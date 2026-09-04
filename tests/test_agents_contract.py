@@ -113,26 +113,88 @@ def test_blocked_items_are_marked_so_the_agent_skips_them():
 
 # ── the guardrails ────────────────────────────────────────────────────────────
 
-def test_the_contract_documents_both_agents_by_name():
+# Every scheduled agent this repo ever had is now retired: Sentinel and
+# ModelCalibration on 2026-09-01..03 (the watch became a worker cron), Janitor on
+# 2026-09-03 (four SUCCEEDED runs, nothing landed, no working exit from its
+# sandbox). They stay DOCUMENTED rather than deleted, which is the whole point
+# of the tests below — a retired agent that vanishes from the docs is one the
+# next session cheerfully rebuilds, and rebuilding Janitor costs ~$6 a day to
+# produce nothing.
+RETIRED_AGENTS = ("Sentinel", "Janitor")
+
+
+def _labelled_retired(text: str, name: str, window: int = 700) -> bool:
+    """True when every mention of `name` sits near the word 'retire'."""
+    low = text.lower()
+    needle = name.lower()
+    i = low.find(needle)
+    if i < 0:
+        return False
+    while i >= 0:
+        near = low[max(0, i - window): i + window]
+        if "retire" in near:
+            return True
+        i = low.find(needle, i + 1)
+    return False
+
+
+def test_the_contract_documents_every_agent_by_name():
     """
     Named Sentinel and Janitor by mike, 2026-08-30. Pinned because a rename that
-    lands in the Routine but not the repo leaves two agents nobody can look up.
+    lands in the Routine but not the repo leaves an agent nobody can look up.
+    Retirement does not release the obligation — it strengthens it.
     """
     text = AGENTS.read_text(encoding="utf-8")
-    assert "Sentinel" in text and "Janitor" in text
+    for name in RETIRED_AGENTS:
+        assert name in text, f"{name} is undocumented; a future session will rebuild it"
+        assert _labelled_retired(text, name), (
+            f"the contract names {name} but never says it is retired, so it reads "
+            f"as a live agent")
+
+
+def test_the_contract_says_not_to_rebuild_janitor_and_why():
+    """
+    The specific trap. Janitor's prompt was rewritten on 2026-09-03 to remove its
+    do-nothing escape hatch and to demand `git ls-remote` proof of the push, and
+    the very NEXT run still landed nothing. Without that recorded, the obvious
+    move for a reader who sees a broken agent is another prompt rewrite.
+    """
+    # Whitespace-normalised: the contract is hard-wrapped, so a phrase that
+    # straddles a line break is still the phrase. Matching the raw text made
+    # this fail for the formatting rather than the content.
+    text = " ".join(AGENTS.read_text(encoding="utf-8").lower().split())
+    assert "do not rebuild" in text
+    assert "prompt was never the binding constraint" in text
 
 
 def test_the_agents_are_findable_from_the_file_every_session_reads():
     """
     CLAUDE.md §9 is the map. An agent documented only in docs/ is an agent a
     fresh session never learns exists — the same reason the §9 table exists at
-    all.
+    all. It must not advertise a retired agent as a live one either.
     """
     root = Path(__file__).parent.parent
     claude_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "Sentinel" in claude_md and "Janitor" in claude_md
     assert "docs/agents_contract.md" in claude_md
     assert "docs/followups.md" in claude_md
+    for name in RETIRED_AGENTS:
+        if name in claude_md:
+            assert _labelled_retired(claude_md, name), (
+                f"CLAUDE.md names {name} without saying it is retired")
+
+
+def test_the_backlog_does_not_promise_an_agent_that_no_longer_runs():
+    """
+    followups.md described itself as "Janitor's worklist" and said an agent took
+    an item every morning. Nothing takes an item any more, and a backlog that
+    claims an owner it does not have is how items sit untouched while everyone
+    assumes something else is on it.
+    """
+    root = Path(__file__).parent.parent
+    text = (root / "docs" / "followups.md").read_text(encoding="utf-8")
+    assert "Janitor's worklist" not in text
+    assert _labelled_retired(text, "Janitor"), (
+        "followups.md must say why no agent is coming for these items")
 
 
 def test_there_is_a_one_screen_summary():
@@ -142,7 +204,10 @@ def test_there_is_a_one_screen_summary():
     quick = root / "docs" / "AGENTS.md"
     assert quick.exists()
     text = quick.read_text(encoding="utf-8")
-    assert "Sentinel" in text and "Janitor" in text
+    for name in RETIRED_AGENTS:
+        assert name in text, f"{name} vanished from the one-screen summary"
+        assert _labelled_retired(text, name), (
+            f"AGENTS.md names {name} without marking it retired")
     # Links onward to both, by their post-rename names. Asserting the bare
     # "agents.md" used to pass for the wrong reason: this file and the contract
     # collided on case, so on Windows both paths read the SAME file and the
