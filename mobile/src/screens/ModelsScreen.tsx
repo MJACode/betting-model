@@ -144,13 +144,18 @@ export function ModelsScreen() {
           keyExtractor={(item) => item.modelId}
           // Every unpaused model is listed whether or not it has settled a bet,
           // so the list is never empty and ListEmptyComponent never fires. A
-          // sport with nothing settled since the live date would otherwise be a
-          // wall of "0 picks · — · —", indistinguishable from a failed fetch
-          // (UX_REVIEW §3). Say which it is.
+          // wall of "0 picks · — · —" is indistinguishable from a failed fetch
+          // (UX_REVIEW §3), and it has two different causes — say which.
+          //
+          // While the first fetch is in flight the rows are real but every stat
+          // is EMPTY_STATS, so the zeros mean "not loaded yet": spinner. Once it
+          // lands and nothing has settled, they mean what they say.
           ListHeaderComponent={
-            !loading &&
-            builtInWithStats.length > 0 &&
-            builtInWithStats.every((m) => m.stats.picks === 0) ? (
+            loading && rows.length === 0 ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : !loading &&
+              builtInWithStats.length > 0 &&
+              builtInWithStats.every((m) => m.stats.picks === 0) ? (
               <EmptyState
                 title={`No settled bets yet for ${sport}`}
                 subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
@@ -166,8 +171,19 @@ export function ModelsScreen() {
               }
             />
           )}
+          // Reachable when every model for the sport is paused or retired. It
+          // takes no app build to get here — isModelPaused prefers the server
+          // store over the bundled list — and until the inputs card was removed
+          // something always rendered, so this path had never been seen.
           ListEmptyComponent={
-            loading ? <ActivityIndicator style={styles.loading} /> : null
+            loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title={`No models listed for ${sport}`}
+                subtitle="Every model for this sport is paused right now. Paused models don’t produce picks; they come back here when they’re unpaused."
+              />
+            )
           }
           contentContainerStyle={styles.list}
         />
