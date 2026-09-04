@@ -11,8 +11,9 @@
 // What a chip means: the SAME bet (same side, same line — docs/best_line.md §5)
 // at that book, at that book's latest price. The record chip (DK, or the NFL
 // card's soft book) is the stored number the pick was given at and never
-// re-prices. The user's own book is ringed; the best payout says "best" in
-// words, not just colour.
+// re-prices. The best payout says "best" in words, not just colour. No chip is
+// marked as the user's: the book picker is the Stats page's and does not reach
+// this row (Matt, 2026-09-04).
 //
 // Live picks (is_live) get one DraftKings chip; the Live board's header and
 // the detail screen's provenance line say why (the in-play model prices and

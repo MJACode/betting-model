@@ -110,9 +110,9 @@ export function PickCard({
       : null;
 
   // Stake is a PAIR: what you lay, and what that wins. Computed off the price
-  // the card actually shows (the user's book when it prices the side), because
-  // a stake derived from a different number than the one printed beside it is
-  // incoherent — a -105 quote risks 1.05u to win 1u, not 1.1u.
+  // the card actually shows, which is now always the modeled DraftKings number
+  // — so the stake beside an edge is derived from the same price the edge was,
+  // which §6 requires and the old per-book quote quietly broke.
   const stake = stakeFor(pick.kelly_fraction, quote?.price ?? pick.dk_odds, kelly);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.

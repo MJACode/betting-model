@@ -388,24 +388,35 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   if (legs.length === 0) return null;
 
   return (
-    <View style={styles.parlayActions}>
-      <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
-        <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
-        <Text style={styles.saveBtnText}>Save parlay</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => setHandoffOpen(true)}
-        style={({ pressed }) => [
-          styles.dkBtn,
-          { backgroundColor: btnColors.bg },
-          pressed && styles.pressed,
-        ]}
-      >
-        <Ionicons name="open-outline" size={18} color={btnColors.fg} />
-        <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
-          {betOnBookLabel(handoff.book)}
-        </Text>
-      </Pressable>
+    <>
+      <View style={styles.parlayActions}>
+        <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
+          <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
+          <Text style={styles.saveBtnText}>Save parlay</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setHandoffOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${betOnBookLabel(handoff.book)}. Priced at DraftKings; the Open with row above ranks every book by payout.`}
+          style={({ pressed }) => [
+            styles.dkBtn,
+            { backgroundColor: btnColors.bg },
+            pressed && styles.pressed,
+          ]}
+        >
+          <Ionicons name="open-outline" size={18} color={btnColors.fg} />
+          <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
+            {betOnBookLabel(handoff.book)}
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* The green button always opens DraftKings, while "Open with" above may
+          star another book as the best payout. Unexplained, the largest control
+          on the screen contradicts the row 40pt above it (UX review). */}
+      <Text style={styles.handoffNote}>
+        Priced at DraftKings · tap a book in “Open with” above for the best payout
+      </Text>
 
       <ParlayDkHandoff
         visible={handoffOpen}
@@ -413,7 +424,7 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
         book={handoff.book}
         onClose={() => setHandoffOpen(false)}
       />
-    </View>
+    </>
   );
 }
 
@@ -1081,6 +1092,11 @@ const styles = StyleSheet.create({
     backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
+  },
+  handoffNote: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   dkBtnText: {
     color: '#000',

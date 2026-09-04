@@ -634,9 +634,11 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
  * of the rest), and `hidden` says how many the detail screen's All-books table
  * still holds.
  *
- * `pinnedBook` is for a board that singles one book out. The pick boards pass
- * nothing (Matt, 2026-09-04): picks are shown best price first across every
- * book we price, and the Stats page's book preference does not reach them.
+ * `pinnedBook` is for a board that singles one book out. NO CALLER PASSES ONE
+ * today (Matt, 2026-09-04): picks are shown best price first across every book
+ * we price, and the Stats page's book preference does not reach them. It stays
+ * because the record chip and a pinned book share one eviction rule, and a
+ * board that wants a pinned book should not have to re-derive it.
  */
 export function selectLineChips(
   quotes: LineQuote[],

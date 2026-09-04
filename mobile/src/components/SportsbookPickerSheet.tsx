@@ -56,11 +56,19 @@ export function SportsbookPickerSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      >
+        {/* accessible={false}: an accessible Pressable groups its children
+            into ONE VoiceOver element, which would leave the book rows, the
+            Close button and Apply unreachable. Same fix as StatsLineSheet. */}
+        <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
           <View style={styles.grabber} />
           <View style={styles.header}>
-            <Text style={styles.title}>Stats Page Sportsbook</Text>
+            <Text style={styles.title}>Stats page sportsbook</Text>
             <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
@@ -93,11 +101,11 @@ export function SportsbookPickerSheet({
                   </View>
                   <View style={styles.rowBody}>
                     <Text style={styles.rowName}>{bookName(b)}</Text>
-                    {isModel ? (
+                    {isModel ? null : (
                       <Text style={styles.rowSub}>
-                        Model book — signals and the track record are priced here
+                        No fallback — a player {bookName(b)} hasn’t priced shows no line
                       </Text>
-                    ) : null}
+                    )}
                   </View>
                   {active ? (
                     <Ionicons name="checkmark-circle" size={24} color={colors.bet} />
@@ -109,10 +117,12 @@ export function SportsbookPickerSheet({
             })}
           </ScrollView>
 
+          {/* One sentence, not a paragraph: Settings states the scope above
+              this sheet and the Explainer carries the long version, so a third
+              copy here reads as the app being defensive (UX review). */}
           <Text style={styles.footnote}>
-            This applies to the Stats page only. Picks and Signals always list every book’s line,
-            best price first, off a pick modeled against DraftKings — the book our track record is
-            graded against — so that pricing is not switchable. Live picks are DraftKings only.
+            Stats page only — Picks and Signals always price at DraftKings and list every book
+            best price first.
           </Text>
 
           <Pressable

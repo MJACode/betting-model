@@ -15,7 +15,7 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { usePreferredBook } from '@/hooks/usePreferredBook';
-import { bookName } from '@/lib/markets';
+import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -23,17 +23,30 @@ export function SportsbookIndicator() {
   const { book } = usePreferredBook();
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  // A DraftKings user is being told "this page only" about a scope they cannot
+  // see the other side of — for them the line is just the book. The qualifier
+  // appears once it is true of something, and says what it protects rather
+  // than naming a page (UX review).
+  const label =
+    book === MODEL_BOOK
+      ? `Stats lines at ${bookName(book)}`
+      : `Stats lines at ${bookName(book)} · Picks stay at ${bookName(MODEL_BOOK)}`;
+
   return (
     <>
       <Pressable
         onPress={() => setPickerOpen(true)}
         accessibilityRole="button"
         accessibilityLabel={`Stats page sportsbook: ${bookName(book)}. Tap to switch.`}
+        // The row is caption-height, and with the Picks board's line removed it
+        // is the only entry to the picker outside Settings — a missed tap has
+        // nowhere else to go (UX review).
+        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
         style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
       >
         <Ionicons name="wallet-outline" size={13} color={colors.textTertiary} />
         <Text style={styles.text} numberOfLines={1}>
-          {`Stats lines at ${bookName(book)} · this page only`}
+          {label}
         </Text>
         <Ionicons name="chevron-forward" size={12} color={colors.textTertiary} />
       </Pressable>

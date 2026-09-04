@@ -329,7 +329,7 @@ export function SettingsScreen() {
           <Pressable
             onPress={() => setBookPickerOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel={`Sportsbook: ${bookName(book)}. Tap to change.`}
+            accessibilityLabel={`Stats page sportsbook: ${bookName(book)}. Tap to change.`}
             style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
           >
             <View style={[styles.bookBadge, book === MODEL_BOOK && styles.bookBadgeDk]}>
@@ -343,11 +343,12 @@ export function SettingsScreen() {
             <Text style={styles.bookRowChange}>Change</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </Pressable>
+          {/* A grouped-list footer is read as the explanation of the control
+              above it, so it leads with what this setting does (UX review). The
+              long version lives in the Explainer, not here. */}
           <Text style={styles.bookNote}>
-            Picks, Signals and parlays always list every book’s line, best price first, off a pick
-            modeled against DraftKings — the book the models score and our track record is graded
-            against. That pricing is not switchable. On the Stats page there is no fallback: a
-            player your book hasn’t priced shows no line.
+            There is no fallback: a player this book hasn’t priced shows no line. Picks and
+            Signals always price at DraftKings and list every book best price first.
           </Text>
         </View>
 

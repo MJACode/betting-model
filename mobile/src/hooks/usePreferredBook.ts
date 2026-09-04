@@ -82,8 +82,5 @@ export function usePreferredBook() {
     save(v).catch((err) => console.warn('[preferredBook] set failed', err));
   }, []);
 
-  /** True when the user bets somewhere other than the book we model against. */
-  const isNonModelBook = book !== MODEL_BOOK;
-
-  return { book, setBook, ready, isNonModelBook };
+  return { book, setBook, ready };
 }

@@ -39,9 +39,9 @@ export function ExplainerScreen() {
           </P>
           <P>
             Every pick lists each book's line, <Strong>best price first</Strong>,
-            so you can place it wherever pays most. We shop that list across every
-            book we price, and it isn't switchable — the price the pick is
-            measured at stays DraftKings either way.
+            so you can place it wherever pays most. We compare every book we
+            price and put the best payout first. You can't change that ordering,
+            and the price a pick is measured at is always DraftKings.
           </P>
           <P>
             Book coverage is uneven — DraftKings posts far more prop markets than
