@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 217 — 2026-09-01 is the official live date, and the app now mirrors Retool by reading the same view |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 216 — eleven models told the dashboard they had never fired; the whole of UFC was one of them |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 215 — the Stats line pill becomes the bet button, the rows lose their sublines, and the stat groups become tabs |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 214 — the sportsbook picker is the Stats page's setting; Picks and Signals are best-line across books and not switchable |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 213 — the Stats tab shows the user’s sportsbook’s current line for every player and team, separate from the models; the pre-game poller is wiping prop rows |
