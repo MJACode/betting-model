@@ -3,7 +3,7 @@ import {
   fetchCustomModelBacktest,
   fetchCustomModelPicks,
   fetchSettledPicks,
-  fetchModelFullOutcomeRecord,
+  fetchPublishedModelRecord,
   FullOutcomeRecord,
 } from '@/lib/queries';
 import {
@@ -23,11 +23,13 @@ import {
   writeSettledCache,
 } from '@/lib/settledPickCache';
 import { todayET } from '@/lib/format';
+import { LIVE_RECORD_START } from '@/lib/recordStart';
 import { errorText } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, SettledPick, SignalType } from '@/types';
 
-const PAPER_START = '2026-04-14';
+// The official live date, from the one place it is stated (lib/recordStart).
+const PAPER_START = LIVE_RECORD_START;
 
 // Re-exported so existing `from '@/hooks/useCustomModelStats'` imports keep
 // working; the definitions moved to the pure lib for testability.
@@ -66,12 +68,13 @@ export function useSettledPicksSincePaperStart() {
 
       const from = refreshFrom(cached, PAPER_START);
 
-      // Settled picks drive custom-model backtests; the full-outcome view drives
-      // built-in model records (grades dead-zone picks the settled set never has).
+      // Settled picks drive custom-model backtests; the PUBLISHED record drives
+      // built-in model rows — the same v_public_track_record rows Retool reads,
+      // so the two surfaces cannot disagree (Matt, 2026-09-04: "mirror retool").
       // View fetch is failure-tolerant so a view error can't blank the screen.
       const [fresh, recs] = await Promise.all([
         fetchSettledPicks(from, todayET()),
-        fetchModelFullOutcomeRecord().catch(() => ({} as Record<string, FullOutcomeRecord>)),
+        fetchPublishedModelRecord().catch(() => ({} as Record<string, FullOutcomeRecord>)),
       ]);
 
       const merged = mergeSettled(cached, fresh, from);

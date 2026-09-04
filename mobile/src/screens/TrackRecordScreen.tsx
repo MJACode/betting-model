@@ -41,9 +41,12 @@ import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
+import { GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI } from '@/lib/recordStart';
 
-/** First day of the tracked record. Every published number starts here. */
-const RECORD_START = '2026-04-14';
+/** First day of the tracked record. Every published number starts here.
+ *  The official live date — see lib/recordStart, which is the one place it is
+ *  stated and must match the server's own gate. */
+const RECORD_START = LIVE_RECORD_START;
 
 function roiColor(roi: number): string {
   if (roi > 0.001) return colors.positive;
@@ -231,7 +234,7 @@ export function TrackRecordScreen() {
               label="Beat the close"
               value={overall.clvBeatRate != null ? formatPct(overall.clvBeatRate, 0) : '—'}
             />
-            <HeroStat label="Since" value={RECORD_START.slice(5)} />
+            <HeroStat label="Since" value={LIVE_RECORD_START_SHORT} />
           </View>
         </View>
 
@@ -261,12 +264,15 @@ export function TrackRecordScreen() {
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>Read this first</Text>
           <Text style={styles.noteBody}>
+            {LIVE_RECORD_START_LABEL} is our official live date. Everything before it still
+            happened and is still in our books, but the published record starts here — so it is
+            short by design, and the percentages will move a lot for a while.{'\n\n'}
             This is the real, unedited record — flat $100 bets at the DraftKings price we
-            scored, every settled pick since {RECORD_START}. Some models are profitable, some
-            aren’t yet, and we show them all. A new model stays paper-only until it clears 50+
-            picks with positive ROI and calibration error under 5%. A pick that had no
-            DraftKings price when we posted it counts in the win–loss record but stakes nothing,
-            so it is marked unpriced and left out of ROI.
+            scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
+            profitable, some aren’t yet, and we show them all. A new model is shown but not
+            backed until it clears 50 settled picks with positive ROI and calibration error
+            under 5%. A pick that had no DraftKings price when we posted it counts in the
+            win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
           </Text>
         </View>
 
@@ -351,9 +357,17 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {row.wins}–{row.losses}
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
           {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
+          {decided < MIN_PICKS_FOR_COLOURED_ROI
+            ? ` · ${decided} of ${GO_LIVE_SETTLED_PICKS} settled`
+            : ''}
         </Text>
       </View>
-      <Text style={[styles.modelRoi, { color: roiColor(roi) }]}>
+      <Text
+        style={[
+          styles.modelRoi,
+          { color: decided < MIN_PICKS_FOR_COLOURED_ROI ? colors.textSecondary : roiColor(roi) },
+        ]}
+      >
         {Number(row.staked_flat ?? 0) > 0 ? formatPctSigned(roi) : '—'}
       </Text>
     </View>
