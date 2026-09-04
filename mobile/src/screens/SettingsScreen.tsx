@@ -319,17 +319,17 @@ export function SettingsScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Your sportsbook</Text>
+          <Text style={styles.cardLabel}>Stats page sportsbook</Text>
           <Text style={styles.bookHint}>
-            Where you actually bet. Picks show this book’s price and line, and the “Bet on…”
-            button opens its betslip.
+            Which book’s line the Stats page prints beside each player. It changes nothing on
+            Picks or Signals.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
           <Pressable
             onPress={() => setBookPickerOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel={`Sportsbook: ${bookName(book)}. Tap to change.`}
+            accessibilityLabel={`Stats page sportsbook: ${bookName(book)}. Tap to change.`}
             style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
           >
             <View style={[styles.bookBadge, book === MODEL_BOOK && styles.bookBadgeDk]}>
@@ -343,10 +343,12 @@ export function SettingsScreen() {
             <Text style={styles.bookRowChange}>Change</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </Pressable>
+          {/* A grouped-list footer is read as the explanation of the control
+              above it, so it leads with what this setting does (UX review). The
+              long version lives in the Explainer, not here. */}
           <Text style={styles.bookNote}>
-            Signals and parlays are always priced against DraftKings — the book the models score
-            and our track record is graded against. This only changes the odds you see, never the
-            pick. If your book hasn’t posted a line, we show the DraftKings price and label it.
+            There is no fallback: a player this book hasn’t priced shows no line. Picks and
+            Signals always price at DraftKings and list every book best price first.
           </Text>
         </View>
 
