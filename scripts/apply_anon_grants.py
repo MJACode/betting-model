@@ -137,8 +137,18 @@ def _function_plan(conn) -> tuple[list[str], list[str]]:
             skipped.append(name)
             continue
         for one in sig.split("|"):
+            # PUBLIC FIRST, AND THAT IS NOT COSMETIC. Postgres grants EXECUTE on
+            # a function to PUBLIC by default, and anon is a member of PUBLIC --
+            # so `REVOKE ... FROM anon, authenticated` leaves the function
+            # callable and reports success. Measured 2026-09-04: the first run
+            # of this script revoked has_active_subscription from both named
+            # roles and anon could still execute it, because its ACL carried
+            # `=X/postgres` (empty grantee = PUBLIC). 21 of 28 public functions
+            # carry that grant. data/migrations/add_discord_link_and_whop_
+            # memberships.sql already spelled it `FROM PUBLIC, anon,
+            # authenticated`; this is that lesson, relearned the hard way.
             stmts.append(
-                f"REVOKE ALL ON FUNCTION {one} FROM anon, authenticated")
+                f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC, anon, authenticated")
     return stmts, skipped
 
 
@@ -194,6 +204,22 @@ def main() -> int:
         if uncallable:
             conn.rollback()
             logger.error(f"anon cannot call {uncallable} — rolled back.")
+            return 1
+        # And that the revokes actually bit. The first run "succeeded" while
+        # leaving has_active_subscription callable through PUBLIC, so a revoke
+        # is not believed until it is read back.
+        still_callable = [
+            name for name in RPC_REVOKE
+            if (sig := _function_signature(conn, name)) is not None
+            and any(
+                conn.execute("SELECT has_function_privilege('anon', %s, 'EXECUTE')",
+                             (one,)).fetchone()[0]
+                for one in sig.split("|"))
+        ]
+        if still_callable:
+            conn.rollback()
+            logger.error(f"anon can STILL call {still_callable} after the "
+                         f"revoke — rolled back.")
             return 1
         conn.commit()
     except Exception as exc:                                   # noqa: BLE001
