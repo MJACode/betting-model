@@ -300,6 +300,14 @@ RPC_REVOKE: tuple[str, ...] = (
     # superseded by has_app_access()/my_access(), which cannot see a Whop-paid
     # member (data/supabase_schema.sql). Nothing in the repo or the app calls it.
     "has_active_subscription",
+    # The Teams board's compute-and-swap pair (2026-09-04, migration
+    # cache_team_stats_board). team_stats_board_compute is the 31 s season
+    # aggregate that used to BE team_stats_board(); refresh_team_stats_board
+    # runs it and swaps the result into team_stats_board_cache. Both are
+    # worker-only: the app calls team_stats_board(), which now reads the cache.
+    # An anon caller holding EXECUTE on either would be free DB-CPU burn.
+    "team_stats_board_compute",
+    "refresh_team_stats_board",
 )
 
 # LEFT ALONE, deliberately: log_picks_changes(). It returns `trigger`, so
