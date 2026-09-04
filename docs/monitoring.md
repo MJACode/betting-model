@@ -19,36 +19,78 @@ The Retool port carries the same three invariants this file documents: it reads
 ROI over the priced subset with the coverage shown beside it, and it bounds the
 picks series on the indexed `game_date`. See the 2026-08-31 session entry for
 the three places the port's brief disagreed with production.
+**Superseded in part on 2026-09-04** — the PUBLISHED record (the app's Models
+and Record tabs, and Retool's `q_performance`) now reads one shared view from
+the live date; read the next two sections before this paragraph.
 
-### The dashboard and the app's Models tab measure different things — on purpose
+### The official live date is 2026-09-01, and the app now mirrors Retool
 
-Asked twice now (Matt, 2026-09-03 on UFC and 2026-09-04 on the Retool feed), so
-it is written down rather than re-derived. **Both numbers are right; they answer
-different questions**, and neither surface says which on its face.
+Matt, 2026-09-04: *"Just mirror retool for now. But only start tracking bets as
+of 9/1 and on, that will be our official live date."*
 
-| | Dashboard / Retool | App's Models tab |
+**One window.** `config.PAPER_TRADING_START`, `mobile/src/lib/recordStart.ts`
+and the `game_date >= '2026-09-01'` gate inside `v_public_track_record{,_daily}`
+all say 2026-09-01 (migration `live_record_start_2026_09_01.sql`). Nothing
+before it is deleted — those picks stay in `picks` and stay the bet of record
+(§1c); they are outside the *published* window.
+
+**One measure.** Both published views were a UNION of two branches answering
+different questions — a re-graded full-outcome branch for the MLB/WNBA core
+models, and a settled-BET-as-fired branch for everything else. Retool reads the
+second kind, so the second kind is now used for **every** model and the
+re-graded branch is gone. The app's Models tab reads the same view
+(`fetchPublishedModelRecord`), so the two surfaces agree by construction.
+
+**Retool's `q_performance` is therefore one line**, and that is the point — the
+logic lives in the view, not in two hand-written copies that drift:
+
+```sql
+SELECT * FROM v_public_track_record ORDER BY picks DESC;
+```
+
+Measured at the cutover (production, 2026-09-04): the published record went from
+**691-568-3 over 1,262 settled picks, +4.89%, +61.2u** to **46-30-0 over 76
+settled picks, +15.40%, +11.7u**, six models firing. Those per-model ROIs sit on
+1–26 bets and are not evidence of anything yet.
+
+**What deliberately did NOT move to 9/1:** `v_model_full_outcome_record`,
+`v_model_full_outcome_picks` and `mv_scored_pick_outcomes` keep their 2026-04-14
+gate and their re-graded semantics, because that is the threshold-sweep tool and
+§7's EVALUATION RULE needs every scored pick — BET, AVOID and dead-zone alike.
+A cut cannot be swept on a few days of BET-only history. Publishing and sweeping
+are now different objects, which is the fix rather than an inconsistency.
+
+### Published record vs. sweep record — still two numbers, now two objects
+
+The app and Retool agree (above). What still differs, and always will, is the
+**published** record versus the **sweep** record, because they answer different
+questions. Before 2026-09-04 they were tangled together inside one view, which
+is what produced "these numbers don't match" twice in two days (Matt, 09-03 on
+UFC and 09-04 on the Retool feed).
+
+| | Published — app + Retool | Sweep — threshold analysis |
 |---|---|---|
-| Source | `mv_scored_pick_outcomes`, `signal_type='BET'` | `v_model_full_outcome_record` |
-| Question | what the model **told us to bet at the time**, and how that did | how the **current** prob/edge cut performs over every scored pick |
+| Object | `v_public_track_record{,_daily}` | `v_model_full_outcome_record`, `mv_scored_pick_outcomes` |
+| Window | from the live date, **2026-09-01** | from **2026-04-14**, the longer history |
+| Rows | settled **BET picks as fired** | **every scored pick** — BET, AVOID and dead-zone NONE |
 | Cuts | whatever was live when the pick fired | today's cuts, applied retroactively |
-| Sample | the picks actually published | the whole scored universe, re-graded |
+| Answers | what we actually told members to bet, and how it did | would a different cut have done better |
 
-Measured 2026-09-04, the same models on the same database:
+**The sweep column is in-sample and the published column is not.** Every cut was
+swept on that same history, so re-grading it at today's cut selects the picks
+that were kept *because* they won (§7, "in-sample is in-sample"). Measured
+2026-09-04, before the cutover, on the same database and the same day:
 
-| Model | Dashboard / Retool | App Models tab |
+| Model | As fired | Re-graded at today's cut |
 |---|---|---|
 | `mlb_moneyline` | 98 bets, 54-44, **-3.25u (-3.3%)** | 31 bets, 23-8, **+7.39u (+23.8%)** |
 | `mlb_over_under` | 39 bets, 11-26, **-16.08u (-43.5%)** | 85 bets, 40-43, **-5.72u (-6.7%)** |
 | `mlb_prop_pitcher_outs` | 94 bets, 50-44, **+5.41u (+5.8%)** | 188 bets, 101-87, **+23.55u (+12.5%)** |
-| `mlb_prop_batter_hits` | 359 bets, **-34.36u (-9.6%)** | 0 bets (paused; nothing clears its cut) |
 
-**The app's column is in-sample and the dashboard's is not.** Every cut was
-swept on this same history, so re-grading it at today's cut selects the picks
-that were kept *because* they won (CLAUDE.md §7, "in-sample is in-sample").
-The dashboard's number is what was actually published. When the two disagree,
-the dashboard is the one to quote to a member; the app's is the one to quote
-when asking whether a cut is worth keeping. Do not "reconcile" them by making
-one read the other's source — that would delete a question, not answer it.
+A 27-point gap on one model, from one database, on one day. **Quote the
+published number to a member; quote the sweep number only when deciding whether
+a cut is worth keeping, and never without saying it is in-sample.** The two are
+no longer allowed to collide inside a single view.
 
 A third tab, **Picks & CLV** (2026-09-03), lists every BET pick with the price it
 fired at, the closing price, and its CLV, plus a units rollup and charts. It

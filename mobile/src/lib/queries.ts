@@ -1192,6 +1192,54 @@ export async function fetchModelFullOutcomeRecord(): Promise<Record<string, Full
   return map;
 }
 
+/**
+ * The per-model PUBLISHED record — the same rows the Retool dashboard reads.
+ *
+ * Matt, 2026-09-04: "just mirror retool". The Models tab used to read
+ * `v_model_full_outcome_record`, which re-grades EVERY scored pick (BET, AVOID
+ * and dead-zone alike) against today's cut. Retool reads settled BET picks AS
+ * FIRED. Those answer different questions and gave different numbers for the
+ * same model on the same day — `mlb_moneyline` was -3.3% on one and +23.8% on
+ * the other — so the Models tab now reads `v_public_track_record`, which is the
+ * BET-as-fired record and is exactly what Retool is pointed at.
+ *
+ * Shaped into `FullOutcomeRecord` on purpose: every consumer
+ * (`viewRecordToStats`, the Models rows, the built-in detail header) keeps
+ * working unchanged, so the switch is one fetch rather than a refactor.
+ * `priced_bets` and `units` come back out of the money columns — `staked_flat`
+ * is 100 x the PRICED picks, and an unpriced pick contributes neither
+ * (CLAUDE.md §6: profit_flat fabricates -110 when dk_odds is NULL).
+ */
+export async function fetchPublishedModelRecord(): Promise<Record<string, FullOutcomeRecord>> {
+  const { data, error } = await supabase
+    .from('v_public_track_record')
+    .select('model_id, picks, wins, losses, pushes, profit_flat, staked_flat');
+  if (error) throw error;
+  const map: Record<string, FullOutcomeRecord> = {};
+  for (const r of (data ?? []) as unknown as TrackRecordRow[]) {
+    const staked = Number(r.staked_flat ?? 0);
+    const profit = Number(r.profit_flat ?? 0);
+    map[r.model_id] = {
+      model_id: r.model_id,
+      // The view only ever returns unpaused models (it joins
+      // model_action_thresholds and filters), and a retired model has no
+      // threshold row at all, so both flags are constant here.
+      paused: false,
+      prob_only: false,
+      bets: Number(r.picks ?? 0),
+      wins: Number(r.wins ?? 0),
+      losses: Number(r.losses ?? 0),
+      pushes: Number(r.pushes ?? 0),
+      priced_bets: staked / 100,
+      units: profit / 100,
+      // Null rather than 0 when nothing was priced: 0.0% reads as break-even,
+      // and a record-only model has no ROI to report.
+      roi_pct: staked > 0 ? (profit / staked) * 100 : null,
+    };
+  }
+  return map;
+}
+
 // One row per pick behind a model's full-outcome record — the exact pick set
 // v_model_full_outcome_record aggregates (every scored pick graded at the
 // CURRENT cut, decided outcomes only). profit_units is 1-unit flat at dk_odds,

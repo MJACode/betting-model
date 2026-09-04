@@ -1,5 +1,5 @@
 /**
- * On-device cache of settled picks since the record start (2026-04-14).
+ * On-device cache of settled picks since the live date (2026-09-01).
  *
  * The model screens backtest custom models against every settled pick, which is
  * ~3.2k rows and grows ~29/day. Re-downloading all of it on every Models tab

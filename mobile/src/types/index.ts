@@ -479,7 +479,7 @@ export interface OpeningSliceRow {
 
 /**
  * One row from v_public_track_record — every settled BET pick that meets the
- * CURRENT action criteria, since the record start (2026-04-14), aggregated
+ * CURRENT action criteria, since the live date (2026-09-01), aggregated
  * per (sport, model_id). Nothing cherry-picked; losing models included.
  */
 export interface TrackRecordRow {

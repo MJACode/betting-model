@@ -41,9 +41,12 @@ import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
+import { LIVE_RECORD_START } from '@/lib/recordStart';
 
-/** First day of the tracked record. Every published number starts here. */
-const RECORD_START = '2026-04-14';
+/** First day of the tracked record. Every published number starts here.
+ *  The official live date — see lib/recordStart, which is the one place it is
+ *  stated and must match the server's own gate. */
+const RECORD_START = LIVE_RECORD_START;
 
 function roiColor(roi: number): string {
   if (roi > 0.001) return colors.positive;

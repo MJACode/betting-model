@@ -28,6 +28,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { isUnlockedPreview, passesActionFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
+import { LIVE_RECORD_START } from '@/lib/recordStart';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -188,7 +189,7 @@ export function BuiltInModelDetailScreen() {
         }
         ListFooterComponent={
           <>
-            <Text style={styles.sectionHeader}>Since 2026-04-14 · at current thresholds</Text>
+            <Text style={styles.sectionHeader}>Since {LIVE_RECORD_START} · bets as placed</Text>
             <View style={styles.statRow}>
               <StatTile
                 label="Picks"
