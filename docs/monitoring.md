@@ -20,6 +20,36 @@ ROI over the priced subset with the coverage shown beside it, and it bounds the
 picks series on the indexed `game_date`. See the 2026-08-31 session entry for
 the three places the port's brief disagreed with production.
 
+### The dashboard and the app's Models tab measure different things — on purpose
+
+Asked twice now (Matt, 2026-09-03 on UFC and 2026-09-04 on the Retool feed), so
+it is written down rather than re-derived. **Both numbers are right; they answer
+different questions**, and neither surface says which on its face.
+
+| | Dashboard / Retool | App's Models tab |
+|---|---|---|
+| Source | `mv_scored_pick_outcomes`, `signal_type='BET'` | `v_model_full_outcome_record` |
+| Question | what the model **told us to bet at the time**, and how that did | how the **current** prob/edge cut performs over every scored pick |
+| Cuts | whatever was live when the pick fired | today's cuts, applied retroactively |
+| Sample | the picks actually published | the whole scored universe, re-graded |
+
+Measured 2026-09-04, the same models on the same database:
+
+| Model | Dashboard / Retool | App Models tab |
+|---|---|---|
+| `mlb_moneyline` | 98 bets, 54-44, **-3.25u (-3.3%)** | 31 bets, 23-8, **+7.39u (+23.8%)** |
+| `mlb_over_under` | 39 bets, 11-26, **-16.08u (-43.5%)** | 85 bets, 40-43, **-5.72u (-6.7%)** |
+| `mlb_prop_pitcher_outs` | 94 bets, 50-44, **+5.41u (+5.8%)** | 188 bets, 101-87, **+23.55u (+12.5%)** |
+| `mlb_prop_batter_hits` | 359 bets, **-34.36u (-9.6%)** | 0 bets (paused; nothing clears its cut) |
+
+**The app's column is in-sample and the dashboard's is not.** Every cut was
+swept on this same history, so re-grading it at today's cut selects the picks
+that were kept *because* they won (CLAUDE.md §7, "in-sample is in-sample").
+The dashboard's number is what was actually published. When the two disagree,
+the dashboard is the one to quote to a member; the app's is the one to quote
+when asking whether a cut is worth keeping. Do not "reconcile" them by making
+one read the other's source — that would delete a question, not answer it.
+
 A third tab, **Picks & CLV** (2026-09-03), lists every BET pick with the price it
 fired at, the closing price, and its CLV, plus a units rollup and charts. It
 READS the CLV columns `picks` already carries (`closing_dk_odds`, `closing_line`,
@@ -55,6 +85,44 @@ same-line, pre-game and DK-only guards live.
   `picks` (`profit_flat = profit_units x 100`): **287-238-0, -52.58u, -10.01%** —
   -12.91% for pre-game prop models fired in-play, -1.13% for the dedicated
   `*_live_*` models. Read live P&L from `picks`, not from the matview.
+
+  **The Models panel now reads them from `picks` (2026-09-04), and the Retool
+  port must too.** The live exclusion is only half of it: the matview also
+  carries an explicit model allow-list, so anything it cannot regrade from a
+  box score is missing too. `store.model_performance` aggregated the matview
+  alone, so those models joined to nothing, returned settled=0, and the page
+  rendered that zero as *"registered · awaiting first pick"*. Measured
+  2026-09-04 — **eleven models, 182 settled BETs, all reading as never fired**:
+
+  | Model | Settled | Record | Units |
+  |---|---|---|---|
+  | `mlb_live_total_runs` | 94 | 58-36 | +12.25u |
+  | `mlb_live_win_prob` (retired) | 17 | 7-10 | -5.44u |
+  | `mlb_live_runline` (retired) | 16 | 6-10 | -6.08u |
+  | `ufc_total_rounds` | 13 | 8-5 | -1.86u |
+  | `mlb_f5_over_under` | 11 | 8-1 | unpriced |
+  | `ncaaf_live_total` | 8 | 3-5 | -2.50u |
+  | `mlb_f5_runline` | 7 | 4-3 | unpriced |
+  | `wnba_spread` | 6 | 2-4 | -2.15u |
+  | `ufc_method_of_victory` | 5 | 3-2 | unpriced |
+  | `ufc_moneyline` | 3 | 2-1 | +0.57u |
+  | `ncaaf_live_win_prob` | 2 | 1-1 | -0.58u |
+
+  That is the whole of UFC and every live lane looking like a broken pipeline
+  (CLAUDE.md §7). The query now has a second `agg` arm reading those models out
+  of `picks`, scoped by **`NOT EXISTS` against the matview on `model_id`** —
+  not by a `_live_` name pattern, which would have fixed the five live lanes
+  and left UFC broken, and not by `is_live`, which would fold every pre-game
+  prop model's in-play picks into its pre-game row (§6 keeps those apart).
+  The anti-join makes the two arms disjoint by construction, so `UNION ALL`
+  cannot double-count, and the arm empties itself as the allow-list grows.
+  Verified on production: 33 rows, **0 models split across arms**, 0 rows
+  reporting a false zero.
+
+  **Retool is a separate implementation of this same query and does NOT
+  inherit the fix** — its `q_performance` needs the same second arm, or it
+  keeps showing all eleven as awaiting their first pick. `monitoring/store.py`
+  is the reference implementation.
 * The matview also has **no `NO_ACTION` concept** — it regrades from box scores,
   so four voided WNBA props are counted as real bets by anything reading its own
   `result` column.
