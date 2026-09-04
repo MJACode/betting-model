@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatAmerican } from '@/lib/format';
 import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
@@ -40,9 +41,22 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
 
   return (
     <View style={styles.wrap}>
+      {/* Title, an (i) for the mechanics, and the star's meaning stated where
+          the stars are — the reference betslip Matt sent puts the legend on
+          this row rather than in a paragraph under the tiles, and a legend
+          beside the thing it labels is read; a paragraph below it is not. */}
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Open with</Text>
-        <Text style={styles.headerHint}>best payout first</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.title}>Open with</Text>
+          <InfoTooltip
+            title="Open with"
+            body={
+              'Every book we price this slip at, best payout first. Tap one to open it.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nBooks can’t accept a whole parlay from a link, so add each leg once you’re there.\n\nThis row is every book, not just the ones you selected in Settings — your books decide the green button, never where you’re allowed to place.'
+            }
+            accessibilityLabel="About the Open with row"
+          />
+        </View>
+        <Text style={styles.headerHint}>★ = best odds</Text>
       </View>
 
       <ScrollView
@@ -94,11 +108,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
         })}
       </ScrollView>
 
-      <Text style={styles.hint}>
-        ★ best payout · tap a book to open it. N/M legs: that book doesn’t post every leg at the
-        same line, so it can’t price the whole slip. Books can’t accept a whole parlay from a
-        link, so add each leg there.
-      </Text>
+
     </View>
   );
 }
@@ -115,6 +125,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.sm,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   title: {
     fontSize: font.size.footnote,
@@ -183,12 +198,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: 2,
-  },
-  hint: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 15,
-    marginTop: spacing.sm,
   },
   pressed: {
     opacity: 0.6,
