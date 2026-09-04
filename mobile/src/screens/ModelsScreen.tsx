@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
-import { ModelInputsCard } from '@/components/ModelInputsCard';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -143,25 +142,20 @@ export function ModelsScreen() {
         <FlatList
           data={builtInWithStats}
           keyExtractor={(item) => item.modelId}
-          // What the selected sport's models consider — collapsed to one line
-          // so the record stays the first thing on screen (Matt, 2026-09-03).
+          // Every unpaused model is listed whether or not it has settled a bet,
+          // so the list is never empty and ListEmptyComponent never fires. A
+          // sport with nothing settled since the live date would otherwise be a
+          // wall of "0 picks · — · —", indistinguishable from a failed fetch
+          // (UX_REVIEW §3). Say which it is.
           ListHeaderComponent={
-            <>
-              <ModelInputsCard sport={sport} />
-              {/* Every unpaused model is listed whether or not it has settled a
-                  bet, so the list is never empty and ListEmptyComponent never
-                  fires. A sport with nothing settled since the live date would
-                  otherwise be a wall of "0 picks · — · —", indistinguishable
-                  from a failed fetch (UX_REVIEW §3). Say which it is. */}
-              {!loading &&
-              builtInWithStats.length > 0 &&
-              builtInWithStats.every((m) => m.stats.picks === 0) ? (
-                <EmptyState
-                  title={`No settled bets yet for ${sport}`}
-                  subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
-                />
-              ) : null}
-            </>
+            !loading &&
+            builtInWithStats.length > 0 &&
+            builtInWithStats.every((m) => m.stats.picks === 0) ? (
+              <EmptyState
+                title={`No settled bets yet for ${sport}`}
+                subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
+              />
+            ) : null
           }
           renderItem={({ item }) => (
             <BuiltInModelRow
