@@ -185,8 +185,8 @@ that helper** — all five prop lanes share the one lookup, pinned by
   14:20 ET: DK priced `batter_hits` for **184 players across all 9 games; 60 held a
   pick.** Matt's direction: *"display all lines regardless of bet status … if they
   select FanDuel we only show FanDuel … it works separately from the models."* So the
-  tab's LINE column is now the user's sportsbook (`usePreferredBook`) and only that
-  book — no DK fallback — for the line the ruler is on, for players
+  tab's LINE column is now the user's sportsbook (`usePreferredBook` — a STATS-PAGE
+  setting only, session 214) and only that book — no DK fallback — for the line the ruler is on, for players
   (`v_latest_prop_odds_all_books`, one market at a time) AND teams
   (`v_latest_odds_all_books`, the team's own side of its moneyline/spread/total,
   market chosen by the stat). Both bounded to the sport's slate and to games that

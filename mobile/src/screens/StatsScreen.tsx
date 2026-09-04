@@ -709,7 +709,7 @@ export function StatsScreen() {
             <Text style={styles.title}>Stats</Text>
             <SettingsButton />
           </View>
-          <SportsbookIndicator fallsBackToModelBook={false} />
+          <SportsbookIndicator />
           <SportToggle />
         </View>
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
@@ -780,7 +780,7 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
-        <SportsbookIndicator fallsBackToModelBook={false} />
+        <SportsbookIndicator />
         <SportToggle />
       </View>
 

@@ -33,7 +33,6 @@ import {
   type PicksFilterState,
 } from '@/components/filters/PickFilters';
 import { SportToggle } from '@/components/SportToggle';
-import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SettingsButton } from '@/components/SettingsButton';
 import { BetslipButton } from '@/components/BetslipButton';
 import { SignalLockCard } from '@/components/SignalLockCard';
@@ -169,11 +168,11 @@ export function PicksHomeScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Picks</Text>
           <InfoTooltip
-            title="Today, Signals & Movement"
+            title="Pricing, Today, Signals & Movement"
             body={
-              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.'
+              'Every price here is DraftKings, the number the edge and stake were computed from. The Betting lines chips under a pick are every book that prices the same bet, best payout first.\n\nToday = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.'
             }
-            accessibilityLabel="About Today, Signals and Movement"
+            accessibilityLabel="About pricing, Today, Signals and Movement"
           />
           <View style={styles.headerRight}>
             <BetslipButton />
@@ -181,7 +180,6 @@ export function PicksHomeScreen() {
           </View>
         </View>
         <Text style={styles.subtitle}>{subtitle}</Text>
-        <SportsbookIndicator />
         <SportToggle available={sportsWithPicks} signalCounts={sportSignalCounts} />
         <View style={styles.subTabs}>
           <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />

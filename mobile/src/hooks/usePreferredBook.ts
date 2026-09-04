@@ -4,12 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { BETTABLE_BOOKS, MODEL_BOOK, type BookKey } from '@/lib/markets';
 
 /**
- * The user's sportsbook.
+ * The STATS PAGE's sportsbook — nothing else reads it (Matt, 2026-09-04).
  *
- * Picks are always MODELED against DraftKings — this preference only changes
- * which book's price we SHOW, so a user who bets at FanDuel sees the number
- * they'll actually get. The edge/probability on every card still comes from the
- * DraftKings line the model scored against.
+ * It used to set the price shown on every board. It no longer does: Picks,
+ * Signals, the pick detail, the betslip and parlays all price at DraftKings,
+ * the book the models score and the track record is graded against, and list
+ * every book's line best price first for the hand-off. A member cannot switch
+ * that. What this preference still decides is the line the Stats leaderboard
+ * prints beside each player, with no DraftKings fallback.
  *
  * Defaults to DraftKings so nothing changes until the user opts in. Persisted to
  * AsyncStorage and shared across screens via a module-level store + listeners
@@ -80,8 +82,5 @@ export function usePreferredBook() {
     save(v).catch((err) => console.warn('[preferredBook] set failed', err));
   }, []);
 
-  /** True when the user bets somewhere other than the book we model against. */
-  const isNonModelBook = book !== MODEL_BOOK;
-
-  return { book, setBook, ready, isNonModelBook };
+  return { book, setBook, ready };
 }

@@ -38,16 +38,17 @@ export function ExplainerScreen() {
             is the one book we score, track, and grade our record against.
           </P>
           <P>
-            You can pick where <Strong>you</Strong> bet in Settings → Your
-            sportsbook. That changes the price and line shown on each pick, and
-            sends the "Bet on…" button to that book's betslip, so you see the
-            number you'll actually get. It does not change the pick or the edge.
+            Every pick lists each book's line, <Strong>best price first</Strong>,
+            so you can place it wherever pays most. We compare every book we
+            price and put the best payout first. You can't change that ordering,
+            and the price a pick is measured at is always DraftKings.
           </P>
           <P>
             Book coverage is uneven — DraftKings posts far more prop markets than
-            anyone else. When your book hasn't priced a pick, the card shows the
-            DraftKings number and says so. Open a pick and check{' '}
-            <Strong>All books</Strong> to compare every book side by side.
+            anyone else. Open a pick and check <Strong>All books</Strong> to
+            compare every book side by side. The one place you choose a book is
+            Settings → Stats page sportsbook, and it only sets the line the Stats
+            leaderboard prints beside each player.
           </P>
         </Section>
 

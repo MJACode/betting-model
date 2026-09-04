@@ -9,7 +9,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { setParlayRestore } from '@/hooks/useParlayRestore';
 import {
   computeParlayMetrics,
@@ -44,7 +43,6 @@ const UNDO_MS = 4500;
 export function SavedParlaysScreen() {
   const navigation = useNavigation<Nav>();
   const { items, remove, restore, clear } = useSavedParlays();
-  const { book: preferredBook } = usePreferredBook();
   const [handoff, setHandoff] = useState<{ book: string; legs: HandoffLeg[] } | null>(null);
   // Last deleted parlay, kept briefly so the user can Undo (no confirm dialog).
   const [undo, setUndo] = useState<SavedParlay | null>(null);
@@ -102,11 +100,12 @@ export function SavedParlaysScreen() {
     ]);
   }, [items.length, clear]);
 
-  // Hand off at the user's book when the snapshot shows it priced every leg
-  // (savedHandoffBookFor), else DraftKings — each leg's link is AT the book
-  // being opened, never DK's slip under another book's label.
+  // Hand off at DraftKings, the book the slip was priced against — saved
+  // parlays no longer follow a book preference (Matt, 2026-09-04: that picker
+  // is the Stats page's). Each leg's link is AT the book being opened, never
+  // DK's slip under another book's label.
   const betAtBook = (sp: SavedParlay) => {
-    const { book, links } = savedHandoffBookFor(sp.legs, preferredBook);
+    const { book, links } = savedHandoffBookFor(sp.legs, MODEL_BOOK);
     setHandoff({
       book,
       legs: sp.legs.map((l, i) => ({
@@ -153,7 +152,7 @@ export function SavedParlaysScreen() {
         renderItem={({ item }) => (
           <SavedParlayCard
             parlay={item}
-            handoffBook={savedHandoffBookFor(item.legs, preferredBook).book}
+            handoffBook={savedHandoffBookFor(item.legs, MODEL_BOOK).book}
             onBet={() => betAtBook(item)}
             onEdit={() => editInBuilder(item)}
             onDelete={() => deleteNow(item)}
