@@ -291,10 +291,47 @@ Two follow-on fixes the change forced, both worth knowing:
   calling `schema_is_current`, every caller silently becomes an unguarded DDL
   site while the offender test keeps passing.
 
-Still not done, deliberately: the other **seven** RLS-off `public` base tables --
-`brand_assets` and the six `*_pre_rebuild_20260903` /
-`odds_pre_first_pitch_relabel_20260903` repair backups. None is reachable by anon
-or authenticated today. Same fix, same cost; it needs a decision, not a guess.
+**AND THEN THE REST, 2026-09-04 in session 212** (mike: *"do the remaining seven
+too"*). It was **eight** -- my seven was an hour stale and `nfl_odds_cache_backup`
+had arrived in between. The invariant now holds schema-wide:
+
+    0 of 84 public base tables have RLS off
+    0 have FORCE RLS on
+
+`brand_assets` turned out to be a fourth CREATE SITE (`fetch_brand_avatar.py`)
+rather than an archive; the other seven have no create site and are swept by the
+admin script only. They are locked rather than dropped because a repair is
+reversible only while its backup exists -- retention is a separate decision.
+
+**A NEW OPEN DOOR OF THE SAME SHAPE, FOUND WHILE VERIFYING THIS ONE:**
+`game_weather` grants anon INSERT/UPDATE/DELETE while its only anon policies are
+SELECT (`allow anon read`, `anon read game_weather`, plus `service_role_all`). So
+the writes are **inert today** -- RLS denies them -- but the ACL does not match
+intent, and that is precisely the "one lock, and it is an ACL" state this section
+exists to complain about. The session-205 sweep missed it.
+
+Safe to close: `mobile/src` only ever SELECTs `game_weather` (three call sites in
+`queries.ts`), and every writer is server-side over `postgres`
+(`data/ingestors/weather_ingestor.py` and the feature engines). Fix is
+`REVOKE INSERT, UPDATE, DELETE ON game_weather FROM anon, authenticated`, or
+adding it to a declared write surface if anon really should write weather.
+
+Worth re-running the same query against the other three anon-writable tables
+whenever this is touched -- `device_push_tokens`, `feedback` and `tracked_bets`
+all hold write grants wider than their policies (DELETE on the first two, UPDATE
+on all three), inert for the same reason:
+
+```sql
+select c.relname,
+       has_table_privilege('anon', c.oid, 'INSERT') as ins,
+       has_table_privilege('anon', c.oid, 'UPDATE') as upd,
+       has_table_privilege('anon', c.oid, 'DELETE') as del,
+       (select string_agg(p.polname||':'||p.polcmd::text, ', ')
+          from pg_policy p where p.polrelid = c.oid) as policies
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and c.relkind = 'r'
+  and has_table_privilege('anon', c.oid, 'INSERT,UPDATE,DELETE');
+```
 
 The superseded check, kept so nobody re-runs it and re-reaches the wrong answer:
 
