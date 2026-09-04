@@ -368,7 +368,7 @@ export function DailyResultsModal({
             ) : null}
 
             <Text style={styles.footer}>
-              Settled BET picks only, graded at the current thresholds. Flat ROI assumes a $100
+              Settled BET picks only, settled BET picks that meet our current criteria, as posted. Flat ROI assumes a $100
               stake per pick. Open picks settle after their games go final. Home-run picks are
               record-only — shown for transparency but never counted in the record or P&L.
             </Text>

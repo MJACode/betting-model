@@ -31,9 +31,21 @@ SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "")
 
 # ── Bankroll & sizing ─────────────────────────────────────────────────────────
 BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
-# Evaluation start date — picks before this date are excluded from all P&L and
-# go-live gate calculations. Set to when v8 models first ran live.
-PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-04-14")
+# THE OFFICIAL LIVE DATE. Picks before it are excluded from all published P&L
+# and from the go-live gate. Matt, 2026-09-04: "only start tracking bets as of
+# 9/1 and on, that will be our official live date." (Was 2026-04-14, when the v8
+# models first ran live.)
+#
+# Nothing before it is deleted — every earlier pick stays in `picks` and stays
+# the bet of record (CLAUDE.md 1c); it is simply outside the published window.
+# Must match `LIVE_RECORD_START` in mobile/src/lib/recordStart.ts and the
+# `game_date >= '2026-09-01'` gate in v_public_track_record{,_daily}
+# (data/migrations/live_record_start_2026_09_01.sql).
+#
+# NOT the sweep window: the full-outcome views keep their own longer history,
+# because a threshold cannot be swept on a few days of BET-only picks
+# (CLAUDE.md 7, THE EVALUATION RULE).
+PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-09-01")
 
 # ── Pick locking ──────────────────────────────────────────────────────────────
 # When True (default), game-level picks (ML / runline / O-U / F5 / 3-way /

@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
 
 export function ExplainerScreen() {
   return (
@@ -322,7 +323,7 @@ export function ExplainerScreen() {
           <P>
             Build your own pick filter from any combination of model + min
             probability + min edge. The app backtests each filter against
-            every settled pick on record (since 2026-04-14) and shows live
+            every scored pick since {BACKTEST_START} — the full graded history, which is longer than the published record — and shows
             win rate and flat ROI.
           </P>
           <P>

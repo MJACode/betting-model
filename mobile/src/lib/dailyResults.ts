@@ -16,6 +16,7 @@ import {
 } from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
+import { LIVE_RECORD_START } from '@/lib/recordStart';
 
 export interface ModelDayStats extends CustomModelStats {
   modelId: string;
@@ -77,7 +78,7 @@ export interface DailyResults {
 }
 
 /** Earliest day the recap can show — the record start. */
-export const RESULTS_MIN_DATE = '2026-04-14';
+export const RESULTS_MIN_DATE = LIVE_RECORD_START;
 
 export function emptyDailyResults(date: string): DailyResults {
   return {

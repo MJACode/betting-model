@@ -14,8 +14,14 @@ import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
+import { SHADOW_TRACK_START } from '@/lib/recordStart';
 
-const PAPER_START = '2026-04-14';
+// The shadow track keeps its own, longer window — a comparison needs history to
+// compare against. Named in lib/recordStart beside the live date so the two are
+// findable together. Renamed off the old PAPER_ prefix deliberately: the
+// platform is LIVE, and that word must not survive anywhere near user copy
+// (CLAUDE.md §2).
+const RECORD_START = SHADOW_TRACK_START;
 
 function roiColor(roi: number): string {
   if (roi > 0.001) return colors.positive;
@@ -158,7 +164,9 @@ export function OpeningComparisonScreen() {
 
         <Text style={styles.footer}>
           Flat $100 bets at the price we first locked, every settled game-level pick since{' '}
-          {PAPER_START.slice(5)}. This is a shadow experiment — it doesn’t change the picks you see
+          {SHADOW_TRACK_START}. This experiment keeps a longer history than the published
+          record on purpose — a comparison needs something to compare against. It is a shadow
+          experiment: it doesn’t change the picks you see
           or our published track record. No bet rule is built from it yet; we’re measuring first.
         </Text>
       </ScrollView>

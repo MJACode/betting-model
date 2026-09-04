@@ -1,5 +1,5 @@
 /**
- * On-device cache of settled picks since the record start (2026-04-14).
+ * On-device cache of settled picks since the live date (2026-09-01).
  *
  * The model screens backtest custom models against every settled pick, which is
  * ~3.2k rows and grows ~29/day. Re-downloading all of it on every Models tab
@@ -18,10 +18,18 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { addDays } from './format';
 import type { SettledPick } from '@/types';
+import { LIVE_RECORD_START } from '@/lib/recordStart';
 
 // Bump when SETTLED_PICK_COLUMNS / SettledPickKey changes — cached rows written
 // by an older build would be missing the new column.
-const KEY = 'settledPicks.v2'; // v2: + scored_line (line-value filter, 2026-08-22)
+// v3 (2026-09-04): the published window moved to LIVE_RECORD_START. A device
+// upgrading from v2 still held ~3,200 rows back to 2026-04-14, which every
+// fallback path would have rendered under headers that now say "since
+// September 1" — so a member who upgraded and a member who reinstalled saw
+// different records for the same model. Bumping the key drops the old envelope;
+// the floor in mergeSettled below stops it recurring the next time the date
+// moves, without another bump.
+const KEY = 'settledPicks.v3';
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day
@@ -94,7 +102,9 @@ export function mergeSettled(
   fresh: SettledPick[],
   from: string,
 ): SettledPick[] {
-  const kept = cached.filter((r) => r.game_date < from);
+  // Anything before the live date is outside the published window and must not
+  // survive in the cache — see the KEY comment above.
+  const kept = cached.filter((r) => r.game_date < from && r.game_date >= LIVE_RECORD_START);
   const out = [...kept, ...fresh];
   out.sort((a, b) => (a.game_date < b.game_date ? 1 : a.game_date > b.game_date ? -1 : 0));
   return out;
