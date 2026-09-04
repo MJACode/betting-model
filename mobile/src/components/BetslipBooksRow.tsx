@@ -21,9 +21,10 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  *
  * The odds differ per book because each leg is re-priced at that book's own
  * line-shop snapshot; the slip's win probability is book-independent, so the
- * highest payout is simply the best place to put the slip on. DraftKings is
- * always fully priced (every leg requires a DK price to be a leg), so the row
- * always has at least one complete quote.
+ * highest payout is simply the best place to put the slip on. DraftKings
+ * prices every pick and custom leg, but a Stats LINE leg it never posted
+ * (lib/lineLegs.ts) leaves its tile partial like any other book's — so the
+ * row can, on such a slip, hold no complete quote at all.
  */
 export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
   const quotes = useMemo(
@@ -81,11 +82,12 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
                     }`
                   : `Open ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
               }
-              style={({ pressed }) => [
-                styles.tile,
-                !full && styles.tilePartial,
-                pressed && styles.pressed,
-              ]}
+              // A partial tile fades its ODDS only (oddsNa below): the badge
+              // and the "2/3 legs" coverage are the information, and at 55%
+              // on textTertiary they were under AA — on DraftKings' own tile,
+              // the one users look for first, whenever a Stats line leg DK
+              // never posted is in the slip (UX review).
+              style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
             >
               {q.isBest && fullCount > 1 ? (
                 <View style={styles.star}>
@@ -155,9 +157,6 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
-  },
-  tilePartial: {
-    opacity: 0.55,
   },
   star: {
     position: 'absolute',

@@ -494,6 +494,37 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
   );
 }
 
+/**
+ * Every book's latest line for ONE player and market — what a Stats LINE leg
+ * re-prices from each time the betslip resolves (lib/lineLegs.ts). A few
+ * dozen rows, bounded by game_id; no paging needed.
+ */
+export async function fetchPropLineRows(
+  gameId: string,
+  market: string,
+  playerName: string,
+): Promise<PropOddsByBookRow[]> {
+  const { data, error } = await supabase
+    .from('v_latest_prop_odds_all_books')
+    .select(PROP_ODDS_BY_BOOK_COLUMNS)
+    .eq('game_id', gameId)
+    .eq('market', market)
+    .eq('player_name', playerName);
+  if (error) throw error;
+  return (data ?? []) as unknown as PropOddsByBookRow[];
+}
+
+/** One game row, for a line leg's matchup and start time. */
+export async function fetchGameById(gameId: string): Promise<GameRow | null> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('game_id', gameId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as GameRow | null) ?? null;
+}
+
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
     supabase

@@ -17,6 +17,9 @@ export interface HandoffLeg {
   matchup: string | null;
   americanOdds: number;
   betLink: string | null;
+  /** Does the hand-off book price this leg at all? A Stats line leg that
+   *  DraftKings never posted is "not posted here", not "add it by hand". */
+  posted?: boolean;
 }
 
 interface Props {
@@ -92,6 +95,8 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
                     <Text style={styles.addBtnText}>Add to slip</Text>
                     <Ionicons name="open-outline" size={14} color={colors.tint} />
                   </Pressable>
+                ) : item.posted === false ? (
+                  <Text style={styles.noLink}>Not posted at {name}</Text>
                 ) : (
                   <Text style={styles.noLink}>No link — add manually</Text>
                 )}

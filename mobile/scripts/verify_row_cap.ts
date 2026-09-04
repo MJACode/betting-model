@@ -80,12 +80,13 @@ async function main() {
   const q = read('src/lib/queries.ts');
   const pg = read('src/lib/paging.ts');
   // Every read of the two views. A statement ends at the next line that opens
-  // with `)`, `:`, `]` or `;` — the arrow's closing paren for a paged read, the
-  // ternary / array continuation for the per-game ones in fetchPickDetail.
+  // with `)`, `:` or `]` — the arrow's closing paren for a paged read, the
+  // ternary / array continuation for the per-game ones in fetchPickDetail...
   const reads = [...q.matchAll(/\.from\('(v_latest_(?:prop_)?odds_all_books)'\)/g)].map((m) => {
     const at = m.index ?? 0;
     const after = q.slice(at);
-    const end = after.search(/\n\s*[):\];]/);
+    // ...or at the first `;`, which ends a plain one-statement read.
+    const end = after.search(/;|\n\s*[):\]]/);
     return { view: m[1]!, at, before: q.slice(Math.max(0, at - 400), at), stmt: after.slice(0, end < 0 ? 600 : end) };
   });
   // SLATE reads return a whole day, a week, or every game with a signal, and
@@ -95,7 +96,7 @@ async function main() {
   const dated = reads.filter((r) => isSlate(r.stmt));
   const perGame = reads.filter((r) => !isSlate(r.stmt));
   check('seven slate all-books reads (Stats props, Teams lines, Picks x2, UFC / NFL / NCAAF windows)', dated.length === 7, `${dated.length}`);
-  check('two per-game reads (the pick detail)', perGame.length === 2, `${perGame.length}`);
+  check('three per-game reads (the pick detail x2, the line-leg re-price)', perGame.length === 3, `${perGame.length}`);
   // The Picks screen's two reads are bounded to the picks that render lines,
   // never the whole day (the 2026-09-04 UX review: 16 statements per mount).
   const picksReads = dated.filter((r) => r.stmt.includes(".in('game_id'"));

@@ -6,9 +6,16 @@
  * These three decisions are Matt's, made on 2026-09-04 against a competitor's
  * leaderboard, and each is the kind that quietly regresses in a refactor:
  *
- *  1. THE PILL IS THE BET LINK. "mirror exactly how they show the draft kings
- *     line and its betable link directly to that sportsbook." One tap goes to
- *     the book — no sheet in between, on either board.
+ *  1. THE PILL IS THE BET LINK — REVERSED FOR PLAYERS the same evening. The
+ *     morning's "mirror exactly how they show the draft kings line and its
+ *     betable link directly to that sportsbook" became, with the competitor's
+ *     betslip flow beside ours: "it shouldn't take you directly to the book,
+ *     it should ask you if you want to add to bet slip then bet slip should
+ *     allow you to add to any book." So on the Players board the pill opens
+ *     AddLineSheet (verify_line_legs.ts pins that flow); the Teams board still
+ *     opens the book until team line legs land (a stated follow-up), and the
+ *     pill's LOOK — filled in the book's colour, carrying its mark — holds on
+ *     both.
  *  2. NOTHING UNDER THE PLAYER NAME. "I also like how their lines are clean."
  *     The Players rows are one line: name and team, nothing beneath.
  *  3. THE STAT GROUPS ARE TABS. "batting and pitching is floating to nowhere,
@@ -40,18 +47,22 @@ const player = read('src/screens/PlayerStatsScreen.tsx');
 const bookMark = read('src/components/BookMark.tsx');
 const groupTabs = read('src/components/GroupTabs.tsx');
 
-// ── 1. The pill is the bet link ─────────────────────────────────────────────
+// ── 1. The pill: asks on Players, hands off on Teams (for now) ─────────────
 
+// The CALL, not the import: a file that still imports a helper but no longer
+// hands it the quote has quietly changed what a tap does.
+check(
+  'StatsScreen: tapping a line pill opens the add-to-betslip sheet, not a book',
+  /setLineSheet\(\s*quote\s*\)/.test(stats) && !/openBookBetslip\(/.test(stats),
+);
+check(
+  'TeamsBoard: tapping a line pill still hands the quote to openBookBetslip (follow-up: team line legs)',
+  /openBookBetslip\(\s*quote\.book\s*,\s*quote\.link\s*\)/.test(teams),
+);
 for (const [file, src] of [
   ['StatsScreen', stats],
   ['TeamsBoard', teams],
 ] as const) {
-  // The CALL, not the import: a file that still imports the helper but no
-  // longer hands it the quote has quietly stopped being a bet link.
-  check(
-    `${file}: tapping a line pill hands the quote to openBookBetslip`,
-    /openBookBetslip\(\s*quote\.book\s*,\s*quote\.link\s*\)/.test(src),
-  );
   check(
     `${file}: no in-app sheet stands between the pill and the book`,
     !src.includes('StatsLineSheet'),
