@@ -63,6 +63,28 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
 
 ### Conventions (load-bearing — don't break)
 
+- **Three staleness guards, and they measure different things** (`data/live_quote_guard.py`).
+  A live book price is refused if any one fires:
+
+  | Guard | Catches | Where |
+  |---|---|---|
+  | quote AGE (`LIVE_QUOTE_MAX_AGE_SEC` / `MAX_QUOTE_AGE_SEC`, 90s) | a market the book has FROZEN | NCAAF `serve.py`, NFL `executor.py` |
+  | quote vs SCORE (`quote_predates_score`) | a number the book stamped BEFORE the last score | both, via `ScoreClock` |
+  | edge CAP (`MAX_EDGE_CAP`, 0.18) | republished, but not yet moved | NCAAF `serve.py` |
+
+  The middle one was added 2026-09-03 after an NCAAF total was bet 0.6s after a
+  touchdown against a quote 62.2s old — inside the 90s cap, with an edge of
+  0.1577 inside the 0.18 cap. Both other guards are bounded on the quote's age
+  or the edge's size, and **no such bound can see an event**. The score guard is
+  self-clearing: it blocks only until the book republishes.
+  **MLB (`models/live_scorer.py`) has the age bound and the edge cap but NOT
+  the score guard** — `_get_live_dk_odds` drops an in-play row older than
+  `LIVE_ODDS_MAX_AGE_SEC` (30s, tighter than football's 90s) and
+  `LIVE_MAX_EDGE_CAP` is 0.2. So the gap is the middle row only. Lower priority
+  because a run moves a baseball total 0.5–1 where a touchdown moves a football
+  total ~6 — and measured: across ~50 `mlb_live_total_runs` BETs the next DK
+  publish moved the line 0.0 every time. That measured LINE, not price.
+
 - **`snapshot_type='in_play'` isolation:** the pre-game `_get_dk_odds`, the training bulk odds
   lookup (`_build_bulk_mlb_lookups`), and CLV close capture (`_closing_dk_odds`) all EXCLUDE
   in-play rows. In-play prices must never leak into pre-game scoring, training features, or

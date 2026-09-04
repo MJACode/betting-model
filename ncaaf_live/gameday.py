@@ -60,6 +60,7 @@ from ncaaf_live.feeds.odds_live import LiveOddsFeed, parse_event_odds  # noqa: E
 # lands in one sport's loop and not the others is how this repo accumulates
 # work (CLAUDE.md section 1b).
 from config import live_slate_dates  # noqa: E402
+from data.live_quote_guard import ScoreClock  # noqa: E402
 from data.ingestors.live_price_log import (  # noqa: E402
     now_iso, record_live_prices, rows_from_quote)
 from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
@@ -470,6 +471,11 @@ def main() -> int:
     team_ids = fetch_team_ids(season) if use_cfbd else {}
     known_schools = load_known_schools()
     prev_scores: dict = {}
+    # PER GAME, deliberately. `scores_moved` below is one bool for the whole
+    # pass and is CFBD-only -- the ESPN fallback resolves scores per game
+    # further down -- so a guard hung on it would be blind on the fallback.
+    # This is keyed by game_id and fed from the same `state` the engine prices.
+    score_clock = ScoreClock()
 
     while True:
         started = time.monotonic()
@@ -567,6 +573,14 @@ def main() -> int:
                     feed_blessed = True
                     log.info("feed check passed on first live payload "
                              "(%s @ %s)", ctx.away, ctx.home)
+                # WHEN did this game's score last change? A quote DraftKings
+                # stamped before that has not accounted for the score, however
+                # young it is -- the 2026-09-03 Wake Forest total was 62.2s old
+                # and already extinct. None at first sight and after a restart,
+                # which leaves the age bound as the only defence, as before.
+                score_seen_at = score_clock.observe(
+                    ctx.game_id,
+                    (state.get("home_score"), state.get("away_score")), now)
                 quote = odds_map.get(key)
                 # AUDIT THE PRICE WE PRICED ON. This loop read DraftKings'
                 # in-play feed, decided on it, and threw it away -- so a
@@ -577,7 +591,8 @@ def main() -> int:
                 if quote:
                     priced_this_pass.extend(rows_from_quote(
                         ctx.game_id, "NCAAF", quote, SNAPSHOT_BOOK, priced_at))
-                picks = engine.price(state, ctx, quote)
+                picks = engine.price(state, ctx, quote,
+                                     score_seen_at=score_seen_at)
                 if conn is None and not a.dry_run:
                     conn = get_connection()
                 try:

@@ -298,3 +298,109 @@ def test_nfl_hook_resolves_from_the_workers_cwd():
          "_record_live_prices([]); print('RESOLVED-OK')"],
         cwd=str(root / "nfl"), capture_output=True, text=True, timeout=300)
     assert "RESOLVED-OK" in out.stdout, (out.stdout, out.stderr[-2000:])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE SECOND INCIDENT (2026-09-03, Akron at Wake Forest) — a quote that was
+# YOUNG and still extinct. Every timestamp below is measured, not constructed:
+# DraftKings' publish clock and its re-hang come from `odds`, the pick time from
+# `picks_log`, and the score-detection time from the pollers service log line
+# "score change seen - pulling odds now (3s floor)".
+#
+#   23:51:42.0  DK publishes the live total at 44.5, Over -105
+#   ~23:52:2x   Wake Forest scores a touchdown (ESPN drive wallclock)
+#   23:52:43.6  the loop SEES the score and pulls odds at the 3s floor
+#   23:52:44.2  we post Over 44.5 at -105, edge +15.77%
+#   23:53:21.0  DK re-hangs at 50.5
+#
+# At pick time the quote was 62.2s old against a 90s cap (61.6s at the moment
+# the score was seen) and the edge 0.1577 against a 0.18 cap, so BOTH existing
+# guards passed it — correctly, on what they measure.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from ncaaf_live.serve import LIVE_QUOTE_MAX_AGE_SEC              # noqa: E402
+from data.live_quote_guard import (ScoreClock,                 # noqa: E402
+                                     quote_predates_score)
+
+WF_QUOTE_TS = "2026-09-03T23:51:42Z"       # DK's last_update on the 44.5
+WF_SCORE_SEEN = datetime(2026, 9, 3, 23, 52, 43, 643000, tzinfo=timezone.utc)
+WF_PICK_TIME = datetime(2026, 9, 3, 23, 52, 44, 234000, tzinfo=timezone.utc)
+WF_REHANG_TS = "2026-09-03T23:53:21Z"      # DK's next publish, at 50.5
+
+
+def _wf_total(ts):
+    return {"line": 44.5, "over": -105, "under": -125, "ts": ts}
+
+
+def test_the_old_guards_would_still_pass_the_wake_forest_quote():
+    """The control. Without a score, the 44.5 is takeable — which is precisely
+    why this pick shipped. If this assertion ever flips, the new guard is not
+    what is catching the incident below and the test proves nothing."""
+    age = quote_age_seconds(WF_QUOTE_TS, WF_PICK_TIME)
+    assert 62.0 < age < 62.5                      # 62.2s, measured
+    assert age < LIVE_QUOTE_MAX_AGE_SEC           # inside the 90s cap
+    assert market_is_takeable(_wf_total(WF_QUOTE_TS), "totals", "g",
+                              WF_PICK_TIME, score_seen_at=None)
+
+
+def test_quote_published_before_the_score_is_declined():
+    """The fix. Same quote, same instant — but we have seen the touchdown."""
+    assert quote_predates_score(WF_QUOTE_TS, WF_SCORE_SEEN)
+    assert not market_is_takeable(_wf_total(WF_QUOTE_TS), "totals", "g",
+                                  WF_PICK_TIME, score_seen_at=WF_SCORE_SEEN)
+
+
+def test_the_rehung_quote_is_takeable_again():
+    """Self-clearing: the block lasts exactly until the book republishes, so a
+    real post-score price is never held back."""
+    after = datetime(2026, 9, 3, 23, 53, 25, tzinfo=timezone.utc)
+    assert not quote_predates_score(WF_REHANG_TS, WF_SCORE_SEEN)
+    assert market_is_takeable(_wf_total(WF_REHANG_TS), "totals", "g",
+                              after, score_seen_at=WF_SCORE_SEEN)
+
+
+def test_unknown_timestamps_are_not_treated_as_stale():
+    """Fail OPEN, matching `quote_age_seconds`: a feed shape change must not
+    silently blank the board. The age bound still applies underneath."""
+    assert not quote_predates_score(None, WF_SCORE_SEEN)
+    assert not quote_predates_score("not-a-time", WF_SCORE_SEEN)
+    assert not quote_predates_score(WF_QUOTE_TS, None)
+
+
+def test_score_clock_reports_no_event_at_first_sight():
+    """A game APPEARING is not a score. Same rule `scores_moved` already
+    applies — otherwise every market is declined at kickoff."""
+    clock = ScoreClock()
+    t0 = datetime(2026, 9, 3, 23, 0, tzinfo=timezone.utc)
+    assert clock.observe("g", (0, 0), t0) is None
+    assert clock.observe("g", (0, 0), t0 + timedelta(seconds=5)) is None
+
+
+def test_score_clock_stamps_the_change_and_holds_it():
+    clock = ScoreClock()
+    t0 = datetime(2026, 9, 3, 23, 0, tzinfo=timezone.utc)
+    clock.observe("g", (0, 10), t0)
+    scored = t0 + timedelta(seconds=30)
+    assert clock.observe("g", (0, 17), scored) == scored
+    # Held until the NEXT change, so the guard stays armed across later passes.
+    assert clock.observe("g", (0, 17), scored + timedelta(seconds=9)) == scored
+
+
+def test_score_clock_ignores_a_dropped_score_field():
+    """A feed that blanks the score for one pass must not read as a change when
+    it comes back."""
+    clock = ScoreClock()
+    t0 = datetime(2026, 9, 3, 23, 0, tzinfo=timezone.utc)
+    clock.observe("g", (0, 10), t0)
+    assert clock.observe("g", (None, None), t0 + timedelta(seconds=5)) is None
+    assert clock.observe("g", (0, 10), t0 + timedelta(seconds=10)) is None
+
+
+def test_score_clock_keeps_games_independent():
+    clock = ScoreClock()
+    t0 = datetime(2026, 9, 3, 23, 0, tzinfo=timezone.utc)
+    clock.observe("a", (0, 0), t0)
+    clock.observe("b", (0, 0), t0)
+    scored = t0 + timedelta(seconds=20)
+    assert clock.observe("a", (7, 0), scored) == scored
+    assert clock.observe("b", (0, 0), scored) is None
