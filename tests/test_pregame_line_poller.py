@@ -260,16 +260,19 @@ def test_nhl_is_not_polled_while_out_of_season():
 # The poller already knows what it wrote, so the map only needs SEEDING.
 
 class _PollConn:
-    """Counts the fingerprint rebuilds. Everything else is a no-op."""
+    """Counts the fingerprint seeds and records the keys each one asked for.
+    Everything else is a no-op."""
 
     def __init__(self):
         self.seeds = 0
+        self.seed_keys: list[list[tuple]] = []
 
     def execute(self, sql, params=None):
         outer = self
         joined = " ".join(sql.split())
-        if "DISTINCT ON (o.game_id, o.market)" in joined:
+        if "FROM unnest(" in joined and "FROM odds o" in joined:
             outer.seeds += 1
+            outer.seed_keys.append(list(zip(params[0], params[1])))
 
         class C:
             def fetchall(self_inner):
@@ -308,13 +311,78 @@ def test_a_tick_given_a_map_does_not_rebuild_it(monkeypatch):
         "being handed one — this is the 24.6-hour query")
 
 
-def test_a_tick_given_no_map_still_seeds_its_own(monkeypatch):
-    """A one-off call or a test must keep working unchanged."""
+def test_a_tick_given_no_map_seeds_the_keys_it_was_quoted(monkeypatch):
+    """A one-off call or a test must keep working unchanged -- and the seed it
+    runs is for the quoted keys, not the whole table."""
+    from data.ingestors.pregame_line_poller import poll_once
+    _quiet_poll(monkeypatch, written=[_row(game_id="g1"), _row(game_id="g2", market="totals")])
+    conn = _PollConn()
+    poll_once(conn, sports=["MLB"], score=False)
+    assert conn.seeds == 1
+    assert sorted(conn.seed_keys[0]) == [("g1", "h2h"), ("g2", "totals")]
+
+
+def test_a_tick_with_nothing_quoted_runs_no_seed(monkeypatch):
+    """No quotes, nothing to diff, nothing to look up."""
     from data.ingestors.pregame_line_poller import poll_once
     _quiet_poll(monkeypatch)
     conn = _PollConn()
     poll_once(conn, sports=["MLB"], score=False)
+    assert conn.seeds == 0
+
+
+def test_the_seed_asks_only_for_keys_the_map_does_not_hold(monkeypatch):
+    """The 24.6-hour query in miniature: a map that already carries a key must
+    not send that key back to the database, however often it is quoted."""
+    from data.ingestors.pregame_line_poller import poll_once, _key, _fingerprint
+    held = _row(game_id="g1")
+    new = _row(game_id="g2", market="totals")
+    _quiet_poll(monkeypatch, written=[held, new])
+    conn = _PollConn()
+    known = {_key(held): _fingerprint(held)}
+    poll_once(conn, sports=["MLB"], score=False, known=known)
     assert conn.seeds == 1
+    assert conn.seed_keys[0] == [("g2", "totals")]
+    # Now every quoted key is in the map: the next tick looks nothing up.
+    poll_once(conn, sports=["MLB"], score=False, known=known)
+    assert conn.seeds == 1
+
+
+def test_the_seed_is_one_index_probe_per_key_not_a_table_scan():
+    """The whole-table DISTINCT ON was a Parallel Seq Scan of the 842 MB odds
+    table every re-seed (shared read=88,408 pages), and the app's views timed
+    out underneath it 41 times in one minute. The seed must be driven by the
+    caller's keys and bounded to one row per key."""
+    from data.ingestors.pregame_line_poller import SEED_SQL
+    sql = " ".join(SEED_SQL.split())
+    assert "FROM unnest(%s::text[], %s::text[]) AS k(game_id, market)" in sql
+    assert "DISTINCT ON" not in sql
+    assert "ORDER BY o.snapshot_at DESC LIMIT 1" in sql, "not a top-1 probe"
+    assert "o.game_id = k.game_id AND o.market = k.market" in sql, \
+        "the probe must be keyed on the index's leading columns"
+    assert "::timestamptz" not in sql, \
+        "a cast defeats idx_odds_book_snap; text order was measured equal"
+    assert "o.snapshot_type <> 'in_play'" in sql, "the live lane leaked in"
+
+
+def test_other_books_and_in_play_quotes_are_never_looked_up():
+    from data.ingestors.pregame_line_poller import quoted_keys
+    rows = [_row(game_id="g1"), _row(game_id="g2", bookmaker="fanduel"),
+            _row(game_id="g3", snapshot_type="in_play")]
+    assert quoted_keys(rows) == {("g1", "h2h")}
+
+
+def test_a_key_the_database_has_never_stored_is_written(monkeypatch):
+    """A seed that returns nothing for a key means "never seen", and never
+    seen counts as changed -- the opener is the most valuable number here."""
+    from data.ingestors.pregame_line_poller import poll_once, _key
+    opener = _row(game_id="g9")
+    _quiet_poll(monkeypatch, written=[opener])
+    conn = _PollConn()                      # its seed returns no rows
+    known: dict = {}
+    out = poll_once(conn, sports=["MLB"], score=False, known=known)
+    assert out["written"] == 1
+    assert _key(opener) in known
 
 
 def test_what_a_tick_writes_lands_in_the_map(monkeypatch):
@@ -352,7 +420,11 @@ def test_the_loop_reseeds_on_a_bounded_schedule():
            / "pregame_line_poller.py").read_text(encoding="utf-8")
     body = src[src.index("while True:"):]
     assert "PREGAME_POLL_RESEED_SEC" in body
-    assert "last_known_prices" in body, "the loop never seeds the map at all"
+    # A re-seed is an EMPTY map (the next tick looks its quoted keys up), never
+    # a whole-table read.
+    reseed = body[body.index("PREGAME_POLL_RESEED_SEC"):body.index("poll_once(conn, known=known)")]
+    assert "known = {}" in reseed, "the loop never re-seeds the map at all"
+    assert "last_known_prices" not in reseed, "the loop re-reads the whole table"
 
 
 def test_a_failed_tick_throws_the_map_away():
