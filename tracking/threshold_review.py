@@ -58,7 +58,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 import config
-from data.anon_readable import lock_down
+from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 
 # The day the calibrated cuts shipped. Bets before this were made under
@@ -122,8 +122,14 @@ def ensure_schema(conn) -> None:
     than per write), but it still fires Supabase's pgrst_ddl_watch and so still
     costs a PostgREST schema-cache reload. See data/ddl_guard.py.
     """
-    if (schema_is_current(conn, "model_auto_pauses")
-            and schema_is_current(conn, "threshold_reviews")):
+    # rls= and revoked_from= are load-bearing: this returns EARLY, before the
+    # lock_down() calls below, so without them it answers True on a database
+    # where both tables exist but are still anon-granted and RLS-off, and the
+    # lock-down never runs. A guard that dead code can satisfy.
+    if (schema_is_current(conn, "model_auto_pauses", rls=True,
+                          revoked_from=API_ROLES)
+            and schema_is_current(conn, "threshold_reviews", rls=True,
+                                  revoked_from=API_ROLES)):
         return
     conn.execute(DDL)
     conn.execute(LEDGER_DDL)

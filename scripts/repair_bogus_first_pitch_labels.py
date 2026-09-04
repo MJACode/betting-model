@@ -57,6 +57,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from data.anon_readable import lock_down_sql
 from data.db import get_connection
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES
 
@@ -135,6 +136,15 @@ def main() -> int:
     conn.execute(f"DROP TABLE IF EXISTS {tbl}")
     conn.execute(f"CREATE TABLE {tbl} AS "
                  f"SELECT * FROM odds WHERE odds_id = ANY(%s)", (ids,))
+    # A FRESH TABLE IS AN OPEN TABLE. DROP + CREATE means every re-run of this
+    # script makes a new one, so the lock has to be applied here rather than
+    # swept up later -- the model_artifacts lesson, on a table named at runtime.
+    # lock_down_sql validates the identifier (tbl comes from --backup-table) and
+    # refuses anything in the app's read surface. Unconditional rather than
+    # gated: the table was created one statement ago, so the gate would always
+    # say "needed", and this fires once per repair run.
+    for stmt in lock_down_sql(tbl):
+        conn.execute(stmt)
     backed_up = conn.execute(f"SELECT count(*) FROM {tbl}").fetchone()[0]
     if backed_up != len(ids):
         conn.rollback()

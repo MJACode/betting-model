@@ -16,9 +16,10 @@ WHAT IT DOES, in one transaction:
      FROM anon, authenticated
   2. GRANT SELECT on every relation in data/anon_readable.py, so the app's read
      surface is stated rather than inherited.
-  3. REVOKE, then ENABLE ROW LEVEL SECURITY, on the worker-only tables in
-     WORKER_ONLY_TABLES -- a second lock behind the ACL, so a future migration
-     that re-grants is not sufficient on its own.
+  3. REVOKE, then ENABLE ROW LEVEL SECURITY, on every table in
+     data/anon_readable.closed_tables() -- the worker-only tables plus the
+     extracted-data archives. A second lock behind the ACL, so a future
+     migration that re-grants is not sufficient on its own.
 
 Step 2 is a no-op on today's schema -- all 34 are already readable, measured
 before writing this. It exists because step 1 makes the grant something you
@@ -68,8 +69,8 @@ from data.anon_readable import (
     AUTHENTICATED_ONLY,
     RPC_ANON_CALLABLE,
     RPC_REVOKE,
-    WORKER_ONLY_TABLES,
     lock_down,
+    closed_tables,
 )
 from data.db import get_connection
 
@@ -108,6 +109,22 @@ def _function_signature(conn, name: str) -> str | None:
     # Overloads are joined with '|' and the caller grants each, so adding an
     # overload later cannot leave one of them ungranted. There are none today.
     return "|".join(r[0] for r in row)
+
+
+def _table_exists(conn, rel: str) -> bool:
+    """Whether `rel` is a base table in public.
+
+    ARCHIVE_TABLES have no create site, so one of them CAN legitimately go away
+    -- a retention decision drops a repair backup nobody needs any more. Without
+    this check `ALTER TABLE <gone> ENABLE ROW LEVEL SECURITY` raises and rolls
+    back the WHOLE apply, so a tidy-up in one place would break the grant sweep
+    everywhere. Same shape as _function_signature returning None for a function
+    that is not there: skip it, say so, carry on.
+    """
+    return bool(conn.execute(
+        "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relname = %s AND c.relkind = 'r'",
+        (rel,)).fetchall())
 
 
 def _plan() -> list[str]:
@@ -176,7 +193,7 @@ def main() -> int:
     logger.info(f"{len(stmts)} statement(s): 1 ALTER DEFAULT PRIVILEGES, "
                 f"{len(ANON_READABLE)} anon+authenticated grants, "
                 f"{len(AUTHENTICATED_ONLY)} authenticated-only grant(s); plus "
-                f"revoke+RLS on {len(WORKER_ONLY_TABLES)} worker-only tables, "
+                f"revoke+RLS on {len(closed_tables())} closed tables, "
                 f"gated on the catalog")
     logger.info(REVOKE_DEFAULT)
 
@@ -199,7 +216,13 @@ def main() -> int:
         # lock_down() rather than raw statements, so a re-run against an
         # already-closed schema fires no ACCESS EXCLUSIVE DDL and forces no
         # PostgREST cache reload. The read-back below still checks the state.
-        for rel in WORKER_ONLY_TABLES:
+        present = [rel for rel in closed_tables() if _table_exists(conn, rel)]
+        absent = [rel for rel in closed_tables() if rel not in present]
+        if absent:
+            logger.warning(
+                f"not in pg_class, skipped (drop them from ARCHIVE_TABLES if "
+                f"that is deliberate): {absent}")
+        for rel in present:
             ran = lock_down(conn, rel)
             logger.info(f"{rel}: {len(ran)} lock-down statement(s)"
                         + (" (already closed)" if not ran else ""))
@@ -265,7 +288,7 @@ def main() -> int:
         # exist errors, but on one already enabled it succeeds silently, and
         # "succeeded" is not the same as "is on".
         rls_off = [
-            rel for rel in WORKER_ONLY_TABLES
+            rel for rel in present
             if not conn.execute(
                 "SELECT c.relrowsecurity FROM pg_class c "
                 "JOIN pg_namespace n ON n.oid = c.relnamespace "
@@ -278,9 +301,9 @@ def main() -> int:
             return 1
         # AND the owner must not be forced under the policies. FORCE ROW LEVEL
         # SECURITY on a table with zero policies would deny the WORKER, which
-        # owns these and writes all three -- a silent stop, not an error.
+        # owns every one of these -- a silent stop, not an error.
         forced = [
-            rel for rel in WORKER_ONLY_TABLES
+            rel for rel in present
             if conn.execute(
                 "SELECT c.relforcerowsecurity FROM pg_class c "
                 "JOIN pg_namespace n ON n.oid = c.relnamespace "
@@ -301,7 +324,7 @@ def main() -> int:
     logger.success(
         f"Default privileges revoked for {', '.join(API_ROLES)} on new public "
         f"tables; {len(ANON_READABLE) + len(AUTHENTICATED_ONLY)} read grants "
-        f"asserted; RLS on for {len(WORKER_ONLY_TABLES)} worker-only tables.")
+        f"asserted; RLS on for {len(present)} closed tables.")
     return 0
 
 
