@@ -18,7 +18,6 @@ import {
   MODEL_BOOK,
   type Movement,
 } from '@/lib/markets';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
@@ -57,7 +56,6 @@ export function PickCard({
   item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
 }: Props) {
   const { pick, game } = item;
-  const { book: preferredBook } = usePreferredBook();
   const [contextOpen, setContextOpen] = React.useState(false);
   // Live picks are DraftKings only (Matt, 2026-09-03): the in-play model reads
   // DK's line and the bet is placed there, so the user's book never applies.
@@ -98,14 +96,12 @@ export function PickCard({
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
-  // The price the user actually sees: their own sportsbook's number when it has
-  // one, otherwise the modeled DraftKings price (flagged as such). Model/Edge/EV
-  // on this card always come from the DK line the model scored — only the price
-  // and line shown here follow the user's book. A live pick shows the stored
-  // DK number regardless.
-  const quote = live
-    ? displayQuoteForPick(pick, [], MODEL_BOOK)
-    : displayQuoteForPick(pick, item.bookRows ?? [], preferredBook);
+  // The headline price is always the modeled DraftKings number — the price this
+  // pick's edge, EV and stake were computed from. The boards do not follow a
+  // book preference (Matt, 2026-09-04: that picker belongs to the Stats page).
+  // Where to actually place the bet is the "Betting lines" row below, which
+  // prices every book best first.
+  const quote = displayQuoteForPick(pick, [], MODEL_BOOK);
   // Their book can hang the same bet off a different number (FD 9.0 vs DK 8.5).
   // Showing the price without the line would misrepresent the bet.
   const quoteLine =
@@ -114,9 +110,9 @@ export function PickCard({
       : null;
 
   // Stake is a PAIR: what you lay, and what that wins. Computed off the price
-  // the card actually shows (the user's book when it prices the side), because
-  // a stake derived from a different number than the one printed beside it is
-  // incoherent — a -105 quote risks 1.05u to win 1u, not 1.1u.
+  // the card actually shows, which is now always the modeled DraftKings number
+  // — so the stake beside an edge is derived from the same price the edge was,
+  // which §6 requires and the old per-book quote quietly broke.
   const stake = stakeFor(pick.kelly_fraction, quote?.price ?? pick.dk_odds, kelly);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
@@ -338,7 +334,6 @@ export function PickCard({
         <BookLinesRow
           pick={pick}
           bookRows={item.bookRows}
-          preferredBook={preferredBook}
           onMore={onPress}
         />
       ) : null}

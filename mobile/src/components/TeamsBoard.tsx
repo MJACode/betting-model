@@ -25,14 +25,16 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { EmptyState } from '@/components/EmptyState';
+import { GroupTabs } from '@/components/GroupTabs';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
-import { StatsLineSheet, type StatsLineTarget } from '@/components/StatsLineSheet';
+import { BookMark } from '@/components/BookMark';
 import { showToast } from '@/components/Toast';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import type { Sport } from '@/hooks/useSportFilter';
 import { addDays, formatAmerican, todayET, weekdayET } from '@/lib/format';
-import { bookLabel, bookName } from '@/lib/markets';
+import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
+import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
 import { buildTonightSlate } from '@/lib/statsBoard';
 import {
@@ -105,7 +107,6 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
     games: [],
   });
   const [gameLines, setGameLines] = useState<OddsByBookRow[]>([]);
-  const [lineSheet, setLineSheet] = useState<StatsLineTarget | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -231,31 +232,9 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
 
   return (
     <>
-      {/* Group tabs — Efficiency first by design. */}
-      {groups.length > 1 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.fixedRow}
-          contentContainerStyle={styles.groupTabRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {groups.map((g) => (
-            <Pressable
-              key={g}
-              onPress={() => pickGroup(g)}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityState={{ selected: g === activeGroup }}
-              style={({ pressed }) => pressed && styles.pressed}
-            >
-              <Text style={[styles.groupTab, g === activeGroup && styles.groupTabActive]}>
-                {g.toUpperCase()}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : null}
+      {/* Group tabs — Efficiency first by design, and the same two-level tab
+          bar the Players board uses (Matt, 2026-09-04). */}
+      <GroupTabs groups={groups} active={activeGroup} onChange={pickGroup} />
 
       <ScrollView
         horizontal
@@ -359,11 +338,8 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
               cuts={cuts}
               quote={quote}
               showLine={showLines}
-              onLinePress={
-                quote
-                  ? () => setLineSheet({ kind: 'team', quote, statLabel: stat.label })
-                  : undefined
-              }
+              // The pill is the bet link: one tap to the book's own betslip.
+              onLinePress={quote ? () => void openBookBetslip(quote.book, quote.link) : undefined}
             />
           );
         }}
@@ -387,9 +363,6 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         initialNumToRender={20}
       />
 
-      {lineSheet ? (
-        <StatsLineSheet target={lineSheet} visible onClose={() => setLineSheet(null)} />
-      ) : null}
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
     </>
   );
@@ -452,7 +425,10 @@ function TeamRow({
 }
 
 /** The user's sportsbook's number for this team's game, from its side, or a
- *  dash. Same pill as the Players board so the two halves read as one tab. */
+ *  dash. Same filled, book-branded pill as the Players board, and the same
+ *  one-tap hand-off to the book (Matt, 2026-09-04). The caption stays here —
+ *  unlike the Players board, the market genuinely varies row to row only by
+ *  which stat is selected, and "ML" / "−1.5" / "o8.5" is what names it. */
 function TeamLineCell({
   quote,
   team,
@@ -469,6 +445,8 @@ function TeamLineCell({
       </View>
     );
   }
+  const c = bookButtonColors(quote.book);
+  const filled = quote.book === MODEL_BOOK;
   const caption = teamLineCaption(quote);
   const what =
     quote.market === 'h2h' ? 'moneyline' : quote.market === 'spreads' ? `spread ${caption}` : `total ${caption}`;
@@ -476,14 +454,25 @@ function TeamLineCell({
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      hitSlop={6}
+      hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
       accessibilityRole="button"
       accessibilityLabel={`${team} ${what}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`}
-      accessibilityHint="Shows the line and a Bet button"
+      accessibilityHint={`Opens ${bookName(quote.book)}`}
       style={({ pressed }) => [styles.lineWrap, pressed && styles.pressed]}
     >
-      <View style={styles.linePill}>
-        <Text style={styles.lineText}>{formatAmerican(quote.price)}</Text>
+      <View
+        style={[
+          styles.linePill,
+          filled ? { backgroundColor: c.bg } : styles.linePillOutlined,
+        ]}
+      >
+        <Text
+          style={[styles.lineText, { color: filled ? c.fg : colors.textPrimary }]}
+          numberOfLines={1}
+        >
+          {formatAmerican(quote.price)}
+        </Text>
+        <BookMark book={quote.book} size={12} color={filled ? c.fg : colors.textPrimary} />
       </View>
       {caption ? <Text style={styles.lineCaption}>{caption}</Text> : null}
     </Pressable>
@@ -494,22 +483,6 @@ const styles = StyleSheet.create({
   fixedRow: { flexGrow: 0, flexShrink: 0 },
   listFlex: { flex: 1 },
   list: { paddingBottom: spacing.xl },
-  groupTabRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.xs,
-  },
-  groupTab: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.4,
-    paddingVertical: 4,
-  },
-  groupTabActive: { color: colors.tint, fontWeight: font.weight.bold },
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
   hintRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: 2 },
   hintText: { fontSize: 11, color: colors.textTertiary, lineHeight: 15 },
@@ -585,13 +558,19 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 11, fontWeight: font.weight.semibold, color: colors.textTertiary },
   rowMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
   valueWrap: { alignItems: 'flex-end', width: 72 },
-  colHeaderLine: { width: 58 },
-  lineWrap: { width: 58, alignItems: 'flex-end' },
-  // Tinted border — the pill is a tappable button (opens the line sheet).
+  colHeaderLine: { minWidth: 66, textAlign: 'right' },
+  lineWrap: { minWidth: 66, alignItems: 'flex-end' },
+  // Filled in the book's own colour — the pill IS the bet button.
   linePill: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    minHeight: 26,
     borderRadius: radii.sm,
+  },
+  linePillOutlined: {
     backgroundColor: colors.noneSoft,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.tint,
@@ -599,7 +578,6 @@ const styles = StyleSheet.create({
   lineText: {
     fontSize: font.size.caption,
     fontWeight: font.weight.bold,
-    color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
   lineCaption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 1 },

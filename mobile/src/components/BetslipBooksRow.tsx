@@ -1,22 +1,21 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { formatAmerican } from '@/lib/format';
 import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
-import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
  * "Open with" — this slip priced at every book a member can bet at
  * (BETTABLE_BOOKS), one tile per book:
  * combined odds where the book prices every leg, otherwise how many legs it
- * covers (N/M). The best payout is starred (ties all starred), the user's own
- * book is ringed, and tapping a tile opens that book (its first leg's betslip
- * link when we have one, else the book's app/site).
+ * covers (N/M). The best payout is starred (ties all starred), and tapping a
+ * tile opens that book (its first leg's betslip link when we have one, else the
+ * book's app/site). No tile is singled out as the user's: the book picker is
+ * the Stats page's and does not reach the slip (Matt, 2026-09-04).
  *
  * The odds differ per book because each leg is re-priced at that book's own
  * line-shop snapshot; the slip's win probability is book-independent, so the
@@ -25,9 +24,6 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * always has at least one complete quote.
  */
 export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
-  const { book: preferredBook } = usePreferredBook();
-  const [pickerOpen, setPickerOpen] = useState(false);
-
   const quotes = useMemo(
     // Bettable books only: a tile opens the book, and Pinnacle / Bovada /
     // ESPN BET cannot take the slip (legFromPick prices no leg there anyway).
@@ -45,16 +41,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
     <View style={styles.wrap}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Open with</Text>
-        <Pressable
-          onPress={() => setPickerOpen(true)}
-          hitSlop={6}
-          style={({ pressed }) => [styles.bookChip, pressed && styles.pressed]}
-          accessibilityLabel={`Your sportsbook is ${bookName(preferredBook)}. Tap to switch.`}
-        >
-          <Ionicons name="wallet-outline" size={12} color={colors.tint} />
-          <Text style={styles.bookChipText}>{bookName(preferredBook)}</Text>
-          <Ionicons name="chevron-down" size={12} color={colors.tint} />
-        </Pressable>
+        <Text style={styles.headerHint}>best payout first</Text>
       </View>
 
       <ScrollView
@@ -64,7 +51,6 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
       >
         {quotes.map((q) => {
           const full = q.americanOdds != null;
-          const isPreferred = q.book === preferredBook;
           const firstLink = q.links.find((l) => l != null) ?? null;
           return (
             <Pressable
@@ -77,14 +63,11 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
                 full
                   ? `Open ${bookName(q.book)}, combined odds ${formatAmerican(q.americanOdds!)}${
                       q.isBest && fullCount > 1 ? ', best payout' : ''
-                    }${isPreferred ? ', your sportsbook' : ''}`
-                  : `Open ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines${
-                      isPreferred ? ', your sportsbook' : ''
                     }`
+                  : `Open ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
               }
               style={({ pressed }) => [
                 styles.tile,
-                isPreferred && styles.tilePreferred,
                 !full && styles.tilePartial,
                 pressed && styles.pressed,
               ]}
@@ -111,12 +94,10 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
       </ScrollView>
 
       <Text style={styles.hint}>
-        ★ best payout · your book highlighted · tap a book to open it. N/M legs: that book
-        doesn’t post every leg at the same line, so it can’t price the whole slip. Books can’t
-        accept a whole parlay from a link, so add each leg there.
+        ★ best payout · tap a book to open it. N/M legs: that book doesn’t post every leg at the
+        same line, so it can’t price the whole slip. Books can’t accept a whole parlay from a
+        link, so add each leg there.
       </Text>
-
-      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
     </View>
   );
 }
@@ -141,20 +122,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  bookChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.tint,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  bookChipText: {
+  headerHint: {
     fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.tint,
+    color: colors.textTertiary,
   },
   tiles: {
     flexDirection: 'row',
@@ -169,9 +139,6 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
-  },
-  tilePreferred: {
-    borderColor: colors.tint,
   },
   tilePartial: {
     opacity: 0.55,
