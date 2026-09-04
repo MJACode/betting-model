@@ -124,6 +124,36 @@ ones a retrain would re-fit, so retraining blind may reproduce it. That
 still needs the feature engine run for one date either side of 07-23, which
 is a worker job (no `DATABASE_URL` in a dev sandbox).
 
+## [ ] Default privileges still hand anon EXECUTE on every new function
+
+Found 2026-09-03 in session 206, alongside the table fix. `pg_default_acl`
+carries three entries for `public` from grantor `postgres`:
+
+    objtype r (tables/views)  anon=arwdDxtm   <- REVOKED 2026-09-03
+    objtype S (sequences)     anon=rwU        <- still there
+    objtype f (functions)     anon=X          <- still there
+
+So every new function in `public` is still callable by `anon` the moment it
+exists. That is how five `SECURITY DEFINER` `feedback_*` RPCs ended up
+anon-callable — intended in that case, but nobody granted it.
+
+**Why it was not done in the same change.** Revoking default EXECUTE means every
+new RPC the app calls needs an explicit `GRANT EXECUTE` or PostgREST 404s it —
+a second silent-failure surface, of the same shape the table half needed
+`data/anon_readable.py` and its test to neutralise. Doing it properly means the
+same treatment for functions: a declared list of app-callable RPCs, a test
+against `mobile/src`'s `.rpc('...')` calls, and grants generated from it. The
+17 the app calls today are already enumerable that way.
+
+Sequences are the low-stakes third: `w` on a sequence is `nextval`/`setval`, and
+nothing reads a sequence through PostgREST here.
+
+**Also still open, and NOT fixable from this project:** the `supabase_admin`
+default-ACL entry for `public` tables grants `anon=arwdDxtm` too. Altering it
+needs membership in `supabase_admin`, which `postgres` does not have on a
+managed project. Nothing in this repo creates tables as that role, so it is
+latent rather than live.
+
 ## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
 
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
