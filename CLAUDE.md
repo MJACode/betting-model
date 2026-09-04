@@ -599,6 +599,7 @@ to be known BEFORE deciding which file to open.
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |
 | Live monitor dashboard | `docs/monitoring.md` |
 | Probability calibration (claimed vs realised) | `docs/probability_calibration.md` |
+| Calibration sweep + the weekly judgement pass (both worker crons) | `docs/probability_calibration.md` |
 | Health checks + retrain workflow | `docs/health_checks.md` |
 | Opening-signal shadow track | `docs/opening_signals.md` |
 | Signal-timing analysis + the full evaluation rule | `docs/signal_timing.md` |
