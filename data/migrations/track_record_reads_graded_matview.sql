@@ -99,70 +99,20 @@ BEGIN
     RAISE NOTICE 'v_model_full_outcome_record now reads mv_scored_pick_outcomes';
   END IF;
 
-  -- ── v_public_track_record_daily ──────────────────────────────────────────
-  d := pg_get_viewdef('public.v_public_track_record_daily'::regclass, true);
-  IF position('mv_scored_pick_outcomes' in d) > 0 THEN
-    RAISE NOTICE 'v_public_track_record_daily already reads the matview - skipping';
-  ELSE
-    EXECUTE $v$
-      CREATE OR REPLACE VIEW public.v_public_track_record_daily WITH (security_invoker = on) AS
-      WITH fo_base AS (
-        SELECT o.game_date,
-               o.dk_odds,
-               CASE WHEN o.model_id LIKE 'wnba%' THEN 'WNBA' ELSE 'MLB' END AS sport,
-               (o.model_probability >= t.min_prob
-                AND (t.prob_only OR o.edge >= COALESCE(t.min_edge, 0::numeric))
-                AND (t.min_odds IS NULL OR o.dk_odds IS NULL OR o.dk_odds >= t.min_odds)) AS passes,
-               CASE o.result WHEN 'WIN' THEN 'W' WHEN 'LOSS' THEN 'L' ELSE 'P' END AS res,
-               o.profit_units
-        FROM mv_scored_pick_outcomes o
-        JOIN model_action_thresholds t ON t.model_id = o.model_id
-        WHERE t.paused IS NOT TRUE
-          AND o.model_id <> 'mlb_prop_batter_hr'
-      ), fo AS (
-        SELECT fo_base.game_date,
-               fo_base.sport,
-               count(*) FILTER (WHERE fo_base.passes AND fo_base.res = ANY (ARRAY['W','L','P'])) AS picks,
-               count(*) FILTER (WHERE fo_base.passes AND fo_base.res = 'W') AS wins,
-               count(*) FILTER (WHERE fo_base.passes AND fo_base.res = 'L') AS losses,
-               count(*) FILTER (WHERE fo_base.passes AND fo_base.res = 'P') AS pushes,
-               COALESCE(sum(fo_base.profit_units) FILTER (WHERE fo_base.passes AND fo_base.dk_odds IS NOT NULL), 0::numeric) * 100::numeric AS profit_flat,
-               100 * count(*) FILTER (WHERE fo_base.passes AND fo_base.res = ANY (ARRAY['W','L','P']) AND fo_base.dk_odds IS NOT NULL) AS staked_flat
-        FROM fo_base
-        GROUP BY fo_base.game_date, fo_base.sport
-      ), other AS (
-        SELECT p.game_date,
-               p.sport,
-               count(*) FILTER (WHERE p.result = ANY (ARRAY['WIN','LOSS','PUSH'])) AS picks,
-               count(*) FILTER (WHERE p.result = 'WIN') AS wins,
-               count(*) FILTER (WHERE p.result = 'LOSS') AS losses,
-               count(*) FILTER (WHERE p.result = 'PUSH') AS pushes,
-               COALESCE(sum(p.profit_flat) FILTER (WHERE (p.result = ANY (ARRAY['WIN','LOSS','PUSH'])) AND p.dk_odds IS NOT NULL), 0::numeric) AS profit_flat,
-               100 * count(*) FILTER (WHERE (p.result = ANY (ARRAY['WIN','LOSS','PUSH'])) AND p.dk_odds IS NOT NULL) AS staked_flat
-        FROM picks p
-        JOIN model_action_thresholds t ON t.model_id = p.model_id
-        WHERE p.signal_type = 'BET'
-          AND (p.is_live IS NOT TRUE OR p.model_id LIKE '%\_live\_%')
-          AND t.paused IS NOT TRUE
-          AND p.game_date >= '2026-04-14'
-          AND NOT (p.model_id = 'mlb_over_under' AND p.game_date < '2026-07-05')
-          AND p.model_probability >= t.min_prob
-          AND (t.prob_only OR p.edge >= t.min_edge)
-          AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
-          AND NOT (p.model_id = ANY (ARRAY['mlb_moneyline','mlb_over_under','mlb_runline','mlb_f5_moneyline','wnba_moneyline'])
-                   OR p.model_id LIKE 'mlb_prop_%'
-                   OR p.model_id LIKE 'wnba_prop_%')
-        GROUP BY p.game_date, p.sport
-      )
-      SELECT fo.game_date, fo.sport, fo.picks, fo.wins, fo.losses, fo.pushes, fo.profit_flat, fo.staked_flat
-      FROM fo
-      WHERE fo.picks > 0
-      UNION ALL
-      SELECT other.game_date, other.sport, other.picks, other.wins, other.losses, other.pushes, other.profit_flat, other.staked_flat
-      FROM other
-    $v$;
-    GRANT SELECT ON public.v_public_track_record_daily TO anon, authenticated;
-    RAISE NOTICE 'v_public_track_record_daily now reads mv_scored_pick_outcomes';
-  END IF;
+  -- ── v_public_track_record_daily: REMOVED 2026-09-04 ──────────────────────
+  -- This file also redefined the daily view, guarded on "does the view still
+  -- read mv_scored_pick_outcomes?". That guard is a LOCK, not an idempotency
+  -- check: it cannot tell "never applied" from "deliberately superseded". When
+  -- live_record_start_2026_09_01.sql moved the daily view to the 2026-09-01
+  -- live date, the guard read 0 and this branch restored the 2026-04-14
+  -- definition on the next pass — silently, every pass. The app then drew a
+  -- +64.1u equity curve (Apr 17 → Sep 3) beside a hero card reading +12.02u
+  -- over the same 70 picks.
+  --
+  -- The daily view is owned by live_record_start_views_2026_09_01.sql now, and
+  -- its guard is on the live-date gate — the property the migration is trying
+  -- to establish, not the shape of its own output. The perf fix this file
+  -- exists for is unaffected: the daily view no longer re-grades from the
+  -- player logs either, because it no longer reads them at all.
 END
 $mig$;
