@@ -27,6 +27,13 @@ grants is a no-op on the current schema. The mechanism is for what comes next.
 
 from __future__ import annotations
 
+import re
+
+# Unquoted lower-case identifier: what every table in this repo is named, and
+# narrow enough that nothing it matches can carry SQL. Used by lock_down_sql,
+# which has to interpolate a table name it is sometimes handed at runtime.
+_IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
+
 # Readable by anon AND authenticated -- the board, the odds, the public record.
 # Nothing here is user-scoped; anon is how the app reads before sign-in.
 ANON_READABLE: tuple[str, ...] = (
@@ -111,6 +118,10 @@ def all_readable() -> tuple[str, ...]:
 # used: that is what would subject the owner to the policies and stop the
 # worker dead.
 WORKER_ONLY_TABLES: tuple[str, ...] = (
+    # brand_assets joined on 2026-09-04: scripts/fetch_brand_avatar.py creates it
+    # on demand and already carried its own hand-written REVOKE, so it has always
+    # been this same shape -- a fixed name with a live create site.
+    "brand_assets",
     "model_artifacts",
     # The 250-bet review's two tables. Created on demand by
     # tracking/threshold_review.ensure_schema, never read by the app -- the
@@ -120,6 +131,36 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     "threshold_reviews",
     "worker_jobs",
 )
+
+# Tables that must stay closed but have NO live create site under that exact
+# name, so nothing recreates them and the admin sweep is the only place they
+# need handling. mike, 2026-09-04: "do the remaining seven too."
+#
+# ALL SEVEN ARE EXTRACTED DATA, which is why they are locked rather than
+# dropped: six are dated one-off backups from this week's repairs (sessions 185,
+# 204 and 206) and a repair is only reversible while its backup exists, and
+# nfl_odds_cache_backup holds 6,769 gzipped blobs of nfl/data/odds_cache -- the
+# paid cache CLAUDE.md §1b names as still living outside Supabase, moved in on
+# 2026-09-04. Whether any of them is still worth keeping is a RETENTION
+# decision, and not one a grant change gets to make.
+#
+# A name here is checked against production by the admin script's read-back, so
+# a table that gets dropped later shows up as a failure rather than rotting in
+# this list.
+ARCHIVE_TABLES: tuple[str, ...] = (
+    "mlb_pitcher_stats_pre_rebuild_20260903",
+    "mlb_team_stats_pre_rebuild_20260903",
+    "nba_team_stats_pre_rebuild_20260903",
+    "nfl_odds_cache_backup",
+    "nhl_team_stats_pre_rebuild_20260903",
+    "odds_pre_first_pitch_relabel_20260903",
+    "wnba_team_stats_pre_rebuild_20260903",
+)
+
+
+def closed_tables() -> tuple[str, ...]:
+    """Every table the admin sweep revokes and enables RLS on."""
+    return WORKER_ONLY_TABLES + ARCHIVE_TABLES
 
 
 # The roles PostgREST authenticates as. service_role is deliberately absent:
@@ -148,11 +189,28 @@ def lock_down_sql(table: str) -> tuple[str, ...]:
     (data/ddl_guard.py has the pg_stat_statements numbers). This function is for
     the admin script and the tests, where one extra reload is the point.
     """
-    if table not in WORKER_ONLY_TABLES:
+    # THE IDENTIFIER IS VALIDATED BECAUSE IT IS NOT ALWAYS A LITERAL. Both
+    # statements interpolate `table` into SQL, and one caller passes a value
+    # straight from the command line: repair_bogus_first_pitch_labels.py's
+    # --backup-table. psycopg2 cannot parameterise an identifier, so this is the
+    # only place that check can live.
+    if not _IDENT.fullmatch(table):
         raise ValueError(
-            f"{table!r} is not a worker-only table. Add it to "
-            f"WORKER_ONLY_TABLES first -- and check it is absent from "
-            f"ANON_READABLE, because RLS with no policies denies the app too.")
+            f"{table!r} is not a plain lower-case identifier, and it is "
+            f"interpolated into SQL. Refusing to build a statement from it.")
+    # Refusing an APP-READABLE table is the check that matters. RLS with no
+    # policies denies anon regardless of the GRANT, so enabling it on something
+    # the app reads renders an empty screen with a permission answer folded into
+    # `error` -- the silent failure this whole module exists to prevent, one
+    # layer down. Membership in the declared lists is NOT required, because the
+    # repair script's backup table is named at runtime and is legitimately not
+    # in any of them.
+    if table in all_readable():
+        raise ValueError(
+            f"{table!r} is in the app's read surface. Enabling RLS with no "
+            f"policies would deny anon regardless of its GRANT, so the app "
+            f"would read an empty table. Remove it from ANON_READABLE first if "
+            f"that is really the intent.")
     return (
         f"REVOKE ALL ON {table} FROM anon, authenticated",
         f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",

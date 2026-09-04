@@ -238,34 +238,97 @@ def test_the_worker_only_tables_are_not_also_declared_app_readable():
     permission answer folded into `error` -- the exact silent failure this
     module exists to prevent, one layer down.
     """
-    from data.anon_readable import WORKER_ONLY_TABLES, all_readable
+    from data.anon_readable import all_readable, closed_tables
 
-    overlap = set(WORKER_ONLY_TABLES) & set(all_readable())
+    overlap = set(closed_tables()) & set(all_readable())
     assert not overlap, (
         f"{sorted(overlap)} is declared both worker-only (RLS, no policies) and "
         f"app-readable. RLS with no policies denies anon regardless of the "
         f"GRANT, so the app would read an empty table. Pick one.")
 
 
-def test_lock_down_sql_refuses_a_table_it_was_not_declared_for():
-    """The helper is the only way to build these statements, so it is also the
-    place to refuse an undeclared table -- otherwise `lock_down_sql(typo)` would
-    happily generate DDL that enables RLS on something the app reads."""
+def test_lock_down_sql_refuses_every_table_the_app_reads():
+    """The helper is the only way to build these statements, so it is the place
+    to refuse the one genuinely dangerous case: RLS with no policies denies anon
+    regardless of its GRANT, so enabling it on an app-readable relation empties
+    a screen with nothing in any log near the cause.
+
+    Membership in the declared lists is deliberately NOT required -- the repair
+    script names its backup table at runtime (--backup-table) and is legitimately
+    in none of them. So the check is the read surface, not the roster.
+    """
+    import pytest
+
+    from data.anon_readable import all_readable, lock_down_sql
+
+    for rel in all_readable():
+        with pytest.raises(ValueError, match="read surface"):
+            lock_down_sql(rel)
+
+
+def test_lock_down_sql_refuses_anything_that_is_not_a_plain_identifier():
+    """`table` is interpolated into both statements and one caller passes it
+    from the command line, so this is the only place the identifier can be
+    checked -- psycopg2 cannot parameterise an identifier."""
     import pytest
 
     from data.anon_readable import lock_down_sql
 
-    with pytest.raises(ValueError, match="not a worker-only table"):
-        lock_down_sql("picks")
+    for bad in ('x"; DROP TABLE picks; --', "Foo", "", "a-b", "a b",
+                "public.picks", "x" * 64):
+        with pytest.raises(ValueError, match="plain lower-case identifier"):
+            lock_down_sql(bad)
+
+
+def test_the_archive_tables_have_no_create_site_and_the_worker_only_ones_do():
+    """The two lists mean different things and the difference is load-bearing.
+
+    A table with a live create site needs lock_down() BESIDE the CREATE, because
+    a sweep is undone by the next run against a database where it does not exist.
+    A table with no create site needs only the admin sweep. Mixing them up means
+    either a missed recurrence or a create-site test that cannot be satisfied.
+    """
+    from data.anon_readable import ARCHIVE_TABLES, WORKER_ONLY_TABLES
+
+    assert not set(ARCHIVE_TABLES) & set(WORKER_ONLY_TABLES)
+    # An archive name that starts appearing in a CREATE TABLE is no longer an
+    # archive, and this is what says so.
+    root = Path(__file__).resolve().parents[1]
+    for path in root.rglob("*.py"):
+        rel = path.relative_to(root).as_posix()
+        if rel.startswith(("tests/", "node_modules/")):
+            continue
+        src = path.read_text(encoding="utf-8", errors="replace")
+        for table in ARCHIVE_TABLES:
+            assert f"CREATE TABLE IF NOT EXISTS {table}" not in src, (
+                f"{rel} creates {table}, which is declared an ARCHIVE_TABLE "
+                f"(no create site). Move it to WORKER_ONLY_TABLES and call "
+                f"lock_down() beside the CREATE.")
+
+
+def test_the_dynamic_backup_table_is_locked_down_where_it_is_created():
+    """repair_bogus_first_pitch_labels.py does DROP + CREATE TABLE AS, so every
+    re-run produces a FRESH table with RLS off -- the model_artifacts recurrence
+    on a table whose name comes from --backup-table. The lock has to be applied
+    at the create site; there is no fixed name for a sweep to catch."""
+    src = (Path(__file__).resolve().parents[1] / "scripts"
+           / "repair_bogus_first_pitch_labels.py").read_text(encoding="utf-8")
+    create = src.index("CREATE TABLE {tbl} AS")
+    lock = src.index("lock_down_sql(tbl)")
+    assert create < lock, (
+        "the lock-down must follow the CREATE TABLE AS, not precede it")
+    # and it must land before the transaction is committed
+    assert lock < src.index("conn.commit()", create), (
+        "the lock-down must run before the commit")
 
 
 def test_lock_down_sql_revokes_before_it_enables_rls():
     """Order matters for the same reason it does for the function grants: the
     revoke is the lock that works today and RLS is the one behind it. A reader
     of the log should see them in that order."""
-    from data.anon_readable import WORKER_ONLY_TABLES, lock_down_sql
+    from data.anon_readable import closed_tables, lock_down_sql
 
-    for table in WORKER_ONLY_TABLES:
+    for table in closed_tables():
         stmts = lock_down_sql(table)
         assert len(stmts) == 2, stmts
         assert stmts[0].startswith("REVOKE ALL ON "), stmts[0]
@@ -279,71 +342,161 @@ def test_lock_down_never_uses_force_row_level_security():
     `postgres` -- the role the worker connects as. With zero policies on these
     tables that would stop every worker write, silently and immediately. Pinned
     because `FORCE` is one word away from the statement we do want."""
-    from data.anon_readable import WORKER_ONLY_TABLES, lock_down_sql
+    from data.anon_readable import closed_tables, lock_down_sql
 
-    for table in WORKER_ONLY_TABLES:
+    for table in closed_tables():
         for stmt in lock_down_sql(table):
             assert "FORCE" not in stmt.upper(), stmt
 
 
-def test_every_worker_only_create_site_goes_through_the_gated_helper():
-    """All three tables are created on demand, so the lock-down has to live
-    beside the CREATE -- and it has to be the GATED form.
-
-    `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` takes ACCESS EXCLUSIVE whether
-    or not RLS is already on and fires Supabase's pgrst_ddl_watch, which makes
-    PostgREST answer 503 to the whole app while it rebuilds its schema cache.
-    That trap cost 11.6 hours of database time across seven modules
-    (data/ddl_guard.py). So a write-time call site must use lock_down(), which
-    gates on the catalog -- never lock_down_sql(), which does not.
-    """
-    from pathlib import Path
-
-    sites = {
-        "tracking/job_queue.py": "worker_jobs",
-        "data/ingestors/odds_ingestor.py": "odds_history_pulls",
-        "models/trainer.py": "model_artifacts",
-    }
+def _repo_sources():
+    """(rel_path, source) for every non-test module in the repo."""
     root = Path(__file__).resolve().parents[1]
-    for rel_path, table in sites.items():
-        src = (root / rel_path).read_text(encoding="utf-8")
-        assert f'lock_down(conn, "{table}")' in src or (
-            f'lock_down(conn, ARTIFACT_LOCKDOWN_TABLE)' in src
-            and f'ARTIFACT_LOCKDOWN_TABLE = "{table}"' in src), (
-            f"{rel_path} creates {table} but does not call "
-            f"lock_down(conn, ...) beside the CREATE")
-        assert "lock_down_sql(" not in src, (
-            f"{rel_path} calls lock_down_sql() at a write-time site. That skips "
-            f"the catalog gate and fires ACCESS EXCLUSIVE DDL plus a PostgREST "
-            f"schema-cache reload on every call. Use lock_down(conn, table).")
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel.startswith(("tests/", "node_modules/", "mobile/")):
+            continue
+        yield rel, path.read_text(encoding="utf-8", errors="replace")
 
 
-def test_the_job_queue_guard_checks_rls_and_the_revoke():
-    """job_queue.ensure_schema returns EARLY on schema_is_current(), before the
-    lock_down() call. Without rls= and revoked_from= that guard answers True on
-    a database where worker_jobs exists but is still open, and the lock-down
-    never runs -- a guard that dead code can satisfy."""
-    from pathlib import Path
+def _call_source(src: str, needle: str) -> str | None:
+    """The full text of the first call starting at `needle`, parens balanced.
 
-    src = (Path(__file__).resolve().parents[1]
-           / "tracking" / "job_queue.py").read_text(encoding="utf-8")
-    # Slice to the CLOSING paren, tracking depth: the argument list contains
-    # `columns=("dedupe_key",)`, so a naive index(")") cuts the call in half and
-    # the test passes for the wrong reason.
-    start = src.index('schema_is_current(conn, "worker_jobs"')
-    depth, end = 0, None
+    A naive index(")") cuts a call whose arguments contain their own parens --
+    `columns=("dedupe_key",)` is exactly that -- and the test then passes for
+    the wrong reason.
+    """
+    if needle not in src:
+        return None
+    start = src.index(needle)
+    depth = 0
     for i, ch in enumerate(src[start:], start):
         if ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
             if depth == 0:
-                end = i
-                break
-    assert end is not None, "unbalanced parens in the schema_is_current call"
-    call = src[start:end]
-    assert "rls=True" in call, call
-    assert "revoked_from=API_ROLES" in call, call
+                return src[start:i]
+    raise AssertionError(f"unbalanced parens after {needle!r}")
+
+
+def test_every_worker_only_create_site_goes_through_the_gated_helper():
+    """Every table with a live create site must lock down BESIDE the CREATE, and
+    through the GATED helper.
+
+    DERIVED FROM WORKER_ONLY_TABLES rather than a hand-written map, because a
+    hardcoded list cannot catch the case that actually matters: someone adds a
+    table to WORKER_ONLY_TABLES and forgets the call. That happened -- twice this
+    week the recurrence was a create site nobody had wired up.
+
+    The gated form is required because `ALTER TABLE ... ENABLE ROW LEVEL
+    SECURITY` takes ACCESS EXCLUSIVE whether or not RLS is already on and fires
+    Supabase's pgrst_ddl_watch, which makes PostgREST answer 503 to the whole app
+    while it rebuilds its schema cache -- the trap that cost 11.6 hours of
+    database time (data/ddl_guard.py).
+    """
+    from data.anon_readable import WORKER_ONLY_TABLES
+
+    # db_setup.py runs once against an empty database and is not a write path;
+    # it is exempt in tests/test_ddl_guard.py for the same reason.
+    EXEMPT = {"data/db_setup.py"}
+
+    creators: dict[str, list[str]] = {}
+    for rel, src in _repo_sources():
+        if rel in EXEMPT:
+            continue
+        for table in WORKER_ONLY_TABLES:
+            if re.search(rf"CREATE TABLE IF NOT EXISTS {table}\b", src):
+                creators.setdefault(table, []).append(rel)
+
+    for table, files in sorted(creators.items()):
+        for rel in files:
+            src = dict(_repo_sources())[rel]
+            assert "lock_down(" in src, (
+                f"{rel} creates {table}, a worker-only table, but never calls "
+                f"lock_down(conn, ...). A sweep does not hold: the next run "
+                f"against a database without the table recreates it open.")
+
+    # EVERY worker-only table must have a create site, or it belongs in
+    # ARCHIVE_TABLES instead -- that distinction is the whole reason there are
+    # two lists. All six are found today, model_artifacts included: trainer.py
+    # holds its DDL in ARTIFACT_DDL but the literal is still in the source.
+    from data.anon_readable import ARCHIVE_TABLES
+    unaccounted = [tb for tb in WORKER_ONLY_TABLES if tb not in creators]
+    assert unaccounted == [], (
+        f"no CREATE TABLE found for {unaccounted}. A worker-only table with no "
+        f"create site belongs in ARCHIVE_TABLES ({len(ARCHIVE_TABLES)} today), "
+        f"where the admin sweep is the only place it needs handling.")
+
+
+def test_every_literal_lock_down_target_is_declared():
+    """A call site can name a table lock_down() accepts but nothing declares.
+
+    lock_down_sql deliberately does NOT require list membership -- the repair
+    script names its backup at runtime -- so a table can be dropped from
+    WORKER_ONLY_TABLES while its create site keeps working. Nothing breaks at
+    runtime, which is the problem: it silently falls out of the admin sweep and
+    out of every read-back, so no one is checking it any more.
+
+    Only LITERAL targets are checked. A runtime name (the repair script's `tbl`)
+    has no list to be in, which is the case the roster check exists to allow.
+    """
+    from data.anon_readable import closed_tables
+
+    declared = set(closed_tables())
+    for rel, src in _repo_sources():
+        for match in re.finditer(r'lock_down\(conn,\s*"([a-z_][a-z0-9_]*)"\)', src):
+            table = match.group(1)
+            assert table in declared, (
+                f"{rel} locks down {table!r}, which is in neither "
+                f"WORKER_ONLY_TABLES nor ARCHIVE_TABLES. It still works at "
+                f"runtime, and that is the trap: the admin sweep and its "
+                f"read-backs iterate the declared lists, so nothing checks "
+                f"{table!r} any more.")
+
+
+def test_no_create_site_uses_the_ungated_builder():
+    """lock_down_sql() skips the catalog gate, so at a write-time site it fires
+    ACCESS EXCLUSIVE DDL and a PostgREST cache reload on EVERY call.
+
+    repair_bogus_first_pitch_labels.py is the one legitimate caller: it has just
+    created the table one statement earlier, so the gate would always say
+    "needed", and it runs once per repair.
+    """
+    ALLOWED = {"scripts/repair_bogus_first_pitch_labels.py",
+               "scripts/apply_anon_grants.py", "data/anon_readable.py"}
+    for rel, src in _repo_sources():
+        if rel in ALLOWED:
+            continue
+        assert "lock_down_sql(" not in src, (
+            f"{rel} calls lock_down_sql(), which skips the catalog gate. Use "
+            f"lock_down(conn, table) at a write-time site.")
+
+
+def test_every_guard_on_a_worker_only_table_asks_about_rls():
+    """A schema_is_current() early-return that does not ask about RLS answers
+    True on a table that exists but is still open, and the lock_down() after it
+    never runs -- a guard that dead code can satisfy.
+
+    This bit twice: tracking/job_queue.py, and tracking/threshold_review.py an
+    hour after the first fix shipped. Derived rather than named, so the third
+    time is a red test.
+    """
+    from data.anon_readable import WORKER_ONLY_TABLES
+
+    for rel, src in _repo_sources():
+        for table in WORKER_ONLY_TABLES:
+            needle = f'schema_is_current(conn, "{table}"'
+            call = _call_source(src, needle)
+            if call is None:
+                continue
+            assert "rls=True" in call, (
+                f"{rel}: {needle}...) does not pass rls=True, so it returns "
+                f"True on a table whose RLS is off and skips the lock-down.\n"
+                f"{call}")
+            assert "revoked_from=" in call, (
+                f"{rel}: {needle}...) does not pass revoked_from=, so it "
+                f"returns True on a table that is still anon-granted.\n{call}")
 
 
 def test_the_apply_script_reads_back_that_rls_actually_landed():
