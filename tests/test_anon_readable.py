@@ -185,10 +185,41 @@ def test_the_function_revoke_names_public_as_well_as_the_roles():
     from scripts import apply_anon_grants
 
     src = _inspect.getsource(apply_anon_grants._function_plan)
-    revoke = re.search(r'REVOKE ALL ON FUNCTION \{one\} FROM ([^"]+)"', src)
-    assert revoke, src
-    roles = revoke.group(1)
-    assert "PUBLIC" in roles, (
-        f"revoke targets {roles!r} -- without PUBLIC the function stays "
-        f"callable and the run still reports success")
-    assert "anon" in roles and "authenticated" in roles, roles
+    # There are two revokes in this function and they mean different things:
+    # one strips PUBLIC from a callable before granting it to the named roles,
+    # the other takes a function away entirely. This is about the second, so it
+    # matches the full role list rather than the first REVOKE it finds.
+    targets = re.findall(r'REVOKE ALL ON FUNCTION \{one\} FROM ([^"]+)"', src)
+    assert targets, src
+    full = [t for t in targets if "anon" in t]
+    assert full, (
+        f"no revoke targets anon at all; found {targets!r}. The RPC_REVOKE "
+        f"path must remove the named roles as well as PUBLIC.")
+    for roles in full:
+        assert "PUBLIC" in roles, (
+            f"revoke targets {roles!r} -- without PUBLIC the function stays "
+            f"callable and the run still reports success")
+        assert "authenticated" in roles, roles
+
+
+def test_public_is_stripped_from_every_declared_callable_before_it_is_granted():
+    """Postgres grants function EXECUTE to PUBLIC by default, so a function with
+    an explicit anon grant is usually ALSO callable by every other role --
+    including any role added later. The end state wanted is "PUBLIC holds
+    nothing, anon and authenticated hold exactly EXECUTE".
+
+    Order is load-bearing: the revoke must come BEFORE the grant, or it strips
+    the grant it just made. Measured before shipping: all 20 functions carrying
+    the PUBLIC grant already held explicit anon=X and authenticated=X, so PUBLIC
+    was never the only source for any of them.
+    """
+    import inspect as _inspect
+
+    from scripts import apply_anon_grants
+
+    src = _inspect.getsource(apply_anon_grants._function_plan)
+    rev = src.index('REVOKE ALL ON FUNCTION {one} FROM PUBLIC"')
+    grant = src.index('GRANT EXECUTE ON FUNCTION {one} TO anon, authenticated"')
+    assert rev < grant, (
+        "the PUBLIC revoke must be emitted before the named grant, or it "
+        "removes the grant it just made")

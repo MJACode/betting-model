@@ -130,6 +130,19 @@ def _function_plan(conn) -> tuple[list[str], list[str]]:
             skipped.append(name)
             continue
         for one in sig.split("|"):
+            # PUBLIC OFF FIRST, then the named grant. Postgres grants function
+            # EXECUTE to PUBLIC by default, so most of these carry `=X/postgres`
+            # in their ACL and are callable by any role at all -- including any
+            # role added later. The named grants are what the app actually needs,
+            # so the end state is "PUBLIC holds nothing, anon and authenticated
+            # hold exactly EXECUTE".
+            #
+            # Safe because the grant follows in the same transaction, and the
+            # read-back at the end refuses to commit if anon has lost the call.
+            # Verified before shipping: all 20 functions carrying the PUBLIC
+            # grant already held explicit anon=X and authenticated=X, so PUBLIC
+            # was never the only source for any of them.
+            stmts.append(f"REVOKE ALL ON FUNCTION {one} FROM PUBLIC")
             stmts.append(f"GRANT EXECUTE ON FUNCTION {one} TO anon, authenticated")
     for name in RPC_REVOKE:
         sig = _function_signature(conn, name)
@@ -220,6 +233,21 @@ def main() -> int:
             conn.rollback()
             logger.error(f"anon can STILL call {still_callable} after the "
                          f"revoke — rolled back.")
+            return 1
+        # PUBLIC must hold nothing on the declared callables. Read back for the
+        # same reason as above: a revoke that did not bite reports success.
+        public_left = [
+            name for name in RPC_ANON_CALLABLE
+            if (sig := _function_signature(conn, name)) is not None
+            and any(
+                conn.execute("SELECT has_function_privilege('public', %s, 'EXECUTE')",
+                             (one,)).fetchone()[0]
+                for one in sig.split("|"))
+        ]
+        if public_left:
+            conn.rollback()
+            logger.error(f"PUBLIC still holds EXECUTE on {public_left} — "
+                         f"rolled back.")
             return 1
         conn.commit()
     except Exception as exc:                                   # noqa: BLE001
