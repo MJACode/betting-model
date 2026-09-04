@@ -21,6 +21,8 @@
  */
 
 import { readFileSync } from 'node:fs';
+
+import { lastName } from '../src/lib/matchup';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -156,20 +158,56 @@ check(
   /detail: string \| null;/.test(matchup),
 );
 check(
-  'a batter matchup names the opposing starter and his arm',
-  /detail: `\$\{lastName\(m\.opp_starter_name\)\}\$\{hand\}`/.test(matchup),
+  'a batter matchup names the opposing starter AND his ERA',
+  // The ERA, not the arm: the tier colour separates only the tails (cliffs at
+  // 4.60 / 3.40 around a ~4.10 league average), and `text` — the only other
+  // carrier — now reaches a screen reader and nothing else.
+  /detail: `\$\{lastName\(m\.opp_starter_name\)\} \$\{era\.toFixed\(2\)\}`/.test(matchup),
 );
 check(
-  'the SPOT column has room for it, and grows with the text',
-  /matchupWrap: \{\s*\n\s*minWidth: 68/.test(stats),
+  'a named starter with no ERA yet is named, not called TBD',
+  /detail: m\.opp_starter_name \? `\$\{lastName\(m\.opp_starter_name\)\}\$\{hand\}` : 'TBD'/.test(
+    matchup,
+  ),
+);
+// lastName is pure and importable, so this RUNS it rather than grepping the
+// source for a constant name — the first version asserted /SUFFIXES/, which
+// `SUFFIXES_X` still satisfies. Where behaviour can be executed, execute it.
+for (const [input, want] of [
+  ['Nestor Cortes Jr.', 'Cortes'],
+  ['Ke Bryan Hayes Sr.', 'Hayes'],
+  ['Jose De Leon', 'De Leon'],
+  ['Bryan De La Cruz', 'De La Cruz'],
+  ['Cristian Javier', 'Javier'],
+  ['Ohtani', 'Ohtani'],
+] as const) {
+  check(`lastName(${JSON.stringify(input)}) is the surname, not the suffix`, lastName(input) === want, lastName(input));
+}
+check(
+  'the SPOT column and its header share one constant, and its growth is bounded',
+  /colHeaderMatchup: \{ minWidth: SPOT_W/.test(stats) &&
+    /matchupWrap: \{\s*\n\s*minWidth: SPOT_W,\s*\n\s*maxWidth:/.test(stats),
 );
 check(
-  'the tier is the opponent’s colour, not a separate glyph eating the room',
-  stats.includes('styles.matchupOppName') && !stats.includes('styles.matchupTier'),
+  'and both right-hand columns can give, so the player NAME is not the only one that does',
+  (stats.match(/^\s+flexShrink: 1,$/gm) ?? []).length >= 2,
 );
 check(
-  'and colour is never the only carrier — the label says the tier in words',
-  /accessibilityLabel=\{`\$\{matchupTierLabel\(matchup\.tier\)\} spot/.test(stats),
+  'the tier colours the FACT, not the team abbreviation',
+  // colors.bet/avoid are BET/AVOID semantics: a green team name on a board of
+  // prices reads as a side, and the hit-rate column is already a traffic light.
+  /<Text style=\{\[styles\.matchupDetail, \{ color: c \}\]\}/.test(stats) &&
+    /<Text style=\{styles\.matchupOppName\}/.test(stats),
+);
+check(
+  'and colour is never the only carrier — the label says the tier IN WORDS',
+  // Not the FAV/TGH/NEU glyph: spoken, "TGH" is noise and "NEU" is "new".
+  /accessibilityLabel=\{`\$\{matchupTierWord\(matchup\.tier\)\} spot/.test(stats) &&
+    /return 'Favourable';/.test(stats),
+);
+check(
+  'the two-line rail stays straight when a sport has no detail',
+  /\{matchup\.detail \?\? '—'\}/.test(stats),
 );
 
 // ── 4. What the review caught: three regressions that must not come back ────
@@ -196,8 +234,8 @@ check(
   (stats.match(/accessibilityHint=\{tappable \? 'Opens this player' : undefined\}/g) ?? []).length >= 2,
 );
 check(
-  'the price column sizes to its content rather than pinning a width',
-  /oddsWrap: \{\s*\n\s*minWidth:/.test(stats) && !/oddsWrap: \{\s*\n\s*width:/.test(stats),
+  'the price column grows with the text rather than clipping the price',
+  /oddsWrap: \{\s*\n\s*minWidth: ODDS_W,\s*\n\s*maxWidth:/.test(stats),
 );
 check(
   'the pill clears the 44pt target with vertical hitSlop',

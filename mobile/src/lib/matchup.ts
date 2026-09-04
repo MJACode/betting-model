@@ -27,10 +27,14 @@ export interface MatchupInfo {
    * enough for a ~68pt column: the opposing starter and his arm, the opposing
    * lineup's wOBA, the defence's rating.
    *
-   * It is deliberately not the ERA — the tier colour is already a function of
-   * ERA (>= 4.60 favourable, <= 3.40 tough), so printing it repeats the colour,
-   * while handedness is carried nowhere else and decides a platoon. Null when
-   * the feed has nothing, which is what "starter TBD" means.
+   * It IS the ERA, reversing a first pass that printed the arm instead. Three
+   * things settled it: the tier colour is a 3-bucket step function with cliffs
+   * at 4.60 and 3.40 and league-average starter ERA is ~4.10, so the colour
+   * separates the tails while the number separates the middle, where most rows
+   * live; handedness is un-actionable on a board that never shows the hitter's
+   * bat side; and `text` — the only other carrier of the ERA — now reaches a
+   * screen reader and nothing else, so dropping the number here removed it from
+   * the product for every sighted user. Null when the feed has nothing.
    */
   detail: string | null;
   row: TonightMatchupRow;
@@ -42,10 +46,25 @@ const num = (v: number | string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** "Braxton Ashcraft" → "Ashcraft". The SPOT column has room for one word. */
+/**
+ * "Braxton Ashcraft" → "Ashcraft". The SPOT column has room for one word.
+ *
+ * A bare `parts[parts.length - 1]` shipped **"Jr."** for every suffixed pitcher
+ * — "Nestor Cortes Jr." is a real name on a real probables feed, and both MLB
+ * StatsAPI and the DK feed carry the suffix. Particles are kept too, because
+ * "De Leon" and "De La Cruz" are the surname, not "Leon" and "Cruz".
+ */
+const SUFFIXES = new Set(['jr', 'jr.', 'sr', 'sr.', 'ii', 'iii', 'iv', 'v']);
+const PARTICLES = new Set(['de', 'del', 'de la', 'la', 'van', 'von', 'da', 'di', "o'"]);
+
 export function lastName(name: string): string {
   const parts = name.trim().split(/\s+/);
-  return parts.length < 2 ? name : parts[parts.length - 1];
+  while (parts.length > 1 && SUFFIXES.has(parts[parts.length - 1].toLowerCase())) parts.pop();
+  if (parts.length < 2) return parts[0] ?? name;
+  // Walk back over particles so a two- or three-word surname survives whole.
+  let i = parts.length - 1;
+  while (i > 1 && PARTICLES.has(parts[i - 1].toLowerCase())) i--;
+  return parts.slice(i).join(' ');
 }
 
 /** "Braxton Ashcraft" → "B. Ashcraft" */
@@ -67,13 +86,21 @@ function gradeBatter(m: TonightMatchupRow): MatchupInfo {
   const era = num(m.opp_starter_era);
   const hand = m.opp_starter_hand ? ` (${m.opp_starter_hand})` : '';
   if (!m.opp_starter_name || era == null) {
-    return { tier: 'neutral', text: `vs ${m.opponent} · starter TBD`, detail: 'TBD', row: m };
+    // "TBD" only when the STARTER is unknown. A named starter with no ERA yet —
+    // a call-up, a first start — is not an unknown opponent, and three letters
+    // under "vs HOU" read as though the game itself were unsettled.
+    return {
+      tier: 'neutral',
+      text: `vs ${m.opponent} · ${m.opp_starter_name ?? 'starter TBD'}`,
+      detail: m.opp_starter_name ? `${lastName(m.opp_starter_name)}${hand}` : 'TBD',
+      row: m,
+    };
   }
   const tier: MatchupTier = era >= 4.6 ? 'favorable' : era <= 3.4 ? 'tough' : 'neutral';
   return {
     tier,
     text: `vs ${m.opponent} · ${shortName(m.opp_starter_name)} ${era.toFixed(2)} ERA${hand}`,
-    detail: `${lastName(m.opp_starter_name)}${hand}`,
+    detail: `${lastName(m.opp_starter_name)} ${era.toFixed(2)}`,
     row: m,
   };
 }
@@ -107,7 +134,7 @@ function gradeWnba(m: TonightMatchupRow): MatchupInfo {
   return {
     tier,
     text: `vs ${m.opponent} · DefRtg ${def.toFixed(1)}`,
-    detail: `${def.toFixed(1)} DefRtg`,
+    detail: `${def.toFixed(1)} Def`,
     row: m,
   };
 }

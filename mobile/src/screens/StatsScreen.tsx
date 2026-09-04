@@ -116,6 +116,29 @@ type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 // and its "Bet on …" button.
 
 const SEASON = new Date().getUTCFullYear();
+/**
+ * The two right-hand column widths, shared by the header cell and the row cell
+ * so the header rail cannot drift off its column — content-sized rows under a
+ * fixed header meant one long pitcher name shifted that row's price out from
+ * under its own "DK".
+ *
+ * Each cell is min/max/shrink rather than a single fixed width, which is the
+ * only shape that survives both failure modes:
+ *
+ *   - `flexShrink: 1` because the row's only other flexible child is the
+ *     player's NAME. With the default flexShrink of 0 these two grew at Dynamic
+ *     Type sizes and the name paid for all of it, reaching zero around
+ *     fontScale 2. The detail ellipsizing is the right thing to lose first.
+ *   - `maxWidth` because content-sized cells under a fixed header shifted one
+ *     row's price out from under its own "DK" whenever a pitcher's name ran
+ *     long. Bounded growth bounds the drift.
+ *   - and NOT a hard width, which was the first attempt: it pins the header
+ *     perfectly and then clips the PRICE at about fontScale 1.3, which is the
+ *     one number on the row a user came for.
+ */
+const SPOT_W = 76;
+const ODDS_W = 62;
+
 const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
@@ -1386,10 +1409,20 @@ function matchupColor(tier: MatchupInfo['tier']): string {
   return colors.textSecondary;
 }
 
-function matchupTierLabel(tier: MatchupInfo['tier']): string {
-  if (tier === 'favorable') return 'FAV';
-  if (tier === 'tough') return 'TGH';
-  return 'NEU';
+/**
+ * The tier IN WORDS, for the accessibility label.
+ *
+ * There used to be only `matchupTierLabel`, returning the three-letter glyph
+ * FAV / TGH / NEU that the cell printed. When the cell stopped printing it and
+ * the label started carrying it instead, the label inherited the glyph — so
+ * VoiceOver announced "TGH spot" and "NEU spot" ("new spot"), while sighted
+ * users had colour alone. An abbreviation drawn on screen is a label; spoken,
+ * it is noise.
+ */
+function matchupTierWord(tier: MatchupInfo['tier']): string {
+  if (tier === 'favorable') return 'Favourable';
+  if (tier === 'tough') return 'Tough';
+  return 'Neutral';
 }
 
 /** Right-hand LINE cell: the user's sportsbook's price for the number the
@@ -1478,9 +1511,18 @@ function OddsCell({
  * the pattern the NBA's own leaderboards use and what Matt asked the designer
  * to arbitrate.
  *
- * The tier is the OPPONENT'S COLOUR rather than a separate FAV/TGH/NEU glyph,
- * which is what buys the room for the second line. Colour is never the only
- * carrier: the cell's accessibility label says the tier in words.
+ * The tier colours the PITCHER, not the opponent. Two reasons it moved off
+ * `vs HOU`: `colors.bet` / `colors.avoid` are this app's BET/AVOID semantics,
+ * so a green team abbreviation on a board full of prices reads as "bet
+ * Houston"; and the hit-rate column 60pt away is already green/amber/red about
+ * something else, so the row carried two traffic lights meaning different
+ * things. On the fact, the colour reads as "this pitcher is the reason", which
+ * is what it actually encodes.
+ *
+ * Colour is never the only carrier: the cell's accessibility label says the
+ * tier in words (matchupTierWord — it used to say "TGH", which is not a word).
+ * The em-dash placeholder keeps the two-line rail straight when a sport has no
+ * detail to print.
  */
 function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
   if (!matchup) {
@@ -1499,20 +1541,19 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
     <View
       style={styles.matchupWrap}
       accessible
-      accessibilityLabel={`${matchupTierLabel(matchup.tier)} spot, ${matchup.text}`}
+      accessibilityLabel={`${matchupTierWord(matchup.tier)} spot, ${matchup.text}`}
     >
-      <Text style={[styles.matchupOppName, { color: c }]} numberOfLines={1}>
+      <Text style={styles.matchupOppName} numberOfLines={1}>
         vs {matchup.row.opponent}
       </Text>
-      {matchup.detail ? (
-        <Text style={styles.matchupDetail} numberOfLines={1}>
-          {matchup.detail}
-        </Text>
-      ) : null}
+      <Text style={[styles.matchupDetail, { color: c }]} numberOfLines={1}>
+        {matchup.detail ?? '—'}
+      </Text>
     </View>
   );
 }
 
+/** Compact column header sitting flush above the leaderboard (HOF-style). */
 function ColumnHeader({
   rightLabel,
   showOdds,
@@ -2002,7 +2043,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
-  colHeaderOdds: { minWidth: 62, textAlign: 'right' },
+  colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
   // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
   // where a column of dashes would otherwise read as a broken screen.
   noLinesRow: {
@@ -2019,7 +2060,7 @@ const styles = StyleSheet.create({
     lineHeight: font.size.caption * 1.35,
   },
   noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
-  colHeaderMatchup: { minWidth: 68, textAlign: 'right' },
+  colHeaderMatchup: { minWidth: SPOT_W, textAlign: 'right' },
   // Rows are deliberately compact — more players visible per screen.
   row: {
     flexDirection: 'row',
@@ -2068,7 +2109,9 @@ const styles = StyleSheet.create({
   // minWidth, not width: the price and its column grow together at large text
   // sizes instead of the number being the thing that gets an ellipsis.
   oddsWrap: {
-    minWidth: 62,
+    minWidth: ODDS_W,
+    maxWidth: ODDS_W * 1.5,
+    flexShrink: 1,
     alignItems: 'flex-end',
   },
   // Filled in the book's own colour — the pill IS the bet button, and the mark
@@ -2115,7 +2158,9 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   matchupWrap: {
-    minWidth: 68,
+    minWidth: SPOT_W,
+    maxWidth: SPOT_W * 1.4,
+    flexShrink: 1,
     alignItems: 'flex-end',
   },
   matchupOppName: {
