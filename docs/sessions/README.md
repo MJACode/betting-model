@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 210 — the PUBLIC grant swept off all 20 declared callables that still carried it; callable-by-PUBLIC 21 -> 1 |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 208 — the function grants; a literal grep for .rpc() misses eight the app reaches by ternary |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 209 — the Models tab priced unpriced UFC picks at a fabricated -110 and the Record tab did not; one `flatPnl` rule for every client tally, `· N unpriced` on both rows |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 208 — the model-inputs card drops its closing note (Matt) |

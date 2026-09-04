@@ -184,6 +184,16 @@ Also caught: `_jsonb_text_array` must stay granted even though the app never
 names it. `custom_model_picks` and `custom_model_backtest` are SECURITY INVOKER
 and both call it, so the CALLER needs EXECUTE.
 
+**Completed 2026-09-04 in session 210** (mike: *"sweep the PUBLIC grant off the
+19 stats rpcs"*). Session 208 named PUBLIC in the two REVOKEs but not on the 25
+it was GRANTing, so the explicit `anon, authenticated` grant sat on top of a
+PUBLIC grant that was still there on **20** of them — decoration. The apply now
+does `REVOKE ALL ON FUNCTION ... FROM PUBLIC` before each GRANT (order pinned by
+a test), and a third in-transaction read-back rolls the whole apply back if
+PUBLIC still holds anything on a declared callable. Verified in `pg_proc` after
+the run: callable-by-PUBLIC **21 -> 1**, the one being `log_picks_changes()`,
+left alone on purpose.
+
 Sequences remain deliberately untouched: `tracked_bets.id` defaults to
 `nextval('tracked_bets_id_seq')` and anon holds USAGE/UPDATE on it, so closing
 the sequence default would break the next app-writable table's INSERT on its own
