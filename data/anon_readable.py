@@ -112,7 +112,12 @@ def all_readable() -> tuple[str, ...]:
 # worker dead.
 WORKER_ONLY_TABLES: tuple[str, ...] = (
     "model_artifacts",
+    # The 250-bet review's two tables. Created on demand by
+    # tracking/threshold_review.ensure_schema, never read by the app -- the
+    # pause is applied server-side by models/scorer.py through auto_paused().
+    "model_auto_pauses",
     "odds_history_pulls",
+    "threshold_reviews",
     "worker_jobs",
 )
 

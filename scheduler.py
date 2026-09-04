@@ -735,6 +735,34 @@ def catch_up_weekly_jobs() -> None:
                 except Exception:  # noqa: BLE001
                     pass
 
+            # The 250-bet review's two tables, for exactly the reason stated
+            # above: a schema change with no path into production is not a
+            # schema change.
+            #
+            # threshold_review.ensure_schema has created both tables on every
+            # 7:45am run since 2026-08-31 and NEITHER existed. The connection is
+            # autocommit=False and run_review returns at `not_due` on every day
+            # the slate is under the next 250-bet milestone -- every day so far
+            # -- so the CREATE TABLEs were discarded when the caller closed the
+            # connection. That is fixed at source (ensure_schema now commits),
+            # but the cron only reaches it once a day, while models/scorer.py
+            # reads model_auto_pauses on EVERY scoring run and has been logging
+            # `relation "model_auto_pauses" does not exist` for days.
+            #
+            # Deliberately NOT gated by owns(): auto_paused() is consulted by
+            # the scorer wherever it runs, not only on the service that owns the
+            # review. Idempotent and internally gated by ddl_guard, so a
+            # container that restarts repeatedly does not re-fire the DDL.
+            try:
+                from tracking.threshold_review import ensure_schema
+                ensure_schema(conn)
+            except Exception:  # noqa: BLE001 — must not stop the scheduler
+                log.exception("catch-up: threshold-review schema failed (continuing)")
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
             season = datetime.now().year
             savant_stale, newest, kinds = _savant_is_stale(conn, season)
             calib_stale, last_sweep = _model_calibration_is_stale(conn)
