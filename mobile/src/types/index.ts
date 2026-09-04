@@ -421,6 +421,10 @@ export type RootStackParamList = {
     playerName: string;
     sport: PlayerLogSport;
     playerType?: PlayerType;
+    // The user came from the Betslip screen to find a leg. Adding one here
+    // bounces them straight back, the same round-trip the Stats tab ran before
+    // its line pills became sportsbook links (2026-09-04).
+    fromParlay?: boolean;
   };
   Explainer: undefined;
   ConnectSportsbook: undefined;
