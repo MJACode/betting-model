@@ -457,7 +457,6 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
  * The view carries no sport column and `player_points` is both an NBA and a
  * WNBA market, so the CALLER must bound the rows to its sport's game ids.
  */
-
 export async function fetchPropLinesForDate(
   date: string,
   market: string,
@@ -496,8 +495,7 @@ export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow
 }
 
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes, propBooksRes] =
-    await Promise.all([
+  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -515,31 +513,6 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
-    // Both all-books reads are PAGED: a full slate is ~1,200 game-line rows and
-    // ~14,600 prop rows, and the server caps every response at 1,000 whatever
-    // .limit() asks for (see fetchAllPages). Wrapped so a failure stays an
-    // {error} like the other enrichment reads rather than rejecting the batch.
-    fetchAllPages<OddsByBookRow>((from, to) =>
-      supabase
-        .from('v_latest_odds_all_books')
-        .select(ODDS_BY_BOOK_COLUMNS)
-        .eq('game_date', date)
-        .order('game_id')
-        .order('market')
-        .order('bookmaker')
-        .range(from, to),
-    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
-    fetchAllPages<PropOddsByBookRow>((from, to) =>
-      supabase
-        .from('v_latest_prop_odds_all_books')
-        .select(PROP_ODDS_BY_BOOK_COLUMNS)
-        .eq('game_date', date)
-        .order('game_id')
-        .order('market')
-        .order('player_name')
-        .order('bookmaker')
-        .range(from, to),
-    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -547,12 +520,76 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   if (weatherRes.error) throw weatherRes.error;
   // Latest odds are enrichment only — a failure shouldn't take down the picks list.
   const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
+
+  // The all-books line shop, read AFTER the picks and BOUNDED TO THE PICKS THAT
+  // RENDER LINES. Only signal cards show the line-shop chips and the All books
+  // table (PickCard.showLines is BET-only; AVOID is kept for the Signals
+  // surface), so the two reads take the BET/AVOID picks' games — and for
+  // props their markets and players — rather than the whole day. A full day
+  // is ~1,200 game-line rows and ~14,600 prop rows against a 1,000-row
+  // response cap (see fetchAllPages); paging THAT was 16 statements per mount
+  // across eight screens, each one re-evaluating the whole day's view (the
+  // 2026-09-04 UX review). Bounded, each read is one page and the game_id
+  // filter lands on the view's driving `games` scan. The reads are still
+  // enrichment: a failure leaves the chips empty, never the board.
+  const rawPicks = (picksRes.data ?? []) as Pick[];
+  const lineGames = new Set<string>();
+  const propGames = new Set<string>();
+  const propMarkets = new Set<string>();
+  const propPlayers = new Set<string>();
+  for (const p of rawPicks) {
+    if (p.signal_type !== 'BET' && p.signal_type !== 'AVOID') continue;
+    if (gameMarketForModel(p.model_id)) {
+      lineGames.add(p.game_id);
+      continue;
+    }
+    const propMarket = propMarketForModel(p.model_id);
+    const player = propMarket ? playerNameFromPickLabel(p.pick_label) : null;
+    if (propMarket && player) {
+      propGames.add(p.game_id);
+      propMarkets.add(propMarket);
+      propPlayers.add(player);
+    }
+  }
+  const [allBooksRes, propBooksRes] = await Promise.all([
+    lineGames.size === 0
+      ? Promise.resolve({ data: [] as OddsByBookRow[], error: null as unknown })
+      : fetchAllPages<OddsByBookRow>(
+          (from, to) =>
+            supabase
+              .from('v_latest_odds_all_books')
+              .select(ODDS_BY_BOOK_COLUMNS)
+              .in('game_id', Array.from(lineGames))
+              .order('game_id')
+              .order('market')
+              .order('bookmaker')
+              .range(from, to),
+          (r) => `${r.game_id}|${r.market}|${r.bookmaker}`,
+        ).then((data) => ({ data, error: null as unknown }), (error: unknown) => ({ data: null, error })),
+    propGames.size === 0
+      ? Promise.resolve({ data: [] as PropOddsByBookRow[], error: null as unknown })
+      : fetchAllPages<PropOddsByBookRow>(
+          (from, to) =>
+            supabase
+              .from('v_latest_prop_odds_all_books')
+              .select(PROP_ODDS_BY_BOOK_COLUMNS)
+              .in('game_id', Array.from(propGames))
+              .in('market', Array.from(propMarkets))
+              .in('player_name', Array.from(propPlayers))
+              .order('game_id')
+              .order('market')
+              .order('player_name')
+              .order('bookmaker')
+              .range(from, to),
+          (r) => `${r.game_id}|${r.market}|${r.player_name}|${r.bookmaker}`,
+        ).then((data) => ({ data, error: null as unknown }), (error: unknown) => ({ data: null, error })),
+  ]);
   const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
   const propBooks = (
     propBooksRes.error ? [] : (propBooksRes.data ?? [])
   ) as unknown as PropOddsByBookRow[];
 
-  const picks = (picksRes.data ?? []) as Pick[];
+  const picks = rawPicks;
   const games = (gamesRes.data ?? []) as GameRow[];
   const weather = (weatherRes.data ?? []) as GameWeather[];
 
@@ -639,8 +676,8 @@ export async function fetchUpcomingUfcPicks(
     // and bet button here, not just on the detail screen. Scoped by the game_id
     // prefix (§20: `UFC_{date}_{away}_{home}`) because the view carries no sport
     // column and this window otherwise drags in every future NBA/NCAAF row.
-    // Paged (see fetchAllPages): a week of NCAAF is ~2,300 rows, over the
-    // 1,000-row response cap; wrapped so a failure stays an {error}.
+    // Paged (see fetchAllPages): one card is a few hundred rows, but the
+    // window can hold two; wrapped so a failure stays an {error}.
     fetchAllPages<OddsByBookRow>((from, to) =>
       supabase
         .from('v_latest_odds_all_books')
@@ -776,8 +813,9 @@ export async function fetchUpcomingNflPicks(
     // user see a real, current number for the book they actually bet at. Scoped
     // by the game_id prefix (§28: `NFL_{nflverse_id}`) — the view has no sport
     // column, and an 8-day window spans other sports' future slates.
-    // Paged (see fetchAllPages): a week of NCAAF is ~2,300 rows, over the
-    // 1,000-row response cap; wrapped so a failure stays an {error}.
+    // Paged (see fetchAllPages): a 16-game week is ~600 rows, under the
+    // 1,000-row response cap today and over it once every book posts every
+    // market; wrapped so a failure stays an {error}.
     fetchAllPages<OddsByBookRow>((from, to) =>
       supabase
         .from('v_latest_odds_all_books')

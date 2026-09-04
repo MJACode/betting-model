@@ -22,15 +22,27 @@ const MAX_PAGES = 100;
 
 export async function fetchAllPages<T>(
   page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
+  /** A row's identity, when the caller has one. The refresh pass writes between
+   *  pages, and a key inserted mid-drain shifts every later offset by one, so
+   *  the row at the seam comes back twice; with a key the repeat is dropped. */
+  keyOf?: (row: T) => string,
 ): Promise<T[]> {
   const out: T[] = [];
+  const seen = keyOf ? new Set<string>() : null;
   let from = 0;
   for (let i = 0; i < MAX_PAGES; i++) {
     const { data, error } = await page(from, from + PAGE_ROWS - 1);
     if (error) throw error;
     const rows = (data ?? []) as T[];
     if (rows.length === 0) break;
-    out.push(...rows);
+    for (const row of rows) {
+      if (seen && keyOf) {
+        const k = keyOf(row);
+        if (seen.has(k)) continue;
+        seen.add(k);
+      }
+      out.push(row);
+    }
     from += rows.length;
   }
   return out;

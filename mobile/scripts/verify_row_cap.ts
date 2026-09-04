@@ -88,13 +88,20 @@ async function main() {
     const end = after.search(/\n\s*[):\];]/);
     return { view: m[1]!, at, before: q.slice(Math.max(0, at - 400), at), stmt: after.slice(0, end < 0 ? 600 : end) };
   });
-  // DATE-BOUNDED reads return a whole slate (or a week of one) and must page;
-  // per-GAME reads are a few dozen rows by construction and stay a plain select.
-  const isDated = (stmt: string) => /\.(eq|gt|gte)\('game_date'/.test(stmt);
-  const dated = reads.filter((r) => isDated(r.stmt));
-  const perGame = reads.filter((r) => !isDated(r.stmt));
-  check('seven date-bounded all-books reads (Stats props, Teams lines, Picks x2, UFC / NFL / NCAAF windows)', dated.length === 7, `${dated.length}`);
+  // SLATE reads return a whole day, a week, or every game with a signal, and
+  // must page; per-GAME reads are a few dozen rows by construction and stay a
+  // plain select.
+  const isSlate = (stmt: string) => /\.(eq|gt|gte)\('game_date'|\.in\('game_id'/.test(stmt);
+  const dated = reads.filter((r) => isSlate(r.stmt));
+  const perGame = reads.filter((r) => !isSlate(r.stmt));
+  check('seven slate all-books reads (Stats props, Teams lines, Picks x2, UFC / NFL / NCAAF windows)', dated.length === 7, `${dated.length}`);
   check('two per-game reads (the pick detail)', perGame.length === 2, `${perGame.length}`);
+  // The Picks screen's two reads are bounded to the picks that render lines,
+  // never the whole day (the 2026-09-04 UX review: 16 statements per mount).
+  const picksReads = dated.filter((r) => r.stmt.includes(".in('game_id'"));
+  check('the Picks screen bounds both reads to signal games', picksReads.length === 2, `${picksReads.length}`);
+  check('its prop read is bounded to the signal players too', picksReads.some((r) => r.stmt.includes(".in('player_name'")));
+  check('fetchAllPages drops page-seam repeats when given a key', /seen\.has\(k\)/.test(pg));
   for (const r of dated) {
     check(`${r.view} @${r.at}: inside fetchAllPages`, r.before.includes('fetchAllPages<'));
     check(`${r.view} @${r.at}: pages with .range(from, to)`, r.stmt.includes('.range(from, to)'));
