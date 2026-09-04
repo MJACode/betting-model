@@ -189,13 +189,46 @@ class TestTheRun:
         assert out["status"] == "no_sweep"
         assert "never completed" in out["findings"][0]
 
-    def test_the_missing_auto_pauses_table_is_named_not_skipped(self, monkeypatch):
+    def test_the_missing_auto_pauses_table_is_a_caveat_not_a_finding(self, monkeypatch):
+        """
+        Found by simulating against the real 2026-09-02 rows before shipping.
+        As a FINDING it fired every run forever — the table does not exist and
+        never will unless someone creates it — which titled a no-change run
+        "1 change(s)" AND masked the no-baseline branch, since that only
+        renders when findings is empty. A standing fact is a caveat.
+        """
         monkeypatch.setattr(cw, "_announce", lambda s: True)
         conn = _Conn(dates=("2026-09-02",),
                      sweeps={"2026-09-02": [_row("m", cur_n=5)]},
                      auto_pauses=None)
         out = cw.run_calibration_watch(conn, today=date(2026, 9, 7))
-        assert any("model_auto_pauses" in f for f in out["findings"])
+        assert out["findings"] == [], "a standing gap must not count as a change"
+        assert any("model_auto_pauses" in c for c in out["caveats"]), (
+            "but it must still be stated — an uncovered gap that is silent is "
+            "indistinguishable from one that is covered")
+
+    def test_the_caveat_disappears_once_the_table_exists(self, monkeypatch):
+        monkeypatch.setattr(cw, "_announce", lambda s: True)
+        conn = _Conn(dates=("2026-09-02",),
+                     sweeps={"2026-09-02": [_row("m", cur_n=5)]},
+                     auto_pauses="model_auto_pauses")
+        assert cw.run_calibration_watch(conn, today=date(2026, 9, 7))["caveats"] == []
+
+    def test_a_first_sweep_with_a_standing_caveat_still_says_no_baseline(
+            self, monkeypatch):
+        """The masking half of the same bug, pinned separately."""
+        sent = {}
+        monkeypatch.setattr("tracking.discord_notifier._post",
+                            lambda url, payload: sent.update(payload) or "id")
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "https://example/x")
+        conn = _Conn(dates=("2026-09-02",),
+                     sweeps={"2026-09-02": [_row("m", cur_n=5)]},
+                     auto_pauses=None)
+        cw.run_calibration_watch(conn, today=date(2026, 9, 7))
+        title = sent["embeds"][0]["title"]
+        assert "no baseline" in title, f"got {title!r}"
+        assert "change" not in title, f"a no-change run must not claim one: {title!r}"
+        assert "model_auto_pauses" in sent["embeds"][0]["description"]
 
     def test_it_is_ledgered_only_after_the_post_confirms(self, monkeypatch):
         monkeypatch.setattr(cw, "_announce", lambda s: True)

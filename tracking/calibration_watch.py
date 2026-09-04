@@ -198,21 +198,32 @@ def volume_shifts(cur: dict, prev: dict) -> list[str]:
     return out
 
 
-def auto_pause_note(conn) -> list[str]:
+def auto_pause_caveat(conn) -> str:
     """`model_auto_pauses`, which the old agent prompt told Sentinel to read.
 
     It does not exist and never has (`to_regclass` NULL, verified 2026-09-03),
-    so the instruction could only ever have failed silently. Say so once rather
-    than skipping it, because the 250-bet review IS a real thing and its
-    absence from this report should be visible rather than assumed.
+    so that instruction could only ever have failed silently.
+
+    A CAVEAT, not a finding — and that distinction was got wrong here first.
+    Written as a finding, it fired on the very first simulated run against real
+    production rows and produced the title "1 change(s)" when nothing had
+    changed, while ALSO masking the no-baseline branch, which only renders when
+    `findings` is empty. A missing table is a standing fact about coverage; it
+    will be equally true every Monday forever, so as a finding it is precisely
+    the false alarm that never stops which this module's every-rule-is-a-delta
+    design exists to prevent. Building that trap into the thing written to
+    avoid it is the reason simulating against real rows before shipping is
+    worth the hour.
+
+    Returns "" when the table exists, so the footnote disappears if it is ever
+    created.
     """
     rows = query_rows(conn, "SELECT to_regclass('public.model_auto_pauses')",
                       label="calibration_watch")
     if rows and rows[0] and rows[0][0]:
-        return []
-    return ["`model_auto_pauses` does not exist, so the 250-bet review's pauses "
-            "are NOT covered by this report. It has never existed — the old "
-            "agent prompt asked for it anyway."]
+        return ""
+    return ("`model_auto_pauses` does not exist, so the 250-bet review's pauses "
+            "are not covered here.")
 
 
 def _short(verdict, n: int = 90) -> str:
@@ -264,7 +275,6 @@ def run_calibration_watch(conn, today: date | None = None) -> dict:
         findings += roster_changes(cur, prev)
         findings += volume_shifts(cur, prev)
     findings += dormant_live_models(cur)
-    findings += auto_pause_note(conn)
 
     summary = {
         "status": "ok",
@@ -272,6 +282,7 @@ def run_calibration_watch(conn, today: date | None = None) -> dict:
         "baseline": dates[1] if len(dates) > 1 else None,
         "models": len(cur),
         "findings": findings,
+        "caveats": [c for c in (auto_pause_caveat(conn),) if c],
     }
     summary["posted"] = _announce_and_ledger(conn, summary, today)
     logger.info(f"calibration_watch: {len(findings)} finding(s) across "
@@ -311,7 +322,8 @@ def _announce(s: dict) -> bool:
         body = (f"{s['models']} model(s) swept on {s['run_date']}, compared "
                 f"against {s['baseline']}. No verdict, roster or volume change.")
 
-    body = f"{body}\n\n_{IN_SAMPLE_CAVEAT}_"
+    footnotes = [IN_SAMPLE_CAVEAT] + list(s.get("caveats") or [])
+    body = body + "\n\n" + "\n".join(f"_{f}_" for f in footnotes)
 
     url = config.DISCORD_WEBHOOK_OPS
     if not url:
