@@ -237,3 +237,112 @@ def test_an_unreadable_pause_table_fails_open():
             pass
 
     assert tr.auto_paused(_Broken()) == set()
+
+
+# ── the DDL that was created and thrown away every morning ──────────────────
+
+class _DdlConn:
+    """Records statements and commits, and models autocommit=False.
+
+    `uncommitted` is what a real connection would DISCARD on close — which is
+    exactly what happened in production for four days.
+    """
+
+    def __init__(self, tables_exist=False):
+        self.tables_exist = tables_exist
+        self.statements, self.uncommitted, self.committed = [], [], []
+
+    def execute(self, sql, params=()):
+        s = " ".join(str(sql).split())
+        self.statements.append(s)
+        self.uncommitted.append(s)
+        return _DdlRes(self, s)
+
+    def commit(self):
+        self.committed.extend(self.uncommitted)
+        self.uncommitted = []
+
+    def rollback(self):
+        self.uncommitted = []
+
+    def close(self):
+        self.uncommitted = []          # psycopg discards an open transaction
+
+
+class _DdlRes:
+    def __init__(self, conn, sql):
+        self.conn, self.sql = conn, sql
+
+    def fetchone(self):
+        # data.ddl_guard's catalog probe: a row means the table exists.
+        if "pg_class" in self.sql or "relname" in self.sql:
+            return (False, [], [], 0) if self.conn.tables_exist else None
+        return None
+
+    def fetchall(self):
+        return []
+
+
+def test_ensure_schema_commits_the_tables_it_creates(monkeypatch):
+    """
+    The bug this pins cost four days of a non-existent table.
+
+    data.db.get_connection sets autocommit=False. run_review returns at
+    `not_due` on every day the slate has not crossed a 250-bet milestone —
+    every day so far, 80 settled since EPOCH — and that early return reaches no
+    commit. The caller closes the connection, psycopg discards the open
+    transaction, and both CREATE TABLEs go with it. The review therefore
+    created both tables every morning and threw them away every morning, while
+    models/scorer.py logged `relation "model_auto_pauses" does not exist`.
+    """
+    import tracking.threshold_review as tr
+
+    monkeypatch.setattr(tr, "schema_is_current", lambda *a, **k: False)
+    monkeypatch.setattr(tr, "lock_down", lambda conn, table: ())
+    conn = _DdlConn()
+    tr.ensure_schema(conn)
+
+    created = [s for s in conn.committed if "CREATE TABLE" in s]
+    assert len(created) == 2, (
+        f"both tables must survive the connection closing; committed={conn.committed}")
+    assert any("model_auto_pauses" in s for s in created)
+    assert any("threshold_reviews" in s for s in created)
+
+    conn.close()
+    assert [s for s in conn.committed if "CREATE TABLE" in s], (
+        "the DDL must still be there after close()")
+
+
+def test_the_tables_are_locked_down_at_the_create_site(monkeypatch):
+    """Worker-only tables must arrive closed, not inherit the default anon
+    grant. Same rule as #464, applied where they are created."""
+    import tracking.threshold_review as tr
+
+    locked = []
+    monkeypatch.setattr(tr, "schema_is_current", lambda *a, **k: False)
+    monkeypatch.setattr(tr, "lock_down", lambda conn, table: locked.append(table))
+    tr.ensure_schema(_DdlConn())
+    assert sorted(locked) == ["model_auto_pauses", "threshold_reviews"]
+
+
+def test_a_failed_lock_down_does_not_lose_the_table(monkeypatch):
+    """A lock that raises must not take the CREATE TABLE with it."""
+    import tracking.threshold_review as tr
+
+    def boom(conn, table):
+        raise RuntimeError("catalog unavailable")
+
+    monkeypatch.setattr(tr, "schema_is_current", lambda *a, **k: False)
+    monkeypatch.setattr(tr, "lock_down", boom)
+    conn = _DdlConn()
+    tr.ensure_schema(conn)
+    assert [s for s in conn.committed if "CREATE TABLE" in s]
+
+
+def test_both_review_tables_are_declared_worker_only():
+    """If either is ever added to ANON_READABLE instead, RLS-with-no-policies
+    would deny the app — the manifest is the place that decides."""
+    from data.anon_readable import ANON_READABLE, WORKER_ONLY_TABLES
+    for t in ("model_auto_pauses", "threshold_reviews"):
+        assert t in WORKER_ONLY_TABLES
+        assert t not in ANON_READABLE

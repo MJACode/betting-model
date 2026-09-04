@@ -202,3 +202,45 @@ def test_the_contract_names_both_weekly_jobs_the_catch_up_covers():
     assert "ModelCalibration" in block, (
         "the contract described the catch-up in the general form while it "
         "covered exactly one job — which is how the gap stayed invisible")
+
+
+def test_the_catch_up_creates_the_review_tables_on_boot():
+    """
+    models/scorer.py reads `model_auto_pauses` on EVERY scoring run, but the
+    only thing that created it was a 7:45am cron whose DDL was never committed
+    (see tracking/threshold_review.ensure_schema). Boot is the moment that
+    reliably follows a deploy, and it is where the column migrations already
+    run for the same stated reason: a schema change with no path into
+    production is not a schema change.
+
+    Matches the IMPORT rather than the bare identifier — `ensure_schema` also
+    appears in the surrounding comment, and a test that matches a name
+    appearing in a comment passes with the call deleted. That exact weakness
+    was found in this file's own `_run_migrations` test.
+    """
+    import io
+    from pathlib import Path
+    src = io.open(Path(__file__).parent.parent / "scheduler.py",
+                  encoding="utf-8").read()
+    block = src[src.index("def catch_up_weekly_jobs"):]
+    block = block[:block.index("\ndef ")]
+    assert "from tracking.threshold_review import ensure_schema" in block
+    assert "ensure_schema(conn)" in block
+
+
+def test_the_review_schema_is_not_gated_by_owns():
+    """
+    auto_paused() is consulted by the scorer wherever it runs, not only on the
+    service that owns the review, so gating the table's creation on
+    owns("threshold_review") would leave the other service reading a table that
+    does not exist there.
+    """
+    import io
+    from pathlib import Path
+    src = io.open(Path(__file__).parent.parent / "scheduler.py",
+                  encoding="utf-8").read()
+    block = src[src.index("def catch_up_weekly_jobs"):]
+    block = block[:block.index("\ndef ")]
+    before = block[:block.index("ensure_schema(conn)")]
+    assert 'owns("threshold_review")' not in before, (
+        "the review schema must be created regardless of service role")
