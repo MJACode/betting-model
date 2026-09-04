@@ -119,7 +119,7 @@ function PickDetailContent({
   const { pick, game, weather, bookRows } = enriched;
   const meta = MODEL_META[pick.model_id];
   // The headline price is the modeled DraftKings number the edge, EV and stake
-  // were computed from. Picks do not follow the Stats page's book preference
+  // were computed from. Picks do not follow the member's book preference
   // (Matt, 2026-09-04) — where to place the bet is the Betting lines row below,
   // every bettable book, best price first.
   const live = pick.is_live === true;

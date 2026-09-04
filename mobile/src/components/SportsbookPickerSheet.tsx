@@ -68,7 +68,7 @@ export function SportsbookPickerSheet({
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
           <View style={styles.grabber} />
           <View style={styles.header}>
-            <Text style={styles.title}>Stats page sportsbook</Text>
+            <Text style={styles.title}>Your sportsbook</Text>
             <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
@@ -103,7 +103,7 @@ export function SportsbookPickerSheet({
                     <Text style={styles.rowName}>{bookName(b)}</Text>
                     {isModel ? null : (
                       <Text style={styles.rowSub}>
-                        No fallback — a player {bookName(b)} hasn’t priced shows no line
+                        No fallback — a Stats player {bookName(b)} hasn’t priced shows no line
                       </Text>
                     )}
                   </View>
@@ -121,8 +121,8 @@ export function SportsbookPickerSheet({
               this sheet and the Explainer carries the long version, so a third
               copy here reads as the app being defensive (UX review). */}
           <Text style={styles.footnote}>
-            Stats page only — Picks and Signals always price at DraftKings and list every book
-            best price first.
+            Sets the Stats page’s lines and where the betslip sends you. Picks and Signals
+            always price at DraftKings and list every book best price first.
           </Text>
 
           <Pressable

@@ -658,10 +658,21 @@ threshold was swept on DK-implied edge, and best-of-N prices ~2pp cheaper in
 implied probability, so adopting it as the qualifying price would loosen every
 cut by that much with nobody deciding to (CLAUDE.md §6).
 
-## [ ] [needs-decision] Re-sweep `mlb_live_total_runs` at ~50 settled picks
+## [ ] [needs-decision] Re-sweep `mlb_live_total_runs` — the gate is CLEARED
 
-17 settled as of 2026-08-30. A threshold move needs a named human under §1b,
-so an agent may prepare the sweep and report it but must not ship the cut.
+**Measured 2026-09-04 (session 216): 95 settled BETs, every one carrying a DK
+price, +12.99u — about +13.7% on flat stakes — most recent pick that same day.**
+The item was written at 17 settled with the re-sweep due at ~50, so it is now
+overdue rather than pending. (Query: `picks` where `model_id =
+'mlb_live_total_runs' and signal_type = 'BET'`, result in ('WIN','LOSS','PUSH');
+units gated on `dk_odds IS NOT NULL` per §6, though here nothing is unpriced.)
+
+This is the nearest thing the live lane has to a real result, and CLAUDE.md §1b
+cites it as promising-but-unproven — that citation is now stale by 8 bets and
+should be refreshed from this number when someone touches it.
+
+A threshold move needs a named human under §1b, so an agent may prepare the
+sweep and report it but must not ship the cut.
 
 ## [ ] [needs-decision] Live odds feed
 

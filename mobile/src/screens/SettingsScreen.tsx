@@ -319,17 +319,17 @@ export function SettingsScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Stats page sportsbook</Text>
+          <Text style={styles.cardLabel}>Your sportsbook</Text>
           <Text style={styles.bookHint}>
-            Which book’s line the Stats page prints beside each player. It changes nothing on
-            Picks or Signals.
+            Which book’s line the Stats page prints beside each player, and which book the
+            betslip’s bet button opens. It changes nothing about how picks are priced.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
           <Pressable
             onPress={() => setBookPickerOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel={`Stats page sportsbook: ${bookName(book)}. Tap to change.`}
+            accessibilityLabel={`Your sportsbook: ${bookName(book)}. Tap to change.`}
             style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
           >
             <View style={[styles.bookBadge, book === MODEL_BOOK && styles.bookBadgeDk]}>
@@ -347,8 +347,10 @@ export function SettingsScreen() {
               above it, so it leads with what this setting does (UX review). The
               long version lives in the Explainer, not here. */}
           <Text style={styles.bookNote}>
-            There is no fallback: a player this book hasn’t priced shows no line. Picks and
-            Signals always price at DraftKings and list every book best price first.
+            On Stats there is no fallback: a player this book hasn’t priced shows no line. On
+            the betslip there is — a slip your book can’t price in full opens at DraftKings,
+            so the button never sends you somewhere the bet isn’t. Picks and Signals always
+            price at DraftKings and list every book best price first.
           </Text>
         </View>
 

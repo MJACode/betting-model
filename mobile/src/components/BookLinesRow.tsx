@@ -12,8 +12,9 @@
 // at that book, at that book's latest price. The record chip (DK, or the NFL
 // card's soft book) is the stored number the pick was given at and never
 // re-prices. The best payout says "best" in words, not just colour. No chip is
-// marked as the user's: the book picker is the Stats page's and does not reach
-// this row (Matt, 2026-09-04).
+// marked as the user's: the book picker sets the Stats lines and the betslip's
+// bet button, never how a pick is priced or how these chips are ordered
+// (Matt, 2026-09-04).
 //
 // Live picks (is_live) get one DraftKings chip; the Live board's header and
 // the detail screen's provenance line say why (the in-play model prices and

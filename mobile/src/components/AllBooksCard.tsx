@@ -26,8 +26,9 @@ import type { BookPricedRow, Pick } from '@/types';
  * The line is shown next to the price because a better price on a worse number
  * is not actually a better bet — the user needs to see both.
  *
- * No row is marked as "yours": the book picker is the Stats page's, and it does
- * not reach the pick boards (Matt, 2026-09-04).
+ * No row is marked as "yours": the book picker sets the Stats lines and the
+ * betslip's bet button, and it does not reach the pick boards
+ * (Matt, 2026-09-04).
  */
 export function AllBooksCard({
   pick,

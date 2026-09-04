@@ -636,7 +636,7 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
  *
  * `pinnedBook` is for a board that singles one book out. NO CALLER PASSES ONE
  * today (Matt, 2026-09-04): picks are shown best price first across every book
- * we price, and the Stats page's book preference does not reach them. It stays
+ * we price, and the book preference does not reach a pick's pricing. It stays
  * because the record chip and a pinned book share one eviction rule, and a
  * board that wants a pinned book should not have to re-derive it.
  */

@@ -513,9 +513,11 @@ export function priceBooksForParlay(
  * the button label honest — "Bet on FanDuel" must never open a slip FanDuel
  * can't price.
  *
- * Both callers now pass DraftKings (Matt, 2026-09-04): the book picker is the
- * Stats page's and does not reach the slip. The parameter stays because the
- * "Open with" row is the line-shopping surface and may hand a book back in.
+ * Both callers pass the member's own book (Matt, 2026-09-04: "the parlay
+ * button … should change to match the Sportsbook the user selects as their
+ * preferred"). This is the hand-off only — the slip is priced and modeled at
+ * DraftKings either way (§6), and the "Open with" row still ranks every
+ * bettable book by payout.
  */
 export function handoffBookFor(
   legs: ParlayLeg[],

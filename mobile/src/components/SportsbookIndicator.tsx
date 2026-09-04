@@ -37,7 +37,7 @@ export function SportsbookIndicator() {
       <Pressable
         onPress={() => setPickerOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={`Stats page sportsbook: ${bookName(book)}. Tap to switch.`}
+        accessibilityLabel={`Your sportsbook: ${bookName(book)}. Tap to switch.`}
         // The row is caption-height, and with the Picks board's line removed it
         // is the only entry to the picker outside Settings — a missed tap has
         // nowhere else to go (UX review).

@@ -30,6 +30,7 @@ import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   handoffBookFor,
@@ -48,7 +49,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, MODEL_BOOK } from '@/lib/markets';
+import { bookLabel } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -355,17 +356,31 @@ export function ParlayScreen() {
 
 /**
  * Save-for-later + sportsbook hand-off, shared by the Optimize result card and
- * the manual builder. The hand-off goes to DraftKings — the book the slip is
- * priced and modeled against. It no longer follows a book preference (Matt,
- * 2026-09-04: that picker is the Stats page's), and the "Open with" row above
- * already prices the slip at every bettable book, best payout first. No book
- * has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
+ * the manual builder.
+ *
+ * THE BUTTON IS THE USER'S OWN BOOK (Matt, 2026-09-04): "the parlay button …
+ * should change to match the Sportsbook the user selects as their preferred."
+ * Placing a bet is the one thing the member does at THEIR book, so the button
+ * that sends them there follows their pick — the Stats board's line pill and
+ * this button now read the same setting.
+ *
+ * It is only the hand-off. The slip is still PRICED and modeled at DraftKings
+ * (§6), and the "Open with" row above still ranks every bettable book by
+ * payout, so a better price is always one tap away.
+ *
+ * `handoffBookFor` falls back to DraftKings when their book does not price
+ * every leg — "Bet on FanDuel" must never open a slip FanDuel cannot take.
+ * No book has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
  */
 function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   const { save } = useSavedParlays();
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const { book: preferredBook } = usePreferredBook();
 
-  const handoff = useMemo(() => handoffBookFor(legs, MODEL_BOOK), [legs]);
+  const handoff = useMemo(
+    () => handoffBookFor(legs, preferredBook),
+    [legs, preferredBook],
+  );
   const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(
@@ -388,35 +403,26 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   if (legs.length === 0) return null;
 
   return (
-    <>
-      <View style={styles.parlayActions}>
-        <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
-          <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
-          <Text style={styles.saveBtnText}>Save parlay</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setHandoffOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`${betOnBookLabel(handoff.book)}. Priced at DraftKings; the Open with row above ranks every book by payout.`}
-          style={({ pressed }) => [
-            styles.dkBtn,
-            { backgroundColor: btnColors.bg },
-            pressed && styles.pressed,
-          ]}
-        >
-          <Ionicons name="open-outline" size={18} color={btnColors.fg} />
-          <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
-            {betOnBookLabel(handoff.book)}
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* The green button always opens DraftKings, while "Open with" above may
-          star another book as the best payout. Unexplained, the largest control
-          on the screen contradicts the row 40pt above it (UX review). */}
-      <Text style={styles.handoffNote}>
-        Priced at DraftKings · tap a book in “Open with” above for the best payout
-      </Text>
+    <View style={styles.parlayActions}>
+      <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
+        <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
+        <Text style={styles.saveBtnText}>Save parlay</Text>
+      </Pressable>
+      <Pressable
+        onPress={() => setHandoffOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={betOnBookLabel(handoff.book)}
+        style={({ pressed }) => [
+          styles.dkBtn,
+          { backgroundColor: btnColors.bg },
+          pressed && styles.pressed,
+        ]}
+      >
+        <Ionicons name="open-outline" size={18} color={btnColors.fg} />
+        <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
+          {betOnBookLabel(handoff.book)}
+        </Text>
+      </Pressable>
 
       <ParlayDkHandoff
         visible={handoffOpen}
@@ -424,7 +430,7 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
         book={handoff.book}
         onClose={() => setHandoffOpen(false)}
       />
-    </>
+    </View>
   );
 }
 
@@ -1092,11 +1098,6 @@ const styles = StyleSheet.create({
     backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
-  },
-  handoffNote: {
-    marginTop: spacing.xs,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
   },
   dkBtnText: {
     color: '#000',

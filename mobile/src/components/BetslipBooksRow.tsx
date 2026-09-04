@@ -14,8 +14,9 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * combined odds where the book prices every leg, otherwise how many legs it
  * covers (N/M). The best payout is starred (ties all starred), and tapping a
  * tile opens that book (its first leg's betslip link when we have one, else the
- * book's app/site). No tile is singled out as the user's: the book picker is
- * the Stats page's and does not reach the slip (Matt, 2026-09-04).
+ * book's app/site). No tile is singled out as the user's — the bet button
+ * below the slip is already their own book (Matt, 2026-09-04), so this row's
+ * one job is ranking by payout.
  *
  * The odds differ per book because each leg is re-priced at that book's own
  * line-shop snapshot; the slip's win probability is book-independent, so the
