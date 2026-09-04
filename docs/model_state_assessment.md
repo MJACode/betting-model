@@ -13,8 +13,8 @@ the per-sport docs each tell only their own part of it.
 
 ## 1. The headline
 
-**The data was repaired today. Three of ~20 affected models have been retrained
-against it; the rest are still fitted to the leaked version.**
+**The data was repaired 2026-09-03. Every ACTIVE MLB model has since been
+retrained against it; NBA, NHL, WNBA and the paused MLB props have not.**
 
 That is the single most important fact about the current state, and it is a
 transitional problem rather than a permanent one:
@@ -41,7 +41,9 @@ retrained.**
 | `nba_moneyline` | 2026-06-19 | **mismatched — season starts October** |
 | `nhl_moneyline`, `nhl_moneyline_regulation` | 2026-06-21 | **mismatched — season starts October** |
 | `mlb_f5_over_under`, `mlb_f5_runline` | 2026-05-08 | mismatched (produce no picks) |
-| `mlb_prop_*` | various | partially — props read `mlb_team_stats` for opponent context |
+| `mlb_prop_pitcher_k`, `pitcher_hits`, `pitcher_outs` | **2026-09-03** | matched — retrained |
+| `mlb_prop_batter_runs`, `batter_walks` | **2026-09-03/04** | matched — retrained |
+| `mlb_prop_*` (the 5 PAUSED ones) | various | mismatched — must be retrained BEFORE any unpause |
 | NCAAF, UFC, GOLF, NFL | various | **unaffected** — no leaked table in their feature path |
 
 **NCAAF is unaffected because `ncaaf_team_stats` was always built correctly** —
@@ -95,6 +97,31 @@ by this model's own record.
 | `mlb_over_under` | 52 | −26.73% | paused today |
 
 ---
+
+### The MLB prop models, retrained 2026-09-03/04
+
+All five active MLB props read `mlb_team_stats` — pitcher models for opponent
+`k_pct`/`woba`/`bb_pct`, batter models for opposing `team_era`/`bullpen_era` —
+so all five carried the mismatch.
+
+| model | version | MAE | O/U acc | CalErr |
+|---|---|---|---|---|
+| `mlb_prop_batter_walks` | 20260904_010357 | 0.463 | **0.7141** | **0.0141** |
+| `mlb_prop_batter_runs` | 20260903_205632 | 0.572 | 0.626 | 0.0117 |
+| `mlb_prop_pitcher_hits` | 20260903_230550 | 1.702 | 0.611 | 0.0987 |
+| `mlb_prop_pitcher_outs` | 20260903_233111 | 2.805 | 0.606 | 0.2290 |
+| `mlb_prop_pitcher_k` | 20260903_190319 | 1.760 | 0.6453 | 0.2305 |
+
+Train-vs-holdout MAE is within ~0.01 on every one, so none is overfitting; they
+are fitting what is there. `batter_walks` is the strongest by both O/U accuracy
+and calibration. **The five PAUSED MLB props were deliberately NOT retrained** —
+a paused model cannot fire, so its mismatch is harmless while it is off, but it
+must be retrained before any unpause.
+
+Two features worth knowing about, neither a defect: `opp_team_era` is
+`batter_runs`' third-most-important feature (8.3%), which is the rebuilt table
+earning its place; and `batting_order` alone is **44.3%** of `batter_runs`,
+meaning that model is largely "who bats where" rather than player skill.
 
 ## 3. Every model, by state
 
