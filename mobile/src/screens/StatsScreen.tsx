@@ -19,7 +19,8 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
-import { StatsLineSheet, type StatsLineTarget } from '@/components/StatsLineSheet';
+import { BookMark } from '@/components/BookMark';
+import { GroupTabs, SegmentTabs } from '@/components/GroupTabs';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
@@ -40,13 +41,12 @@ import {
   fetchWindowTotals,
 } from '@/lib/queries';
 import { bookLabel, bookName, propMarketForModel } from '@/lib/markets';
+import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
   bookPostsMarket,
-  buildPickIndex,
   buildQuoteIndex,
   quoteForRow,
-  slipPickFor,
   unstartedGameIds,
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
@@ -103,7 +103,9 @@ type StatsRoute = RouteProp<TabParamList, 'Stats'>;
 type Basis = 'total' | 'perGame';
 /** Which half of the Stats tab is showing. */
 type BoardMode = 'players' | 'teams';
+const BOARD_MODES: BoardMode[] = ['players', 'teams'];
 type Mode = 'totals' | 'hitRate';
+const MODES: Mode[] = ['hitRate', 'totals'];
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
 // the player_season_stat_values_* RPCs in Hit Rate mode).
 type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
@@ -177,10 +179,6 @@ export function StatsScreen() {
   const { book } = usePreferredBook();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
-  const [lineSheet, setLineSheet] = useState<{
-    target: StatsLineTarget;
-    slipPick: EnrichedPick | null;
-  } | null>(null);
   // The "hasn't posted lines" note is the switch — an instruction sits with
   // the control that performs it.
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -357,9 +355,11 @@ export function StatsScreen() {
   // number or a dash, and when the book posts nothing for the stat the board
   // says so instead of showing a column of dashes. See lib/statsOdds.ts.
   //
-  // The models are untouched by all of this. Their one remaining role here is
-  // the betslip: a parlay leg IS a pick, so the sheet can add one only where
-  // the model scored this exact line (slipPickFor).
+  // TAPPING A PILL OPENS THE BOOK (Matt, 2026-09-04: "mirror exactly how they
+  // show the draft kings line and its betable link directly to that
+  // sportsbook"). There is no in-app sheet in between — the pill is the bet
+  // link. Adding a leg to our own betslip lives one tap deeper, on the
+  // player's detail screen, which is where a researcher lands anyway.
   //
   // A retired model resolves to null here (propModelForStat filters it), so
   // Home Runs and RBIs keep their leaderboard and get no betslip button — but
@@ -404,11 +404,6 @@ export function StatsScreen() {
         new Date().toISOString(),
       ),
     [slateGames, oddsDate],
-  );
-
-  const pickByPlayerId = useMemo(
-    () => buildPickIndex(todayPicks, propModel),
-    [todayPicks, propModel],
   );
 
   const quoteByPlayerKey = useMemo(() => {
@@ -460,29 +455,12 @@ export function StatsScreen() {
 
   // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
   // the user straight back to their slip (the session-53 flow, restored).
-  const openLineSheet = useCallback(
-    (quote: StatsOddsQuote, row: { player_id?: string | null; player_name?: string | null }) => {
-      setLineSheet({
-        target: {
-          kind: 'player',
-          quote,
-          name: row.player_name ?? quote.playerName,
-          statLabel: stat?.label ?? '',
-        },
-        slipPick: slipPickFor(row, pickByPlayerId, line),
-      });
-    },
-    [stat, pickByPlayerId, line],
-  );
-  const handleSheetAdded = useCallback(() => {
-    setLineSheet(null);
-    if (fromParlay) {
-      navigation.setParams({ fromParlay: undefined });
-      navigation.navigate('Betslip');
-    } else {
-      showToast('Added · tap the betslip bar at the bottom to open it');
-    }
-  }, [fromParlay, navigation]);
+  // The pill is the bet link: one tap, straight to the book's own betslip for
+  // this exact line. openBookBetslip falls back to the book's site when the
+  // feed carried no deep link for the side.
+  const openBook = useCallback((quote: StatsOddsQuote) => {
+    void openBookBetslip(quote.book, quote.link);
+  }, []);
 
   const band = useMemo(() => hitRateBand(minHitRate, maxHitRate), [minHitRate, maxHitRate]);
 
@@ -612,6 +590,9 @@ export function StatsScreen() {
       // MLB only — it decides batter vs pitcher chips. Fall back to the selected
       // stat's player type so a row missing the column still opens the right side.
       playerType: sport === 'MLB' ? (p.player_type ?? playerType) : undefined,
+      // The pill goes to the sportsbook now, so the leg is added one screen
+      // deeper — carry the round-trip with us.
+      fromParlay: fromParlay || undefined,
     });
   };
 
@@ -814,28 +795,11 @@ export function StatsScreen() {
           fold. Sports with a single group (WNBA/NBA/UFC) skip the group row. */}
       <View style={styles.statPicker}>
         {groups.length > 1 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.fixedRow}
-            contentContainerStyle={styles.groupTabRow}
-            keyboardShouldPersistTaps="handled"
-          >
-            {groups.map((g) => (
-              <Pressable
-                key={g}
-                onPress={() => pickGroup(g)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityState={{ selected: g === activeGroup }}
-                style={({ pressed }) => pressed && styles.pressed}
-              >
-                <Text style={[styles.groupTab, g === activeGroup && styles.groupTabActive]}>
-                  {g.toUpperCase()}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <GroupTabs
+            groups={groups}
+            active={activeGroup}
+            onChange={pickGroup}
+          />
         ) : null}
         <ScrollView
           horizontal
@@ -924,18 +888,12 @@ export function StatsScreen() {
 
       {/* Hit Rates | Averages */}
       {canHitRate ? (
-        <View style={styles.tabRow}>
-          <TabButton
-            label="Hit Rates"
-            active={mode === 'hitRate'}
-            onPress={() => setMode('hitRate')}
-          />
-          <TabButton
-            label="Averages"
-            active={mode === 'totals'}
-            onPress={() => setMode('totals')}
-          />
-        </View>
+        <SegmentTabs
+          items={MODES}
+          active={mode}
+          onChange={setMode}
+          labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
+        />
       ) : null}
 
       {/* A failed load is recoverable far more often than not — PostgREST
@@ -963,7 +921,7 @@ export function StatsScreen() {
         <View style={styles.fromParlayBanner}>
           <Ionicons name="receipt-outline" size={15} color={colors.tint} />
           <Text style={styles.fromParlayText}>
-            Building your betslip — tap a player’s odds to add them, and you’ll head right back.
+            Building your betslip — open a player to add them, and you’ll head right back.
           </Text>
           <Pressable
             onPress={() => navigation.setParams({ fromParlay: undefined })}
@@ -1059,7 +1017,7 @@ export function StatsScreen() {
                 quote={quote}
                 showOdds={showOdds}
                 statLabel={stat?.label ?? ''}
-                onOddsPress={quote ? () => openLineSheet(quote, item) : undefined}
+                onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
               />
@@ -1099,7 +1057,7 @@ export function StatsScreen() {
                 quote={quote}
                 showOdds={showOdds}
                 statLabel={stat?.label ?? ''}
-                onOddsPress={quote ? () => openLineSheet(quote, item.row) : undefined}
+                onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
               />
@@ -1122,15 +1080,6 @@ export function StatsScreen() {
         />
       )}
 
-      {lineSheet ? (
-        <StatsLineSheet
-          target={lineSheet.target}
-          slipPick={lineSheet.slipPick}
-          visible
-          onClose={() => setLineSheet(null)}
-          onAdded={handleSheetAdded}
-        />
-      ) : null}
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
 
       <FilterSheet
@@ -1411,26 +1360,12 @@ function BoardModeToggle({
   onChange: (m: BoardMode) => void;
 }) {
   return (
-    <View style={styles.tabRow}>
-      <TabButton label="Players" active={mode === 'players'} onPress={() => onChange('players')} />
-      <TabButton label="Teams" active={mode === 'teams'} onPress={() => onChange('teams')} />
-    </View>
-  );
-}
-
-function TabButton({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-    </Pressable>
+    <SegmentTabs
+      items={BOARD_MODES}
+      active={mode}
+      onChange={onChange}
+      labelFor={(m) => (m === 'players' ? 'Players' : 'Teams')}
+    />
   );
 }
 
@@ -1451,11 +1386,17 @@ function matchupTierLabel(tier: MatchupInfo['tier']): string {
 }
 
 /** Right-hand LINE cell: the user's sportsbook's price for the number the
- * board is on, or a dash. One kind of cell now — a current line, every row,
- * nothing from a model (Matt, 2026-09-03). The caption under the price is the
- * board's own line, so the pill and the sheet can never disagree.
+ * board is on, or a dash.
  *
- * Tappable (its own Pressable, so the tap doesn't bubble to the row). */
+ * Filled in the book's own colour with the book's mark beside the price, and
+ * tapping it opens that book — the shape Matt asked for on 2026-09-04, and the
+ * shape every odds-comparison app in the category uses. The price is the whole
+ * cell: no caption under it, because the board's headline above already says
+ * which line it is ("1+ Hits") and repeating it 25 times down a column is noise
+ * the competitor does not carry either.
+ *
+ * Its own Pressable, so the tap doesn't bubble to the row (which opens the
+ * player). */
 function OddsCell({
   quote,
   playerName,
@@ -1476,28 +1417,29 @@ function OddsCell({
       </View>
     );
   }
+  const c = bookButtonColors(quote.book);
   const sideWord = quote.side === 'under' ? 'under' : 'over';
   // The pill is a nested Pressable, so VoiceOver reads it as its own element and
   // inherits nothing from the row — without the player and the stat it is 25
-  // near-identical prices with no way to tell whose is whose.
+  // near-identical prices with no way to tell whose is whose. The line goes in
+  // here precisely because it is no longer printed on the row.
   const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`;
   return (
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      hitSlop={6}
+      hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint="Shows the line and a Bet button"
+      accessibilityHint={`Opens ${bookName(quote.book)}`}
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
-      <View style={styles.oddsPill}>
-        <Text style={styles.oddsText}>{formatAmerican(quote.price)}</Text>
+      <View style={[styles.oddsPill, { backgroundColor: c.bg }]}>
+        <Text style={[styles.oddsText, { color: c.fg }]} numberOfLines={1}>
+          {formatAmerican(quote.price)}
+        </Text>
+        <BookMark book={quote.book} color={c.fg} />
       </View>
-      <Text style={styles.oddsLine}>
-        {quote.side === 'under' ? 'u' : 'o'}
-        {quote.line}
-      </Text>
     </Pressable>
   );
 }
@@ -1596,10 +1538,6 @@ function LeaderRow({
           {row.player_name}
           {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
         </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {gp} GP
-          {matchup ? `  ·  ${matchup.text}` : ''}
-        </Text>
       </View>
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
@@ -1654,10 +1592,6 @@ function HitRateRow({
         <Text style={styles.rowName} numberOfLines={1}>
           {player.player_name}
           {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          avg {player.avg.toFixed(1)}
-          {matchup ? `  ·  ${matchup.text}` : ''}
         </Text>
       </View>
       <View style={styles.valueWrap}>
@@ -1916,54 +1850,12 @@ const styles = StyleSheet.create({
   },
 
   // ── Hit Rates / Averages tabs ──
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.bgCard,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: colors.tint,
-  },
-  tabText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-  },
-  tabTextActive: {
-    color: colors.tint,
-  },
 
   statPicker: {
     paddingTop: spacing.xs,
   },
   // Group tabs (Passing | Rushing | …) — same uppercase-caption look the old
   // section labels had, but tappable and on one row.
-  groupTabRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xs,
-  },
-  groupTab: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.4,
-    paddingVertical: 4,
-  },
-  groupTabActive: {
-    color: colors.tint,
-    fontWeight: font.weight.bold,
-  },
   chipRow: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
@@ -2024,7 +1916,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
-  colHeaderOdds: { width: 54 },
+  colHeaderOdds: { width: 78 },
   // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
   // where a column of dashes would otherwise read as a broken screen.
   noLinesRow: {
@@ -2074,11 +1966,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
   },
-  rowMeta: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 1,
-  },
   valueWrap: {
     alignItems: 'flex-end',
     width: 48,
@@ -2093,17 +1980,23 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   oddsWrap: {
-    width: 54,
+    width: 78,
     alignItems: 'flex-end',
   },
-  // Tinted border — the pill is a tappable button (opens the odds sheet).
+  // Filled in the book's own colour — the pill IS the bet button, and the mark
+  // beside the price says whose price it is.
   oddsPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: radii.sm,
-    backgroundColor: colors.noneSoft,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.tint,
+  },
+  oddsText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    fontVariant: ['tabular-nums'],
   },
   fromParlayBanner: {
     flexDirection: 'row',
@@ -2122,16 +2015,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-  },
-  oddsText: {
-    fontSize: font.size.caption,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-  },
-  oddsLine: {
-    fontSize: 10,
-    color: colors.textTertiary,
-    marginTop: 1,
   },
   oddsEmpty: {
     fontSize: font.size.footnote,
