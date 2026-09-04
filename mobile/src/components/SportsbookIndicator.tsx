@@ -19,16 +19,25 @@ import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-export function SportsbookIndicator() {
+export function SportsbookIndicator({
+  fallsBackToModelBook = true,
+}: {
+  /** Whether this board substitutes the DraftKings number when the user's
+   *  book has not priced a bet. The pick boards do (displayQuoteForPick);
+   *  the Stats tab does NOT — Matt, 2026-09-03: "if they select FanDuel we
+   *  only show FanDuel" — so its label must not promise a fallback. */
+  fallsBackToModelBook?: boolean;
+} = {}) {
   const { book, isNonModelBook } = usePreferredBook();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   // DK (the default + the modeled book) gets the short form; any other book
   // also explains the fallback, since coverage gaps make "why does this pick
   // say DK?" the first question a non-DK bettor asks.
-  const label = isNonModelBook
-    ? `Prices & bets at ${bookName(book)} · ${bookLabel(MODEL_BOOK)} shown when ${bookLabel(book)} doesn’t price a bet`
-    : `Prices & bets at ${bookName(book)}`;
+  const label =
+    isNonModelBook && fallsBackToModelBook
+      ? `Prices & bets at ${bookName(book)} · ${bookLabel(MODEL_BOOK)} shown when ${bookLabel(book)} doesn’t price a bet`
+      : `Prices & bets at ${bookName(book)}`;
 
   return (
     <>
