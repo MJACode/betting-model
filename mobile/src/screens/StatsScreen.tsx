@@ -59,12 +59,15 @@ import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/f
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
+  buildSlateGameIndex,
   buildTonightSlate,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
   isStatParticipant,
+  slateGameFor,
+  slateSubline,
   sortLabel,
   sortOptionsFor,
   type SortKey,
@@ -473,6 +476,27 @@ export function StatsScreen() {
     pending.forEach((t) => out.delete(t));
     return out;
   }, [slateGames, oddsDate, slateGameIds]);
+
+  // ── The subline: "9:40 PM ET · @ SEA" under every row's name ───────────────
+  // Matt, 2026-09-05, from a competitor screenshot. Keyed off `games` rather
+  // than the MLB/WNBA matchup views so it lands in EVERY sport at once — the
+  // football boards have no matchup feed at all and would otherwise be the two
+  // that got nothing.
+  //
+  // Rebuilt when the clock crosses a game's start (`startedTeams` already
+  // re-derives then), which is the only thing that changes what it prints.
+  const slateGameIndex = useMemo(
+    () => buildSlateGameIndex(slateGames, slate, new Date().toISOString()),
+    [slateGames, slate],
+  );
+  const sublineFor = useCallback(
+    (row: { team?: string | null; player_name?: string | null }): string | null =>
+      slateSubline(
+        slateGameFor(row, slateGameIndex),
+        row.team ? startedTeams.get(row.team) ?? null : null,
+      ),
+    [slateGameIndex, startedTeams],
+  );
 
   const quoteByPlayerKey = useMemo(() => {
     if (!propMarket || propLines.market !== propMarket) return new Map<string, StatsOddsQuote>();
@@ -1118,6 +1142,7 @@ export function StatsScreen() {
                 player={item}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
+                subline={sublineFor(item)}
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
                 showOdds={showOdds}
@@ -1159,6 +1184,7 @@ export function StatsScreen() {
                 basis={basis}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
+                subline={sublineFor(item.row)}
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
                 showOdds={showOdds}
@@ -1481,6 +1507,15 @@ function BoardModeToggle({
   );
 }
 
+/**
+ * The subline as words. VoiceOver skips a bare "·" and reads "@ SEA" as
+ * "at sign SEA", so the separator becomes a comma and the away marker becomes
+ * the word — the row's label has to say the same thing the row shows.
+ */
+function sublineSpoken(subline: string): string {
+  return subline.replace(/ · /g, ', ').replace(/(^|, )@ /, '$1at ');
+}
+
 function fmtValue(value: number, basis: Basis): string {
   return basis === 'perGame' ? value.toFixed(1) : String(Math.round(value));
 }
@@ -1627,7 +1662,19 @@ function OddsCell({
  * The em-dash placeholder keeps the two-line rail straight when a sport has no
  * detail to print.
  */
-function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
+function MatchupCell({
+  matchup,
+  showOpponent,
+}: {
+  matchup: MatchupInfo | null;
+  /**
+   * False once the row's own subline is printing "vs HOU" under the name
+   * (2026-09-05). Two copies of the opponent 100pt apart on one row is not
+   * emphasis, it is a bug the reader has to rule out — so the column keeps the
+   * FACT the subline cannot carry and drops the half it now duplicates.
+   */
+  showOpponent: boolean;
+}) {
   if (!matchup) {
     return (
       <View
@@ -1646,10 +1693,15 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
       accessible
       accessibilityLabel={`${matchupTierWord(matchup.tier)} spot, ${matchup.text}`}
     >
-      <Text style={styles.matchupOppName} numberOfLines={1}>
-        vs {matchup.row.opponent}
-      </Text>
-      <Text style={[styles.matchupDetail, { color: c }]} numberOfLines={1}>
+      {showOpponent ? (
+        <Text style={styles.matchupOppName} numberOfLines={1}>
+          vs {matchup.row.opponent}
+        </Text>
+      ) : null}
+      <Text
+        style={[styles.matchupDetail, showOpponent && styles.matchupDetailStacked, { color: c }]}
+        numberOfLines={1}
+      >
         {matchup.detail ?? '—'}
       </Text>
     </View>
@@ -1701,6 +1753,7 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
+  subline,
   quote,
   started,
   showOdds,
@@ -1716,6 +1769,8 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
+  subline: string | null;
   quote: StatsOddsQuote | null;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
@@ -1734,7 +1789,7 @@ function LeaderRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}`
+            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
@@ -1743,6 +1798,11 @@ function LeaderRow({
           {row.player_name}
           {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
         </Text>
+        {subline ? (
+          <Text style={styles.rowSubline} numberOfLines={1}>
+            {subline}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
@@ -1756,7 +1816,7 @@ function LeaderRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} showOpponent={!subline} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -1781,6 +1841,7 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
+  subline,
   quote,
   started,
   showOdds,
@@ -1793,6 +1854,8 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
+  subline: string | null;
   quote: StatsOddsQuote | null;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
@@ -1812,7 +1875,7 @@ function HitRateRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}`
+            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
@@ -1821,6 +1884,11 @@ function HitRateRow({
           {player.player_name}
           {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
         </Text>
+        {subline ? (
+          <Text style={styles.rowSubline} numberOfLines={1}>
+            {subline}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.valueWrap}>
         <Text style={[styles.value, { color: pctColor }]}>
@@ -1839,7 +1907,7 @@ function HitRateRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} showOpponent={!subline} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -2204,6 +2272,13 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
   },
+  // "9:40 PM ET · @ SEA". Deliberately the quietest text on the row: it is
+  // context for the name above it, never a number the eye should stop on.
+  rowSubline: {
+    fontSize: 11,
+    color: colors.textTertiary,
+    marginTop: 1,
+  },
   valueWrap: {
     alignItems: 'flex-end',
     width: 48,
@@ -2295,8 +2370,10 @@ const styles = StyleSheet.create({
   matchupDetail: {
     fontSize: font.size.caption,
     color: colors.textTertiary,
-    marginTop: 1,
   },
+  // Only when the opponent line sits above it — alone in the cell the fact
+  // centres against the name block instead of hanging a pixel low.
+  matchupDetailStacked: { marginTop: 1 },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
   retryBtn: {

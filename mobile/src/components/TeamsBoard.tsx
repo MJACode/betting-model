@@ -38,7 +38,12 @@ import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/li
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
-import { buildTonightSlate } from '@/lib/statsBoard';
+import {
+  buildSlateGameIndex,
+  buildTonightSlate,
+  slateGameFor,
+  slateSubline,
+} from '@/lib/statsBoard';
 import {
   buildTeamLineIndex,
   teamLineCaption,
@@ -242,6 +247,20 @@ export function TeamsBoard({
     pending.forEach((t) => out.delete(t));
     return out;
   }, [slate.games, unstarted]);
+
+  // "7:05 PM ET · @ SEA" under each team's record — the Players board's
+  // subline, on the board where the row IS the team (Matt, 2026-09-05: "add
+  // the time of the game and who they are playing … for all sports"). Same
+  // helper, so a doubleheader resolves the same way on both boards.
+  const slateGameIndex = useMemo(
+    () =>
+      buildSlateGameIndex(
+        slate.games,
+        { date: slate.date, isToday: slate.isToday, keys: new Set<string>() },
+        new Date().toISOString(),
+      ),
+    [slate.games, slate.date, slate.isToday],
+  );
   const lineByTeam = useMemo(
     () =>
       buildTeamLineIndex(gameLines, slate.games, {
@@ -386,6 +405,10 @@ export function TeamsBoard({
               cuts={cuts}
               quote={quote}
               started={startedTeams.get(item.team) ?? null}
+              subline={slateSubline(
+                slateGameFor({ team: item.team }, slateGameIndex),
+                startedTeams.get(item.team) ?? null,
+              )}
               showLine={showLines}
               // The pill asks: a tap opens the add-to-betslip sheet.
               onLinePress={quote ? () => setLineSheet(quote) : undefined}
@@ -430,6 +453,7 @@ function TeamRow({
   cuts,
   quote,
   started,
+  subline,
   showLine,
   onLinePress,
 }: {
@@ -439,6 +463,8 @@ function TeamRow({
   cuts: { lo: number; hi: number } | null;
   quote: TeamLineQuote | null;
   started: 'Live' | 'Final' | null;
+  /** "7:05 PM ET · @ SEA"; null when this team has no game on the slate. */
+  subline: string | null;
   showLine: boolean;
   onLinePress?: () => void;
 }) {
@@ -465,6 +491,11 @@ function TeamRow({
             : ''}
           {thin ? `  ·  ${sample} game${sample === 1 ? '' : 's'}` : ''}
         </Text>
+        {subline ? (
+          <Text style={styles.rowSubline} numberOfLines={1}>
+            {subline}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.valueWrap}>
         <Text style={[styles.value, color ? { color } : null]}>
@@ -630,6 +661,9 @@ const styles = StyleSheet.create({
   },
   rowSub: { fontSize: 11, fontWeight: font.weight.semibold, color: colors.textTertiary },
   rowMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
+  // The game, under the record. Quieter than the record it sits below — it is
+  // when and where, not how good.
+  rowSubline: { fontSize: 11, color: colors.textTertiary, marginTop: 1 },
   valueWrap: { alignItems: 'flex-end', width: 72 },
   colHeaderLine: { minWidth: 66, textAlign: 'right' },
   lineWrap: { minWidth: 66, alignItems: 'flex-end' },

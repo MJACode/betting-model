@@ -206,7 +206,7 @@ check(
   'the tier colours the FACT, not the team abbreviation',
   // colors.bet/avoid are BET/AVOID semantics: a green team name on a board of
   // prices reads as a side, and the hit-rate column is already a traffic light.
-  /<Text style=\{\[styles\.matchupDetail, \{ color: c \}\]\}/.test(stats) &&
+  /style=\{\[styles\.matchupDetail,[^\]]*\{ color: c \}\]\}/.test(stats) &&
     /<Text style=\{styles\.matchupOppName\}/.test(stats),
 );
 check(
@@ -218,6 +218,43 @@ check(
 check(
   'the two-line rail stays straight when a sport has no detail',
   /\{matchup\.detail \?\? '—'\}/.test(stats),
+);
+
+// ── 3c. …and then the opponent came back under the name (2026-09-05) ───────
+// Matt, from a competitor screenshot: "add the time of the game and who they
+// are playing under the name … for all sports". That REVERSES 3b's premise
+// for half the SPOT column — so the invariant to hold is not "the column
+// keeps its opponent line", it is that the opponent appears ONCE on a row.
+check(
+  'the SPOT column yields its opponent line to the subline that now carries it',
+  /showOpponent=\{!subline\}/.test(stats) && /\{showOpponent \? \(/.test(stats),
+);
+check(
+  'and it keeps the FACT, which the subline cannot carry',
+  // If this ever goes, the ERA left the product: `text` reaches a screen
+  // reader and nothing else (3b).
+  /\{matchup\.detail \?\? '—'\}/.test(stats),
+);
+check(
+  'the subline is sourced from the slate, not the MLB/WNBA matchup views',
+  // The matchup views cover two sports. `games` covers eight — "for all
+  // sports" is the whole ask, and buildSlateGameIndex is the only reason the
+  // football boards get one.
+  /buildSlateGameIndex\(slateGames, slate/.test(stats) &&
+    /const sublineFor = useCallback\(/.test(stats),
+);
+check(
+  'both boards print it — Hit Rates and Averages, not just the one on screen',
+  (stats.match(/subline=\{sublineFor\(/g) ?? []).length === 2 &&
+    (stats.match(/styles\.rowSubline/g) ?? []).length === 2,
+);
+check(
+  'VoiceOver hears the game too, in words rather than "at sign SEA"',
+  /sublineSpoken\(subline\)/.test(stats) && /replace\(\/\(\^\|, \)@ \/, '\$1at '\)/.test(stats),
+);
+check(
+  'the teams board carries the same subline, from the same helper',
+  /slateSubline\(/.test(teams) && /buildSlateGameIndex\(/.test(teams),
 );
 
 // ── 4. What the review caught: three regressions that must not come back ────

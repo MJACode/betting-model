@@ -12,7 +12,10 @@
  *    sample size, with explicit games/average alternatives;
  *  - "playing tonight" is derived from `games` for EVERY sport — team abbrevs
  *    for team sports, fighter names for UFC — and prefers today, falling back
- *    to the next scheduled day.
+ *    to the next scheduled day;
+ *  - the row SUBLINE ("9:40 PM ET · @ SEA") comes off the same `games` rows, so
+ *    it lands in every sport, resolves doubleheaders to the game still ahead,
+ *    and yields to Live/Final once the game is under way.
  */
 
 import type { GameRow } from '../src/types';
@@ -20,17 +23,21 @@ import * as board from '../src/lib/statsBoard';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
+  buildSlateGameIndex,
   buildTonightSlate,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
   isStatParticipant,
+  slateGameFor,
+  slateSubline,
   sortLabel,
   sortOptionsFor,
   type SortKey,
   type SortableRow,
 } from '../src/lib/statsBoard';
+import { todayET } from '../src/lib/format';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -188,6 +195,124 @@ check('MLB all-zero player stays (cold streaks are real outcomes)',
   isStatParticipant('MLB', [0, 0, 0]));
 check('empty value list: football drops, others keep',
   !isStatParticipant('NFL', []) && !isStatParticipant('NCAAF', []) && isStatParticipant('WNBA', []));
+
+// ── The row subline: when the game starts, and against whom ────────────────
+// Matt, 2026-09-05: "add the time of the game and who they are playing under
+// the name … for all sports". Built off `games`, so what is pinned here is
+// that it works for a sport with no matchup feed, that a doubleheader resolves
+// to the game a bettor can still act on, and that a game under way stops
+// advertising a start time it is already past.
+
+const SUB_TODAY = todayET();
+const at = (hhmm: string, date = SUB_TODAY) => `${date}T${hhmm}:00Z`;
+
+function subGame(over: Partial<GameRow> & Pick<GameRow, 'game_id' | 'home_team' | 'away_team'>): GameRow {
+  return {
+    sport: 'MLB',
+    season: 2026,
+    game_date: SUB_TODAY,
+    home_score: null,
+    away_score: null,
+    home_score_f5: null,
+    away_score_f5: null,
+    commence_time: at('23:10'),
+    home_win: null,
+    home_win_reg: null,
+    went_to_ot: 0,
+    ...over,
+  } as GameRow;
+}
+
+const NOW = at('18:00');
+const slateToday = { date: SUB_TODAY, keys: new Set(['LAD', 'WSH']), isToday: true };
+
+const oneGame = [subGame({ game_id: 'g1', home_team: 'LAD', away_team: 'WSH', commence_time: at('23:10') })];
+const idx = buildSlateGameIndex(oneGame, slateToday, NOW);
+
+check('both sides of a game are keyed', idx.has('LAD') && idx.has('WSH'));
+check('the home row faces the away team, at home', idx.get('LAD')?.opponent === 'WSH' && idx.get('LAD')?.isHome === true);
+check('the away row faces the home team, away', idx.get('WSH')?.opponent === 'LAD' && idx.get('WSH')?.isHome === false);
+check(
+  'the subline reads "<time> · vs OPP" for the home side',
+  /^\d{1,2}:\d{2} [AP]M ET · vs WSH$/.test(slateSubline(idx.get('LAD') ?? null, null) ?? ''),
+  slateSubline(idx.get('LAD') ?? null, null) ?? 'null',
+);
+check(
+  'the away side reads "@ OPP", never "vs"',
+  (slateSubline(idx.get('WSH') ?? null, null) ?? '').endsWith('· @ LAD'),
+  slateSubline(idx.get('WSH') ?? null, null) ?? 'null',
+);
+check('no game, no subline (never a dash or an empty line)', slateSubline(null, null) === null);
+
+// A game under way must not keep printing its start time next to a price the
+// board has already blanked — the row says WHICH state instead.
+check('a live game replaces the clock time', slateSubline(idx.get('LAD') ?? null, 'Live') === 'Live · vs WSH');
+check('a finished game replaces the clock time', slateSubline(idx.get('WSH') ?? null, 'Final') === 'Final · @ LAD');
+
+// Doubleheader: the game a bettor can still act on.
+const dh = [
+  subGame({ game_id: 'dh1', home_team: 'DET', away_team: 'CHW', commence_time: at('17:10') }),
+  subGame({ game_id: 'dh2', home_team: 'DET', away_team: 'CHW', commence_time: at('23:10') }),
+];
+const dhSlate = { date: SUB_TODAY, keys: new Set(['DET', 'CHW']), isToday: true };
+check(
+  'a doubleheader shows the game still ahead, not game one',
+  buildSlateGameIndex(dh, dhSlate, NOW).get('DET')?.game.game_id === 'dh2',
+);
+check(
+  'once both have started it shows the later one, not a game from this morning',
+  buildSlateGameIndex(dh, dhSlate, at('23:30')).get('DET')?.game.game_id === 'dh2',
+);
+check(
+  'before either, it shows game one',
+  buildSlateGameIndex(dh, dhSlate, at('12:00')).get('DET')?.game.game_id === 'dh1',
+);
+
+// Only the slate date. A WEEK of games is fetched (the next-slate fallback
+// needs them), so an index that ignored the date would, the moment today's
+// game started, quietly re-point the row at TOMORROW's opponent — a wrong fact
+// that looks exactly like a right one.
+const spanning = [
+  subGame({ game_id: 'today', home_team: 'NYY', away_team: 'BOS', commence_time: at('17:10') }),
+  subGame({ game_id: 'tomorrow', home_team: 'NYY', away_team: 'TOR', game_date: '2099-01-01', commence_time: '2099-01-01T23:10:00Z' }),
+  subGame({ game_id: 'notplaying', home_team: 'SD', away_team: 'COL', game_date: '2099-01-01', commence_time: '2099-01-01T23:10:00Z' }),
+];
+const spanIdx = buildSlateGameIndex(spanning, { date: SUB_TODAY, keys: new Set(['NYY']), isToday: true }, NOW);
+check(
+  "a team whose game already started keeps TODAY's opponent, never tomorrow's",
+  spanIdx.get('NYY')?.opponent === 'BOS',
+  spanIdx.get('NYY')?.opponent ?? 'none',
+);
+check('a team that is not on the slate date is not indexed at all', !spanIdx.has('SD'));
+check('an empty slate indexes nothing', buildSlateGameIndex(spanning, EMPTY_SLATE, NOW).size === 0);
+
+// A future slate names its day: a bare "1:00 PM ET" on Sunday's board is the
+// wrong DAY, not the wrong hour.
+const future = [subGame({ game_id: 'sat', home_team: 'GB', away_team: 'CHI', sport: 'NFL', game_date: '2099-01-02', commence_time: '2099-01-02T18:00:00Z' })];
+const futureIdx = buildSlateGameIndex(future, { date: '2099-01-02', keys: new Set(['GB']), isToday: false }, NOW);
+check(
+  'a game on a later day carries its weekday',
+  /^[A-Z]{3} \d{1,2}:\d{2} [AP]M ET · vs CHI$/.test(slateSubline(futureIdx.get('GB') ?? null, null) ?? ''),
+  slateSubline(futureIdx.get('GB') ?? null, null) ?? 'null',
+);
+
+// Row → game, matching isOnSlate: team first, then the name (UFC has no team).
+const ufcCard = [subGame({ game_id: 'ufc1', sport: 'UFC', home_team: 'Alex Perez', away_team: 'Matheus Nicolau' })];
+const ufcIdx = buildSlateGameIndex(ufcCard, { date: SUB_TODAY, keys: new Set(['Alex Perez']), isToday: true }, NOW);
+check('a UFC fighter finds his bout by NAME', slateGameFor({ team: null, player_name: 'Alex Perez' }, ufcIdx)?.opponent === 'Matheus Nicolau');
+check('a team row finds its game by ABBREV', slateGameFor({ team: 'LAD', player_name: 'M. Betts' }, idx)?.opponent === 'WSH');
+check('a row with neither gets nothing', slateGameFor({ team: 'SEA', player_name: 'Nobody' }, idx) === null);
+// The football boards are the reason this lives here and not in lib/matchup:
+// they have no matchup feed at all, so a matchup-view subline would have
+// shipped to two sports and skipped six.
+const nflSlate = [subGame({ game_id: 'nfl1', sport: 'NFL', home_team: 'SEA', away_team: 'SF' })];
+check(
+  'a sport with no matchup feed still gets a subline',
+  (slateSubline(
+    slateGameFor({ team: 'SF' }, buildSlateGameIndex(nflSlate, { date: SUB_TODAY, keys: new Set(['SF']), isToday: true }, NOW)),
+    null,
+  ) ?? '').endsWith('· @ SEA'),
+);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
