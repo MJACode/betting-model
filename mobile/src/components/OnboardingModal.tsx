@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BrandMark } from '@/components/BrandMark';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { GO_LIVE_SETTLED_PICKS } from '@/lib/recordStart';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -19,7 +20,8 @@ const SLIDES: Slide[] = [
     icon: 'shield-checkmark-outline',
     title: 'Graded in public, not hype',
     body:
-      'Every market has its own model, and every pick it makes is graded in public — wins and losses, nothing hidden. A model is not cleared for real money until it has 50+ settled picks with positive ROI.',
+      'Every market has its own model, and every pick it makes goes on the record — wins and losses, nothing hidden. A model is not backed for real money until it has ' +
+      `${GO_LIVE_SETTLED_PICKS}+ settled picks with positive ROI (in-play models are the exception, and are unproven).`,
   },
   {
     icon: 'trending-up-outline',

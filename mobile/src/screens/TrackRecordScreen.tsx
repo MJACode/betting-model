@@ -209,9 +209,13 @@ export function TrackRecordScreen() {
           </View>
         </View>
 
-        {/* Unconditional: EquityCurve carries its own "not enough settled days"
-            copy, and it is the only thing between the hero and the prose now. */}
-        <EquityCurve points={equity} width={chartWidth} />
+        {/* Unconditional once loaded: EquityCurve carries its own "not enough
+            settled days" copy, and it is the only thing between the hero and the
+            prose now. Held back on the first load so it cannot assert there are
+            too few settled days while the data is still in flight. */}
+        {loading && rows.length === 0 ? null : (
+          <EquityCurve points={equity} width={chartWidth} />
+        )}
 
         {/* Honest framing — the record is not all green, and says so. */}
         <View style={styles.noteCard}>
@@ -223,7 +227,8 @@ export function TrackRecordScreen() {
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
             profitable, some aren’t yet, and we show them all. A new model is shown but not
-            backed until it clears 50 settled picks with positive ROI. A pick that had no
+            backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive ROI. A
+            pick that had no
             DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
           </Text>

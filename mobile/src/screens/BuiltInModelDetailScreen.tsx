@@ -334,16 +334,20 @@ export function BuiltInModelDetailScreen() {
                         : 'holdout'
                     }
                   />
+                  {/* Paired, always. StatTile is flex:1, so a lone tile stretches
+                      edge to edge and breaks the 2-up grid every other section on
+                      this screen uses — render the ROI tile with an em-dash rather
+                      than dropping it. */}
+                  <StatTile
+                    label="Holdout ROI"
+                    value={
+                      numOrNull(registry.holdout_roi) != null
+                        ? formatPctSigned(numOrNull(registry.holdout_roi))
+                        : '—'
+                    }
+                    caption="backtest, flat bets"
+                  />
                 </View>
-                {numOrNull(registry.holdout_roi) ? (
-                  <View style={styles.statRow}>
-                    <StatTile
-                      label="Holdout ROI"
-                      value={formatPctSigned(numOrNull(registry.holdout_roi))}
-                      caption="backtest, flat bets"
-                    />
-                  </View>
-                ) : null}
                 <Text style={styles.registryMeta}>
                   v{registry.version} · trained {registry.trained_on}
                   {registry.holdout_picks != null ? ` · ${registry.holdout_picks} holdout rows` : ''}
