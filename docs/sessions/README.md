@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 231 — the app and Discord are one board: publishing moved off the capture table |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 230 — the same bet, eleven times: a lock that released when a pick was graded |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 229 — college football player props, built and measured before they are scheduled |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 228 — alternates on every pass, and for WNBA, NBA and NFL |
