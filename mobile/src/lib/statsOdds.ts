@@ -63,6 +63,10 @@ export interface StatsOddsQuote {
   price: number;
   /** That book's betslip deep link for the side, when the feed carried one. */
   link: string | null;
+  /** True when none of the member's books posts the board's line and the
+   *  quote is the book's OWN line instead — a different bet, printed with its
+   *  number ("o1.5") so nobody reads it as the ruler's. */
+  offLine?: boolean;
   /** Every book pricing this player/market/line. Kept for the sheet's
    *  "Switch sportsbook" preview and for tests; the column never reads it. */
   bookRows: BookPricedRow[];
@@ -152,16 +156,20 @@ export function buildQuoteIndex(
     gameIds?: Set<string> | null;
   },
 ): Map<string, StatsOddsQuote> {
-  const inScope = rows.filter(
-    (r) =>
-      r.market === opts.market &&
-      sameLine(num(r.line), opts.line) &&
-      (!opts.gameIds || opts.gameIds.has(r.game_id)),
+  // Every row for the market on the slate, at ANY line: the ruler's line is
+  // preferred, but a book posts ONE line per player in these markets (23 of
+  // 313 priced hitters were 1.5-only at DraftKings on 2026-09-04) and Matt's
+  // "everyone should have a line by this point" is right — a player the book
+  // has priced must not read as unpriced. When none of the member's books
+  // posts the ruler's line, the cell prints the book's own line WITH its
+  // number, as a different bet (offLine), never as the ruler's price.
+  const inMarket = rows.filter(
+    (r) => r.market === opts.market && (!opts.gameIds || opts.gameIds.has(r.game_id)),
   );
-  const skip = ambiguousKeys(inScope.map((r) => r.player_name));
+  const skip = ambiguousKeys(inMarket.map((r) => r.player_name));
 
   const byPlayer = new Map<string, PropOddsByBookRow[]>();
-  for (const r of inScope) {
+  for (const r of inMarket) {
     const key = normalizePlayerName(r.player_name);
     if (!key || skip.has(key)) continue;
     const list = byPlayer.get(key);
@@ -171,26 +179,40 @@ export function buildQuoteIndex(
 
   // Candidates in the member's own order, so bestOf's tie-break is stable.
   const rank = new Map(opts.books.map((b, i) => [b, i] as const));
+  const priceOf = (r: PropOddsByBookRow) => num(opts.side === 'under' ? r.under_price : r.over_price);
   const out = new Map<string, StatsOddsQuote>();
-  for (const [key, list] of byPlayer) {
-    const mine = list
-      .filter((r) => rank.has(r.bookmaker))
-      .sort((a, b) => (rank.get(a.bookmaker) ?? 0) - (rank.get(b.bookmaker) ?? 0));
-    const best = bestOf(mine, (r) =>
-      num(opts.side === 'under' ? r.under_price : r.over_price),
-    );
-    if (best == null) continue;
+  for (const [key, all] of byPlayer) {
+    const atLine = all.filter((r) => sameLine(num(r.line), opts.line));
+    const mine = (list: PropOddsByBookRow[]) =>
+      list
+        .filter((r) => rank.has(r.bookmaker))
+        .sort((a, b) => (rank.get(a.bookmaker) ?? 0) - (rank.get(b.bookmaker) ?? 0));
+    let best = bestOf(mine(atLine), priceOf);
+    let line = opts.line;
+    let offLine = false;
+    let list = atLine;
+    if (best == null) {
+      // The book's own line: the member's books' rows at whatever line each
+      // posts, best price among them; the winner's line becomes the quote's.
+      const own = mine(all).filter((r) => num(r.line) != null);
+      best = bestOf(own, priceOf);
+      if (best == null) continue;
+      line = num(best.row.line) as number;
+      offLine = true;
+      list = all.filter((r) => sameLine(num(r.line), line));
+    }
     out.set(key, {
       playerKey: key,
       playerName: best.row.player_name,
       gameId: best.row.game_id,
       market: opts.market,
-      line: opts.line,
+      line,
       side: opts.side,
       book: best.row.bookmaker,
       price: best.price,
       link: (opts.side === 'under' ? best.row.under_link : best.row.over_link) ?? null,
       bookRows: list as unknown as BookPricedRow[],
+      offLine,
     });
   }
   return out;

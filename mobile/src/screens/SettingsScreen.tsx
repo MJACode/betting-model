@@ -18,6 +18,8 @@ import { useNavigation } from '@react-navigation/native';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { booksLabel, booksName, booksShortList, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
+import { StatePickerSheet } from '@/components/StatePickerSheet';
+import { useBettingState } from '@/hooks/useBettingState';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { useBankroll } from '@/hooks/useBankroll';
 import {
@@ -105,6 +107,8 @@ export function SettingsScreen() {
   const { bankroll, setBankroll, ready } = useBankroll();
   const { books } = usePreferredBooks();
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
+  const { name: stateName } = useBettingState();
+  const [statePickerOpen, setStatePickerOpen] = useState(false);
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
@@ -362,6 +366,29 @@ export function SettingsScreen() {
             betslip still lists every book we price so you can place anywhere. Picks and
             Signals always price at DraftKings.
           </Text>
+        </View>
+
+        {/* The state three books' betslip links need (lib/sportsbookLinks.ts):
+            without it BetMGM, BetRivers and Caesars open at their web root
+            instead of in the app with the bet on the slip. */}
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>Your state</Text>
+          <Text style={styles.bookHint}>
+            Where your sportsbook accounts are licensed. BetMGM, BetRivers and Caesars need it to
+            open your bet in their app.
+          </Text>
+          <Pressable
+            onPress={() => setStatePickerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Your state: ${stateName ?? 'not set'}. Tap to change.`}
+            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
+          >
+            <Text style={[styles.bookRowName, !stateName && { color: colors.textTertiary }]}>
+              {stateName ?? 'Not set'}
+            </Text>
+            <Text style={styles.bookRowChange}>{stateName ? 'Change' : 'Set'}</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </Pressable>
         </View>
 
         <LinkRow
@@ -634,6 +661,7 @@ export function SettingsScreen() {
         </Pressable>
       </ScrollView>
       <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />
+      <StatePickerSheet visible={statePickerOpen} onClose={() => setStatePickerOpen(false)} />
       <DiscordLinkModal visible={discordSheet} onClose={() => setDiscordSheet(false)} />
     </SafeAreaView>
   );

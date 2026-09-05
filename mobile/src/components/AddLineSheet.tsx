@@ -37,6 +37,7 @@ export function AddLineSheet({
   statLabel,
   onClose,
   onAdded,
+  boardHeadline,
 }: {
   /** The pill that was tapped; null closes the sheet. */
   quote: StatsOddsQuote | null;
@@ -47,6 +48,9 @@ export function AddLineSheet({
   /** Called after a successful add — the Stats screen uses it to bounce back
    *  to the betslip when the user came from there. */
   onAdded?: () => void;
+  /** The board's own headline ("1+ Hits"), so an off-line quote can say why
+   *  the title differs from the column it was tapped in. */
+  boardHeadline?: string;
 }) {
   const legs = useLineLegs();
   const { books: myBooks } = usePreferredBooks();
@@ -133,7 +137,9 @@ export function AddLineSheet({
               the reference sheets put their one-line explainer, not as a
               caption under the list (UX review). */}
           <Text style={styles.subtitle}>
-            Add it to your betslip now — you&apos;ll choose the sportsbook there.
+            {quote?.offLine && boardHeadline
+              ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${quote.side === 'under' ? `at most ${quote.line - 0.5}` : `${quote.line + 0.5}+`}. Add it to your betslip now — you’ll choose the sportsbook there.`
+              : 'Add it to your betslip now — you’ll choose the sportsbook there.'}
           </Text>
 
           <Text style={styles.sectionTitle}>Where it&apos;s posted</Text>
