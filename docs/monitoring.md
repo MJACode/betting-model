@@ -60,6 +60,71 @@ gate and their re-graded semantics, because that is the threshold-sweep tool and
 A cut cannot be swept on a few days of BET-only history. Publishing and sweeping
 are now different objects, which is the fix rather than an inconsistency.
 
+### One row per pick — the invariant every surface depends on and none checks
+
+Matt, 2026-09-05, on the model detail screen: *"The same bet showed multiple
+times for a signal. It should just be the first one?"* — eleven identical
+"Logan Allen Over 4.5 Hits · DK +117 · WIN · +$117.00" rows.
+
+They were eleven rows in `picks`. Both pick locks asked for `result IS NULL`,
+so a pick left the lock set the moment `settle_picks` graded it; a doubleheader
+(both games under one game_id — `docs/followups.md`) let game 1's final score
+settle the pick while game 2's `commence_time` kept the pre-game cutoff open,
+so every 10-minute pass scored the same player again and the next settle pass
+released the lock again.
+
+**Every published number counts rows, so every published number moved at once.**
+Measured on production 2026-09-05, the published window (>= 2026-09-01, settled,
+passing the current cuts):
+
+| | picks | W-L | units | ROI |
+|---|---|---|---|---|
+| As published | 132 | 72-60 | +7.38u | +5.59% |
+| One row per pick | 112 | 62-50 | +5.68u | +5.07% |
+
+15% of the published record was copies. **Applied 2026-09-05** (Matt: *"Yes run
+python -m scripts.dedupe_picks"*): 69 rows removed — six more than the 63
+measured an hour earlier, written in the interval — snapshotted into
+`public.picks_dupes_removed_20260905`, `uq_picks_one_row_per_pick` created and
+the matview refreshed. The bottom row is now the published record.
+
+It reached a member's screen before it
+reached any dashboard, and it would have reached Retool identically — `q_performance`
+reads `v_public_track_record`, the app reads the same view, and both count rows.
+
+**Discord was the only surface that got it right, and the reason is worth
+copying.** It does not read `picks` for its unit of work at all: it reads
+`opening_signals`, one row per `lock_key`, and joins the pick with
+`ORDER BY p.created_at LIMIT 1`. One signal, one message, first row wins —
+which is CLAUDE.md §1c expressed in SQL.
+
+**So the fix is in the table, not in three read paths.** Deduplicating in the
+app would have left Retool wrong; deduplicating in both would be two
+definitions of "the same pick" that drift. Instead:
+
+* the locks key on a pick's **existence**, not on it being unsettled
+  (`models/scorer.py::_locked_prop_keys` and `locked_pairs`);
+* the prop scorers skip a game that already carries a **final score**
+  (`_final_game_ids`), which is the case `_game_started` cannot see when one
+  game_id covers two games;
+* `uq_picks_one_row_per_pick` (migration `picks_one_row_per_pick.sql`) makes
+  `(game_date, model_id, game_id, player_id, pick_side)` unique on pre-game
+  rows, and `_insert_picks` carries `ON CONFLICT DO NOTHING` so the losing side
+  of a race drops its copy instead of aborting the pass;
+* `scripts/dedupe_picks.py` removes the rows already written — keeping the
+  BET over a non-BET, then the earliest `created_at`, then the lowest pick_id.
+  **Check what the copies disagree about before trusting the survivor:** the
+  two `Blake Snell Over 5.5 Ks` rows of 2026-05-09 were graded differently
+  (`NO_ACTION` and `LOSS`), so deleting the copy dropped the only row carrying
+  the right answer, and the survivor had to be regraded against the box score;
+* the `one_row_per_pick` CRIT health check says so out loud every morning.
+
+The index is deliberately keyed **without `scored_line`**: a copy written after
+the line moved is the same bug wearing a different number, and it is the exact
+shape §1c's NCAAF example calls out (Over 44.5 churned to Over 54.5). Alternate
+lines do not collide with it — they are odds rows, and the scorer still writes
+one line per player and side.
+
 ### Published record vs. sweep record — still two numbers, now two objects
 
 The app and Retool agree (above). What still differs, and always will, is the

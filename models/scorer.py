@@ -1843,6 +1843,29 @@ def _game_started(pregame_cutoff: str | None) -> bool:
     return dt <= datetime.now(ZoneInfo("UTC"))
 
 
+def _final_game_ids(conn: DBConnection, game_date: str, sport: str) -> set:
+    """Games on this date that already carry a FINAL score.
+
+    THE SECOND HALF OF THE FIRST-PITCH GUARD, for the case where the clock
+    lies. `_game_started` asks whether the scheduled start has passed; this
+    asks whether the game is already OVER. They disagree exactly when one
+    game_id covers two games -- a doubleheader (docs/followups.md) -- because
+    the final score belongs to game 1 while commence_time belongs to game 2.
+    On DET/CLE 2026-09-04 that gap let the evening passes keep scoring props
+    for a game that had finished three hours earlier.
+
+    Belt and braces: the prop lock above already stops the re-score, and the
+    game-level loop only ever reads games with `home_score IS NULL`. This is
+    the guard that does not depend on a pick row existing to look at.
+    """
+    rows = conn.execute(
+        "SELECT game_id FROM games "
+        "WHERE game_date = ? AND sport = ? AND home_score IS NOT NULL",
+        (game_date, sport),
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
 # Calibration maps are loaded once per process: a few rows that change daily,
 # read on every pick insert otherwise.
 _CAL_CACHE: dict | None = None
@@ -1895,6 +1918,14 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             %(best_bet_link)s,
             %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s
         )
+        -- One row per pick (uq_picks_one_row_per_pick, migration
+        -- picks_one_row_per_pick.sql). A second copy of a pick that already
+        -- exists is dropped rather than raising: an IntegrityError here aborts
+        -- the transaction and costs the whole pass its picks, which is a far
+        -- worse failure than the duplicate this index exists to stop. The
+        -- locks in this module are what PREVENT the conflict; this only makes
+        -- the losing side of a race harmless. A no-op until the index exists.
+        ON CONFLICT DO NOTHING
     """
     # Prop picks arrive tagged with (game_id, player_name, market) instead of
     # pre-stamped, because their best price is a per-player lookup and the five
@@ -2313,10 +2344,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             # The pair is keyed without side, so the complementary AVOID
             # written alongside a BET freezes with it — same proposition, other
             # side (the live lock does the same).
+            #
+            # SETTLEMENT IS NOT AN UNLOCK (2026-09-05). The `result IS NULL`
+            # this query used to carry made a graded pick leave the lock set,
+            # so a later pass could score the same pair again and write a
+            # second BET. The game loop only reads games with no final score,
+            # so nothing here was reachable in practice -- but the prop lock
+            # had the same clause and it WAS reachable, 11 copies of one pick
+            # (see _locked_prop_keys). A pick that exists is the bet of record
+            # whatever its result, so both locks key on existence now.
             for gid, mid in conn.execute("""
                 SELECT p.game_id, p.model_id
                 FROM picks p
-                WHERE p.game_date >= %s AND p.result IS NULL
+                WHERE p.game_date >= %s
                   AND p.signal_type = 'BET'
             """, (target_date,)).fetchall():
                 locked_pairs.add((gid, mid))
@@ -2982,16 +3022,31 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
 
 def _locked_prop_keys(conn: DBConnection, target_date: str, model_ids) -> set:
     """First-signal prop lock (config.LOCK_PROP_PICKS_AT_FIRST_SIGNAL): the set of
-    (game_id, model_id, player_id) tuples that already have an unsettled pick for
+    (game_id, model_id, player_id) tuples that already have a pick for
     target_date among the given models. The prop scorers skip these so the first
     confirmed-lineup signal of the day stays put and later refreshes don't
-    overwrite it. Returns an empty set when locking is off (old delete+rescore)."""
+    overwrite it. Returns an empty set when locking is off (old delete+rescore).
+
+    SETTLEMENT IS NOT AN UNLOCK (2026-09-05). This query used to carry
+    `AND result IS NULL`, which meant a pick left the lock set the moment
+    settle_picks graded it -- and the next refresh pass scored the same player
+    again and INSERTED A SECOND PICK. It needs a game that is final while its
+    `games` row still says "not started", which is exactly what a doubleheader
+    does: both games share one game_id (docs/followups.md), so game 1's final
+    score settles the pick while game 2's commence_time keeps the pre-game
+    cutoff open. Measured on DET/CLE 2026-09-04: 11 rows for one Logan Allen
+    Over 4.5 Hits pick, one per 10-minute pass, each settled ~2 minutes later
+    and each releasing the lock for the next -- 20 of the 132 settled BETs in
+    the published 09-01 window were copies of a pick that already existed.
+
+    A pick that exists is the bet of record whatever its result (CLAUDE.md
+    section 1c), so the lock is keyed on EXISTENCE, not on being unsettled."""
     if not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
         return set()
     mids = set(model_ids)
     rows = conn.execute("""
         SELECT game_id, model_id, player_id FROM picks
-        WHERE game_date = %s AND result IS NULL
+        WHERE game_date = %s
     """, (target_date,)).fetchall()
     keys = {(g, m, p) for g, m, p in rows if m in mids}
     if keys:
@@ -3042,6 +3097,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "MLB")
     cut_map = _pregame_cutoff_map(conn, target_date, "MLB")
+    final_ids = _final_game_ids(conn, target_date, "MLB")
 
     total_picks = 0
     total_bets  = 0
@@ -3112,8 +3168,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 player_id          = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(cut_map.get(game_id)):
-                    continue  # game underway — current DK prop prices are in-play
+                if _game_started(cut_map.get(game_id)) or game_id in final_ids:
+                    continue  # game underway or already final — no pre-game price left
                 pitcher_throw_hand = row.get("pitcher_throw_hand")
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
@@ -3285,6 +3341,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "WNBA")
     cut_map = _pregame_cutoff_map(conn, target_date, "WNBA")
+    final_ids = _final_game_ids(conn, target_date, "WNBA")
     total_picks = 0
     total_bets  = 0
 
@@ -3327,8 +3384,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(cut_map.get(game_id)):
-                    continue  # game underway — current DK prop prices are in-play
+                if _game_started(cut_map.get(game_id)) or game_id in final_ids:
+                    continue  # game underway or already final — no pre-game price left
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
                                               cut_map.get(game_id))
@@ -3459,6 +3516,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "NBA")
     cut_map = _pregame_cutoff_map(conn, target_date, "NBA")
+    final_ids = _final_game_ids(conn, target_date, "NBA")
     total_picks = 0
     total_bets  = 0
 
@@ -3510,8 +3568,8 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(cut_map.get(game_id)):
-                    continue  # game underway — current DK prop prices are in-play
+                if _game_started(cut_map.get(game_id)) or game_id in final_ids:
+                    continue  # game underway or already final — no pre-game price left
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
                                               cut_map.get(game_id))
@@ -4186,6 +4244,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "MLB")
     cut_map = _pregame_cutoff_map(conn, target_date, "MLB")
+    final_ids = _final_game_ids(conn, target_date, "MLB")
 
     total_pitcher_picks = 0
     total_pitcher_bets  = 0
@@ -4254,8 +4313,8 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(cut_map.get(game_id)):
-                    continue  # game underway — current DK prop prices are in-play
+                if _game_started(cut_map.get(game_id)) or game_id in final_ids:
+                    continue  # game underway or already final — no pre-game price left
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
                                               cut_map.get(game_id))

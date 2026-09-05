@@ -50,6 +50,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # views. This must run AFTER track_record_reads_graded_matview, which used to
     # own the daily view and reverted it to the 2026-04-14 window on every pass.
     "live_record_start_views_2026_09_01.sql",
+    # 2026-09-05: one row per pick, enforced by a unique index. No-ops (with a
+    # NOTICE) until scripts/dedupe_picks.py has cleared the 63 rows a released
+    # lock wrote, then creates the index on the next pass.
+    "picks_one_row_per_pick.sql",
 ]
 
 
