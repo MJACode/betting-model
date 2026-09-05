@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CalibrationChart } from '@/components/CalibrationChart';
-import { buildCalibration } from '@/lib/calibration';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -73,13 +71,6 @@ export function BuiltInModelDetailScreen() {
   );
   const { registry } = useModelRegistry(modelId);
   const clv = useMemo(() => computeClvStats(modelId, settledRows), [modelId, settledRows]);
-  const calib = useMemo(
-    () =>
-      buildCalibration(
-        settledRows.filter((p) => p.model_id === modelId && passesActionFilter(p)),
-      ),
-    [modelId, settledRows],
-  );
   // The pick-by-pick list behind the record above, bounded to the SAME
   // published window (fetchModelFullOutcomePicks gates on LIVE_RECORD_START).
   // Before that gate the list ran back to 2026-04-14 under a "since 09-01"
@@ -123,10 +114,8 @@ export function BuiltInModelDetailScreen() {
     navigation.setOptions({ title: modelShort(modelId) });
   }, [navigation, modelId]);
 
-  // The ≤5% calibration gate only applies to the binary game/F5 models.
-  // Prop models are Poisson count projections whose CalError is naturally
-  // high (IP/PA variance, not miscalibration), so the number is misleading —
-  // hide it for those.
+  // Prop models are Poisson count projections, so the model card labels their
+  // holdout accuracy as over/under accuracy rather than a straight hit rate.
   const isProp = meta != null && meta.type !== 'game';
 
   const decided = stats.wins + stats.losses;
@@ -332,13 +321,6 @@ export function BuiltInModelDetailScreen() {
               </>
             ) : null}
 
-            {calib ? (
-              <>
-                <Text style={styles.sectionHeader}>Calibration — stated odds vs reality</Text>
-                <CalibrationChart calibration={calib} />
-              </>
-            ) : null}
-
             {registry ? (
               <>
                 <Text style={styles.sectionHeader}>Model card</Text>
@@ -352,19 +334,6 @@ export function BuiltInModelDetailScreen() {
                         : 'holdout'
                     }
                   />
-                  {isProp ? null : (
-                    <StatTile
-                      label="Cal error"
-                      value={formatPct(numOrNull(registry.calibration_score))}
-                      tint={
-                        numOrNull(registry.calibration_score) != null &&
-                        numOrNull(registry.calibration_score)! <= 0.05
-                          ? colors.bet
-                          : colors.med
-                      }
-                      caption="gate ≤ 5%"
-                    />
-                  )}
                 </View>
                 {numOrNull(registry.holdout_roi) ? (
                   <View style={styles.statRow}>

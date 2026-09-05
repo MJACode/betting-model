@@ -223,8 +223,8 @@ export function TrackRecordScreen() {
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
             profitable, some aren’t yet, and we show them all. A new model is shown but not
-            backed until it clears 50 settled picks with positive ROI and calibration error
-            under 5%. A pick that had no DraftKings price when we posted it counts in the
+            backed until it clears 50 settled picks with positive ROI. A pick that had no
+            DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
           </Text>
         </View>

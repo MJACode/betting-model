@@ -78,12 +78,11 @@ export function ExplainerScreen() {
             advantage.
           </Bullet>
           <P>
-            Raw XGBoost outputs are overconfident, so every model passes its
-            scores through <Strong>Platt scaling</Strong> — a sigmoid
-            calibration fitted on cross-validation folds. The number you see
-            (e.g. <Mono>67.3%</Mono>) is the calibrated probability — what the
-            true win rate should be for a bin of picks at that prediction
-            level.
+            Raw XGBoost outputs are overconfident on their own, so every model
+            rescales its scores on held-out folds before publishing them. The
+            number you see (e.g. <Mono>67.3%</Mono>) is that adjusted
+            probability — what the true win rate should be for a bin of picks
+            at that prediction level.
           </P>
         </Section>
 
@@ -275,20 +274,19 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="Why we're different — calibration, not hype">
+        <Section heading="Why we're different — the record, not a hero number">
           <P>
-            Most picks services sell <Strong>accuracy</Strong> ("we hit 80%!").
-            We optimize for <Strong>calibration</Strong> instead — making a "65%"
-            actually win about 65% of the time. Research backs this: a 2024
-            University of Bath study found calibration-optimized betting models
-            massively outperformed accuracy-optimized ones over a full season.
+            Most picks services sell <Strong>accuracy</Strong> ("we hit 80%!") —
+            one number, chosen after the fact, with no way to check it. We
+            publish the full track record instead: wins, losses, pushes and
+            closing-line value on every settled pick, including the models that
+            aren't working.
           </P>
           <P>
-            That's why every model is Platt-scaled and gated at ≤5% calibration
-            error before it can go live, and why we publish a full track record
-            — wins, losses, and closing-line value — instead of a hero win-rate.
-            If a model isn't beating the closing line over a real sample, we'd
-            rather show you that than hide it.
+            A model isn't cleared for real money until it has a real sample
+            behind it — 50+ settled picks with positive ROI. If one isn't
+            beating the closing line over that sample, we'd rather show you
+            that than hide it.
           </P>
         </Section>
 

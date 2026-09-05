@@ -17,9 +17,9 @@ interface Slide {
 const SLIDES: Slide[] = [
   {
     icon: 'shield-checkmark-outline',
-    title: 'Calibrated picks, not hype',
+    title: 'Graded in public, not hype',
     body:
-      'Every market has its own model, calibrated so a "67%" really means about 67%. We grade ourselves in public — wins and losses — and only clear a model for real money after 50+ picks of positive ROI and calibration error under 5%.',
+      'Every market has its own model, and every pick it makes is graded in public — wins and losses, nothing hidden. A model is not cleared for real money until it has 50+ settled picks with positive ROI.',
   },
   {
     icon: 'trending-up-outline',
