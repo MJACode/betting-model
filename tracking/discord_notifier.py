@@ -654,52 +654,67 @@ def _new_signals(conn, target_date: str) -> list[dict]:
 
 
 def _locked_signals(conn, target_date: str) -> list[dict]:
-    """Every locked signal for the date that clears the CURRENT thresholds --
-    ignoring the Discord ledger. Same rows _new_signals() draws from, minus the
+    """Every BET on the date that clears the CURRENT thresholds -- ignoring the
+    Discord ledger. Same rows _new_signals() draws from, minus the
     not-yet-posted filter, so a restatement covers the whole slate rather than
-    whatever happens to be unposted."""
+    whatever happens to be unposted.
+
+    READS `picks`, NOT `opening_signals` (2026-09-05). #489 moved _new_signals
+    onto `picks` and left this producer behind on the capture table, which put
+    the abandoned gate back in front of the one path whose entire job is to
+    REPAIR a channel. A restatement would have omitted exactly the picks that
+    motivated #489 -- the uncaptured ones -- so the correction would have been
+    as incomplete as the post it was correcting, and silently so. Measured on
+    the two Week 1 nfl_wind_totals picks the same day: both in `picks`, neither
+    in `opening_signals`, so a restate could not have reached either.
+
+    The lock_key is SYNTHESISED here exactly as _new_signals synthesises it
+    (`game:model[:player]`), which is the key capture minted, so the push_sent
+    ledger still lines up across all three producers and across the rows
+    capture wrote before the move.
+
+    NO STARTED-GAME GUARD, deliberately, and this is the one producer where
+    that is correct. _new_signals refuses a started game because ANNOUNCING a
+    bet nobody can still take sends a member to a live number. A restatement is
+    not an announcement: it corrects something already published, for a date
+    that is normally over by the time anyone writes the correction. Adding the
+    guard here would make restating a past slate a permanent no-op.
+
+    THE FIRST BET WINS, as everywhere else (§1c): DISTINCT ON the pick's
+    identity ordered by created_at, so a pre-#311 side flip collapses to the
+    one bet of record rather than restating both halves of it.
+    """
     rows = conn.execute("""
-        SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
-               os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
-               os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds,
-               t.min_edge, t.min_odds
-        FROM opening_signals os
-        JOIN model_action_thresholds t ON t.model_id = os.model_id
-        LEFT JOIN games g ON g.game_id = os.game_id
-        -- The pick row itself, for its betslip link and for WHEN IT WAS
-        -- WRITTEN. os.locked_at is the capture step's clock, which runs later
-        -- in the pass (3:18pm picks were captured at 4:31pm on 2026-08-29), so
-        -- it would overstate how fresh a signal is. No fallback on purpose: a
-        -- missing pick row publishes no stamp rather than a wrong one.
-        --
-        -- best_book/best_odds ride along too, and they were MISSING here until
-        -- 2026-09-03 while _new_signals selected them. Both producers render
-        -- through _signal_field -> better_price_note, so a restatement dropped
-        -- the "also `-120` @ BetMGM" line from every pick that had one -- the
-        -- correction quietly told the reader a WORSE place to bet than the post
-        -- it was correcting. Measured on the 2026-09-02 slate: 11 of 22 picks
-        -- carried a better non-DK price, so half the card changed. Same family
-        -- as the session-171 X/Discord divergence: two paths publishing one
-        -- pick, only one of them complete (§1b).
-        LEFT JOIN LATERAL (
-            SELECT p.dk_bet_link, p.created_at, p.best_book, p.best_odds
+        WITH bet AS (
+            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
+                   p.game_id || ':' || p.model_id
+                       || COALESCE(':' || p.player_id, '') AS lock_key,
+                   p.pick_label, p.sport, p.model_id,
+                   p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
+                   p.confidence_tier, g.home_team, g.away_team, g.commence_time,
+                   p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
+                   t.min_edge, t.min_odds
             FROM picks p
-            WHERE p.game_id = os.game_id
-              AND p.model_id = os.model_id
-              AND p.pick_side = os.pick_side
-              AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
-              AND p.game_date = os.game_date
-            ORDER BY p.created_at
-            LIMIT 1
-        ) pk ON TRUE
-        WHERE os.game_date = %s
-          AND os.lock_key NOT LIKE '%%:early'
-          AND t.paused = FALSE
-          AND os.model_probability >= t.min_prob
-          AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
-          AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
-        ORDER BY os.locked_at
+            JOIN model_action_thresholds t ON t.model_id = p.model_id
+            LEFT JOIN games g ON g.game_id = p.game_id
+            WHERE p.game_date = %s
+              AND p.signal_type = 'BET'
+              -- In-play picks have their own producer and their own channel.
+              AND (p.is_live IS NULL OR p.is_live = FALSE)
+              AND p.model_id NOT LIKE '%%_live_%%'
+              -- The app's passesActionFilter, in SQL, off the same row --
+              -- character for character the cut _new_signals applies, because
+              -- a restatement that selected differently from the slate it
+              -- corrects would be a third board.
+              AND t.paused = FALSE
+              AND p.model_probability >= t.min_prob
+              AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR p.dk_odds IS NULL
+                   OR p.dk_odds >= t.min_odds)
+            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
+                     p.created_at
+        )
+        SELECT * FROM bet ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
@@ -926,6 +941,15 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
     Only reaches messages whose id was CAPTURED at post time. Anything posted
     before message_id existed keeps NULL and is left alone rather than guessed
     at — which is exactly why the 2026-08-28 slate has to be cleared by hand.
+
+    RESOLVES THE DATE AND SPORT THROUGH `picks`, not `opening_signals`
+    (2026-09-05), for the same reason _locked_signals now does: this is the
+    delete half of a restatement, and it has to reach every message the
+    restatement replaces. Joined to the capture table it could only ever find
+    the CAPTURED ones, so an uncaptured pick's stale post would survive the
+    correction and the channel would end up showing both numbers -- the worst
+    of the three outcomes, and the one nobody would look for. The join is on
+    the synthesised lock_key, the same key push_sent was ledgered under.
     """
     url = _webhook_for_sport(sport)
     if not url:
@@ -934,11 +958,13 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
         rows = conn.execute("""
             SELECT DISTINCT ps.message_id
               FROM push_sent ps
-              JOIN opening_signals os ON os.lock_key = ps.lock_key
+              JOIN picks p
+                ON ps.lock_key = p.game_id || ':' || p.model_id
+                                 || COALESCE(':' || p.player_id, '')
              WHERE ps.kind = %s
                AND ps.message_id IS NOT NULL
-               AND os.game_date = %s
-               AND os.sport = %s
+               AND p.game_date = %s
+               AND p.sport = %s
         """, (kind, target_date, sport)).fetchall()
     except Exception as exc:  # noqa: BLE001 — the column may not exist yet
         logger.warning(f"Discord: cannot read message ids ({exc}); "
