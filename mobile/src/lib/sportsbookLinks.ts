@@ -22,7 +22,11 @@ import { colors } from '@/lib/theme';
 /** Where each book's betslip link can fall back to when we have no link. */
 interface BookApp {
   /** Custom URL scheme, when we have a verified one. Others fall through to web
-   *  rather than guessing a scheme that would silently fail. */
+   *  rather than guessing a scheme that would silently fail. A scheme here is
+   *  also how the app learns whether the book is INSTALLED — but only if the
+   *  build declares it in app.json's `LSApplicationQueriesSchemes` (iOS
+   *  answers `canOpenURL` for no other scheme). verify_book_links.ts pins
+   *  that every scheme below is declared there. */
   scheme: string | null;
   web: string;
   /** Store page — only carried for books whose listing we've verified. */
@@ -131,22 +135,63 @@ async function tryOpen(url: string, isScheme = false): Promise<boolean> {
 }
 
 /**
+ * Is the book's app on this phone? `true` / `false` when the build can ask,
+ * `null` when it cannot — and an unknown is NOT a no.
+ *
+ * iOS answers `canOpenURL` for a custom scheme only when the scheme is
+ * declared in the build's `LSApplicationQueriesSchemes` (app.json), and
+ * answers `false` — indistinguishable from "not installed" — for any other.
+ * So the question is asked only for books with a verified scheme, on iOS,
+ * and verify_book_links.ts pins that every such scheme is declared. Android
+ * needs a `<queries>` element the app does not declare, so it stays unknown
+ * there. (Matt, 2026-09-05: "If I have the app for that Sportsbook, it should
+ * just open my app.")
+ */
+export async function isBookAppInstalled(book: string): Promise<boolean | null> {
+  const scheme = BOOK_APPS[book]?.scheme;
+  if (!scheme || Platform.OS !== 'ios') return null;
+  try {
+    return await Linking.canOpenURL(scheme);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Open a pre-filled betslip at `book`.
  *
- * Fallback chain: the betslip link (placeholders filled) → the book's app
- * (where we have a verified scheme) → its App Store page → the book's
- * website. Returns true once something opened.
+ * Whether the book's app is installed decides the route when the build can
+ * tell (`isBookAppInstalled`):
  *
- * WHAT CANNOT BE DETECTED: whether the app is installed. iOS answers
- * canOpenURL only for schemes declared in LSApplicationQueriesSchemes, and the
- * build declares none, so a filled universal link is opened and iOS itself
- * decides — the app when it is installed, Safari when it is not. The hand-off
- * sheet therefore also offers the store page outright (ParlayDkHandoff).
+ *   installed  → the betslip link (a universal link iOS routes to the app,
+ *                with the bet on the slip), else the app itself by its
+ *                scheme, else the book's site. Never the App Store: a member
+ *                who has the app is sent to a page whose only button is
+ *                "Open" (Matt, 2026-09-05, with that page on screen).
+ *   not        → the App Store, whatever link we hold — the bet is not
+ *                placeable without the app (Matt, 2026-09-04) — else the site.
+ *   unknown    → link → store → site, the pre-detection chain: a filled
+ *                universal link opens the app when it is there and Safari
+ *                when it is not, and with no link the store is where a member
+ *                without the app needs to be. The hand-off sheet also offers
+ *                the store outright in this case (ParlayDkHandoff).
+ *
+ * Returns true once something opened.
  */
 export async function openBookBetslip(
   book: string,
   link: string | null | undefined,
 ): Promise<boolean> {
+  const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
+  const installed = await isBookAppInstalled(book);
+
+  if (installed === false) {
+    const store = bookStoreUrl(book);
+    if (store && (await tryOpen(store))) return true;
+    if (await tryOpen(app.web)) return true;
+    return couldNotOpen(book);
+  }
+
   if (link && link.trim()) {
     const filled = fillBetslipLink(link, getBettingState());
     if (filled) {
@@ -164,16 +209,24 @@ export async function openBookBetslip(
     }
   }
 
-  const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
-  if (app.scheme && (await tryOpen(app.scheme, true))) return true;
-  // No usable link and no app scheme we can query: the STORE before the site.
-  // A member who has the app sees its page with "Open"; one who does not is
-  // where they need to be to get it (Matt, 2026-09-04) — the book's web root
-  // helps neither, since the bet is not on it.
+  if (installed === true) {
+    if (app.scheme && (await tryOpen(app.scheme, true))) return true;
+    if (await tryOpen(app.web)) return true;
+    return couldNotOpen(book);
+  }
+
+  // Unknown: the scheme cannot be queried on this build, so it is not tried.
+  // The STORE before the site — a member who has the app sees its page with
+  // "Open"; one who does not is where they need to be to get it (Matt,
+  // 2026-09-04) — the book's web root helps neither, since the bet is not on
+  // it.
   const store = bookStoreUrl(book);
   if (store && (await tryOpen(store))) return true;
   if (await tryOpen(app.web)) return true;
+  return couldNotOpen(book);
+}
 
+function couldNotOpen(book: string): false {
   Alert.alert(
     `Could not open ${bookName(book)}`,
     `We couldn’t open the ${bookName(book)} app or website on this device.`,

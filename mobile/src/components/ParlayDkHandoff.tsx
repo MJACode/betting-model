@@ -3,6 +3,7 @@ import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 
 import { useBettingState } from '@/hooks/useBettingState';
+import { useBookAppInstalled } from '@/hooks/useBookAppInstalled';
 import { bookButtonColors, bookStoreUrl, openBookBetslip, openBookStore } from '@/lib/sportsbookLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
@@ -45,6 +46,9 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
   const { state } = useBettingState();
   const store = bookStoreUrl(book, state);
   const btn = bookButtonColors(book);
+  // true / false when the build can ask iOS, null when it cannot (or while
+  // the answer loads). The store row is hidden only on a definite yes.
+  const installed = useBookAppInstalled(book);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -75,11 +79,12 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
             <Ionicons name="open-outline" size={18} color={btn.fg} />
             <Text style={[styles.openBtnText, { color: btn.fg }]}>Open in {name}</Text>
           </Pressable>
-          {/* The app cannot tell whether the book is installed (see
-              openBookBetslip), so the store is offered outright: "If I don't
-              have the Sportsbook for one of them it should take me to the App
-              Store to download it" (Matt, 2026-09-04). */}
-          {store ? (
+          {/* "If I don't have the Sportsbook for one of them it should take me
+              to the App Store to download it" (Matt, 2026-09-04). Offered
+              outright unless the build can tell the app IS installed
+              (useBookAppInstalled) — a member with the app has no use for the
+              store, and an unknown is not a no. */}
+          {store && installed !== true ? (
             <Pressable
               onPress={() => {
                 void openBookStore(book, state);

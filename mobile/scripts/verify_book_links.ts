@@ -62,9 +62,28 @@ check('...and the alert is the whole answer — no fall-through to the store or 
 const states = read('src/hooks/useBettingState.ts');
 check('Missouri is a state (BetMGM and Caesars live there since 2025-12-01)', states.includes("{ code: 'mo', name: 'Missouri' }"));
 check('Delaware is absent on purpose, with the reason', !states.includes("code: 'de'") && states.includes('delawarepark.betrivers.com'));
-const chain = src.slice(src.indexOf('export async function openBookBetslip'), src.indexOf('export function openBetslip'));
+const chain = src.slice(src.indexOf('export async function openBookBetslip'), src.indexOf('function couldNotOpen'));
 const at = (needle: string) => chain.indexOf(needle);
-check('the chain is link → scheme → store → site', at('fillBetslipLink') < at('app.scheme') && at('app.scheme') < at('bookStoreUrl(book)') && at('bookStoreUrl(book)') < at('tryOpen(app.web)'));
+
+// ── installed-app detection (Matt, 2026-09-05: "If I have the app for that
+// Sportsbook, it should just open my app") ──────────────────────────────────
+const appJson = JSON.parse(read('app.json')) as { expo: { version: string; ios: { infoPlist: Record<string, unknown> } } };
+const declared = (appJson.expo.ios.infoPlist.LSApplicationQueriesSchemes ?? []) as string[];
+const schemes = Array.from(src.matchAll(/scheme: '([a-z0-9]+):\/\/'/g), (m) => m[1]!);
+check('at least one book carries a scheme to query', schemes.length >= 1, schemes.join(','));
+for (const sch of schemes) {
+  check(`${sch}:// is declared in LSApplicationQueriesSchemes — iOS answers canOpenURL for no other scheme`, declared.includes(sch), `declared: ${declared.join(',') || '(none)'}`);
+}
+check('the declaration is a native change, so the app version moved off 1.0.0 (OTA cannot carry it; the guard in mobile-ota.yml refuses)', appJson.expo.version !== '1.0.0', appJson.expo.version);
+check('installed? is asked only for a book with a scheme, on iOS, and an unknown is null', src.includes("if (!scheme || Platform.OS !== 'ios') return null;"));
+check('the question is asked before anything opens', at('isBookAppInstalled(book)') >= 0 && at('isBookAppInstalled(book)') < at('fillBetslipLink'));
+const notInstalled = chain.slice(at('installed === false'), at('if (link && link.trim())'));
+check('not installed → the App Store, whatever link we hold, then the site — never the app', notInstalled.includes('bookStoreUrl(book)') && notInstalled.includes('tryOpen(app.web)') && !notInstalled.includes('fillBetslipLink') && !notInstalled.includes('app.scheme'));
+const isInstalled = chain.slice(at('installed === true'), at('// Unknown'));
+check('installed → the link first, then the app by its scheme, then the site — never the App Store', at('fillBetslipLink') < at('installed === true') && isInstalled.includes('app.scheme') && isInstalled.includes('tryOpen(app.web)') && !isInstalled.includes('bookStoreUrl'));
+const unknown = chain.slice(at('// Unknown'));
+check('unknown → link → store → site (the scheme is not tried: it cannot be queried)', unknown.includes('bookStoreUrl(book)') && unknown.indexOf('bookStoreUrl(book)') < unknown.indexOf('tryOpen(app.web)') && !unknown.includes('app.scheme'));
+check('the hook exists for surfaces that offer the store', read('src/hooks/useBookAppInstalled.ts').includes('isBookAppInstalled(book)'));
 for (const b of BETTABLE_BOOKS) {
   // The entry: from `  book: {` to its closing `},` (DraftKings spans lines).
   const from = src.indexOf(`  ${b}: {`);
@@ -79,6 +98,7 @@ for (const b of BETTABLE_BOOKS) {
 check('every store id is a numeric Apple id (nothing hand-typed)', (src.match(/ios\('id(\d+)'\)/g) ?? []).length >= 8 && !/ios\('id[^\d']/.test(src));
 const handoff = read('src/components/ParlayDkHandoff.tsx');
 check('the hand-off sheet offers the store outright, through the same failure path as the bet button', handoff.includes('on the App Store') && handoff.includes('openBookStore(book, state)') && handoff.includes('useBettingState()'));
+check('...except when the build knows the app IS installed (an unknown still shows it)', handoff.includes('useBookAppInstalled(book)') && handoff.includes('store && installed !== true ?'));
 
 // ── the state setting exists and is reachable ────────────────────────────────
 const settings = read('src/screens/SettingsScreen.tsx');
