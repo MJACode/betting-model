@@ -115,6 +115,25 @@ check('an empty board cannot discriminate', hitRateColorDiscriminates([]) === fa
 check('two rows either side of 0.6 are coloured',
   hitRateColorDiscriminates([0.61, 0.59]) === true);
 
+console.log('\n— the unpriced note names the league, and the group when the group is empty —');
+const screen = read('src/screens/StatsScreen.tsx');
+// The claim "no sportsbook posts this" was true while a column unpriced here
+// was unpriced everywhere. College carries and sacks broke that: the NFL
+// prices both, so an unscoped sentence is one the user can disprove two taps
+// away on the other football board.
+check('the note names the sport',
+  screen.includes('`No sportsbook posts ${sport} ${stat.label} lines.`'));
+check('and says it once about the group when the whole group is unpriced',
+  screen.includes('`No sportsbook posts ${sport} ${stat.group.toLowerCase()} lines.`') &&
+    screen.includes('.every((s) => propMarketForStat(s) == null)'));
+check('no unscoped claim survives',
+  !screen.includes('`No sportsbook posts ${stat.label} lines.`'));
+// The direction pill outlives the price on an unpriced column, so its
+// VoiceOver label must not be the one place left promising a bet.
+check('the direction pill no longer says "bets" to VoiceOver',
+  screen.includes('accessibilityLabel="Threshold direction"') &&
+    !screen.includes('accessibilityLabel="Show bets that are"'));
+
 console.log('\n— a slip of only Stats lines does not claim a model —');
 const parlay = read('src/screens/ParlayScreen.tsx');
 check('the tile is labelled from modelBacked',

@@ -21,6 +21,36 @@
 
 ---
 
+## [ ] Nothing tells us when a market we pruned starts being priced
+
+Found 2026-09-05 (session 235), in the UX review of the college prop prune.
+
+`FOOTBALL_MARKET_NOT_PRICED` (mobile) and the pruned entries in
+`config.PROP_MARKETS_NCAAF` / `PROP_ALT_MARKETS['NCAAF']` are a hand-maintained
+mirror of one coverage probe. **They are measurements with no drift
+detection.** If college books start posting carries or sacks mid-season —
+plausible; the pro market prices both — nothing notices. We stop asking, so no
+rows appear; no rows appear, so nobody looks. The column stays dark until a
+person happens to re-run `scripts/probe_market_coverage.py`.
+
+Same shape as the gap the probe was built to close (CLAUDE.md §1b: the current
+state of a system is not its capability), one level up: we have now written our
+belief about the market into config, where it will age silently.
+
+**Cheap version:** a scheduled job that re-probes each sport's pruned keys
+weekly — one market per call, a handful of credits — and posts to Discord when
+one comes back served. The probe already reports exactly this and writes
+nothing; it needs a caller and a comparison against the pruned list.
+
+**Related, same session, same file to touch:** neither prop ingestor writes to
+`api_call_log` (both use bare `requests.get` with only `record_quota_headers`),
+so **prop credit spend is invisible in that table for every sport**. Today's
+590-credit college pass had to be read out of the Railway worker log. Worth
+doing at the same time — both are about a measurement that exists nowhere
+queryable. Detail in `docs/market_coverage.md`.
+
+---
+
 ## [ ] [needs-decision] The pre-game line poller deletes a game's non-BET PROP picks
 
 Found 2026-09-03 (session 185) while tracing why the Stats board's ODDS column

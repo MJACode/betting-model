@@ -193,10 +193,18 @@ check(
 
   // The trigger is a pop-up button: label / value / hint, a menu glyph, and a
   // target that clears 44pt with its slop.
+  // Asserted as a SHAPE, not as three literal strings: the label was
+  // "Show bets that are" until the college prune left this control alive on
+  // columns with no bet at all, and the wording is allowed to keep moving.
+  // What must not move is that all three parts are present and the label does
+  // not promise a wager.
   check('the trigger announces itself as a pop-up button',
-    screen.includes('accessibilityLabel="Show bets that are"')
-      && screen.includes('accessibilityValue={{ text: hitModeLabel(hitMode) }}')
-      && screen.includes('accessibilityHint="Opens the At Least, Over, Under options"'));
+    (() => {
+      const label = /accessibilityLabel="([^"]+)"\s*\n\s*accessibilityValue=\{\{ text: hitModeLabel\(hitMode\) \}\}/
+        .exec(screen)?.[1];
+      return !!label && !/\bbets?\b/i.test(label)
+        && screen.includes('accessibilityHint="Opens the At Least, Over, Under options"');
+    })());
   check('it carries a menu glyph and a real hit target',
     screen.includes('name="chevron-expand"')
       && /onPress=\{\(\) => setModeOpen\(true\)\}\s*\n\s*hitSlop=/.test(screen));

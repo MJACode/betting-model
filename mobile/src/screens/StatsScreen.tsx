@@ -732,10 +732,34 @@ export function StatsScreen() {
   // sportsbooks ›" tail, which is the one action that lifts the lock. It sits
   // LAST because it is the mildest of these states: the column is priced, just
   // on one side only.
+  //
+  // THE NOTE NAMES THE LEAGUE, and that is not decoration. Until 2026-09-05 a
+  // column unpriced here was unpriced everywhere, so a flat "no sportsbook
+  // posts this" was true. Then college books turned out not to price carries
+  // or sacks while the NFL prices both, and the same sentence about the same
+  // word became something the user can disprove two taps away on the other
+  // football board — which makes the APP look wrong rather than the market
+  // look thin (UX review, 2026-09-05). Every sport gets the league word; it
+  // costs the others nothing and it is true for all of them.
+  //
+  // And when the whole active GROUP is unpriced it is said once, about the
+  // group. College defence is 0 of 6 after that same prune, so walking the
+  // Defense chips otherwise produces six identical sentences, which is how a
+  // reader learns to stop reading them.
+  const groupUnpriced =
+    stat != null &&
+    statsForSport(sport)
+      .filter((s) => s.group === stat.group)
+      .every((s) => propMarketForStat(s) == null);
   const noLinesNote: { text: string; canSwitch: boolean } | null =
     propMarket == null
       ? stat != null && sportHasAnyPropMarket(sport)
-        ? { text: `No sportsbook posts ${stat.label} lines.`, canSwitch: false }
+        ? {
+            text: groupUnpriced
+              ? `No sportsbook posts ${sport} ${stat.group.toLowerCase()} lines.`
+              : `No sportsbook posts ${sport} ${stat.label} lines.`,
+            canSwitch: false,
+          }
         : null
       : propLines.status !== 'ok' || slateGameIds.size === 0
         ? null
@@ -1179,7 +1203,12 @@ export function StatsScreen() {
               onPress={() => setModeOpen(true)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
-              accessibilityLabel="Show bets that are"
+              // Not "Show bets that are": this control survives on a column
+              // with no line at all (NCAAF carries, sacks), where it is the
+              // only place left that would still say "bets" (UX review,
+              // 2026-09-05). The threshold is what it actually sets, priced
+              // or not.
+              accessibilityLabel="Threshold direction"
               accessibilityValue={{ text: hitModeLabel(hitMode) }}
               accessibilityHint="Opens the At Least, Over, Under options"
               style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}

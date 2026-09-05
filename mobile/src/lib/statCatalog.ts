@@ -280,9 +280,25 @@ const FOOTBALL_STAT_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = 
  * have blanked two working pro columns to fix two dead college ones.
  *
  * This is a MEASUREMENT, and it is reversible: if college books start posting
- * carries, the entry comes out and the column fills.
+ * carries or sacks, the entry comes out and the column fills.
+ *
+ * NOT HERE, DELIBERATELY: a market we chose not to PULL. The constant is named
+ * for what a probe found — we asked and no book answered — but its mechanism
+ * is "drop the LINE column", and the two come apart the first time someone
+ * stops ingesting a market they could have had, for credits, for latency, or
+ * for a 422 nobody chased. An entry added for THAT reason would make the
+ * board's own caption ("No sportsbook posts NCAAF … lines.") a lie about the
+ * books, silently, with nothing failing. A market we simply do not pull leaves
+ * this map alone and shows the empty state it has earned.
+ *
+ * Keyed by `Sport`, not `string`, and valued by real column keys: both typos
+ * this map invites — `NCAA` for `NCAAF`, and `sacks` for `def_sacks`, which is
+ * tempting because the board's LABEL really is "Sacks" — compile fine as
+ * strings, do nothing, and present as the exact bug this exists to remove.
  */
-const FOOTBALL_MARKET_NOT_PRICED: Record<string, ReadonlyArray<string>> = {
+const FOOTBALL_MARKET_NOT_PRICED: Partial<
+  Record<Extract<Sport, 'NFL' | 'NCAAF'>, ReadonlyArray<keyof SeasonTotalsRow>>
+> = {
   NCAAF: ['carries', 'def_sacks'],
 };
 
@@ -339,7 +355,9 @@ export function propMarketForStat(def: StatDef | null): string | null {
   // is the whole answer for both, and returning early keeps a shared column
   // key (passing_yards) from ever resolving through some other sport's model.
   if (def.sport === 'NCAAF' || def.sport === 'NFL') {
-    if (FOOTBALL_MARKET_NOT_PRICED[def.sport]?.includes(def.key)) return null;
+    if (FOOTBALL_MARKET_NOT_PRICED[def.sport as 'NFL' | 'NCAAF']?.includes(def.key)) {
+      return null;
+    }
     return FOOTBALL_STAT_TO_MARKET[def.key] ?? null;
   }
   const id = rawPropModelForStat(def);
