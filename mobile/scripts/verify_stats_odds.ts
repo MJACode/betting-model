@@ -42,6 +42,7 @@ import {
 } from '../src/lib/statsOdds';
 import type { EnrichedPick, GameRow, OddsByBookRow, PropOddsByBookRow } from '../src/types';
 import { alternateMarketFor, canonicalPropMarket, foldAlternateRows, isAlternateMarket, propLineRowKey } from '../src/lib/propLines';
+import { thresholdLabel } from '../src/lib/hitMode';
 
 const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 let failures = 0;
@@ -425,7 +426,10 @@ check(
   );
   check('an off-line row prices the side it posts even with the other side missing', under.get('george springer')?.price === 230);
   const stats = read('src/screens/StatsScreen.tsx');
-  check('the pill prints the off-line number under the price, in the board\'s idiom', stats.includes('const caption = quote.offLine ? offLineCaption(quote.line, quote.side) : null;') && stats.includes("return side === 'under' ? `At most ${line - 0.5}` : `${line + 0.5}+`;"));
+  check('the pill prints the off-line number under the price, in the board\'s idiom',
+    stats.includes('const caption = quote.offLine ? offLineCaption(quote.line, quote.side) : null;')
+      && thresholdLabel(1.5, 'over') === '2+'
+      && thresholdLabel(1.5, 'under') === '1 or fewer');
   check('VoiceOver hears that it is the book\'s own line', stats.includes('the book’s own line, not the board’s'));
   check('a live or finished game says Live / Final, not a dash', stats.includes('<Text style={styles.oddsStarted}>{started}</Text>') && stats.includes("kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null"));
   check('a doubleheader team with a game still to come gets no label', stats.includes('pending.forEach((t) => out.delete(t));'));

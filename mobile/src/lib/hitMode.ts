@@ -70,8 +70,44 @@ export function hitModeHeadline(n: number, mode: HitMode, statLabel: string): st
   const label = statLabel.trim();
   if (mode === 'over') return `${n + 1}+ ${label}`.trim();
   if (mode === 'under') {
-    // "At most 0 Hits" is nobody's phrasing for it.
-    return n <= 1 ? `No ${label}`.trim() : `At most ${n - 1} ${label}`.trim();
+    // "N or fewer", the exact mirror of "N+" ("N or more"), and it keeps the
+    // stat label PLURAL. Singularising was the obvious alternative and does
+    // not survive this label set — "3PM", "PRA", "RBI", "Total Bases",
+    // "Passes Defended" — so the sentence bends instead of the noun
+    // (UX review, 2026-09-05). "0 or fewer" is nobody's phrasing, hence "No".
+    return n <= 1 ? `No ${label}`.trim() : `${thresholdLabel(n - 0.5, 'under')} ${label}`.trim();
   }
   return `${n}+ ${label}`.trim();
+}
+
+/**
+ * The book's own name for the same bet — "Over 1.5", "Under 1.5".
+ *
+ * The headline speaks the fan's idiom ("2+ Hits") because the price beside it
+ * and the betslip explainer are both written that way. But with the ruler on
+ * 1 and the headline on "2+", the number that connects them — 1.5 — appeared
+ * nowhere, and a mode whose effect you have to derive reads as a mode that
+ * did nothing (UX review, 2026-09-05). This is that number, shown beside the
+ * headline, not instead of it.
+ */
+export function hitModeLineLabel(n: number, mode: HitMode): string {
+  const { line, side } = selectionFor(n, mode);
+  return `${side === 'under' ? 'Under' : 'Over'} ${line}`;
+}
+
+/**
+ * "2+" / "1 or fewer" — the board's own way of naming a whole-number
+ * threshold, given a half-point line and a side.
+ *
+ * ONE home for the idiom, because three places speak it: this module's
+ * headline, the Stats pill's off-line caption, and the add-to-betslip
+ * explainer that quotes both in a single sentence. They disagreed the moment
+ * one of them changed (UX review, 2026-09-05), so they share this instead.
+ *
+ * The stat label always stays PLURAL — "1 or fewer Hits", never "1 or fewer
+ * Hit" — because no strip-the-s rule survives "3PM", "PRA", "RBI", "Total
+ * Bases" or "Passes Defended".
+ */
+export function thresholdLabel(line: number, side: HitDirection): string {
+  return side === 'under' ? `${line - 0.5} or fewer` : `${line + 0.5}+`;
 }

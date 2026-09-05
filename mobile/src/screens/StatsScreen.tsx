@@ -54,7 +54,7 @@ import {
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
 import { computeHitRate } from '@/lib/hitRate';
-import { hitModeHeadline, hitModeLabel, selectionFor, type HitMode } from '@/lib/hitMode';
+import { hitModeHeadline, hitModeLabel, hitModeLineLabel, selectionFor, thresholdLabel, type HitMode } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
@@ -202,13 +202,6 @@ function defaultLineN(def: StatDef | null): number {
 function maxLineN(def: StatDef | null): number {
   return Math.max(10, defaultLineN(def) * 3);
 }
-
-/**
- * Ruler value → the continuous line the hit-rate math uses.
- *   at least N  →  value > N-0.5  ⇔  value >= N
- *   at most  N  →  value < N+0.5  ⇔  value <= N
- */
-
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
@@ -937,23 +930,35 @@ export function StatsScreen() {
           <View style={styles.lineRow}>
             <Pressable
               onPress={() => setModeOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
-              accessibilityLabel={`Show bets that are ${hitModeLabel(hitMode)}. Change`}
+              accessibilityLabel="Show bets that are"
+              accessibilityValue={{ text: hitModeLabel(hitMode) }}
+              accessibilityHint="Opens the At Least, Over, Under options"
               style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
             >
-              <Text style={styles.dirPillText}>{hitModeLabel(hitMode)}</Text>
-              <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
+              <Text style={styles.dirPillText} numberOfLines={1}>
+                {hitModeLabel(hitMode)}
+              </Text>
+              {/* chevron-expand, not chevron-down: this opens a menu in place,
+                  it does not navigate. */}
+              <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
             </Pressable>
             <LineRuler
               value={lineN}
               min={1}
-              max={maxLineN(stat)}
+              max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}
               onChange={setLineN}
+              a11yLabel={`${stat?.label ?? ''} line`}
             />
           </View>
           <View style={styles.headlineRow}>
             <View style={styles.headlineRule} />
             <Text style={styles.headlineText}>{lineHeadline}</Text>
+            {/* The book's own name for the same bet. Without it the ruler says
+                1, the headline says "2+" and the number joining them is
+                nowhere on screen (UX review). */}
+            <Text style={styles.headlineLine}>{hitModeLineLabel(lineN, hitMode)}</Text>
             <View style={styles.headlineRule} />
           </View>
         </>
@@ -1376,7 +1381,9 @@ function LineRuler({
   min,
   max,
   onChange,
+  a11yLabel,
 }: {
+  a11yLabel: string;
   value: number;
   min: number;
   max: number;
@@ -1431,7 +1438,25 @@ function LineRuler({
   };
 
   return (
-    <View style={styles.rulerWrap} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+    // ONE adjustable element, not N tick buttons. VoiceOver gets the number
+    // as a value it can increment and decrement; the ticks themselves are
+    // decoration and are hidden from it. This matters more since the mode
+    // landed: in Under mode the ruler's number and the headline's deliberately
+    // differ by one, so a screen-reader user who cannot reach the ruler cannot
+    // tell which bet the board is on (UX review, 2026-09-05).
+    <View
+      style={styles.rulerWrap}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={a11yLabel}
+      accessibilityValue={{ min, max, now: value, text: String(value) }}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={(e) => {
+        const next = e.nativeEvent.actionName === 'increment' ? value + 1 : value - 1;
+        if (next >= min && next <= max) pickTick(next);
+      }}
+    >
       {width > 0 ? (
         <ScrollView
           ref={scrollRef}
@@ -1448,7 +1473,13 @@ function LineRuler({
             const v = min + i;
             const labeled = v % labelEvery === 0 || v === min || v === max;
             return (
-              <Pressable key={v} onPress={() => pickTick(v)} style={[styles.tickCol, { width: tickW }]}>
+              <Pressable
+                key={v}
+                onPress={() => pickTick(v)}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={[styles.tickCol, { width: tickW }]}
+              >
                 <View style={[styles.tick, labeled && styles.tickMajor]} />
                 {/* The label is wider than its tick column — centre it with a
                     negative margin so it can't clip, and only label ticks far
@@ -1536,7 +1567,7 @@ function matchupTierWord(tier: MatchupInfo['tier']): string {
  * player). */
 /** "2+" for over 1.5, "At most 1" for under 1.5 — lineHeadline's idiom. */
 export function offLineCaption(line: number, side: StatsOddsSide): string {
-  return side === 'under' ? `At most ${line - 0.5}` : `${line + 0.5}+`;
+  return thresholdLabel(line, side);
 }
 
 function OddsCell({
@@ -2014,6 +2045,7 @@ const styles = StyleSheet.create({
     borderColor: colors.separator,
   },
   dirPillText: {
+    flexShrink: 1,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
@@ -2088,6 +2120,10 @@ const styles = StyleSheet.create({
     flex: 1,
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.separator,
+  },
+  headlineLine: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
   },
   headlineText: {
     fontSize: font.size.headline,

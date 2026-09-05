@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { computeHitRate, hitFlags, isHit } from '../src/lib/hitRate';
-import { HIT_MODES, hitModeHeadline, selectionFor, type HitMode } from '../src/lib/hitMode';
+import { HIT_MODES, hitModeHeadline, hitModeLineLabel, selectionFor, type HitMode } from '../src/lib/hitMode';
 
 const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 import { STAT_CATALOG, defaultThresholdFor, type StatDef } from '../src/lib/statCatalog';
@@ -103,8 +103,8 @@ check(
     [1, 'under',   0.5, 'under', 'No Hits'],
     [2, 'atLeast', 1.5, 'over', '2+ Hits'],
     [2, 'over',    2.5, 'over', '3+ Hits'],
-    [2, 'under',   1.5, 'under', 'At most 1 Hits'],
-    [3, 'under',   2.5, 'under', 'At most 2 Hits'],
+    [2, 'under',   1.5, 'under', '1 or fewer Hits'],
+    [3, 'under',   2.5, 'under', '2 or fewer Hits'],
   ];
   for (const [n, mode, line, side, headline] of cases) {
     const sel = selectionFor(n, mode);
@@ -159,6 +159,62 @@ check(
   check('each row previews the bet it would make, since the modes overlap',
     sheet.includes('hitModeHeadline(lineN, m.mode, statLabel)'));
   check('the rows are radios to VoiceOver', sheet.includes('accessibilityRole="radio"'));
+
+  // ── the UX review's fixes ────────────────────────────────────────────────
+  // The headline speaks the fan's idiom; the book's number for the same bet
+  // sits beside it, so the step from "ruler 1 + Over" to "2+ Hits" is on
+  // screen instead of in the user's head.
+  check('the book\'s own line is shown beside the headline',
+    hitModeLineLabel(1, 'atLeast') === 'Over 0.5'
+      && hitModeLineLabel(1, 'over') === 'Over 1.5'
+      && hitModeLineLabel(1, 'under') === 'Under 0.5',
+    [1, 2].map((n) => hitModeLineLabel(n, 'over')).join());
+  check('and the screen renders it', screen.includes('hitModeLineLabel(lineN, hitMode)'));
+
+  // "N or fewer" keeps the stat label plural, which singularising cannot:
+  // "3PM", "PRA", "RBI", "Total Bases" defeat every strip-the-s rule.
+  check('the under idiom never disagrees with its own noun',
+    hitModeHeadline(2, 'under', 'Hits') === '1 or fewer Hits'
+      && hitModeHeadline(2, 'under', 'Total Bases') === '1 or fewer Total Bases');
+  check('the idiom has ONE home, so the three places cannot disagree',
+    read('src/lib/hitMode.ts').includes('export function thresholdLabel(')
+      && screen.includes('return thresholdLabel(line, side);')
+      && read('src/lib/lineLegs.ts').includes('thresholdLabel(quote.line, quote.side)')
+      && !/`\$\{[^}]*- 0\.5\} or fewer`/.test(screen + read('src/lib/lineLegs.ts')));
+
+  // A selected row must not change size in a three-row list built for
+  // comparison, and the preview is the reason the row exists.
+  check('the selected row reserves its border rather than adding one',
+    /borderWidth: 1\.5,\s*\n\s*borderColor: 'transparent',/.test(sheet)
+      && sheet.includes('rowActive: { borderColor: colors.bet }'));
+  check('the preview cannot be the thing that truncates',
+    sheet.includes('<Text style={styles.rowPreview}>{preview}</Text>')
+      && !/rowPreview[^\n]*numberOfLines/.test(sheet));
+
+  // The trigger is a pop-up button: label / value / hint, a menu glyph, and a
+  // target that clears 44pt with its slop.
+  check('the trigger announces itself as a pop-up button',
+    screen.includes('accessibilityLabel="Show bets that are"')
+      && screen.includes('accessibilityValue={{ text: hitModeLabel(hitMode) }}')
+      && screen.includes('accessibilityHint="Opens the At Least, Over, Under options"'));
+  check('it carries a menu glyph and a real hit target',
+    screen.includes('name="chevron-expand"')
+      && /onPress=\{\(\) => setModeOpen\(true\)\}\s*\n\s*hitSlop=/.test(screen));
+
+  // The ruler is ONE adjustable element, not N unlabelled tick buttons —
+  // and in Under mode its number deliberately differs from the headline's.
+  check('the ruler is adjustable by VoiceOver',
+    screen.includes('accessibilityRole="adjustable"')
+      && screen.includes("accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}"));
+  check('its ticks are decoration', /accessibilityElementsHidden[\s\S]{0,120}styles\.tickCol/.test(screen));
+
+  // Under mode costs a notch at the top; the ruler gives it back.
+  check('the ruler reaches the old At Most ceiling in under mode',
+    screen.includes("max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}"));
+
+  // The JSDoc of the deleted lineFor() documented the OLD mapping.
+  check('no stale mapping comment survives the deleted helper',
+    !screen.includes('at most  N  →  value < N+0.5'));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

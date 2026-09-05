@@ -49,7 +49,8 @@ export function HitModeSheet({
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Which side of {lineN} the board is about. The line and the price follow.
+            At Least {lineN} counts games with {lineN} or more. Over {lineN} counts{' '}
+            {lineN + 1} or more. The line and the price follow.
           </Text>
           <View style={styles.list}>
             {HIT_MODES.map((m) => {
@@ -67,10 +68,10 @@ export function HitModeSheet({
                   accessibilityLabel={`${m.label} ${lineN}, that is ${preview}`}
                   style={({ pressed }) => [styles.row, active && styles.rowActive, pressed && styles.pressed]}
                 >
-                  <Text style={styles.rowName}>{m.label}</Text>
-                  <Text style={styles.rowPreview} numberOfLines={1}>
-                    {preview}
-                  </Text>
+                  <View style={styles.rowBody}>
+                    <Text style={styles.rowName}>{m.label}</Text>
+                    <Text style={styles.rowPreview}>{preview}</Text>
+                  </View>
                   {active ? (
                     <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
                   ) : (
@@ -126,9 +127,15 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: radii.md,
     backgroundColor: colors.bgCard,
+    // Reserved, not added on selection: a border that appears would make the
+    // chosen row 3pt taller than its neighbours in a three-row list whose
+    // whole point is comparing them (StatePickerSheet does the same).
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
-  rowActive: { borderWidth: 1.5, borderColor: colors.bet },
-  rowName: { flex: 1, fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  rowActive: { borderColor: colors.bet },
+  rowBody: { flex: 1, gap: 2 },
+  rowName: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
   rowPreview: { fontSize: font.size.footnote, color: colors.textSecondary },
   emptyCircle: {
     width: 22,
