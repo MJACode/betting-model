@@ -19,6 +19,7 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { HitModeSheet } from '@/components/HitModeSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
@@ -55,7 +56,8 @@ import {
   type BookSideCoverage,
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
-import { computeHitRate, type HitDirection } from '@/lib/hitRate';
+import { computeHitRate } from '@/lib/hitRate';
+import { hitModeHeadline, hitModeLabel, hitModeLineLabel, selectionFor, thresholdLabel, type HitMode } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
@@ -204,15 +206,6 @@ function maxLineN(def: StatDef | null): number {
   return Math.max(10, defaultLineN(def) * 3);
 }
 
-/**
- * Ruler value → the continuous line the hit-rate math uses.
- *   at least N  →  value > N-0.5  ⇔  value >= N
- *   at most  N  →  value < N+0.5  ⇔  value <= N
- */
-function lineFor(n: number, direction: HitDirection): number {
-  return direction === 'over' ? n - 0.5 : n + 0.5;
-}
-
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<StatsRoute>();
@@ -237,9 +230,13 @@ export function StatsScreen() {
   const [query, setQuery] = useState<string>('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('default');
-  // Hit Rate controls (front page): integer line + at least / at most.
+  // Hit Rate controls (front page): a whole-number ruler, plus which side of
+  // it the bet is on. The ruler starts at 1 for every mode: "at least 0" is
+  // every game, and "under 0" is fewer than none, which no game can be and no
+  // book prices (lib/hitMode.ts).
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
-  const [direction, setDirection] = useState<HitDirection>('over');
+  const [hitMode, setHitMode] = useState<HitMode>('atLeast');
+  const [modeOpen, setModeOpen] = useState<boolean>(false);
   const [minHitRate, setMinHitRate] = useState<string>('');
   const [maxHitRate, setMaxHitRate] = useState<string>('');
 
@@ -392,7 +389,10 @@ export function StatsScreen() {
     setLineN(defaultLineN(s));
   };
 
-  const line = useMemo(() => lineFor(lineN, direction), [lineN, direction]);
+  // The bet the board is about: a half-point line and a side. Everything
+  // downstream — the hit rate, the odds cell, the betslip leg — reads these
+  // two and never the mode (lib/hitMode.ts).
+  const { line, side } = useMemo(() => selectionFor(lineN, hitMode), [lineN, hitMode]);
 
   // ── The LINE column ────────────────────────────────────────────────────────
   // The user's sportsbook's current line for the number the RULER is on, for
@@ -482,11 +482,11 @@ export function StatsScreen() {
     return buildQuoteIndex(propLines.rows, {
       market: propMarket,
       line,
-      side: direction === 'under' ? 'under' : 'over',
+      side,
       books,
       gameIds: slateGameIds,
     });
-  }, [propLines, propMarket, line, direction, books, slateGameIds]);
+  }, [propLines, propMarket, line, side, books, slateGameIds]);
 
   // Leaderboard names that two players share once folded. Neither gets a quote:
   // a wrong price on the wrong player is worse than a dash (data/name_match.py).
@@ -510,7 +510,7 @@ export function StatsScreen() {
     propMarket != null &&
     propLines.market === propMarket &&
     slateGameIds.size > 0 &&
-    bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction);
+    bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, side);
   const showOdds = bookPosts && booksReady;
 
   // The slate is not always today: buildTonightSlate falls back to the next
@@ -588,56 +588,67 @@ export function StatsScreen() {
   // Only one side left: snap to it rather than leaving the member parked on a
   // view their books cannot price with the control to leave it greyed out.
   //
-  // THE MEMBER'S CHOICE OUTLIVES THE SNAP. `requestedDirection` is what they
+  // THE MEMBER'S CHOICE OUTLIVES THE SNAP. `requestedMode` is what they
   // last asked for, and it is restored the moment their books price it again
   // — otherwise switching to a stat FanDuel prices one-sided would silently
   // eat an At-Most they set deliberately, and switching back would not give
   // it back (UX review). The snap is announced too: the prop read is async, so
   // without a toast the hit-rate column, the headline and the row order all
   // change under the thumb with nothing saying why.
-  const requestedDirection = useRef<HitDirection>('over');
+  const requestedMode = useRef<HitMode>('atLeast');
   const snapAnnounced = useRef<string | null>(null);
-  const chooseDirection = useCallback((d: HitDirection) => {
-    requestedDirection.current = d;
-    setDirection(d);
+  const chooseMode = useCallback((m: HitMode) => {
+    requestedMode.current = m;
+    setHitMode(m);
   }, []);
+  // Which side each mode bets. It does not depend on the ruler: At Least and
+  // Over both take the over, Under takes the under — which is why a book that
+  // posts only one side no longer LOCKS this control the way it did when
+  // there were two modes. Two of the three survive an over-only book, and the
+  // sheet marks the one that does not.
+  const sideOfMode = useCallback((m: HitMode) => selectionFor(1, m).side, []);
+  const modeAvailable = useCallback(
+    (m: HitMode) => (sideOfMode(m) === 'under' ? underAvailable : overAvailable),
+    [sideOfMode, underAvailable, overAvailable],
+  );
   useEffect(() => {
     // Only where the control exists. In Totals mode there is no pill and no
     // caption, so a snap there would be the silent rewrite this avoids; the
     // empty-column note already explains that case.
     if (effectiveMode !== 'hitRate') return;
-    const wanted = requestedDirection.current;
-    const has = (d: HitDirection) => (d === 'under' ? underAvailable : overAvailable);
-    if (has(wanted)) {
-      if (direction !== wanted) setDirection(wanted);
+    const wanted = requestedMode.current;
+    if (modeAvailable(wanted)) {
+      if (hitMode !== wanted) setHitMode(wanted);
       snapAnnounced.current = null;
       return;
     }
-    const fallback: HitDirection = wanted === 'under' ? 'over' : 'under';
-    if (!has(fallback)) return;
-    if (direction !== fallback) setDirection(fallback);
+    // The nearest mode on the side the books DO price: At Least is the plain
+    // reading of any over-side ask, and Under is the only under-side mode.
+    const fallback: HitMode = sideOfMode(wanted) === 'under' ? 'atLeast' : 'under';
+    if (!modeAvailable(fallback)) return;
+    if (hitMode !== fallback) setHitMode(fallback);
     // Announced once per (stat, book set) — the effect re-runs on every rows
     // refresh, and a toast on each would be worse than the silence it fixes.
     const key = `${stat?.key ?? ''}|${books.join(',')}|${wanted}`;
     if (snapAnnounced.current === key) return;
     snapAnnounced.current = key;
     showToast(
-      `No ${wanted === 'under' ? 'At Most' : 'At Least'} ${stat?.label ?? ''} lines at ${booksName(books)} — showing ${fallback === 'under' ? 'At Most' : 'At Least'}.`,
+      `No ${hitModeLabel(wanted)} ${stat?.label ?? ''} lines at ${booksName(books)} — showing ${hitModeLabel(fallback)}.`,
     );
-  }, [effectiveMode, direction, underAvailable, overAvailable, stat, books]);
-  const dirLocked = !underAvailable || !overAvailable;
+  }, [effectiveMode, hitMode, modeAvailable, sideOfMode, stat, books]);
   // Naming the book is the whole point: a greyed control with no reason is the
   // "why is FanDuel blank" question in a smaller box.
   // POSITIVE sentence, so it takes booksName. booksNoneName is the subject of
   // a NEGATIVE one ("Neither DraftKings nor FanDuel has posted…") and would
   // invert the meaning here the moment a second book was selected.
-  const dirLockNote = !dirLocked
-    ? null
-    : `${booksName(books)} ${books.length === 1 ? 'posts' : 'post'} only ${
-        underAvailable ? 'At Most' : 'At Least'
-      } lines for ${stat?.label ?? 'this stat'} ${
-        slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`
-      }.`;
+  const dirLockNote =
+    underAvailable && overAvailable
+      ? null
+      : `${booksName(books)} ${books.length === 1 ? 'posts' : 'post'} only ${
+          underAvailable ? 'Under' : 'At Least and Over'
+        } lines for ${stat?.label ?? 'this stat'} ${
+          slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`
+        }.`;
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
   // STAT at all (nothing to wait for — six of the eighteen football columns,
@@ -666,10 +677,10 @@ export function StatsScreen() {
           ? { text: `${stat?.label ?? ''} lines post once books price ${slateDayLabel} games.`, canSwitch: false }
           : !bookPosts
             ? {
-                text: oneWayMarket(propMarket, direction)
+                text: oneWayMarket(propMarket, side)
                   ? `${booksNoneName(books)} only posts the Yes side of ${propDisplayLabel(propMarket, stat?.label ?? '')}.`
                   : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}.`,
-                canSwitch: !oneWayMarket(propMarket, direction),
+                canSwitch: !oneWayMarket(propMarket, side),
               }
             : dirLockNote
               ? { text: dirLockNote, canSwitch: true }
@@ -727,7 +738,7 @@ export function StatsScreen() {
       if (seasonValues.statKey !== String(stat.key)) return []; // fetch in flight
       for (const r of seasonValues.rows) {
         const values = (r.values ?? []).map(Number);
-        const { hits, total, pct } = computeHitRate(values, line, direction);
+        const { hits, total, pct } = computeHitRate(values, line, side);
         if (total === 0) continue;
         const avg = values.reduce((s, v) => s + v, 0) / total;
         out.push({
@@ -752,7 +763,7 @@ export function StatsScreen() {
       }
       for (const [player_id, games] of byPlayer) {
         const values = games.map((g) => statValue(g, stat));
-        const { hits, total, pct } = computeHitRate(values, line, direction);
+        const { hits, total, pct } = computeHitRate(values, line, side);
         if (total === 0) continue;
         const avg = values.reduce((s, v) => s + v, 0) / total;
         const head = games[0];
@@ -784,7 +795,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, direction, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -828,7 +839,7 @@ export function StatsScreen() {
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // The headline under the ruler, e.g. "25+ Points" / "At most 2 Walks".
   const lineHeadline =
-    direction === 'over' ? `${lineN}+ ${stat?.label ?? ''}` : `At most ${lineN} ${stat?.label ?? ''}`;
+    hitModeHeadline(lineN, hitMode, stat?.label ?? '');
   // What a BET made from this column is called. Almost always the column's own
   // name; "Anytime TD" where the board asks Rush+Rec TDs, because no book
   // sells the column's version (markets.ts propDisplayLabel).
@@ -1061,7 +1072,7 @@ export function StatsScreen() {
         </ScrollView>
       </View>
 
-      {/* Line picker: at least / at most + a tick ruler, then the headline. */}
+      {/* Line picker: the mode, a tick ruler, then the headline. */}
       {effectiveMode === 'hitRate' ? (
         <>
           <View style={styles.lineRow}>
@@ -1076,42 +1087,36 @@ export function StatsScreen() {
                 whole thing twice, once here and once from the caption, and
                 announcing "dimmed" on an element declared as static text. */}
             <Pressable
-              onPress={() => {
-                if (dirLocked) return;
-                chooseDirection(direction === 'over' ? 'under' : 'over');
-              }}
-              hitSlop={dirLocked ? undefined : 8}
-              accessibilityRole={dirLocked ? 'text' : 'button'}
-              accessibilityLabel={
-                dirLocked
-                  ? direction === 'over'
-                    ? 'At Least'
-                    : 'At Most'
-                  : `${direction === 'over' ? 'At Least' : 'At Most'}. Switch to ${direction === 'over' ? 'At Most' : 'At Least'}.`
-              }
-              style={({ pressed }) => [
-                styles.dirPill,
-                dirLocked && styles.dirPillLocked,
-                pressed && !dirLocked && styles.pressed,
-              ]}
+              onPress={() => setModeOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Show bets that are"
+              accessibilityValue={{ text: hitModeLabel(hitMode) }}
+              accessibilityHint="Opens the At Least, Over, Under options"
+              style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
             >
-              <Text style={[styles.dirPillText, dirLocked && styles.dirPillTextLocked]}>
-                {direction === 'over' ? 'At Least' : 'At Most'}
+              <Text style={styles.dirPillText} numberOfLines={1}>
+                {hitModeLabel(hitMode)}
               </Text>
-              {dirLocked ? null : (
-                <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
-              )}
+              {/* chevron-expand, not chevron-down: this opens a menu in place,
+                  it does not navigate. */}
+              <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
             </Pressable>
             <LineRuler
               value={lineN}
               min={1}
-              max={maxLineN(stat)}
+              max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}
               onChange={setLineN}
+              a11yLabel={`${stat?.label ?? ''} line`}
             />
           </View>
           <View style={styles.headlineRow}>
             <View style={styles.headlineRule} />
             <Text style={styles.headlineText}>{lineHeadline}</Text>
+            {/* The book's own name for the same bet. Without it the ruler says
+                1, the headline says "2+" and the number joining them is
+                nowhere on screen (UX review). */}
+            <Text style={styles.headlineLine}>{hitModeLineLabel(lineN, hitMode)}</Text>
             <View style={styles.headlineRule} />
           </View>
         </>
@@ -1356,6 +1361,17 @@ export function StatsScreen() {
         onClose={() => setPickerOpen(false)}
         coverageNote={coverageNote}
       />
+      <HitModeSheet
+        visible={modeOpen}
+        mode={hitMode}
+        lineN={lineN}
+        statLabel={stat?.label ?? ''}
+        onPick={chooseMode}
+        overAvailable={overAvailable}
+        underAvailable={underAvailable}
+        unavailableNote={dirLockNote}
+        onClose={() => setModeOpen(false)}
+      />
       <AddLineSheet
         input={lineSheetInput}
         game={lineSheetGame}
@@ -1530,7 +1546,9 @@ function LineRuler({
   min,
   max,
   onChange,
+  a11yLabel,
 }: {
+  a11yLabel: string;
   value: number;
   min: number;
   max: number;
@@ -1585,7 +1603,25 @@ function LineRuler({
   };
 
   return (
-    <View style={styles.rulerWrap} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+    // ONE adjustable element, not N tick buttons. VoiceOver gets the number
+    // as a value it can increment and decrement; the ticks themselves are
+    // decoration and are hidden from it. This matters more since the mode
+    // landed: in Under mode the ruler's number and the headline's deliberately
+    // differ by one, so a screen-reader user who cannot reach the ruler cannot
+    // tell which bet the board is on (UX review, 2026-09-05).
+    <View
+      style={styles.rulerWrap}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      accessible
+      accessibilityRole="adjustable"
+      accessibilityLabel={a11yLabel}
+      accessibilityValue={{ min, max, now: value, text: String(value) }}
+      accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+      onAccessibilityAction={(e) => {
+        const next = e.nativeEvent.actionName === 'increment' ? value + 1 : value - 1;
+        if (next >= min && next <= max) pickTick(next);
+      }}
+    >
       {width > 0 ? (
         <ScrollView
           ref={scrollRef}
@@ -1602,7 +1638,13 @@ function LineRuler({
             const v = min + i;
             const labeled = v % labelEvery === 0 || v === min || v === max;
             return (
-              <Pressable key={v} onPress={() => pickTick(v)} style={[styles.tickCol, { width: tickW }]}>
+              <Pressable
+                key={v}
+                onPress={() => pickTick(v)}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={[styles.tickCol, { width: tickW }]}
+              >
                 <View style={[styles.tick, labeled && styles.tickMajor]} />
                 {/* The label is wider than its tick column — centre it with a
                     negative margin so it can't clip, and only label ticks far
@@ -1690,7 +1732,7 @@ function matchupTierWord(tier: MatchupInfo['tier']): string {
  * player). */
 /** "2+" for over 1.5, "At most 1" for under 1.5 — lineHeadline's idiom. */
 export function offLineCaption(line: number, side: StatsOddsSide): string {
-  return side === 'under' ? `At most ${line - 0.5}` : `${line + 0.5}+`;
+  return thresholdLabel(line, side);
 }
 
 function OddsCell({
@@ -2181,6 +2223,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   dirPillText: {
+    flexShrink: 1,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
@@ -2255,6 +2298,10 @@ const styles = StyleSheet.create({
     flex: 1,
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.separator,
+  },
+  headlineLine: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
   },
   headlineText: {
     fontSize: font.size.headline,

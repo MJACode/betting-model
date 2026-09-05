@@ -44,6 +44,7 @@ import {
 } from '../src/lib/statsOdds';
 import type { EnrichedPick, GameRow, OddsByBookRow, PropOddsByBookRow } from '../src/types';
 import { alternateMarketFor, canonicalPropMarket, foldAlternateRows, isAlternateMarket, propLineRowKey } from '../src/lib/propLines';
+import { thresholdLabel } from '../src/lib/hitMode';
 
 const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 let failures = 0;
@@ -427,7 +428,10 @@ check(
   );
   check('an off-line row prices the side it posts even with the other side missing', under.get('george springer')?.price === 230);
   const stats = read('src/screens/StatsScreen.tsx');
-  check('the pill prints the off-line number under the price, in the board\'s idiom', stats.includes('const caption = quote.offLine ? offLineCaption(quote.line, quote.side) : null;') && stats.includes("return side === 'under' ? `At most ${line - 0.5}` : `${line + 0.5}+`;"));
+  check('the pill prints the off-line number under the price, in the board\'s idiom',
+    stats.includes('const caption = quote.offLine ? offLineCaption(quote.line, quote.side) : null;')
+      && thresholdLabel(1.5, 'over') === '2+'
+      && thresholdLabel(1.5, 'under') === '1 or fewer');
   check('VoiceOver hears that it is the book\'s own line', stats.includes('the book’s own line, not the board’s'));
   check('a live or finished game says Live / Final, not a dash', stats.includes('<Text style={styles.oddsStarted}>{started}</Text>') && stats.includes("kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null"));
   check('a doubleheader team with a game still to come gets no label', stats.includes('pending.forEach((t) => out.delete(t));'));
@@ -483,7 +487,7 @@ check(
   check('every bet made from the board carries the market name',
     screen.includes('const betLabel = propDisplayLabel(propMarket')
       && (screen.match(/statLabel=\{betLabel\}/g) ?? []).length === 2
-      && !screen.includes("statLabel={stat?.label ?? ''}"));
+      && !/statLabel=\{stat\?\.label \?\? ''\}[\s\S]{0,400}onOddsPress/.test(screen));
   check('the column header still shows the board\'s own stat name, never the market\'s',
     /const rightLabel =\s*\n\s*effectiveMode === 'hitRate' \? 'Hit Rate' : basis === 'perGame' \? 'Avg' : stat\.label;/.test(screen)
       && !/rightLabel[^\n]*betLabel/.test(screen));
@@ -492,7 +496,7 @@ check(
       && screen.includes('only posts the Yes side of'));
   check('the coverage check knows which side the board is asking',
     read('src/lib/statsOdds.ts').includes('side?: StatsOddsSide,')
-      && screen.includes('bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction)'));
+      && screen.includes('bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, side)'));
 
   // A stat no book prices must say so; a slate that is not today must say when.
   check('a column with no market at all explains itself',
@@ -594,13 +598,19 @@ check(
   check('while the direction lock still reads only the member\'s own books',
     screen2.includes('bookCoverageForMarket(propLines.rows, propMarket, books, slateGameIds)')
       && screen2.includes("anyBookPostsSide(coverage, 'under')"));
-  check('the board locks the direction pill to the side the member\'s books sell',
+  check('the board knows which side the member\'s books sell',
     screen2.includes("const underAvailable = !sideKnown || anyBookPostsSide(coverage, 'under');")
-      && screen2.includes('const dirLocked = !underAvailable || !overAvailable;')
-      && screen2.includes('if (dirLocked) return;'));
-  check('and snaps the board off a side it just locked, so nobody is stranded',
-    screen2.includes('if (!has(fallback)) return;')
-      && screen2.includes('if (direction !== fallback) setDirection(fallback);'));
+      && screen2.includes("const sideOfMode = useCallback((m: HitMode) => selectionFor(1, m).side, []);"));
+  check('a one-sided book marks the mode it cannot price rather than locking the control',
+    // Three modes, two sides: an over-only book leaves At Least AND Over live,
+    // so locking the whole pill (as the two-mode version had to) would now
+    // take away more than the books took.
+    read('src/components/HitModeSheet.tsx').includes("const priced = m.mode === 'under' ? underAvailable : overAvailable;")
+      && read('src/components/HitModeSheet.tsx').includes('disabled={!priced}')
+      && screen2.includes('overAvailable={overAvailable}'));
+  check('and snaps the board off a mode the books cannot price, so nobody is stranded',
+    screen2.includes('if (!modeAvailable(fallback)) return;')
+      && screen2.includes('if (hitMode !== fallback) setHitMode(fallback);'));
   check('the lock FAILS OPEN while the lines are loading or the read failed',
     screen2.includes("const sideKnown = coverageReady && slateGameIds.size > 0 && coverage.size > 0;")
       && screen2.includes("propLines.status === 'ok'"));
@@ -626,12 +636,15 @@ check(
   check('VoiceOver hears the side once, and no disabled state on static text',
     !screen2.includes('accessibilityState={{ disabled: dirLocked }}')
       && !screen2.includes('disabled={dirLocked}'));
-  check('the live pill gets a touch target, the locked one needs none',
-    screen2.includes('hitSlop={dirLocked ? undefined : 8}'));
-  check('the member\'s chosen side survives a snap and is restored',
-    screen2.includes('const requestedDirection = useRef<HitDirection>')
-      && screen2.includes('requestedDirection.current = d;')
-      && screen2.includes('if (direction !== wanted) setDirection(wanted);'));
+  check('the pill always opens the menu, and always has a touch target',
+    // It is never locked now, so it is never a control without a target.
+    /onPress=\{\(\) => setModeOpen\(true\)\}\s*\n\s*hitSlop=/.test(screen2));
+  check('the member\'s chosen mode survives a snap and is restored',
+    screen2.includes("const requestedMode = useRef<HitMode>('atLeast');")
+      && screen2.includes('requestedMode.current = m;')
+      && screen2.includes('if (hitMode !== wanted) setHitMode(wanted);')
+      // and the picker applies through chooseMode, or the snap would forget it
+      && screen2.includes('onPick={chooseMode}'));
   check('the snap is announced, and only once per stat and book set',
     screen2.includes('snapAnnounced.current = key;') && screen2.includes('showToast('));
   check('and never runs in Totals mode, where there is no pill and no caption to explain it',
