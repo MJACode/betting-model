@@ -31,9 +31,30 @@ full-board score into a handful of games. The pattern is the house one, not an
 invention: live_price_log.py and scripts/dk_freshness_compare.py both write on
 change, for the same reason.
 
+WHAT IT PUBLISHES (2026-09-05, mike: "when there is a bet from the model, post
+the pick")
+A tick that writes a BET locks it and delivers it immediately, through
+`tracking.signal_publisher.publish_new_signals` -- the same capture + push +
+Discord sequence the refresh pass runs, in the same order, under the same
+`push_sent` ledger and the same guards.
+
+Until this existed, a pick written here waited for the next `:17` pass. On the
+2026-09-05 UFC card that gap ate a real bet: mario-pinto/ryan-spann moneyline
+-195 was written at 18:27:16Z for a fight that started at 18:40:00Z, and the
+signal was not locked until 19:23:24Z -- 43 minutes after the first bell -- so
+the poster's started-game guard dropped it, correctly and permanently. Exactly
+ONE UFC signal reached Discord between Discord posting shipping (2026-08-23)
+and that card. MLB never showed the gap because first pitches are hours apart;
+a UFC card starts a fight every 20-30 minutes, and an NFL/NCAAF cross inside
+the hour before kickoff has the same shape.
+
+Gated on the scorer reporting a NEW BET, so the ~95% of ticks that find nothing
+still cost nothing.
+
 WHAT IT DELIBERATELY DOES NOT DO
-  * It does not settle, notify, or health-check. Those stay on the refresh
-    pass, which still runs.
+  * It does not settle or health-check, and it does not fire the pass-only
+    surfaces: the daily free pick, the restatement, the X post and the
+    track-a-bet line alerts stay on the refresh pass, which still runs.
   * It does not touch in-play rows. Games that have started belong to the live
     loop, and the two must never write the same lane (§6: pre-game and in-play
     prices never mix).
@@ -262,15 +283,36 @@ def poll_once(conn: DBConnection, sports: list | None = None,
             known[_key(row)] = _fingerprint(row)
 
     scored = 0
+    bets = 0
+    target_date = config.today_et()
     if score and moved:
         from models.scorer import run_scorer
-        result = run_scorer(target_date=config.today_et(), only_games=moved)
+        result = run_scorer(target_date=target_date, only_games=moved)
         scored = result.get("total_picks", 0)
+        bets = result.get("bets", 0)
+
+    # PUBLISH WHAT WE JUST WROTE. A pick that waits for the next hourly pass is
+    # a pick whose game can start first -- see the module docstring. Gated on a
+    # new BET so the ~95% of quiet ticks stay free.
+    published = None
+    if bets:
+        try:
+            from tracking.signal_publisher import publish_new_signals
+            published = publish_new_signals(target_date=target_date)
+        except Exception as exc:                              # noqa: BLE001
+            # publish_new_signals guards each surface itself, so reaching here
+            # means the import failed or something outside it did. Belt and
+            # braces on purpose: the pick is already WRITTEN and the next pass
+            # will still publish it, but a tick that dies here stops watching
+            # prices, which is the more expensive failure.
+            logger.error(f"pregame poll: publish failed: {exc}", exc_info=True)
 
     logger.info(f"pregame poll: {len(fetched)} quoted, {len(to_write)} changed, "
-                f"{len(moved)} game(s) re-scored, {scored} pick(s)")
+                f"{len(moved)} game(s) re-scored, {scored} pick(s)"
+                + (f", {bets} BET(s) published {published}" if bets else ""))
     return {"quoted": len(fetched), "written": len(to_write),
-            "games_moved": len(moved), "picks": scored, "credits_used": used}
+            "games_moved": len(moved), "picks": scored, "bets": bets,
+            "published": published, "credits_used": used}
 
 
 def run_forever(interval_sec: int | None = None) -> None:
