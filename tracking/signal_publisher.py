@@ -16,9 +16,9 @@ it. Measured cost on the 2026-09-05 UFC card:
 
     18:27:16Z  poller writes  mario-pinto/ryan-spann  ufc_moneyline  -195  BET
     18:40:00Z  the fight starts
-    19:23:24Z  the hourly pass finally locks the signal
-               -> the Discord poster's "never post a started fight" guard
-                  drops it, correctly and permanently.
+    19:17:00Z  the next refresh pass -- the first thing that would have posted
+               it -- runs, and the poster's "never post a started fight" guard
+               drops it, correctly and permanently.
 
 That pick existed 13 minutes before the fight and was publishable for every one
 of them. MLB never noticed the gap because first pitches are hours apart; a UFC
@@ -30,9 +30,12 @@ WHAT THIS IS
 The three steps that turn a written BET into a published one, in the order they
 have to happen, callable from anywhere:
 
-    capture_opening_signals   lock the cross into the shadow track
+    capture_opening_signals   stamp the cross into the CLV shadow track
       -> notify_signal_changes  push it to opted-in devices
       -> notify_discord_signals post it to the sport's channel
+
+Both notifiers read `picks` directly (2026-09-05), so this adds no gate the
+app does not already apply -- it only decides WHEN they are asked.
 
 CLAUDE.md §1b: a change to how one model operates is assessed against all of
 them, and the shared helper is preferred over a per-sport implementation. This
@@ -73,9 +76,9 @@ def publish_new_signals(target_date: str | None = None,
         here must not be able to stop it — a stopped poller and a quiet market
         look identical from the outside.
       * A broken Discord webhook must not suppress the push, and a failed
-        capture must not skip delivery of signals locked earlier: the notifiers
-        read the shadow track, not this call's own output, so they still have
-        work to do even when capture fails.
+        capture must not skip delivery at all: the notifiers read `picks`, not
+        this call's own output, so the pick is postable whether or not the
+        shadow track took it.
     """
     import config
 
@@ -84,7 +87,15 @@ def publish_new_signals(target_date: str | None = None,
 
     out = {"locked": 0, "pushed": 0, "discord": 0}
 
-    # 1. Lock the cross. MUST come first: both notifiers read opening_signals.
+    # 1. Lock the cross into the opening-signal / CLV shadow track.
+    #
+    # NOT a gate on delivery: since 2026-09-05 both notifiers read `picks`
+    # directly (Matt: "the app and discord should always show the same picks"),
+    # so capture can only inform the shadow track, never decide what posts.
+    # It runs FIRST anyway, because its whole value is a `locked_at` that says
+    # when the cross happened -- and its own first-pitch guard drops a capture
+    # that arrives after the game started, which is exactly what waiting for
+    # the next pass produced.
     try:
         from tracking.opening_signals import capture_opening_signals
         out["locked"] = capture_opening_signals(

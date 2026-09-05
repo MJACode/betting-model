@@ -148,8 +148,8 @@ def _surfaces(monkeypatch, order, fail=()):
 
 
 def test_capture_runs_before_either_notifier(monkeypatch):
-    """Both notifiers read opening_signals. Deliver first and the cross that
-    just landed is invisible to them."""
+    """The shadow track is stamped before delivery, so its locked_at says when
+    the cross happened rather than when the webhook answered."""
     order = []
     _surfaces(monkeypatch, order)
     out = signal_publisher.publish_new_signals(target_date="2026-09-05")
@@ -158,8 +158,8 @@ def test_capture_runs_before_either_notifier(monkeypatch):
 
 
 def test_a_failed_capture_still_delivers(monkeypatch):
-    """Signals locked on an earlier tick may still be unposted — a capture
-    failure must not decide that there is nothing to deliver."""
+    """The notifiers read `picks`, not the shadow track — a capture failure
+    must never be able to decide that there is nothing to deliver."""
     order = []
     _surfaces(monkeypatch, order, fail={"capture"})
     out = signal_publisher.publish_new_signals(target_date="2026-09-05")
