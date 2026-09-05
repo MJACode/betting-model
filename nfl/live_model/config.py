@@ -71,7 +71,19 @@ SHARP_BOOK = "pinnacle"
 # Seconds. The books reprice off the official feed in 1-3s and The Odds API
 # republishes featured markets every ~40s and props every ~60s, so polling
 # faster than this buys nothing but credits.
-POLL_STATE_SEC = 10                 # ESPN game state
+# 10 -> 5 on 2026-09-05 (Matt: "every 5 seconds or less when game starts").
+# ESPN game state is NOT an Odds API call -- it costs no credits -- and it is
+# what the model reads the game off, so this is the poll that matters and the
+# one that was free to tighten. The quote polls below deliberately did NOT
+# follow it: see the note there.
+POLL_STATE_SEC = 5                  # ESPN game state
+# NOT taken to 5s with the state poll above. The Odds API republishes featured
+# markets every ~40s (measured independently for the live loops: 136 distinct
+# snapshots over 2.5 hours, median refresh 46s, with ~7 consecutive polls served
+# the identical payload -- docs/discord.md). Polling a 46s cache every 5 seconds
+# cannot make a quote fresher, it just buys the same snapshot twelve times: ~29k
+# credits on a Sunday slate for no new information. Raise this only against a
+# measurement showing the feed itself moved faster.
 POLL_ANCHOR_SEC = 60                # main lines, while any game is live
 POLL_DERIVATIVE_SEC = 60            # only for games in a hunt state
 POLL_PROP_SEC = 60                  # baseline, matches the ~60s republish

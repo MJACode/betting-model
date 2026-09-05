@@ -443,7 +443,15 @@ def test_the_stamp_is_read_from_the_pick_row_not_the_capture_step(producer):
     conn = _StampConn([_row("k1")])
     getattr(dn, producer)(conn, "2026-08-23")
     assert "p.created_at" in conn.sql
-    assert "pk.created_at" in conn.sql
+    # The capture clock must not be PROJECTED. Asserted against the select list
+    # (everything before the first FROM) rather than the whole statement, so
+    # _locked_signals may still ORDER BY os.locked_at -- ordering by it is fine,
+    # publishing it as the stamp is not. This replaced a check for the literal
+    # alias "pk.created_at" on 2026-09-05, when _new_signals stopped reading
+    # `picks` through a LATERAL and started reading it as the base table: the
+    # alias was an implementation detail, this is the requirement.
+    select_list = conn.sql[:conn.sql.index("FROM")]
+    assert "locked_at" not in select_list
 
 
 def test_the_free_pick_is_stamped_too():

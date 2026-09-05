@@ -2234,9 +2234,18 @@ NFL_MODEL_FIRST_SEASON: int = int(os.environ.get("NFL_MODEL_FIRST_SEASON", "2015
 # be captured, and therefore only reach Discord and push, on GAME DAY, by which
 # time the opener's number has been corrected and the bet no longer exists.
 #
-# 7 matches the opener's own LEAD_HI_DAYS (nfl/models/opener_spread.py); the
-# wind card never reaches further than ~4 days out.
-NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "7"))
+# 7 -> 10 on 2026-09-05. The old value matched the opener's own LEAD_HI_DAYS,
+# and the comment here claimed "the wind card never reaches further than ~4 days
+# out". It does: scheduler.NFL_POLL_HORIZON_DAYS is 10, and Week 1 Sunday is 9
+# days from Friday. Both 2026-09-05 wind picks (game_date 2026-09-13) fell
+# outside the 7-day window and were never captured at all.
+#
+# This no longer gates DISCORD or PUSH -- both read `picks` directly now, so
+# neither has a date horizon to fall outside of. It still bounds the
+# opening-signal / CLV shadow track, which is why it is widened rather than
+# deleted: at 7 that track was silently dropping NFL look-ahead picks. 10
+# matches the poll horizon, so capture covers everything the poller can write.
+NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "10"))
 
 # How many seasons back the self-healing NFL player-stats ingest keeps loaded
 # (current season + this many prior). The first run after deploy backfills
