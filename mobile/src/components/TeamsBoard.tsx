@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -31,6 +32,7 @@ import { FilterChip } from '@/components/filters/FilterChip';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
 import { showToast } from '@/components/Toast';
+import { useNow } from '@/hooks/useNow';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
@@ -38,7 +40,13 @@ import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/li
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
-import { buildTonightSlate } from '@/lib/statsBoard';
+import {
+  buildSlateGameIndex,
+  buildTonightSlate,
+  slateGameFor,
+  slateSubline,
+  sublineSpoken,
+} from '@/lib/statsBoard';
 import {
   buildTeamLineIndex,
   teamLineCaption,
@@ -67,7 +75,6 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
 
-const AMBER = '#FF9500'; // mid tertile (no theme token)
 
 /**
  * Seasons to try, newest first. Every league except MLB/WNBA is out of season
@@ -81,9 +88,9 @@ function seasonCandidates(): number[] {
 }
 
 function tierColor(tier: Tier): string | undefined {
-  if (tier === 'good') return colors.bet;
-  if (tier === 'bad') return colors.avoid;
-  if (tier === 'mid') return AMBER;
+  if (tier === 'good') return colors.gradeGood;
+  if (tier === 'bad') return colors.gradeBad;
+  if (tier === 'mid') return colors.gradeMid;
   return undefined;
 }
 
@@ -218,9 +225,11 @@ export function TeamsBoard({
   const lineMarket = stat ? teamLineMarketFor(String(stat.key)) : 'h2h';
   // Only games that have NOT started: a game in progress has no line a user
   // can still take, and its "latest" pre-game row is a live number.
+  // One clock for every time-derived cell on the board — see hooks/useNow.
+  const now = useNow();
   const unstarted = useMemo(
-    () => unstartedGameIds(slate.games, new Date().toISOString()),
-    [slate.games],
+    () => unstartedGameIds(slate.games, new Date(now).toISOString()),
+    [slate.games, now],
   );
   // Teams whose game is live or over: the cell says which ("Live" / "Final",
   // GameStatusPill's words) rather than printing a dash that reads as "no
@@ -241,7 +250,21 @@ export function TeamsBoard({
     }
     pending.forEach((t) => out.delete(t));
     return out;
-  }, [slate.games, unstarted]);
+  }, [slate.games, unstarted, now]);
+
+  // "7:05 PM ET · @ SEA" under each team's record — the Players board's
+  // subline, on the board where the row IS the team (Matt, 2026-09-05: "add
+  // the time of the game and who they are playing … for all sports"). Same
+  // helper, so a doubleheader resolves the same way on both boards.
+  const slateGameIndex = useMemo(
+    () =>
+      buildSlateGameIndex(
+        slate.games,
+        { date: slate.date, isToday: slate.isToday, keys: new Set<string>() },
+        new Date(now).toISOString(),
+      ),
+    [slate.games, slate.date, slate.isToday, now],
+  );
   const lineByTeam = useMemo(
     () =>
       buildTeamLineIndex(gameLines, slate.games, {
@@ -360,7 +383,7 @@ export function TeamsBoard({
         <View style={styles.colHeader}>
           <Text style={styles.colHeaderRank}>RK</Text>
           <Text style={styles.colHeaderName}>
-            TEAM{season ? `  ·  ${season}` : ''}
+            TEAM{season ? ` · ${season}` : ''}
           </Text>
           <Text style={styles.colHeaderRight} numberOfLines={1}>
             {stat.label.toUpperCase()}
@@ -386,6 +409,12 @@ export function TeamsBoard({
               cuts={cuts}
               quote={quote}
               started={startedTeams.get(item.team) ?? null}
+              subline={slateSubline(
+                slateGameFor({ team: item.team }, slateGameIndex)?.game ?? null,
+                // Only when the LINE column is hidden — it prints the same
+                // word, and twice on one row reads as a bug (UX review).
+                showLines ? null : startedTeams.get(item.team) ?? null,
+              )}
               showLine={showLines}
               // The pill asks: a tap opens the add-to-betslip sheet.
               onLinePress={quote ? () => setLineSheet(quote) : undefined}
@@ -410,6 +439,9 @@ export function TeamsBoard({
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
         initialNumToRender={20}
+        // The board prints a clock on every row now, and this was one of the
+        // two lists in the app whose pull gesture did nothing (UX review).
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
       />
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
@@ -430,6 +462,7 @@ function TeamRow({
   cuts,
   quote,
   started,
+  subline,
   showLine,
   onLinePress,
 }: {
@@ -439,6 +472,8 @@ function TeamRow({
   cuts: { lo: number; hi: number } | null;
   quote: TeamLineQuote | null;
   started: 'Live' | 'Final' | null;
+  /** "7:05 PM ET · @ SEA"; null when this team has no game on the slate. */
+  subline: string | null;
   showLine: boolean;
   onLinePress?: () => void;
 }) {
@@ -451,19 +486,34 @@ function TeamRow({
   const sample = def.sample ? sampleFor(row, def) : null;
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, subline ? styles.rowWithGame : null]}>
       <Text style={styles.rank}>{rank}</Text>
       <View style={styles.rowMain}>
         <Text style={styles.rowName} numberOfLines={1}>
           {row.team}
           {row.conference ? <Text style={styles.rowSub}>  {row.conference}</Text> : null}
         </Text>
+        {/* The game sits directly under the name, exactly where the Players
+            board puts it: the two boards are one toggle apart, and the same
+            fact at two different vertical positions makes the eye re-find it
+            on every flip (UX review, 2026-09-05). Not MERGED into the record
+            line — a record is a stat and a fixture is a schedule, and merged,
+            the record truncates first at large Dynamic Type. */}
+        {subline ? (
+          <Text
+            style={styles.rowSubline}
+            numberOfLines={1}
+            accessibilityLabel={sublineSpoken(subline)}
+          >
+            {subline}
+          </Text>
+        ) : null}
         <Text style={styles.rowMeta} numberOfLines={1}>
           {row.wins}-{row.losses}
           {row.point_diff_pg != null
-            ? `  ·  ${row.point_diff_pg > 0 ? '+' : ''}${Number(row.point_diff_pg).toFixed(1)}/g`
+            ? ` · ${row.point_diff_pg > 0 ? '+' : ''}${Number(row.point_diff_pg).toFixed(1)}/g`
             : ''}
-          {thin ? `  ·  ${sample} game${sample === 1 ? '' : 's'}` : ''}
+          {thin ? ` · ${sample} game${sample === 1 ? '' : 's'}` : ''}
         </Text>
       </View>
       <View style={styles.valueWrap}>
@@ -558,7 +608,7 @@ const styles = StyleSheet.create({
   list: { paddingBottom: spacing.xl },
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
   hintRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: 2 },
-  hintText: { fontSize: 11, color: colors.textTertiary, lineHeight: 15 },
+  hintText: { fontSize: font.size.micro, color: colors.textTertiary, lineHeight: 15 },
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -585,14 +635,14 @@ const styles = StyleSheet.create({
   },
   colHeaderRank: {
     width: 20,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
   colHeaderName: {
     flex: 1,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -600,7 +650,7 @@ const styles = StyleSheet.create({
   colHeaderRight: {
     width: 72,
     textAlign: 'right',
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -615,6 +665,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
+  // Reserved ONLY on a row that has a game. A TeamRow is not tappable, so the
+  // height buys no touch target — it exists so the list does not re-flow when
+  // the slate query settles. Unconditional, it was ~14pt of dead space on
+  // every row of every off-day board (UX review, 2026-09-05).
+  rowWithGame: { minHeight: 54 },
   rowMain: { flex: 1, minWidth: 0 },
   rank: {
     width: 20,
@@ -628,8 +683,12 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  rowSub: { fontSize: 11, fontWeight: font.weight.semibold, color: colors.textTertiary },
-  rowMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
+  rowSub: { fontSize: font.size.micro, fontWeight: font.weight.semibold, color: colors.textTertiary },
+  rowMeta: { fontSize: font.size.micro, color: colors.textSecondary, marginTop: 1 },
+  // The game, directly under the name. Same size and colour as the record
+  // below it: textTertiary is ~3.4:1 on the card at this size, under the AA
+  // floor, and this is the line Matt asked for (UX review, 2026-09-05).
+  rowSubline: { fontSize: font.size.micro, color: colors.textSecondary, marginTop: 1 },
   valueWrap: { alignItems: 'flex-end', width: 72 },
   colHeaderLine: { minWidth: 66, textAlign: 'right' },
   lineWrap: { minWidth: 66, alignItems: 'flex-end' },
@@ -675,8 +734,8 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  valueLabel: { fontSize: 10, color: colors.textTertiary },
-  thinLabel: { fontSize: 10, color: colors.textTertiary, fontStyle: 'italic' },
+  valueLabel: { fontSize: font.size.nano, color: colors.textTertiary },
+  thinLabel: { fontSize: font.size.nano, color: colors.textTertiary, fontStyle: 'italic' },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
   errorBanner: {

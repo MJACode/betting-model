@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 234 — Doubles and Triples were never blank because the market didn't exist; nobody had asked |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 235 — Doubles and Triples were never blank because the market didn't exist; nobody had asked |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 234 — the game time went under the name, and SPOT became a graded matchup difficulty |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 233 — "nothing shows for Cesar's and FanDuel": we have their lines, and the side we do not have is the one that was on screen |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 232 — the app and Discord are one board: publishing moved off the capture table |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 231 — the college prop probe came back 12x cheaper than I said, and Matt turned it on |

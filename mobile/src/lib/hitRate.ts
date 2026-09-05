@@ -66,15 +66,19 @@ export function hitRateBandOf(pct: number): HitRateBandName {
 /**
  * Should the board colour hit rates at all, for THIS column?
  *
- * The ramp is absolute — green at 60%, amber at 40%, `colors.avoid` below —
- * which reads as a comparison between players only while the column actually
- * spans bands. On a rare-event column it does not: at "1+ Doubles" every
- * hitter in the league sits at 10-30%, so the whole column renders the app's
- * AVOID colour beside a +450 price that may well be the better side of that
- * number, and one tap to "No Doubles" turns the same column into a wall of
- * green beside heavy chalk. The colour stops distinguishing players and starts
- * delivering a verdict on the bet — which this board is not entitled to give,
- * because no model prices Doubles (UX review, 2026-09-05).
+ * The ramp is absolute — good at 60%, mid at 40%, bad below — which reads as a
+ * comparison between players only while the column actually spans bands. On a
+ * rare-event column it does not: at "1+ Doubles" every hitter in the league
+ * sits at 10-30%, so the whole column renders the bad end of the ramp beside a
+ * +450 price that may well be the better side of that number, and one tap to
+ * "No Doubles" turns the same column into a wall of green beside heavy chalk.
+ * The colour stops distinguishing players and starts delivering a verdict on
+ * the bet — which this board is not entitled to give, because no model prices
+ * Doubles (UX review, 2026-09-05).
+ *
+ * Orthogonal to WHICH colours the ramp uses: session 234 repainted it onto the
+ * accessible `colors.grade*` tokens, and a ramp that says the same thing about
+ * every row says nothing about any of them at any contrast level.
  *
  * So: colour when it discriminates, and otherwise let the percentage and the
  * x/N sub-label carry it, as they already do. Both are always printed, so
