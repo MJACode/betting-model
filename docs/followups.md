@@ -23,7 +23,7 @@
 
 ## [ ] Nothing tells us when a market we pruned starts being priced
 
-Found 2026-09-05 (session 235), in the UX review of the college prop prune.
+Found 2026-09-05 (session 237), in the UX review of the college prop prune.
 
 `FOOTBALL_MARKET_NOT_PRICED` (mobile) and the pruned entries in
 `config.PROP_MARKETS_NCAAF` / `PROP_ALT_MARKETS['NCAAF']` are a hand-maintained
