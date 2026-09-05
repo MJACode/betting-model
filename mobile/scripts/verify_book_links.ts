@@ -86,8 +86,13 @@ for (const sch of [...verifiedSchemes, ...candidateSchemes]) {
 check('nothing is declared that no book asks about', declared.every((d) => verifiedSchemes.includes(d) || candidateSchemes.includes(d)), declared.filter((d) => !verifiedSchemes.includes(d) && !candidateSchemes.includes(d)).join(','));
 check('the declaration is within Apple\'s cap of 50', declared.length <= 50, String(declared.length));
 const detect = src.slice(src.indexOf('export async function isBookAppInstalled'), src.indexOf('/**\n * Open a pre-filled betslip'));
-check('a `true` from any scheme, verified or candidate, is proof', detect.includes('for (const url of [...verified, ...candidates])') && detect.includes('if (await Linking.canOpenURL(url)) return true;'));
-check('a `false` is proof only from the verified scheme; candidates leave it unknown', detect.includes('if (verified.includes(url)) verifiedSaidNo = true;') && detect.includes('return verifiedSaidNo ? false : null;'));
+check('a `true` from any scheme, verified or candidate, is proof', detect.includes('[...verified, ...candidates].map(ask)') && detect.includes('if (answers.some((a) => a === true)) return true;'));
+check('a `false` is proof only from the verified scheme; candidates leave it unknown', detect.includes('answers.slice(0, verified.length).some((a) => a === false)') && detect.includes('return verifiedSaidNo ? false : null;'));
+// A bare brand is as likely a sibling app (FanDuel DFS, BetMGM Casino, Caesars
+// Rewards); a yes from it would hide the store from the member it was for.
+for (const bare of ['fanduel', 'betmgm', 'caesars', 'williamhill', 'hardrock', 'bally', 'fanatics'] as const) {
+  check(`no bare-brand candidate: ${bare}://`, !candidateSchemes.includes(bare));
+}
 check('the declaration is a native change, so the app version moved off 1.0.0 (OTA cannot carry it; the guard in mobile-ota.yml refuses)', appJson.expo.version !== '1.0.0', appJson.expo.version);
 check('installed? is asked only on iOS and only for a book with something to ask; otherwise null', src.includes("if (!app || Platform.OS !== 'ios') return null;") && src.includes('if (verified.length === 0 && candidates.length === 0) return null;'));
 check('the question is asked before anything opens', at('isBookAppInstalled(book)') >= 0 && at('isBookAppInstalled(book)') < at('fillBetslipLink'));

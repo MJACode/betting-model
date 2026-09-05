@@ -34,7 +34,11 @@ interface BookApp {
    *  unknown, which is today's behaviour. So a wrong guess costs nothing and
    *  a right one opens the app. Every entry, verified or not, must be declared
    *  in app.json's `LSApplicationQueriesSchemes` or iOS answers `false`
-   *  regardless (verify_book_links.ts pins it; Apple caps the list at 50). */
+   *  regardless (verify_book_links.ts pins it; Apple caps the list at 50).
+   *  A candidate must name the SPORTSBOOK product, never the bare brand:
+   *  `fanduel://` is as likely FanDuel's fantasy app, `betmgm://` its casino,
+   *  `caesars://` its rewards app — and a yes from a sibling app would hide
+   *  the store from the member it was meant for (UX review). */
   candidateSchemes?: string[];
   web: string;
   /** Store page — only carried for books whose listing we've verified. */
@@ -59,9 +63,9 @@ const BOOK_APPS: Record<string, BookApp> = {
   // id below is Apple's own, taken from the apps.apple.com URL of the book's
   // listing — none is guessed. iOS only: Google Play package names are not
   // verified, so Android keeps the web fallback.
-  fanduel: { scheme: null, candidateSchemes: ['fanduelsportsbook', 'fanduel-sportsbook', 'fdsportsbook', 'fanduel'], web: 'https://sportsbook.fanduel.com/', store: ios('id1413721906') },
-  betmgm: { scheme: null, candidateSchemes: ['betmgm', 'betmgmsports', 'betmgm-sports'], web: 'https://sports.betmgm.com/', store: ios('id1430875409') },
-  williamhill_us: { scheme: null, candidateSchemes: ['caesarssportsbook', 'caesars', 'williamhill', 'czrsportsbook'], web: 'https://sportsbook.caesars.com/', store: ios('id1413099571') },
+  fanduel: { scheme: null, candidateSchemes: ['fanduelsportsbook', 'fanduel-sportsbook', 'fdsportsbook'], web: 'https://sportsbook.fanduel.com/', store: ios('id1413721906') },
+  betmgm: { scheme: null, candidateSchemes: ['betmgmsports', 'betmgm-sports', 'betmgmsportsbook'], web: 'https://sports.betmgm.com/', store: ios('id1430875409') },
+  williamhill_us: { scheme: null, candidateSchemes: ['caesarssportsbook', 'czrsportsbook', 'williamhillsportsbook'], web: 'https://sportsbook.caesars.com/', store: ios('id1413099571') },
   espnbet: { scheme: null, web: 'https://espnbet.com/', store: null },
   bovada: { scheme: null, web: 'https://www.bovada.lv/', store: null },
   pinnacle: { scheme: null, web: 'https://www.pinnacle.com/', store: null },
@@ -165,15 +169,12 @@ export async function isBookAppInstalled(book: string): Promise<boolean | null> 
   if (verified.length === 0 && candidates.length === 0) return null;
   // A `true` from ANY scheme is proof: iOS says yes only for a scheme some
   // installed app registered. A `false` is proof only from the verified one.
-  let verifiedSaidNo = false;
-  for (const url of [...verified, ...candidates]) {
-    try {
-      if (await Linking.canOpenURL(url)) return true;
-      if (verified.includes(url)) verifiedSaidNo = true;
-    } catch {
-      // asked and not answered: no evidence either way
-    }
-  }
+  // Asked in parallel — this sits on the tap-to-open path (UX review).
+  const ask = (url: string): Promise<boolean | null> =>
+    Linking.canOpenURL(url).catch(() => null); // asked and not answered: no evidence either way
+  const answers = await Promise.all([...verified, ...candidates].map(ask));
+  if (answers.some((a) => a === true)) return true;
+  const verifiedSaidNo = answers.slice(0, verified.length).some((a) => a === false);
   return verifiedSaidNo ? false : null;
 }
 
