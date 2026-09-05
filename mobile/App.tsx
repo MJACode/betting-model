@@ -278,6 +278,9 @@ export default function App() {
             component={SavedParlaysScreen}
             options={{ title: 'Saved Parlays', headerBackTitle: 'Back' }}
           />
+          {/* No UI navigates here since the Track Record link was removed
+              (2026-09-05). The opening-signal shadow track still runs
+              server-side; the route is kept so the screen stays compiled. */}
           <Stack.Screen
             name="OpeningComparison"
             component={OpeningComparisonScreen}

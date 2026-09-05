@@ -11,23 +11,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import type { CompositeNavigationProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import type { RootStackParamList, TabParamList } from '@/types';
 import {
   fetchPublicTrackRecord,
   fetchTrackRecordDaily,
 } from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
-import { CalibrationChart } from '@/components/CalibrationChart';
 import { SettingsButton } from '@/components/SettingsButton';
-import { buildCalibration } from '@/lib/calibration';
-import { useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
-import { passesActionFilter } from '@/lib/thresholds';
 import {
   EMPTY_SUMMARY,
   groupBySport,
@@ -55,13 +46,6 @@ function roiColor(roi: number): string {
 }
 
 export function TrackRecordScreen() {
-  const navigation =
-    useNavigation<
-      CompositeNavigationProp<
-        BottomTabNavigationProp<TabParamList, 'TrackRecord'>,
-        NativeStackNavigationProp<RootStackParamList>
-      >
-    >();
   const [rows, setRows] = useState<TrackRecordRow[]>([]);
   const [daily, setDaily] = useState<TrackRecordDailyRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -128,19 +112,6 @@ export function TrackRecordScreen() {
       return { date, cumUnits: cum / 100 };
     });
   }, [visibleDaily]);
-
-  // Overall calibration across every settled BET pick that meets current cuts.
-  const { rows: settledPicks } = useSettledPicksSincePaperStart();
-  const calibration = useMemo(
-    () =>
-      buildCalibration(
-        settledPicks.filter(
-          (p) => passesActionFilter(p) && (sportSel === 'All' || p.sport === sportSel),
-        ),
-        { minTotal: 30 },
-      ),
-    [settledPicks, sportSel],
-  );
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
@@ -238,27 +209,13 @@ export function TrackRecordScreen() {
           </View>
         </View>
 
-        {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
-
-        {calibration ? (
-          <CalibrationChart
-            calibration={calibration}
-            flush
-            title="Calibration — when we say X, does it happen?"
-          />
-        ) : null}
-
-        {/* Link to the opening-signal vs live experiment */}
-        <Pressable
-          onPress={() => navigation.navigate('OpeningComparison')}
-          style={({ pressed }) => [styles.expLink, pressed && { opacity: 0.6 }]}
-        >
-          <Ionicons name="flask-outline" size={16} color={colors.tint} />
-          <Text style={styles.expLinkText}>
-            Experiment: lock our first signal vs chase the live line
-          </Text>
-          <Ionicons name="chevron-forward" size={15} color={colors.tint} />
-        </Pressable>
+        {/* Unconditional once loaded: EquityCurve carries its own "not enough
+            settled days" copy, and it is the only thing between the hero and the
+            prose now. Held back on the first load so it cannot assert there are
+            too few settled days while the data is still in flight. */}
+        {loading && rows.length === 0 ? null : (
+          <EquityCurve points={equity} width={chartWidth} />
+        )}
 
         {/* Honest framing — the record is not all green, and says so. */}
         <View style={styles.noteCard}>
@@ -270,8 +227,9 @@ export function TrackRecordScreen() {
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
             profitable, some aren’t yet, and we show them all. A new model is shown but not
-            backed until it clears 50 settled picks with positive ROI and calibration error
-            under 5%. A pick that had no DraftKings price when we posted it counts in the
+            backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive ROI. A
+            pick that had no
+            DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
           </Text>
         </View>
@@ -433,17 +391,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   heroStatLabel: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
-  expLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
-  },
-  expLinkText: { flex: 1, fontSize: font.size.footnote, color: colors.tint, fontWeight: font.weight.medium },
   noteCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,

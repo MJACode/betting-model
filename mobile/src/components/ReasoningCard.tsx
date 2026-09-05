@@ -41,26 +41,8 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
       <Row
         label="Model probability"
         value={formatPct(pick.model_probability)}
-        sub="What our XGBoost + Platt calibration says is the chance this side hits."
+        sub="What our model says is the chance this side hits."
       />
-
-      {/* What that claim has actually been worth, from the model's own graded
-          record. Shown only where a map applies and it moves the number — a
-          model that is already honest does not need a second row saying so,
-          and one whose gap was not stable enough to map has no honest second
-          number to show. The decision still runs on the raw probability. */}
-      {pick.model_probability_cal != null &&
-       Math.abs(pick.model_probability_cal - pick.model_probability) >= 0.01 ? (
-        <Row
-          label="Calibrated"
-          value={formatPct(pick.model_probability_cal)}
-          sub={
-            pick.model_probability_cal < pick.model_probability
-              ? "What that claim has been worth on this model's own settled record — it has historically run ahead of its results, so this is the honest number."
-              : "What that claim has been worth on this model's own settled record — it has historically run behind its results, so this is the honest number."
-          }
-        />
-      ) : null}
 
       {pick.dk_odds != null ? (
         <Row
