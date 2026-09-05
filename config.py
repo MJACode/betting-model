@@ -1928,6 +1928,50 @@ PROP_MARKETS_BATTER = [
 ]
 PROP_MARKETS_ALL = PROP_MARKETS_PITCHER + PROP_MARKETS_BATTER
 
+# ── Alternate (milestone) prop lines ─────────────────────────────────────────
+# Matt, 2026-09-05: "Yes to alternate lines." The competitor prices every
+# threshold because it ingests The Odds API's `*_alternate` markets -- 2+/3+
+# hits, 7+/8+ strikeouts and so on -- where our standard pull carries one line
+# per player per book. These feed the Stats board and the betslip's line legs
+# ONLY. They are stored under their OWN market key (`batter_hits_alternate`,
+# never folded into `batter_hits`) so that every model-facing read, which takes
+# the newest DraftKings row for (game, player, market), keeps seeing exactly
+# one standard line: a second line under the same key would make "the newest
+# row" an arbitrary one of two (models/scorer._latest_dk_prop_row,
+# tracking/paper_tracker._closing_dk_odds). The one remap predates this:
+# DraftKings serves "to hit a HR" only as batter_home_runs_alternate, whose 0.5
+# line is written to the canonical market for the HR model
+# (data/ingestors/prop_odds_ingestor.ALT_MARKET_REMAP); its other lines are now
+# kept as alternates instead of dropped.
+#
+# COST, measured 2026-09-04 in api_call_log rather than estimated: the MLB
+# prop event call (13 markets, 13 books) ran 705 times and averaged 32.0
+# credits; the 3-market F5 call at the same 13 books is a flat 6, i.e. ~2
+# credits per market. Eight more markets on every pass is therefore roughly
+# 11,000-14,000 credits/day. Matt approved ~7,000/day, so alternates are
+# requested at most every PROP_ALT_REFRESH_MIN minutes -- the daytime passes
+# are hourly already, the evening 10-minute passes carry them every third
+# pass -- which is ~370 calls/day, about 6,000-7,500 credits. The first day's
+# api_call_log is the number to read back. PROP_ALT_REFRESH_MIN=0 carries them
+# on every pass.
+#
+# Only sports with a board that shows them are listed. WNBA/NBA alternates
+# (player_points_alternate, ...) cost the same per market and are a separate
+# decision.
+PROP_ALT_MARKETS = {
+    "MLB": [
+        "batter_hits_alternate",
+        "batter_total_bases_alternate",
+        "batter_rbis_alternate",
+        "batter_runs_scored_alternate",
+        "batter_walks_alternate",
+        "pitcher_strikeouts_alternate",
+        "pitcher_hits_allowed_alternate",
+        "pitcher_walks_alternate",
+    ],
+}
+PROP_ALT_REFRESH_MIN = int(os.environ.get("PROP_ALT_REFRESH_MIN", "30"))
+
 # WNBA player prop markets (The Odds API basketball player-prop keys).
 # All modelled as Poisson count projections.
 PROP_MARKETS_WNBA = [

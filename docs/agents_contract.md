@@ -435,8 +435,9 @@ findings are comparable run to run, the agent supplies judgement on top and
 never replaces them.
 
 **References:** real shipped screens pulled through the Mobbin MCP server
-(`mobbin`, declared in `.mcp.json`; official remote server, OAuth, paid plan —
-`mobile/docs/UX_REVIEW.md` has the setup). Each finding names the app and
+(Matt's claude.ai connector `Mobbin`, tools `mcp__Mobbin__*`; official remote
+server, OAuth, paid plan — `mobile/docs/UX_REVIEW.md` has the setup and why
+the `.mcp.json` copy was removed). Each finding names the app and
 screen it is compared against, or the Apple HIG section, so Matt has a picture
 to look at rather than an adjective. When Mobbin is not connected, the review
 says so in one line and continues on HIG and the app's own conventions — a

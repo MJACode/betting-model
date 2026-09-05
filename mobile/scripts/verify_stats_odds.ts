@@ -41,6 +41,7 @@ import {
   unstartedGameIds,
 } from '../src/lib/statsOdds';
 import type { EnrichedPick, GameRow, OddsByBookRow, PropOddsByBookRow } from '../src/types';
+import { alternateMarketFor, canonicalPropMarket, foldAlternateRows, isAlternateMarket, propLineRowKey } from '../src/lib/propLines';
 
 const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 let failures = 0;
@@ -430,6 +431,33 @@ check(
   check('a doubleheader team with a game still to come gets no label', stats.includes('pending.forEach((t) => out.delete(t));'));
   const teams = read('src/components/TeamsBoard.tsx');
   check('the Teams board says Live / Final too', teams.includes('<Text style={styles.lineStarted}>{started}</Text>') && teams.includes('gameStatus(g).kind'));
+}
+
+// ── Alternate lines fold onto their market (lib/propLines.ts, 2026-09-05) ──
+{
+  const r = (market: string, bookmaker: string, line: number, over: number | null): PropOddsByBookRow => ({
+    game_id: 'MLB_2026-09-05_WSH_LAD', game_date: '2026-09-05', market, player_name: 'Mookie Betts', team: 'LAD',
+    bookmaker, line, over_price: over, under_price: null, over_link: null, under_link: null, snapshot_at: 't',
+  });
+  check('an alternate key names its market', isAlternateMarket('batter_hits_alternate') && !isAlternateMarket('batter_hits'));
+  check('canonical strips the suffix and leaves a standard key alone', canonicalPropMarket('batter_hits_alternate') === 'batter_hits' && canonicalPropMarket('batter_hits') === 'batter_hits');
+  check('the alternate key for a market', alternateMarketFor('batter_hits') === 'batter_hits_alternate' && alternateMarketFor('batter_hits_alternate') === 'batter_hits_alternate');
+  const rows = [r('batter_hits', 'draftkings', 0.5, -250), r('batter_hits_alternate', 'draftkings', 0.5, -245), r('batter_hits_alternate', 'draftkings', 1.5, 230), r('batter_hits_alternate', 'fanduel', 0.5, -240)];
+  const folded = foldAlternateRows(rows);
+  check('alternate rows come back under the standard market', folded.every((x) => x.market === 'batter_hits'));
+  check('an alternate that duplicates the book\'s standard line is dropped', folded.filter((x) => x.bookmaker === 'draftkings').map((x) => `${x.line}:${x.over_price}`).join() === '0.5:-250,1.5:230');
+  check('another book\'s alternate at that line is kept (that book has no standard row)', folded.some((x) => x.bookmaker === 'fanduel' && x.line === 0.5));
+  check('order is preserved', folded.map((x) => x.over_price).join() === '-250,230,-240');
+  check('the paging key carries the line', propLineRowKey(rows[2]!) !== propLineRowKey(rows[1]!) && propLineRowKey(rows[2]!).endsWith('|1.5'));
+  // The quote index sees one market with every line: a 1.5 ruler finds the
+  // alternate row where the standard line is 0.5.
+  const idx = buildQuoteIndex(folded, { market: 'batter_hits', line: 1.5, side: 'over', books: ['draftkings'] });
+  const q = idx.get('mookie betts');
+  check('the ruler at 1.5 prices the alternate line, on the board\'s number', q?.line === 1.5 && q?.price === 230 && q?.offLine === false, `${q?.line} ${q?.price} ${q?.offLine}`);
+  const queries = read('src/lib/queries.ts');
+  check('the Stats read asks for the market AND its alternate key', queries.includes(".in('market', [market, alternateMarketFor(market)])"));
+  check('the reads fold alternates before returning', (queries.match(/foldAlternateRows\(/g) ?? []).length >= 2);
+  check('the paged Stats read orders and keys by line', queries.includes(".order('line')") && queries.includes('propLineRowKey,'));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

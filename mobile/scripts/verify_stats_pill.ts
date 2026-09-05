@@ -12,10 +12,9 @@
  *     betslip flow beside ours: "it shouldn't take you directly to the book,
  *     it should ask you if you want to add to bet slip then bet slip should
  *     allow you to add to any book." So on the Players board the pill opens
- *     AddLineSheet (verify_line_legs.ts pins that flow); the Teams board still
- *     opens the book until team line legs land (a stated follow-up), and the
- *     pill's LOOK — filled in the book's colour, carrying its mark — holds on
- *     both.
+ *     AddLineSheet (verify_line_legs.ts pins that flow); since 2026-09-05 the
+ *     Teams board's pill asks the same way (team line legs), and the pill's
+ *     LOOK — filled in the book's colour, carrying its mark — holds on both.
  *  2. NOTHING UNDER THE PLAYER NAME. "I also like how their lines are clean."
  *     The Players rows are one line: name and team, nothing beneath.
  *  3. THE STAT GROUPS ARE TABS. "batting and pitching is floating to nowhere,
@@ -47,7 +46,7 @@ const player = read('src/screens/PlayerStatsScreen.tsx');
 const bookMark = read('src/components/BookMark.tsx');
 const groupTabs = read('src/components/GroupTabs.tsx');
 
-// ── 1. The pill: asks on Players, hands off on Teams (for now) ─────────────
+// ── 1. The pill asks, on Players and on Teams ───────────────────────────────
 
 // The CALL, not the import: a file that still imports a helper but no longer
 // hands it the quote has quietly changed what a tap does.
@@ -56,8 +55,8 @@ check(
   /setLineSheet\(\s*quote\s*\)/.test(stats) && !/openBookBetslip\(/.test(stats),
 );
 check(
-  'TeamsBoard: tapping a line pill still hands the quote to openBookBetslip (follow-up: team line legs)',
-  /openBookBetslip\(\s*quote\.book\s*,\s*quote\.link\s*\)/.test(teams),
+  'TeamsBoard: tapping a line pill opens the add-to-betslip sheet, not a book (team line legs, 2026-09-05)',
+  /setLineSheet\(\s*quote\s*\)/.test(teams) && !/openBookBetslip\(/.test(teams),
 );
 for (const [file, src] of [
   ['StatsScreen', stats],

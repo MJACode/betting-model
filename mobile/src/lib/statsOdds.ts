@@ -319,6 +319,10 @@ export interface TeamLineQuote {
   /** Spread from the team's side (−1.5 = favourite) or the total; null on h2h. */
   line: number | null;
   link: string | null;
+  /** EVERY book's row for this game at the quote's number (all rows on h2h),
+   *  the member's books or not — what the add-to-betslip sheet lists, and
+   *  what a game line leg is priced from (lib/lineLegs.ts). */
+  bookRows: OddsByBookRow[];
 }
 
 /**
@@ -360,10 +364,16 @@ export function buildTeamLineIndex(
 ): Map<string, TeamLineQuote> {
   const out = new Map<string, TeamLineQuote>();
   const rank = new Map(opts.books.map((b, i) => [b, i] as const));
-  // Every selected book's row for a game, in the member's own book order.
+  // Every selected book's row for a game, in the member's own book order —
+  // and every book's, for the sheet's price list and the leg's per-book pricing.
   const byGame = new Map<string, OddsByBookRow[]>();
+  const byGameAll = new Map<string, OddsByBookRow[]>();
   for (const r of rows) {
-    if (r.market !== opts.market || !rank.has(r.bookmaker)) continue;
+    if (r.market !== opts.market) continue;
+    const every = byGameAll.get(r.game_id);
+    if (every) every.push(r);
+    else byGameAll.set(r.game_id, [r]);
+    if (!rank.has(r.bookmaker)) continue;
     const list = byGame.get(r.game_id);
     if (list) list.push(r);
     else byGame.set(r.game_id, [r]);
@@ -379,6 +389,7 @@ export function buildTeamLineIndex(
     // The anchor's number is the bet; books on any other number are a
     // different bet and do not compete.
     let candidates = all;
+    let everyAt = byGameAll.get(g.game_id) ?? all;
     let anchorSpread: number | null = null;
     let anchorTotal: number | null = null;
     if (opts.market === 'spreads') {
@@ -386,11 +397,13 @@ export function buildTeamLineIndex(
       if (!anchor) continue;
       anchorSpread = num(anchor.spread_home);
       candidates = all.filter((r) => sameLine(num(r.spread_home), anchorSpread));
+      everyAt = everyAt.filter((r) => sameLine(num(r.spread_home), anchorSpread));
     } else if (opts.market === 'totals') {
       const anchor = all.find((r) => num(r.total_line) != null);
       if (!anchor) continue;
       anchorTotal = num(anchor.total_line);
       candidates = all.filter((r) => sameLine(num(r.total_line), anchorTotal));
+      everyAt = everyAt.filter((r) => sameLine(num(r.total_line), anchorTotal));
     }
 
     for (const isHome of [true, false]) {
@@ -426,6 +439,7 @@ export function buildTeamLineIndex(
         price: best.price,
         line,
         link: link ?? null,
+        bookRows: everyAt,
       });
     }
   }

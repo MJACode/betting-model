@@ -58,7 +58,7 @@ type View3 = 'today' | 'signals' | 'movement';
 
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
-  const { data: allData, loading, error, refresh, date } = useTodayPicks();
+  const { data: allData, loading, error, partial, refresh, date } = useTodayPicks();
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
@@ -192,6 +192,25 @@ export function PicksHomeScreen() {
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>Connection error: {error}</Text>
         </View>
+      ) : null}
+
+      {/* The picks loaded but something behind them did not — the odds views
+          the line pills read, or one sport's look-ahead card. Say so and
+          offer the retry; an empty pill and silence is how the 2026-09-04
+          timeouts went unseen here. */}
+      {!error && partial.length > 0 ? (
+        <Pressable
+          onPress={() => void refresh()}
+          accessibilityRole="button"
+          accessibilityLabel={`Couldn’t load ${partial.join('; ')}. Picks are unaffected. Retry`}
+          style={({ pressed }) => [styles.partialBanner, pressed && styles.partialPressed]}
+        >
+          <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+          <Text style={styles.partialText}>
+            Couldn’t load {partial.join('; ')}. Picks are unaffected.{' '}
+            <Text style={styles.partialLink}>Retry</Text>
+          </Text>
+        </Pressable>
       ) : null}
 
       {view === 'today' && exposure ? (
@@ -405,6 +424,30 @@ const styles = StyleSheet.create({
   errorText: {
     color: colors.avoid,
     fontSize: font.size.footnote,
+  },
+  partialBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: 8,
+    minHeight: 44,
+  },
+  partialPressed: {
+    opacity: 0.7,
+  },
+  partialText: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontSize: font.size.footnote,
+  },
+  partialLink: {
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
   },
   rgBanner: {
     flexDirection: 'row',

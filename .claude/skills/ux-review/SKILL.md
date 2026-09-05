@@ -30,10 +30,11 @@ report. The agent is read-only; this command never edits code.
 
 3. **Launch the agent** with the Agent tool, `subagent_type: frontend-ux-designer`,
    in the foreground. Give it: the target as resolved, the list of changed
-   front-end files, and the scan output. Tell it whether the Mobbin MCP server
-   is connected in this session (check for any `mcp__Mobbin__*` or
-   `mcp__mobbin__*` tool); if it is not, or it answers "requires a paid plan",
-   tell the agent to say so and proceed on HIG and the app's conventions.
+   front-end files, and the scan output. Tell it whether the Mobbin connector
+   is connected in this session (an `mcp__Mobbin__*` tool is listed -- there
+   is no other route since 2026-09-05); if it is not, or it answers "requires
+   a paid plan", tell the agent to say so and proceed on HIG and the app's
+   conventions.
 
 4. **Relay the report** to the user unchanged in substance: verdict, findings
    (severity, file:line, why, reference, change), scan output, then the four

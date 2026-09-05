@@ -1,4 +1,5 @@
 import { fetchAllPages } from '@/lib/paging';
+import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { supabase } from './supabase';
 import {
   LOG_COLUMNS,
@@ -462,17 +463,26 @@ export async function fetchPropLinesForDate(
   market: string,
 ): Promise<PropOddsByBookRow[]> {
   // Paged: a full MLB market is ~1,900 rows, over the 1,000-row response cap.
-  return fetchAllPages<PropOddsByBookRow>((from, to) =>
-    supabase
-      .from('v_latest_prop_odds_all_books')
-      .select(PROP_ODDS_BY_BOOK_COLUMNS)
-      .eq('game_date', date)
-      .eq('market', market)
-      .order('game_id')
-      .order('player_name')
-      .order('bookmaker')
-      .range(from, to),
+  // The market's alternate lines (lib/propLines.ts) ride along under their
+  // own key and are folded onto the market here, so callers see one market
+  // with every line a book posts. The line is in the order and the key: an
+  // alternate key returns several rows per (game, player, book).
+  const rows = await fetchAllPages<PropOddsByBookRow>(
+    (from, to) =>
+      supabase
+        .from('v_latest_prop_odds_all_books')
+        .select(PROP_ODDS_BY_BOOK_COLUMNS)
+        .eq('game_date', date)
+        .in('market', [market, alternateMarketFor(market)])
+        .order('game_id')
+        .order('market')
+        .order('player_name')
+        .order('bookmaker')
+        .order('line')
+        .range(from, to),
+    propLineRowKey,
   );
+  return foldAlternateRows(rows);
 }
 
 /**
@@ -508,10 +518,25 @@ export async function fetchPropLineRows(
     .from('v_latest_prop_odds_all_books')
     .select(PROP_ODDS_BY_BOOK_COLUMNS)
     .eq('game_id', gameId)
-    .eq('market', market)
+    .in('market', [market, alternateMarketFor(market)])
     .eq('player_name', playerName);
   if (error) throw error;
-  return (data ?? []) as unknown as PropOddsByBookRow[];
+  return foldAlternateRows((data ?? []) as unknown as PropOddsByBookRow[]);
+}
+
+/**
+ * Every book's latest line for ONE game market -- what a Teams-board LINE leg
+ * re-prices from each time the betslip resolves (lib/lineLegs.ts
+ * gameLineLegFromRows). ~13 rows, bounded by game_id; no paging needed.
+ */
+export async function fetchGameLineRows(gameId: string, market: string): Promise<OddsByBookRow[]> {
+  const { data, error } = await supabase
+    .from('v_latest_odds_all_books')
+    .select(ODDS_BY_BOOK_COLUMNS)
+    .eq('game_id', gameId)
+    .eq('market', market);
+  if (error) throw error;
+  return (data ?? []) as unknown as OddsByBookRow[];
 }
 
 /** One game row, for a line leg's matchup and start time. */
@@ -525,7 +550,18 @@ export async function fetchGameById(gameId: string): Promise<GameRow | null> {
   return (data as GameRow | null) ?? null;
 }
 
-export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
+/**
+ * `onEnrichmentError` is called, never thrown, for each enrichment read that
+ * fails -- the DraftKings latest-odds view, the all-books line shop, the prop
+ * line shop. The picks list must not go down with them, but they must not
+ * fail SILENTLY either: until 2026-09-05 an unreachable odds view left the
+ * Picks screen with empty line pills and no message, which is why the
+ * 2026-09-04 statement timeouts were only ever noticed on the Stats board.
+ */
+export async function fetchPicksForDate(
+  date: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
   const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
     supabase
       .from('picks')
@@ -549,7 +585,9 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   if (picksRes.error) throw picksRes.error;
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
-  // Latest odds are enrichment only — a failure shouldn't take down the picks list.
+  // Latest odds are enrichment only — a failure shouldn't take down the picks
+  // list, but it is reported (see the docstring).
+  if (latestOddsRes.error) onEnrichmentError?.('today’s lines', latestOddsRes.error);
   const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
 
   // The all-books line shop, read AFTER the picks and BOUNDED TO THE PICKS THAT
@@ -612,9 +650,11 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
               .order('player_name')
               .order('bookmaker')
               .range(from, to),
-          (r) => `${r.game_id}|${r.market}|${r.player_name}|${r.bookmaker}`,
+          propLineRowKey,
         ).then((data) => ({ data, error: null as unknown }), (error: unknown) => ({ data: null, error })),
   ]);
+  if (allBooksRes.error) onEnrichmentError?.('the line shop', allBooksRes.error);
+  if (propBooksRes.error) onEnrichmentError?.('the prop line shop', propBooksRes.error);
   const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
   const propBooks = (
     propBooksRes.error ? [] : (propBooksRes.data ?? [])

@@ -48,6 +48,8 @@ from config import (
     PROP_MARKETS_ALL,
     PROP_MARKETS_WNBA,
     PROP_MARKETS_NBA,
+    PROP_ALT_MARKETS,
+    PROP_ALT_REFRESH_MIN,
 )
 from data.db import get_connection, DBConnection
 from data.ingestors.odds_quota import record_quota_headers, persist_quota
@@ -85,13 +87,73 @@ YESNO_DEFAULT_LINE_MARKETS = {"batter_home_runs", "player_double_double",
 # DraftKings does NOT serve the standard `batter_home_runs` market via The Odds
 # API (verified 2026-06-20 — DK returns batter_hits/total_bases but never
 # batter_home_runs). It serves "to hit a home run" under `batter_home_runs_alternate`
-# (the 0.5-line over at real +250..+500 prices, plus a 1.5 multi-HR line we ignore).
+# (the 0.5-line over at real +250..+500 prices, plus a 1.5 multi-HR line).
 # Request the alternate and remap its 0.5 line back to our canonical
-# batter_home_runs market so the scorer/settlement are unchanged.
+# batter_home_runs market so the scorer/settlement are unchanged. Its OTHER
+# lines were dropped until 2026-09-05; they are now kept under the alternate
+# key like every other alternate line (below).
 ALT_MARKET_REMAP = {"batter_home_runs_alternate": "batter_home_runs"}
 ALT_KEEP_POINT   = {"batter_home_runs_alternate": 0.5}
-# Extra request-only markets per sport (remapped to canonical on parse).
+# Extra request-only markets per sport, requested on EVERY pass because a
+# model prices off them (the HR remap above).
 EXTRA_REQUEST_MARKETS = {"MLB": ["batter_home_runs_alternate"]}
+
+# ALTERNATE LINES (Matt, 2026-09-05: "Yes to alternate lines"). The
+# `*_alternate` markets in config.PROP_ALT_MARKETS carry every milestone a
+# book posts -- 2+/3+ hits, 7+/8+ strikeouts -- and are written UNDER THEIR
+# OWN MARKET KEY, one row per (player, line), never folded into the standard
+# market. Every model-facing read takes the newest DraftKings row for (game,
+# player, market) and must keep finding exactly one standard line there;
+# config.py has the reasoning. The app reads the alternate key beside the
+# standard one (mobile/src/lib/propLines.ts) and the all-books view returns
+# every line the newest pass wrote for an alternate key
+# (data/migrations/alternate_prop_lines_view.sql).
+#
+# They are requested at most every config.PROP_ALT_REFRESH_MIN minutes
+# (_alt_markets_due) because each market costs ~2 credits per event call
+# (measured, config.py) and the evening pass runs every 10 minutes.
+ALT_LINE_MARKETS = frozenset(m for ms in PROP_ALT_MARKETS.values() for m in ms)
+
+
+def _is_alt_line_market(market: str) -> bool:
+    """A market key stored as-is with one row per line (never remapped)."""
+    return market.endswith("_alternate")
+
+
+def alt_markets_due(conn: DBConnection, sport: str, target_date: str,
+                    now: datetime | None = None) -> bool:
+    """Should this pass request the alternate markets?
+
+    True when the sport has any, and the newest alternate row for the date is
+    older than PROP_ALT_REFRESH_MIN minutes (or there is none). A failed check
+    answers False and WARNS: a broken gate that spent every pass would double
+    the approved credit budget silently, whereas stale alternates are visible
+    on the board and in this log line.
+    """
+    markets = PROP_ALT_MARKETS.get(sport) or []
+    if not markets:
+        return False
+    if PROP_ALT_REFRESH_MIN <= 0:
+        return True
+    try:
+        row = conn.execute("""
+            SELECT max(snapshot_at)
+            FROM player_prop_odds
+            WHERE game_date = %s AND market = ANY(%s)
+        """, (target_date, list(markets))).fetchone()
+    except Exception as exc:  # noqa: BLE001 -- the gate must never abort the pass
+        logger.warning(f"Alternate-line gate failed ({exc}); NOT requesting alternates this pass")
+        return False
+    newest = row[0] if row else None
+    if not newest:
+        return True
+    try:
+        newest_dt = datetime.fromisoformat(str(newest).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    now = now or datetime.now(newest_dt.tzinfo)
+    age_min = (now - newest_dt).total_seconds() / 60.0
+    return age_min >= PROP_ALT_REFRESH_MIN
 
 # ── API Helpers ───────────────────────────────────────────────────────────────
 
@@ -166,6 +228,19 @@ def _get_event_props(event_id: str, markets: list[str],
 
     resp = requests.get(url, params=params, timeout=20)
     record_quota_headers(resp)
+
+    if resp.status_code == 422:
+        # An alternate key the API does not recognise for this sport would
+        # 422 the WHOLE call and cost the models their standard lines. Drop the
+        # alternate-line markets and retry before anything else; the standard
+        # set has been accepted for months.
+        alts = [m for m in markets if m in ALT_LINE_MARKETS]
+        if alts:
+            logger.warning(f"Event {event_id}: 422 with alternate markets "
+                           f"({resp.text[:160]!r}) — retrying without them")
+            params["markets"] = ",".join(m for m in markets if m not in ALT_LINE_MARKETS)
+            resp = requests.get(url, params=params, timeout=20)
+            record_quota_headers(resp)
 
     if resp.status_code == 422:
         # Usually an unsupported market for this event, but can also be an
@@ -257,10 +332,13 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
         market_key = mkt.get("key", "")
         if market_key not in allowed_markets:
             continue
-        # Remap source-only markets to canonical (DK's batter_home_runs_alternate
-        # → batter_home_runs); keep only the configured line from the alternate.
-        out_market = ALT_MARKET_REMAP.get(market_key, market_key)
-        keep_pt    = ALT_KEEP_POINT.get(market_key)
+        # An alternate market carries several lines per player. The configured
+        # line (DK's batter_home_runs_alternate at 0.5) is remapped to the
+        # canonical market the model prices; every other line stays under the
+        # alternate key, one row per (player, line), so no canonical market
+        # ever holds two lines for one player (config.PROP_ALT_MARKETS).
+        is_alt  = _is_alt_line_market(market_key)
+        keep_pt = ALT_KEEP_POINT.get(market_key)
 
         for outcome in mkt.get("outcomes", []):
             name_field = (outcome.get("name") or "").strip()
@@ -270,9 +348,14 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
             link  = outcome.get("link")
             sid   = outcome.get("sid")
 
-            # Alternate markets carry several lines (HR: 0.5 + 1.5) — keep only ours.
-            if keep_pt is not None and point != keep_pt:
-                continue
+            if is_alt and keep_pt is not None and point == keep_pt:
+                out_market = ALT_MARKET_REMAP[market_key]
+            elif is_alt:
+                if point is None:
+                    continue   # a milestone with no number cannot be a line
+                out_market = market_key
+            else:
+                out_market = market_key
 
             # Detect which field holds direction vs. player name
             n_lo, d_lo = name_field.lower(), desc_field.lower()
@@ -295,7 +378,10 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
             if point is None and out_market in YESNO_DEFAULT_LINE_MARKETS:
                 point = 0.5
 
-            key = (out_market, player_name)
+            # Alternate rows are keyed by line as well: the whole point is
+            # that one player has several.
+            key = (out_market, player_name, point) if _is_alt_line_market(out_market) \
+                else (out_market, player_name)
             row = player_rows[key]
             row["player_name"] = player_name
             row["market"]      = out_market
@@ -314,6 +400,14 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
     for row in player_rows.values():
         if row["player_name"] and row["market"] and row["line"] is not None:
             result.append(dict(row))
+    # An alternate line that duplicates this book's STANDARD line for the same
+    # player (1+ hits beside batter_hits 0.5) is the same proposition twice;
+    # the standard row is the one the app and the models already read.
+    standard = {(r["market"], r["player_name"], r["line"])
+                for r in result if not _is_alt_line_market(r["market"])}
+    result = [r for r in result
+              if not (_is_alt_line_market(r["market"])
+                      and (r["market"][:-len("_alternate")], r["player_name"], r["line"]) in standard)]
     return result
 
 
@@ -374,7 +468,6 @@ def run_prop_odds_ingestor(target_date: str = None,
     # Request extra source markets that get remapped to canonical on parse
     # (e.g. DK's batter_home_runs_alternate → batter_home_runs).
     markets  += EXTRA_REQUEST_MARKETS.get(sport, [])
-    allowed   = set(markets)
 
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
@@ -382,6 +475,12 @@ def run_prop_odds_ingestor(target_date: str = None,
     logger.info(f"Prop odds ingestor: {sport} {target_date} ({snapshot_type})")
 
     conn = get_connection()
+    # The alternate-line markets ride on the same event call, at most every
+    # PROP_ALT_REFRESH_MIN minutes (credits: config.PROP_ALT_MARKETS).
+    if alt_markets_due(conn, sport, target_date):
+        markets += PROP_ALT_MARKETS.get(sport, [])
+        logger.info(f"  alternate lines requested this pass: {PROP_ALT_MARKETS.get(sport)}")
+    allowed = set(markets)
     total_rows = 0
     total_events = 0
 

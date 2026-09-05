@@ -150,7 +150,7 @@ of any of these is a Should-fix, with the existing one named.
 ## 9. References — how Mobbin is used
 
 The agent pulls 2–4 real screens per new or materially changed pattern through
-the `mobbin` MCP server and names them in the finding. The point is not to copy
+the `Mobbin` MCP connector and names them in the finding. The point is not to copy
 a competitor; it is to stop designing from a blank prompt and to give Matt a
 picture he can look at.
 
@@ -173,13 +173,22 @@ can do.
 
 The official server is remote (`https://api.mobbin.com/mcp`, OAuth in the
 browser) and exposes three tools: `search_screens`, `search_flows` and
-`search_sections`. Two routes reach it, and the agent is allowed both:
+`search_sections`. ONE route reaches it:
 
 - **Matt's claude.ai connector**, named `Mobbin` — tools arrive as
-  `mcp__Mobbin__*`. Connected 2026-09-02; this is the route that is live.
-- **The repo's `.mcp.json`**, named `mobbin` — tools arrive as
-  `mcp__mobbin__*` in a local Claude Code session once approved and
-  authenticated (`/mcp` → mobbin → Authenticate).
+  `mcp__Mobbin__*`. Connected 2026-09-02. Tested 2026-09-05: `search_screens`
+  (`platform: ios`, standard mode) answered in one call with three real
+  screens, so "connected" is a measured fact, not a setting.
+
+There used to be a second route, a `mobbin` server declared in the repo's
+`.mcp.json`. It only ever worked in a local session after `/mcp →
+Authenticate`; in every remote session it sat unauthenticated, the harness
+listed it as "requires authentication", and the reply said Mobbin needed
+authorising while the connector was answering fine. Two names for one
+service is how a working tool gets reported as down. Removed 2026-09-05
+(Matt: "that is already properly set up"). If a local session ever wants its
+own copy, add it back under a different name and keep the agent's tool list
+pointing at the connector.
 
 **It needs a paid Mobbin plan, on the account the connector is signed in as.**
 Measured 2026-09-02 and again 2026-09-03: `search_screens` answered
