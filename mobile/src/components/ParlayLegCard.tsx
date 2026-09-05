@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatAmerican, formatPct } from '@/lib/format';
 import { bookLabel } from '@/lib/markets';
+import { isLineLeg } from '@/lib/lineLegs';
 import { modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { matchupForLeg, type ParlayLeg } from '@/lib/parlay';
@@ -35,8 +36,15 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
               {leg.isFavorite ? 'FAV' : 'DOG'}
             </Text>
           </View>
-          <Text style={styles.stat}>{formatPct(leg.modelProb)}</Text>
-          <Text style={styles.stat}>{formatAmerican(leg.americanOdds)}</Text>
+          {/* A Stats line leg has no model: its probability is the odds-implied
+              one, and it says so rather than reading as a model call. */}
+          <Text style={styles.stat}>
+            {isLineLeg(leg) ? `implied ${formatPct(leg.modelProb)}` : formatPct(leg.modelProb)}
+          </Text>
+          <Text style={styles.stat}>
+            {formatAmerican(leg.americanOdds)}
+            {leg.dkPriced === false && leg.pricedAt ? ` · ${bookLabel(leg.pricedAt)}` : ''}
+          </Text>
           {leg.bestBook ? (
             <Text style={styles.bestBook}>
               {bookLabel(leg.bestBook.bookmaker)} {formatAmerican(leg.bestBook.american)}

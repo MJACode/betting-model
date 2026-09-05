@@ -163,18 +163,39 @@ that helper** — all five prop lanes share the one lookup, pinned by
 `tests/test_prop_name_match.py`.
 
 **Known issues (active):**
-- **The Stats board's ODDS column reads only `picks`.** `StatsScreen.oddsByPlayer`
-  joins today's picks by `player_id`, so a player DraftKings prices but no model has
-  scored shows "—" — most visibly every batter in a game whose lineup has not posted
-  (2026-08-30, 12:24pm ET: 4 of 14 games, ~19 DK-priced batters each, all dashes).
-  The prices are already fetched by `fetchPicksForDate` via
-  `v_latest_prop_odds_all_books`; the open question is the tap target, since the odds
-  sheet and add-to-betslip both want a real `EnrichedPick`. Related: the pill prints
-  the model's own line as an `o0.5` subtitle whatever the ruler says, so a "2+ Hits"
-  board can show a 0.5 price.
+- **The pre-game line poller wipes a game's non-BET PROP picks (NOT FIXED — needs a
+  decision).** `data/ingestors/pregame_line_poller.py` calls `run_scorer(only_games=…)`
+  whenever DK's number on a game moves, and the game scorer's non-BET housekeeping
+  delete (`models/scorer.py`, "Housekeeping for the pairs the lock deliberately leaves
+  open") is scoped by `game_id`, not by model — so it takes that game's prop NONE and
+  AVOID rows with it, and `run_scorer` never re-creates them. Prop rows only come back
+  on the next hourly prop pass. Measured: prop non-BET deletes were **0/day through
+  2026-08-29 and 8.5k–23k/day from 2026-08-30**, the day the poller shipped. **BET rows
+  are never touched** (0 prop BET deletes in that window), so §1c holds for the bet of
+  record. Not fixed here because the delete is accidentally load-bearing: `_locked_prop_keys`
+  locks on ANY unsettled row including NONE, so without something clearing them a
+  dead-zone player could never later fire. The real fix is probably to lock props on
+  BET only (matching the game lock) — a model-behaviour change, so it is Matt's call.
 - **Pre-lock-era prop prices may include late-snapshot contamination (Apr 14–Jun 25):** in the delete+rescore era the evening passes re-scored props after first pitch against the latest stored DK snapshot, and 10-15% of prop snapshots in that window were post-start. Unlike the lock era (repaired 2026-08-09 via the is_live flag), those rows can't be identified by `created_at` (rewritten every pass). Impact is diluted (most re-scores still read pre-game snapshots) but unquantified — treat pre-July prop sweep ROIs as approximate.
 
 **Resolved:**
+- **The Stats board's ODDS column read only `picks` (FIXED 2026-09-03, then
+  redirected by Matt the same day).** It joined today's picks by `player_id`, so a
+  player DraftKings priced but no model had scored showed "—". Measured 2026-09-03
+  14:20 ET: DK priced `batter_hits` for **184 players across all 9 games; 60 held a
+  pick.** Matt's direction: *"display all lines regardless of bet status … if they
+  select FanDuel we only show FanDuel … it works separately from the models."* So the
+  tab's LINE column is now the user's sportsbook (`usePreferredBook` — a STATS-PAGE
+  setting only, session 214) and only that book — no DK fallback — for the line the ruler is on, for players
+  (`v_latest_prop_odds_all_books`, one market at a time) AND teams
+  (`v_latest_odds_all_books`, the team's own side of its moneyline/spread/total,
+  market chosen by the stat). Both bounded to the sport's slate and to games that
+  have not started (a started game's "latest" row is a live number — PIT read
+  −50000 mid-game). A pick's only remaining role is unlocking "Add to betslip" at
+  its own line. **FanDuel posts no `batter_hits` line at all** (2026-09-03), so a
+  FanDuel user sees the note "FanDuel doesn't post Hits lines today" rather than a
+  column of dashes. Pure logic in `mobile/src/lib/statsOdds.ts`, pinned by
+  `mobile/scripts/verify_stats_odds.ts`.
 - NHL h2h_3way 422 error (FIXED 2026-06-13): `h2h_3way` is an additional market
   that 422s when included in the bulk `/odds` request (it was killing the whole
   NHL fetch). Now fetched via the per-event endpoint (`_fetch_nhl_3way_per_event`),

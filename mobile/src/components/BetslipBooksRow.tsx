@@ -1,33 +1,32 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatAmerican } from '@/lib/format';
 import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
-import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
  * "Open with" — this slip priced at every book a member can bet at
  * (BETTABLE_BOOKS), one tile per book:
  * combined odds where the book prices every leg, otherwise how many legs it
- * covers (N/M). The best payout is starred (ties all starred), the user's own
- * book is ringed, and tapping a tile opens that book (its first leg's betslip
- * link when we have one, else the book's app/site).
+ * covers (N/M). The best payout is starred (ties all starred), and tapping a
+ * tile opens that book (its first leg's betslip link when we have one, else the
+ * book's app/site). No tile is singled out as the user's — the bet button
+ * below the slip is already their own book (Matt, 2026-09-04), so this row's
+ * one job is ranking by payout.
  *
  * The odds differ per book because each leg is re-priced at that book's own
  * line-shop snapshot; the slip's win probability is book-independent, so the
- * highest payout is simply the best place to put the slip on. DraftKings is
- * always fully priced (every leg requires a DK price to be a leg), so the row
- * always has at least one complete quote.
+ * highest payout is simply the best place to put the slip on. DraftKings
+ * prices every pick and custom leg, but a Stats LINE leg it never posted
+ * (lib/lineLegs.ts) leaves its tile partial like any other book's — so the
+ * row can, on such a slip, hold no complete quote at all.
  */
 export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
-  const { book: preferredBook } = usePreferredBook();
-  const [pickerOpen, setPickerOpen] = useState(false);
-
   const quotes = useMemo(
     // Bettable books only: a tile opens the book, and Pinnacle / Bovada /
     // ESPN BET cannot take the slip (legFromPick prices no leg there anyway).
@@ -43,18 +42,22 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
 
   return (
     <View style={styles.wrap}>
+      {/* Title, an (i) for the mechanics, and the star's meaning stated where
+          the stars are — the reference betslip Matt sent puts the legend on
+          this row rather than in a paragraph under the tiles, and a legend
+          beside the thing it labels is read; a paragraph below it is not. */}
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Open with</Text>
-        <Pressable
-          onPress={() => setPickerOpen(true)}
-          hitSlop={6}
-          style={({ pressed }) => [styles.bookChip, pressed && styles.pressed]}
-          accessibilityLabel={`Your sportsbook is ${bookName(preferredBook)}. Tap to switch.`}
-        >
-          <Ionicons name="wallet-outline" size={12} color={colors.tint} />
-          <Text style={styles.bookChipText}>{bookName(preferredBook)}</Text>
-          <Ionicons name="chevron-down" size={12} color={colors.tint} />
-        </Pressable>
+        <View style={styles.headerLeft}>
+          <Text style={styles.title}>Open with</Text>
+          <InfoTooltip
+            title="Open with"
+            body={
+              'Every book we price this slip at, best payout first. Tap one to open it.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nBooks can’t accept a whole parlay from a link, so add each leg once you’re there.\n\nThis row is every book, not just the ones you selected in Settings — your books decide the green button, never where you’re allowed to place.'
+            }
+            accessibilityLabel="About the Open with row"
+          />
+        </View>
+        <Text style={styles.headerHint}>★ = best odds</Text>
       </View>
 
       <ScrollView
@@ -64,7 +67,6 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
       >
         {quotes.map((q) => {
           const full = q.americanOdds != null;
-          const isPreferred = q.book === preferredBook;
           const firstLink = q.links.find((l) => l != null) ?? null;
           return (
             <Pressable
@@ -77,17 +79,15 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
                 full
                   ? `Open ${bookName(q.book)}, combined odds ${formatAmerican(q.americanOdds!)}${
                       q.isBest && fullCount > 1 ? ', best payout' : ''
-                    }${isPreferred ? ', your sportsbook' : ''}`
-                  : `Open ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines${
-                      isPreferred ? ', your sportsbook' : ''
                     }`
+                  : `Open ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
               }
-              style={({ pressed }) => [
-                styles.tile,
-                isPreferred && styles.tilePreferred,
-                !full && styles.tilePartial,
-                pressed && styles.pressed,
-              ]}
+              // A partial tile fades its ODDS only (oddsNa below): the badge
+              // and the "2/3 legs" coverage are the information, and at 55%
+              // on textTertiary they were under AA — on DraftKings' own tile,
+              // the one users look for first, whenever a Stats line leg DK
+              // never posted is in the slip (UX review).
+              style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
             >
               {q.isBest && fullCount > 1 ? (
                 <View style={styles.star}>
@@ -110,13 +110,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
         })}
       </ScrollView>
 
-      <Text style={styles.hint}>
-        ★ best payout · your book highlighted · tap a book to open it. N/M legs: that book
-        doesn’t post every leg at the same line, so it can’t price the whole slip. Books can’t
-        accept a whole parlay from a link, so add each leg there.
-      </Text>
 
-      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
     </View>
   );
 }
@@ -134,6 +128,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.sm,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   title: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
@@ -141,20 +140,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  bookChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.tint,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  bookChipText: {
+  headerHint: {
     fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.tint,
+    color: colors.textTertiary,
   },
   tiles: {
     flexDirection: 'row',
@@ -169,12 +157,6 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
-  },
-  tilePreferred: {
-    borderColor: colors.tint,
-  },
-  tilePartial: {
-    opacity: 0.55,
   },
   star: {
     position: 'absolute',
@@ -215,12 +197,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: 2,
-  },
-  hint: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 15,
-    marginTop: spacing.sm,
   },
   pressed: {
     opacity: 0.6,

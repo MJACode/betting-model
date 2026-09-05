@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
-import { ModelInputsCard } from '@/components/ModelInputsCard';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -22,6 +21,7 @@ import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from
 import { betTypeLabel, MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { BACKTEST_START_LABEL, GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -85,9 +85,10 @@ export function ModelsScreen() {
           !isModelRetired(modelId),
       ).map((modelId) => ({
         modelId,
-        // Prefer the full-outcome view record (grades dead-zone picks at the
-        // current cut) when available; fall back to the settled-pick count for
-        // sports the view doesn't cover yet (WNBA/NBA/UFC/NHL/golf).
+        // The PUBLISHED record (v_public_track_record — the same rows Retool
+        // reads) when the model has one; otherwise fall back to the on-device
+        // settled picks, which now means "no settled bet in the published
+        // window yet" rather than "a sport the view doesn't cover".
         stats: records[modelId]
           ? viewRecordToStats(records[modelId])
           : computeBuiltInModelStats(modelId, rows),
@@ -117,8 +118,8 @@ export function ModelsScreen() {
         </View>
         <Text style={styles.subtitle}>
           {tab === 'builtin'
-            ? 'How each model’s current prob/edge cut has performed since 2026-04-14. Tap one to see today’s picks.'
-            : 'Save your own pick filters and see how they would have performed since 2026-04-14.'}
+            ? `How each model has performed since ${LIVE_RECORD_START_LABEL}, our live date. Tap one to see today’s picks.`
+            : `Save your own pick filters and see how they would have performed since ${BACKTEST_START_LABEL} — backtests use our full graded history, not just the live window.`}
         </Text>
 
         <View style={styles.sportToggleWrap}>
@@ -141,9 +142,26 @@ export function ModelsScreen() {
         <FlatList
           data={builtInWithStats}
           keyExtractor={(item) => item.modelId}
-          // What the selected sport's models consider — collapsed to one line
-          // so the record stays the first thing on screen (Matt, 2026-09-03).
-          ListHeaderComponent={<ModelInputsCard sport={sport} />}
+          // Every unpaused model is listed whether or not it has settled a bet,
+          // so the list is never empty and ListEmptyComponent never fires. A
+          // wall of "0 picks · — · —" is indistinguishable from a failed fetch
+          // (UX_REVIEW §3), and it has two different causes — say which.
+          //
+          // While the first fetch is in flight the rows are real but every stat
+          // is EMPTY_STATS, so the zeros mean "not loaded yet": spinner. Once it
+          // lands and nothing has settled, they mean what they say.
+          ListHeaderComponent={
+            loading && rows.length === 0 ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : !loading &&
+              builtInWithStats.length > 0 &&
+              builtInWithStats.every((m) => m.stats.picks === 0) ? (
+              <EmptyState
+                title={`No settled bets yet for ${sport}`}
+                subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
+              />
+            ) : null
+          }
           renderItem={({ item }) => (
             <BuiltInModelRow
               modelId={item.modelId}
@@ -153,8 +171,19 @@ export function ModelsScreen() {
               }
             />
           )}
+          // Reachable when every model for the sport is paused or retired. It
+          // takes no app build to get here — isModelPaused prefers the server
+          // store over the bundled list — and until the inputs card was removed
+          // something always rendered, so this path had never been seen.
           ListEmptyComponent={
-            loading ? <ActivityIndicator style={styles.loading} /> : null
+            loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title={`No models listed for ${sport}`}
+                subtitle="Every model for this sport is paused right now. Paused models don’t produce picks; they come back here when they’re unpaused."
+              />
+            )
           }
           contentContainerStyle={styles.list}
         />
@@ -230,8 +259,13 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // Named on the row so an 8-5 next to a negative ROI reads as "six of those
   // had no price" rather than as a bug.
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
-  const roiColor =
-    stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
+  // A percentage on a handful of bets is not a result — see
+  // MIN_PICKS_FOR_COLOURED_ROI. The number still shows; it just stops wearing
+  // the colour that claims it means something.
+  const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
+  const roiColor = thin
+    ? colors.textSecondary
+    : stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
   return (
     <Pressable
       onPress={onPress}
@@ -240,6 +274,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
         (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (thin && stats.picks > 0 ? `, only ${stats.picks} of ${GO_LIVE_SETTLED_PICKS} settled picks` : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced` : '')
       }
       style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
@@ -256,6 +291,11 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             {stats.picks} pick{stats.picks === 1 ? '' : 's'}
             {decided > 0 ? ` · ${stats.wins}–${stats.losses}${stats.pushes > 0 ? `–${stats.pushes}` : ''}` : ''}
           </Text>
+          {thin && stats.picks > 0 ? (
+            <Text style={styles.subtle}>
+              {stats.picks} of {GO_LIVE_SETTLED_PICKS} settled · too few to judge
+            </Text>
+          ) : null}
           {unpriced > 0 ? (
             // Its own line: on a 375pt phone the sub-line has ~160pt, and a
             // mid-phrase wrap would orphan the one segment that explains the

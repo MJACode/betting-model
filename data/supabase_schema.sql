@@ -2531,15 +2531,51 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- security_invoker; anon SELECT. The mobile client computes the best price per
 -- pick side and shows a "Best FD +145" chip when a non-DK book beats DK.
 --
---   CREATE VIEW v_latest_odds_all_books WITH (security_invoker = on) AS
---     SELECT DISTINCT ON (o.game_id, o.market, o.bookmaker) o.game_id, g.game_date,
---            o.market, o.bookmaker, o.home_price, o.away_price, o.over_price,
---            o.under_price, o.spread_home, o.total_line, o.home_link, o.away_link,
---            o.over_link, o.under_link, o.snapshot_at
---     FROM odds o JOIN games g ON g.game_id = o.game_id
---     WHERE o.bookmaker <> 'sbr_consensus'
---       AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
---     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
+-- TWO REWRITES ON 2026-09-04, both measured as `authenticated` on a 41-game day:
+--
+--   1. push_game_date_into_latest_odds_views put game_date at the head of the
+--      DISTINCT ON key, because Postgres pushes a predicate through DISTINCT
+--      ON only for key columns and the app's `game_date = today` filter was
+--      being applied AFTER the whole 2.7M-row table had been de-duplicated:
+--      91 s -> 3.7 s.
+--   2. skip_scan_latest_odds_views replaced DISTINCT ON altogether. The refresh
+--      pass writes every book's line every pass, so one game carries ~2,400
+--      pre-game rows by evening and DISTINCT ON must fetch every one to keep
+--      the newest per (market, book). The view now drives from `games`, walks
+--      the distinct (market, bookmaker) keys of each game with a recursive
+--      skip scan on idx_odds_book_snap (one index probe per key), then takes
+--      the newest pre-game row per key with one backward probe:
+--      3,739 ms and a 24 MB sort -> 333 ms, 1,180 rows read instead of 98,941.
+--
+--   Same columns, order, types and exclusions (sbr_consensus, in_play); "newest"
+--   is still snapshot_at DESC on the text column, and the text order was
+--   measured equal to the timestamptz order on all 7,348 keys since 09-01
+--   before the index was relied on for it. Full measurements in the migration.
+--
+--   CREATE OR REPLACE VIEW v_latest_odds_all_books WITH (security_invoker = on) AS
+--     SELECT g.game_id, g.game_date, mb.market, mb.bookmaker,
+--            l.home_price, l.away_price, l.over_price, l.under_price,
+--            l.spread_home, l.total_line, l.home_link, l.away_link,
+--            l.over_link, l.under_link, l.snapshot_at
+--     FROM games g
+--     CROSS JOIN LATERAL (            -- distinct (market, bookmaker) for the game
+--       WITH RECURSIVE s AS (
+--         (SELECT o.market, o.bookmaker FROM odds o WHERE o.game_id = g.game_id
+--           ORDER BY o.market, o.bookmaker LIMIT 1)
+--         UNION ALL
+--         SELECT n.market, n.bookmaker FROM s CROSS JOIN LATERAL (
+--           SELECT o.market, o.bookmaker FROM odds o
+--            WHERE o.game_id = g.game_id
+--              AND (o.market, o.bookmaker) > (s.market, s.bookmaker)
+--            ORDER BY o.market, o.bookmaker LIMIT 1) n)
+--       SELECT s.market, s.bookmaker FROM s WHERE s.bookmaker <> 'sbr_consensus'
+--     ) mb
+--     CROSS JOIN LATERAL (            -- newest pre-game row for that key
+--       SELECT o.home_price, ... , o.snapshot_at FROM odds o
+--        WHERE o.game_id = g.game_id AND o.market = mb.market AND o.bookmaker = mb.bookmaker
+--          AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+--        ORDER BY o.snapshot_at DESC LIMIT 1
+--     ) l;
 --   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;
 
 -- ── MULTI-BOOK EXPANSION (session: multiple-betting-lines) ───────────────────
@@ -2561,16 +2597,54 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- an anon SELECT policy from session 18b). Reads game_date off the table directly
 -- — unlike the game-market view, no join to games is needed.
 --
+-- Same two rewrites on 2026-09-04 as the game-market view above, same shape:
+-- drive from `games`, skip-scan the distinct (market, player_name, bookmaker)
+-- keys per game on idx_prop_odds_line_snap, one backward probe per key.
+-- Measured as `authenticated`, 41-game day, ~168,000 prop rows for ~14,600 keys:
+--     game_date = today (the Picks screen, every market)   4,541 ms -> 653-1,570 ms
+--     game_date = today AND market = 'batter_hits' (Stats)   768 ms ->   310 ms
+-- The market filter is applied to the view's output (Postgres does not push
+-- predicates into a recursive CTE), so the Stats board pays the whole-day walk;
+-- a per-market RPC would get the rest back and is not worth an app change.
+-- game_date now comes from `games`: 0 of 685,152 rows since 08-28 disagreed with
+-- it and 0 lacked a games row.
+--
+-- INDEXES on player_prop_odds after 2026-09-04:
+--     idx_prop_odds_line_snap (game_id, market, player_name, bookmaker, snapshot_at)
+--         created CONCURRENTLY, 337 MB -- the skip scan and the top-1 probe both
+--         run on it, as does the pick-detail lookup by (game_id, market, player).
+--     idx_prop_odds_game (game_id, market)  DROPPED -- a prefix of the above.
+--     idx_prop_odds_date (game_date)        kept -- the scorer/feature reads by date.
+--     idx_prop_odds_date_line               created and DROPPED the same day: it only
+--         helped the market-filtered read (211 ms) and cost 370 MB.
+--
 --   CREATE OR REPLACE VIEW v_latest_prop_odds_all_books
 --   WITH (security_invoker = on) AS
---     SELECT DISTINCT ON (p.game_id, p.market, p.player_name, p.bookmaker)
---            p.game_id, p.game_date, p.market, p.player_name, p.team, p.bookmaker,
---            p.line, p.over_price, p.under_price, p.over_link, p.under_link,
---            p.snapshot_at
---     FROM player_prop_odds p
---     WHERE p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play'
---     ORDER BY p.game_id, p.market, p.player_name, p.bookmaker, p.snapshot_at DESC;
+--     SELECT g.game_id, g.game_date, pb.market, pb.player_name, l.team, pb.bookmaker,
+--            l.line, l.over_price, l.under_price, l.over_link, l.under_link, l.snapshot_at
+--     FROM games g
+--     CROSS JOIN LATERAL ( WITH RECURSIVE s AS (... skip scan over
+--            (market, player_name, bookmaker) for g.game_id ...) SELECT * FROM s ) pb
+--     CROSS JOIN LATERAL (
+--       SELECT p.team, p.line, p.over_price, p.under_price, p.over_link, p.under_link, p.snapshot_at
+--         FROM player_prop_odds p
+--        WHERE p.game_id = g.game_id AND p.market = pb.market
+--          AND p.player_name = pb.player_name AND p.bookmaker = pb.bookmaker
+--          AND (p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play')
+--        ORDER BY p.snapshot_at DESC LIMIT 1 ) l;
 --   GRANT SELECT ON v_latest_prop_odds_all_books TO anon, authenticated;
+--
+-- ALTERNATE LINES, 2026-09-05 (migration alternate_prop_lines_view, the file
+-- of the same name under data/migrations/). The prop ingestor writes The Odds
+-- API's `*_alternate` markets under their own key, one row per (player,
+-- line) -- config.PROP_ALT_MARKETS. The view keeps ONE newest row for a
+-- standard key (the line MOVES during the day; a per-line key would keep the
+-- morning's 0.5 beside the evening's 1.5) and, for an alternate key, returns
+-- EVERY row of the newest pass, found by equality on all five index columns
+-- (the probe's snapshot_at). A fourth LATERAL, UNION ALL of the two cases;
+-- same columns, same order; no new index. Measured after applying, 157-game
+-- date, market = batter_hits: 278 ms (was 310); 9,035 standard rows for
+-- 9,035 keys, i.e. unchanged for every existing reader.
 --
 -- ── IN-PLAY MULTI-BOOK (session: sportsbook-betting-line) ───────────────
 -- Applied via migration add_latest_inplay_odds_all_books_view.
@@ -2812,6 +2886,57 @@ REVOKE ALL ON nfl_odds_history FROM anon, authenticated;
 -- Performance: the line is resolved with ONE DISTINCT ON pass over the season's
 -- odds slice. Two correlated LIMIT-1 subqueries per game ran 3.5s for MLB; the
 -- single pass picks identical rows in ~0.5s (NCAAF ~85ms).
+--
+-- ── TEAM STATS BOARD CACHE (2026-09-04, migration cache_team_stats_board) ────
+-- The ~0.5 s above was measured in August against a smaller odds table. By
+-- 2026-09-04 the same call was 31,669 ms for MLB 2026 (explain analyze:
+-- shared hit=368,782 read=70,757, temp 796) against an 8 s statement timeout,
+-- and the Teams board showed "Connection error: canceling statement due to
+-- statement timeout (57014)". The `picked` CTE recomputes the pre-game closing
+-- line for every finished game of the season on every call — 1,883 games,
+-- 88,040 odds rows sorted to disk to keep 3,766 — and a better index condition
+-- only got it to 17.6 s: the cost is 63,000 random heap reads of a 1.3 GB table,
+-- data volume rather than plan shape.
+--
+-- A finished game's closing line never changes and a season aggregate moves
+-- once a day, so the board is now COMPUTED ONCE and READ MANY TIMES:
+--
+--   team_stats_board_compute(sport, season)   the function above, RENAMED and
+--                                             worker-only (REVOKE from PUBLIC,
+--                                             anon, authenticated by name).
+--   team_stats_board_cache                    one row per (sport, season, team),
+--                                             the 53 board columns plus
+--                                             refreshed_at. RLS on, SELECT-only
+--                                             policy for anon/authenticated.
+--   refresh_team_stats_board(sport, season)   DELETE that pair + INSERT ... SELECT
+--                                             FROM team_stats_board_compute, in
+--                                             one transaction, so a reader never
+--                                             sees a half-built board. Returns
+--                                             rows written. Worker-only.
+--   team_stats_board(sport, season)           the SAME signature the app calls
+--                                             (mobile/src/lib/queries.ts), now a
+--                                             STABLE SQL function reading the
+--                                             cache ORDER BY team: 1.9 ms.
+--
+-- Refreshed by run_pipeline step `refresh-team-board` (data/team_board_cache.py)
+-- right after refresh-outcomes, for every team sport x (last year, this year,
+-- next year) — 18 pairs; NHL/NBA/NCAAF label a season by its ENDING year, so
+-- next year is the one in progress each autumn. A plain table rather than a
+-- matview, deliberately: the full compute is minutes, longer than a session
+-- tool can hold a statement, and REFRESH MATERIALIZED VIEW is all-or-nothing.
+-- Per-pair refresh fits any window and RLS applies.
+--
+-- Populated 2026-09-04 by hand for all 18 pairs; the ATS identity (wins = losses
+-- summed over a closed league) held on every populated pair: MLB 2026 1883-1883,
+-- MLB 2025 1769-1769, NFL 2025 284-284, WNBA 2026 223-223, NCAAF 2026 13-13.
+-- NCAAF 2025 is 867-847 for the documented FBS-filter reason.
+--
+--   CREATE TABLE team_stats_board_cache (sport text NOT NULL, season integer NOT NULL,
+--     team text, conference text, games_played bigint, ... rush_yards_pg numeric,
+--     refreshed_at timestamptz NOT NULL DEFAULT now(),
+--     PRIMARY KEY (sport, season, team));
+--   -- full column list, the two functions and every grant:
+--   -- data/migrations/cache_team_stats_board.sql
 
 -- ── LIVE CALIBRATION (tracking/live_calibration.py) ──────────────────────────
 -- Latest recalibration report per LIVE model: the cutoff in force, what it is

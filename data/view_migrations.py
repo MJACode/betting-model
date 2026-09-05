@@ -44,7 +44,16 @@ ACTIVE_MIGRATIONS: list[str] = [
     "add_player_news.sql",
     # 2026-09-02: the record views read the graded matview instead of
     # re-grading 126k picks per read (the Record tab was timing out at 8s).
+    # Its daily-view branch was removed on 2026-09-04 -- see below.
     "track_record_reads_graded_matview.sql",
+    # 2026-09-04: the published record starts at the official live date, in BOTH
+    # views. This must run AFTER track_record_reads_graded_matview, which used to
+    # own the daily view and reverted it to the 2026-04-14 window on every pass.
+    "live_record_start_views_2026_09_01.sql",
+    # 2026-09-05: one row per pick, enforced by a unique index. No-ops (with a
+    # NOTICE) until scripts/dedupe_picks.py has cleared the 63 rows a released
+    # lock wrote, then creates the index on the next pass.
+    "picks_one_row_per_pick.sql",
 ]
 
 
@@ -71,7 +80,7 @@ def apply_view_migrations(conn=None) -> int:
                 # fragments at every semicolon in its body. Each migration here
                 # must therefore be a SINGLE statement (a DO block), which is
                 # also what makes the idempotency check atomic.
-                conn.execute(path.read_text())
+                conn.execute(path.read_text(encoding="utf-8"))
                 conn.commit()
                 applied += 1
                 logger.info(f"View migration OK: {name}")

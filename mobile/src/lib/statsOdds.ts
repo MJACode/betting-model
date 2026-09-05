@@ -1,0 +1,539 @@
+/**
+ * The Stats tab's LINE column — the selected sportsbook's current number for
+ * every player and team on the board.
+ *
+ * WHAT MATT ASKED FOR (2026-09-03): "display all lines regardless of bet
+ * status … see a current line for a player or team so that I can do research
+ * on players and bet what I want off of that data. If they select FanDuel we
+ * only show FanDuel, if the user had DK selected then we only show DK. Only do
+ * this feature on this tab. It works separately from the models and we just
+ * need to show current lines."
+ *
+ * So, three rules, each of which is a product decision rather than a default:
+ *
+ *  1. THE COLUMN IS THE USER'S BOOK, AND ONLY THAT BOOK. No DraftKings fallback
+ *     when their book has not posted a line — that is what "only show FanDuel"
+ *     means, and a DK price standing in for a FanDuel one is a number the user
+ *     cannot get at the book they chose. Measured 2026-09-03: FanDuel posts no
+ *     `batter_hits` line at all, while every book prices h2h/spread/total on
+ *     all nine games. A FanDuel user's Players board is therefore honest and
+ *     sparse, and the screen says why rather than showing a silent column of
+ *     dashes.
+ *  2. THE LINE IS THE LINE THE BOARD IS ASKING ABOUT. "2+ Hits" is Over 1.5,
+ *     not Over 0.5; a price hung off another number is a different bet
+ *     (docs/best_line.md §5) and gets no cell.
+ *  3. NO MODEL IN THE CELL. The models decide against DraftKings (§6) and that
+ *     is untouched — nothing here reaches a scorer. The one place a pick still
+ *     matters on this tab is the betslip: a parlay leg IS a pick, so "Add to
+ *     betslip" can only exist where the model made one at this exact line. It
+ *     is offered without edge or EV, as a button, and nowhere else.
+ *
+ * Names: leaderboard rows carry `player_id`, prop odds carry `player_name`, so
+ * the join folds through normalizePlayerName and REFUSES any key two spellings
+ * share. A wrong price on the wrong player is worse than a dash.
+ *
+ * Verify with: npx tsx scripts/verify_stats_odds.ts
+ */
+
+import { normalizePlayerName } from './playerNews';
+import type {
+  BookPricedRow,
+  EnrichedPick,
+  GameRow,
+  OddsByBookRow,
+  PropOddsByBookRow,
+} from '@/types';
+
+/** The side of a line the Stats board is asking about. */
+export type StatsOddsSide = 'over' | 'under';
+
+/** One book's number for one player, at the line the board is showing. */
+export interface StatsOddsQuote {
+  /** Normalized player name — the join key, never displayed. */
+  playerKey: string;
+  /** The feed's own spelling, for the sheet header. */
+  playerName: string;
+  gameId: string;
+  market: string;
+  line: number;
+  side: StatsOddsSide;
+  /** The selected book. */
+  book: string;
+  /** That book's American price for `side` at `line`. */
+  price: number;
+  /** That book's betslip deep link for the side, when the feed carried one. */
+  link: string | null;
+  /** True when none of the member's books posts the board's line and the
+   *  quote is the book's OWN line instead — a different bet, printed with its
+   *  number ("o1.5") so nobody reads it as the ruler's. */
+  offLine?: boolean;
+  /** Every book pricing this player/market/line. Kept for the sheet's
+   *  "Switch sportsbook" preview and for tests; the column never reads it. */
+  bookRows: BookPricedRow[];
+}
+
+/**
+ * BEST OF THE MEMBER'S BOOKS. American odds are monotonic in payout — a larger
+ * number always pays more on the same stake, across the −100/+100 boundary
+ * (−200 beats −300, +105 beats −105) — so the best price is the numeric max,
+ * with no decimal conversion to get wrong.
+ *
+ * Ties go to the EARLIER book in the caller's list, which is BETTABLE_BOOKS
+ * order, so DraftKings wins a tie and the board does not reshuffle its badges
+ * every refresh when two books post the same number.
+ *
+ * The comparison is only ever between rows for the SAME side at the SAME line
+ * — a price hung off another number is a different bet (docs/best_line.md §5),
+ * and the callers guarantee it: props filter on `sameLine` before they get
+ * here, and team lines anchor to one book's number below.
+ */
+function bestOf<T>(
+  candidates: readonly T[],
+  priceOf: (row: T) => number | null,
+): { row: T; price: number } | null {
+  let best: { row: T; price: number } | null = null;
+  for (const row of candidates) {
+    const price = priceOf(row);
+    if (price == null) continue;
+    if (best == null || price > best.price) best = { row, price };
+  }
+  return best;
+}
+
+/** Supabase returns numerics as strings — coerce before comparing anything. */
+function num(v: number | string | null | undefined): number | null {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Lines are one decimal place; compare with a tolerance, never with ===. */
+export function sameLine(a: number | null, b: number | null): boolean {
+  if (a == null || b == null) return false;
+  return Math.abs(a - b) < 1e-9;
+}
+
+/**
+ * Fold a list of names to normalized keys, REFUSING any key two different
+ * spellings share.
+ *
+ * This mirrors data/name_match.py::resolve_feed_name, which returns None rather
+ * than guess when two candidates fold alike — the fold drops generational
+ * suffixes, so "Luis Garcia" and "Luis Garcia Jr." collide, and they are two
+ * people. Returns the set of keys that are AMBIGUOUS and must not be joined on.
+ */
+export function ambiguousKeys(names: Iterable<string | null | undefined>): Set<string> {
+  const spellings = new Map<string, Set<string>>();
+  for (const raw of names) {
+    if (!raw) continue;
+    const key = normalizePlayerName(raw);
+    if (!key) continue;
+    const seen = spellings.get(key);
+    if (seen) seen.add(raw);
+    else spellings.set(key, new Set([raw]));
+  }
+  const out = new Set<string>();
+  for (const [key, seen] of spellings) if (seen.size > 1) out.add(key);
+  return out;
+}
+
+/**
+ * The selected book's quote per player for one market, at one line and side.
+ *
+ * `gameIds` bounds the rows to the sport's slate: the view has no sport column
+ * and `player_points` is both an NBA and a WNBA market, so without it a WNBA
+ * board could show an NBA price.
+ */
+export function buildQuoteIndex(
+  rows: PropOddsByBookRow[],
+  opts: {
+    market: string;
+    line: number;
+    side: StatsOddsSide;
+    /** The member's sportsbooks. The ONLY books the column prints — no
+     *  fallback outside the set; the best price among them wins the cell. */
+    books: readonly string[];
+    gameIds?: Set<string> | null;
+  },
+): Map<string, StatsOddsQuote> {
+  // Every row for the market on the slate, at ANY line: the ruler's line is
+  // preferred, but a book posts ONE line per player in these markets (23 of
+  // 313 priced hitters were 1.5-only at DraftKings on 2026-09-04) and Matt's
+  // "everyone should have a line by this point" is right — a player the book
+  // has priced must not read as unpriced. When none of the member's books
+  // posts the ruler's line, the cell prints the book's own line WITH its
+  // number, as a different bet (offLine), never as the ruler's price.
+  const inMarket = rows.filter(
+    (r) => r.market === opts.market && (!opts.gameIds || opts.gameIds.has(r.game_id)),
+  );
+  const skip = ambiguousKeys(inMarket.map((r) => r.player_name));
+
+  const byPlayer = new Map<string, PropOddsByBookRow[]>();
+  for (const r of inMarket) {
+    const key = normalizePlayerName(r.player_name);
+    if (!key || skip.has(key)) continue;
+    const list = byPlayer.get(key);
+    if (list) list.push(r);
+    else byPlayer.set(key, [r]);
+  }
+
+  // Candidates in the member's own order, so bestOf's tie-break is stable.
+  const rank = new Map(opts.books.map((b, i) => [b, i] as const));
+  const priceOf = (r: PropOddsByBookRow) => num(opts.side === 'under' ? r.under_price : r.over_price);
+  const out = new Map<string, StatsOddsQuote>();
+  for (const [key, all] of byPlayer) {
+    const atLine = all.filter((r) => sameLine(num(r.line), opts.line));
+    const mine = (list: PropOddsByBookRow[]) =>
+      list
+        .filter((r) => rank.has(r.bookmaker))
+        .sort((a, b) => (rank.get(a.bookmaker) ?? 0) - (rank.get(b.bookmaker) ?? 0));
+    let best = bestOf(mine(atLine), priceOf);
+    let line = opts.line;
+    let offLine = false;
+    let list = atLine;
+    if (best == null) {
+      // The book's own line: the member's books' rows at whatever line each
+      // posts, best price among them; the winner's line becomes the quote's.
+      const own = mine(all).filter((r) => num(r.line) != null);
+      best = bestOf(own, priceOf);
+      if (best == null) continue;
+      line = num(best.row.line) as number;
+      offLine = true;
+      list = all.filter((r) => sameLine(num(r.line), line));
+    }
+    out.set(key, {
+      playerKey: key,
+      playerName: best.row.player_name,
+      gameId: best.row.game_id,
+      market: opts.market,
+      line,
+      side: opts.side,
+      book: best.row.bookmaker,
+      price: best.price,
+      link: (opts.side === 'under' ? best.row.under_link : best.row.over_link) ?? null,
+      bookRows: list as unknown as BookPricedRow[],
+      offLine,
+    });
+  }
+  return out;
+}
+
+/** The winning book's quote for one leaderboard row, or null. */
+export function quoteForRow(
+  row: { player_name?: string | null },
+  quoteIndex: Map<string, StatsOddsQuote>,
+  ambiguous?: Set<string>,
+): StatsOddsQuote | null {
+  const key = normalizePlayerName(row.player_name);
+  if (!key || ambiguous?.has(key)) return null;
+  return quoteIndex.get(key) ?? null;
+}
+
+/**
+ * Does ANY of the member's books post a line for this market on the slate,
+ * ON THE SIDE THE BOARD IS ASKING? Drives the "FanDuel doesn't post Hits
+ * lines" note, so an empty column reads as their books' coverage rather than
+ * as a broken screen (UX_REVIEW §3).
+ *
+ * The side is load-bearing for a ONE-WAY market. `player_anytime_td` has a
+ * Yes price and no No price (the football ingestor says so in its own
+ * comment), so flipping the board to "At most 0" nulls every quote while a
+ * side-blind check still answers "yes, posted" — a full column of dashes
+ * under a DraftKings header with no explanation. MLB home runs have had the
+ * same shape all along; college football's most-tapped prop makes it
+ * reachable, so the check learned about sides (UX review, 2026-09-05).
+ */
+export function bookPostsMarket(
+  rows: PropOddsByBookRow[],
+  market: string,
+  books: readonly string[],
+  gameIds?: Set<string> | null,
+  side?: StatsOddsSide,
+): boolean {
+  const set = new Set(books);
+  return rows.some(
+    (r) =>
+      r.market === market &&
+      set.has(r.bookmaker) &&
+      (!gameIds || gameIds.has(r.game_id)) &&
+      (!side || num(side === 'under' ? r.under_price : r.over_price) != null),
+  );
+}
+
+/**
+ * Which SIDES each of the member's books actually prices for this market on
+ * the slate — the answer to "why is FanDuel blank?", computed from the rows
+ * the board already loaded rather than a second read.
+ *
+ * IT IS PER SIDE BECAUSE THE FEED IS. Measured 2026-09-05 on the MLB slate:
+ * FanDuel and Caesars post no standard `batter_hits` market at all, and the
+ * milestone market we fold in for them (1+ / 2+ Hits) carries an OVER price
+ * and no Under. So "FanDuel has Hits lines" and "FanDuel has At-Most Hits
+ * lines" are different questions, and only the first is true — FanDuel had
+ * an Over price on 8 of the 12 MLB stats that day and an Under price on 2.
+ *
+ * Books with no row at all for the market are absent from the map, which is
+ * what a caller means by "we pull nothing for them here". A book is never
+ * dropped from the picker over it (Matt, 2026-09-05: "if we are getting
+ * betting lines for a Sportsbook we should show it as an option and display
+ * those lines … it doesn't matter if we don't have as many props as DK") —
+ * this drives what the row SAYS, not whether it exists.
+ */
+export interface BookSideCoverage {
+  over: boolean;
+  under: boolean;
+}
+
+export function bookCoverageForMarket(
+  rows: PropOddsByBookRow[],
+  market: string,
+  books: readonly string[],
+  gameIds?: Set<string> | null,
+): Map<string, BookSideCoverage> {
+  const wanted = new Set(books);
+  const out = new Map<string, BookSideCoverage>();
+  for (const r of rows) {
+    if (r.market !== market) continue;
+    if (!wanted.has(r.bookmaker)) continue;
+    if (gameIds && !gameIds.has(r.game_id)) continue;
+    const over = num(r.over_price) != null;
+    const under = num(r.under_price) != null;
+    // A row with a line but NO price on either side is not coverage. Letting
+    // it in would seat a book in the map with both sides false, and every
+    // caller reads presence in the map as "we have something here" — the
+    // board would then grey the direction control and name a side the book
+    // does not actually sell.
+    if (!over && !under) continue;
+    const seen = out.get(r.bookmaker) ?? { over: false, under: false };
+    if (over) seen.over = true;
+    if (under) seen.under = true;
+    out.set(r.bookmaker, seen);
+  }
+  return out;
+}
+
+/**
+ * Does ANY of the member's books price this side of the market on the slate?
+ * The board's Over/Under control reads it: an "At Most" view none of their
+ * books sells is a dead end, and Matt chose to close it rather than let the
+ * board answer it with a column of dashes (2026-09-05).
+ */
+export function anyBookPostsSide(
+  coverage: Map<string, BookSideCoverage>,
+  side: StatsOddsSide,
+): boolean {
+  for (const c of coverage.values()) if (side === 'under' ? c.under : c.over) return true;
+  return false;
+}
+
+/**
+ * The games on the slate that have NOT started — the only ones with a line a
+ * user can still take. The "latest" pre-game row for a game in progress is a
+ * live number (Pittsburgh read −50000 up four runs on 2026-09-03), and the
+ * refresh keeps writing `open` rows after first pitch (CLAUDE.md §6), so a
+ * date bound alone would print in-play prices under a "current line" header.
+ * A game with no commence_time is kept: fail open, never blank the column.
+ */
+export function unstartedGameIds(games: GameRow[], nowIso: string): Set<string> {
+  const now = Date.parse(nowIso);
+  const out = new Set<string>();
+  for (const g of games) {
+    const t = g.commence_time ? Date.parse(g.commence_time) : NaN;
+    if (Number.isNaN(t) || Number.isNaN(now) || t > now) out.add(g.game_id);
+  }
+  return out;
+}
+
+// ── The betslip's one dependence on a pick ──────────────────────────────────
+
+/**
+ * Today's prop picks for one model, keyed by `player_id`. A BET always wins the
+ * key: a dead-zone NONE row written by a later pass must never displace the
+ * signal a user was actually given (§1c).
+ */
+export function buildPickIndex(
+  picks: EnrichedPick[],
+  modelId: string | null,
+): Map<string, EnrichedPick> {
+  const out = new Map<string, EnrichedPick>();
+  if (!modelId) return out;
+  for (const ep of picks) {
+    const p = ep.pick;
+    if (p.model_id !== modelId || !p.player_id || p.dk_odds == null) continue;
+    const existing = out.get(p.player_id);
+    if (existing && p.signal_type !== 'BET') continue;
+    out.set(p.player_id, ep);
+  }
+  return out;
+}
+
+/**
+ * The pick a row could add to the betslip: the model's pick for this player,
+ * ONLY when it was scored at the line the board is showing. A parlay leg is a
+ * bet of record, and Over 0.5 is not a leg on an Over 1.5 board.
+ */
+export function slipPickFor(
+  row: { player_id?: string | null },
+  pickIndex: Map<string, EnrichedPick>,
+  line: number,
+): EnrichedPick | null {
+  const pick = row.player_id ? pickIndex.get(row.player_id) : undefined;
+  return pick && sameLine(num(pick.pick.scored_line), line) ? pick : null;
+}
+
+// ── Teams ───────────────────────────────────────────────────────────────────
+
+/** The game market a team stat is naturally read against. */
+export type TeamLineMarket = 'h2h' | 'spreads' | 'totals';
+
+/** One book's number for a team's game, from that team's side. */
+export interface TeamLineQuote {
+  team: string;
+  opponent: string;
+  isHome: boolean;
+  gameId: string;
+  market: TeamLineMarket;
+  book: string;
+  /** The team's own side: its moneyline, its spread, or the game total (over). */
+  price: number;
+  /** Spread from the team's side (−1.5 = favourite) or the total; null on h2h. */
+  line: number | null;
+  link: string | null;
+  /** EVERY book's row for this game at the quote's number (all rows on h2h),
+   *  the member's books or not — what the add-to-betslip sheet lists, and
+   *  what a game line leg is priced from (lib/lineLegs.ts). */
+  bookRows: OddsByBookRow[];
+}
+
+/**
+ * Which market a team stat reads against. Scoring stats → the total; margin
+ * and every against-the-spread split → the spread; the rest → the moneyline.
+ * A team's Over% beside the game total, its ATS% beside its spread, its Win%
+ * beside its moneyline — the line the research question is about.
+ */
+export function teamLineMarketFor(statKey: string): TeamLineMarket {
+  if (
+    statKey === 'over_pct' ||
+    statKey === 'points_for_pg' ||
+    statKey === 'points_against_pg' ||
+    statKey === 'pace'
+  ) {
+    return 'totals';
+  }
+  if (statKey === 'point_diff_pg' || statKey.includes('ats')) return 'spreads';
+  return 'h2h';
+}
+
+/**
+ * The best of the member's books for every team on the slate, from each team's
+ * own side. One entry per team, so a game yields two — the home side and the
+ * away side of the same row. Bound to `games` (the sport's slate on the date)
+ * so an NBA row can never land on a WNBA team that shares an abbrev.
+ *
+ * SPREADS AND TOTALS ANCHOR TO ONE NUMBER BEFORE THEY SHOP. Books hang
+ * different lines — −1.5 at one, −2.5 at another — and the better price on a
+ * different number is a different bet (docs/best_line.md §5), so the anchor is
+ * the first of the member's books (BETTABLE_BOOKS order, hence DraftKings when
+ * it is selected) that posts the market, and only books on that same number
+ * compete for the cell. Moneylines have no line, so they shop freely.
+ */
+export function buildTeamLineIndex(
+  rows: OddsByBookRow[],
+  games: GameRow[],
+  opts: { market: TeamLineMarket; books: readonly string[]; gameIds?: Set<string> | null },
+): Map<string, TeamLineQuote> {
+  const out = new Map<string, TeamLineQuote>();
+  const rank = new Map(opts.books.map((b, i) => [b, i] as const));
+  // Every selected book's row for a game, in the member's own book order —
+  // and every book's, for the sheet's price list and the leg's per-book pricing.
+  const byGame = new Map<string, OddsByBookRow[]>();
+  const byGameAll = new Map<string, OddsByBookRow[]>();
+  for (const r of rows) {
+    if (r.market !== opts.market) continue;
+    const every = byGameAll.get(r.game_id);
+    if (every) every.push(r);
+    else byGameAll.set(r.game_id, [r]);
+    if (!rank.has(r.bookmaker)) continue;
+    const list = byGame.get(r.game_id);
+    if (list) list.push(r);
+    else byGame.set(r.game_id, [r]);
+  }
+  for (const list of byGame.values()) {
+    list.sort((a, b) => (rank.get(a.bookmaker) ?? 0) - (rank.get(b.bookmaker) ?? 0));
+  }
+  for (const g of games) {
+    if (opts.gameIds && !opts.gameIds.has(g.game_id)) continue;
+    const all = byGame.get(g.game_id);
+    if (!all || all.length === 0 || !g.home_team || !g.away_team) continue;
+
+    // The anchor's number is the bet; books on any other number are a
+    // different bet and do not compete.
+    let candidates = all;
+    let everyAt = byGameAll.get(g.game_id) ?? all;
+    let anchorSpread: number | null = null;
+    let anchorTotal: number | null = null;
+    if (opts.market === 'spreads') {
+      const anchor = all.find((r) => num(r.spread_home) != null);
+      if (!anchor) continue;
+      anchorSpread = num(anchor.spread_home);
+      candidates = all.filter((r) => sameLine(num(r.spread_home), anchorSpread));
+      everyAt = everyAt.filter((r) => sameLine(num(r.spread_home), anchorSpread));
+    } else if (opts.market === 'totals') {
+      const anchor = all.find((r) => num(r.total_line) != null);
+      if (!anchor) continue;
+      anchorTotal = num(anchor.total_line);
+      candidates = all.filter((r) => sameLine(num(r.total_line), anchorTotal));
+      everyAt = everyAt.filter((r) => sameLine(num(r.total_line), anchorTotal));
+    }
+
+    for (const isHome of [true, false]) {
+      const team = isHome ? g.home_team : g.away_team;
+      const opponent = isHome ? g.away_team : g.home_team;
+      let line: number | null = null;
+      let best: { row: OddsByBookRow; price: number } | null = null;
+      if (opts.market === 'totals') {
+        best = bestOf(candidates, (r) => num(r.over_price));
+        line = anchorTotal;
+      } else {
+        best = bestOf(candidates, (r) => num(isHome ? r.home_price : r.away_price));
+        if (opts.market === 'spreads') {
+          if (anchorSpread == null) continue;
+          line = isHome ? anchorSpread : -anchorSpread;
+        }
+      }
+      if (best == null) continue;
+      if (opts.market === 'totals' && line == null) continue;
+      const link =
+        opts.market === 'totals'
+          ? best.row.over_link
+          : isHome
+            ? best.row.home_link
+            : best.row.away_link;
+      out.set(team, {
+        team,
+        opponent,
+        isHome,
+        gameId: g.game_id,
+        market: opts.market,
+        book: best.row.bookmaker,
+        price: best.price,
+        line,
+        link: link ?? null,
+        bookRows: everyAt,
+      });
+    }
+  }
+  return out;
+}
+
+/** "ML", "−1.5", "+1.5", "o8.5" — the caption under a team's price. Every cell
+ *  carries one: the caption is what tells the user which market the column is
+ *  showing, and a bare moneyline pill beside two-line spread cells left the
+ *  row unbalanced and the target under 44pt (UX review, 2026-09-03). */
+export function teamLineCaption(q: TeamLineQuote): string | null {
+  if (q.market === 'h2h') return 'ML';
+  if (q.line == null) return null;
+  if (q.market === 'totals') return `o${q.line}`;
+  const n = Math.abs(q.line) === 0 ? 0 : q.line;
+  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
+}

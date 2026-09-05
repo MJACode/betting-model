@@ -22,7 +22,7 @@
 import { americanToDecimal } from '@/lib/format';
 import { stakeFor, effectiveKellyFraction, KELLY_MULTIPLIER,
          type KellySizingOpts, type UnitStake } from '@/lib/thresholds';
-import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, MODEL_BOOK } from '@/lib/markets';
+import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 
@@ -71,6 +71,17 @@ export interface ParlayLeg {
   bookPrices: LegBookPrice[];
   pick: Pick | null; // original Pick; null for user-entered custom legs
   game: GameRow | null; // matchup for the leg card
+  /** Does DraftKings price this leg? Absent (pick legs, custom legs) means yes:
+   * a pick leg requires dk_odds and a custom leg is book-agnostic. A Stats LINE
+   * leg (lib/lineLegs.ts) sets false when DraftKings never posted that line, so
+   * the per-book pricing does not credit DK with a leg it cannot take. */
+  dkPriced?: boolean;
+  /** DraftKings' betslip deep link for a line leg (pick legs carry it on the
+   * pick). */
+  dkLink?: string | null;
+  /** The book `americanOdds` came from, for a line leg DraftKings did not
+   * post — so its card can say "−115 · FD" rather than imply DraftKings. */
+  pricedAt?: string;
 }
 
 export interface ParlayMetrics {
@@ -440,9 +451,16 @@ function legPriceAtBook(
   book: string,
 ): { decimal: number; link: string | null } | null {
   if (book === MODEL_BOOK) {
-    return { decimal: leg.decimalOdds, link: leg.pick?.dk_bet_link ?? null };
+    // A Stats line leg DraftKings never posted is not DK's to price.
+    if (leg.dkPriced === false) return null;
+    return { decimal: leg.decimalOdds, link: leg.pick?.dk_bet_link ?? leg.dkLink ?? null };
   }
-  if (leg.pick == null) return { decimal: leg.decimalOdds, link: null };
+  // Only a hand-entered custom leg is book-agnostic (the user quoted a market
+  // number, not one book's). A Stats line leg always carries `dkPriced`, so a
+  // DraftKings-only line leg is NOT credited to every other book.
+  if (leg.pick == null && leg.dkPriced === undefined) {
+    return { decimal: leg.decimalOdds, link: null };
+  }
   const row = leg.bookPrices.find((b) => b.bookmaker === book);
   return row ? { decimal: row.decimal, link: row.link } : null;
 }
@@ -508,22 +526,64 @@ export function priceBooksForParlay(
 }
 
 /**
- * Where the betslip's main action button should hand off: the user's chosen
- * book when it prices EVERY leg, else DraftKings (which always does). Falling
- * back keeps the button label honest — "Bet on FanDuel" must never open a slip
- * FanDuel can't price.
+ * Where the betslip's main action button should hand off: the BEST-PAYING of
+ * the member's own books that prices EVERY leg, else DraftKings (which always
+ * does). Falling back keeps the button label honest — "Bet on FanDuel" must
+ * never open a slip FanDuel can't price — and the screen says when it happens.
+ *
+ * The member's books come from `usePreferredBooks` (Matt, 2026-09-04: "the
+ * parlay button … should change to match the Sportsbook the user selects as
+ * their preferred", and the picker is now a set). With two selected this is the
+ * same rule the Stats board uses on a single line, applied to the whole slip.
+ *
+ * This is the hand-off only — the slip is priced and modeled at DraftKings
+ * either way (§6) — and it narrows the DEFAULT, never the options: the "Open
+ * with" row beside it still lists every bettable book with its coverage, so a
+ * member can always place at a book they have not selected.
  */
+export interface Handoff {
+  book: string;
+  /** Per-leg betslip link at that book, slip order; null when none. */
+  links: (string | null)[];
+  /** Per-leg: does that book price the leg at all? A null link with `posted`
+   *  true is "add it by hand"; with `posted` false it is "not posted here". */
+  posted: boolean[];
+  /** How many legs the book prices, of how many. */
+  priced: number;
+  total: number;
+}
+
+function handoffFrom(q: BetslipBookQuote, legs: ParlayLeg[]): Handoff {
+  return {
+    book: q.book,
+    links: q.links,
+    posted: legs.map((l) => legPriceAtBook(l, q.book) != null),
+    priced: q.priced,
+    total: q.total,
+  };
+}
+
 export function handoffBookFor(
   legs: ParlayLeg[],
-  preferredBook: string,
-): { book: string; links: (string | null)[] } {
-  const quotes = priceBooksForParlay(legs, 1, [preferredBook, MODEL_BOOK]);
-  const preferred = quotes.find((q) => q.book === preferredBook);
-  if (preferred && preferred.decimalPayout != null) {
-    return { book: preferredBook, links: preferred.links };
-  }
+  preferredBooks: readonly string[],
+): Handoff {
+  // priceBooksForParlay sorts fully-priced books best payout first, ties to DK.
+  const quotes = priceBooksForParlay(legs, 1, [...preferredBooks, MODEL_BOOK]);
+  const mine = new Set(preferredBooks);
+  const best = quotes.find((q) => q.decimalPayout != null && mine.has(q.book));
+  if (best) return handoffFrom(best, legs);
+  // DraftKings prices every pick and custom leg, but a Stats LINE leg it never
+  // posted leaves it partial (lib/lineLegs.ts). Then the best fully-priced
+  // bettable book takes the button, and if none prices every leg either, the
+  // book covering the most legs — `priced` of `total`, and the screen says so.
   const dk = quotes.find((q) => q.book === MODEL_BOOK);
-  return { book: MODEL_BOOK, links: dk?.links ?? legs.map(() => null) };
+  if (dk?.decimalPayout != null) return handoffFrom(dk, legs);
+  const any = priceBooksForParlay(legs, 1, BETTABLE_BOOKS);
+  const full = any.find((q) => q.decimalPayout != null);
+  if (full) return handoffFrom(full, legs);
+  const most = any[0];
+  if (most) return handoffFrom(most, legs);
+  return { book: MODEL_BOOK, links: legs.map(() => null), posted: legs.map(() => false), priced: 0, total: legs.length };
 }
 
 // ── Edit helpers (pure) ──────────────────────────────────────────────────────
@@ -569,6 +629,10 @@ export interface SavedParlayLeg {
    * so a FanDuel user's saved parlay can still hand off to FanDuel. Absent on
    * custom legs and pre-upgrade saves (those hand off at DraftKings). */
   bookLinks?: Record<string, string | null>;
+  /** A Stats LINE leg DraftKings did not post at save time (lib/lineLegs.ts):
+   * the saved hand-off must not credit DraftKings with it. Absent on pick and
+   * custom legs, which DraftKings always prices. */
+  dkPriced?: boolean;
 }
 
 export interface SavedParlay {
@@ -595,41 +659,73 @@ export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
       decimalOdds: l.decimalOdds,
       isGameLine: l.isGameLine,
       isFavorite: l.isFavorite,
-      gameId: l.pickId < 0 ? null : l.gameId,
+      // A negative pickId is a custom leg OR a Stats line leg; only the custom
+      // leg has no game. A line leg keeps its game, its per-book coverage and
+      // whether DraftKings posted it, so the saved hand-off stays honest.
+      gameId: l.pick != null || l.dkPriced != null ? l.gameId : null,
       matchup: matchupForLeg(l.game),
-      dkBetLink: l.pick?.dk_bet_link ?? null,
+      dkBetLink: l.pick?.dk_bet_link ?? l.dkLink ?? null,
       bookLinks:
-        l.pick != null && l.bookPrices.length > 0
+        (l.pick != null || l.dkPriced != null) && l.bookPrices.length > 0
           ? Object.fromEntries(l.bookPrices.map((b) => [b.bookmaker, b.link]))
           : undefined,
+      dkPriced: l.dkPriced,
     })),
   };
 }
 
 /**
- * Where a SAVED parlay's bet button hands off: the user's chosen book when the
- * snapshot shows it priced every real leg (bookLinks carries the book's key),
- * else DraftKings — same honesty rule as the live betslip's handoffBookFor:
- * "Bet on FanDuel" must never open a slip FanDuel couldn't price. Custom legs
- * are book-agnostic (the user quoted a market number, not one book's), so they
- * never disqualify the preferred book — they just carry no link there.
- * Pre-upgrade saves have no bookLinks, so they keep handing off at DraftKings.
+ * Where a SAVED parlay's bet button hands off: the first of the member's books
+ * (their own order) whose links the snapshot carries for every real leg, else
+ * DraftKings — same honesty rule as the live betslip's handoffBookFor: "Bet on
+ * FanDuel" must never open a slip FanDuel couldn't price. Custom legs are
+ * book-agnostic (the user quoted a market number, not one book's), so they
+ * never disqualify a book — they just carry no link there. Pre-upgrade saves
+ * have no bookLinks at all, so they keep handing off at DraftKings.
+ *
+ * Order, not payout, decides between two covered books: a save stores links,
+ * not prices, so there is no honest way to rank them by what they pay now.
  */
 export function savedHandoffBookFor(
   legs: SavedParlayLeg[],
-  preferredBook: string,
+  preferredBooks: readonly string[],
 ): { book: string; links: (string | null)[] } {
   const dk = { book: MODEL_BOOK, links: legs.map((l) => l.dkBetLink) };
-  if (preferredBook === MODEL_BOOK || legs.length === 0) return dk;
-  const isCustom = (l: SavedParlayLeg) => l.pickId < 0 || l.gameId == null;
-  const covered = legs.every(
-    (l) => isCustom(l) || (l.bookLinks != null && preferredBook in l.bookLinks),
-  );
-  if (!covered) return dk;
-  return {
-    book: preferredBook,
-    links: legs.map((l) => (isCustom(l) ? null : l.bookLinks?.[preferredBook] ?? null)),
-  };
+  if (legs.length === 0) return dk;
+  // A custom leg has no game; a Stats line leg is negative too but carries one.
+  const isCustom = (l: SavedParlayLeg) => l.gameId == null;
+  // DraftKings covers a pick leg through its stored link, and a line leg only
+  // when it posted the line (dkPriced), link or no link.
+  const dkCovers = (l: SavedParlayLeg) =>
+    isCustom(l) || (l.dkPriced != null ? l.dkPriced : l.dkBetLink != null);
+  for (const book of preferredBooks) {
+    // DraftKings takes the same coverage test as everyone else. Short-circuiting
+    // on it meant a member with DK selected ALWAYS got "Bet on DraftKings" on a
+    // saved slip while the builder's button said FanDuel for the same legs —
+    // two rules behind two identical-looking buttons (UX review). DK still wins
+    // a genuine tie, because it is first in BETTABLE_BOOKS order, and it is
+    // still the fallback below when nothing covers the slip.
+    if (book === MODEL_BOOK && legs.every(dkCovers)) return dk;
+    const covered = legs.every(
+      (l) => isCustom(l) || (l.bookLinks != null && book in l.bookLinks),
+    );
+    if (!covered) continue;
+    return {
+      book,
+      links: legs.map((l) => (isCustom(l) ? null : l.bookLinks?.[book] ?? null)),
+    };
+  }
+  // None of the member's books covers the slip. DraftKings is the fallback
+  // only when it covers every leg; a saved Stats line leg DraftKings never
+  // posted (dkPriced false) sends the button to the first bettable book that
+  // does cover the slip — the same honesty rule as the live handoffBookFor.
+  if (legs.every(dkCovers)) return dk;
+  for (const book of BETTABLE_BOOKS) {
+    if (book === MODEL_BOOK) continue;
+    const covered = legs.every((l) => isCustom(l) || (l.bookLinks != null && book in l.bookLinks));
+    if (covered) return { book, links: legs.map((l) => (isCustom(l) ? null : l.bookLinks?.[book] ?? null)) };
+  }
+  return dk;
 }
 
 /**
@@ -652,6 +748,7 @@ export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
     legEdge: 0,
     bestBook: null, // saved snapshots don't carry live multi-book prices
     bookPrices: [],
+    dkPriced: sl.dkPriced,
     pick: null,
     game: null,
   };

@@ -41,7 +41,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import MODELS, PROP_MODELS
+from config import MODELS, PROP_MODELS, PAPER_TRADING_START
 from data.db import get_connection
 
 # Models registered in config that intentionally have no trained artifact yet
@@ -180,6 +180,39 @@ class HealthReport:
         else:
             self.add(check, STALE, severity,
                      f"last snapshot {age_h:.1f}h ago (max {max_age_hours}h)", latest)
+
+
+def _published_record_problems(rec: dict, daily: dict, live_start: str) -> list[str]:
+    """Reconcile the two published record views. Returns a list of problems.
+
+    Each dict is {sport: (picks, profit_flat_cents, first_game_date)} — `rec`
+    from v_public_track_record, `daily` from v_public_track_record_daily. Pure
+    so it can be tested on the real numbers that were live when this was
+    written, without a database.
+    """
+    problems: list[str] = []
+    for source, agg in (("v_public_track_record", rec),
+                        ("v_public_track_record_daily", daily)):
+        early = sorted(s for s, (_, _, first) in agg.items() if first < live_start)
+        if early:
+            problems.append(
+                f"{source} publishes games before the live date {live_start} "
+                f"({', '.join(early)})")
+    # Only sports with a settled pick appear in the daily view (its HAVING
+    # clause), so a 0-pick sport in the per-model view is not a mismatch.
+    for sport in sorted(s for s, (picks, _, _) in rec.items() if picks > 0):
+        rec_picks, rec_profit, _ = rec[sport]
+        if sport not in daily:
+            problems.append(f"{sport}: {rec_picks} settled pick(s) in the per-model "
+                            f"view, absent from the daily view")
+            continue
+        day_picks, day_profit, _ = daily[sport]
+        # Cents, so exact equality is right; rounded only against float drift.
+        if day_picks != rec_picks or round(day_profit - rec_profit, 2) != 0:
+            problems.append(
+                f"{sport}: per-model {rec_picks} picks / {rec_profit / 100:+.2f}u "
+                f"vs daily {day_picks} picks / {day_profit / 100:+.2f}u")
+    return problems
 
 
 def run_system_health(run_date: str | None = None) -> dict:
@@ -781,6 +814,88 @@ def run_system_health(run_date: str | None = None) -> dict:
                 r.add("signal_delivery", OK, "CRIT",
                       f"every postable signal in the last 3 days was delivered "
                       f"({wired and ', '.join(sorted(wired)) or 'default channel'})")
+
+        # ── The published record: one population, two views ─────────────────
+        # v_public_track_record feeds the hero card and the Models tab;
+        # v_public_track_record_daily feeds the equity curve. They are two
+        # aggregations of ONE population, so they must agree — and on
+        # 2026-09-04 they did not. Only half of the live-date migration was
+        # holding in production: an older migration still in
+        # data/view_migrations.py restored the daily view's 2026-04-14 window on
+        # every pass, so the app drew a +64.1u curve (Apr 17 -> Sep 3) beside a
+        # hero card reading +12.02u over the same 70 picks. Both numbers were on
+        # one screen, published to members, and nothing flagged it.
+        #
+        # The check is the RECONCILIATION, not the view text: same picks and
+        # same units per sport, and no published game before the live date. A
+        # migration that lands on one view and not the other fails here the next
+        # morning instead of on a member's screenshot.
+        try:
+            rec = {sport: (int(picks or 0), float(profit or 0), str(first))
+                   for sport, picks, profit, first in conn.execute("""
+                       SELECT sport, SUM(picks), SUM(profit_flat), MIN(first_date)
+                       FROM v_public_track_record GROUP BY sport
+                   """).fetchall()}
+            daily = {sport: (int(picks or 0), float(profit or 0), str(first))
+                     for sport, picks, profit, first in conn.execute("""
+                         SELECT sport, SUM(picks), SUM(profit_flat), MIN(game_date)
+                         FROM v_public_track_record_daily GROUP BY sport
+                     """).fetchall()}
+            problems = _published_record_problems(rec, daily, PAPER_TRADING_START)
+            if problems:
+                r.add("published_record_window", STALE, "CRIT", "; ".join(problems))
+            elif not rec:
+                # Not an error on its own: the window can legitimately hold no
+                # settled pick on day one. Said out loud so an empty record is
+                # never mistaken for a passing reconciliation.
+                r.add("published_record_window", SKIPPED, "CRIT",
+                      f"the published record is empty since {PAPER_TRADING_START}")
+            else:
+                total = sum(picks for picks, _, _ in rec.values())
+                r.add("published_record_window", OK, "CRIT",
+                      f"both published views start at {PAPER_TRADING_START} and agree "
+                      f"on {total} settled pick(s) across {len(rec)} sport(s)")
+        except Exception as exc:
+            r.add("published_record_window", ERROR, "CRIT", f"query failed: {exc}")
+
+        # ── One row per pick ─────────────────────────────────────────────────
+        # A pick is a pick (CLAUDE.md §1c), and a pick is ONE ROW. Every
+        # surface counts rows -- the app's record, Retool's q_performance, the
+        # graded matview, the custom-model backtest -- so a second copy of a
+        # pick inflates all of them at once and nothing else notices. Discord
+        # is the only surface immune, because it posts one message per
+        # opening_signals.lock_key.
+        #
+        # On 2026-09-04 a released lock wrote 11 copies of one Logan Allen prop
+        # (see models/scorer.py::_locked_prop_keys), and 20 of the 132 settled
+        # BETs in the published window were duplicates -- +7.38u published
+        # against +5.68u real. It reached a member's screen before it reached a
+        # dashboard. This is the check that would have caught it that morning.
+        #
+        # The key is the pick lock's key. uq_picks_one_row_per_pick enforces it
+        # once the table is clean; this stays as the check that says so out
+        # loud, and that keeps working if the index is ever dropped.
+        try:
+            dupes = _scalar(conn, """
+                SELECT COUNT(*) FROM (
+                    SELECT game_date, model_id, COUNT(*) AS n
+                    FROM picks
+                    WHERE is_live IS NOT TRUE AND game_date >= ?
+                    GROUP BY game_date, model_id, game_id,
+                             COALESCE(player_id, ''), pick_side
+                    HAVING COUNT(*) > 1
+                ) d
+            """, (PAPER_TRADING_START,))
+            if dupes:
+                r.add("one_row_per_pick", STALE, "CRIT",
+                      f"{dupes} pick(s) written more than once since "
+                      f"{PAPER_TRADING_START} — every published record counts "
+                      f"the copies; run python -m scripts.dedupe_picks")
+            else:
+                r.add("one_row_per_pick", OK, "CRIT",
+                      f"no pick written twice since {PAPER_TRADING_START}")
+        except Exception as exc:
+            r.add("one_row_per_pick", ERROR, "CRIT", f"query failed: {exc}")
 
         # ── Persist + summarize ──────────────────────────────────────────────
         checked_at = datetime.now(timezone.utc).isoformat()

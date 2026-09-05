@@ -11,8 +11,10 @@
 // What a chip means: the SAME bet (same side, same line — docs/best_line.md §5)
 // at that book, at that book's latest price. The record chip (DK, or the NFL
 // card's soft book) is the stored number the pick was given at and never
-// re-prices. The user's own book is ringed; the best payout says "best" in
-// words, not just colour.
+// re-prices. The best payout says "best" in words, not just colour. No chip is
+// marked as the user's: the book picker sets the Stats lines and the betslip's
+// bet button, never how a pick is priced or how these chips are ordered
+// (Matt, 2026-09-04).
 //
 // Live picks (is_live) get one DraftKings chip; the Live board's header and
 // the detail screen's provenance line say why (the in-play model prices and
@@ -31,8 +33,6 @@ import type { BookPricedRow, Pick } from '@/types';
 interface Props {
   pick: Pick;
   bookRows: BookPricedRow[] | undefined;
-  /** The user's sportsbook (usePreferredBook) — ringed when it prices the pick. */
-  preferredBook: string;
   /** Where "+N more" goes — the detail screen's All-books table. Omit on the
    *  detail screen itself, where every book is already listed below. */
   onMore?: () => void;
@@ -41,14 +41,14 @@ interface Props {
   maxChips?: number;
 }
 
-export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips = 3 }: Props) {
+export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3 }: Props) {
   const quotes = pickLineQuotes(pick, bookRows ?? []);
   if (quotes.length === 0) return null;
   // Card (onMore set) vs detail: the card is scanned, so it drops the per-chip
   // icon and the hint — the a11y label and the header say the chip opens the
   // book; the detail screen can breathe and keeps both.
   const compact = onMore != null;
-  const { shown, hidden } = selectLineChips(quotes, preferredBook, compact ? maxChips : 99);
+  const { shown, hidden } = selectLineChips(quotes, null, compact ? maxChips : 99);
 
   return (
     <View style={styles.wrap}>
@@ -63,7 +63,6 @@ export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips =
       <View style={styles.chips}>
         {shown.map((q) => {
           const isDk = q.bookmaker === MODEL_BOOK;
-          const yours = q.bookmaker === preferredBook;
           // "best" = the top payout; "posted" = the NFL soft book's stored
           // price, the number the pick was posted at (never "given" — jargon).
           const tag = q.isBest && quotes.length > 1 ? 'best' : q.isRecord && !isDk ? 'posted' : null;
@@ -79,12 +78,11 @@ export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips =
               accessibilityRole="button"
               accessibilityLabel={`Bet at ${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
                 tag === 'best' ? ', best price' : tag === 'posted' ? ', the posted price' : ''
-              }${yours ? ', your sportsbook' : ''}`}
+              }`}
               style={({ pressed }) => [
                 styles.chip,
                 isDk && styles.chipDk,
                 q.isBest && quotes.length > 1 && styles.chipBest,
-                yours && styles.chipYours,
                 pressed && styles.pressed,
               ]}
             >
@@ -168,12 +166,8 @@ const styles = StyleSheet.create({
   },
   // Best payout: the word "best" in dark text (green caption on the grey chip
   // was ~2.0:1) with the green on the border, where contrast is not a rule.
-  // The user's ring wins when both apply — "yours" matters more than "best".
   chipBest: {
     borderColor: colors.bet,
-  },
-  chipYours: {
-    borderColor: colors.tint,
   },
   chipMore: {
     backgroundColor: colors.bgCard,

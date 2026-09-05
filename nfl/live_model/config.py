@@ -71,8 +71,25 @@ SHARP_BOOK = "pinnacle"
 # Seconds. The books reprice off the official feed in 1-3s and The Odds API
 # republishes featured markets every ~40s and props every ~60s, so polling
 # faster than this buys nothing but credits.
-POLL_STATE_SEC = 10                 # ESPN game state
-POLL_ANCHOR_SEC = 60                # main lines, while any game is live
+# 10 -> 5 on 2026-09-05 (Matt: "every 5 seconds or less when game starts").
+# ESPN game state is NOT an Odds API call -- it costs no credits -- and it is
+# what the model reads the game off, so this is the poll that matters and the
+# one that was free to tighten. The quote polls below deliberately did NOT
+# follow it: see the note there.
+POLL_STATE_SEC = 5                  # ESPN game state
+# 60 -> 5 on 2026-09-05 (Matt), with the cost stated and accepted.
+#
+# What 5s buys, precisely: the aggregator republishes featured markets every
+# ~40-46s (136 distinct snapshots over 2.5 hours, ~7 consecutive polls served
+# the identical payload -- docs/discord.md), so this CANNOT make a quote fresher
+# than that floor. What it does buy is catching each new snapshot within 5s of
+# it appearing instead of up to 60s later, which is the same trade the MLB live
+# loop took when it went to 5s. Do not read it as beating the book.
+#
+# The prop / derivative / halftime polls below deliberately stay at 60s: the
+# prop feed's own republish is ~60s, so the argument above does not carry, and
+# each is a per-game cost rather than one slate-wide call.
+POLL_ANCHOR_SEC = 5                 # main lines, while any game is live
 POLL_DERIVATIVE_SEC = 60            # only for games in a hunt state
 POLL_PROP_SEC = 60                  # baseline, matches the ~60s republish
 POLL_PROP_TRIGGERED_SEC = 60        # after a game-script trigger fires
@@ -94,13 +111,22 @@ MAX_STATE_AGE_SEC = 45
 # 3 credits per slate wide anchor poll per minute:
 #   one preseason game, ~3h   180 prop  +   540 anchor  =    ~720
 #   a full Sunday, ~13 games  2,340 prop + 1,800 anchor =  ~4,140
-# 12,000 leaves roughly 3x headroom for a Sunday plus the night game, and at
-# that rate the 4.37M credits remaining outlast several NFL seasons.
+#
+# RE-SIZED 2026-09-05 with POLL_ANCHOR_SEC at 5s. The anchor poll is slate-wide
+# at ~3 credits, so 12x the rate is 12x that component and nothing else:
+#   a full Sunday, ~13h       2,340 prop + 21,600 anchor = ~23,940
+# 12,000 would now BIND BY EARLY AFTERNOON, and this file already says why that
+# is the worst outcome: "a cap that halts coverage in the fourth quarter of the
+# late window is not a safety net, it is a silent hole in the record." 60,000
+# keeps ~2.5x headroom over the projection. Season cost is roughly +30k per
+# game day, ~1.1M over 18 weeks, against 4.71M remaining and a 46-76k/day burn
+# (odds_api_quota, read 2026-09-05) -- affordable, and worth re-reading at the
+# midpoint rather than assuming.
 #
 # The 9x saving that makes this affordable is buying only the ONE market the
 # deployed lane reads instead of all nine in PROP_MARKETS. Restore the cap
 # math before adding a lane that needs a second market.
-LIVE_DAILY_CREDIT_CAP = int(os.getenv("NFL_LIVE_DAILY_CREDIT_CAP", "12000"))
+LIVE_DAILY_CREDIT_CAP = int(os.getenv("NFL_LIVE_DAILY_CREDIT_CAP", "60000"))
 BACKTEST_CREDIT_BUDGET = int(os.getenv("NFL_LIVE_BACKTEST_BUDGET", "5000"))
 
 # --------------------------------------------------------------- thresholds
@@ -114,6 +140,23 @@ EV_THRESHOLDS = {
     "nfl_live_stale": 0.03,
 }
 MODEL_IDS = tuple(EV_THRESHOLDS)
+
+# The most juice this lane will lay, as an American price (Matt, 2026-09-05:
+# "-140 should be price ceiling"). A quote worse than this is REFUSED before the
+# EV test, so the lane never takes the bet at all.
+#
+# Enforced HERE and not in the display filter, deliberately. The same number in
+# config.MODEL_MIN_ODDS would have let the lane bet -250 and then hidden the
+# pick from the app, Discord and push -- taken and concealed from the person who
+# has to place it, which is the failure #491 fixed. A ceiling the model applies
+# is a decision; a ceiling the board applies is a disappearance.
+#
+# -140 matches the blanket prop floor every MLB and WNBA prop model carries, so
+# the live lane lays no more juice than the pre-game ones. It is a RISK rule,
+# not a measured cut: a live prop past -140 needs a very high model probability
+# to clear the 0.06 EV gate, and that is exactly where the model is least worth
+# trusting.
+MIN_PRICE = float(os.getenv("NFL_LIVE_MIN_PRICE", "-140"))
 
 # ------------------------------------------------------------------- sizing
 # Quarter Kelly with a further half haircut, hard capped. See the spec: the

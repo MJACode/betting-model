@@ -18,7 +18,6 @@ import {
   MODEL_BOOK,
   type Movement,
 } from '@/lib/markets';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
@@ -28,7 +27,6 @@ import { AddToPlayButton } from './AddToPlayButton';
 import { BookLinesRow } from './BookLinesRow';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
-import { PickContextSheet, pickHasContext } from './PickContextSheet';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
 
@@ -57,12 +55,9 @@ export function PickCard({
   item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
 }: Props) {
   const { pick, game } = item;
-  const { book: preferredBook } = usePreferredBook();
-  const [contextOpen, setContextOpen] = React.useState(false);
   // Live picks are DraftKings only (Matt, 2026-09-03): the in-play model reads
   // DK's line and the bet is placed there, so the user's book never applies.
   const live = pick.is_live === true;
-  const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -98,14 +93,12 @@ export function PickCard({
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
-  // The price the user actually sees: their own sportsbook's number when it has
-  // one, otherwise the modeled DraftKings price (flagged as such). Model/Edge/EV
-  // on this card always come from the DK line the model scored — only the price
-  // and line shown here follow the user's book. A live pick shows the stored
-  // DK number regardless.
-  const quote = live
-    ? displayQuoteForPick(pick, [], MODEL_BOOK)
-    : displayQuoteForPick(pick, item.bookRows ?? [], preferredBook);
+  // The headline price is always the modeled DraftKings number — the price this
+  // pick's edge, EV and stake were computed from. The boards do not follow a
+  // book preference (Matt, 2026-09-04: that picker belongs to the Stats page).
+  // Where to actually place the bet is the "Betting lines" row below, which
+  // prices every book best first.
+  const quote = displayQuoteForPick(pick, [], MODEL_BOOK);
   // Their book can hang the same bet off a different number (FD 9.0 vs DK 8.5).
   // Showing the price without the line would misrepresent the bet.
   const quoteLine =
@@ -114,9 +107,9 @@ export function PickCard({
       : null;
 
   // Stake is a PAIR: what you lay, and what that wins. Computed off the price
-  // the card actually shows (the user's book when it prices the side), because
-  // a stake derived from a different number than the one printed beside it is
-  // incoherent — a -105 quote risks 1.05u to win 1u, not 1.1u.
+  // the card actually shows, which is now always the modeled DraftKings number
+  // — so the stake beside an edge is derived from the same price the edge was,
+  // which §6 requires and the old per-book quote quietly broke.
   const stake = stakeFor(pick.kelly_fraction, quote?.price ?? pick.dk_odds, kelly);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
@@ -180,7 +173,17 @@ export function PickCard({
     Boolean(onToggleSlip) && pick.dk_odds != null && pick.result == null && !preview;
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
+    // The card tap is the only route to the pick's breakdown now that the
+    // Context button is gone, so it has to announce itself: a settled pick
+    // renders no action buttons at all, and without this VoiceOver reads the
+    // card as inert text (UX review, 2026-09-05).
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${matchup}. ${pick.pick_label}. ${pick.signal_type}.`}
+      accessibilityHint="Opens the full breakdown, including recent form and matchup context."
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+    >
       <View style={styles.headerRow}>
         <Text style={styles.matchup} numberOfLines={1}>
           {matchup}
@@ -338,33 +341,18 @@ export function PickCard({
         <BookLinesRow
           pick={pick}
           bookRows={item.bookRows}
-          preferredBook={preferredBook}
           onMore={onPress}
         />
       ) : null}
 
-      {hasContext || canTrack || canSlip ? (
+      {canTrack || canSlip ? (
         <View style={styles.actionsRow}>
-          {hasContext ? (
-            <Pressable
-              onPress={() => setContextOpen(true)}
-              hitSlop={6}
-              style={({ pressed }) => [styles.contextBtn, pressed && styles.pressed]}
-            >
-              <Ionicons name="information-circle-outline" size={15} color={colors.tint} />
-              <Text style={styles.contextBtnText}>Context</Text>
-            </Pressable>
-          ) : (
-            <View />
-          )}
-          <View style={styles.actionsRight}>
-            {canSlip ? (
-              <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} compact />
-            ) : null}
-            {canTrack ? (
-              <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
-            ) : null}
-          </View>
+          {canSlip ? (
+            <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} compact />
+          ) : null}
+          {canTrack ? (
+            <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
+          ) : null}
         </View>
       ) : null}
 
@@ -388,10 +376,6 @@ export function PickCard({
             {timing.label}
           </Text>
         </View>
-      ) : null}
-
-      {contextOpen ? (
-        <PickContextSheet enriched={item} visible onClose={() => setContextOpen(false)} />
       ) : null}
     </Pressable>
   );
@@ -586,13 +570,9 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.sm,
-  },
-  actionsRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: spacing.sm,
+    marginTop: spacing.sm,
   },
   // The post-time footer: last line of the card, under the action buttons.
   timingRow: {
@@ -606,21 +586,5 @@ const styles = StyleSheet.create({
   // wrapping (UX review, 2026-09-03).
   timingText: {
     flexShrink: 1,
-  },
-  contextBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radii.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.tint,
-    backgroundColor: colors.bgCard,
-  },
-  contextBtnText: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.tint,
   },
 });

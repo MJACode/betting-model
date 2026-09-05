@@ -123,6 +123,21 @@ RUN_NFL_WIND_CARD = os.environ.get("RUN_NFL_WIND_CARD", "1") != "0"
 # de-vig-Pinnacle-bet-the-outlier rule. RUN_NFL_PROP_CARD=0 disables it.
 RUN_NFL_PROP_CARD = os.environ.get("RUN_NFL_PROP_CARD", "1") != "0"
 
+# NCAAF player props (data/ingestors/ncaaf_prop_odds_ingestor.py). Matt turned
+# these on 2026-09-05 after the probe measured them: ~8.7 credits per event
+# against 68 events the feed lists, so ONE FULL PASS IS ~590 CREDITS and the
+# three below cost ~1,800 on a Saturday. That is affordable enough that the
+# ceiling is coverage, not money -- which is why this is three passes and not
+# hourly: the lines are the Stats board's research column, not a model input,
+# and nothing measured says a college prop line moves enough between 9am and
+# 1pm to be worth 11 more passes.
+#
+# Scheduled DAILY, not on Saturdays: college football also plays Thursday and
+# Friday nights and the odd Tuesday in November. A day with no events costs
+# NOTHING -- the ingestor returns before any paid call, and the /events listing
+# it reads first is free (measured: credits null).
+RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
+
 # NFL in-play gameday worker (nfl/live_model). Polls ESPN state every 10s and
 # prices the one validated lane, live pass attempts. Set RUN_NFL_LIVE=0 to
 # disable without a redeploy. It is PAPER ONLY: the executor records decisions
@@ -222,6 +237,29 @@ def run_model_calibration() -> None:
         log.info("ModelCalibration: %s", result.get("status"))
     except Exception:  # noqa: BLE001 - must never kill the scheduler
         log.exception("ERROR model-calibration crashed")
+
+
+def run_calibration_watch() -> None:
+    # The ModelCalibration JUDGEMENT pass. The sweep above writes the rows;
+    # this reads them and says what changed. In-process for the same reason as
+    # the sweep and the pipeline watch: its output is a Discord post and a
+    # push_sent row, not an exit code.
+    #
+    # It is deliberately a SEPARATE job from run_model_calibration rather than
+    # a tail call inside it. A judgement pass that runs inside the job
+    # producing its inputs cannot report on a sweep that did not finish -- the
+    # same reasoning that keeps the threshold review out of the pipeline.
+    try:
+        from data.db import get_connection
+        from tracking.calibration_watch import run_calibration_watch as _run
+        conn = get_connection()
+        try:
+            result = _run(conn)
+        finally:
+            conn.close()
+        log.info("CalibrationWatch: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR calibration-watch crashed")
 
 
 def run_job_queue() -> None:
@@ -343,7 +381,8 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
                   "savant_refresh", "threshold_review",
-                  "model_calibration", "job_queue", "pipeline_watch"}
+                  "model_calibration", "job_queue", "pipeline_watch",
+                  "calibration_watch"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -485,7 +524,15 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
 
 
 NFL_POLL_HORIZON_DAYS = 10.0   # start watching this far out
-NFL_FAST_WINDOW_HOURS = 3.0    # inside this, poll every 10 minutes
+NFL_FAST_WINDOW_HOURS = float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))
+# Inside this many hours to kickoff, poll every 10 minutes instead of hourly.
+#
+# 3 -> 24 on 2026-09-05 (Matt). The 10-minute tier was meant to cover the
+# run-up to kickoff and only reached T-3h, so T-24h..T-3h -- the window the
+# opener rule actually fires in, and where the wind forecast firms up --
+# resolved at one tick an hour. Cost is ~6 credits a tick (wind us,eu +
+# opener us,eu), so the extra 126 ticks a kickoff-day are ~750 credits
+# against a 4.71M balance and a ~46-76k/day burn: immaterial.
 
 
 def _nfl_lead_hours() -> float | None:
@@ -549,6 +596,16 @@ def run_nfl_poll(fast: bool = False) -> None:
     # Record what the models thought of every game this tick, and flag any
     # locked pick whose conditions have changed. Never re-prices anything.
     _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
+
+
+def run_ncaaf_prop_odds() -> None:
+    """One college prop pass: the scoped slate, every book, standard + alternate.
+
+    A clean no-op off-season and on days with no games -- the ingestor lists
+    events first (a free call) and returns before spending anything.
+    """
+    _run([sys.executable, "-m", "data.ingestors.ncaaf_prop_odds_ingestor"],
+         "ncaaf-prop-odds")
 
 
 def run_nfl_prop_card() -> None:
@@ -711,6 +768,34 @@ def catch_up_weekly_jobs() -> None:
                 except Exception:  # noqa: BLE001
                     pass
 
+            # The 250-bet review's two tables, for exactly the reason stated
+            # above: a schema change with no path into production is not a
+            # schema change.
+            #
+            # threshold_review.ensure_schema has created both tables on every
+            # 7:45am run since 2026-08-31 and NEITHER existed. The connection is
+            # autocommit=False and run_review returns at `not_due` on every day
+            # the slate is under the next 250-bet milestone -- every day so far
+            # -- so the CREATE TABLEs were discarded when the caller closed the
+            # connection. That is fixed at source (ensure_schema now commits),
+            # but the cron only reaches it once a day, while models/scorer.py
+            # reads model_auto_pauses on EVERY scoring run and has been logging
+            # `relation "model_auto_pauses" does not exist` for days.
+            #
+            # Deliberately NOT gated by owns(): auto_paused() is consulted by
+            # the scorer wherever it runs, not only on the service that owns the
+            # review. Idempotent and internally gated by ddl_guard, so a
+            # container that restarts repeatedly does not re-fire the DDL.
+            try:
+                from tracking.threshold_review import ensure_schema
+                ensure_schema(conn)
+            except Exception:  # noqa: BLE001 — must not stop the scheduler
+                log.exception("catch-up: threshold-review schema failed (continuing)")
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
             season = datetime.now().year
             savant_stale, newest, kinds = _savant_is_stale(conn, season)
             calib_stale, last_sweep = _model_calibration_is_stale(conn)
@@ -846,6 +931,23 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=TIMEZONE),
         id="model_calibration",
         name="ModelCalibration (weekly, Mon 8:30am ET)",
+    )
+
+    # The judgement half, 30 minutes after the sweep it reads. The gap is the
+    # point: the sweep refits calibrations and analyses ~22 models, and a
+    # judgement pass that started at the same minute would read last week's
+    # rows and report "nothing changed" against a sweep still running.
+    #
+    # Every rule it applies is a DELTA. Measured 2026-09-03 before it shipped:
+    # 13 of the 22 models in the sweep carry a standing "RE-CUT to ..."
+    # verdict, so a rule that reported every RE-CUT would post thirteen
+    # identical findings every Monday forever. A false alarm that never stops
+    # is how a channel becomes unreadable, which is silence by another route.
+    sched.add_job(
+        run_calibration_watch,
+        CronTrigger(day_of_week="mon", hour=9, minute=0, timezone=TIMEZONE),
+        id="calibration_watch",
+        name="Calibration watch — judgement pass (weekly, Mon 9:00am ET)",
     )
 
     # Pre-registered threshold review — daily at 7:45am ET, after the pipeline
@@ -1047,6 +1149,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_PROP_CARD=0 — NFL prop card NOT scheduled.")
+
+    if RUN_NCAAF_PROP_ODDS:
+        # 9am / 1pm / 6pm ET: one fresh number before each of the day's kick
+        # waves (noon, 3:30, 7pm, and the 6pm pass carries the late window).
+        # Minute 35 keeps it clear of the :17 refresh pass and the :25 prop card.
+        sched.add_job(
+            run_ncaaf_prop_odds,
+            CronTrigger(hour="9,13,18", minute=35, timezone=TIMEZONE),
+            id="ncaaf_prop_odds",
+            name="NCAAF player props (9am/1pm/6pm ET)",
+            max_instances=1, coalesce=True, misfire_grace_time=1800,
+        )
+    else:
+        log.info("RUN_NCAAF_PROP_ODDS=0 — NCAAF player props NOT scheduled.")
 
     return sched
 

@@ -2,80 +2,162 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { usePreferredBook, BOOKS, type BookKey } from '@/hooks/usePreferredBook';
+import { usePreferredBooks, BOOKS, type BookKey } from '@/hooks/usePreferredBooks';
 import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * "Select Your Sportsbook" bottom sheet — the one place the user switches which
- * book's lines the whole app shows (and where the "Bet on …" buttons send them).
+ * "Your sportsbooks" bottom sheet — the books the member can bet at, MULTI-
+ * SELECT (Matt, 2026-09-04, with a competitor's picker beside ours: "give them
+ * the option to place on any Sportsbook we have odds for"). Pick DraftKings and
+ * FanDuel and the Stats board prints whichever pays more on each line, badged
+ * with the book that won it.
  *
- * Modeled on the betting-app pickers users already know: a sheet of book rows
- * with the chosen one ringed and checked, committed by a green Apply button.
- * Selection is a DRAFT until Apply — tapping rows just moves the ring, and
+ * Scope is the whole point of this sheet's copy. The setting used to price
+ * every board, and the Picks header carried a line saying so. It no longer
+ * does: Picks and Signals show the best line across every book we price, off a
+ * pick modeled at DraftKings, and a member cannot change that. What the set
+ * decides is the Stats board's lines and where the betslip's bet button sends
+ * them.
+ *
+ * THE LAST BOOK CANNOT BE UNCHECKED. An empty set would blank the Stats column
+ * with nothing on screen to explain it, so the final checkmark is inert and
+ * says why rather than silently refusing.
+ *
+ * Selection is a DRAFT until Apply — tapping rows just moves checkmarks, and
  * dismissing the sheet (backdrop, X, back) discards the draft. That matches the
  * reference UI this mirrors; the app's live-apply convention stays for filters,
- * where the list below IS the feedback — here the whole app changes, so an
+ * where the list below IS the feedback — here two screens change, so an
  * explicit commit reads better.
  *
  * The list is BETTABLE_BOOKS — the books we ingest lines for AND a member can
- * place at from the US — so the user can never select a book we hold no
- * prices for, or one (Pinnacle, Bovada) that will not take their bet. The
- * models always price against DraftKings; this only changes what the user is
- * SHOWN, and when their book hasn't posted a line for a bet we show the
- * DraftKings number and label it (displayQuoteForPick's fallback). DK's brand
- * green is the only brand color used — the other books get a neutral badge
- * rather than an approximated hex (a wrong brand color that fails contrast is
- * worse than a consistent one).
+ * place at from the US — so the user can never select a book we hold no prices
+ * for, or one (Pinnacle, Bovada) that will not take their bet. The reference
+ * picker also lists DFS platforms (PrizePicks, Pick6); we carry no odds for
+ * those, so listing them would be a checkbox that changes nothing.
+ *
+ * COVERAGE IS SHOWN, NEVER ENFORCED (Matt, 2026-09-05: "if we are getting
+ * betting lines for a Sportsbook we should show it as an option and display
+ * those lines. It doesn't matter if we don't have as many props as DK"). He
+ * had opened this sheet with FanDuel and Caesars showing nothing and read it
+ * as us not carrying them; we do — measured that morning, both post Hits,
+ * RBIs, Runs, Total Bases and HR, but only through the milestone market,
+ * which is OVER-ONLY. So a row can carry a `coverageNote` saying what the
+ * board's current stat has at that book, and every row stays selectable
+ * whatever it says. Only the Stats screen passes one; Settings has no stat in
+ * context and shows the plain list.
+ *
+ * DK's brand green is the only brand color used — the other books get a neutral
+ * badge rather than an approximated hex (a wrong brand color that fails
+ * contrast is worse than a consistent one), and no logos: docs/book_logos.md
+ * records the four routes tried for the image files and why none landed.
  */
 export function SportsbookPickerSheet({
   visible,
   onClose,
+  coverageNote,
 }: {
   visible: boolean;
   onClose: () => void;
+  /** What the caller's current context has at this book — "Hits: At Least
+   *  only", "No Hits lines today". Display only: it never disables a row and
+   *  never removes one. */
+  coverageNote?: (book: BookKey) => string | null;
 }) {
-  const { book, setBook } = usePreferredBook();
-  const [selected, setSelected] = useState<BookKey>(book);
+  const { books, setBooks } = usePreferredBooks();
+  const [selected, setSelected] = useState<BookKey[]>(books);
 
   // Re-seed the draft from the committed value every time the sheet opens, so
   // an abandoned draft from a previous open can never leak into this one.
   useEffect(() => {
-    if (visible) setSelected(book);
-  }, [visible, book]);
+    if (visible) setSelected(books);
+  }, [visible, books]);
+
+  const allOn = selected.length === BOOKS.length;
+  const toggle = (b: BookKey) => {
+    setSelected((prev) => {
+      if (!prev.includes(b)) return BOOKS.filter((x) => x === b || prev.includes(x));
+      // The last one stays on: an empty set has no honest Stats column.
+      if (prev.length === 1) return prev;
+      return prev.filter((x) => x !== b);
+    });
+  };
+  const toggleAll = () => setSelected(allOn ? [MODEL_BOOK] : [...BOOKS]);
 
   const apply = () => {
-    setBook(selected);
+    setBooks(selected);
     onClose();
   };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      >
+        {/* accessible={false}: an accessible Pressable groups its children
+            into ONE VoiceOver element, which would leave the book rows, the
+            Close button and Apply unreachable. Same fix as StatsLineSheet. */}
+        <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
           <View style={styles.grabber} />
           <View style={styles.header}>
-            <Text style={styles.title}>Select Your Sportsbook</Text>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+            <Text style={styles.title}>Your sportsbooks</Text>
+            <Pressable onPress={onClose} hitSlop={12} accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Your book is ringed on every pick’s betting lines, and its price sets the risk and
-            payout shown. Only books we pull live lines from, and that you can bet at, are listed.
+            Your Stats lines show the best of these, and the betslip opens the one taking
+            your slip.
           </Text>
+
+          <Pressable
+            onPress={toggleAll}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: allOn }}
+            accessibilityLabel={allOn ? 'Keep DraftKings only' : 'Select all sportsbooks'}
+            hitSlop={8}
+            style={({ pressed }) => [styles.selectAllRow, pressed && styles.pressed]}
+          >
+            <Text style={styles.selectAllText}>{allOn ? 'Keep DraftKings only' : 'Select all'}</Text>
+            {allOn ? (
+              <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
+            ) : (
+              <View style={styles.emptyCircleSm} />
+            )}
+          </Pressable>
 
           <ScrollView style={styles.list} bounces={false}>
             {BOOKS.map((b) => {
-              const active = b === selected;
+              const active = selected.includes(b);
               const isModel = b === MODEL_BOOK;
+              const last = active && selected.length === 1;
+              // The lock line wins the one sub-line slot: it explains a
+              // control the member just tried to use, which the coverage note
+              // does not.
+              //
+              // The note is deliberately SELECTION-INDEPENDENT — it answers
+              // "what does this book have", not "what do your books have", so
+              // it reads the same whether the row is checked or not. `last`
+              // above reads the DRAFT (`selected`); do not be tempted to make
+              // the note follow it.
+              const note = last ? null : (coverageNote?.(b) ?? null);
               return (
                 <Pressable
                   key={b}
-                  onPress={() => setSelected(b)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
+                  onPress={() => toggle(b)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: active }}
+                  accessibilityLabel={
+                    last
+                      ? `${bookName(b)}, selected. Your only sportsbook — choose another before removing it.`
+                      : note
+                        ? `${bookName(b)}. ${note}`
+                        : bookName(b)
+                  }
                   style={({ pressed }) => [
                     styles.row,
                     active && styles.rowActive,
@@ -89,13 +171,22 @@ export function SportsbookPickerSheet({
                   </View>
                   <View style={styles.rowBody}>
                     <Text style={styles.rowName}>{bookName(b)}</Text>
-                    {isModel ? (
-                      <Text style={styles.rowSub}>
-                        Model book — signals and the track record are priced here
-                      </Text>
+                    {last ? (
+                      <View style={styles.lockRow}>
+                        <Ionicons name="lock-closed" size={11} color={colors.textTertiary} />
+                        <Text style={styles.rowSub}>
+                          Your only sportsbook — add another before removing this one
+                        </Text>
+                      </View>
+                    ) : note ? (
+                      <Text style={styles.rowSub}>{note}</Text>
                     ) : null}
                   </View>
                   {active ? (
+                    // Green even when locked: in this sheet green means
+                    // selected, and greying the one book that is definitively
+                    // on made it look the most off (UX review). The lock icon
+                    // beside the sub-line carries the state instead.
                     <Ionicons name="checkmark-circle" size={24} color={colors.bet} />
                   ) : (
                     <View style={styles.emptyCircle} />
@@ -105,16 +196,13 @@ export function SportsbookPickerSheet({
             })}
           </ScrollView>
 
-          <Text style={styles.footnote}>
-            Picks are always modeled against DraftKings — switching books changes the price you
-            see, never the pick. Every pick still lists each book’s line, best price first, so you
-            can place it wherever pays most. Live picks are DraftKings only.
-          </Text>
-
+          {/* One sentence, not a paragraph: Settings states the scope above
+              this sheet and the Explainer carries the long version, so a third
+              copy here reads as the app being defensive (UX review). */}
           <Pressable
             onPress={apply}
             accessibilityRole="button"
-            accessibilityLabel="Apply sportsbook selection"
+            accessibilityLabel={`Apply. ${selected.length} sportsbook${selected.length === 1 ? '' : 's'} selected.`}
             style={({ pressed }) => [styles.applyBtn, pressed && styles.applyBtnPressed]}
           >
             <Text style={styles.applyText}>Apply</Text>
@@ -220,11 +308,29 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
   },
-  footnote: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 16,
-    marginTop: spacing.sm,
+  emptyCircleSm: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.separatorOpaque,
+  },
+  lockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  selectAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  selectAllText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   applyBtn: {
     marginTop: spacing.md,

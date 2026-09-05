@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
+import { useLineLegs } from '@/hooks/useLineLegs';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { betslipSummary, shouldShowBetslipBar, BETSLIP_BAR_STAKE } from '@/lib/parlay';
@@ -44,10 +45,11 @@ export function BetslipBar({
   onOpen: () => void;
 }) {
   const slip = useParlaySlip();
+  const lineLegs = useLineLegs();
   // Nothing selected = nothing to show, and (deliberately) nothing fetched:
   // the inner component owns the picks query, so an empty slip costs no
-  // network at all.
-  if (hidden || !slip.ready || slip.count === 0) return null;
+  // network at all. Line legs (Stats-board lines) count as selections too.
+  if (hidden || !slip.ready || !lineLegs.ready || slip.count + lineLegs.count === 0) return null;
   return (
     <BetslipBarContent bottomOffset={bottomOffset} onOpen={onOpen} />
   );
@@ -61,11 +63,11 @@ function BetslipBarContent({
   onOpen: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { slip, legs, resolving } = useResolvedSlip();
+  const { legs, count, resolving } = useResolvedSlip();
 
   const summary = useMemo(
-    () => betslipSummary(legs, slip.count),
-    [legs, slip.count],
+    () => betslipSummary(legs, count),
+    [legs, count],
   );
 
   // Over the tab bar the home-indicator inset is already spent by the tabs;

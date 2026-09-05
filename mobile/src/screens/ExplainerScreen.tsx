@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
 
 export function ExplainerScreen() {
   return (
@@ -38,16 +39,22 @@ export function ExplainerScreen() {
             is the one book we score, track, and grade our record against.
           </P>
           <P>
-            You can pick where <Strong>you</Strong> bet in Settings → Your
-            sportsbook. That changes the price and line shown on each pick, and
-            sends the "Bet on…" button to that book's betslip, so you see the
-            number you'll actually get. It does not change the pick or the edge.
+            Every pick lists each book's line, <Strong>best price first</Strong>,
+            so you can place it wherever pays most. We compare every book we
+            price and put the best payout first. You can't change that ordering,
+            and the price a pick is measured at is always DraftKings.
           </P>
           <P>
             Book coverage is uneven — DraftKings posts far more prop markets than
-            anyone else. When your book hasn't priced a pick, the card shows the
-            DraftKings number and says so. Open a pick and check{' '}
-            <Strong>All books</Strong> to compare every book side by side.
+            anyone else. Open a pick and check <Strong>All books</Strong> to
+            compare every book side by side. You choose the books you bet at in
+            Settings → Your sportsbooks, and you can pick as many as you like.
+            They set two things: the line the Stats leaderboard prints beside
+            each player — the <Strong>best of your books</Strong> on that number,
+            badged with the one offering it — and which book the betslip's bet
+            button opens. They never change what a pick is measured at, and they
+            never limit where you can place: the betslip lists every book we
+            price, whether you selected it or not.
           </P>
         </Section>
 
@@ -320,7 +327,7 @@ export function ExplainerScreen() {
           <P>
             Build your own pick filter from any combination of model + min
             probability + min edge. The app backtests each filter against
-            every settled pick on record (since 2026-04-14) and shows live
+            every scored pick since {BACKTEST_START} — the full graded history, which is longer than the published record — and shows
             win rate and flat ROI.
           </P>
           <P>

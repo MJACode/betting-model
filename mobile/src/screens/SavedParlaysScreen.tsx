@@ -9,7 +9,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { setParlayRestore } from '@/hooks/useParlayRestore';
 import {
   computeParlayMetrics,
@@ -17,7 +16,8 @@ import {
   savedLegToParlayLeg,
   type SavedParlay,
 } from '@/lib/parlay';
-import { MODEL_BOOK } from '@/lib/markets';
+import { bookName, booksName, MODEL_BOOK } from '@/lib/markets';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { betOnBookLabel, bookButtonColors } from '@/lib/sportsbookLinks';
 import { modelShort } from '@/lib/modelMeta';
 import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
@@ -44,7 +44,10 @@ const UNDO_MS = 4500;
 export function SavedParlaysScreen() {
   const navigation = useNavigation<Nav>();
   const { items, remove, restore, clear } = useSavedParlays();
-  const { book: preferredBook } = usePreferredBook();
+  // `ready` matters more here than on the builder: without it EVERY card's
+  // primary button flips book, colour and label at once a frame after mount
+  // (UX review).
+  const { books: preferredBooks, ready: bookReady } = usePreferredBooks();
   const [handoff, setHandoff] = useState<{ book: string; legs: HandoffLeg[] } | null>(null);
   // Last deleted parlay, kept briefly so the user can Undo (no confirm dialog).
   const [undo, setUndo] = useState<SavedParlay | null>(null);
@@ -102,11 +105,14 @@ export function SavedParlaysScreen() {
     ]);
   }, [items.length, clear]);
 
-  // Hand off at the user's book when the snapshot shows it priced every leg
-  // (savedHandoffBookFor), else DraftKings — each leg's link is AT the book
-  // being opened, never DK's slip under another book's label.
+  // Hand off at the user's own book, like the builder's button and the Stats
+  // line pill (Matt, 2026-09-04). savedHandoffBookFor falls back to DraftKings
+  // unless their book has a stored link for EVERY leg — a saved slip carries
+  // the links it was saved with, so an older save legitimately has DK only.
+  // Each leg's link is AT the book being opened, never DK's slip under another
+  // book's label.
   const betAtBook = (sp: SavedParlay) => {
-    const { book, links } = savedHandoffBookFor(sp.legs, preferredBook);
+    const { book, links } = savedHandoffBookFor(sp.legs, preferredBooks);
     setHandoff({
       book,
       legs: sp.legs.map((l, i) => ({
@@ -153,7 +159,9 @@ export function SavedParlaysScreen() {
         renderItem={({ item }) => (
           <SavedParlayCard
             parlay={item}
-            handoffBook={savedHandoffBookFor(item.legs, preferredBook).book}
+            handoffBook={savedHandoffBookFor(item.legs, preferredBooks).book}
+            preferredBooks={preferredBooks}
+            bookReady={bookReady}
             onBet={() => betAtBook(item)}
             onEdit={() => editInBuilder(item)}
             onDelete={() => deleteNow(item)}
@@ -183,6 +191,8 @@ export function SavedParlaysScreen() {
 function SavedParlayCard({
   parlay,
   handoffBook,
+  preferredBooks,
+  bookReady,
   onBet,
   onEdit,
   onDelete,
@@ -190,6 +200,10 @@ function SavedParlayCard({
   parlay: SavedParlay;
   /** Book the bet button hands off to (savedHandoffBookFor) — names the label. */
   handoffBook: string;
+  /** The member's own books, to say WHY a card fell back to DraftKings. */
+  preferredBooks: readonly string[];
+  /** False until the stored preference has loaded — see the hook's `ready`. */
+  bookReady: boolean;
   onBet: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -199,6 +213,12 @@ function SavedParlayCard({
     [parlay.legs],
   );
   const betColors = bookButtonColors(handoffBook);
+  // Two saved slips can legitimately carry different books: this screen has no
+  // "Open with" row, so without a reason on the card that reads as a bug. A
+  // save made before the member chose their book has no links at that book at
+  // all, which is a different sentence from "your book can't price this leg".
+  const fellBack = bookReady && !preferredBooks.includes(handoffBook);
+  const preUpgrade = parlay.legs.some((l) => l.bookLinks == null);
   const renderRightActions = () => (
     <Pressable
       onPress={onDelete}
@@ -261,10 +281,18 @@ function SavedParlayCard({
       <View style={styles.actions}>
         <Pressable
           onPress={onBet}
+          disabled={!bookReady}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !bookReady }}
+          accessibilityLabel={
+            fellBack
+              ? `${betOnBookLabel(handoffBook)}. This slip has no ${booksName(preferredBooks)} links.`
+              : betOnBookLabel(handoffBook)
+          }
           style={({ pressed }) => [
             styles.betBtn,
             { backgroundColor: betColors.bg },
-            pressed && styles.pressed,
+            (pressed || !bookReady) && styles.pressed,
           ]}
         >
           <Ionicons name="open-outline" size={16} color={betColors.fg} />
@@ -272,6 +300,13 @@ function SavedParlayCard({
             {betOnBookLabel(handoffBook)}
           </Text>
         </Pressable>
+        {fellBack ? (
+          <Text style={styles.betFallback}>
+            {preUpgrade
+              ? `Saved before you chose ${booksName(preferredBooks)} — opens ${bookName(handoffBook)}`
+              : `${booksName(preferredBooks)} ${preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price every leg — opens ${bookName(handoffBook)}`}
+          </Text>
+        ) : null}
         <View style={styles.secondaryRow}>
           <Pressable onPress={onEdit} style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}>
             <Ionicons name="create-outline" size={16} color={colors.tint} />
@@ -482,6 +517,11 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
+  },
+  betFallback: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   secondaryRow: {
     flexDirection: 'row',

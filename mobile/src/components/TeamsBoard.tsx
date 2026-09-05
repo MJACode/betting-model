@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,10 +25,35 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { AddLineSheet } from '@/components/AddLineSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { GroupTabs } from '@/components/GroupTabs';
 import { FilterChip } from '@/components/filters/FilterChip';
+import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
+import { BookMark } from '@/components/BookMark';
+import { showToast } from '@/components/Toast';
+import { useNow } from '@/hooks/useNow';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
-import { fetchTeamStats } from '@/lib/queries';
+import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
+import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
+import { teamLineSheetInput } from '@/lib/lineLegs';
+import { bookButtonColors } from '@/lib/sportsbookLinks';
+import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
+import {
+  buildSlateGameIndex,
+  buildTonightSlate,
+  slateGameFor,
+  slateSubline,
+  sublineSpoken,
+} from '@/lib/statsBoard';
+import {
+  buildTeamLineIndex,
+  teamLineCaption,
+  teamLineMarketFor,
+  unstartedGameIds,
+  type TeamLineQuote,
+} from '@/lib/statsOdds';
 import {
   isThinSample,
   rankTeams,
@@ -47,9 +73,8 @@ import {
 } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
-import type { TeamStatsRow } from '@/types';
+import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
 
-const AMBER = '#FF9500'; // mid tertile (no theme token)
 
 /**
  * Seasons to try, newest first. Every league except MLB/WNBA is out of season
@@ -63,13 +88,21 @@ function seasonCandidates(): number[] {
 }
 
 function tierColor(tier: Tier): string | undefined {
-  if (tier === 'good') return colors.bet;
-  if (tier === 'bad') return colors.avoid;
-  if (tier === 'mid') return AMBER;
+  if (tier === 'good') return colors.gradeGood;
+  if (tier === 'bad') return colors.gradeBad;
+  if (tier === 'mid') return colors.gradeMid;
   return undefined;
 }
 
-export function TeamsBoard({ sport }: { sport: Sport }) {
+export function TeamsBoard({
+  sport,
+  onAdded,
+}: {
+  sport: Sport;
+  /** After a line is added — the Stats screen bounces back to the betslip
+   *  when the member came from there, on this board as on Players. */
+  onAdded?: () => void;
+}) {
   const groups = useMemo(() => teamGroupsForSport(sport), [sport]);
   const [stat, setStat] = useState<TeamStatDef | null>(() => defaultTeamStatFor(sport));
   const [rows, setRows] = useState<TeamStatsRow[]>([]);
@@ -77,6 +110,62 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState<string>('');
+
+  // ── The LINE column: the user's sportsbook's number for each team's next
+  // game, from that team's side. Matt, 2026-09-03: "see a current line for a
+  // player or team … if they select FanDuel we only show FanDuel". The market
+  // follows the stat (Over% beside the total, ATS% beside the spread, Win%
+  // beside the moneyline — lib/statsOdds.teamLineMarketFor). No model, no
+  // fallback outside the member's own books.
+  // `ready` gates the column: the pill's book is the member's own, so a tap
+  // before storage answers would show the wrong one (UX review).
+  const { books, ready: booksReady } = usePreferredBooks();
+  // THE PILL ASKS, here too (Matt, 2026-09-05: "Team line legs, yes build
+  // it"). A tap opens AddLineSheet with the team's line — its moneyline, its
+  // spread at the board's number, the game total — and every book's price
+  // for it; the one action puts a GAME line leg in our betslip
+  // (lib/lineLegs.ts). Until today this pill was the one control on the
+  // Stats tab that still left the app.
+  const [lineSheet, setLineSheet] = useState<TeamLineQuote | null>(null);
+  const [slate, setSlate] = useState<{ date: string; isToday: boolean; games: GameRow[] }>({
+    date: '',
+    isToday: false,
+    games: [],
+  });
+  const [gameLines, setGameLines] = useState<OddsByBookRow[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const from = todayET();
+    // Today's games, or the next scheduled day for a sport that does not play
+    // daily — the same rule the Players board's "Playing today" toggle uses.
+    fetchSlateGames(sport, from, addDays(from, 7))
+      .then(async (games) => {
+        const t = buildTonightSlate(games, sport, from);
+        const onDate = games.filter((g) => g.sport === sport && g.game_date === t.date);
+        if (cancelled) return;
+        setSlate({ date: t.date, isToday: t.isToday, games: onDate });
+        if (!t.date) {
+          setGameLines([]);
+          return;
+        }
+        const lines = await fetchGameLinesForDate(t.date);
+        if (!cancelled) setGameLines(lines);
+      })
+      // Enrichment only — the board must never break because the odds view is
+      // unreachable. But say so: an unreachable view and "no games" both look
+      // like an empty column.
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setSlate({ date: '', isToday: false, games: [] });
+        setGameLines([]);
+        showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport]);
 
   // Reset to the sport's default stat whenever the sport changes — the stat
   // sets do not overlap across sports, so keeping the old one would be invalid.
@@ -133,6 +222,76 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
     [filtered, stat],
   );
 
+  const lineMarket = stat ? teamLineMarketFor(String(stat.key)) : 'h2h';
+  // Only games that have NOT started: a game in progress has no line a user
+  // can still take, and its "latest" pre-game row is a live number.
+  // One clock for every time-derived cell on the board — see hooks/useNow.
+  const now = useNow();
+  const unstarted = useMemo(
+    () => unstartedGameIds(slate.games, new Date(now).toISOString()),
+    [slate.games, now],
+  );
+  // Teams whose game is live or over: the cell says which ("Live" / "Final",
+  // GameStatusPill's words) rather than printing a dash that reads as "no
+  // line" (same as the Players board). A team with a game still to come gets
+  // no label.
+  const startedTeams = useMemo(() => {
+    const out = new Map<string, 'Live' | 'Final'>();
+    const pending = new Set<string>();
+    for (const g of slate.games) {
+      const teams = [g.home_team, g.away_team].filter(Boolean) as string[];
+      if (unstarted.has(g.game_id)) {
+        teams.forEach((t) => pending.add(t));
+        continue;
+      }
+      const kind = gameStatus(g).kind;
+      const label = kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null;
+      if (label) teams.forEach((t) => out.set(t, label));
+    }
+    pending.forEach((t) => out.delete(t));
+    return out;
+  }, [slate.games, unstarted, now]);
+
+  // "7:05 PM ET · @ SEA" under each team's record — the Players board's
+  // subline, on the board where the row IS the team (Matt, 2026-09-05: "add
+  // the time of the game and who they are playing … for all sports"). Same
+  // helper, so a doubleheader resolves the same way on both boards.
+  const slateGameIndex = useMemo(
+    () =>
+      buildSlateGameIndex(
+        slate.games,
+        { date: slate.date, isToday: slate.isToday, keys: new Set<string>() },
+        new Date(now).toISOString(),
+      ),
+    [slate.games, slate.date, slate.isToday, now],
+  );
+  const lineByTeam = useMemo(
+    () =>
+      buildTeamLineIndex(gameLines, slate.games, {
+        market: lineMarket,
+        books,
+        gameIds: unstarted,
+      }),
+    [gameLines, slate.games, lineMarket, books, unstarted],
+  );
+  // Gated on the DAY and the BOOKS, never on which stat is selected — the
+  // column must not come and go as the user taps through chips.
+  const mine = useMemo(() => new Set<string>(books), [books]);
+  const showLines =
+    booksReady &&
+    unstarted.size > 0 &&
+    gameLines.some((r) => mine.has(r.bookmaker) && unstarted.has(r.game_id));
+  // The header names the book when there is one, else the RULE ("BEST") — with
+  // several books the cells no longer share one, so each pill carries its own
+  // badge instead. Plus the day when it is not today; the market is on every
+  // cell's caption ("ML", "−1.5", "o8.5").
+  const lineHeader = `${booksLabel(books)}${slate.date && !slate.isToday ? ` ${weekdayET(slate.date)}` : ''}`;
+  // None of their books posts anything for today's games — say so, with the switch.
+  const noLinesNote =
+    unstarted.size > 0 && gameLines.length > 0 && !gameLines.some((r) => mine.has(r.bookmaker))
+      ? `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted lines for today’s games.`
+      : null;
+
   if (!stat) {
     return (
       <EmptyState
@@ -144,31 +303,9 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
 
   return (
     <>
-      {/* Group tabs — Efficiency first by design. */}
-      {groups.length > 1 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.fixedRow}
-          contentContainerStyle={styles.groupTabRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {groups.map((g) => (
-            <Pressable
-              key={g}
-              onPress={() => pickGroup(g)}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityState={{ selected: g === activeGroup }}
-              style={({ pressed }) => pressed && styles.pressed}
-            >
-              <Text style={[styles.groupTab, g === activeGroup && styles.groupTabActive]}>
-                {g.toUpperCase()}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : null}
+      {/* Group tabs — Efficiency first by design, and the same two-level tab
+          bar the Players board uses (Matt, 2026-09-04). */}
+      <GroupTabs groups={groups} active={activeGroup} onChange={pickGroup} />
 
       <ScrollView
         horizontal
@@ -216,7 +353,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
           returnKeyType="search"
         />
         {query.length > 0 ? (
-          <Pressable onPress={() => setQuery('')} hitSlop={8}>
+          <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
             <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
           </Pressable>
         ) : null}
@@ -228,24 +365,62 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         </View>
       ) : null}
 
+      {noLinesNote ? (
+        <Pressable
+          onPress={() => setPickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${noLinesNote} Switch sportsbook`}
+          style={({ pressed }) => [styles.noLinesRow, pressed && styles.pressed]}
+        >
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>
+            {noLinesNote} <Text style={styles.noLinesLink}>Change your sportsbooks ›</Text>
+          </Text>
+        </Pressable>
+      ) : null}
+
       {ranked.length > 0 ? (
         <View style={styles.colHeader}>
           <Text style={styles.colHeaderRank}>RK</Text>
           <Text style={styles.colHeaderName}>
-            TEAM{season ? `  ·  ${season}` : ''}
+            TEAM{season ? ` · ${season}` : ''}
           </Text>
           <Text style={styles.colHeaderRight} numberOfLines={1}>
             {stat.label.toUpperCase()}
           </Text>
+          {showLines ? (
+            <Text style={[styles.colHeaderRight, styles.colHeaderLine]} numberOfLines={1}>
+              {lineHeader}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
       <FlatList
         data={ranked}
         keyExtractor={(item) => item.team}
-        renderItem={({ item, index }) => (
-          <TeamRow rank={index + 1} row={item} def={stat} cuts={cuts} />
-        )}
+        renderItem={({ item, index }) => {
+          const quote = lineByTeam.get(item.team) ?? null;
+          return (
+            <TeamRow
+              rank={index + 1}
+              row={item}
+              def={stat}
+              cuts={cuts}
+              quote={quote}
+              started={startedTeams.get(item.team) ?? null}
+              subline={slateSubline(
+                slateGameFor({ team: item.team }, slateGameIndex)?.game ?? null,
+                // Only when the LINE column is hidden — it prints the same
+                // word, and twice on one row reads as a bug (UX review).
+                showLines ? null : startedTeams.get(item.team) ?? null,
+              )}
+              showLine={showLines}
+              // The pill asks: a tap opens the add-to-betslip sheet.
+              onLinePress={quote ? () => setLineSheet(quote) : undefined}
+            />
+          );
+        }}
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator style={styles.loading} />
@@ -264,6 +439,17 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
         initialNumToRender={20}
+        // The board prints a clock on every row now, and this was one of the
+        // two lists in the app whose pull gesture did nothing (UX review).
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+      />
+
+      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <AddLineSheet
+        input={lineSheet ? teamLineSheetInput(lineSheet, sport) : null}
+        game={lineSheet ? slate.games.find((g) => g.game_id === lineSheet.gameId) ?? null : null}
+        onClose={() => setLineSheet(null)}
+        onAdded={onAdded}
       />
     </>
   );
@@ -274,11 +460,22 @@ function TeamRow({
   row,
   def,
   cuts,
+  quote,
+  started,
+  subline,
+  showLine,
+  onLinePress,
 }: {
   rank: number;
   row: TeamStatsRow;
   def: TeamStatDef;
   cuts: { lo: number; hi: number } | null;
+  quote: TeamLineQuote | null;
+  started: 'Live' | 'Final' | null;
+  /** "7:05 PM ET · @ SEA"; null when this team has no game on the slate. */
+  subline: string | null;
+  showLine: boolean;
+  onLinePress?: () => void;
 }) {
   const value = teamStatValue(row, def);
   const thin = isThinSample(row, def);
@@ -289,19 +486,34 @@ function TeamRow({
   const sample = def.sample ? sampleFor(row, def) : null;
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, subline ? styles.rowWithGame : null]}>
       <Text style={styles.rank}>{rank}</Text>
       <View style={styles.rowMain}>
         <Text style={styles.rowName} numberOfLines={1}>
           {row.team}
           {row.conference ? <Text style={styles.rowSub}>  {row.conference}</Text> : null}
         </Text>
+        {/* The game sits directly under the name, exactly where the Players
+            board puts it: the two boards are one toggle apart, and the same
+            fact at two different vertical positions makes the eye re-find it
+            on every flip (UX review, 2026-09-05). Not MERGED into the record
+            line — a record is a stat and a fixture is a schedule, and merged,
+            the record truncates first at large Dynamic Type. */}
+        {subline ? (
+          <Text
+            style={styles.rowSubline}
+            numberOfLines={1}
+            accessibilityLabel={sublineSpoken(subline)}
+          >
+            {subline}
+          </Text>
+        ) : null}
         <Text style={styles.rowMeta} numberOfLines={1}>
           {row.wins}-{row.losses}
           {row.point_diff_pg != null
-            ? `  ·  ${row.point_diff_pg > 0 ? '+' : ''}${Number(row.point_diff_pg).toFixed(1)}/g`
+            ? ` · ${row.point_diff_pg > 0 ? '+' : ''}${Number(row.point_diff_pg).toFixed(1)}/g`
             : ''}
-          {thin ? `  ·  ${sample} game${sample === 1 ? '' : 's'}` : ''}
+          {thin ? ` · ${sample} game${sample === 1 ? '' : 's'}` : ''}
         </Text>
       </View>
       <View style={styles.valueWrap}>
@@ -314,7 +526,79 @@ function TeamRow({
           <Text style={styles.thinLabel}>thin</Text>
         ) : null}
       </View>
+      {showLine ? <TeamLineCell quote={quote} team={row.team} started={started} onPress={onLinePress} /> : null}
     </View>
+  );
+}
+
+/** The user's sportsbook's number for this team's game, from its side, or a
+ *  dash. Same filled, book-branded pill as the Players board, and the same
+ *  ask-to-add-to-betslip tap (Matt, 2026-09-05). The caption stays here —
+ *  unlike the Players board, the market genuinely varies row to row only by
+ *  which stat is selected, and "ML" / "−1.5" / "o8.5" is what names it. */
+function TeamLineCell({
+  quote,
+  team,
+  started,
+  onPress,
+}: {
+  quote: TeamLineQuote | null;
+  team: string;
+  /** The team's game is live or over: no line, and the cell says which. */
+  started?: 'Live' | 'Final' | null;
+  onPress?: () => void;
+}) {
+  if (quote == null) {
+    if (started) {
+      return (
+        <View style={styles.lineWrap} accessible accessibilityLabel={`${team}, game ${started.toLowerCase()}`}>
+          <Text style={styles.lineStarted}>{started}</Text>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.lineWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Text style={styles.lineEmpty}>—</Text>
+      </View>
+    );
+  }
+  const c = bookButtonColors(quote.book);
+  const filled = quote.book === MODEL_BOOK;
+  const caption = teamLineCaption(quote);
+  const what =
+    quote.market === 'h2h'
+      ? 'moneyline'
+      : quote.market === 'spreads'
+        ? `spread ${caption}`
+        : `total over ${quote.line}`; // spoken: the side, not the sighted "o8.5"
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+      accessibilityRole="button"
+      accessibilityLabel={`${team} ${what}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`}
+      accessibilityHint="Asks to add this line to your betslip"
+      style={({ pressed }) => [styles.lineWrap, pressed && styles.pressed]}
+    >
+      <View
+        style={[
+          styles.linePill,
+          filled ? { backgroundColor: c.bg } : styles.linePillOutlined,
+        ]}
+      >
+        <Text
+          style={[styles.lineText, { color: filled ? c.fg : colors.textPrimary }]}
+          numberOfLines={1}
+        >
+          {formatAmerican(quote.price)}
+        </Text>
+        <BookMark book={quote.book} size={12} color={filled ? c.fg : colors.textPrimary} />
+        {/* No arrow-out glyph: the pill no longer leaves the app. It asks,
+            like the Players pill, and carries what that one carries. */}
+      </View>
+      {caption ? <Text style={styles.lineCaption}>{caption}</Text> : null}
+    </Pressable>
   );
 }
 
@@ -322,25 +606,9 @@ const styles = StyleSheet.create({
   fixedRow: { flexGrow: 0, flexShrink: 0 },
   listFlex: { flex: 1 },
   list: { paddingBottom: spacing.xl },
-  groupTabRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.xs,
-  },
-  groupTab: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.4,
-    paddingVertical: 4,
-  },
-  groupTabActive: { color: colors.tint, fontWeight: font.weight.bold },
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
   hintRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: 2 },
-  hintText: { fontSize: 11, color: colors.textTertiary, lineHeight: 15 },
+  hintText: { fontSize: font.size.micro, color: colors.textTertiary, lineHeight: 15 },
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -367,14 +635,14 @@ const styles = StyleSheet.create({
   },
   colHeaderRank: {
     width: 20,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
   colHeaderName: {
     flex: 1,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -382,7 +650,7 @@ const styles = StyleSheet.create({
   colHeaderRight: {
     width: 72,
     textAlign: 'right',
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -397,6 +665,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
+  // Reserved ONLY on a row that has a game. A TeamRow is not tappable, so the
+  // height buys no touch target — it exists so the list does not re-flow when
+  // the slate query settles. Unconditional, it was ~14pt of dead space on
+  // every row of every off-day board (UX review, 2026-09-05).
+  rowWithGame: { minHeight: 54 },
   rowMain: { flex: 1, minWidth: 0 },
   rank: {
     width: 20,
@@ -410,16 +683,59 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  rowSub: { fontSize: 11, fontWeight: font.weight.semibold, color: colors.textTertiary },
-  rowMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
+  rowSub: { fontSize: font.size.micro, fontWeight: font.weight.semibold, color: colors.textTertiary },
+  rowMeta: { fontSize: font.size.micro, color: colors.textSecondary, marginTop: 1 },
+  // The game, directly under the name. Same size and colour as the record
+  // below it: textTertiary is ~3.4:1 on the card at this size, under the AA
+  // floor, and this is the line Matt asked for (UX review, 2026-09-05).
+  rowSubline: { fontSize: font.size.micro, color: colors.textSecondary, marginTop: 1 },
   valueWrap: { alignItems: 'flex-end', width: 72 },
+  colHeaderLine: { minWidth: 66, textAlign: 'right' },
+  lineWrap: { minWidth: 66, alignItems: 'flex-end' },
+  // Filled in the book's own colour — the pill IS the bet button.
+  linePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    minHeight: 26,
+    borderRadius: radii.sm,
+  },
+  linePillOutlined: {
+    backgroundColor: colors.noneSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+  },
+  lineText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    fontVariant: ['tabular-nums'],
+  },
+  lineCaption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 1 },
+  lineEmpty: { fontSize: font.size.footnote, color: colors.textTertiary },
+  lineStarted: { fontSize: font.size.caption, fontWeight: font.weight.semibold, color: colors.textTertiary, textAlign: 'center' },
+  noLinesRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  noLinesText: {
+    flex: 1,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: font.size.caption * 1.35,
+  },
+  noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
   value: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  valueLabel: { fontSize: 10, color: colors.textTertiary },
-  thinLabel: { fontSize: 10, color: colors.textTertiary, fontStyle: 'italic' },
+  valueLabel: { fontSize: font.size.nano, color: colors.textTertiary },
+  thinLabel: { fontSize: font.size.nano, color: colors.textTertiary, fontStyle: 'italic' },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
   errorBanner: {

@@ -2,7 +2,8 @@ import React from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
+import { useBettingState } from '@/hooks/useBettingState';
+import { bookButtonColors, bookStoreUrl, openBookBetslip, openBookStore } from '@/lib/sportsbookLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -17,6 +18,9 @@ export interface HandoffLeg {
   matchup: string | null;
   americanOdds: number;
   betLink: string | null;
+  /** Does the hand-off book price this leg at all? A Stats line leg that
+   *  DraftKings never posted is "not posted here", not "add it by hand". */
+  posted?: boolean;
 }
 
 interface Props {
@@ -36,6 +40,10 @@ interface Props {
 export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: Props) {
   const firstLink = legs.find((l) => l.betLink)?.betLink ?? null;
   const name = bookName(book);
+  // Through the hook, not the sync read: betPARX's page depends on the state,
+  // which can land after this sheet mounts.
+  const { state } = useBettingState();
+  const store = bookStoreUrl(book, state);
   const btn = bookButtonColors(book);
 
   return (
@@ -44,7 +52,7 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
         <View style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>Bet on {name}</Text>
-            <Pressable onPress={onClose} hitSlop={8}>
+            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -67,6 +75,24 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
             <Ionicons name="open-outline" size={18} color={btn.fg} />
             <Text style={[styles.openBtnText, { color: btn.fg }]}>Open in {name}</Text>
           </Pressable>
+          {/* The app cannot tell whether the book is installed (see
+              openBookBetslip), so the store is offered outright: "If I don't
+              have the Sportsbook for one of them it should take me to the App
+              Store to download it" (Matt, 2026-09-04). */}
+          {store ? (
+            <Pressable
+              onPress={() => {
+                void openBookStore(book, state);
+              }}
+              accessibilityRole="link"
+              accessibilityLabel={`Get ${name} on the App Store`}
+              hitSlop={6}
+              style={({ pressed }) => [styles.storeRow, pressed && styles.pressed]}
+            >
+              <Ionicons name="download-outline" size={15} color={colors.tint} />
+              <Text style={styles.storeText}>Get {name} on the App Store</Text>
+            </Pressable>
+          ) : null}
 
           <FlatList
             data={legs}
@@ -92,6 +118,8 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
                     <Text style={styles.addBtnText}>Add to slip</Text>
                     <Ionicons name="open-outline" size={14} color={colors.tint} />
                   </Pressable>
+                ) : item.posted === false ? (
+                  <Text style={styles.noLink}>Not posted at {name}</Text>
                 ) : (
                   <Text style={styles.noLink}>No link — add manually</Text>
                 )}
@@ -148,6 +176,20 @@ const styles = StyleSheet.create({
   openBtnText: {
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
+  },
+  storeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: 44,
+  },
+  storeText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+    flexShrink: 1,
+    textAlign: 'center',
   },
   list: {
     flexGrow: 0,

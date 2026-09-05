@@ -11,11 +11,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { GroupTabs } from '@/components/GroupTabs';
 import { HitRateChart } from '@/components/HitRateChart';
 import { PlayerNewsButton } from '@/components/PlayerNewsButton';
 import { TrendStrip } from '@/components/TrendStrip';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePlayerTrends } from '@/hooks/usePlayerTrends';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   chipGroupsFor,
   chipsForPlayer,
@@ -30,17 +34,27 @@ import {
   type PlayerLogEntry,
   type PlayerLogSport,
 } from '@/lib/playerLog';
+import { propModelForStat } from '@/lib/statCatalog';
 import type { StatDef } from '@/lib/statCatalog';
+import { buildPickIndex, slipPickFor } from '@/lib/statsOdds';
+import { slipKeyForPick } from '@/lib/parlay';
+import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
 export function PlayerStatsScreen() {
   const route = useRoute<Route>();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
+  const fromParlay = route.params.fromParlay === true;
+  // Handed over by the Stats board; absent when the player was opened from
+  // anywhere else. Typed loosely on the route (a string) and narrowed here.
+  const matchupText = route.params.matchupText ?? null;
+  const matchupGrade = (route.params.matchupGrade as MatchupGrade | undefined) ?? null;
   // Older navigation state (a screen restored from a build before player detail
   // went multi-sport) carries no sport — MLB was the only one that could open it.
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
@@ -77,6 +91,38 @@ export function PlayerStatsScreen() {
   // Recent news for this player. Independent of the trend load: news failing
   // must never cost the chart, and vice versa.
   const news = usePlayerNews({ sport, playerId: playerId || null, playerName });
+
+  // ── The betslip leg ────────────────────────────────────────────────────────
+  // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
+  // this is where a leg joins OUR slip. It is deliberately the model's pick and
+  // not the chart's threshold: a parlay leg is a bet of record (§1c), and the
+  // pick states its own line, so the card can never offer a bet at a number
+  // nobody priced. No edge, no EV — the Stats surface stays out of the models.
+  const { data: todayPicks } = useTodayPicks();
+  const slip = useParlaySlip();
+  //
+  // GATED ON THE LINE THE CHART IS SHOWING. The card sits directly under a
+  // chart the user re-lines with the ± stepper, so its placement claims the
+  // number on screen — offering the model's Over 0.5 pick under a 3+ chart
+  // would hand someone a leg they did not read. slipPickFor is the guard, and
+  // it is the same one the sheet this card replaced was built around.
+  //
+  // This screen's stepper is an "N+" threshold; the market line is the
+  // half-point below it, which is how lineFor() converts on the Stats board.
+  const slipPick = useMemo(() => {
+    if (line == null) return null;
+    const idx = buildPickIndex(todayPicks, propModelForStat(stat));
+    const found = slipPickFor({ player_id: playerId }, idx, line - 0.5);
+    return found && found.pick.result == null ? found : null;
+  }, [todayPicks, stat, playerId, line]);
+  const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
+  const inSlip = slipKey != null && slip.has(slipKey);
+  const toggleSlip = () => {
+    if (slipKey == null) return;
+    const adding = !inSlip;
+    slip.toggle(slipKey);
+    if (adding && fromParlay) navigation.navigate('Betslip');
+  };
 
   const step = useMemo(() => lineStepFor(stat), [stat]);
   const statLabel = stat?.label ?? '';
@@ -130,6 +176,35 @@ export function PlayerStatsScreen() {
           <View style={styles.headerText}>
             <Text style={styles.playerName}>{playerName}</Text>
             <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
+            {/* Tonight's matchup, in full. The Stats board's MATCHUP column is
+                a bare grade as of 2026-09-05, so this is where the FACT behind
+                it lives for a sighted user — Matt's own alternative home for it
+                ("have it be in the player data when you click on a record",
+                2026-09-04). Only present when the board handed it over, so a
+                player opened from anywhere else shows nothing here rather than
+                an empty row. */}
+            {matchupText ? (
+              // Labelled, because VoiceOver drops a bare "+" and would
+              // announce a B+ as a B — gradeSpoken exists for exactly this and
+              // the screen that now OWNS this fact was the one mis-speaking it
+              // (UX review, 2026-09-05).
+              <View
+                style={styles.matchupRow}
+                accessible
+                accessibilityLabel={`Tonight's matchup, ${
+                  matchupGrade ? `${gradeSpoken(matchupGrade)}, ` : ''
+                }${matchupText.replace(/ · /g, ', ')}`}
+              >
+                {matchupGrade ? (
+                  <Text style={[styles.matchupGrade, { color: gradeColor(matchupGrade) }]}>
+                    {matchupGrade}
+                  </Text>
+                ) : null}
+                <Text style={styles.matchupLine} numberOfLines={2}>
+                  {matchupText}
+                </Text>
+              </View>
+            ) : null}
           </View>
           {/* Recent news, top right — the sentence behind the number. Hidden
               when the feed has nothing on this player, so the header never
@@ -141,32 +216,18 @@ export function PlayerStatsScreen() {
           />
         </View>
 
-        {/* Group tabs — only sports whose stats span several groups (NFL) get a
-            row here; one group means the chip row already says everything. */}
-        {groups.length > 1 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.groupTabRow}
-          >
-            {groups.map((g) => {
-              const active = g === activeGroup;
-              return (
-                <Pressable
-                  key={g}
-                  onPress={() => {
-                    if (active) return;
-                    const first = chips.find((c) => c.group === g);
-                    if (first) setStat(first);
-                  }}
-                  style={styles.groupTab}
-                >
-                  <Text style={[styles.groupTabText, active && styles.groupTabTextActive]}>{g}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        ) : null}
+        {/* Group tabs — the same two-level bar as the Stats tab (Matt,
+            2026-09-04). Only sports whose stats span several groups (NFL) show
+            a row; one group means the chip row already says everything. */}
+        <GroupTabs
+          second={false}
+          groups={groups}
+          active={activeGroup}
+          onChange={(g) => {
+            const first = chips.find((c) => c.group === g);
+            if (first) setStat(first);
+          }}
+        />
 
         {/* Stat selector */}
         <ScrollView
@@ -253,10 +314,16 @@ export function PlayerStatsScreen() {
                 </View>
                 <View style={styles.stepper}>
                   <Text style={styles.stepperLabel}>At least</Text>
+                  {/* Icon-only, so the label is the only thing VoiceOver has
+                      — an unlabelled glyph button is announced as "button" and
+                      nothing else. Pre-existing; cleared here because this
+                      change brought the file into the reviewed set. */}
                   <Pressable
                     onPress={() => stepLine(-1)}
                     hitSlop={8}
                     style={styles.stepBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Lower the line"
                   >
                     <Ionicons name="remove" size={18} color={colors.tint} />
                   </Pressable>
@@ -265,6 +332,8 @@ export function PlayerStatsScreen() {
                     onPress={() => stepLine(1)}
                     hitSlop={8}
                     style={styles.stepBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Raise the line"
                   >
                     <Ionicons name="add" size={18} color={colors.tint} />
                   </Pressable>
@@ -284,6 +353,45 @@ export function PlayerStatsScreen() {
                 </View>
               </View>
             </View>
+
+            {/* The betslip leg. The Stats board's line pills go straight to the
+                sportsbook now, so this is the one place a leg joins OUR slip —
+                and only where the model actually made a pick, because a leg is
+                a bet of record and carries its own line. */}
+            {slipPick ? (
+              <View style={styles.slipCard}>
+                <View style={styles.slipBody}>
+                  <Text style={styles.slipLabel} numberOfLines={2}>
+                    {slipPick.pick.pick_label}
+                  </Text>
+                  {slipPick.pick.dk_odds != null ? (
+                    <Text style={styles.slipPrice}>
+                      {formatAmerican(slipPick.pick.dk_odds)} · DraftKings
+                    </Text>
+                  ) : null}
+                </View>
+                <Pressable
+                  onPress={toggleSlip}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={inSlip ? 'Remove from betslip' : 'Add to betslip'}
+                  style={({ pressed }) => [
+                    styles.slipBtn,
+                    inSlip && styles.slipBtnIn,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Ionicons
+                    name={inSlip ? 'checkmark' : 'add'}
+                    size={16}
+                    color={inSlip ? colors.bet : colors.textInverse}
+                  />
+                  <Text style={[styles.slipBtnText, inSlip && styles.slipBtnTextIn]}>
+                    {inSlip ? 'In slip' : 'Add'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             <TrendStrip
               title={`${statLabel} — rolling averages`}
@@ -357,6 +465,47 @@ function GameRow({
 }
 
 const styles = StyleSheet.create({
+  slipCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginTop: spacing.md,
+  },
+  slipBody: { flex: 1 },
+  slipLabel: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  slipPrice: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  slipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.tint,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  slipBtnIn: {
+    backgroundColor: colors.betSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.bet,
+  },
+  slipBtnText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textInverse,
+  },
+  slipBtnTextIn: { color: colors.bet },
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingBottom: spacing.xl },
   header: {
@@ -378,23 +527,27 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
-  groupTabRow: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
+  // Its own row rather than a third meta line: at the same size and colour as
+  // `meta` directly above it, the fact the GRADE column now depends on was
+  // visually indistinguishable from the player's identity subtitle, and a
+  // reader scanned straight past it (UX review, 2026-09-05).
+  matchupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
     paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
   },
-  groupTab: {
-    paddingVertical: 4,
+  matchupLine: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
   },
-  groupTabText: {
-    fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  groupTabTextActive: {
-    color: colors.tint,
+  matchupGrade: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.bold,
   },
   windowRow: {
     paddingHorizontal: spacing.lg,
@@ -473,7 +626,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   statCellLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
   },
@@ -572,7 +725,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   gameStatLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
   },

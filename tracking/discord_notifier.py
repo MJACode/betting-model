@@ -516,24 +516,6 @@ def _configured() -> bool:
                 or config.DISCORD_WEBHOOK_RESULTS)
 
 
-def _lookahead_horizon(target_date: str) -> str:
-    """Furthest-out game_date whose locked look-ahead signal may post today.
-
-    Kept in step with tracking/opening_signals.capture_opening_signals: capture
-    reaches forward this far, so the poster must too or the row it locks sits
-    unposted until kickoff.
-
-    One horizon for both look-ahead sports, deliberately: NFL_LOCK_AHEAD_DAYS
-    and NCAAF_SCORE_AHEAD_DAYS are both 7, and taking the max means a change to
-    either one can only ever widen this window, never orphan the other sport's
-    rows. Two separate horizons here would be two things to keep in sync, and
-    §1b's whole complaint is that per-sport copies drift.
-    """
-    return (date.fromisoformat(target_date)
-            + timedelta(days=max(config.NFL_LOCK_AHEAD_DAYS,
-                                 config.NCAAF_SCORE_AHEAD_DAYS))).isoformat()
-
-
 # ── New BET signals ──────────────────────────────────────────────────────────
 
 
@@ -571,92 +553,87 @@ def _still_pre_game(commence, now=None) -> bool:
 
 
 def _new_signals(conn, target_date: str) -> list[dict]:
-    """Locked opening signals clearing the CURRENT action thresholds that haven't
-    been posted to Discord yet. Joining model_action_thresholds applies the same
-    prob / edge / price-floor / paused cut as the app's passesActionFilter, so we
-    only ever post genuinely bettable signals."""
+    """Bettable picks that have not been posted to Discord yet.
+
+    READS `picks`, NOT `opening_signals` (2026-09-05, Matt: "the app and discord
+    should always show the same picks. They should be identical").
+
+    The app reads `picks` directly and gates on passesActionFilter. This reads
+    the same table through the same model_action_thresholds row, so the two
+    surfaces select the same set by construction rather than by keeping two
+    windows in sync -- which is what they were doing, and it did not hold.
+
+    WHY THE OLD SOURCE FAILED. Posting from `opening_signals` put the capture
+    step between a pick and the channel, and capture is a second gate the app
+    does not have: it can only ever LOSE rows relative to `picks`, never add
+    one. Measured over every eligible BET since Discord signals went live
+    (2026-08-23 22:42 ET) through 2026-09-05: 125 eligible, 119 posted, 6
+    missed -- and all 6 were never captured, none were captured-then-unposted.
+    Delivery was already perfect; capture was the entire leak.
+
+    Two of those six were the Week 1 wind picks. `capture_opening_signals`
+    reaches NFL_LOCK_AHEAD_DAYS forward, a pick written 2026-09-04 for a
+    2026-09-13 kickoff is 9 days out, so it was never locked and could never
+    post -- while the app showed it all along. That asymmetry is now gone: there
+    is no date horizon here at all. A pick is postable when its game has not
+    started, however far ahead it was written.
+
+    `opening_signals` is untouched and still the opening-signal / CLV shadow
+    track (docs/opening_signals.md). It simply is no longer the gate between a
+    pick and the channel.
+
+    THE BET OF RECORD IS THE FIRST ONE. `picks` can hold more than one BET per
+    (game, model, player) from before #311 made the pick lock general, so the
+    earliest `created_at` wins -- the same row capture would have locked, and
+    the same one §1c calls the bet of record. The synthesised lock_key matches
+    the key capture minted (`game:model[:player]`), so the push_sent ledger
+    carries over and nothing already posted posts twice.
+    """
     rows = conn.execute("""
-        SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
-               os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
-               os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds,
-               t.min_edge, t.min_odds
-        FROM opening_signals os
-        JOIN model_action_thresholds t ON t.model_id = os.model_id
-        LEFT JOIN games g ON g.game_id = os.game_id
-        -- The pick row itself, for its betslip link and for WHEN IT WAS
-        -- WRITTEN. os.locked_at is the capture step's clock, which runs later
-        -- in the pass (3:18pm picks were captured at 4:31pm on 2026-08-29), so
-        -- it would overstate how fresh a signal is. No fallback on purpose: a
-        -- missing pick row publishes no stamp rather than a wrong one.
-        LEFT JOIN LATERAL (
-            -- best_book/best_odds ride along on the join that already reads
-            -- this pick. DISPLAY ONLY: the BET decision stays on DraftKings
-            -- (§6) because every threshold was swept on DK-implied edge, and a
-            -- best-of-N price is ~2pp cheaper in implied probability.
-            SELECT p.dk_bet_link, p.created_at, p.best_book, p.best_odds
+        WITH bet AS (
+            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
+                   p.game_id || ':' || p.model_id
+                       || COALESCE(':' || p.player_id, '') AS lock_key,
+                   p.pick_label, p.sport, p.model_id,
+                   p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
+                   p.confidence_tier, g.home_team, g.away_team, g.commence_time,
+                   p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
+                   t.min_edge, t.min_odds
             FROM picks p
-            WHERE p.game_id = os.game_id
-              AND p.model_id = os.model_id
-              AND p.pick_side = os.pick_side
-              AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
-              AND p.game_date = os.game_date
-            ORDER BY p.created_at
-            LIMIT 1
-        ) pk ON TRUE
-        WHERE (os.game_date = %s
-               -- NFL and NCAAF picks are written days ahead and are the bet of
-               -- record the moment they land, so waiting for game day would
-               -- post them AFTER the number that justified them is gone. For
-               -- the NFL opener rule that is fatal by construction: its entire
-               -- edge IS the stale soft-book number, and by kickoff the book
-               -- has corrected. Mirrors the capture window in
-               -- tracking/opening_signals.py. The push_sent NOT EXISTS below
-               -- still makes each signal post exactly once, so widening the
-               -- date window cannot duplicate.
-               --
-               -- NCAAF was added 2026-08-30. It was omitted because look-ahead
-               -- picks used to delete-and-rescore until game morning and so
-               -- were genuinely unlocked -- but #311 made the pick lock general
-               -- that same morning, and a locked NCAAF BET is now exactly as
-               -- immutable as an NFL one. The visible cost of the gap: a
-               -- Florida Atlantic +27.5 (-115) BET locked 2026-08-29 for a
-               -- 2026-09-05 kickoff was never postable, and would not have
-               -- become postable for seven days.
-               OR (os.sport IN ('NFL', 'NCAAF', 'UFC')
-                   AND os.game_date > %s AND os.game_date <= %s))
-          -- The ':early' exclusion that used to sit here is retired with the
-          -- suffix itself (2026-08-30, mike: "UFC: publish"). Historical rows
-          -- carrying the old suffix are still filtered, so a shadow row locked
-          -- before the change can never surface as a bet nobody was given.
-          AND os.lock_key NOT LIKE '%%:early'
-          -- NEVER DELIVER A PRE-GAME PICK FOR A GAME THAT HAS STARTED.
-          --
-          -- The pick was created pre-game and is a legitimate bet of record;
-          -- what is wrong is POSTING it once the game is under way, because the
-          -- reader cannot take it. On 2026-08-29 three F5 picks locked at 3:18pm
-          -- ET, the 3:17pm refresh pass ABORTED before reaching the capture
-          -- step, and the 4:17pm pass captured them at 4:31pm -- 20 minutes
-          -- after two of those games had first pitch. Discord posted all three.
-          --
-          -- Deliberately at DELIVERY, not at capture: the pick still locks and
-          -- still settles into the model record (it was a real signal at a real
-          -- number), it simply is not announced as something to go and bet.
-          -- Anything with no commence_time (golf tournaments, a missing games
-          -- row) is unaffected -- an unknown start time must not silently
-          -- suppress a signal.
-          AND (g.commence_time IS NULL
-               OR g.commence_time::timestamptz > NOW())
-          AND t.paused = FALSE
-          AND os.model_probability >= t.min_prob
-          AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
-          AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
-          AND NOT EXISTS (
-              SELECT 1 FROM push_sent s
-              WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
-          )
-        ORDER BY os.locked_at
-    """, (target_date, target_date, _lookahead_horizon(target_date))).fetchall()
+            JOIN model_action_thresholds t ON t.model_id = p.model_id
+            LEFT JOIN games g ON g.game_id = p.game_id
+            WHERE p.signal_type = 'BET'
+              -- In-play picks have their own producer and their own channel.
+              AND (p.is_live IS NULL OR p.is_live = FALSE)
+              AND p.model_id NOT LIKE '%%_live_%%'
+              -- NEVER DELIVER A PRE-GAME PICK FOR A GAME THAT HAS STARTED.
+              -- The pick is a legitimate bet of record; announcing it once the
+              -- game is under way is what is wrong, because the reader cannot
+              -- take it. Anything with no commence_time (golf tournaments, a
+              -- missing games row) is unaffected -- an unknown start time must
+              -- not silently suppress a signal.
+              AND (g.commence_time IS NULL
+                   OR g.commence_time::timestamptz > NOW())
+              -- With no date horizon, a game whose start time we never learned
+              -- would stay postable forever. Bound THOSE to the run date; a
+              -- game with a real commence_time in the future needs no bound.
+              AND (g.commence_time IS NOT NULL OR p.game_date >= %s)
+              -- The app's passesActionFilter, in SQL, off the same row.
+              AND t.paused = FALSE
+              AND p.model_probability >= t.min_prob
+              AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR p.dk_odds IS NULL
+                   OR p.dk_odds >= t.min_odds)
+            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
+                     p.created_at
+        )
+        SELECT * FROM bet
+        WHERE NOT EXISTS (
+            SELECT 1 FROM push_sent s
+            WHERE s.lock_key = bet.lock_key AND s.kind = 'discord_signal'
+        )
+        ORDER BY created_at
+    """, (target_date,)).fetchall()
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
@@ -671,60 +648,73 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
-        # Applied HERE and not in _locked_signals: that one feeds the
-        # restatement path, which deliberately re-publishes a whole past slate
-        # as a correction, and dropping its started games would make the
-        # correction incomplete.
+        # Belt and braces with the SQL bound above, and the only guard that
+        # holds for a caller whose cursor does not evaluate NOW().
         if _still_pre_game(r[11])]
 
 
 def _locked_signals(conn, target_date: str) -> list[dict]:
-    """Every locked signal for the date that clears the CURRENT thresholds --
-    ignoring the Discord ledger. Same rows _new_signals() draws from, minus the
+    """Every BET on the date that clears the CURRENT thresholds -- ignoring the
+    Discord ledger. Same rows _new_signals() draws from, minus the
     not-yet-posted filter, so a restatement covers the whole slate rather than
-    whatever happens to be unposted."""
+    whatever happens to be unposted.
+
+    READS `picks`, NOT `opening_signals` (2026-09-05). #489 moved _new_signals
+    onto `picks` and left this producer behind on the capture table, which put
+    the abandoned gate back in front of the one path whose entire job is to
+    REPAIR a channel. A restatement would have omitted exactly the picks that
+    motivated #489 -- the uncaptured ones -- so the correction would have been
+    as incomplete as the post it was correcting, and silently so. Measured on
+    the two Week 1 nfl_wind_totals picks the same day: both in `picks`, neither
+    in `opening_signals`, so a restate could not have reached either.
+
+    The lock_key is SYNTHESISED here exactly as _new_signals synthesises it
+    (`game:model[:player]`), which is the key capture minted, so the push_sent
+    ledger still lines up across all three producers and across the rows
+    capture wrote before the move.
+
+    NO STARTED-GAME GUARD, deliberately, and this is the one producer where
+    that is correct. _new_signals refuses a started game because ANNOUNCING a
+    bet nobody can still take sends a member to a live number. A restatement is
+    not an announcement: it corrects something already published, for a date
+    that is normally over by the time anyone writes the correction. Adding the
+    guard here would make restating a past slate a permanent no-op.
+
+    THE FIRST BET WINS, as everywhere else (§1c): DISTINCT ON the pick's
+    identity ordered by created_at, so a pre-#311 side flip collapses to the
+    one bet of record rather than restating both halves of it.
+    """
     rows = conn.execute("""
-        SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
-               os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
-               os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds,
-               t.min_edge, t.min_odds
-        FROM opening_signals os
-        JOIN model_action_thresholds t ON t.model_id = os.model_id
-        LEFT JOIN games g ON g.game_id = os.game_id
-        -- The pick row itself, for its betslip link and for WHEN IT WAS
-        -- WRITTEN. os.locked_at is the capture step's clock, which runs later
-        -- in the pass (3:18pm picks were captured at 4:31pm on 2026-08-29), so
-        -- it would overstate how fresh a signal is. No fallback on purpose: a
-        -- missing pick row publishes no stamp rather than a wrong one.
-        --
-        -- best_book/best_odds ride along too, and they were MISSING here until
-        -- 2026-09-03 while _new_signals selected them. Both producers render
-        -- through _signal_field -> better_price_note, so a restatement dropped
-        -- the "also `-120` @ BetMGM" line from every pick that had one -- the
-        -- correction quietly told the reader a WORSE place to bet than the post
-        -- it was correcting. Measured on the 2026-09-02 slate: 11 of 22 picks
-        -- carried a better non-DK price, so half the card changed. Same family
-        -- as the session-171 X/Discord divergence: two paths publishing one
-        -- pick, only one of them complete (§1b).
-        LEFT JOIN LATERAL (
-            SELECT p.dk_bet_link, p.created_at, p.best_book, p.best_odds
+        WITH bet AS (
+            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
+                   p.game_id || ':' || p.model_id
+                       || COALESCE(':' || p.player_id, '') AS lock_key,
+                   p.pick_label, p.sport, p.model_id,
+                   p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
+                   p.confidence_tier, g.home_team, g.away_team, g.commence_time,
+                   p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
+                   t.min_edge, t.min_odds
             FROM picks p
-            WHERE p.game_id = os.game_id
-              AND p.model_id = os.model_id
-              AND p.pick_side = os.pick_side
-              AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
-              AND p.game_date = os.game_date
-            ORDER BY p.created_at
-            LIMIT 1
-        ) pk ON TRUE
-        WHERE os.game_date = %s
-          AND os.lock_key NOT LIKE '%%:early'
-          AND t.paused = FALSE
-          AND os.model_probability >= t.min_prob
-          AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
-          AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
-        ORDER BY os.locked_at
+            JOIN model_action_thresholds t ON t.model_id = p.model_id
+            LEFT JOIN games g ON g.game_id = p.game_id
+            WHERE p.game_date = %s
+              AND p.signal_type = 'BET'
+              -- In-play picks have their own producer and their own channel.
+              AND (p.is_live IS NULL OR p.is_live = FALSE)
+              AND p.model_id NOT LIKE '%%_live_%%'
+              -- The app's passesActionFilter, in SQL, off the same row --
+              -- character for character the cut _new_signals applies, because
+              -- a restatement that selected differently from the slate it
+              -- corrects would be a third board.
+              AND t.paused = FALSE
+              AND p.model_probability >= t.min_prob
+              AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR p.dk_odds IS NULL
+                   OR p.dk_odds >= t.min_odds)
+            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
+                     p.created_at
+        )
+        SELECT * FROM bet ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
@@ -951,6 +941,15 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
     Only reaches messages whose id was CAPTURED at post time. Anything posted
     before message_id existed keeps NULL and is left alone rather than guessed
     at — which is exactly why the 2026-08-28 slate has to be cleared by hand.
+
+    RESOLVES THE DATE AND SPORT THROUGH `picks`, not `opening_signals`
+    (2026-09-05), for the same reason _locked_signals now does: this is the
+    delete half of a restatement, and it has to reach every message the
+    restatement replaces. Joined to the capture table it could only ever find
+    the CAPTURED ones, so an uncaptured pick's stale post would survive the
+    correction and the channel would end up showing both numbers -- the worst
+    of the three outcomes, and the one nobody would look for. The join is on
+    the synthesised lock_key, the same key push_sent was ledgered under.
     """
     url = _webhook_for_sport(sport)
     if not url:
@@ -959,11 +958,13 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
         rows = conn.execute("""
             SELECT DISTINCT ps.message_id
               FROM push_sent ps
-              JOIN opening_signals os ON os.lock_key = ps.lock_key
+              JOIN picks p
+                ON ps.lock_key = p.game_id || ':' || p.model_id
+                                 || COALESCE(':' || p.player_id, '')
              WHERE ps.kind = %s
                AND ps.message_id IS NOT NULL
-               AND os.game_date = %s
-               AND os.sport = %s
+               AND p.game_date = %s
+               AND p.sport = %s
         """, (kind, target_date, sport)).fetchall()
     except Exception as exc:  # noqa: BLE001 — the column may not exist yet
         logger.warning(f"Discord: cannot read message ids ({exc}); "

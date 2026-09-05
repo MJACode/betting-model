@@ -443,7 +443,15 @@ def test_the_stamp_is_read_from_the_pick_row_not_the_capture_step(producer):
     conn = _StampConn([_row("k1")])
     getattr(dn, producer)(conn, "2026-08-23")
     assert "p.created_at" in conn.sql
-    assert "pk.created_at" in conn.sql
+    # The capture clock must not be PROJECTED. Asserted against the select list
+    # (everything before the first FROM) rather than the whole statement, so
+    # _locked_signals may still ORDER BY os.locked_at -- ordering by it is fine,
+    # publishing it as the stamp is not. This replaced a check for the literal
+    # alias "pk.created_at" on 2026-09-05, when _new_signals stopped reading
+    # `picks` through a LATERAL and started reading it as the base table: the
+    # alias was an implementation detail, this is the requirement.
+    select_list = conn.sql[:conn.sql.index("FROM")]
+    assert "locked_at" not in select_list
 
 
 def test_the_free_pick_is_stamped_too():
@@ -1384,3 +1392,72 @@ def test_recap_sql_survives_both_window_substitutions():
         assert r"'%%\_live\_%%'" in rendered
         # Every remaining placeholder is a real parameter slot.
         assert rendered.count("%s") == window.count("%s")
+
+
+# ── The restate path reads the same board as the slate it corrects ───────────
+# 2026-09-05. #489 moved _new_signals from `opening_signals` onto `picks` and
+# left _locked_signals and _delete_posted behind, so the ONE path whose job is
+# to repair a channel still read the table whose gate caused the damage. These
+# pin the property, not the wording: a restatement must select from the board
+# the app and the slate producer select from.
+
+def _sql_for(producer, target_date="2026-08-28"):
+    conn = _StampConn([])
+    getattr(dn, producer)(conn, target_date)
+    return conn.sql
+
+
+@pytest.mark.parametrize("producer", ["_new_signals", "_locked_signals"])
+def test_both_slate_producers_select_from_picks(producer):
+    """One board (CLAUDE.md 1b). A restatement that read the capture table
+    would omit precisely the uncaptured picks #489 exists to save -- measured
+    the same day on the two Week 1 nfl_wind_totals picks, which were in `picks`
+    and in neither `opening_signals` nor Discord."""
+    sql = _sql_for(producer)
+    assert "FROM picks p" in sql
+    assert "opening_signals" not in sql, (
+        f"{producer} still reads the capture table")
+
+
+def test_the_restate_producer_applies_the_apps_action_filter():
+    """Same cut as the slate it corrects, off the same row. A restatement that
+    selected differently would be a third board, not a correction."""
+    sql = _sql_for("_locked_signals")
+    for clause in ("model_action_thresholds", "t.paused = FALSE",
+                   "p.model_probability >= t.min_prob",
+                   "t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0)",
+                   "p.dk_odds >= t.min_odds"):
+        assert clause in sql, clause
+
+
+def test_the_restate_producer_keeps_the_first_bet_only():
+    """1c: `picks` can hold more than one BET per identity from before the lock
+    was general, so the earliest created_at is the bet of record -- the same row
+    _new_signals picks, or a restatement would correct a pick nobody was given."""
+    sql = _sql_for("_locked_signals")
+    assert "DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))" in sql
+    assert "|| ':' || p.model_id" in sql, "lock_key must be synthesised as capture minted it"
+
+
+def test_the_restate_producer_has_no_started_game_guard():
+    """The one producer where a started game is fine, and it must stay that
+    way: a restatement corrects something ALREADY published, for a date that is
+    normally over. The guard would make restating a past slate a no-op."""
+    sql = _sql_for("_locked_signals")
+    assert "commence_time::timestamptz > NOW()" not in sql
+
+
+def test_the_restate_delete_resolves_messages_through_picks():
+    """The delete half has to reach every message the restatement replaces.
+    Joined to `opening_signals` it could only find the captured ones, leaving
+    an uncaptured pick's stale post standing beside its correction."""
+    conn = _StampConn([])
+    monkey = dn.config.DISCORD_WEBHOOKS
+    try:
+        dn.config.DISCORD_WEBHOOKS = {"NFL": "http://x/nfl"}
+        dn._delete_posted(conn, "2026-08-28", "NFL", "discord_signal")
+    finally:
+        dn.config.DISCORD_WEBHOOKS = monkey
+    assert "JOIN picks p" in conn.sql
+    assert "opening_signals" not in conn.sql
+    assert "p.game_date = %s" in conn.sql and "p.sport = %s" in conn.sql

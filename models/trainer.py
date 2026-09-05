@@ -40,6 +40,7 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (LIVE_MODELS, MODEL_PROB_THRESHOLDS, MODELS, MODELS_DIR,
                     PROP_MODELS, SPORTS, calibration_method)
+from data.anon_readable import lock_down
 from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset
 from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_dataset
@@ -575,7 +576,15 @@ CREATE TABLE IF NOT EXISTS model_artifacts (
 #
 # Nothing in mobile/src references model_artifacts, so there is no app surface
 # to preserve.
-ARTIFACT_REVOKE = "REVOKE ALL ON model_artifacts FROM anon, authenticated"
+# RLS ON TOP OF THE REVOKE, from 2026-09-04 (mike). The revoke is one lock and
+# it is an ACL; RLS with zero policies is deny-all for anyone who is neither the
+# table owner nor BYPASSRLS, so a future migration that re-grants is no longer
+# enough on its own. Stated once in data/anon_readable.py and called from all
+# three worker-only create sites.
+# Applied through lock_down(), which gates on the catalog: a full retrain sweep
+# stores ~70 artifacts, and firing ACCESS EXCLUSIVE DDL 70 times would mean 70
+# forced PostgREST schema-cache reloads and 503s across the app.
+ARTIFACT_LOCKDOWN_TABLE = "model_artifacts"
 
 
 def _store_artifact(conn, model_id: str, version: str, path) -> None:
@@ -597,7 +606,7 @@ def _store_artifact(conn, model_id: str, version: str, path) -> None:
         data = Path(path).read_bytes()
         rel = Path(path).relative_to(MODELS_DIR.parent.parent).as_posix()
         conn.execute(ARTIFACT_DDL)
-        conn.execute(ARTIFACT_REVOKE)
+        lock_down(conn, ARTIFACT_LOCKDOWN_TABLE)
         conn.execute("""
             INSERT INTO model_artifacts
                 (model_path, model_id, version, stored_at, size_bytes, payload)

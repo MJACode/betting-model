@@ -58,6 +58,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 import config
+from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 
 # The day the calibrated cuts shipped. Bets before this were made under
@@ -98,16 +99,48 @@ def _enabled() -> bool:
 
 
 def ensure_schema(conn) -> None:
-    # Two tables, so two catalog probes -- both must already exist before the
-    # block can be skipped. `CREATE TABLE IF NOT EXISTS` is the cheapest DDL
-    # here (single-digit ms, and this runs on a schedule rather than per write),
-    # but it still fires Supabase's pgrst_ddl_watch and so still costs a
-    # PostgREST schema-cache reload. See data/ddl_guard.py.
-    if (schema_is_current(conn, "model_auto_pauses")
-            and schema_is_current(conn, "threshold_reviews")):
+    """Create both tables if absent, and COMMIT them.
+
+    THE COMMIT IS THE WHOLE POINT, and its absence is why neither table existed
+    in production for the first four days this module ran.
+
+    `data.db.get_connection()` sets `autocommit = False`. `run_review` returns
+    at `not_due` on every day the slate has not crossed a 250-bet milestone --
+    which is every day so far: 80 settled bets since EPOCH on 2026-09-04 --
+    and that early return reaches no `conn.commit()`. The caller then closes
+    the connection, psycopg discards the open transaction, and the two CREATE
+    TABLEs go with it. So the review created both tables every single morning
+    and threw them away every single morning, silently, while
+    `models/scorer.py` logged `relation "model_auto_pauses" does not exist`.
+
+    A schema helper that does not persist its schema is broken regardless of
+    what its caller does, so the commit belongs HERE and not in run_review --
+    a fix in the caller would leave the next caller to rediscover this.
+
+    Both probes must pass before the block is skipped. `CREATE TABLE IF NOT
+    EXISTS` is the cheapest DDL here (single-digit ms, on a schedule rather
+    than per write), but it still fires Supabase's pgrst_ddl_watch and so still
+    costs a PostgREST schema-cache reload. See data/ddl_guard.py.
+    """
+    # rls= and revoked_from= are load-bearing: this returns EARLY, before the
+    # lock_down() calls below, so without them it answers True on a database
+    # where both tables exist but are still anon-granted and RLS-off, and the
+    # lock-down never runs. A guard that dead code can satisfy.
+    if (schema_is_current(conn, "model_auto_pauses", rls=True,
+                          revoked_from=API_ROLES)
+            and schema_is_current(conn, "threshold_reviews", rls=True,
+                                  revoked_from=API_ROLES)):
         return
     conn.execute(DDL)
     conn.execute(LEDGER_DDL)
+    # Worker-only, so they arrive closed rather than inheriting the default
+    # anon grant (#464). lock_down carries its own ddl_guard gate internally.
+    for table in ("model_auto_pauses", "threshold_reviews"):
+        try:
+            lock_down(conn, table)
+        except Exception:  # noqa: BLE001 — a failed lock must not lose the table
+            logger.exception(f"ensure_schema: could not lock down {table}")
+    conn.commit()
 
 
 def auto_paused(conn) -> set[str]:

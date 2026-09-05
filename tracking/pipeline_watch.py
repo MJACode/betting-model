@@ -30,11 +30,12 @@ reader to ignore the channel, which is the same silence by another route.
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from loguru import logger
 
 import config
+from tracking.watch_util import post_and_ledger, query_rows
 
 # A step has to be slow enough to matter AND relatively slower than its own
 # baseline. Either test alone is noise: a 0.2s step that doubles is 0.2s, and a
@@ -75,15 +76,16 @@ def _enabled() -> bool:
 
 
 def _rows(conn, sql, params=()):
-    try:
-        return conn.execute(sql, params).fetchall()
-    except Exception as exc:  # noqa: BLE001 — one bad query must not sink the watch
-        logger.warning(f"pipeline_watch: query failed: {exc}")
-        try:
-            conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
-        return []
+    """Delegates to the shared helper — the rollback lives in one place now.
+
+    Extracted to tracking/watch_util.py 2026-09-03 when the calibration
+    judgement pass became the second watch. §1b prefers a shared helper over
+    a per-watch copy, and this one in particular: the missing rollback is bug
+    #390, which was fixed here, then found AGAIN in scripts/pipeline_report.py
+    on this watch's first live run (#417). A third copy would have been a third
+    chance to omit it.
+    """
+    return query_rows(conn, sql, params, label="pipeline_watch")
 
 
 # ── the six rules, each a pure function of rows so it can be tested ──────────
@@ -263,26 +265,8 @@ def _announce_and_ledger(conn, summary: dict, run_day: date) -> bool:
     One row per day (`lock_key` is the ET run date), ON CONFLICT DO NOTHING, so
     a retry or a second container cannot double-count a morning.
     """
-    if not _announce(summary):
-        logger.warning("pipeline_watch: the post did not confirm — not ledgered")
-        return False
-    try:
-        conn.execute(
-            "INSERT INTO push_sent (lock_key, kind, sent_at) "
-            "VALUES (%s, 'pipeline_watch', %s) "
-            "ON CONFLICT (lock_key, kind) DO NOTHING",
-            (f"pipeline_watch:{run_day.isoformat()}",
-             datetime.now(timezone.utc).isoformat()),
-        )
-        conn.commit()
-    except Exception:  # noqa: BLE001 — a failed ledger must not lose the report
-        logger.exception("pipeline_watch: posted but could not ledger")
-        try:
-            conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
-        return False
-    return True
+    return post_and_ledger(conn, "pipeline_watch", run_day,
+                           lambda: _announce(summary))
 
 
 def _announce(s: dict) -> bool:

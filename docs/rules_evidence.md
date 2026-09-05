@@ -420,3 +420,87 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 - **Check whether deps actually install before hand-waving.** PyPI is often
   reachable from these sandboxes — a real suite run beats "run it on your
   machine". Equally, the sandbox egress limits are not the system limits (§1b).
+
+## The app, Discord and push show the same picks (2026-09-05)
+
+The rule is in CLAUDE.md §1b. This is what was measured.
+
+**The report.** Matt: *"There was an NFL signal last night at 8pm. Why didn't
+that post to discord."* `picks` row 1634280 — `nfl_wind_totals`, CLE @ JAX
+Under 40.5 (-105), written 2026-09-05 00:00:19 UTC = **2026-09-04 20:00:19 ET**.
+It cleared every threshold: edge 5.97pp against a 3.00pp cut, probability 0.5489
+against 0.52, -105 against a -200 floor, model not paused. The app showed it.
+Discord never did, and neither did push.
+
+**Why.** The publishers read `opening_signals`; the app reads `picks`.
+`capture_opening_signals` reached `NFL_LOCK_AHEAD_DAYS` (7) forward, the game
+was 2026-09-13 — 9 days out — so no lock row was ever written and there was
+nothing for the publishers to find. `config.py` carried the comment *"the wind
+card never reaches further than ~4 days out"*; `scheduler.NFL_POLL_HORIZON_DAYS`
+is 10, and Week 1 Sunday is 9 days from Friday.
+
+**The gap was not NFL-only.** Every BET clearing its current thresholds since
+the first Discord signal (2026-08-23 22:42 ET) through 2026-09-05:
+
+| Sport | Eligible | Published | Never captured | Captured, not published |
+|---|---|---|---|---|
+| MLB | 117 | 113 | 4 | 0 |
+| NFL | 2 | 0 | 2 | 0 |
+| WNBA | 4 | 4 | 0 | 0 |
+| UFC | 1 | 1 | 0 | 0 |
+| NCAAF | 1 | 1 | 0 | 0 |
+| **Total** | **125** | **119** | **6** | **0** |
+
+**The shape of the answer is the whole point: every miss is a capture miss, and
+nothing that was captured failed to deliver.** Delivery was already 100%.
+Bounding on the launch date mattered — an unbounded query showed 39 misses out
+of 161, but 33 of those were picks written before Discord signals existed and
+were never eligible. Reporting that 24% would have been wrong.
+
+The 4 MLB misses (3 × `mlb_f5_moneyline` on 08-26, 1 × `mlb_prop_batter_walks`
+on 08-24) pass every guard in the capture predicate — right `game_date`,
+pre-first-pitch, `signal_type='BET'`, not live, no lock row under any side — and
+remain unexplained: `pipeline_runs` only reaches back to 2026-08-27. Since that
+date, where the run history exists, the only capture misses are the two NFL
+picks.
+
+**Push was worse than Discord.** `push_notifier._new_bet_signals` read
+`opening_signals` AND bounded on `os.game_date = target_date`, without even the
+look-ahead widening Discord carried, and applied no `min_odds` gate. So no
+look-ahead pick in any sport could be pushed on the day it was written.
+
+**Deploy check before shipping.** Re-pointing the producers at `picks` risks a
+backlog flood on the first run. Counted first: exactly 2 rows — the two NFL
+picks. No burst.
+
+## `nfl_live_prop` went live without the §2 gate (2026-09-05)
+
+The rule and the override are in CLAUDE.md §2. The detail:
+
+Matt, after the gate was put to him: *"NFL should be live out of the gate, we
+should not do paper trading and delay this being an available feature."*
+
+**The record at that moment was zero, and could not have become anything else.**
+Zero `nfl_live%` rows in `picks`, zero in `model_action_thresholds`, and
+`nfl_live` appeared nowhere in `config.py`. The lane recorded every decision to
+a JSONL file on the Railway volume and alerted nobody — a complete audit log
+and not a record the platform can read. Nothing joined it to `games`, nothing
+settled it, no surface displayed it. So the §2 gate (≥50 settled picks, positive
+flat ROI, CalErr ≤5%) was not a waiting period for this model, it was
+unreachable: the lane could run every Sunday of the season and still report 0/50.
+
+Going live and becoming measurable were therefore the same change, which is why
+the usual "run it as paper first" answer did not apply here.
+
+**Scope is one lane.** `EV_THRESHOLDS` names four model ids; only
+`nfl_live_prop` has an implementation. `nfl_live_deriv` and `nfl_live_halftime`
+would trade `DERIVATIVE_MARKETS` — all half and quarter lines — and `games`
+stores full-game scores only (plus MLB's F5), so those picks could not be
+settled by anything in this repo. They stay unimplemented and must not write
+until a scores source exists.
+
+**Its thresholds are 0.0/0.0 on purpose.** The cut is EV, in
+`nfl/live_model/config.EV_THRESHOLDS`, applied by the executor before a decision
+is recorded as a bet. A second, different cut in `model_action_thresholds` would
+re-filter bets the model already took — picks written and never shown, the exact
+app/Discord divergence the same release removed.

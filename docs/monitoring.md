@@ -19,6 +19,143 @@ The Retool port carries the same three invariants this file documents: it reads
 ROI over the priced subset with the coverage shown beside it, and it bounds the
 picks series on the indexed `game_date`. See the 2026-08-31 session entry for
 the three places the port's brief disagreed with production.
+**Superseded in part on 2026-09-04** — the PUBLISHED record (the app's Models
+and Record tabs, and Retool's `q_performance`) now reads one shared view from
+the live date; read the next two sections before this paragraph.
+
+### The official live date is 2026-09-01, and the app now mirrors Retool
+
+Matt, 2026-09-04: *"Just mirror retool for now. But only start tracking bets as
+of 9/1 and on, that will be our official live date."*
+
+**One window.** `config.PAPER_TRADING_START`, `mobile/src/lib/recordStart.ts`
+and the `game_date >= '2026-09-01'` gate inside `v_public_track_record{,_daily}`
+all say 2026-09-01 (migration `live_record_start_2026_09_01.sql`). Nothing
+before it is deleted — those picks stay in `picks` and stay the bet of record
+(§1c); they are outside the *published* window.
+
+**One measure.** Both published views were a UNION of two branches answering
+different questions — a re-graded full-outcome branch for the MLB/WNBA core
+models, and a settled-BET-as-fired branch for everything else. Retool reads the
+second kind, so the second kind is now used for **every** model and the
+re-graded branch is gone. The app's Models tab reads the same view
+(`fetchPublishedModelRecord`), so the two surfaces agree by construction.
+
+**Retool's `q_performance` is therefore one line**, and that is the point — the
+logic lives in the view, not in two hand-written copies that drift:
+
+```sql
+SELECT * FROM v_public_track_record ORDER BY picks DESC;
+```
+
+Measured at the cutover (production, 2026-09-04): the published record went from
+**691-568-3 over 1,262 settled picks, +4.89%, +61.2u** to **46-30-0 over 76
+settled picks, +15.40%, +11.7u**, six models firing. Those per-model ROIs sit on
+1–26 bets and are not evidence of anything yet.
+
+**What deliberately did NOT move to 9/1:** `v_model_full_outcome_record`,
+`v_model_full_outcome_picks` and `mv_scored_pick_outcomes` keep their 2026-04-14
+gate and their re-graded semantics, because that is the threshold-sweep tool and
+§7's EVALUATION RULE needs every scored pick — BET, AVOID and dead-zone alike.
+A cut cannot be swept on a few days of BET-only history. Publishing and sweeping
+are now different objects, which is the fix rather than an inconsistency.
+
+### One row per pick — the invariant every surface depends on and none checks
+
+Matt, 2026-09-05, on the model detail screen: *"The same bet showed multiple
+times for a signal. It should just be the first one?"* — eleven identical
+"Logan Allen Over 4.5 Hits · DK +117 · WIN · +$117.00" rows.
+
+They were eleven rows in `picks`. Both pick locks asked for `result IS NULL`,
+so a pick left the lock set the moment `settle_picks` graded it; a doubleheader
+(both games under one game_id — `docs/followups.md`) let game 1's final score
+settle the pick while game 2's `commence_time` kept the pre-game cutoff open,
+so every 10-minute pass scored the same player again and the next settle pass
+released the lock again.
+
+**Every published number counts rows, so every published number moved at once.**
+Measured on production 2026-09-05, the published window (>= 2026-09-01, settled,
+passing the current cuts):
+
+| | picks | W-L | units | ROI |
+|---|---|---|---|---|
+| As published | 132 | 72-60 | +7.38u | +5.59% |
+| One row per pick | 112 | 62-50 | +5.68u | +5.07% |
+
+15% of the published record was copies. **Applied 2026-09-05** (Matt: *"Yes run
+python -m scripts.dedupe_picks"*): 69 rows removed — six more than the 63
+measured an hour earlier, written in the interval — snapshotted into
+`public.picks_dupes_removed_20260905`, `uq_picks_one_row_per_pick` created and
+the matview refreshed. The bottom row is now the published record.
+
+It reached a member's screen before it
+reached any dashboard, and it would have reached Retool identically — `q_performance`
+reads `v_public_track_record`, the app reads the same view, and both count rows.
+
+**Discord was the only surface that got it right, and the reason is worth
+copying.** It does not read `picks` for its unit of work at all: it reads
+`opening_signals`, one row per `lock_key`, and joins the pick with
+`ORDER BY p.created_at LIMIT 1`. One signal, one message, first row wins —
+which is CLAUDE.md §1c expressed in SQL.
+
+**So the fix is in the table, not in three read paths.** Deduplicating in the
+app would have left Retool wrong; deduplicating in both would be two
+definitions of "the same pick" that drift. Instead:
+
+* the locks key on a pick's **existence**, not on it being unsettled
+  (`models/scorer.py::_locked_prop_keys` and `locked_pairs`);
+* the prop scorers skip a game that already carries a **final score**
+  (`_final_game_ids`), which is the case `_game_started` cannot see when one
+  game_id covers two games;
+* `uq_picks_one_row_per_pick` (migration `picks_one_row_per_pick.sql`) makes
+  `(game_date, model_id, game_id, player_id, pick_side)` unique on pre-game
+  rows, and `_insert_picks` carries `ON CONFLICT DO NOTHING` so the losing side
+  of a race drops its copy instead of aborting the pass;
+* `scripts/dedupe_picks.py` removes the rows already written — keeping the
+  BET over a non-BET, then the earliest `created_at`, then the lowest pick_id.
+  **Check what the copies disagree about before trusting the survivor:** the
+  two `Blake Snell Over 5.5 Ks` rows of 2026-05-09 were graded differently
+  (`NO_ACTION` and `LOSS`), so deleting the copy dropped the only row carrying
+  the right answer, and the survivor had to be regraded against the box score;
+* the `one_row_per_pick` CRIT health check says so out loud every morning.
+
+The index is deliberately keyed **without `scored_line`**: a copy written after
+the line moved is the same bug wearing a different number, and it is the exact
+shape §1c's NCAAF example calls out (Over 44.5 churned to Over 54.5). Alternate
+lines do not collide with it — they are odds rows, and the scorer still writes
+one line per player and side.
+
+### Published record vs. sweep record — still two numbers, now two objects
+
+The app and Retool agree (above). What still differs, and always will, is the
+**published** record versus the **sweep** record, because they answer different
+questions. Before 2026-09-04 they were tangled together inside one view, which
+is what produced "these numbers don't match" twice in two days (Matt, 09-03 on
+UFC and 09-04 on the Retool feed).
+
+| | Published — app + Retool | Sweep — threshold analysis |
+|---|---|---|
+| Object | `v_public_track_record{,_daily}` | `v_model_full_outcome_record`, `mv_scored_pick_outcomes` |
+| Window | from the live date, **2026-09-01** | from **2026-04-14**, the longer history |
+| Rows | settled **BET picks as fired** | **every scored pick** — BET, AVOID and dead-zone NONE |
+| Cuts | whatever was live when the pick fired | today's cuts, applied retroactively |
+| Answers | what we actually told members to bet, and how it did | would a different cut have done better |
+
+**The sweep column is in-sample and the published column is not.** Every cut was
+swept on that same history, so re-grading it at today's cut selects the picks
+that were kept *because* they won (§7, "in-sample is in-sample"). Measured
+2026-09-04, before the cutover, on the same database and the same day:
+
+| Model | As fired | Re-graded at today's cut |
+|---|---|---|
+| `mlb_moneyline` | 98 bets, 54-44, **-3.25u (-3.3%)** | 31 bets, 23-8, **+7.39u (+23.8%)** |
+| `mlb_over_under` | 39 bets, 11-26, **-16.08u (-43.5%)** | 85 bets, 40-43, **-5.72u (-6.7%)** |
+| `mlb_prop_pitcher_outs` | 94 bets, 50-44, **+5.41u (+5.8%)** | 188 bets, 101-87, **+23.55u (+12.5%)** |
+
+A 27-point gap on one model, from one database, on one day. **Quote the
+published number to a member; quote the sweep number only when deciding whether
+a cut is worth keeping, and never without saying it is in-sample.** The two are
+no longer allowed to collide inside a single view.
 
 A third tab, **Picks & CLV** (2026-09-03), lists every BET pick with the price it
 fired at, the closing price, and its CLV, plus a units rollup and charts. It
@@ -55,6 +192,44 @@ same-line, pre-game and DK-only guards live.
   `picks` (`profit_flat = profit_units x 100`): **287-238-0, -52.58u, -10.01%** —
   -12.91% for pre-game prop models fired in-play, -1.13% for the dedicated
   `*_live_*` models. Read live P&L from `picks`, not from the matview.
+
+  **The Models panel now reads them from `picks` (2026-09-04), and the Retool
+  port must too.** The live exclusion is only half of it: the matview also
+  carries an explicit model allow-list, so anything it cannot regrade from a
+  box score is missing too. `store.model_performance` aggregated the matview
+  alone, so those models joined to nothing, returned settled=0, and the page
+  rendered that zero as *"registered · awaiting first pick"*. Measured
+  2026-09-04 — **eleven models, 182 settled BETs, all reading as never fired**:
+
+  | Model | Settled | Record | Units |
+  |---|---|---|---|
+  | `mlb_live_total_runs` | 94 | 58-36 | +12.25u |
+  | `mlb_live_win_prob` (retired) | 17 | 7-10 | -5.44u |
+  | `mlb_live_runline` (retired) | 16 | 6-10 | -6.08u |
+  | `ufc_total_rounds` | 13 | 8-5 | -1.86u |
+  | `mlb_f5_over_under` | 11 | 8-1 | unpriced |
+  | `ncaaf_live_total` | 8 | 3-5 | -2.50u |
+  | `mlb_f5_runline` | 7 | 4-3 | unpriced |
+  | `wnba_spread` | 6 | 2-4 | -2.15u |
+  | `ufc_method_of_victory` | 5 | 3-2 | unpriced |
+  | `ufc_moneyline` | 3 | 2-1 | +0.57u |
+  | `ncaaf_live_win_prob` | 2 | 1-1 | -0.58u |
+
+  That is the whole of UFC and every live lane looking like a broken pipeline
+  (CLAUDE.md §7). The query now has a second `agg` arm reading those models out
+  of `picks`, scoped by **`NOT EXISTS` against the matview on `model_id`** —
+  not by a `_live_` name pattern, which would have fixed the five live lanes
+  and left UFC broken, and not by `is_live`, which would fold every pre-game
+  prop model's in-play picks into its pre-game row (§6 keeps those apart).
+  The anti-join makes the two arms disjoint by construction, so `UNION ALL`
+  cannot double-count, and the arm empties itself as the allow-list grows.
+  Verified on production: 33 rows, **0 models split across arms**, 0 rows
+  reporting a false zero.
+
+  **Retool is a separate implementation of this same query and does NOT
+  inherit the fix** — its `q_performance` needs the same second arm, or it
+  keeps showing all eleven as awaiting their first pick. `monitoring/store.py`
+  is the reference implementation.
 * The matview also has **no `NO_ACTION` concept** — it regrades from box scores,
   so four voided WNBA props are counted as real bets by anything reading its own
   `result` column.

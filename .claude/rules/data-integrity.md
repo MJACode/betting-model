@@ -16,6 +16,22 @@ paths:
 
 Every one of these is a way a number can be wrong while looking right.
 
+- **AN IDEMPOTENCY GUARD THAT ASKS "DOES THE VIEW STILL LOOK LIKE MY OUTPUT?"
+  IS A LOCK, NOT A GUARD.** `data/view_migrations.py` executes every file in
+  `ACTIVE_MIGRATIONS` on every pipeline pass, so each one must be able to answer
+  "have I already been applied?". `track_record_reads_graded_matview.sql`
+  answered it with `position('mv_scored_pick_outcomes' in pg_get_viewdef(...))
+  > 0`, which cannot distinguish "never applied" from "deliberately superseded":
+  when the live-date migration moved `v_public_track_record_daily` off the
+  matview, the guard read 0 and the ELSE branch restored the 2026-04-14
+  definition — every pass, silently, for days. The app published a +64.1u equity
+  curve (Apr 17 → Sep 3) beside a hero card reading +12.02u over the same 70
+  picks. **Guard on the PROPERTY the migration establishes** (here the
+  `'2026-09-01'` gate), never on the shape of its own output, and when a
+  migration is superseded, delete the branch rather than leaving it to fight the
+  new one. Corollary, from the same file: `path.read_text()` with no encoding is
+  the §7 trap — these migrations are full of box-drawing characters.
+
 - **A backfilled stats table can carry the season's FINAL numbers under a
   season-START date, and every model that reads it is then trained on the
   future.** `mlb_team_stats` has two rows per historical season, `YYYY-01-01`

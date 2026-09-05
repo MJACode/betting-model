@@ -17,6 +17,8 @@ publishing one pick, only one of them complete (§1b).
 
 from __future__ import annotations
 
+import re
+
 import sys
 from pathlib import Path
 
@@ -43,9 +45,13 @@ def test_both_signal_producers_select_the_better_price():
     part that actually reaches the renderer — is missing them. That weaker
     version was written first and survived the mutation.
     """
+    # Adjacent pair in the select list, either alias. `_new_signals` reads
+    # `picks` as its base table since 2026-09-05 and so projects `p.`, while
+    # `_locked_signals` still reaches it through a LATERAL and projects `pk.`.
+    # The alias was never the property; the projection reaching the renderer is.
     for name in ("_new_signals", "_locked_signals"):
         body = _producer(name)
-        assert "pk.best_book" in body and "pk.best_odds" in body, (
+        assert re.search(r"\bpk?\.best_book,\s*pk?\.best_odds", body), (
             f"{name} does not project the better price out to the renderer, so "
             f"anything rendered through it drops the 'also @ Book' line")
 

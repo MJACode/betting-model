@@ -19,9 +19,40 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 237 — Doubles and Triples were never blank because the market didn't exist; nobody had asked |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 236 — the Movement tab and the per-card Context button come off the Picks surface |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 235 — the wind bet that showed in the app and not in Discord, and the repair path that still read the abandoned table |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 234 — the game time went under the name, and SPOT became a graded matchup difficulty |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 233 — "nothing shows for Cesar's and FanDuel": we have their lines, and the side we do not have is the one that was on screen |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 232 — the app and Discord are one board: publishing moved off the capture table |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 231 — the college prop probe came back 12x cheaper than I said, and Matt turned it on |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 230 — the same bet, eleven times: a lock that released when a pick was graded |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 229 — college football player props, built and measured before they are scheduled |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 228 — alternates on every pass, and for WNBA, NBA and NFL |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 227 — "Yes to alternate lines", team line legs, the Picks screen says when its lines fail, and Mobbin is one route |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 226 — three complaints after the betslip flow shipped: dashes at game time, BetMGM not opening, and "take me to the App Store" |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 225 — "I gave you bad info": the line pill asks to add to the betslip, and the betslip opens at any book |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 224 — the "What {sport} models look at" card is removed from the Models tab, one day after it shipped |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 223 — "pulling some lines but not all of them": every response is capped at 1,000 rows, and the Stats board asked for 20,000 |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 222 — "still not seeing the lines": the poller's re-seed was a 700 MB table scan every 15 minutes, and the views had to survive it |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 221 — the Teams board timed out, and so did "today's lines": one view keyed wrong, one function recomputing a season per tap |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 220 — your sportsbooks becomes a SET: the Stats board shows the best of them, and the betslip button follows |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 219 — the equity curve was still on the April window, because a migration in the active list restored it every pass |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 218 — the SPOT column's second review: a spoken tier that said "TGH", a column that ate the player's name, and "Jr." for every suffixed pitcher |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 217 — 2026-09-01 is the official live date, and the app now mirrors Retool by reading the same view |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 216 — eleven models told the dashboard they had never fired; the whole of UFC was one of them |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 215 — the Stats line pill becomes the bet button, the rows lose their sublines, and the stat groups become tabs |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 214 — the sportsbook picker is the Stats page's setting; Picks and Signals are best-line across books and not switchable |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 213 — the Stats tab shows the user’s sportsbook’s current line for every player and team, separate from the models; the pre-game poller is wiping prop rows |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 212 — the last RLS-off table closed (0 of 84 now); the guard bug recurred within the hour, so three guards are derived rather than named |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 211 — RLS on the three worker-only tables; the DDL guard moved inside the helper after operations.md caught an "idempotent so free" comment |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 210 — the PUBLIC grant swept off all 20 declared callables that still carried it; callable-by-PUBLIC 21 -> 1 |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 208 — the function grants; a literal grep for .rpc() misses eight the app reaches by ternary |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 210 — a live NCAAF total was bet 0.6s after a touchdown against the book's pre-touchdown price; an event-relative staleness guard (`quote_predates_score`) for NCAAF and NFL |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 209 — the Models tab priced unpriced UFC picks at a fabricated -110 and the Record tab did not; one `flatPnl` rule for every client tally, `· N unpriced` on both rows |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 208 — the model-inputs card drops its closing note (Matt) |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 207 — pick card: "No MGM line" note removed, post time is the footer, raw timestamp fixed |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 207 — default privileges revoked; the silent-failure trap that creates gets a manifest and a tripwire |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 206 — the pitcher-stats leak; all four MLB models re-measured; over_under paused, f5 retrained, era_last3 made a true rolling window |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 205 — the anon grant on odds is inert under RLS; the one on worker_jobs is not, and followups.md said the opposite |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 204 — the pre-game bound moves off the schedule, and the derivation it moves onto is wrong for 7 of 415 games |

@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS brand_assets (
 
 
 def store(assets: dict[str, tuple[bytes, str, str]]) -> None:
+    from data.anon_readable import API_ROLES, lock_down
     from data.db import get_connection
     from data.ddl_guard import schema_is_current
 
@@ -209,11 +210,15 @@ def store(assets: dict[str, tuple[bytes, str, str]]) -> None:
     try:
         # Gate the DDL (CLAUDE.md §7: every write-time ensure block fires a
         # PostgREST schema reload; IF NOT EXISTS does not make it free).
+        # rls=True joined revoked_from= on 2026-09-04: without it this returns
+        # True on a database where brand_assets exists but has no RLS, and the
+        # lock_down() below never runs.
         if not schema_is_current(conn, "brand_assets", columns=("bytes_b64",),
-                                 revoked_from=("anon", "authenticated")):
+                                 rls=True, revoked_from=API_ROLES):
             conn.execute(DDL)
-            # New object in public: REVOKE from anon/authenticated BY NAME.
-            conn.execute("REVOKE ALL ON brand_assets FROM anon, authenticated")
+            # New object in public: REVOKE from anon/authenticated BY NAME, then
+            # RLS as the second lock. lock_down() carries its own catalog gate.
+            lock_down(conn, "brand_assets")
             conn.commit()
         for key, (blob, ctype, url) in assets.items():
             conn.execute("""

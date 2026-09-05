@@ -203,7 +203,7 @@ export interface EnrichedPick {
   bestOdds?: { bookmaker: string; price: number; link: string | null } | null;
   /** Every book's latest price for this pick's side — game markets from
    * v_latest_odds_all_books, props from v_latest_prop_odds_all_books. Powers the
-   * "your book" chip and the All books table. Empty when nothing is priced.
+   * betting-lines chips and the All books table. Empty when nothing is priced.
    * DISPLAY ONLY: the model's edge always comes from the DraftKings price. */
   bookRows?: BookPricedRow[];
 }
@@ -421,6 +421,26 @@ export type RootStackParamList = {
     playerName: string;
     sport: PlayerLogSport;
     playerType?: PlayerType;
+    // The user came from the Betslip screen to find a leg. Adding one here
+    // bounces them straight back, the same round-trip the Stats tab ran before
+    // its line pills became sportsbook links (2026-09-04).
+    fromParlay?: boolean;
+    /**
+     * Tonight's matchup in full — "vs LAA · S. Gray 5.90 ERA (R)" — and the
+     * letter the board graded it.
+     *
+     * Carried as params rather than refetched here: the Stats board already
+     * holds both, and this screen would otherwise pull the whole matchup view
+     * to print one line. Passed from the board ONLY, so a player opened from
+     * anywhere else simply shows no matchup line.
+     *
+     * They exist because the MATCHUP column became a bare grade on 2026-09-05
+     * and the FACT behind it had nowhere else to go — Matt's own alternative
+     * on 2026-09-04 was "have it be in the player data when you click on a
+     * record". Without this the ERA left the product for every sighted user.
+     */
+    matchupText?: string;
+    matchupGrade?: string;
   };
   Explainer: undefined;
   ConnectSportsbook: undefined;
@@ -479,7 +499,7 @@ export interface OpeningSliceRow {
 
 /**
  * One row from v_public_track_record — every settled BET pick that meets the
- * CURRENT action criteria, since the record start (2026-04-14), aggregated
+ * CURRENT action criteria, since the live date (2026-09-01), aggregated
  * per (sport, model_id). Nothing cherry-picked; losing models included.
  */
 export interface TrackRecordRow {
@@ -528,7 +548,7 @@ export interface ParlayTrackRow {
 }
 
 export type TabParamList = {
-  // Merged Picks home (Today | Signals | Movement) replaces the old Picks +
+  // Merged Picks home (Today | Signals) replaces the old Picks +
   // Signals tabs. Live (in-play) is promoted to its own tab; Settings moved off
   // the tab bar to a top-right gear.
   Picks: undefined;

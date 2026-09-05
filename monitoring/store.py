@@ -342,6 +342,41 @@ def model_performance(conn) -> list[dict]:
     so units and ROI are computed over the PRICED subset and the count is
     reported beside them. Fabricating a price for those is how a record-only
     model ends up with invented P&L.
+
+    A MODEL THE MATVIEW DOES NOT GRADE TAKES ITS RECORD FROM `picks`.
+    The matview grades what it can regrade from box scores, so it carries an
+    explicit model allow-list and excludes in-play picks twice (`p.is_live IS
+    NOT TRUE` plus no `*_live_*` model in the list). `profit_units` exists ONLY
+    in the matview, so every model outside it joined to nothing and reported
+    settled=0 — which this dashboard renders as "registered · awaiting first
+    pick", the exact confusion tests/test_registered_not_firing.py exists to
+    prevent. Measured 2026-09-04, eleven models with a real settled BET record
+    read as never having fired, 182 bets in all:
+
+        mlb_live_total_runs  94  58-36  +12.25u   <- best MLB model on the app
+        mlb_live_win_prob    17   7-10   -5.44u      (retired)
+        mlb_live_runline     16   6-10   -6.08u      (retired)
+        ufc_total_rounds     13   8-5    -1.86u
+        mlb_f5_over_under    11   8-1    unpriced
+        ncaaf_live_total      8   3-5    -2.50u
+        mlb_f5_runline        7   4-3    unpriced
+        wnba_spread           6   2-4    -2.15u
+        ufc_method_of_victory 5   3-2    unpriced (no method market exists)
+        ufc_moneyline         3   2-1    +0.57u
+        ncaaf_live_win_prob   2   1-1    -0.58u
+
+    The second arm keys on "has no row in the matview at all" rather than on a
+    model-id pattern, so the two arms are disjoint BY CONSTRUCTION — a model is
+    graded by exactly one of them, never split across both — and the arm empties
+    itself as the matview's allow-list grows, instead of going stale.
+    `picks.profit_flat` is units x 100, so units divide back out.
+
+    What this deliberately does NOT do: fold a pre-game model's IN-PLAY picks
+    into its pre-game row. A model the matview already grades is untouched here,
+    so its in-play picks stay out exactly as before — they are a different bet at
+    a different price and CLAUDE.md section 6 keeps the two apart. (Today no
+    model reaching the second arm has picks of both kinds; if one ever does, its
+    row would blend them and this is where to split it.)
     """
     sql = """
         WITH agg AS (
@@ -356,6 +391,27 @@ def model_performance(conn) -> list[dict]:
             FROM mv_scored_pick_outcomes
             WHERE signal_type = 'BET' AND result IN ('WIN', 'LOSS', 'PUSH')
             GROUP BY model_id, sport
+            UNION ALL
+            -- Models the matview does not grade at all (the live lanes, UFC,
+            -- wnba_spread, the F5 secondary markets), from picks. The NOT
+            -- EXISTS is what makes the two arms disjoint, so UNION ALL cannot
+            -- double-count and a model is never split across both. Units and
+            -- the ROI denominator gate on a real dk_odds, for the same reason
+            -- the matview leaves profit_units NULL on an unpriced pick.
+            SELECT p.model_id, p.sport,
+                   COUNT(*)                                     AS settled,
+                   COUNT(*) FILTER (WHERE p.result = 'WIN')     AS wins,
+                   COUNT(*) FILTER (WHERE p.result = 'LOSS')    AS losses,
+                   COUNT(*) FILTER (WHERE p.result = 'PUSH')    AS pushes,
+                   COUNT(*) FILTER (WHERE p.dk_odds IS NOT NULL) AS priced,
+                   COALESCE(SUM(p.profit_flat) FILTER (WHERE p.dk_odds IS NOT NULL), 0)
+                       / 100.0                                  AS units,
+                   MAX(p.game_date)                             AS last_date
+            FROM picks p
+            WHERE p.signal_type = 'BET' AND p.result IN ('WIN', 'LOSS', 'PUSH')
+              AND NOT EXISTS (SELECT 1 FROM mv_scored_pick_outcomes m
+                               WHERE m.model_id = p.model_id)
+            GROUP BY p.model_id, p.sport
         )
         SELECT t.model_id,
                COALESCE(a.sport, upper(split_part(t.model_id, '_', 1))) AS sport,

@@ -1,5 +1,7 @@
 import { Alert, Linking, Platform } from 'react-native';
 
+import { getBettingState } from '@/hooks/useBettingState';
+import { fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { colors } from '@/lib/theme';
 
@@ -40,22 +42,59 @@ const BOOK_APPS: Record<string, BookApp> = {
         ? 'https://apps.apple.com/us/app/draftkings-sportsbook-casino/id1375031369'
         : 'https://play.google.com/store/apps/details?id=com.draftkings.sportsbook',
   },
-  fanduel: { scheme: null, web: 'https://sportsbook.fanduel.com/', store: null },
-  betmgm: { scheme: null, web: 'https://sports.betmgm.com/', store: null },
-  williamhill_us: { scheme: null, web: 'https://sportsbook.caesars.com/', store: null },
+  // App Store pages (2026-09-04, Matt: "If I don't have the Sportsbook for
+  // one of them it should take me to the App Store to download it"). Every
+  // id below is Apple's own, taken from the apps.apple.com URL of the book's
+  // listing — none is guessed. iOS only: Google Play package names are not
+  // verified, so Android keeps the web fallback.
+  fanduel: { scheme: null, web: 'https://sportsbook.fanduel.com/', store: ios('id1413721906') },
+  betmgm: { scheme: null, web: 'https://sports.betmgm.com/', store: ios('id1430875409') },
+  williamhill_us: { scheme: null, web: 'https://sportsbook.caesars.com/', store: ios('id1413099571') },
   espnbet: { scheme: null, web: 'https://espnbet.com/', store: null },
   bovada: { scheme: null, web: 'https://www.bovada.lv/', store: null },
   pinnacle: { scheme: null, web: 'https://www.pinnacle.com/', store: null },
-  // The five us2-region books + Fanatics (config.py, 2026-09-03). Web only —
-  // no verified schemes. The per-outcome betslip link from the odds feed is
-  // the primary route; these are the fallback when a row carries no link.
-  fanatics: { scheme: null, web: 'https://sportsbook.fanatics.com/', store: null },
-  betrivers: { scheme: null, web: 'https://www.betrivers.com/', store: null },
-  hardrockbet: { scheme: null, web: 'https://www.hardrock.bet/', store: null },
-  ballybet: { scheme: null, web: 'https://www.ballybet.com/', store: null },
+  // The five us2-region books + Fanatics (config.py, 2026-09-03). No verified
+  // schemes. The per-outcome betslip link from the odds feed is the primary
+  // route; the store and then the site are the fallbacks when a row carries
+  // no link.
+  fanatics: { scheme: null, web: 'https://sportsbook.fanatics.com/', store: ios('id1616738407') },
+  betrivers: { scheme: null, web: 'https://www.betrivers.com/', store: ios('id1635357259') },
+  hardrockbet: { scheme: null, web: 'https://www.hardrock.bet/', store: ios('id1572525917') },
+  ballybet: { scheme: null, web: 'https://www.ballybet.com/', store: ios('id1590852096') },
+  // betPARX ships one app PER STATE (MD, PA, NJ) — resolved from the member's
+  // state below; with none set there is no single page to send them to.
   betparx: { scheme: null, web: 'https://www.betparx.com/', store: null },
-  rebet: { scheme: null, web: 'https://play.rebet.app/', store: null },
+  rebet: { scheme: null, web: 'https://play.rebet.app/', store: ios('id6468762763') },
 };
+
+/** An App Store page, iOS only (the id is Apple's; see BOOK_APPS). */
+function ios(id: string): string | null {
+  return Platform.OS === 'ios' ? `https://apps.apple.com/us/app/${id}` : null;
+}
+
+const BETPARX_STORE_BY_STATE: Record<string, string> = {
+  md: 'id1662448269',
+  pa: 'id1605805308',
+  nj: 'id1605805764',
+};
+
+/** Open a book's App Store page, with the same failure path as the betslip
+ *  hand-off (an Alert, never a silent no-op). */
+export async function openBookStore(book: string, state: string | null = getBettingState()): Promise<boolean> {
+  const store = bookStoreUrl(book, state);
+  if (store && (await tryOpen(store))) return true;
+  Alert.alert(`Could not open the App Store`, `We couldn’t open ${bookName(book)}’s App Store page on this device.`);
+  return false;
+}
+
+/** The App Store page for a book, when we hold Apple's own id for it. */
+export function bookStoreUrl(book: string, state: string | null = getBettingState()): string | null {
+  if (book === 'betparx') {
+    const id = state ? BETPARX_STORE_BY_STATE[state] : undefined;
+    return id ? ios(id) : null;
+  }
+  return BOOK_APPS[book]?.store ?? null;
+}
 
 /**
  * Button colors per book.
@@ -76,6 +115,8 @@ export function bookButtonColors(book: string): { bg: string; fg: string } {
 // names, so it stays importable from plain-Node verify scripts.
 export { betOnBookLabel } from '@/lib/markets';
 
+export { fillBetslipLink, linkNeedsState } from '@/lib/betslipLinks';
+
 async function tryOpen(url: string, isScheme = false): Promise<boolean> {
   try {
     const supported = await Linking.canOpenURL(url);
@@ -92,22 +133,46 @@ async function tryOpen(url: string, isScheme = false): Promise<boolean> {
 /**
  * Open a pre-filled betslip at `book`.
  *
- * Fallback chain: the betslip link → the book's app (where we have a verified
- * scheme) → the book's website → its store page. Returns true once something
- * opened.
+ * Fallback chain: the betslip link (placeholders filled) → the book's app
+ * (where we have a verified scheme) → its App Store page → the book's
+ * website. Returns true once something opened.
+ *
+ * WHAT CANNOT BE DETECTED: whether the app is installed. iOS answers
+ * canOpenURL only for schemes declared in LSApplicationQueriesSchemes, and the
+ * build declares none, so a filled universal link is opened and iOS itself
+ * decides — the app when it is installed, Safari when it is not. The hand-off
+ * sheet therefore also offers the store page outright (ParlayDkHandoff).
  */
 export async function openBookBetslip(
   book: string,
   link: string | null | undefined,
 ): Promise<boolean> {
   if (link && link.trim()) {
-    if (await tryOpen(link.trim())) return true;
+    const filled = fillBetslipLink(link, getBettingState());
+    if (filled) {
+      if (await tryOpen(filled)) return true;
+    } else if (linkNeedsState(link)) {
+      // The link is a template and the member has not said which state their
+      // account is in. The alert is the WHOLE answer: falling through to the
+      // store or the site would send them somewhere unrelated to the setting
+      // they were just asked to change (UX review).
+      Alert.alert(
+        `Which state do you bet in?`,
+        `${bookName(book)} links need your state to open the app with the bet on your slip. Set it under Settings → Your state.`,
+      );
+      return false;
+    }
   }
 
   const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
   if (app.scheme && (await tryOpen(app.scheme, true))) return true;
+  // No usable link and no app scheme we can query: the STORE before the site.
+  // A member who has the app sees its page with "Open"; one who does not is
+  // where they need to be to get it (Matt, 2026-09-04) — the book's web root
+  // helps neither, since the bet is not on it.
+  const store = bookStoreUrl(book);
+  if (store && (await tryOpen(store))) return true;
   if (await tryOpen(app.web)) return true;
-  if (app.store && (await tryOpen(app.store))) return true;
 
   Alert.alert(
     `Could not open ${bookName(book)}`,
@@ -117,8 +182,9 @@ export async function openBookBetslip(
 }
 
 /**
- * DraftKings hand-off. Parlays are priced leg-by-leg off DraftKings odds, so
- * that flow hands off to DK regardless of the user's display preference.
+ * The DraftKings-specific hand-off. The parlay flow does NOT come through here:
+ * it chooses its book with `handoffBookFor` (the member's own book when it
+ * prices every leg, else DraftKings) and opens it via openBookBetslip.
  */
 export function openBetslip(link: string | null | undefined): Promise<boolean> {
   return openBookBetslip(MODEL_BOOK, link);

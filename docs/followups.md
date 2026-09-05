@@ -1,16 +1,90 @@
 # Follow-ups
 
-> **Janitor's worklist.** The durable backlog: Janitor (see `docs/agents_contract.md`)
-> takes one item from here every morning, and a human can add to it any time.
+> **The durable backlog.** Anyone can add to it any time, and items are cleared
+> in ordinary working sessions — pick one up when a session has room.
+>
+> **There is no longer an agent that does this.** Janitor was retired
+> 2026-09-03 after four runs finished SUCCEEDED having landed nothing at all;
+> it had no way to get work out of its sandbox. `docs/agents_contract.md` has
+> the measurements and the routes that were tried, so nobody rebuilds it.
 >
 > **Why a file:** a task list that lives only in a chat is gone the moment the
 > session ends. Four small fixes below were flagged in three separate sessions
 > and never done, because each time they lost to a larger ask and nothing
-> carried them forward. Same reasoning as CLAUDE.md §1b.
+> carried them forward. Same reasoning as CLAUDE.md §1b. That reasoning is
+> UNCHANGED by the retirement — the file was always the memory; the agent was
+> only ever one possible reader of it.
 >
 > **Format:** one `## Item` per task. `[needs-decision]` means blocked on a
-> human and the agent must skip it. Tick with `- [x]` and leave it in place for
-> one week so a reader can see what recently changed, then delete.
+> human. Tick with `- [x]` and leave it in place for one week so a reader can
+> see what recently changed, then delete.
+
+---
+
+## [ ] Nothing tells us when a market we pruned starts being priced
+
+Found 2026-09-05 (session 235), in the UX review of the college prop prune.
+
+`FOOTBALL_MARKET_NOT_PRICED` (mobile) and the pruned entries in
+`config.PROP_MARKETS_NCAAF` / `PROP_ALT_MARKETS['NCAAF']` are a hand-maintained
+mirror of one coverage probe. **They are measurements with no drift
+detection.** If college books start posting carries or sacks mid-season —
+plausible; the pro market prices both — nothing notices. We stop asking, so no
+rows appear; no rows appear, so nobody looks. The column stays dark until a
+person happens to re-run `scripts/probe_market_coverage.py`.
+
+Same shape as the gap the probe was built to close (CLAUDE.md §1b: the current
+state of a system is not its capability), one level up: we have now written our
+belief about the market into config, where it will age silently.
+
+**Cheap version:** a scheduled job that re-probes each sport's pruned keys
+weekly — one market per call, a handful of credits — and posts to Discord when
+one comes back served. The probe already reports exactly this and writes
+nothing; it needs a caller and a comparison against the pruned list.
+
+**Related, same session, same file to touch:** neither prop ingestor writes to
+`api_call_log` (both use bare `requests.get` with only `record_quota_headers`),
+so **prop credit spend is invisible in that table for every sport**. Today's
+590-credit college pass had to be read out of the Railway worker log. Worth
+doing at the same time — both are about a measurement that exists nowhere
+queryable. Detail in `docs/market_coverage.md`.
+
+---
+
+## [ ] [needs-decision] The pre-game line poller deletes a game's non-BET PROP picks
+
+Found 2026-09-03 (session 185) while tracing why the Stats board's ODDS column
+was empty for players DraftKings was pricing.
+
+`data/ingestors/pregame_line_poller.py` calls `run_scorer(only_games=…)` every
+time DK's number on a game moves. The game scorer's non-BET housekeeping delete
+(`models/scorer.py`, "Housekeeping for the pairs the lock deliberately leaves
+open") is scoped by `game_id` and not by model, so it removes that game's PROP
+`NONE` and `AVOID` rows as well — and `run_scorer` never re-creates them,
+because prop scoring is a separate function that only runs on the hourly pass.
+`picks_log` for 2026-09-03 shows it plainly: INSERT 36 batter-hits rows at :20,
+DELETE 36 at :24, nothing until the next hour.
+
+**Measured.** Prop non-BET deletes per day: 0 on 2026-08-28 and 08-29, then
+8,467 / 23,047 / 15,841 / 15,718 on 08-30 → 09-02 — the step is the day the
+poller shipped. **No prop BET row was deleted** in that window, so §1c holds for
+the bet of record; what churns is the dead-zone and AVOID population.
+
+**Why it is not just "delete the delete".** `_locked_prop_keys` locks on ANY
+unsettled row including `NONE`, so nothing else un-locks a dead-zone player. Stop
+the delete and a player who was in the dead zone at 10am can never later cross
+into a BET — a worse bug than the one being fixed.
+
+**The likely fix, and why it needs a human.** Lock props on `BET` only, matching
+the game lock's own rule ("no pick because bad number, then it drifts into pick
+territory, is a pick we should take"), and let the prop scorers delete-and-rescore
+their own non-BET rows each pass. That changes which picks fire, so under §1b it
+is a model update and needs `Updated-By:` — **whose call it is has not been
+asked.** Do not ship it from the backlog.
+
+The app-side symptom is already gone: the Stats ODDS column reads
+`v_latest_prop_odds_all_books` as of session 185, so a missing prop row no
+longer blanks the price.
 
 ---
 
@@ -124,7 +198,84 @@ ones a retrain would re-fit, so retraining blind may reproduce it. That
 still needs the feature engine run for one date either side of 07-23, which
 is a worker job (no `DATABASE_URL` in a dev sandbox).
 
-## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
+## [ ] `my_access()` is called by the app and does not exist in production
+
+Found 2026-09-04 in session 208 while enumerating the function grant surface.
+`mobile/src/lib/discord.ts:157` calls `supabase.rpc('my_access')` and
+`fetchAccess()` does `if (error) throw error` — it does not fail soft. But
+`my_access()` is **absent from `pg_proc`**: it and `has_app_access()` are defined
+only in `data/migrations/add_discord_link_and_whop_memberships.sql`, which has
+**never been applied**. `has_active_subscription()` — the function that migration
+supersedes — is the one that actually exists.
+
+CLAUDE.md §6 states the gate is `public.my_access()` / `has_app_access()`. That
+is the intended design, not the deployed one, and the difference has never been
+written down.
+
+**What needs deciding:** whether to apply that migration (it also creates the
+Discord-link and Whop-membership tables), or to change the app. Not touched here
+— it is the entitlement path, and applying a never-run migration that creates
+billing-adjacent tables is not a side effect of a grant change.
+
+Note it does NOT block the grant work: the migration already carries its own
+`REVOKE ALL ... FROM PUBLIC, anon, authenticated` plus
+`GRANT EXECUTE ... TO authenticated`, so it stays correct now the default
+privilege is revoked.
+
+## [x] Default privileges still hand anon EXECUTE on every new function
+
+Found 2026-09-03 in session 206, alongside the table fix. `pg_default_acl`
+carries three entries for `public` from grantor `postgres`:
+
+    objtype r (tables/views)  anon=arwdDxtm   <- REVOKED 2026-09-03
+    objtype S (sequences)     anon=rwU        <- still there
+    objtype f (functions)     anon=X          <- still there
+
+So every new function in `public` is still callable by `anon` the moment it
+exists. That is how five `SECURITY DEFINER` `feedback_*` RPCs ended up
+anon-callable — intended in that case, but nobody granted it.
+
+**DONE 2026-09-04 in session 208** (mike: *"do the function grants too"*), with
+exactly that treatment: `RPC_ANON_CALLABLE` in `data/anon_readable.py`, a test
+against `mobile/src`, and grants generated from it.
+
+**And "the 17 the app calls" was wrong — it is 24.** Four call sites in
+`queries.ts` build the name at runtime (`const fn = sport === 'NFL' ? ... : ...`),
+so a literal grep for `.rpc('...')` misses eight functions the app reaches
+through a ternary. Sweeping on the literal list would have revoked EXECUTE on
+the NBA, WNBA, NCAAF and NFL stats functions — silently. The test resolves both
+forms and has its own guard-the-guard case, because a resolver that stops
+resolving fails OPEN: the surface looks smaller and the sweep gets bolder.
+
+Also caught: `_jsonb_text_array` must stay granted even though the app never
+names it. `custom_model_picks` and `custom_model_backtest` are SECURITY INVOKER
+and both call it, so the CALLER needs EXECUTE.
+
+**Completed 2026-09-04 in session 210** (mike: *"sweep the PUBLIC grant off the
+19 stats rpcs"*). Session 208 named PUBLIC in the two REVOKEs but not on the 25
+it was GRANTing, so the explicit `anon, authenticated` grant sat on top of a
+PUBLIC grant that was still there on **20** of them — decoration. The apply now
+does `REVOKE ALL ON FUNCTION ... FROM PUBLIC` before each GRANT (order pinned by
+a test), and a third in-transaction read-back rolls the whole apply back if
+PUBLIC still holds anything on a declared callable. Verified in `pg_proc` after
+the run: callable-by-PUBLIC **21 -> 1**, the one being `log_picks_changes()`,
+left alone on purpose.
+
+Sequences remain deliberately untouched: `tracked_bets.id` defaults to
+`nextval('tracked_bets_id_seq')` and anon holds USAGE/UPDATE on it, so closing
+the sequence default would break the next app-writable table's INSERT on its own
+primary key.
+
+Sequences are the low-stakes third: `w` on a sequence is `nextval`/`setval`, and
+nothing reads a sequence through PostgREST here.
+
+**Also still open, and NOT fixable from this project:** the `supabase_admin`
+default-ACL entry for `public` tables grants `anon=arwdDxtm` too. Altering it
+needs membership in `supabase_admin`, which `postgres` does not have on a
+managed project. Nothing in this repo creates tables as that role, so it is
+latent rather than live.
+
+## [x] RLS is off on `worker_jobs` and `odds_history_pulls`
 
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
 level: "is public, but RLS has not been enabled."
@@ -152,6 +303,102 @@ second lock. It was deliberately NOT done in the same migration -- RLS with no
 policy locks out every connection that is not the table owner, and the worker's
 role has not been verified to be that owner; the revoke closes the hole without
 gambling the job queue.
+
+**DONE 2026-09-04 in session 211** (mike: *"enable rls on those three tables"*),
+on all three -- `model_artifacts` joined the two named here, because it has the
+same shape and the same on-demand creation.
+
+**The open question this item flagged is answered: the worker IS the owner.**
+"the worker's role has not been verified to be that owner" was the stated reason
+for not doing it in the same migration. Measured: all three are owned by
+`postgres`, `postgres` has `rolbypassrls` **and** owns them (exempt twice over),
+`service_role` also has `rolbypassrls`, and `pg_stat_activity` shows the worker's
+connections as `usename=postgres` via Supavisor. No view or matview selects from
+any of the three (`pg_depend` -> `pg_rewrite`), and `mobile/src` never names
+them. `FORCE ROW LEVEL SECURITY` -- the variant that WOULD subject the owner to
+the policies -- is deliberately not used, and a test pins that.
+
+**NOT run once as a migration, and the reason is this file's own next paragraph
+plus a third data point.** All three tables are created on demand by the code
+that writes them, so a migration is undone by the next run against a database
+where the table does not yet exist -- which is exactly how `model_artifacts` came
+back with the full anon grant between two sweeps hours apart. So the pair lives
+beside each CREATE, through `data/anon_readable.py::lock_down(conn, table)`,
+which carries the `schema_is_current` gate INTERNALLY as the paragraph below
+requires. The gate is inside the helper rather than at each call site so a new
+caller cannot forget it; `lock_down_sql()` is the ungated builder, for the admin
+script and the tests only.
+
+**Verified after the apply, three ways.** `pg_class`: RLS on, `FORCE` off, 0
+policies, anon/authenticated hold nothing on all three. `get_advisors(security)`:
+the two ERROR-level `rls_disabled_in_public` lints are **gone** and all three now
+report `rls_enabled_no_policy` at INFO -- the locked shape this file's last
+paragraph says is expected. And `scripts/verify_worker_rls.py` on the worker
+itself (it cannot run anywhere else -- the Supabase MCP is
+`supabase_read_only_user` and `SET LOCAL ROLE postgres` is denied):
+
+    connected as 'postgres', rolbypassrls=True
+    model_artifacts:     rls=True owner=postgres rows_visible=4
+    odds_history_pulls:  rls=True owner=postgres rows_visible=1042
+    worker_jobs:         rls=True owner=postgres rows_visible=15
+    worker_jobs write probe: insert/read-back/update/delete all succeeded
+
+Row counts matter more than the absence of an exception: a non-exempt role gets
+**zero rows**, not an error, so a SELECT returning the count already known to be
+there is what proves exemption. All rolled back.
+
+Two follow-on fixes the change forced, both worth knowing:
+
+- `job_queue.ensure_schema`'s `schema_is_current(...)` early-return fires BEFORE
+  the lock-down, so without `rls=True, revoked_from=API_ROLES` it answers True on
+  a still-open table and the lock-down never runs. A guard that dead code can
+  satisfy.
+- `tests/test_ddl_guard.py` now treats `lock_down(` as a guarded path rather than
+  exempting each caller, with its own guard-the-guard case: if `lock_down` stops
+  calling `schema_is_current`, every caller silently becomes an unguarded DDL
+  site while the offender test keeps passing.
+
+**AND THEN THE REST, 2026-09-04 in session 212** (mike: *"do the remaining seven
+too"*). It was **eight** -- my seven was an hour stale and `nfl_odds_cache_backup`
+had arrived in between. The invariant now holds schema-wide:
+
+    0 of 84 public base tables have RLS off
+    0 have FORCE RLS on
+
+`brand_assets` turned out to be a fourth CREATE SITE (`fetch_brand_avatar.py`)
+rather than an archive; the other seven have no create site and are swept by the
+admin script only. They are locked rather than dropped because a repair is
+reversible only while its backup exists -- retention is a separate decision.
+
+**A NEW OPEN DOOR OF THE SAME SHAPE, FOUND WHILE VERIFYING THIS ONE:**
+`game_weather` grants anon INSERT/UPDATE/DELETE while its only anon policies are
+SELECT (`allow anon read`, `anon read game_weather`, plus `service_role_all`). So
+the writes are **inert today** -- RLS denies them -- but the ACL does not match
+intent, and that is precisely the "one lock, and it is an ACL" state this section
+exists to complain about. The session-205 sweep missed it.
+
+Safe to close: `mobile/src` only ever SELECTs `game_weather` (three call sites in
+`queries.ts`), and every writer is server-side over `postgres`
+(`data/ingestors/weather_ingestor.py` and the feature engines). Fix is
+`REVOKE INSERT, UPDATE, DELETE ON game_weather FROM anon, authenticated`, or
+adding it to a declared write surface if anon really should write weather.
+
+Worth re-running the same query against the other three anon-writable tables
+whenever this is touched -- `device_push_tokens`, `feedback` and `tracked_bets`
+all hold write grants wider than their policies (DELETE on the first two, UPDATE
+on all three), inert for the same reason:
+
+```sql
+select c.relname,
+       has_table_privilege('anon', c.oid, 'INSERT') as ins,
+       has_table_privilege('anon', c.oid, 'UPDATE') as upd,
+       has_table_privilege('anon', c.oid, 'DELETE') as del,
+       (select string_agg(p.polname||':'||p.polcmd::text, ', ')
+          from pg_policy p where p.polrelid = c.oid) as policies
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and c.relkind = 'r'
+  and has_table_privilege('anon', c.oid, 'INSERT,UPDATE,DELETE');
+```
 
 The superseded check, kept so nobody re-runs it and re-reaches the wrong answer:
 
@@ -441,10 +688,21 @@ threshold was swept on DK-implied edge, and best-of-N prices ~2pp cheaper in
 implied probability, so adopting it as the qualifying price would loosen every
 cut by that much with nobody deciding to (CLAUDE.md §6).
 
-## [ ] [needs-decision] Re-sweep `mlb_live_total_runs` at ~50 settled picks
+## [ ] [needs-decision] Re-sweep `mlb_live_total_runs` — the gate is CLEARED
 
-17 settled as of 2026-08-30. A threshold move needs a named human under §1b,
-so an agent may prepare the sweep and report it but must not ship the cut.
+**Measured 2026-09-04 (session 216): 95 settled BETs, every one carrying a DK
+price, +12.99u — about +13.7% on flat stakes — most recent pick that same day.**
+The item was written at 17 settled with the re-sweep due at ~50, so it is now
+overdue rather than pending. (Query: `picks` where `model_id =
+'mlb_live_total_runs' and signal_type = 'BET'`, result in ('WIN','LOSS','PUSH');
+units gated on `dk_odds IS NOT NULL` per §6, though here nothing is unpriced.)
+
+This is the nearest thing the live lane has to a real result, and CLAUDE.md §1b
+cites it as promising-but-unproven — that citation is now stale by 8 bets and
+should be refreshed from this number when someone touches it.
+
+A threshold move needs a named human under §1b, so an agent may prepare the
+sweep and report it but must not ship the cut.
 
 ## [ ] [needs-decision] Live odds feed
 
@@ -545,3 +803,74 @@ very likely a better feature — it carries information `era` does not, where
 today it mostly restates it. Doing it properly means: fix the ingestor, rebuild
 all seasons, recompute 2026, re-sweep the thresholds, and stamp it
 `Updated-By:`. One decision, one owner, one session.
+
+## [ ] Doubleheaders collide under one game_id, and their props land on top of each other
+
+Found 2026-09-05 while designing the alternate-lines view. 1,546 (game,
+market, player, book) keys since 2026-08-29 carry TWO rows at the same
+`snapshot_at`, DraftKings included (163): `_build_game_id` is
+`MLB_<date>_<away>_<home>`, so both games of DET@CLE on 2026-09-04 write
+their props under `MLB_2026-09-04_DET_CLE`, and "the newest row" for Jose
+Ramirez is whichever game's batch inserted last. The Odds API gives each game
+its own event id; the game_id throws that away. Touches the odds ingestor,
+the prop ingestor, `games`, the scorer's `_latest_dk_prop_row` and
+settlement, so it is its own session: decide how a second game is keyed
+(the app's `startedTeams` map already treats a team with a game still to
+come as unstarted), then make both ingestors and the pick lock agree.
+
+**Second symptom, found 2026-09-05 and CONTAINED, not fixed:** the collision
+also duplicated PICKS. Game 1's final score settled a prop pick while game 2's
+`commence_time` kept the pre-game cutoff open, and both locks released a pick
+the moment it was graded — so every 10-minute pass wrote another copy. Eleven
+rows for one Logan Allen Over 4.5 Hits, and 20 of the 132 settled BETs in the
+published 09-01 window were copies (+7.38u published against +5.68u real). The
+locks now key on a pick's EXISTENCE, the prop scorers skip a game that already
+has a final score, and `uq_picks_one_row_per_pick` enforces one row per pick —
+so the collision can no longer inflate the record. It can still put game 1's
+score against game 2's pick, which is what this item is for.
+
+## [ ] `picks.player_id` and `picks.is_live` exist in production and in neither schema file
+
+Found 2026-09-05 writing tests against the real table. Both columns are read
+and written all over the scorer, the views and the app, and neither
+`data/db_setup.py`'s `SCHEMA_SQL` nor `data/supabase_schema.sql` declares
+them — they were added by hand and never written back. So a first-time setup
+builds a `picks` table the scorer cannot insert into, and every sqlite-backed
+test has to ALTER them in (`tests/test_pick_lock_survives_settlement.py` does).
+Small and mechanical: add both to each schema file, and check the same way for
+every other column production has grown.
+
+## [x] NCAAF player props have no ingest — DONE 2026-09-05
+
+Raised when NCAAF alternates were approved with nothing to ride. Matt asked
+what it meant and then "Yes do it", so
+`data/ingestors/ncaaf_prop_odds_ingestor.py` exists: CFBD ids via
+`resolve_odds_api_school`, `americanfootball_ncaaf`, the shared parser, and
+`config.PROP_MARKETS_NCAAF` + the NCAAF alternates. Scoped to games
+DraftKings already prices (measured: 120 games on a Saturday, 70 lined) under
+a per-pass ceiling, and OFF (`RUN_NCAAF_PROP_ODDS=0`) until the probe's
+measured cost is in front of Matt.
+
+Still open underneath it: **no NCAAF prop MODEL.** These rows are research —
+the Stats board's line column and betslip line legs. A college prop model is
+its own piece of work, and would need the CFBD player log as its substrate.
+
+## [ ] No slate-wide book-coverage answer the app can afford
+
+Found 2026-09-05 building the Stats picker's coverage note. The board can say
+"FanDuel posts no At-Most Hits lines today" for free, because it already holds
+that stat's rows. It cannot say "FanDuel has nothing at all today" without
+reading every market — and that read is not affordable: `explain analyze` on
+`v_latest_prop_odds_all_books` grouped by book for one date measured **17.5s**,
+and straight off `player_prop_odds` **8.5s** over 172,462 rows for 2026-09-05.
+Both are far past what a screen (or the statement timeout) will take.
+
+The fix is a small coverage table the prop ingestors maintain as they write —
+`(game_date, sport, bookmaker, market, has_over, has_under, games)`, one row
+per combination, refreshed each pass — which the app reads in milliseconds.
+It would also give the Discord and monitoring surfaces a cheap answer to "which
+books did we actually get tonight", which today is a table scan nobody runs.
+
+Not needed for anything shipped yet: Matt's rule is that a book we pull lines
+for stays in the picker whatever its depth (2026-09-05), so nothing currently
+depends on the slate-wide answer.

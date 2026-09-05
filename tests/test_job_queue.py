@@ -472,3 +472,64 @@ def test_a_failed_job_needs_a_new_key_to_rerun():
     keys = [e["key"] for e in entries]
     assert "opp-starter-baseline-hits" in keys
     assert "opp-starter-baseline-hits-r2" in keys
+
+
+# ── publish_discord_signals ──────────────────────────────────────────────────
+# 2026-09-05. Two Week 1 nfl_wind_totals picks were on the app board and had
+# never reached Discord. By the time it was noticed the leak (#489) was already
+# fixed and both picks were selectable -- what was missing was anything that
+# could RUN the producer before the next :17 refresh pass, and that pass had
+# just been killed mid-run by a deploy. The worker holds the webhooks and polls
+# this queue every five minutes.
+
+def test_the_discord_publish_job_is_registered():
+    assert "publish_discord_signals" in q.JOBS
+
+
+def test_the_discord_publish_job_takes_an_optional_date():
+    """Omitted means today. The date bounds only picks with no commence_time,
+    so a future NFL kickoff is reached either way -- but a caller repairing an
+    older slate must still be able to name it."""
+    assert q._validate_publish_discord_signals({}) == {}
+    assert q._validate_publish_discord_signals({"target_date": ""}) == {}
+    assert (q._validate_publish_discord_signals({"target_date": "2026-09-05"})
+            == {"target_date": "2026-09-05"})
+    for bad in ("2026-9-5", "tomorrow", "20260905", "2026-09-05T00:00"):
+        with pytest.raises(ValueError):
+            q._validate_publish_discord_signals({"target_date": bad})
+
+
+def test_the_discord_publish_job_calls_the_ordinary_producer(monkeypatch):
+    """THE SAFETY ARGUMENT, pinned. It must call notify_discord_signals by its
+    ordinary name and pass nothing that could widen it: the started-game guard,
+    the model_action_thresholds cut and the push_sent ledger all live inside
+    that function, so forcing it can only ever send what was never sent."""
+    import tracking.discord_notifier as dn
+
+    calls = []
+    monkeypatch.setattr(dn, "notify_discord_signals",
+                        lambda target_date=None, dry_run=False:
+                        (calls.append((target_date, dry_run)), 2)[1])
+    out = q._job_publish_discord_signals(target_date="2026-09-05")
+    assert calls == [("2026-09-05", False)]
+    assert out["posted"] == 2
+
+    calls.clear()
+    q._job_publish_discord_signals()
+    assert calls == [(None, False)], "no date means today, not a widened window"
+
+
+def test_the_discord_publish_job_never_restates(monkeypatch):
+    """A restatement RE-publishes something members have already seen and is
+    gated on an explicit date list for that reason. This job has no such gate
+    because it cannot reach an already-posted pick at all -- it must never
+    reach for the restate producer to make itself look more useful."""
+    # Read off the CODE OBJECT, not the source text: the docstring explains
+    # why it is not a restatement and would satisfy a grep for the word.
+    names = q._job_publish_discord_signals.__code__.co_names
+    assert "notify_discord_signals" in names
+    assert "notify_discord_restate" not in names
+    assert not any("push_sent" in str(c)
+                   for c in q._job_publish_discord_signals.__code__.co_consts
+                   if not isinstance(c, str) or "\n" not in c), \
+        "clearing the ledger would turn this into an unlabelled restatement"

@@ -1,3 +1,5 @@
+import { fetchAllPages } from '@/lib/paging';
+import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { supabase } from './supabase';
 import {
   LOG_COLUMNS,
@@ -63,6 +65,7 @@ import type {
   TrackRecordRow,
   UmpireRow,
 } from '@/types';
+import { LIVE_RECORD_START } from '@/lib/recordStart';
 
 const MLB_TOTALS_COLUMNS =
   'player_id, player_name, team, player_type, season, games_played, at_bats, ' +
@@ -444,9 +447,122 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
   return (data ?? []) as LatestDkOddsRow[];
 }
 
-export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes, propBooksRes] =
-    await Promise.all([
+/**
+ * Every book's latest prop line for ONE market on one date.
+ *
+ * The Stats board's LINE column reads this rather than `picks`: the user's own
+ * sportsbook's current number for every player, separate from the models
+ * (lib/statsOdds.ts). Bounded to one market so the read stays small: a full
+ * MLB slate is ~190 players x 13 books per market.
+ *
+ * The view carries no sport column and `player_points` is both an NBA and a
+ * WNBA market, so the CALLER must bound the rows to its sport's game ids.
+ */
+export async function fetchPropLinesForDate(
+  date: string,
+  market: string,
+): Promise<PropOddsByBookRow[]> {
+  // Paged: a full MLB market is ~1,900 rows, over the 1,000-row response cap.
+  // The market's alternate lines (lib/propLines.ts) ride along under their
+  // own key and are folded onto the market here, so callers see one market
+  // with every line a book posts. The line is in the order and the key: an
+  // alternate key returns several rows per (game, player, book).
+  const rows = await fetchAllPages<PropOddsByBookRow>(
+    (from, to) =>
+      supabase
+        .from('v_latest_prop_odds_all_books')
+        .select(PROP_ODDS_BY_BOOK_COLUMNS)
+        .eq('game_date', date)
+        .in('market', [market, alternateMarketFor(market)])
+        .order('game_id')
+        .order('market')
+        .order('player_name')
+        .order('bookmaker')
+        .order('line')
+        .range(from, to),
+    propLineRowKey,
+  );
+  return foldAlternateRows(rows);
+}
+
+/**
+ * Every book's latest line for every game market on one date — the Teams
+ * board's LINE column. ~15 games x 3 markets x 13 books on a full MLB slate.
+ * The caller bounds it to its sport's games, for the same reason as above.
+ */
+export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow[]> {
+  // Paged: ~1,200 rows on a full MLB slate, over the 1,000-row response cap.
+  return fetchAllPages<OddsByBookRow>((from, to) =>
+    supabase
+      .from('v_latest_odds_all_books')
+      .select(ODDS_BY_BOOK_COLUMNS)
+      .eq('game_date', date)
+      .order('game_id')
+      .order('market')
+      .order('bookmaker')
+      .range(from, to),
+  );
+}
+
+/**
+ * Every book's latest line for ONE player and market — what a Stats LINE leg
+ * re-prices from each time the betslip resolves (lib/lineLegs.ts). A few
+ * dozen rows, bounded by game_id; no paging needed.
+ */
+export async function fetchPropLineRows(
+  gameId: string,
+  market: string,
+  playerName: string,
+): Promise<PropOddsByBookRow[]> {
+  const { data, error } = await supabase
+    .from('v_latest_prop_odds_all_books')
+    .select(PROP_ODDS_BY_BOOK_COLUMNS)
+    .eq('game_id', gameId)
+    .in('market', [market, alternateMarketFor(market)])
+    .eq('player_name', playerName);
+  if (error) throw error;
+  return foldAlternateRows((data ?? []) as unknown as PropOddsByBookRow[]);
+}
+
+/**
+ * Every book's latest line for ONE game market -- what a Teams-board LINE leg
+ * re-prices from each time the betslip resolves (lib/lineLegs.ts
+ * gameLineLegFromRows). ~13 rows, bounded by game_id; no paging needed.
+ */
+export async function fetchGameLineRows(gameId: string, market: string): Promise<OddsByBookRow[]> {
+  const { data, error } = await supabase
+    .from('v_latest_odds_all_books')
+    .select(ODDS_BY_BOOK_COLUMNS)
+    .eq('game_id', gameId)
+    .eq('market', market);
+  if (error) throw error;
+  return (data ?? []) as unknown as OddsByBookRow[];
+}
+
+/** One game row, for a line leg's matchup and start time. */
+export async function fetchGameById(gameId: string): Promise<GameRow | null> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('game_id', gameId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as GameRow | null) ?? null;
+}
+
+/**
+ * `onEnrichmentError` is called, never thrown, for each enrichment read that
+ * fails -- the DraftKings latest-odds view, the all-books line shop, the prop
+ * line shop. The picks list must not go down with them, but they must not
+ * fail SILENTLY either: until 2026-09-05 an unreachable odds view left the
+ * Picks screen with empty line pills and no message, which is why the
+ * 2026-09-04 statement timeouts were only ever noticed on the Stats board.
+ */
+export async function fetchPicksForDate(
+  date: string,
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -464,27 +580,87 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
-    supabase.from('v_latest_odds_all_books').select(ODDS_BY_BOOK_COLUMNS).eq('game_date', date),
-    // Prop lines across all books — the prop half of line shopping. Capped
-    // generously: a full slate is ~3.5k rows per book.
-    supabase
-      .from('v_latest_prop_odds_all_books')
-      .select(PROP_ODDS_BY_BOOK_COLUMNS)
-      .eq('game_date', date)
-      .limit(20000),
   ]);
 
   if (picksRes.error) throw picksRes.error;
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
-  // Latest odds are enrichment only — a failure shouldn't take down the picks list.
+  // Latest odds are enrichment only — a failure shouldn't take down the picks
+  // list, but it is reported (see the docstring).
+  if (latestOddsRes.error) onEnrichmentError?.('today’s lines', latestOddsRes.error);
   const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
+
+  // The all-books line shop, read AFTER the picks and BOUNDED TO THE PICKS THAT
+  // RENDER LINES. Only signal cards show the line-shop chips and the All books
+  // table (PickCard.showLines is BET-only; AVOID is kept for the Signals
+  // surface), so the two reads take the BET/AVOID picks' games — and for
+  // props their markets and players — rather than the whole day. A full day
+  // is ~1,200 game-line rows and ~14,600 prop rows against a 1,000-row
+  // response cap (see fetchAllPages); paging THAT was 16 statements per mount
+  // across eight screens, each one re-evaluating the whole day's view (the
+  // 2026-09-04 UX review). Bounded, each read is one page and the game_id
+  // filter lands on the view's driving `games` scan. The reads are still
+  // enrichment: a failure leaves the chips empty, never the board.
+  const rawPicks = (picksRes.data ?? []) as Pick[];
+  const lineGames = new Set<string>();
+  const propGames = new Set<string>();
+  const propMarkets = new Set<string>();
+  const propPlayers = new Set<string>();
+  for (const p of rawPicks) {
+    if (p.signal_type !== 'BET' && p.signal_type !== 'AVOID') continue;
+    if (gameMarketForModel(p.model_id)) {
+      lineGames.add(p.game_id);
+      continue;
+    }
+    const propMarket = propMarketForModel(p.model_id);
+    const player = propMarket ? playerNameFromPickLabel(p.pick_label) : null;
+    if (propMarket && player) {
+      propGames.add(p.game_id);
+      propMarkets.add(propMarket);
+      propPlayers.add(player);
+    }
+  }
+  const [allBooksRes, propBooksRes] = await Promise.all([
+    lineGames.size === 0
+      ? Promise.resolve({ data: [] as OddsByBookRow[], error: null as unknown })
+      : fetchAllPages<OddsByBookRow>(
+          (from, to) =>
+            supabase
+              .from('v_latest_odds_all_books')
+              .select(ODDS_BY_BOOK_COLUMNS)
+              .in('game_id', Array.from(lineGames))
+              .order('game_id')
+              .order('market')
+              .order('bookmaker')
+              .range(from, to),
+          (r) => `${r.game_id}|${r.market}|${r.bookmaker}`,
+        ).then((data) => ({ data, error: null as unknown }), (error: unknown) => ({ data: null, error })),
+    propGames.size === 0
+      ? Promise.resolve({ data: [] as PropOddsByBookRow[], error: null as unknown })
+      : fetchAllPages<PropOddsByBookRow>(
+          (from, to) =>
+            supabase
+              .from('v_latest_prop_odds_all_books')
+              .select(PROP_ODDS_BY_BOOK_COLUMNS)
+              .in('game_id', Array.from(propGames))
+              .in('market', Array.from(propMarkets))
+              .in('player_name', Array.from(propPlayers))
+              .order('game_id')
+              .order('market')
+              .order('player_name')
+              .order('bookmaker')
+              .range(from, to),
+          propLineRowKey,
+        ).then((data) => ({ data, error: null as unknown }), (error: unknown) => ({ data: null, error })),
+  ]);
+  if (allBooksRes.error) onEnrichmentError?.('the line shop', allBooksRes.error);
+  if (propBooksRes.error) onEnrichmentError?.('the prop line shop', propBooksRes.error);
   const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
   const propBooks = (
     propBooksRes.error ? [] : (propBooksRes.data ?? [])
   ) as unknown as PropOddsByBookRow[];
 
-  const picks = (picksRes.data ?? []) as Pick[];
+  const picks = rawPicks;
   const games = (gamesRes.data ?? []) as GameRow[];
   const weather = (weatherRes.data ?? []) as GameWeather[];
 
@@ -571,12 +747,20 @@ export async function fetchUpcomingUfcPicks(
     // and bet button here, not just on the detail screen. Scoped by the game_id
     // prefix (§20: `UFC_{date}_{away}_{home}`) because the view carries no sport
     // column and this window otherwise drags in every future NBA/NCAAF row.
-    supabase
-      .from('v_latest_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .like('game_id', 'UFC_%')
-      .gt('game_date', afterDate)
-      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): one card is a few hundred rows, but the
+    // window can hold two; wrapped so a failure stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'UFC_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -700,12 +884,21 @@ export async function fetchUpcomingNflPicks(
     // user see a real, current number for the book they actually bet at. Scoped
     // by the game_id prefix (§28: `NFL_{nflverse_id}`) — the view has no sport
     // column, and an 8-day window spans other sports' future slates.
-    supabase
-      .from('v_latest_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .like('game_id', 'NFL_%')
-      .gt('game_date', afterDate)
-      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): a 16-game week is ~600 rows, under the
+    // 1,000-row response cap today and over it once every book posts every
+    // market; wrapped so a failure stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'NFL_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -784,12 +977,20 @@ export async function fetchUpcomingNcaafPicks(
       .lte('game_date', throughDate),
     // Scoped by the game_id prefix: the all-books view has no sport column and
     // a week-long window spans every other sport's future slate.
-    supabase
-      .from('v_latest_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .like('game_id', 'NCAAF_%')
-      .gt('game_date', afterDate)
-      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): a week of NCAAF is ~2,300 rows, over the
+    // 1,000-row response cap; wrapped so a failure stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'NCAAF_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -1152,6 +1353,54 @@ export async function fetchModelFullOutcomeRecord(): Promise<Record<string, Full
   return map;
 }
 
+/**
+ * The per-model PUBLISHED record — the same rows the Retool dashboard reads.
+ *
+ * Matt, 2026-09-04: "just mirror retool". The Models tab used to read
+ * `v_model_full_outcome_record`, which re-grades EVERY scored pick (BET, AVOID
+ * and dead-zone alike) against today's cut. Retool reads settled BET picks AS
+ * FIRED. Those answer different questions and gave different numbers for the
+ * same model on the same day — `mlb_moneyline` was -3.3% on one and +23.8% on
+ * the other — so the Models tab now reads `v_public_track_record`, which is the
+ * BET-as-fired record and is exactly what Retool is pointed at.
+ *
+ * Shaped into `FullOutcomeRecord` on purpose: every consumer
+ * (`viewRecordToStats`, the Models rows, the built-in detail header) keeps
+ * working unchanged, so the switch is one fetch rather than a refactor.
+ * `priced_bets` and `units` come back out of the money columns — `staked_flat`
+ * is 100 x the PRICED picks, and an unpriced pick contributes neither
+ * (CLAUDE.md §6: profit_flat fabricates -110 when dk_odds is NULL).
+ */
+export async function fetchPublishedModelRecord(): Promise<Record<string, FullOutcomeRecord>> {
+  const { data, error } = await supabase
+    .from('v_public_track_record')
+    .select('model_id, picks, wins, losses, pushes, profit_flat, staked_flat');
+  if (error) throw error;
+  const map: Record<string, FullOutcomeRecord> = {};
+  for (const r of (data ?? []) as unknown as TrackRecordRow[]) {
+    const staked = Number(r.staked_flat ?? 0);
+    const profit = Number(r.profit_flat ?? 0);
+    map[r.model_id] = {
+      model_id: r.model_id,
+      // The view only ever returns unpaused models (it joins
+      // model_action_thresholds and filters), and a retired model has no
+      // threshold row at all, so both flags are constant here.
+      paused: false,
+      prob_only: false,
+      bets: Number(r.picks ?? 0),
+      wins: Number(r.wins ?? 0),
+      losses: Number(r.losses ?? 0),
+      pushes: Number(r.pushes ?? 0),
+      priced_bets: staked / 100,
+      units: profit / 100,
+      // Null rather than 0 when nothing was priced: 0.0% reads as break-even,
+      // and a record-only model has no ROI to report.
+      roi_pct: staked > 0 ? (profit / staked) * 100 : null,
+    };
+  }
+  return map;
+}
+
 // One row per pick behind a model's full-outcome record — the exact pick set
 // v_model_full_outcome_record aggregates (every scored pick graded at the
 // CURRENT cut, decided outcomes only). profit_units is 1-unit flat at dk_odds,
@@ -1175,6 +1424,12 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   const { data, error } = await supabase
     .from('v_model_full_outcome_picks')
     .select('*')
+    // Bounded to the published window. The view itself keeps the longer
+    // sweep history (2026-04-14), so without this the detail screen listed
+    // April-onward picks under a "since 2026-09-01" record and told the reader
+    // they were "the exact set behind the record above" — two counts a scroll
+    // apart, with copy insisting they matched.
+    .gte('game_date', LIVE_RECORD_START)
     .eq('model_id', modelId)
     .order('game_date', { ascending: false })
     .order('pick_id', { ascending: false })

@@ -20,19 +20,60 @@ week 3", and it is not recoverable after the fact.
 
 from __future__ import annotations
 
+import importlib
 import logging
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 from .config import (
     DERIV_LAG_RATIO, EV_THRESHOLDS, KELLY_FRACTION, KELLY_HAIRCUT,
     MAX_DAILY_EXPOSURE_FRACTION, MAX_QUOTE_AGE_SEC, MAX_STAKE_FRACTION,
-    MAX_STATE_AGE_SEC, MIN_SECONDS_FOR_PRICING, SCRIPT_LEAD_TRIGGER,
+    MAX_STATE_AGE_SEC, MIN_PRICE, MIN_SECONDS_FOR_PRICING, SCRIPT_LEAD_TRIGGER,
 )
 from .engine.pricing import american_to_decimal, american_to_prob
 from .state import GameState
 
 log = logging.getLogger(__name__)
+
+
+def _platform_guard():
+    """The shared pre-score staleness guard, imported LAZILY and optionally.
+
+    Three constraints collide here and this is the only shape that satisfies
+    all of them:
+
+      * the NFL worker runs with cwd=nfl/, where the repo root is not on
+        sys.path until something puts it there (same reason
+        workers/gameday.py bootstraps before importing the price log);
+      * `nfl/` carries its own `models/` and `data/` directories, so a bare
+        top-level import of either resolves to the wrong thing -- which is why
+        the guard lives at `data/live_quote_guard.py` and is reached only
+        after the root insert;
+      * `nfl/` must keep running with no platform present at all.
+
+    So: bootstrap, import, and on failure return None ONCE with a warning. A
+    missing platform degrades this lane to the age bound it had before, which
+    is the previous behaviour rather than a new failure mode.
+    """
+    global _GUARD
+    if _GUARD is not _UNTRIED:
+        return _GUARD
+    try:
+        root = str(Path(__file__).resolve().parents[2])
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        _GUARD = importlib.import_module("data.live_quote_guard")
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("pre-score quote guard unavailable (%s) - falling back to "
+                    "the age bound alone", exc)
+        _GUARD = None
+    return _GUARD
+
+
+_UNTRIED = object()
+_GUARD = _UNTRIED
 
 
 @dataclass
@@ -126,7 +167,24 @@ def state_is_priceable(state: GameState, now: datetime | None = None) -> tuple[b
     return True, ""
 
 
-def quote_is_fresh(quote, now: datetime | None = None) -> tuple[bool, str]:
+def quote_is_fresh(quote, now: datetime | None = None,
+                   score_seen_at: datetime | None = None) -> tuple[bool, str]:
+    """Age is necessary and not sufficient — see models/live_quote_guard.py.
+
+    NCAAF shipped a live total on 2026-09-03 that was 62.2s old against this
+    same 90s bound and already extinct: a touchdown had landed 0.6s earlier and
+    DraftKings had not re-hung. Football is where this bites hardest, because a
+    touchdown moves a full-game total ~6 points in one step, so the NFL lane
+    gets the guard BEFORE its season rather than after its own incident
+    (CLAUDE.md 1b — a change to one model is assessed against all of them).
+
+    `score_seen_at` is None until a game's score changes, which leaves the age
+    bound as the only defence, exactly as before.
+    """
+    guard = _platform_guard()
+    if guard is not None and guard.quote_predates_score(
+            getattr(quote, "ts", None), score_seen_at):
+        return False, "quote_predates_score"
     age = quote.age_seconds(now)
     if age > MAX_QUOTE_AGE_SEC:
         return False, f"stale_quote:{age:.0f}s"
@@ -189,6 +247,18 @@ class Executor:
         self.recorder = recorder
         self.alerter = alerter
         self.decisions: list[Decision] = []
+        # Fed from `state` inside evaluate(), so no live-loop wiring is needed:
+        # GamedayWorker builds ONE Executor at startup (workers/gameday.py:149)
+        # and ticks it, so this clock persists across passes. A per-pass
+        # Executor would leave every call at first sight and make the guard
+        # dead code -- if that construction ever moves, hoist this to module
+        # level (the `_WRITTEN` precedent in data/ingestors/live_price_log.py).
+        #
+        # NOTE _platform_guard() may insert the repo root into sys.path, so
+        # constructing an Executor has that side effect -- the same insert
+        # workers/gameday.py already performs before its price-log import.
+        guard = _platform_guard()
+        self._score_clock = guard.ScoreClock() if guard else None
 
     def evaluate(self, *, state: GameState, quote, model_prob: float,
                  model_id: str, now: datetime | None = None,
@@ -201,6 +271,18 @@ class Executor:
         """
         now = now or datetime.now(timezone.utc)
         ctx = dict(context or {})
+        # The BOOK's team names ride along on every decision. Quote.home_team
+        # explains why they exist at all: "the book's event id and ESPN's event
+        # id are unrelated strings, so the only thing the two feeds share is who
+        # is playing." `game_id` below is ESPN's, so these names are the ONLY
+        # bridge from a decision to the platform's `games` row -- which is what
+        # pick_writer.resolve_game_id joins on, and what settlement then needs.
+        # Also worth having in the JSONL audit log on its own: a decision log
+        # that cannot say who was playing is hard to read back a month later.
+        for _k, _v in (("home_team", getattr(quote, "home_team", None)),
+                       ("away_team", getattr(quote, "away_team", None))):
+            if _v and _k not in ctx:
+                ctx[_k] = _v
         market_prob = american_to_prob(quote.price)
         ev = expected_value(model_prob, quote.price)
 
@@ -219,13 +301,33 @@ class Executor:
         ok, why = state_is_priceable(state, now)
         if not ok:
             return _mk(False, why)
-        ok, why = quote_is_fresh(quote, now)
+        # OUR clock, not `state.ts`. The feed's generation time is EARLIER
+        # than our observation, which would narrow the blocked window -- the
+        # unsafe direction, and a silent divergence from NCAAF. The guard's
+        # contract is deliberately conservative here; see live_quote_guard.
+        score_seen_at = self._score_clock.observe(
+            state.game_id, (state.home_score, state.away_score),
+            now or datetime.now(timezone.utc)) if self._score_clock else None
+        ok, why = quote_is_fresh(quote, now, score_seen_at)
         if not ok:
             return _mk(False, why)
         if model_id not in EV_THRESHOLDS:
             return _mk(False, f"unknown_model:{model_id}")
         if not (0.0 < model_prob < 1.0):
             return _mk(False, "degenerate_model_prob")
+
+        # THE JUICE CEILING, before the EV test (Matt, 2026-09-05: "-140 should
+        # be price ceiling"). Deliberately not an edge question: a quote past the
+        # ceiling is ineligible however good the number looks, because clearing
+        # a 0.06 EV gate at -250 requires a model probability high enough that
+        # the model is the thing least worth trusting. A more negative American
+        # price is more juice, so the test is `<`; a plus price always passes.
+        #
+        # Refused rather than filtered downstream: this records a PASS with a
+        # reason, so the audit log shows the lane looked and declined. The same
+        # number in the display filter would have written the bet and hidden it.
+        if quote.price < MIN_PRICE:
+            return _mk(False, f"price_past_ceiling:{quote.price:.0f}<{MIN_PRICE:.0f}")
 
         threshold = EV_THRESHOLDS[model_id]
         if ev < threshold:

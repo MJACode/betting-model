@@ -31,9 +31,21 @@ SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "")
 
 # ── Bankroll & sizing ─────────────────────────────────────────────────────────
 BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
-# Evaluation start date — picks before this date are excluded from all P&L and
-# go-live gate calculations. Set to when v8 models first ran live.
-PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-04-14")
+# THE OFFICIAL LIVE DATE. Picks before it are excluded from all published P&L
+# and from the go-live gate. Matt, 2026-09-04: "only start tracking bets as of
+# 9/1 and on, that will be our official live date." (Was 2026-04-14, when the v8
+# models first ran live.)
+#
+# Nothing before it is deleted — every earlier pick stays in `picks` and stays
+# the bet of record (CLAUDE.md 1c); it is simply outside the published window.
+# Must match `LIVE_RECORD_START` in mobile/src/lib/recordStart.ts and the
+# `game_date >= '2026-09-01'` gate in v_public_track_record{,_daily}
+# (data/migrations/live_record_start_2026_09_01.sql).
+#
+# NOT the sweep window: the full-outcome views keep their own longer history,
+# because a threshold cannot be swept on a few days of BET-only picks
+# (CLAUDE.md 7, THE EVALUATION RULE).
+PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-09-01")
 
 # ── Pick locking ──────────────────────────────────────────────────────────────
 # When True (default), game-level picks (ML / runline / O-U / F5 / 3-way /
@@ -401,6 +413,20 @@ ACTION_THRESHOLDS: dict = {
     # blind month at >= 50 flags.
     "wnba_prop_market":           {"min_prob": 0.0, "min_edge": 0.05},
     "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
+    # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
+    # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
+    # paper trading and delay this being an available feature") -- taken with
+    # the §2 go-live gate NOT met, deliberately and on his call. Settled record
+    # at that moment: ZERO bets. Do not "restore" the gate here without asking
+    # him; do re-sweep these numbers the moment ~50 settled bets exist.
+    #
+    # Floors of 0.0 are not placeholders, they are the design: this lane's cut
+    # is EV, enforced in nfl/live_model/config.EV_THRESHOLDS and applied by the
+    # executor BEFORE a decision is ever recorded as a bet. A second, different
+    # cut here would silently re-filter bets the model already took -- picks
+    # written and never shown, which is exactly the app/Discord divergence this
+    # release removes. Same reasoning as ncaaf_spread's 0.0 edge floor.
+    "nfl_live_prop": {"min_prob": 0.0, "min_edge": 0.0},
     "nfl_prop_pass_yards":         {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_completions":   {"min_prob": 0.55, "min_edge": 0.05},
@@ -1000,6 +1026,29 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
+    # NFL LIVE pass attempts. Every other entry in this dict TIGHTENS the house
+    # default; this one loosens it, and it has to.
+    #
+    # This lane's cut is EV (nfl/live_model/config.EV_THRESHOLDS), applied by
+    # the executor BEFORE a decision is ever recorded as a bet. The -200 default
+    # would re-cut that after the fact: a live prop the lane bet at -250 gets
+    # written to `picks` and then hidden by the app's passesActionFilter and the
+    # Discord card's threshold join. Written but not shown is precisely the
+    # divergence #489 removed, and it would have been reintroduced for the one
+    # lane that release took live -- by a default nobody chose for it.
+    #
+    # The ceiling now EXISTS, in the executor: nfl/live_model/config.MIN_PRICE
+    # is -140 (Matt, 2026-09-05), and the lane refuses a worse quote before the
+    # EV test rather than betting it and letting the board hide it. So this
+    # entry matches that number instead of being non-binding: the two agree, and
+    # nothing the lane writes can be filtered out here. -140 is also the blanket
+    # prop floor every MLB and WNBA prop model carries.
+    #
+    # KEEP THE TWO IN STEP. If the executor ceiling moves, move this with it --
+    # a display floor TIGHTER than the executor's is how a taken bet gets
+    # concealed (#491), and one looser is dead config that reads as a rule.
+    # tests/test_nfl_live_pick_writer.py asserts they match.
+    "nfl_live_prop":             -140,
 }
 
 
@@ -1029,6 +1078,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.05,
     "nhl_puckline":             0.05,
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
+    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.00,   # card gates on |dev| >= 1.0; edge >= 0 drops juice-eaten quotes
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.08,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
@@ -1123,6 +1173,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
+    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.52,   # ~breakeven at -110, a sanity floor like wind's. Was 0.55, which
                                     # was set against a FLAT 0.5818 model prob; once the card began
                                     # pricing per deviation it silently became an edge filter (§28)
@@ -1274,6 +1325,23 @@ LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000
 # from the RECENT regime, so its bets/week projections move with this -- that is
 # the mechanism working, not drift.
 LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 30))
+# How far DraftKings' publish clock may sit BEHIND the moment we saw the score
+# and still be decided on. Zero: a quote stamped before the score is a
+# pre-score number, whatever its age.
+#
+# The bound above and this one are NOT the same question, and 2026-09-03 is
+# why. NCAAF posted a live total at 44.5 on a quote 62.2s old -- which would
+# have cleared even a 90s bound comfortably -- 0.6s after the loop saw a
+# touchdown, and DraftKings re-hung at 50.5 within the minute. An age bound
+# cannot see an event; it can only ask how recent a number is, never what
+# happened since. See data/live_quote_guard.py for the full timeline.
+#
+# MLB is the mildest of the three sports here (a run moves a total 0.5-1 where
+# a touchdown moves one ~6) and its 30s bound is already the tightest, so this
+# is expected to fire rarely. It is set anyway because the failure it prevents
+# is a grand slam landing between the book's publish and ours.
+LIVE_SCORE_LAG_TOLERANCE_SEC: float = float(
+    os.environ.get("LIVE_SCORE_LAG_TOLERANCE_SEC", 0))
 
 # ── Pre-game line poller (2026-08-30) ────────────────────────────────────────
 # The pre-game board used to be re-read by the 28-job refresh pass, which takes
@@ -1907,6 +1975,15 @@ PROP_MARKETS_PITCHER = [
 ]
 PROP_MARKETS_BATTER = [
     "batter_hits",
+    # Doubles and triples: the Stats board has carried both columns since it
+    # shipped and both were permanently blank, because nobody had asked the
+    # feed whether it served them. The 2026-09-05 coverage probe did, and it
+    # does (scripts/probe_market_coverage.py) -- the gap was ours, not the
+    # source's. `batter_at_bats`, `pitcher_home_runs_allowed` and
+    # `pitcher_pitches` are the board's other blanks and the API does NOT
+    # know those keys, so those columns are correctly blank forever.
+    "batter_doubles",
+    "batter_triples",
     "batter_total_bases",
     "batter_home_runs",      # poisson (v2 — pitcher HR/9, gb%, park factor, platoon)
     "batter_rbis",
@@ -1915,6 +1992,109 @@ PROP_MARKETS_BATTER = [
     "batter_walks",
 ]
 PROP_MARKETS_ALL = PROP_MARKETS_PITCHER + PROP_MARKETS_BATTER
+
+# ── Alternate (milestone) prop lines ─────────────────────────────────────────
+# Matt, 2026-09-05: "Yes to alternate lines." The competitor prices every
+# threshold because it ingests The Odds API's `*_alternate` markets -- 2+/3+
+# hits, 7+/8+ strikeouts and so on -- where our standard pull carries one line
+# per player per book. These feed the Stats board and the betslip's line legs
+# ONLY. They are stored under their OWN market key (`batter_hits_alternate`,
+# never folded into `batter_hits`) so that every model-facing read, which takes
+# the newest DraftKings row for (game, player, market), keeps seeing exactly
+# one standard line: a second line under the same key would make "the newest
+# row" an arbitrary one of two (models/scorer._latest_dk_prop_row,
+# tracking/paper_tracker._closing_dk_odds). The one remap predates this:
+# DraftKings serves "to hit a HR" only as batter_home_runs_alternate, whose 0.5
+# line is written to the canonical market for the HR model
+# (data/ingestors/prop_odds_ingestor.ALT_MARKET_REMAP); its other lines are now
+# kept as alternates instead of dropped.
+#
+# COST, measured 2026-09-04 in api_call_log rather than estimated: the MLB
+# prop event call (13 markets, 13 books) ran 705 times and averaged 32.0
+# credits; the 3-market F5 call at the same 13 books is a flat 6, i.e. ~2
+# credits per market. Eight more MLB markets on every pass is therefore
+# roughly 11,000-14,000 credits/day. Shipped at a 30-minute cadence
+# (~6,000-7,500/day) on 2026-09-05; the same day Matt approved EVERY PASS at
+# the stated 11,000-14,000 ("Yes ... Can you make the change?"), so
+# PROP_ALT_REFRESH_MIN defaults to 0. A positive value restores the cadence
+# (prop_odds_ingestor.alt_markets_due) without a code change.
+#
+# Matt, the same message: "WNBA and NBA same cost yes. Same with NFL NCAAF."
+# Basketball alternates ride the same ingestor and gate. NFL alternates ride
+# data/ingestors/nfl_prop_odds_ingestor.py, in their own request chunks so a
+# key the API rejects costs one chunk, never the standard markets. NCAAF had
+# no player-prop ingest at all when that was written; it got one the same day
+# (data/ingestors/ncaaf_prop_odds_ingestor.py, "Yes do it"), so its alternates
+# are here too -- scoped to games a book already prices, and OFF until the
+# probe's number is in front of Matt (RUN_NCAAF_PROP_ODDS).
+PROP_ALT_MARKETS = {
+    "MLB": [
+        "batter_hits_alternate",
+        "batter_total_bases_alternate",
+        "batter_rbis_alternate",
+        "batter_runs_scored_alternate",
+        "batter_walks_alternate",
+        "batter_stolen_bases_alternate",
+        "pitcher_strikeouts_alternate",
+    ],
+    # NOT here, measured twice: pitcher_hits_allowed_alternate and
+    # pitcher_walks_alternate produced ZERO rows across a full day of passes
+    # AND came back "supported, but no book priced it" from the coverage
+    # probe. pitcher_earned_runs_alternate and pitcher_outs_alternate are the
+    # same and were never added. An alternate nobody prices is ~2.5 credits
+    # per event call for nothing, on every pass.
+    "WNBA": [
+        "player_points_alternate",
+        "player_rebounds_alternate",
+        "player_assists_alternate",
+        "player_threes_alternate",
+        "player_points_rebounds_assists_alternate",
+    ],
+    "NBA": [
+        "player_points_alternate",
+        "player_rebounds_alternate",
+        "player_assists_alternate",
+        "player_threes_alternate",
+        "player_points_rebounds_assists_alternate",
+        "player_blocks_alternate",
+        "player_steals_alternate",
+        "player_turnovers_alternate",
+    ],
+    "NCAAF": [
+        "player_pass_yds_alternate",
+        "player_pass_tds_alternate",
+        "player_pass_completions_alternate",
+        "player_pass_attempts_alternate",
+        "player_rush_yds_alternate",
+        "player_reception_yds_alternate",
+        "player_receptions_alternate",
+        # `player_rush_attempts_alternate` and `player_sacks_alternate` are
+        # gone for the same measured reason as their standard keys: zero rows
+        # across the 2026-09-05 1pm ET pass, riding chunks that otherwise
+        # returned full.
+        #
+        # 20 markets to 16 is five chunks per event down to four -- ~68 fewer
+        # CALLS per pass and ~20% off a 219.6s run. It is NOT a credit saving
+        # of any size: The Odds API bills per market RETURNED, and these
+        # returned nothing, so they were already close to free. The reason to
+        # drop them is that a request nobody answers is a lie in the config
+        # about what this sport offers.
+    ],
+    "NFL": [
+        "player_pass_yds_alternate",
+        "player_pass_attempts_alternate",
+        "player_pass_completions_alternate",
+        "player_pass_tds_alternate",
+        "player_rush_yds_alternate",
+        "player_rush_attempts_alternate",
+        "player_reception_yds_alternate",
+        "player_receptions_alternate",
+        "player_rush_reception_yds_alternate",
+        "player_tackles_assists_alternate",
+        "player_sacks_alternate",
+    ],
+}
+PROP_ALT_REFRESH_MIN = int(os.environ.get("PROP_ALT_REFRESH_MIN", "0"))
 
 # WNBA player prop markets (The Odds API basketball player-prop keys).
 # All modelled as Poisson count projections.
@@ -1954,6 +2134,65 @@ PROP_MARKETS_NBA = [
 # rush/reception and first TD are all excluded — see docs/nfl_props_model.md §3
 # for the measurement behind each exclusion (two of them have NEGATIVE
 # out-of-sample R²: a tuned model is worse than the pooled mean).
+# NCAAF player prop markets (Matt, 2026-09-05: "Yes do it"). The Odds API uses
+# ONE key namespace for both football leagues, so these are the NFL keys under
+# the americanfootball_ncaaf sport key -- WHICH of them the API actually serves
+# for college is NOT assumed here. A key it does not support 422s its own
+# request chunk and is skipped (ncaaf_prop_odds_ingestor._event_props), and the
+# probe REPORTS which markets came back. Ordered to match the Stats tab's NCAAF
+# board (mobile/src/lib/statCatalog.ts), because that board -- not a model -- is
+# what these lines are for: NCAAF has four game-level models and no prop model,
+# so a college prop row is research, never a pick.
+PROP_MARKETS_NCAAF = [
+    "player_pass_yds",
+    "player_pass_tds",
+    "player_pass_completions",
+    "player_pass_attempts",
+    "player_pass_interceptions",
+    "player_rush_yds",
+    "player_reception_yds",
+    "player_receptions",
+    "player_anytime_td",
+    # NOT here, and NOT an oversight: `player_rush_attempts` and
+    # `player_sacks`. The first real college pass (2026-09-05 1pm ET) asked
+    # ALL 68 events -- nothing dropped for scope -- and 31 came back with
+    # props: 9,187 rows, 615 players, 7 books, 590 credits, 219.6s. Neither of
+    # these two returned a single row, and both rode in market chunks whose
+    # other members came back full, so the chunk was not lost to a 422: we
+    # asked, and nobody priced them. The coverage probe had already said the
+    # same one market per call ("supported, no book"). The NFL prices both
+    # (3,206 and 3,718 stored rows), which is why the prune is per league.
+]
+# NOT pulled, though the feed offers them for football, because nothing can
+# DISPLAY them and an unreachable market is a credit spent on nothing
+# (tests/test_ncaaf_prop_odds.py pins the pull against the app's map in both
+# directions):
+#   player_rush_reception_yds  -- the board has no combined rush+rec yards
+#     column, only its two halves.
+#   player_tackles_assists     -- the board's def_tackles charges a shared
+#     tackle as a HALF (CFBD stores 5 solo + 9 assists as 9.5), the market
+#     counts solo + assists at FULL credit, so the price would sit beside a
+#     number on a different scale -- a different bet in the sense of
+#     docs/best_line.md §5 (UX review, 2026-09-05). It comes back with a
+#     full-credit column, which is a new StatDef.
+
+
+# WHICH college games get a prop pull. Measured 2026-09-05, a full Saturday:
+# 120 NCAAF games on the slate, 70 with a DraftKings game line, 39 FBS vs FBS,
+# 34 priced by our own models. Pulling all 120 is how a college slate costs
+# more than the entire MLB program -- and the 50 games with no DK line at all
+# (Lakeland at Carthage, Division III) have no player props to sell us.
+#
+# So the scope is "a book is already pricing this game": an event is pulled
+# only when DraftKings has posted a game line for it. That is self-maintaining
+# -- no hand-kept televised list to rot -- and it is the same signal a human
+# would use. NCAAF_PROP_MAX_EVENTS is the hard ceiling per pass regardless.
+NCAAF_PROP_REQUIRE_DK_LINE = os.environ.get("NCAAF_PROP_REQUIRE_DK_LINE", "1") != "0"
+NCAAF_PROP_MAX_EVENTS = int(os.environ.get("NCAAF_PROP_MAX_EVENTS", "80"))
+# OFF until the probe's measured number is in front of Matt. Turning this on is
+# a Railway variable, not a deploy.
+RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
+
 PROP_MARKETS_NFL = [
     "player_pass_yds",
     "player_pass_attempts",
@@ -2145,9 +2384,18 @@ NFL_MODEL_FIRST_SEASON: int = int(os.environ.get("NFL_MODEL_FIRST_SEASON", "2015
 # be captured, and therefore only reach Discord and push, on GAME DAY, by which
 # time the opener's number has been corrected and the bet no longer exists.
 #
-# 7 matches the opener's own LEAD_HI_DAYS (nfl/models/opener_spread.py); the
-# wind card never reaches further than ~4 days out.
-NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "7"))
+# 7 -> 10 on 2026-09-05. The old value matched the opener's own LEAD_HI_DAYS,
+# and the comment here claimed "the wind card never reaches further than ~4 days
+# out". It does: scheduler.NFL_POLL_HORIZON_DAYS is 10, and Week 1 Sunday is 9
+# days from Friday. Both 2026-09-05 wind picks (game_date 2026-09-13) fell
+# outside the 7-day window and were never captured at all.
+#
+# This no longer gates DISCORD or PUSH -- both read `picks` directly now, so
+# neither has a date horizon to fall outside of. It still bounds the
+# opening-signal / CLV shadow track, which is why it is widened rather than
+# deleted: at 7 that track was silently dropping NFL look-ahead picks. 10
+# matches the poll horizon, so capture covers everything the poller can write.
+NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "10"))
 
 # How many seasons back the self-healing NFL player-stats ingest keeps loaded
 # (current season + this many prior). The first run after deploy backfills

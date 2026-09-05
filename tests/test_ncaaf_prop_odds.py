@@ -1,0 +1,351 @@
+"""College football player props: scoped, resolved, and measured before spending.
+
+Matt, 2026-09-05: "Yes do it" — build the NCAAF prop ingestor, scoped to games
+a book already prices, with the real cost measured on one Saturday before it
+runs on a schedule.
+
+The invariants pinned here are the ones that cost money or corrupt the table:
+
+  1. SCOPE. A 120-game Saturday is 120 paid calls. Only events DraftKings has
+     already lined are pulled, under a hard per-pass ceiling, and every drop
+     is counted so a shrinking slate is legible rather than mysterious.
+  2. THE GAME ID IS RESOLVED. "Ohio State Buckeyes" must become the CFBD
+     school, and an event that resolves to no known game is SKIPPED — an
+     orphan prop row joins to nothing and looks like coverage forever.
+  3. A rejected market chunk costs its own markets and no others, and
+     alternates never share a chunk with a standard market.
+  4. Only books we asked for are ever written.
+  5. The probe writes NOTHING.
+  6. NCAAF has no prop model and this does not add one.
+"""
+
+import io
+from pathlib import Path
+
+import pytest
+
+import config
+from data.ingestors import ncaaf_prop_odds_ingestor as m
+
+ROOT = Path(__file__).parent.parent
+
+
+# ── config ───────────────────────────────────────────────────────────────────
+
+def test_every_ncaaf_alternate_has_a_standard_market_we_pull():
+    base = set(config.PROP_MARKETS_NCAAF)
+    for k in config.PROP_ALT_MARKETS["NCAAF"]:
+        assert k.endswith("_alternate"), k
+        assert k[:-len("_alternate")] in base, f"{k} has no standard market"
+
+
+def test_turning_college_props_on_is_a_variable_not_a_deploy():
+    """Built off (2026-09-05) so the probe's cost reached Matt first; turned on
+    the same day once it had ("Yes turn on NCAAF prop odds"). The flag stays a
+    Railway variable in BOTH places that read it, so it can go back off without
+    a deploy."""
+    import os
+    if os.environ.get("RUN_NCAAF_PROP_ODDS") is None:
+        assert config.RUN_NCAAF_PROP_ODDS is False, "the code default stays off"
+    sched = io.open(ROOT / "scheduler.py", encoding="utf-8").read()
+    assert 'os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"' in sched
+    assert "RUN_NCAAF_PROP_ODDS=0" in sched, "the off state must log why"
+
+
+def test_the_schedule_is_three_passes_on_game_day_not_hourly():
+    """Measured: ~8.7 credits/event over 68 events is ~590 per pass, so three
+    passes are ~1,800 on a Saturday. Hourly would be ~8,300 for lines that are
+    research, not a model input."""
+    sched = io.open(ROOT / "scheduler.py", encoding="utf-8").read()
+    assert 'CronTrigger(hour="9,13,18", minute=35, timezone=TIMEZONE)' in sched
+    assert 'id="ncaaf_prop_odds"' in sched
+    # Daily, not Saturday-only: college also plays Thursday and Friday nights,
+    # and a day with no events costs nothing (the /events listing is free).
+    assert "day_of_week" not in sched.split('id="ncaaf_prop_odds"')[0][-400:]
+
+
+def test_a_day_with_no_college_games_spends_nothing():
+    """The gate is the events listing, which is free — so leaving this
+    scheduled year-round costs nothing out of season."""
+    src = io.open(ROOT / "data" / "ingestors" / "ncaaf_prop_odds_ingestor.py",
+                  encoding="utf-8").read()
+    body = src.split("def run_ncaaf_prop_odds_ingestor")[1]
+    early = body.index("if not events:")
+    spend = body.index("_event_props(")
+    assert early < spend, "the empty-slate return must come before any paid call"
+
+
+def test_ncaaf_has_no_prop_model_and_this_does_not_add_one():
+    ncaaf_models = [x for x in config.MODELS if "ncaaf" in x]
+    assert ncaaf_models, "sanity: NCAAF still has its game-level models"
+    assert not [x for x in ncaaf_models if "prop" in x], \
+        "a college prop row is research, not a pick"
+
+
+# ── chunking ─────────────────────────────────────────────────────────────────
+
+def test_alternates_never_share_a_chunk_with_a_standard_market():
+    want = list(config.PROP_MARKETS_NCAAF) + list(config.PROP_ALT_MARKETS["NCAAF"])
+    chunks = m._market_chunks(want)
+    assert [mk for c in chunks for mk in c] == want, "every market, once, in order"
+    for c in chunks:
+        assert len({mk.endswith("_alternate") for mk in c}) == 1, f"mixed chunk: {c}"
+        assert len(c) <= m.MARKET_CHUNK
+
+
+# ── scope ────────────────────────────────────────────────────────────────────
+
+class _Conn:
+    """games / odds for one Saturday, in the shape scope_events queries."""
+
+    def __init__(self, known, lined):
+        self.known, self.lined = known, lined
+
+    def execute(self, sql, params=None):
+        rows = [(g,) for g in (self.lined if "o.bookmaker" in sql else self.known)]
+        return type("R", (), {"fetchall": lambda _self: rows})()
+
+
+EVENTS = [
+    {"id": "1", "home_team": "Kansas Jayhawks", "away_team": "Long Island University Sharks"},
+    {"id": "2", "home_team": "USC Trojans", "away_team": "Fresno State Bulldogs"},
+    {"id": "3", "home_team": "Carthage Red Men", "away_team": "Lakeland Muskies"},
+]
+DATE = "2026-09-05"
+
+
+@pytest.fixture
+def resolver(monkeypatch):
+    """The real resolver needs the schools table; the mapping it performs is
+    what matters here, so it is stubbed to the same shape it returns."""
+    names = {
+        "Kansas Jayhawks": "Kansas",
+        "Long Island University Sharks": "Long Island University",
+        "USC Trojans": "USC",
+        "Fresno State Bulldogs": "Fresno State",
+        "Carthage Red Men": "Carthage",
+        "Lakeland Muskies": "Lakeland",
+    }
+    monkeypatch.setattr(m, "resolve_odds_api_school",
+                        lambda n, conn=None: names.get(n, n))
+
+
+KANSAS = "NCAAF_2026-09-05_long-island-university_kansas"
+USC = "NCAAF_2026-09-05_fresno-state_usc"
+CARTHAGE = "NCAAF_2026-09-05_lakeland_carthage"
+
+
+def test_only_games_a_book_already_prices_are_pulled(resolver):
+    """The measured Saturday: 120 games, 70 with a DK line. Division III has
+    no player props to sell us."""
+    conn = _Conn(known=[KANSAS, USC, CARTHAGE], lined=[KANSAS, USC])
+    kept, dropped = scope(conn)
+    assert [gid for _ev, gid in kept] == [KANSAS, USC]
+    assert dropped["no_dk_line"] == 1
+
+
+def test_an_event_we_cannot_resolve_to_a_game_is_skipped(resolver):
+    conn = _Conn(known=[USC], lined=[USC, KANSAS, CARTHAGE])
+    kept, dropped = scope(conn)
+    assert [gid for _ev, gid in kept] == [USC]
+    assert dropped["unresolved"] == 2, "an orphan prop row joins to nothing"
+
+
+def test_the_game_id_is_the_resolved_school_not_the_feed_name(resolver):
+    conn = _Conn(known=[USC], lined=[USC])
+    kept, _ = scope(conn)
+    assert kept[0][1] == USC
+    assert "trojans" not in kept[0][1] and "bulldogs" not in kept[0][1]
+
+
+def test_the_per_pass_ceiling_is_hard(resolver):
+    conn = _Conn(known=[KANSAS, USC, CARTHAGE], lined=[KANSAS, USC, CARTHAGE])
+    kept, dropped = scope(conn, max_events=2)
+    assert len(kept) == 2 and dropped["over_cap"] == 1
+
+
+def test_the_dk_line_gate_can_be_turned_off_for_a_backfill(resolver):
+    conn = _Conn(known=[KANSAS, USC, CARTHAGE], lined=[])
+    kept, dropped = scope(conn, require_dk_line=False)
+    assert len(kept) == 3 and dropped["no_dk_line"] == 0
+
+
+def scope(conn, **kw):
+    kw.setdefault("require_dk_line", True)
+    kw.setdefault("max_events", 80)
+    return m.scope_events(conn, EVENTS, DATE, **kw)
+
+
+# ── the event call ───────────────────────────────────────────────────────────
+
+class _Resp:
+    def __init__(self, status, markets, books=("draftkings",)):
+        self.status_code = status
+        self.headers = {"x-requests-used": "100"}
+        self.text = ""
+        self._m, self._b = markets, books
+
+    def json(self):
+        return {"bookmakers": [{"key": b, "markets": [{"key": mk, "outcomes": [{"name": "Over"}]}
+                                                      for mk in self._m]} for b in self._b]}
+
+
+def test_a_rejected_chunk_costs_only_its_own_markets(monkeypatch):
+    """The likeliest 422 for college is a market the API does not serve here."""
+    def fake_get(url, params=None, timeout=None):
+        mk = params["markets"].split(",")
+        return _Resp(422 if any(x.endswith("_alternate") for x in mk) else 200, mk)
+
+    monkeypatch.setattr(m.requests, "get", fake_get)
+    monkeypatch.setattr(m, "record_quota_headers", lambda r: None)
+    monkeypatch.setattr(m.time, "sleep", lambda s: None)
+    want = list(config.PROP_MARKETS_NCAAF) + list(config.PROP_ALT_MARKETS["NCAAF"])
+    per_book, _credits = m._event_props("ev", want)
+    got = {mk["key"] for _b, ms in per_book for mk in ms}
+    assert got == set(config.PROP_MARKETS_NCAAF)
+    assert not any(x.endswith("_alternate") for x in got)
+
+
+def test_a_book_we_did_not_ask_for_is_never_written(monkeypatch):
+    monkeypatch.setattr(m.requests, "get", lambda url, params=None, timeout=None:
+                        _Resp(200, ["player_pass_yds"], books=("draftkings", "some_new_book")))
+    monkeypatch.setattr(m, "record_quota_headers", lambda r: None)
+    monkeypatch.setattr(m.time, "sleep", lambda s: None)
+    per_book, _ = m._event_props("ev", ["player_pass_yds"])
+    assert [b for b, _ in per_book] == ["draftkings"]
+
+
+# ── the probe ────────────────────────────────────────────────────────────────
+
+def test_the_probe_writes_nothing(monkeypatch, resolver):
+    """It exists to measure. A probe that inserts is a pull with a nice name."""
+    conn = _Conn(known=[KANSAS, USC], lined=[KANSAS, USC])
+    conn.commit = lambda: None
+    conn.close = lambda: None
+    monkeypatch.setattr(m, "get_connection", lambda: conn)
+    monkeypatch.setattr(m, "persist_quota", lambda c: None)
+    monkeypatch.setattr(m, "_get_events", lambda d: EVENTS)
+    monkeypatch.setattr(m, "_event_props",
+                        lambda ev, mk: ([("draftkings", [{"key": "player_pass_yds",
+                                                          "outcomes": [{"name": "Over"}]}])], 24))
+
+    def boom(*a, **k):
+        raise AssertionError("the probe must not write")
+
+    monkeypatch.setattr(m, "_insert_prop_odds", boom)
+    out = m.probe(DATE, limit_events=2)
+    assert out["events_probed"] == 2
+    assert out["credits_per_event"] == 24
+    assert out["events_in_scope"] == 2
+    assert out["projected_one_pass"] == 48
+    assert out["markets_returned"] == {"player_pass_yds": 2}
+
+
+# ── the worker job ───────────────────────────────────────────────────────────
+
+def test_the_job_defaults_to_probing_and_caps_its_sample():
+    from tracking.job_queue import JOBS, _validate_ncaaf_prop_odds as v
+    assert "ncaaf_prop_odds" in JOBS
+    assert v({})["probe"] is True, "the default must be the safe one"
+    with pytest.raises(ValueError):
+        v({"limit_events": 99})
+    with pytest.raises(ValueError):
+        v({"date": "saturday"})
+
+
+# ── the app's half ───────────────────────────────────────────────────────────
+
+def _football_map(sport: str = "NCAAF") -> set[str]:
+    """The markets mobile/src/lib/statCatalog.ts can display FOR ONE LEAGUE.
+
+    The two leagues share one catalog and one map but NOT one market: college
+    books do not price carries or sacks and the NFL does, so the map answers
+    through a per-league exclusion (FOOTBALL_MARKET_NOT_PRICED). Reading the
+    map without applying it would say NCAAF shows two columns it cannot.
+    """
+    src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts",
+                  encoding="utf-8").read()
+    block = src.split("FOOTBALL_STAT_TO_MARKET")[1].split("};")[0]
+    by_key = {line.split(":")[0].strip(): line.split("'")[1]
+              for line in block.splitlines() if "'player_" in line}
+
+    excl_block = src.split("FOOTBALL_MARKET_NOT_PRICED")[1].split("};")[0]
+    excluded: set[str] = set()
+    for line in excl_block.splitlines():
+        if line.strip().startswith(f"{sport}:"):
+            excluded = {t.strip().strip("'") for t in
+                        line.split("[")[1].split("]")[0].split(",") if t.strip()}
+    return {m for k, m in by_key.items() if k not in excluded}
+
+
+def test_what_we_pull_and_what_the_board_can_show_are_the_same_set():
+    """Both directions, because each failure costs something different.
+
+    A market the board asks for but we never pull is a permanently blank
+    column. A market we pull but the board cannot show is a credit spent on
+    nothing, every event, every pass -- which is how `player_tackles_assists`
+    and `player_rush_reception_yds` came out of the college pull (UX review,
+    2026-09-05).
+
+    Football is the sport where this can go wrong quietly: it is the only one
+    whose board reaches its market WITHOUT a model, so nothing else ties the
+    two lists together.
+    """
+    mapped = _football_map("NCAAF")
+    pulled = set(config.PROP_MARKETS_NCAAF)
+    assert mapped, "the map is present"
+    assert mapped == pulled, (
+        f"board-only: {mapped - pulled}  |  pulled-but-unshowable: {pulled - mapped}")
+
+
+def test_the_half_credit_tackle_market_is_in_neither_list():
+    """CFBD charges a shared tackle as a half and the book counts it whole, so
+    a tackles price beside this board's number is a different bet."""
+    assert "player_tackles_assists" not in _football_map()
+    assert "player_tackles_assists" not in config.PROP_MARKETS_NCAAF
+    src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts",
+                  encoding="utf-8").read()
+    assert "def_tackles" not in src.split("FOOTBALL_STAT_TO_MARKET")[1].split("};")[0]
+
+
+def test_the_map_serves_both_football_leagues():
+    """NFL had 103,693 prop rows stored and invisible for the same reason
+    NCAAF's would have been: no prop model to route the market lookup through.
+    One map, both leagues -- or the pros stay dashed while college works."""
+    src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts",
+                  encoding="utf-8").read()
+    assert "def.sport === 'NCAAF' || def.sport === 'NFL'" in src
+    assert "NCAAF_STAT_TO_MARKET" not in src, "renamed: it is not NCAAF-only"
+
+
+def test_the_two_college_markets_no_book_prices_are_gone_from_both_lists():
+    """Measured, not assumed. The first real college prop pass (2026-09-05
+    1pm ET) covered 31 games, 615 players and 7 books and returned ZERO rows
+    for `player_rush_attempts` and `player_sacks`. Both rode in market chunks
+    whose other members came back full, so the chunk was not lost to a 422 --
+    we asked, and nobody priced them."""
+    for m in ("player_rush_attempts", "player_sacks"):
+        assert m not in config.PROP_MARKETS_NCAAF
+        assert m + "_alternate" not in config.PROP_ALT_MARKETS["NCAAF"]
+        assert m not in _football_map("NCAAF")
+
+
+def test_the_prune_is_per_league_and_the_nfl_keeps_both():
+    """The leagues share a stat catalog and a map, and do NOT share a market.
+    The NFL prices carries and sacks -- 3,206 and 3,718 stored rows -- so
+    pruning them from the shared map would blank two working pro columns to
+    fix two dead college ones."""
+    for m in ("player_rush_attempts", "player_sacks"):
+        assert m in config.PROP_MARKETS_NFL, f"{m} is a real NFL market"
+        assert m in _football_map("NFL"), f"the NFL board must still show {m}"
+        assert m + "_alternate" in config.PROP_ALT_MARKETS["NFL"]
+
+
+def test_the_college_pull_lost_a_whole_chunk_per_event():
+    """20 markets chunked five at a time is five calls per event; 16 is four.
+    That is the credit saving, and it is why the alternates went with the
+    standard keys rather than being left as free riders."""
+    from data.ingestors.ncaaf_prop_odds_ingestor import _market_chunks
+    markets = list(config.PROP_MARKETS_NCAAF) + list(config.PROP_ALT_MARKETS["NCAAF"])
+    assert len(markets) == 16
+    assert len(_market_chunks(markets)) == 4

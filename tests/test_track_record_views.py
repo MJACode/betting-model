@@ -24,7 +24,13 @@ MIG = ROOT / "data" / "migrations" / "track_record_reads_graded_matview.sql"
 SQL = MIG.read_text(encoding="utf-8")
 SH = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
 
-VIEWS = ("v_model_full_outcome_record", "v_public_track_record_daily")
+# v_public_track_record_daily was in this list until 2026-09-04. This file's
+# branch for it was removed: its guard ("does the view still read the matview?")
+# could not tell "never applied" from "superseded by the live-date migration",
+# so it restored the 2026-04-14 window on every pass and the app's equity curve
+# drifted five months away from its own hero card. The daily view now belongs to
+# live_record_start_views_2026_09_01.sql (tests/test_live_record_start_views.py).
+VIEWS = ("v_model_full_outcome_record",)
 
 
 def _code(sql: str) -> str:
@@ -57,7 +63,13 @@ def test_migration_is_one_statement():
     assert CODE.split("$mig$")[-1].strip() == ";"
 
 
-def test_both_views_read_the_matview_and_never_the_player_logs():
+def test_the_daily_view_is_no_longer_redefined_here():
+    """The regression guard. Re-adding a branch for the daily view re-arms the
+    revert that put a 2026-04-14 equity curve under a 2026-09-01 hero card."""
+    assert "v_public_track_record_daily" not in CODE
+
+
+def test_the_full_outcome_view_reads_the_matview_and_never_the_player_logs():
     for view in VIEWS:
         body = _body(view)
         assert "FROM mv_scored_pick_outcomes o" in body, view
@@ -81,7 +93,9 @@ def test_the_other_active_migrations_still_find_their_markers():
     """units_precision_for_public_record and require_price_for_published_units
     run every pass and RAISE if their expressions are gone."""
     assert "round(COALESCE(sum(profit) FILTER (WHERE passes), 0::numeric), 6)" in _body(VIEWS[0])
-    assert "AND p.dk_odds IS NOT NULL), 0::numeric) AS profit_flat" in _body(VIEWS[1])
+    # The daily view's own priced-units marker moved with the view itself.
+    live = (ROOT / "data" / "migrations" / "live_record_start_views_2026_09_01.sql")
+    assert "AND p.dk_odds IS NOT NULL), 0::numeric)" in _code(live.read_text(encoding="utf-8"))
 
 
 def test_no_ddl_outside_the_guarded_branches():
@@ -89,7 +103,7 @@ def test_no_ddl_outside_the_guarded_branches():
     reload (CLAUDE.md section 7). The runner executes this file on every pass,
     so on the no-op path nothing may fire: each GRANT sits after an ELSE."""
     grants = [m.start() for m in re.finditer(r"^\s*GRANT ", CODE, re.M)]
-    assert len(grants) == 2
+    assert len(grants) == 1
     for pos in grants:
         before = CODE[:pos]
         assert before.rfind("ELSE") > before.rfind("END IF;"), "GRANT outside the guarded branch"

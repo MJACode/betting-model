@@ -33,7 +33,6 @@ import {
   type PlayerLogSport,
 } from '@/lib/playerLog';
 import type { Sport } from '@/hooks/useSportFilter';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
@@ -119,34 +118,29 @@ function PickDetailContent({
   const slip = useParlaySlip();
   const { pick, game, weather, bookRows } = enriched;
   const meta = MODEL_META[pick.model_id];
-  // The headline price: the user's own sportsbook's number when it prices this
-  // side, else the modeled DraftKings price, labeled. Live picks are DraftKings
-  // only (Matt, 2026-09-03) — the in-play model reads DK's line and the bet is
-  // placed there. The hand-off itself is the Betting lines row below.
-  const { book: preferredBook } = usePreferredBook();
+  // The headline price is the modeled DraftKings number the edge, EV and stake
+  // were computed from. Picks do not follow the member's book preference
+  // (Matt, 2026-09-04) — where to place the bet is the Betting lines row below,
+  // every bettable book, best price first.
   const live = pick.is_live === true;
-  const quote = live
-    ? displayQuoteForPick(pick, [], MODEL_BOOK)
-    : displayQuoteForPick(pick, bookRows ?? [], preferredBook);
+  const quote = displayQuoteForPick(pick, [], MODEL_BOOK);
   // Unlocked look-ahead (future UFC/golf): show the line, never the signal —
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const retired = isModelRetired(pick.model_id);
-  // One plain-English line saying whose price this screen is showing — the
-  // active book's number, or the labeled DK fallback when their book doesn't
-  // price this bet. Renders in the header so the provenance is never implicit.
+  // One plain-English line saying whose price this screen is showing — always
+  // the book the pick was modeled at. Renders in the header so the provenance
+  // is never implicit.
   const quoteProvenance =
     quote == null
       ? null
       : live
         ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} · live picks are DraftKings only`
-        : quote.isFallback && quote.bookmaker !== preferredBook
-        ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} — no ${bookName(preferredBook)} price for this bet`
         : `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)}${
             quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
               ? ` (line ${quote.line})`
               : ''
-          } · your sportsbook`;
+          } · the price this pick was modeled at`;
 
   // The best price we found across every book the odds feed carries, recorded
   // on the pick when it was scored. Shown only when it genuinely beats the
@@ -300,7 +294,7 @@ function PickDetailContent({
             only, and the in-play rows are no longer fetched. */}
         {pick.signal_type === 'BET' && !preview && !retired ? (
           <View style={styles.linesCard}>
-            <BookLinesRow pick={pick} bookRows={bookRows} preferredBook={preferredBook} />
+            <BookLinesRow pick={pick} bookRows={bookRows} />
           </View>
         ) : null}
         {live ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}

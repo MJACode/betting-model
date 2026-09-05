@@ -24,13 +24,14 @@ import { BetslipBooksRow } from '@/components/BetslipBooksRow';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
 import { betOnBookLabel, bookButtonColors, DK_GREEN } from '@/lib/sportsbookLinks';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
+import { isLineLeg } from '@/lib/lineLegs';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   handoffBookFor,
@@ -49,7 +50,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel } from '@/lib/markets';
+import { bookLabel, bookName, booksName, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -87,6 +88,8 @@ export function ParlayScreen() {
   // betslip bar can never disagree about what is in the slip.
   const {
     slip,
+    lineLegs,
+    count: slipCount,
     picks: { data, loading, error, refresh },
     legs: slipLegs,
     stale: staleKeys,
@@ -148,12 +151,21 @@ export function ParlayScreen() {
   // The sport a saved slip is filed under: the first real pick's sport (custom
   // legs carry no pick, so they can't answer this).
   const sport = useMemo(
-    () => legs.find((l) => l.pick != null)?.pick?.sport ?? 'MLB',
+    () =>
+      legs.find((l) => l.pick != null)?.pick?.sport ??
+      legs.find((l) => isLineLeg(l))?.game?.sport ??
+      'MLB',
     [legs],
   );
 
   const handleRemove = useCallback(
     (pickId: number) => {
+      // A Stats line leg is negative too, but it lives in its own store.
+      const line = slipLegs.find((l) => l.pickId === pickId && isLineLeg(l));
+      if (line) {
+        lineLegs.remove(line.slipKey);
+        return;
+      }
       if (pickId < 0) {
         setManualCustom((prev) => prev.filter((l) => l.pickId !== pickId));
         return;
@@ -162,19 +174,21 @@ export function ParlayScreen() {
       const leg = slipLegs.find((l) => l.pickId === pickId);
       if (leg) slip.remove(leg.slipKey);
     },
-    [slip, slipLegs],
+    [slip, slipLegs, lineLegs],
   );
 
   const handleClear = useCallback(() => {
     slip.clear();
+    lineLegs.clear();
     setManualCustom([]);
-  }, [slip]);
+  }, [slip, lineLegs]);
 
   // Only reachable when the board isn't trusted (offline, empty slate) — the
   // pruner leaves those keys in place, so this is the manual escape hatch.
   const handleClearStale = useCallback(() => {
-    staleKeys.forEach((key) => slip.remove(key));
-  }, [staleKeys, slip]);
+    // `line:` keys are Stats line legs (their read failed); the rest are picks.
+    staleKeys.forEach((key) => (key.startsWith('line:') ? lineLegs.remove(key) : slip.remove(key)));
+  }, [staleKeys, slip, lineLegs]);
 
   const openCustom = useCallback(() => {
     setCustomLabel('');
@@ -236,9 +250,9 @@ export function ParlayScreen() {
                 <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
               </Pressable>
               <Text style={styles.title}>Betslip</Text>
-              {slip.count > 0 ? (
+              {slipCount > 0 ? (
                 <View style={styles.countBadge}>
-                  <Text style={styles.countBadgeText}>{slip.count}</Text>
+                  <Text style={styles.countBadgeText}>{slipCount}</Text>
                 </View>
               ) : null}
             </View>
@@ -356,17 +370,44 @@ export function ParlayScreen() {
 
 /**
  * Save-for-later + sportsbook hand-off, shared by the Optimize result card and
- * the manual builder. The hand-off goes to the USER'S book when it prices every
- * leg (with that book's own betslip links), falling back to DraftKings — the
- * button label always names the book it actually opens. No book has a multi-leg
- * deep link, so it opens a leg-by-leg hand-off sheet.
+ * the manual builder.
+ *
+ * THE BUTTON IS THE USER'S OWN BOOK (Matt, 2026-09-04): "the parlay button …
+ * should change to match the Sportsbook the user selects as their preferred."
+ * Placing a bet is the one thing the member does at THEIR book, so the button
+ * that sends them there follows their pick — the Stats board's line pill and
+ * this button now read the same setting.
+ *
+ * It is only the hand-off. The slip is still PRICED and modeled at DraftKings
+ * (§6), and the "Open with" row above still ranks every bettable book by
+ * payout, so a better price is always one tap away.
+ *
+ * `handoffBookFor` falls back to DraftKings when their book does not price
+ * every leg — "Bet on FanDuel" must never open a slip FanDuel cannot take.
+ * No book has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
  */
 function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   const { save } = useSavedParlays();
-  const { book: preferredBook } = usePreferredBook();
   const [handoffOpen, setHandoffOpen] = useState(false);
+  // `ready` gates the button: the hook seeds to DraftKings and resolves storage
+  // in an effect, so without it a FanDuel member sees a green "Bet on
+  // DraftKings" for a frame — and a tap landing in that window hands off to the
+  // wrong book with no way to tell (UX review).
+  const { books: preferredBooks, ready: bookReady } = usePreferredBooks();
 
-  const handoff = useMemo(() => handoffBookFor(legs, preferredBook), [legs, preferredBook]);
+  const handoff = useMemo(
+    () => handoffBookFor(legs, preferredBooks),
+    [legs, preferredBooks],
+  );
+  // None of their books could take the whole slip, so the button is opening DK
+  // instead. A STATE, not a standing pricing note — it renders only when the
+  // app has just overridden the member's own choice on a money-moving action.
+  const fellBack = bookReady && !(preferredBooks as readonly string[]).includes(handoff.book);
+  // The slip is PRICED at DraftKings but this button opens somewhere else, and
+  // "Potential payout" is 40pt above it. Still a state and not the standing
+  // note Matt removed: with DraftKings taking the slip — the common case —
+  // nothing renders (UX review).
+  const opensElsewhere = bookReady && handoff.book !== MODEL_BOOK;
   const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(
@@ -377,9 +418,15 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
         matchup: matchupForLeg(l.game),
         americanOdds: l.americanOdds,
         betLink: handoff.links[i] ?? null,
+        posted: handoff.posted[i] ?? true,
       })),
     [legs, handoff],
   );
+  // No book prices every leg — a Stats line leg DraftKings never posted, on a
+  // slip another book cannot complete. The button opens the book covering the
+  // most, and says how many, so nobody taps a green button into a slip that
+  // book cannot take (UX review).
+  const partial = bookReady && handoff.priced < handoff.total;
 
   const onSave = useCallback(() => {
     save(legs, sport);
@@ -389,32 +436,61 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   if (legs.length === 0) return null;
 
   return (
-    <View style={styles.parlayActions}>
-      <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
-        <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
-        <Text style={styles.saveBtnText}>Save parlay</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => setHandoffOpen(true)}
-        style={({ pressed }) => [
-          styles.dkBtn,
-          { backgroundColor: btnColors.bg },
-          pressed && styles.pressed,
-        ]}
-      >
-        <Ionicons name="open-outline" size={18} color={btnColors.fg} />
-        <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
-          {betOnBookLabel(handoff.book)}
-        </Text>
-      </Pressable>
+    <>
+      <View style={styles.parlayActions}>
+        <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
+          <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
+          <Text style={styles.saveBtnText}>Save parlay</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setHandoffOpen(true)}
+          disabled={!bookReady}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !bookReady }}
+          accessibilityLabel={
+            fellBack
+              ? `${betOnBookLabel(handoff.book)}. ${booksName(preferredBooks)} ${preferredBooks.length === 1 ? 'does' : 'do'} not price every leg.`
+              : betOnBookLabel(handoff.book)
+          }
+          style={({ pressed }) => [
+            styles.dkBtn,
+            { backgroundColor: btnColors.bg },
+            (pressed || !bookReady) && styles.pressed,
+          ]}
+        >
+          <Ionicons name="open-outline" size={18} color={btnColors.fg} />
+          <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
+            {betOnBookLabel(handoff.book)}
+          </Text>
+        </Pressable>
+      </View>
 
+      {partial ? (
+        <Text style={styles.handoffFallback}>
+          {bookName(handoff.book)} prices {handoff.priced} of {handoff.total} legs — add the
+          rest at a book that posts them
+        </Text>
+      ) : fellBack ? (
+        <Text style={styles.handoffFallback}>
+          {booksName(preferredBooks)} {preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price
+          every leg — opening {bookName(handoff.book)}
+        </Text>
+      ) : opensElsewhere ? (
+        <Text style={styles.handoffFallback}>
+          Priced at DraftKings · opening {bookName(handoff.book)}
+        </Text>
+      ) : null}
+
+      {/* Sibling, not a child of the row: parlayActions is flexDirection row
+          with a gap, and a Modal that ever became a layout participant would
+          open one. */}
       <ParlayDkHandoff
         visible={handoffOpen}
         legs={handoffLegs}
         book={handoff.book}
         onClose={() => setHandoffOpen(false)}
       />
-    </View>
+    </>
   );
 }
 
@@ -423,8 +499,27 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
  * (~15-25% vs ~5% on straights). We only build +EV combos, but we say so plainly
  * and warn hard when the combined EV is negative.
  */
-function ParlayHoldNote({ ev }: { ev: number }) {
+function ParlayHoldNote({
+  ev,
+  exception,
+  modelBacked,
+}: {
+  ev: number;
+  exception: string | null;
+  /**
+   * Does any leg carry a model's number? A slip built entirely of Stats line
+   * legs does not — Doubles and Triples have no model at all — so the positive
+   * branch must not credit "the model's combined probability" for a figure
+   * that is the books' own price multiplied out (UX review, 2026-09-05).
+   */
+  modelBacked: boolean;
+}) {
   const negative = ev < 0;
+  // A Stats line leg DraftKings never posted is priced at another book, and
+  // the note must not attribute that number to DraftKings (UX review).
+  const priced = exception
+    ? `Priced at DraftKings, except ${exception}.`
+    : 'Every leg is priced at DraftKings — that’s the book the models score against, whichever book you bet at.';
   return (
     <View style={[styles.holdNote, negative && styles.holdNoteBad]}>
       <Ionicons
@@ -434,8 +529,12 @@ function ParlayHoldNote({ ev }: { ev: number }) {
       />
       <Text style={[styles.holdNoteText, negative && styles.holdNoteTextBad]}>
         {negative
-          ? 'Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value. Legs are priced at DraftKings.'
-          : 'Every leg is priced at DraftKings — that’s the book the models score against, whichever book you bet at. Parlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats DK’s price.'}
+          ? modelBacked
+            ? `Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value. ${priced}`
+            : `Negative EV — these are your own lines at the books’ own prices, so the parlay hold is the whole story. Straight bets are the better value. ${priced}`
+          : modelBacked
+            ? `${priced} Parlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats the price.`
+            : `${priced} These are your own lines, priced at what the book is offering — no model has an opinion on them. Parlays carry far more hold (~15–25%) than straight bets (~5%).`}
       </Text>
     </View>
   );
@@ -465,18 +564,18 @@ function GradeBadge({ grade, small }: { grade: ParlayGrade; small?: boolean }) {
  * edge) on this exact slip, and — when same-game legs are correlated — the joint
  * probability vs the naïve product, which is the whole point of the engine.
  */
-function CorrelatedExtras({ m }: { m: CorrelatedMetrics }) {
+function CorrelatedExtras({ m, allDk }: { m: CorrelatedMetrics; allDk: boolean }) {
   const holdPositive = m.dkHoldPct >= 0;
   return (
     <View style={styles.corrExtras}>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>Fair odds</Text>
         <Text style={styles.corrValue}>
-          {formatAmerican(m.fairAmerican)} · DK {formatAmerican(m.americanOdds)}
+          {formatAmerican(m.fairAmerican)} · {allDk ? 'DK' : 'slip'} {formatAmerican(m.americanOdds)}
         </Text>
       </View>
       <View style={styles.corrRow}>
-        <Text style={styles.corrLabel}>{holdPositive ? 'DK hold on this slip' : 'Your edge on this slip'}</Text>
+        <Text style={styles.corrLabel}>{holdPositive ? (allDk ? 'DK hold on this slip' : 'Hold on this slip') : 'Your edge on this slip'}</Text>
         <Text style={[styles.corrValue, { color: holdPositive ? colors.avoid : colors.bet }]}>
           {formatPct(Math.abs(m.dkHoldPct))}
         </Text>
@@ -526,7 +625,7 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
       </View>
       <Text style={styles.corrHint}>
         {lineShop.shoppedCount} leg{lineShop.shoppedCount === 1 ? '' : 's'} priced better at {books}.
-        Display-only — the DraftKings hand-off uses DK prices.
+        Display-only — the odds above are DraftKings’. Tap a book in Open with to place at its price.
       </Text>
     </View>
   );
@@ -572,6 +671,17 @@ function SlipBody({
   onClear: () => void;
   onClearStale: () => void;
 }) {
+  // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
+  // and four labels below attribute the slip's number to DK only when it is.
+  const allDk = legs.every((l) => l.dkPriced !== false);
+  // Every leg a Stats line the user chose themselves? Then nothing on this
+  // slip is a model's number, and two labels below must not say it is.
+  const modelBacked = legs.some((l) => !isLineLeg(l));
+  const dkException = useMemo(() => {
+    const off = legs.filter((l) => l.dkPriced === false);
+    if (off.length === 0) return null;
+    return off.map((l) => `${l.label} at ${bookName(l.pricedAt ?? '')}`).join(' and ');
+  }, [legs]);
   const staleNote =
     staleCount > 0 ? (
       <Pressable
@@ -586,8 +696,8 @@ function SlipBody({
     ) : removedCount > 0 ? (
       <View style={styles.missingNote}>
         <Text style={styles.missingNoteText}>
-          {removedCount} selection{removedCount === 1 ? ' was' : 's were'} removed — no longer
-          available today
+          {removedCount} selection{removedCount === 1 ? ' was' : 's were'} removed — the line moved
+          or the game started
         </Text>
       </View>
     ) : null;
@@ -644,7 +754,10 @@ function SlipBody({
         </View>
 
         <View style={styles.statsRow}>
-          <Stat label="Model" value={formatPct(metrics.parlayProb)} />
+          <Stat
+            label={modelBacked ? 'Model' : 'Implied'}
+            value={formatPct(metrics.parlayProb)}
+          />
           <Stat
             label="EV"
             value={formatPctSigned(metrics.ev)}
@@ -655,7 +768,7 @@ function SlipBody({
             value={formatPctSigned(metrics.edgeVsDk)}
             color={metrics.edgeVsDk >= 0 ? colors.bet : colors.avoid}
           />
-          <Stat label="DK imp." value={formatPct(metrics.dkImpliedProb)} />
+          <Stat label={allDk ? 'DK imp.' : 'Implied'} value={formatPct(metrics.dkImpliedProb)} />
         </View>
 
         <View style={styles.stakeRow}>
@@ -663,13 +776,13 @@ function SlipBody({
           <Stat label="Potential payout" value={formatCurrency(payout)} />
         </View>
 
-        <CorrelatedExtras m={metrics} />
+        <CorrelatedExtras m={metrics} allDk={allDk} />
 
         <BetslipBooksRow legs={legs} />
 
         <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
-        <ParlayHoldNote ev={metrics.ev} />
+        <ParlayHoldNote ev={metrics.ev} exception={dkException} modelBacked={modelBacked} />
 
         <View style={styles.legsList}>
           {legs.map((leg) => (
@@ -1082,6 +1195,11 @@ const styles = StyleSheet.create({
     backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
+  },
+  handoffFallback: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   dkBtnText: {
     color: '#000',

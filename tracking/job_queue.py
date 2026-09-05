@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 import config
+from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 
 MAX_ATTEMPTS = 3
@@ -107,10 +108,18 @@ _INDEX_NAMES = ("worker_jobs_pending_idx", "worker_jobs_dedupe_idx")
 def ensure_schema(conn) -> None:
     # Lock-taking DDL that also forces a PostgREST schema-cache reload on every
     # call; skip it once the catalog matches (data/ddl_guard.py).
+    # rls= and revoked_from= are load-bearing, not decoration: without them this
+    # returns True on a database where worker_jobs exists but is still
+    # anon-granted and RLS-off, and the lock_down() below never runs.
     if schema_is_current(conn, "worker_jobs", columns=("dedupe_key",),
-                         indexes=_INDEX_NAMES):
+                         indexes=_INDEX_NAMES, rls=True,
+                         revoked_from=API_ROLES):
         return
     conn.execute(DDL)
+    # Revoke + RLS beside the CREATE, not in a migration: this table is created
+    # on demand, so a one-off sweep is undone by the next run against a database
+    # where it does not yet exist. lock_down() carries its own catalog gate.
+    lock_down(conn, "worker_jobs")
     conn.execute("CREATE INDEX IF NOT EXISTS worker_jobs_pending_idx "
                  "ON worker_jobs (status, created_at)")
     # dedupe_key arrived after the table did, and CREATE TABLE IF NOT EXISTS
@@ -243,6 +252,67 @@ def _job_historical_odds(**kw):
         credit_cap=kw["credit_cap"])
 
 
+def _job_ncaaf_prop_odds(**kw):
+    from data.ingestors.ncaaf_prop_odds_ingestor import (
+        probe as ncaaf_prop_probe, run_ncaaf_prop_odds_ingestor)
+    if kw["probe"]:
+        return ncaaf_prop_probe(kw["date"], kw["limit_events"],
+                                with_alternates=kw["with_alternates"])
+    return run_ncaaf_prop_odds_ingestor(kw["date"],
+                                        with_alternates=kw["with_alternates"])
+
+
+def _job_market_coverage(**kw):
+    from scripts.probe_market_coverage import probe
+    return probe(kw["sport"], kw["markets"])
+
+
+def _validate_market_coverage(args: dict) -> dict:
+    """Which books serve which prop markets. Writes nothing.
+
+    Stored data cannot answer this: a market we never REQUEST has no rows, and
+    no query can tell "no book prices it" from "we never asked". So this asks
+    -- one market per call, which costs the same as chunking and attributes an
+    unsupported key exactly.
+    """
+    from data.ingestors.odds_ingestor import SPORT_KEYS
+    sport = str(args.get("sport") or "").upper()
+    if sport not in SPORT_KEYS:
+        raise ValueError(f"unknown sport {sport!r}")
+    # `markets` ABSENT means "every candidate for this sport". An explicit
+    # empty list is a caller error, not a full sweep -- `or None` would have
+    # quietly turned one into the other, and a probe that asks 30 markets when
+    # it was told to ask none is a paid call nobody requested.
+    markets = args.get("markets")
+    if markets is not None:
+        if not isinstance(markets, list):
+            raise ValueError("markets must be a list")
+        markets = [str(m) for m in markets]
+        if not 1 <= len(markets) <= 60:
+            raise ValueError(f"markets out of range: {len(markets)}")
+    return {"sport": sport, "markets": markets}
+
+
+def _validate_ncaaf_prop_odds(args: dict) -> dict:
+    """College props, measured before they are scheduled.
+
+    `probe: true` writes nothing and reports credits per event, which markets
+    the API actually serves for college, and what a full pass would cost --
+    the number Matt asked for before this runs on a schedule. The sample is
+    capped hard: a "probe" that walks a 70-game Saturday is not a probe.
+    """
+    date = args.get("date")
+    if date:
+        datetime.strptime(str(date), "%Y-%m-%d")   # raises if malformed
+    limit = int(args.get("limit_events") or 3)
+    if not 1 <= limit <= 10:
+        raise ValueError(f"limit_events out of range for a probe: {limit}")
+    return {"date": str(date) if date else None,
+            "probe": bool(args.get("probe", True)),
+            "limit_events": limit,
+            "with_alternates": bool(args.get("with_alternates", True))}
+
+
 def _validate_historical_odds(args: dict) -> dict:
     from data.ingestors.odds_ingestor import SPORT_KEYS
 
@@ -345,6 +415,49 @@ def _job_publish_x_results(**kw):
         conn.close()
 
 
+def _job_publish_discord_signals(**kw):
+    """Run the ordinary Discord signals producer NOW, instead of at :17.
+
+    WHY THIS EXISTS. 2026-09-05, Matt: two Week 1 nfl_wind_totals picks were on
+    the app board and had never reached Discord -- the capture leak #489 fixed
+    an hour earlier. By then the fix was deployed and both picks were
+    selectable, so nothing was left to repair; the only thing missing was
+    something to RUN the producer. notify_discord_signals is called from
+    exactly one place, the refresh pass at :17, and that pass had just been
+    killed mid-run by the deploy chain (the scheduler restarted 15:22:48Z).
+    "Post this pick now" therefore had no answer but "wait for the next cron",
+    which §1b says is not an answer -- the worker holds the webhooks and the
+    queue polls every five minutes.
+
+    NOTHING IS BYPASSED, and that is the whole safety argument. This calls the
+    ordinary producer by its ordinary name: the started-game guard still holds,
+    the model_action_thresholds cut still holds, and the push_sent ledger still
+    holds, so the job posts what is unposted and nothing else. Run it twice and
+    the second run posts zero. It changes WHEN the producer runs, never what it
+    selects -- which is also why it needs no date-list gate the way
+    notify_discord_restate does: a restatement re-publishes something already
+    sent, this one can only ever send something that never was.
+
+    target_date is optional and bounds only picks with NO commence_time (§the
+    _new_signals docstring); a pick whose game has a real start time in the
+    future is reached whatever date is passed. Omit it for "today".
+    """
+    from tracking.discord_notifier import notify_discord_signals
+
+    target_date = kw.get("target_date") or None
+    posted = notify_discord_signals(target_date=target_date)
+    return {"target_date": target_date or "today", "posted": posted}
+
+
+def _validate_publish_discord_signals(args: dict) -> dict:
+    raw = str(args.get("target_date") or "").strip()
+    if not raw:
+        return {}
+    if len(raw) != 10 or raw.count("-") != 2:
+        raise ValueError("target_date must be YYYY-MM-DD")
+    return {"target_date": raw}
+
+
 def _validate_publish_x_results(args: dict) -> dict:
     game_date = str(args.get("game_date") or "").strip()
     if len(game_date) != 10 or game_date.count("-") != 2:
@@ -354,12 +467,16 @@ def _validate_publish_x_results(args: dict) -> dict:
 
 JOBS = {
     "publish_x_results": (_job_publish_x_results, _validate_publish_x_results),
+    "publish_discord_signals": (_job_publish_discord_signals,
+                                _validate_publish_discord_signals),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
     "game_log_backfill": (_job_game_log_backfill, _validate_game_log_backfill),
+    "ncaaf_prop_odds": (_job_ncaaf_prop_odds,  _validate_ncaaf_prop_odds),
+    "market_coverage": (_job_market_coverage,  _validate_market_coverage),
 }
 
 

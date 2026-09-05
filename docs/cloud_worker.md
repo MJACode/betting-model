@@ -74,6 +74,58 @@ Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cade
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
 
+### College football player props
+
+`data/ingestors/ncaaf_prop_odds_ingestor.py`, 2026-09-05. **9am / 1pm / 6pm ET
+daily**, gated on `RUN_NCAAF_PROP_ODDS=1` (code default is still `0`, so it is
+one Railway variable away from off).
+
+A college Saturday is 120 games against MLB's ~15, and a prop pull is one paid
+call per event, so this is the one ingestor whose cost is set by slate size
+rather than cadence. It is scoped to games DraftKings has already lined
+(`NCAAF_PROP_REQUIRE_DK_LINE=1`, 70 of 120 on the measured Saturday) under a
+hard per-pass ceiling (`NCAAF_PROP_MAX_EVENTS=80`), and the measured cost
+comes from the probe rather than an estimate:
+
+```
+python -m data.ingestors.ncaaf_prop_odds_ingestor --probe    # writes nothing
+```
+
+or as a worker job, which is how it runs here — `ncaaf_prop_odds` with
+`{"probe": true}` (`jobs/declared_jobs.json`). The probe reports credits per
+event, WHICH of the 24 requested markets The Odds API actually serves for
+college (it uses one key namespace for both football leagues and documents
+neither), which books answer, and what one full scoped pass would cost.
+
+**What the probe measured, 2026-09-05** (job `ncaaf_prop_odds`, `{"probe":
+true}`, verified against `api_call_log` rather than its own header delta):
+
+| | |
+|---|---|
+| credits per event | **8.7** |
+| events the feed lists | **68** (not the 120 in `games` — the Odds API never carries the Division III fixtures) |
+| one full pass | **~590 credits** |
+| markets served | 13 of 20 requested, from 7 books |
+| rejected (422) | 0 |
+
+Three passes on a Saturday is therefore **~1,800 credits**, and hourly would
+be ~8,300 — both affordable, which is why the cadence is set by how often a
+college prop line is worth re-reading rather than by cost. 9am / 1pm / 6pm ET
+puts one fresh number before each kick wave; minute 35 keeps it clear of the
+:17 refresh pass and the :25 NFL prop card.
+
+Scheduled **daily**, not Saturday-only: college also plays Thursday and Friday
+nights. A day with no games costs nothing — the ingestor lists events first
+(that call is free, measured) and returns before any paid call.
+
+**A prior estimate here was wrong by ~12x and is worth remembering.** Before
+the probe, this section projected ~6,800 credits for one pass, derived from
+MLB's cost per market. Two assumptions did it: that our 120-game slate was
+the population (the feed lists 68), and that credits scale with markets
+REQUESTED (they scale with what comes back — college serves few markets at
+few books, so a call is 1.7 credits, not 12). An estimate extrapolated from a
+real measurement is still an estimate.
+
 ### The NFL wind-totals card
 
 The standalone `nfl/` package's weekly bet card (`docs/sports/nfl.md`), automated on the
