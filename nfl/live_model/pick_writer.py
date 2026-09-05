@@ -180,28 +180,53 @@ _INSERT_SQL = """
 """
 
 
-def _lane_is_locked(conn, game_id: str, model_id: str) -> bool:
-    """Does this lane already hold an unsettled live BET for this game?
+def _lane_is_locked(conn, game_id: str, model_id: str,
+                    player_key: str | None) -> bool:
+    """Does this PLAYER's lane already hold an unsettled live BET in this game?
 
     The FIRST-SIGNAL LIVE LOCK (§1c, config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL):
-    the first BET in a (game, model) lane is the bet of record at its line and
-    price, and is never re-priced however far the edge later moves.
+    the first BET in a lane is the bet of record at its line and price, and is
+    never re-priced however far the edge later moves.
 
-    The canonical implementation is models.scorer._locked_live_lanes, which the
-    MLB and NCAAF live loops call. This package CANNOT import it: `from models.x
-    import` under nfl/ resolves to whichever `models` package sys.path reaches
-    first, and both roots are on the path on every scheduled run --
-    tests/test_nfl_model_imports.py fails the build over exactly that. So the
-    predicate is restated here, and tests/test_nfl_live_pick_writer.py asserts it
-    still matches the scorer's, which is the drift guard the shared import would
-    otherwise have given for free.
+    SCOPED BY PLAYER, WHICH IS A DELIBERATE DIVERGENCE FROM
+    models.scorer._locked_live_lanes. That one keys on (game, model) because
+    every lane it serves is a GAME-level proposition -- one total, one
+    moneyline, one runline per game -- so the lane and the game are the same
+    thing. This lane is a PLAYER PROP: one game carries a proposition per
+    quarterback, and locking on (game, model) meant the first QB's bet froze the
+    lane for everyone else in the game. On a 13-game Sunday with two passers a
+    side that silently blocks roughly half the eligible bets, and it looks
+    exactly like "the model found nothing".
+
+    Shipped that way in #489 and fixed here. The pre-game NFL prop models have
+    the same shape and the same answer: the proposition is the player, not the
+    game.
     """
     rows = conn.execute("""
-        SELECT DISTINCT model_id FROM picks
-        WHERE game_id = %s AND is_live = TRUE
-          AND signal_type = 'BET' AND result IS NULL
-    """, (game_id,)).fetchall()
-    return model_id in {r[0] for r in rows}
+        SELECT 1 FROM picks
+        WHERE game_id = %s AND model_id = %s
+          AND COALESCE(player_key, '') = COALESCE(%s, '')
+          AND is_live = TRUE AND signal_type = 'BET' AND result IS NULL
+        LIMIT 1
+    """, (game_id, model_id, player_key)).fetchall()
+    return bool(rows)
+
+
+# Decline reasons that are a MARKET OPINION and belong in `picks` as AVOID, the
+# way every other live lane records its declines (mlb_live_total_runs 95 BET /
+# 73 AVOID, ncaaf_live_total 20/7 -- nfl_live_prop was the only lane whose
+# declines lived in a JSONL file nobody could query).
+#
+# Everything else the executor refuses -- a stale quote, a degenerate state, no
+# Kelly stake, the daily exposure cap -- is PLUMBING, not a view on the market.
+# Those stay in the audit log only: they answer "is a guard eating candidates",
+# which is an operations question, and writing them here would be the "hundreds
+# of dead rows a day" CLAUDE.md warns about for live lanes.
+_AVOID_REASONS = ("below_threshold", "price_past_ceiling")
+
+
+def _is_market_opinion(reason: str | None) -> bool:
+    return str(reason or "").split(":", 1)[0] in _AVOID_REASONS
 
 
 class PicksRecorder:
@@ -216,6 +241,8 @@ class PicksRecorder:
     def __init__(self, bankroll: float | None = None, conn_factory=None):
         self._bankroll = bankroll
         self._conn_factory = conn_factory
+        # (game, model, player, side) -> the (line, price) last written as AVOID.
+        self._avoid_sigs: dict[tuple, tuple] = {}
 
     def _bankroll_value(self) -> float:
         if self._bankroll is not None:
@@ -230,12 +257,95 @@ class PicksRecorder:
         return get_connection()
 
     def __call__(self, decision) -> None:
-        if not getattr(decision, "bet", False):
-            return                      # passes live in the JSONL log only
+        # THE BET PATH RUNS FIRST AND ALONE (Matt, 2026-09-05: recording
+        # declines "shouldn't prevent bets from being live"). Nothing in the
+        # AVOID path can delay, block or fail a bet: it is a separate branch,
+        # separately guarded, and a decline that cannot be written costs a row
+        # in a research table and nothing else.
+        if getattr(decision, "bet", False):
+            try:
+                self._write(decision)
+            except Exception:           # noqa: BLE001
+                log.exception("live pick write failed; decision stands in the JSONL log")
+            return
+        if _is_market_opinion(getattr(decision, "reason", None)):
+            try:
+                self._write_avoid(decision)
+            except Exception:           # noqa: BLE001
+                log.exception("live AVOID write failed; decision stands in the JSONL log")
+
+    def _write_avoid(self, decision) -> None:
+        """Record a model-level decline as an AVOID row.
+
+        WHY AT ALL. Every other live lane already does this -- mlb_live_total_runs
+        carries 95 BET and 73 AVOID, ncaaf_live_total 20 and 7 -- and CLAUDE.md's
+        evaluation rule says any analysis of thresholds or timing must see the
+        whole population, not just what cleared the live bar. nfl_live_prop was
+        the only lane whose declines lived in a JSONL file on a Railway volume,
+        so its cut could never be swept against its own near-misses.
+
+        WRITTEN ONLY WHEN THE PROPOSITION CHANGES, which is what keeps this from
+        becoming churn. The executor evaluates every candidate on every poll --
+        at a 5s cadence that is thousands of identical opinions an hour -- while
+        the thing a reader cares about is the line and price on offer. Same rule
+        and same reasoning as models.live_scorer._lane_signature: side, signal,
+        line, price, and deliberately NOT model_probability, which drifts on
+        every snap while the bet on offer is unchanged.
+
+        The signature cache is per worker process. A restart re-writes one row
+        per live lane, which is a handful, and the alternative (a DB read per
+        candidate per poll) is the pool exhaustion CLAUDE.md documents for the
+        NCAAF loop.
+        """
+        player_key = _norm_player(decision.player)
+        side = str(decision.side or "").lower()
+        key = (decision.game_id, decision.model_id, player_key or "", side)
+        sig = (
+            None if decision.line is None else round(float(decision.line), 2),
+            None if decision.price is None else round(float(decision.price), 2),
+        )
+        if self._avoid_sigs.get(key) == sig:
+            return                      # same proposition, already recorded
+
+        ctx = decision.context or {}
+        conn = self._connect()
         try:
-            self._write(decision)
-        except Exception:               # noqa: BLE001
-            log.exception("live pick write failed; decision stands in the JSONL log")
+            game_id = resolve_game_id(conn, ctx.get("home_team"),
+                                      ctx.get("away_team"), decision.ts)
+            if game_id is None:
+                return
+
+            # A lane holding the bet of record is not also "avoided". Same rule
+            # the MLB loop applies by excluding locked lanes from its rewrite.
+            from config import LOCK_LIVE_PICKS_AT_FIRST_SIGNAL
+            if LOCK_LIVE_PICKS_AT_FIRST_SIGNAL and _lane_is_locked(
+                    conn, game_id, decision.model_id, player_key):
+                self._avoid_sigs[key] = sig
+                return
+
+            # Replace this lane's standing AVOID, never a BET (§1c). The
+            # signal_type guard is what makes that structural rather than
+            # incidental -- the same guard ncaaf_live.gameday.write_picks uses.
+            conn.execute("""
+                DELETE FROM picks
+                WHERE game_id = %s AND model_id = %s
+                  AND COALESCE(player_key, '') = COALESCE(%s, '')
+                  AND pick_side = %s
+                  AND is_live = TRUE AND result IS NULL
+                  AND signal_type <> 'BET'
+            """, (game_id, decision.model_id, player_key, side))
+            row = build_pick(decision, game_id, self._bankroll_value())
+            row["signal_type"] = "AVOID"
+            row["kelly_fraction"] = 0.0
+            row["recommended_bet"] = 0.0
+            conn.execute(_INSERT_SQL, row)
+            conn.commit()
+            self._avoid_sigs[key] = sig
+        finally:
+            try:
+                conn.close()
+            except Exception:           # noqa: BLE001
+                pass
 
     def _write(self, decision) -> None:
         from config import LOCK_LIVE_PICKS_AT_FIRST_SIGNAL
@@ -253,9 +363,10 @@ class PicksRecorder:
             # record and is never re-priced. Same helper the MLB and NCAAF live
             # loops use, so the three lanes cannot drift on what "locked" means.
             if LOCK_LIVE_PICKS_AT_FIRST_SIGNAL and _lane_is_locked(
-                    conn, game_id, decision.model_id):
-                log.info("lane %s locked for %s -- bet of record stands",
-                         decision.model_id, game_id)
+                    conn, game_id, decision.model_id,
+                    _norm_player(decision.player)):
+                log.info("lane %s/%s locked for %s -- bet of record stands",
+                         decision.model_id, decision.player, game_id)
                 return
 
             row = build_pick(decision, game_id, self._bankroll_value())

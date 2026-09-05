@@ -218,25 +218,85 @@ def test_the_recorder_never_raises_into_the_hot_path():
 
 # ── the lock, and the drift guard for restating it ───────────────────────────
 
-def test_the_lane_lock_matches_the_scorers_canonical_predicate():
-    """pick_writer restates models.scorer._locked_live_lanes' query because it
-    cannot import it -- `from models.x import` under nfl/ resolves to whichever
-    `models` package sys.path reaches first, and tests/test_nfl_model_imports.py
-    fails the build over that. Restating it means the two can drift, so pin the
-    predicate here: this is the guard the shared import would have been.
+def test_the_lane_lock_shares_the_scorers_meaning_of_locked():
+    """"Locked" has to mean the same thing everywhere: an unsettled live BET.
+
+    pick_writer restates models.scorer._locked_live_lanes' predicate because it
+    cannot import it (`from models.x import` under nfl/ resolves to whichever
+    `models` package sys.path reaches first, and test_nfl_model_imports fails the
+    build over it). Restating means the two can drift, so the shared clauses are
+    pinned here -- but as CLAUSES, not as one string, because the two are
+    deliberately not identical. See the next test for the part that differs.
     """
     import inspect
     import re
     from live_model.pick_writer import _lane_is_locked
     from models.scorer import _locked_live_lanes
 
-    def _clauses(fn):
+    def _sql(fn):
         src = inspect.getsource(fn)
-        sql = src[src.index("SELECT"):src.index('"""', src.index("SELECT"))]
-        return re.sub(r"\s+", " ", sql).strip().lower()
+        i = src.index("SELECT")
+        return re.sub(r"\s+", " ", src[i:src.index('"""', i)]).strip().lower()
 
-    assert _clauses(_lane_is_locked) == _clauses(_locked_live_lanes), (
-        "the live lane lock has drifted from the scorer's canonical version")
+    ours, theirs = _sql(_lane_is_locked), _sql(_locked_live_lanes)
+    for clause in ("is_live = true", "signal_type = 'bet'", "result is null",
+                   "game_id = %s"):
+        assert clause in ours, f"{clause} missing from the NFL lock"
+        assert clause in theirs, f"{clause} missing from the scorer's lock"
+
+
+def test_the_lock_is_scoped_by_player_not_just_by_game():
+    """The #489 bug, pinned.
+
+    models.scorer._locked_live_lanes keys on (game, model) because every lane it
+    serves is a GAME-level proposition -- one total, one moneyline per game. This
+    lane is a PLAYER PROP: a game carries a proposition per quarterback. Locking
+    on (game, model) meant the first QB's bet froze the lane for everyone else in
+    that game, which on a 13-game Sunday silently blocks roughly half the
+    eligible bets and looks exactly like the model finding nothing.
+    """
+    import inspect
+    from live_model.pick_writer import _lane_is_locked
+
+    src = inspect.getsource(_lane_is_locked)
+    assert "player_key" in src, "the lock must be scoped by player"
+    assert "model_id = %s" in src, (
+        "and by model -- a game-wide lock would block other lanes too")
+
+
+def test_two_players_in_one_game_can_both_get_a_bet():
+    """The behavioural half. A source assertion alone would pass against a lock
+    that names player_key and still ignores it."""
+    seen = []
+
+    class _TwoQBConn(_Conn):
+        def __init__(self):
+            super().__init__()
+            self.locked_for = {"CJ STROUD"}
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+            if "SELECT 1 FROM picks" in sql:
+                # params: (game_id, model_id, player_key)
+                self._last_lock = params[2] in self.locked_for
+            if "INSERT INTO picks" in sql:
+                seen.append(params["player_key"])
+            return self
+
+        def fetchall(self):
+            last = self.executed[-1][0]
+            if "FROM games" in last:
+                return [("NFL_2026_01_BUF_HOU",)]
+            if "SELECT 1 FROM picks" in last:
+                return [(1,)] if self._last_lock else []
+            return []
+
+    conn = _TwoQBConn()
+    rec = PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)
+    rec(_Decision(player="C.J. Stroud"))    # already locked -> skipped
+    rec(_Decision(player="Josh Allen"))     # different player -> must write
+    assert seen == ["JOSH ALLEN"], (
+        f"the second quarterback was blocked by the first: {seen}")
 
 
 def test_a_locked_lane_writes_nothing_further():
@@ -392,3 +452,118 @@ def test_the_ceiling_is_a_refusal_not_a_filter():
         "the ceiling must return a recorded PASS, not silently skip")
     # Before the EV test: eligibility, not an edge question.
     assert i < src.index("threshold = EV_THRESHOLDS[model_id]")
+
+
+# ── declines are recorded, like every other live lane ────────────────────────
+
+class _AvoidConn(_Conn):
+    """Resolves the game, reports the lane unlocked, records what was written."""
+
+    def __init__(self):
+        super().__init__()
+        self.inserts = []
+        self.deletes = []
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+        if "INSERT INTO picks" in sql:
+            self.inserts.append(params)
+        if "DELETE FROM picks" in sql:
+            self.deletes.append(params)
+        return self
+
+    def fetchall(self):
+        last = self.executed[-1][0]
+        return [("NFL_2026_01_BUF_HOU",)] if "FROM games" in last else []
+
+
+def _mk_decline(reason, **over):
+    d = _Decision(bet=False, **over)
+    d.reason = reason
+    return d
+
+
+def test_a_market_opinion_decline_is_written_as_avoid():
+    """Every other live lane records its declines in `picks`: mlb_live_total_runs
+    95 BET / 73 AVOID, ncaaf_live_total 20/7. nfl_live_prop was the only one whose
+    declines lived in a JSONL file nobody could query, so its cut could never be
+    swept against its own near-misses (CLAUDE.md's evaluation rule)."""
+    conn = _AvoidConn()
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)(
+        _mk_decline("below_threshold:0.0210<0.0600"))
+    assert len(conn.inserts) == 1
+    assert conn.inserts[0]["signal_type"] == "AVOID"
+    assert conn.inserts[0]["kelly_fraction"] == 0.0
+    assert conn.inserts[0]["recommended_bet"] == 0.0
+
+
+def test_the_juice_ceiling_decline_is_also_a_market_opinion():
+    conn = _AvoidConn()
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)(
+        _mk_decline("price_past_ceiling:-250<-140"))
+    assert len(conn.inserts) == 1 and conn.inserts[0]["signal_type"] == "AVOID"
+
+
+@pytest.mark.parametrize("reason", [
+    "stale_quote:212s", "degenerate_model_prob", "no_kelly_stake",
+    "daily_exposure_cap", "unknown_model:nfl_live_deriv",
+])
+def test_plumbing_refusals_stay_out_of_picks(reason):
+    """A stale quote is not a view on the market. Writing these would be the
+    "hundreds of dead rows a day" CLAUDE.md warns about for live lanes -- and
+    they answer an operations question, which the JSONL log already serves."""
+    conn = _AvoidConn()
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)(_mk_decline(reason))
+    assert conn.inserts == [] and conn.executed == []
+
+
+def test_an_unchanged_proposition_is_not_rewritten():
+    """The executor evaluates every candidate on every poll -- at 5s that is
+    thousands of identical opinions an hour. Same rule as
+    models.live_scorer._lane_signature: rewrite on the PROPOSITION changing."""
+    conn = _AvoidConn()
+    rec = PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)
+    for _ in range(5):
+        rec(_mk_decline("below_threshold:0.02<0.06", line=32.5, price=-115))
+    assert len(conn.inserts) == 1, "an unchanged line and price wrote twice"
+
+
+def test_a_moved_line_is_rewritten():
+    """The mirror: a dedup that never invalidates would record the first
+    opinion of the game and nothing after it."""
+    conn = _AvoidConn()
+    rec = PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)
+    rec(_mk_decline("below_threshold:0.02<0.06", line=32.5, price=-115))
+    rec(_mk_decline("below_threshold:0.02<0.06", line=33.5, price=-115))
+    rec(_mk_decline("below_threshold:0.02<0.06", line=33.5, price=-120))
+    assert len(conn.inserts) == 3
+    assert len(conn.deletes) == 3, "each rewrite must replace the standing row"
+
+
+def test_the_avoid_rewrite_can_never_delete_a_bet():
+    """§1c. The standing AVOID is replaced; a BET is the bet of record and is
+    never removed -- the same guard ncaaf_live.gameday.write_picks carries."""
+    conn = _AvoidConn()
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)(
+        _mk_decline("below_threshold:0.02<0.06"))
+    delete_sql = [s for s, _ in conn.executed if "DELETE FROM picks" in s][0]
+    assert "signal_type <> 'BET'" in delete_sql
+
+
+def test_recording_a_decline_can_never_break_a_bet():
+    """Matt, 2026-09-05: recording declines "shouldn't prevent bets from being
+    live". The two paths are separate branches with separate guards, so a
+    failing AVOID write costs a research row and nothing else."""
+    def explode():
+        raise RuntimeError("connection refused")
+
+    # The AVOID path swallowing its own failure.
+    PicksRecorder(bankroll=1000.0, conn_factory=explode)(
+        _mk_decline("below_threshold:0.02<0.06"))
+
+    # And a bet still writes when the AVOID cache is populated for that lane.
+    conn = _AvoidConn()
+    rec = PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)
+    rec(_mk_decline("below_threshold:0.02<0.06"))
+    rec(_Decision())
+    assert any(i["signal_type"] == "BET" for i in conn.inserts)
