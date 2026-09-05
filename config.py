@@ -1009,6 +1009,21 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
+    # NFL LIVE pass attempts. Every other entry in this dict TIGHTENS the house
+    # default; this one loosens it, and it has to.
+    #
+    # This lane's cut is EV (nfl/live_model/config.EV_THRESHOLDS), applied by
+    # the executor BEFORE a decision is ever recorded as a bet. The -200 default
+    # would re-cut that after the fact: a live prop the lane bet at -250 gets
+    # written to `picks` and then hidden by the app's passesActionFilter and the
+    # Discord card's threshold join. Written but not shown is precisely the
+    # divergence #489 removed, and it would have been reintroduced for the one
+    # lane that release took live -- by a default nobody chose for it.
+    #
+    # A price ceiling on live props may well be wanted. It belongs in the
+    # EXECUTOR, where the lane declines the bet, not here, where the pick is
+    # taken and then concealed from the person who has to place it.
+    "nfl_live_prop":             -100000,
 }
 
 
