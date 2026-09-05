@@ -425,6 +425,22 @@ export type RootStackParamList = {
     // bounces them straight back, the same round-trip the Stats tab ran before
     // its line pills became sportsbook links (2026-09-04).
     fromParlay?: boolean;
+    /**
+     * Tonight's matchup in full — "vs LAA · S. Gray 5.90 ERA (R)" — and the
+     * letter the board graded it.
+     *
+     * Carried as params rather than refetched here: the Stats board already
+     * holds both, and this screen would otherwise pull the whole matchup view
+     * to print one line. Passed from the board ONLY, so a player opened from
+     * anywhere else simply shows no matchup line.
+     *
+     * They exist because the MATCHUP column became a bare grade on 2026-09-05
+     * and the FACT behind it had nowhere else to go — Matt's own alternative
+     * on 2026-09-04 was "have it be in the player data when you click on a
+     * record". Without this the ERA left the product for every sighted user.
+     */
+    matchupText?: string;
+    matchupGrade?: string;
   };
   Explainer: undefined;
   ConnectSportsbook: undefined;

@@ -115,7 +115,21 @@ which is exactly when users open it.
   around body text. Numbers in tiles may cap with `maxFontSizeMultiplier`,
   and that is the one place it is fine.
 - Contrast: `textTertiary` on `bg` is at the AA floor; do not put it on a
-  coloured chip.
+  coloured chip. On `bgCard` at 11pt it is ~3.4:1 and is BELOW the floor —
+  size does not exempt it, 11pt is not "large text".
+- **A colour ramp that encodes a RANK must vary in lightness, not only in
+  hue.** Tuning every step of a scale to the same contrast ratio makes it
+  iso-luminant: the reader can see that two rows differ but not which is
+  better, and the hues collapse together under deuteranopia. This shipped
+  once (2026-09-05, the matchup grade ramp: relative luminance 0.1596 / 0.1603
+  / 0.1570 / 0.1528 across A / B / C / D — B was *lighter* than A). Prefer
+  fewer steps that differ in lightness over more steps that do not, and let
+  the label carry the fine resolution. AA caps luminance at ~0.183 on white,
+  so on a light surface the ramp runs lightest at the good end and darkest at
+  the bad end.
+- Two traffic lights on one screen should share one ramp. An accessible scale
+  next to an inaccessible one is worse than either alone: the board reads as
+  having two standards, and the primary number is usually the one left behind.
 
 ## 6. Layout and safe areas
 
