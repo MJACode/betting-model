@@ -229,6 +229,36 @@ def _job_historical_odds(**kw):
         credit_cap=kw["credit_cap"])
 
 
+def _job_ncaaf_prop_odds(**kw):
+    from data.ingestors.ncaaf_prop_odds_ingestor import (
+        probe as ncaaf_prop_probe, run_ncaaf_prop_odds_ingestor)
+    if kw["probe"]:
+        return ncaaf_prop_probe(kw["date"], kw["limit_events"],
+                                with_alternates=kw["with_alternates"])
+    return run_ncaaf_prop_odds_ingestor(kw["date"],
+                                        with_alternates=kw["with_alternates"])
+
+
+def _validate_ncaaf_prop_odds(args: dict) -> dict:
+    """College props, measured before they are scheduled.
+
+    `probe: true` writes nothing and reports credits per event, which markets
+    the API actually serves for college, and what a full pass would cost --
+    the number Matt asked for before this runs on a schedule. The sample is
+    capped hard: a "probe" that walks a 70-game Saturday is not a probe.
+    """
+    date = args.get("date")
+    if date:
+        datetime.strptime(str(date), "%Y-%m-%d")   # raises if malformed
+    limit = int(args.get("limit_events") or 3)
+    if not 1 <= limit <= 10:
+        raise ValueError(f"limit_events out of range for a probe: {limit}")
+    return {"date": str(date) if date else None,
+            "probe": bool(args.get("probe", True)),
+            "limit_events": limit,
+            "with_alternates": bool(args.get("with_alternates", True))}
+
+
 def _validate_historical_odds(args: dict) -> dict:
     from data.ingestors.odds_ingestor import SPORT_KEYS
 
@@ -345,6 +375,7 @@ JOBS = {
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
+    "ncaaf_prop_odds": (_job_ncaaf_prop_odds,  _validate_ncaaf_prop_odds),
 }
 
 

@@ -220,6 +220,39 @@ const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
   'points', 'rebounds', 'assists', 'threes', 'pra',
 ]);
 
+/**
+ * NCAAF stat key → the player_prop_odds market it is priced in.
+ *
+ * College football is the one sport whose board has lines but no models
+ * (2026-09-05: four game-level NCAAF models, no prop model, and Matt asked
+ * for the props anyway — "Yes do it"). Every other sport reaches its market
+ * THROUGH its model id, which is why NCAAF rows showed a dash however much
+ * data was stored: rawPropModelForStat returns null for NCAAF by design, so
+ * the market lookup returned null with it. This map is the direct route, and
+ * it only exists for NCAAF.
+ *
+ * Keys mirror config.PROP_MARKETS_NCAAF. A stat with no entry has no market
+ * we pull — CFBD reports solo tackles and passes defended, no book prices
+ * them — and its column correctly stays blank rather than borrowing a
+ * neighbouring market's number.
+ */
+const NCAAF_STAT_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = {
+  passing_yards: 'player_pass_yds',
+  passing_tds: 'player_pass_tds',
+  completions: 'player_pass_completions',
+  attempts: 'player_pass_attempts',
+  interceptions: 'player_pass_interceptions',
+  rushing_yards: 'player_rush_yds',
+  carries: 'player_rush_attempts',
+  receptions: 'player_receptions',
+  receiving_yards: 'player_reception_yds',
+  // "Scores a touchdown": a Yes/No market the ingestor stores at the 0.5 line,
+  // which is what a 0.5 rush+rec TD board row asks.
+  rush_rec_tds: 'player_anytime_td',
+  def_tackles: 'player_tackles_assists',
+  def_sacks: 'player_sacks',
+};
+
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
@@ -235,10 +268,15 @@ export function propModelForStat(def: StatDef | null): string | null {
  * RBI "absent from display and not counted toward anything"); the Stats tab's
  * LINE column is the sportsbook's number, not the model's, so a retired model
  * must not blank it (Matt, 2026-09-03: "works separately from the models").
- * Null for stats no book prices (NCAAF, and anything with no market).
+ * Null for stats no book prices. NCAAF resolves through its own map rather
+ * than a model, because it has none (2026-09-05).
  */
 export function propMarketForStat(def: StatDef | null): string | null {
   if (!def) return null;
+  // NCAAF has no prop model to route through — the map above is the whole
+  // answer, and returning early keeps a shared column key (passing_yards)
+  // from ever resolving through an NFL model on a college player.
+  if (def.sport === 'NCAAF') return NCAAF_STAT_TO_MARKET[def.key] ?? null;
   const id = rawPropModelForStat(def);
   return id ? propMarketForModel(id) : null;
 }
