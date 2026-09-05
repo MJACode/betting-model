@@ -75,6 +75,28 @@ check('a same-named column from another sport resolves nothing',
 check('and the real MLB column still resolves',
   propMarketForStat(byKey('doubles')) === 'batter_doubles');
 
+console.log('\n— the two football leagues do not share a market —');
+// The first real college prop pass (2026-09-05 1pm ET) covered 31 games, 615
+// players and 7 books and returned zero rows for carries and sacks; the NFL
+// prices both. One shared catalog, one shared map, two different answers.
+for (const key of ['carries', 'def_sacks']) {
+  const college = STAT_CATALOG.find((d) => d.sport === 'NCAAF' && String(d.key) === key);
+  const pro = STAT_CATALOG.find((d) => d.sport === 'NFL' && String(d.key) === key);
+  check(`NCAAF ${key} resolves nothing`, !!college && propMarketForStat(college) === null,
+    String(college && propMarketForStat(college)));
+  check(`NFL ${key} still resolves`, !!pro && propMarketForStat(pro) !== null,
+    String(pro && propMarketForStat(pro)));
+}
+// Everything else stays shared — the exclusion is two columns, not a fork.
+for (const key of ['rushing_yards', 'receptions', 'passing_yards']) {
+  const college = STAT_CATALOG.find((d) => d.sport === 'NCAAF' && String(d.key) === key);
+  const pro = STAT_CATALOG.find((d) => d.sport === 'NFL' && String(d.key) === key);
+  if (!college || !pro) continue;
+  check(`both leagues still agree on ${key}`,
+    propMarketForStat(college) !== null && propMarketForStat(college) === propMarketForStat(pro),
+    String(propMarketForStat(college)));
+}
+
 console.log('\n— the ramp switches itself off on a rare-event column —');
 check('bands: 0.7 high, 0.5 mid, 0.2 low',
   hitRateBandOf(0.7) === 'high' && hitRateBandOf(0.5) === 'mid' && hitRateBandOf(0.2) === 'low');

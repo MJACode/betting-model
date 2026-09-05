@@ -268,6 +268,25 @@ const FOOTBALL_STAT_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = 
 };
 
 /**
+ * Columns one football league's books do not price, so the shared map above
+ * must not answer for them.
+ *
+ * The two leagues share a stat catalog and they do NOT share a market. On
+ * 2026-09-05 the first real college prop pass covered 31 games, 615 players
+ * and 7 books, and returned zero rows for `player_rush_attempts` and
+ * `player_sacks` — both of which rode in chunks whose other markets came back
+ * full, so we asked and nobody priced them. The NFL prices the same two keys
+ * (3,206 and 3,718 stored rows), so pruning them from the shared map would
+ * have blanked two working pro columns to fix two dead college ones.
+ *
+ * This is a MEASUREMENT, and it is reversible: if college books start posting
+ * carries, the entry comes out and the column fills.
+ */
+const FOOTBALL_MARKET_NOT_PRICED: Record<string, ReadonlyArray<string>> = {
+  NCAAF: ['carries', 'def_sacks'],
+};
+
+/**
  * Stats with a real market and NO model, outside football.
  *
  * The market normally comes THROUGH the model id, which is why a stat nobody
@@ -320,6 +339,7 @@ export function propMarketForStat(def: StatDef | null): string | null {
   // is the whole answer for both, and returning early keeps a shared column
   // key (passing_yards) from ever resolving through some other sport's model.
   if (def.sport === 'NCAAF' || def.sport === 'NFL') {
+    if (FOOTBALL_MARKET_NOT_PRICED[def.sport]?.includes(def.key)) return null;
     return FOOTBALL_STAT_TO_MARKET[def.key] ?? null;
   }
   const id = rawPropModelForStat(def);

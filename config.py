@@ -2049,10 +2049,19 @@ PROP_ALT_MARKETS = {
         "player_pass_completions_alternate",
         "player_pass_attempts_alternate",
         "player_rush_yds_alternate",
-        "player_rush_attempts_alternate",
         "player_reception_yds_alternate",
         "player_receptions_alternate",
-        "player_sacks_alternate",
+        # `player_rush_attempts_alternate` and `player_sacks_alternate` are
+        # gone for the same measured reason as their standard keys: zero rows
+        # across the 2026-09-05 1pm ET pass, riding chunks that otherwise
+        # returned full.
+        #
+        # 20 markets to 16 is five chunks per event down to four -- ~68 fewer
+        # CALLS per pass and ~20% off a 219.6s run. It is NOT a credit saving
+        # of any size: The Odds API bills per market RETURNED, and these
+        # returned nothing, so they were already close to free. The reason to
+        # drop them is that a request nobody answers is a lie in the config
+        # about what this sport offers.
     ],
     "NFL": [
         "player_pass_yds_alternate",
@@ -2124,11 +2133,18 @@ PROP_MARKETS_NCAAF = [
     "player_pass_attempts",
     "player_pass_interceptions",
     "player_rush_yds",
-    "player_rush_attempts",
     "player_reception_yds",
     "player_receptions",
     "player_anytime_td",
-    "player_sacks",
+    # NOT here, and NOT an oversight: `player_rush_attempts` and
+    # `player_sacks`. The first real college pass (2026-09-05 1pm ET) asked
+    # ALL 68 events -- nothing dropped for scope -- and 31 came back with
+    # props: 9,187 rows, 615 players, 7 books, 590 credits, 219.6s. Neither of
+    # these two returned a single row, and both rode in market chunks whose
+    # other members came back full, so the chunk was not lost to a 422: we
+    # asked, and nobody priced them. The coverage probe had already said the
+    # same one market per call ("supported, no book"). The NFL prices both
+    # (3,206 and 3,718 stored rows), which is why the prune is per league.
 ]
 # NOT pulled, though the feed offers them for football, because nothing can
 # DISPLAY them and an unreachable market is a credit spent on nothing

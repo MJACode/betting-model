@@ -255,12 +255,27 @@ def test_the_job_defaults_to_probing_and_caps_its_sample():
 
 # ── the app's half ───────────────────────────────────────────────────────────
 
-def _football_map() -> set[str]:
-    """The markets mobile/src/lib/statCatalog.ts can actually display."""
+def _football_map(sport: str = "NCAAF") -> set[str]:
+    """The markets mobile/src/lib/statCatalog.ts can display FOR ONE LEAGUE.
+
+    The two leagues share one catalog and one map but NOT one market: college
+    books do not price carries or sacks and the NFL does, so the map answers
+    through a per-league exclusion (FOOTBALL_MARKET_NOT_PRICED). Reading the
+    map without applying it would say NCAAF shows two columns it cannot.
+    """
     src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts",
                   encoding="utf-8").read()
     block = src.split("FOOTBALL_STAT_TO_MARKET")[1].split("};")[0]
-    return {line.split("'")[1] for line in block.splitlines() if "'player_" in line}
+    by_key = {line.split(":")[0].strip(): line.split("'")[1]
+              for line in block.splitlines() if "'player_" in line}
+
+    excl_block = src.split("FOOTBALL_MARKET_NOT_PRICED")[1].split("};")[0]
+    excluded: set[str] = set()
+    for line in excl_block.splitlines():
+        if line.strip().startswith(f"{sport}:"):
+            excluded = {t.strip().strip("'") for t in
+                        line.split("[")[1].split("]")[0].split(",") if t.strip()}
+    return {m for k, m in by_key.items() if k not in excluded}
 
 
 def test_what_we_pull_and_what_the_board_can_show_are_the_same_set():
@@ -276,7 +291,7 @@ def test_what_we_pull_and_what_the_board_can_show_are_the_same_set():
     whose board reaches its market WITHOUT a model, so nothing else ties the
     two lists together.
     """
-    mapped = _football_map()
+    mapped = _football_map("NCAAF")
     pulled = set(config.PROP_MARKETS_NCAAF)
     assert mapped, "the map is present"
     assert mapped == pulled, (
@@ -301,3 +316,36 @@ def test_the_map_serves_both_football_leagues():
                   encoding="utf-8").read()
     assert "def.sport === 'NCAAF' || def.sport === 'NFL'" in src
     assert "NCAAF_STAT_TO_MARKET" not in src, "renamed: it is not NCAAF-only"
+
+
+def test_the_two_college_markets_no_book_prices_are_gone_from_both_lists():
+    """Measured, not assumed. The first real college prop pass (2026-09-05
+    1pm ET) covered 31 games, 615 players and 7 books and returned ZERO rows
+    for `player_rush_attempts` and `player_sacks`. Both rode in market chunks
+    whose other members came back full, so the chunk was not lost to a 422 --
+    we asked, and nobody priced them."""
+    for m in ("player_rush_attempts", "player_sacks"):
+        assert m not in config.PROP_MARKETS_NCAAF
+        assert m + "_alternate" not in config.PROP_ALT_MARKETS["NCAAF"]
+        assert m not in _football_map("NCAAF")
+
+
+def test_the_prune_is_per_league_and_the_nfl_keeps_both():
+    """The leagues share a stat catalog and a map, and do NOT share a market.
+    The NFL prices carries and sacks -- 3,206 and 3,718 stored rows -- so
+    pruning them from the shared map would blank two working pro columns to
+    fix two dead college ones."""
+    for m in ("player_rush_attempts", "player_sacks"):
+        assert m in config.PROP_MARKETS_NFL, f"{m} is a real NFL market"
+        assert m in _football_map("NFL"), f"the NFL board must still show {m}"
+        assert m + "_alternate" in config.PROP_ALT_MARKETS["NFL"]
+
+
+def test_the_college_pull_lost_a_whole_chunk_per_event():
+    """20 markets chunked five at a time is five calls per event; 16 is four.
+    That is the credit saving, and it is why the alternates went with the
+    standard keys rather than being left as free riders."""
+    from data.ingestors.ncaaf_prop_odds_ingestor import _market_chunks
+    markets = list(config.PROP_MARKETS_NCAAF) + list(config.PROP_ALT_MARKETS["NCAAF"])
+    assert len(markets) == 16
+    assert len(_market_chunks(markets)) == 4
