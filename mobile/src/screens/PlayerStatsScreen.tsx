@@ -303,10 +303,16 @@ export function PlayerStatsScreen() {
                 </View>
                 <View style={styles.stepper}>
                   <Text style={styles.stepperLabel}>At least</Text>
+                  {/* Icon-only, so the label is the only thing VoiceOver has
+                      — an unlabelled glyph button is announced as "button" and
+                      nothing else. Pre-existing; cleared here because this
+                      change brought the file into the reviewed set. */}
                   <Pressable
                     onPress={() => stepLine(-1)}
                     hitSlop={8}
                     style={styles.stepBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Lower the line"
                   >
                     <Ionicons name="remove" size={18} color={colors.tint} />
                   </Pressable>
@@ -315,6 +321,8 @@ export function PlayerStatsScreen() {
                     onPress={() => stepLine(1)}
                     hitSlop={8}
                     style={styles.stepBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Raise the line"
                   >
                     <Ionicons name="add" size={18} color={colors.tint} />
                   </Pressable>
@@ -593,7 +601,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   statCellLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
   },
@@ -692,7 +700,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   gameStatLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
   },
