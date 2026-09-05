@@ -25,6 +25,8 @@
  *    against.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   ambiguousKeys,
   bookPostsMarket,
@@ -40,6 +42,7 @@ import {
 } from '../src/lib/statsOdds';
 import type { EnrichedPick, GameRow, OddsByBookRow, PropOddsByBookRow } from '../src/types';
 
+const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
   if (!cond) failures++;
@@ -222,7 +225,13 @@ check(
   'a 2+ Hits board shows the 1.5 price, not the 0.5 one',
   at1_5.get('mookie betts')?.price === 125 && at1_5.get('mookie betts')?.line === 1.5,
 );
-check('a player DK prices only at 0.5 has no cell on a 2+ board (different bet)', !at1_5.has('christian yelich'));
+// 2026-09-04, reversed: the book's OWN line shows, marked off-line, instead of
+// a dash ("everyone should have a line by this point"). Still a different
+// bet — the cell prints its number and the sheet adds THAT line.
+check(
+  'a player DK prices only at 0.5 gets that line on a 2+ board, marked off-line',
+  at1_5.get('christian yelich')?.line === 0.5 && at1_5.get('christian yelich')?.offLine === true,
+);
 const under = buildQuoteIndex(SLATE, { ...DK_OVER_0_5, side: 'under' });
 check('"At most 0 Hits" reads the UNDER price', under.get('mookie betts')?.price === 193);
 check('sameLine tolerates float noise', sameLine(0.1 + 0.2 - 0.3 + 1.5, 1.5));
@@ -383,6 +392,44 @@ check(
   !buildQuoteIndex(SLATE, { ...DK_OVER_0_5, gameIds: live }).has('mookie betts') &&
     buildQuoteIndex(SLATE, { ...DK_OVER_0_5, gameIds: live }).has('trevor story'),
 );
+
+
+// ── The book's OWN line when it does not post the ruler's (2026-09-04) ──────
+// Matt: "everyone should have a line by this point." 23 of 313 priced hitters
+// were 1.5-only at DraftKings; the cell prints that line WITH its number as a
+// different bet (offLine), never the ruler's price, and never a dash.
+{
+  const ownLine = buildQuoteIndex(
+    [
+      { ...SLATE[0]!, player_name: 'George Springer', line: 1.5, over_price: 230, under_price: -320 },
+      { ...SLATE[0]!, player_name: 'Bryce Harper', line: 0.5, over_price: -161, under_price: 121 },
+    ],
+    DK_OVER_0_5,
+  );
+  const springer = ownLine.get('george springer');
+  const harper = ownLine.get('bryce harper');
+  check('a player the book posts only at 1.5 gets that line, marked off-line', springer?.line === 1.5 && springer?.offLine === true && springer?.price === 230);
+  check('a player posted at the ruler line is unchanged and not off-line', harper?.line === 0.5 && !harper?.offLine && harper?.price === -161);
+  const both = buildQuoteIndex(
+    [
+      { ...SLATE[0]!, player_name: 'Mookie Betts', line: 0.5, over_price: -250, under_price: 184, bookmaker: 'draftkings' },
+      { ...SLATE[0]!, player_name: 'Mookie Betts', line: 1.5, over_price: 200, under_price: -260, bookmaker: 'betmgm' },
+    ],
+    { ...DK_OVER_0_5, books: ['draftkings', 'betmgm'] },
+  );
+  check('the ruler line wins over another book\'s off-line number', both.get('mookie betts')?.line === 0.5 && !both.get('mookie betts')?.offLine);
+  const under = buildQuoteIndex(
+    [{ ...SLATE[0]!, player_name: 'George Springer', line: 1.5, over_price: 230, under_price: null }],
+    DK_OVER_0_5,
+  );
+  check('an off-line row prices the side it posts even with the other side missing', under.get('george springer')?.price === 230);
+  const stats = read('src/screens/StatsScreen.tsx');
+  check('the pill prints the off-line number under the price', stats.includes("const caption = quote.offLine ? `${sideWord === 'under' ? 'u' : 'o'}${quote.line}` : null;"));
+  check('VoiceOver hears that it is the book\'s own line', stats.includes('the book’s own line, not the board’s'));
+  check('a started game says "Started", not a dash', stats.includes('<Text style={styles.oddsStarted}>Started</Text>'));
+  const teams = read('src/components/TeamsBoard.tsx');
+  check('the Teams board says "Started" too', teams.includes('<Text style={styles.lineStarted}>Started</Text>'));
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 226 — three complaints after the betslip flow shipped: dashes at game time, BetMGM not opening, and "take me to the App Store" |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 225 — "I gave you bad info": the line pill asks to add to the betslip, and the betslip opens at any book |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 224 — the "What {sport} models look at" card is removed from the Models tab, one day after it shipped |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 223 — "pulling some lines but not all of them": every response is capped at 1,000 rows, and the Stats board asked for 20,000 |

@@ -1,8 +1,8 @@
 import React from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Modal, Pressable, StyleSheet, Text, View, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
+import { bookButtonColors, bookStoreUrl, openBookBetslip } from '@/lib/sportsbookLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -39,6 +39,7 @@ interface Props {
 export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: Props) {
   const firstLink = legs.find((l) => l.betLink)?.betLink ?? null;
   const name = bookName(book);
+  const store = bookStoreUrl(book);
   const btn = bookButtonColors(book);
 
   return (
@@ -70,6 +71,24 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
             <Ionicons name="open-outline" size={18} color={btn.fg} />
             <Text style={[styles.openBtnText, { color: btn.fg }]}>Open in {name}</Text>
           </Pressable>
+          {/* The app cannot tell whether the book is installed (see
+              openBookBetslip), so the store is offered outright: "If I don't
+              have the Sportsbook for one of them it should take me to the App
+              Store to download it" (Matt, 2026-09-04). */}
+          {store ? (
+            <Pressable
+              onPress={() => {
+                void Linking.openURL(store).catch(() => {});
+              }}
+              accessibilityRole="link"
+              accessibilityLabel={`Don't have the ${name} app? Get it on the App Store`}
+              hitSlop={6}
+              style={({ pressed }) => [styles.storeRow, pressed && styles.pressed]}
+            >
+              <Ionicons name="download-outline" size={15} color={colors.tint} />
+              <Text style={styles.storeText}>Don&apos;t have the {name} app? Get it on the App Store</Text>
+            </Pressable>
+          ) : null}
 
           <FlatList
             data={legs}
@@ -153,6 +172,18 @@ const styles = StyleSheet.create({
   openBtnText: {
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
+  },
+  storeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: 44,
+  },
+  storeText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   list: {
     flexGrow: 0,

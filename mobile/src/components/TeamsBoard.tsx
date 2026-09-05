@@ -205,6 +205,17 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
     () => unstartedGameIds(slate.games, new Date().toISOString()),
     [slate.games],
   );
+  // Teams whose game is in progress: the cell says "Started" rather than
+  // printing a dash that reads as "no line" (same as the Players board).
+  const startedTeams = useMemo(() => {
+    const out = new Set<string>();
+    for (const g of slate.games) {
+      if (unstarted.has(g.game_id)) continue;
+      if (g.home_team) out.add(g.home_team);
+      if (g.away_team) out.add(g.away_team);
+    }
+    return out;
+  }, [slate.games, unstarted]);
   const lineByTeam = useMemo(
     () =>
       buildTeamLineIndex(gameLines, slate.games, {
@@ -348,6 +359,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
               def={stat}
               cuts={cuts}
               quote={quote}
+              started={startedTeams.has(item.team)}
               showLine={showLines}
               // The pill is the bet link: one tap to the book's own betslip.
               onLinePress={quote ? () => void openBookBetslip(quote.book, quote.link) : undefined}
@@ -385,6 +397,7 @@ function TeamRow({
   def,
   cuts,
   quote,
+  started,
   showLine,
   onLinePress,
 }: {
@@ -393,6 +406,7 @@ function TeamRow({
   def: TeamStatDef;
   cuts: { lo: number; hi: number } | null;
   quote: TeamLineQuote | null;
+  started: boolean;
   showLine: boolean;
   onLinePress?: () => void;
 }) {
@@ -430,7 +444,7 @@ function TeamRow({
           <Text style={styles.thinLabel}>thin</Text>
         ) : null}
       </View>
-      {showLine ? <TeamLineCell quote={quote} team={row.team} onPress={onLinePress} /> : null}
+      {showLine ? <TeamLineCell quote={quote} team={row.team} started={started} onPress={onLinePress} /> : null}
     </View>
   );
 }
@@ -443,13 +457,23 @@ function TeamRow({
 function TeamLineCell({
   quote,
   team,
+  started,
   onPress,
 }: {
   quote: TeamLineQuote | null;
   team: string;
+  /** The team's game is in progress: no line, and the cell says why. */
+  started?: boolean;
   onPress?: () => void;
 }) {
   if (quote == null) {
+    if (started) {
+      return (
+        <View style={styles.lineWrap} accessible accessibilityLabel={`${team}, game started`}>
+          <Text style={styles.lineStarted}>Started</Text>
+        </View>
+      );
+    }
     return (
       <View style={styles.lineWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.lineEmpty}>—</Text>
@@ -598,6 +622,7 @@ const styles = StyleSheet.create({
   },
   lineCaption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 1 },
   lineEmpty: { fontSize: font.size.footnote, color: colors.textTertiary },
+  lineStarted: { fontSize: font.size.caption, fontWeight: font.weight.semibold, color: colors.textTertiary, textAlign: 'center' },
   noLinesRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

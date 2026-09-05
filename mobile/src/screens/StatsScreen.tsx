@@ -433,6 +433,20 @@ export function StatsScreen() {
     [slateGames, oddsDate],
   );
 
+  // Teams whose game has STARTED. Their lines are hidden by design (a game in
+  // progress has no line a user can still take), and the cell says so instead
+  // of printing a dash that reads as "no line" — at 6:45pm on 2026-09-04 the
+  // 6:11 game's players had all gone blank while every other row was priced.
+  const startedTeams = useMemo(() => {
+    const out = new Set<string>();
+    for (const g of slateGames) {
+      if (g.game_date !== oddsDate || slateGameIds.has(g.game_id)) continue;
+      if (g.home_team) out.add(g.home_team);
+      if (g.away_team) out.add(g.away_team);
+    }
+    return out;
+  }, [slateGames, oddsDate, slateGameIds]);
+
   const quoteByPlayerKey = useMemo(() => {
     if (!propMarket || propLines.market !== propMarket) return new Map<string, StatsOddsQuote>();
     return buildQuoteIndex(propLines.rows, {
@@ -1052,6 +1066,7 @@ export function StatsScreen() {
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
                 quote={quote}
+                started={!!item.team && startedTeams.has(item.team)}
                 showOdds={showOdds}
                 statLabel={stat?.label ?? ''}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
@@ -1092,6 +1107,7 @@ export function StatsScreen() {
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
                 quote={quote}
+                started={!!item.row.team && startedTeams.has(item.row.team)}
                 showOdds={showOdds}
                 statLabel={stat?.label ?? ''}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
@@ -1454,16 +1470,27 @@ function matchupTierWord(tier: MatchupInfo['tier']): string {
  * player). */
 function OddsCell({
   quote,
+  started,
   playerName,
   statLabel,
   onPress,
 }: {
   quote: StatsOddsQuote | null;
+  started?: boolean;
   playerName: string;
   statLabel: string;
   onPress?: () => void;
 }) {
   if (quote == null) {
+    // A game in progress has no line a user can still take (unstartedGameIds),
+    // and the cell says so — a dash there read as "the book never priced him".
+    if (started) {
+      return (
+        <View style={styles.oddsWrap} accessible accessibilityLabel={`${playerName}, game started`}>
+          <Text style={styles.oddsStarted}>Started</Text>
+        </View>
+      );
+    }
     // The dash is not read out: the row's own label already says the player and
     // the stat, and "em dash" is not information.
     return (
@@ -1483,7 +1510,10 @@ function OddsCell({
   // inherits nothing from the row — without the player and the stat it is 25
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`;
+  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  // The book's OWN line, when it does not post the board's: printed under the
+  // price so the cell never reads as the ruler's number (statsOdds offLine).
+  const caption = quote.offLine ? `${sideWord === 'under' ? 'u' : 'o'}${quote.line}` : null;
   return (
     <Pressable
       onPress={onPress}
@@ -1510,6 +1540,7 @@ function OddsCell({
         </Text>
         <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>
+      {caption ? <Text style={styles.oddsCaption}>{caption}</Text> : null}
     </Pressable>
   );
 }
@@ -1613,6 +1644,7 @@ function LeaderRow({
   matchup,
   showMatchup,
   quote,
+  started,
   showOdds,
   statLabel,
   onOddsPress,
@@ -1627,6 +1659,8 @@ function LeaderRow({
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   quote: StatsOddsQuote | null;
+  /** The player's game is in progress: no line, and the cell says why. */
+  started: boolean;
   showOdds: boolean;
   statLabel: string;
   onOddsPress?: () => void;
@@ -1658,6 +1692,7 @@ function LeaderRow({
       {showOdds ? (
         <OddsCell
           quote={quote}
+          started={started}
           playerName={row.player_name ?? ''}
           statLabel={statLabel}
           onPress={onOddsPress}
@@ -1689,6 +1724,7 @@ function HitRateRow({
   matchup,
   showMatchup,
   quote,
+  started,
   showOdds,
   statLabel,
   onOddsPress,
@@ -1700,6 +1736,8 @@ function HitRateRow({
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   quote: StatsOddsQuote | null;
+  /** The player's game is in progress: no line, and the cell says why. */
+  started: boolean;
   showOdds: boolean;
   statLabel: string;
   onOddsPress?: () => void;
@@ -1737,6 +1775,7 @@ function HitRateRow({
       {showOdds ? (
         <OddsCell
           quote={quote}
+          started={started}
           playerName={player.player_name}
           statLabel={statLabel}
           onPress={onOddsPress}
@@ -2170,6 +2209,18 @@ const styles = StyleSheet.create({
   oddsEmpty: {
     fontSize: font.size.footnote,
     color: colors.textTertiary,
+  },
+  oddsStarted: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    textAlign: 'center',
+  },
+  oddsCaption: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 1,
   },
   matchupWrap: {
     minWidth: SPOT_W,
