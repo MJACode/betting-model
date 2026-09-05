@@ -56,10 +56,14 @@ _SAVED = _ROOT / "models" / "saved"
 # decision, and it is not this test's to make. Shrinking this dict is good;
 # growing it needs a reason written next to it.
 _KNOWN_DRIFT: dict[str, list[str]] = {
-    # Added to the list at some point without a retrain. Both are real feature
-    # keys the builder produces, so a retrain WOULD pick them up.
-    "mlb_prop_pitcher_hits": ["opp_team_whiff_pct", "opp_team_k_pct",
-                              "park_hr_factor"],
+    # Added to the list at some point without a retrain. A real feature key the
+    # builder produces, so a retrain WOULD pick it up.
+    #
+    # `mlb_prop_pitcher_hits` was here too, for opp_team_whiff_pct,
+    # opp_team_k_pct and park_hr_factor. #454's retrain
+    # (v20260903_230550) picked up all three, so the drift is gone and the
+    # exception with it -- which is this dict working as intended: it records a
+    # gap until a retrain closes it, and shrinking it is the good direction.
     "mlb_prop_batter_sb": ["opp_team_sb_allowed"],
 }
 
