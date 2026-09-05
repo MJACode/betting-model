@@ -164,18 +164,45 @@ export function formatStampET(iso: string | null | undefined): string {
   return day ? `${day} · ${time}` : time;
 }
 
+/**
+ * "SAT" for a commence time on a future ET day; null when it's today.
+ *
+ * The short sibling of `gameDayLabelET`, and it lives HERE rather than in the
+ * board that wanted it: a hand-rolled date format in a screen is how two
+ * surfaces end up printing the same day differently (UX review, 2026-09-05 —
+ * the first version of this shipped inside `statsBoard.ts`). The Stats board
+ * wants three letters because it prints the label on every row, where
+ * "Sat 6/14" would eat the width the opponent needs.
+ */
+export function weekdayShortET(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  try {
+    const d = parseStamp(iso);
+    if (etDate(d) === todayET()) return null;
+    return new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' })
+      .format(d)
+      .toUpperCase();
+  } catch {
+    return null;
+  }
+}
+
+/** A Date as its America/New_York calendar date, YYYY-MM-DD. */
+function etDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
 /** "Sat 6/14" for a commence time on a future ET day; null when it's today. */
 export function gameDayLabelET(iso: string | null | undefined): string | null {
   if (!iso) return null;
   try {
     const d = parseStamp(iso);
-    const dateET = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/New_York',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(d);
-    if (dateET === todayET()) return null;
+    if (etDate(d) === todayET()) return null;
     return new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York',
       weekday: 'short',

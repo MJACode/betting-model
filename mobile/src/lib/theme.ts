@@ -5,6 +5,8 @@
 
 import { Platform } from 'react-native';
 
+import type { MatchupGrade } from './matchup';
+
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
 export const colors = {
@@ -53,6 +55,36 @@ export const colors = {
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
 
+  // ── The board's good / average / bad ramp ────────────────────────────────
+  // Used by BOTH traffic lights on the Stats board: the matchup grade and the
+  // hit-rate percentage. One standard, because the alternative shipped for
+  // half a day — an accessible ramp in the MATCHUP column two columns away
+  // from an inaccessible one on the board's primary number.
+  //
+  // Three properties, all measured (2026-09-05):
+  //
+  //   1. NOT `bet` / `avoid`. Those are BET/AVOID semantics, and a row already
+  //      carries a price; a third thing in the same green reads as a side to
+  //      take rather than a spot to weigh.
+  //   2. Every step clears WCAG AA for text. `bet` is 2.22:1 on bgCard,
+  //      `#FF9500` is 2.20:1 and `avoid` is 3.55:1 — the three the board used
+  //      for both columns until now, all below the 4.5:1 floor, on numbers
+  //      that have to be read.
+  //   3. LIGHTNESS FALLS MONOTONICALLY good -> bad, which is the property the
+  //      first attempt at this ramp missed: tuning five steps to ~5:1 each
+  //      made them iso-luminant (relative luminance 0.1596 / 0.1603 / 0.1570 /
+  //      0.1528 — B was fractionally LIGHTER than A), so a reader could see
+  //      that two rows differed but not which was better, and under
+  //      deuteranopia the green and the olive collapsed together. Colour that
+  //      encodes a rank has to vary in lightness, not only in hue.
+  //
+  // Three steps, not five: the LETTER already carries thirteen steps of order,
+  // so the colour only has to say good / average / bad — and three levels that
+  // differ in lightness say it better than five that do not.
+  gradeGood: '#198438', // L 0.1699 ·  4.77:1
+  gradeMid: '#5F5F64', //  L 0.1154 ·  6.35:1
+  gradeBad: '#7A1712', //  L 0.0479 · 10.72:1
+
   // Confidence
   high: '#34C759',
   med: '#FF9500',
@@ -97,6 +129,12 @@ export const font = {
     default: 'System',
   }),
   size: {
+    // Below caption. Both were already in the StyleSheets as literals (row
+    // team abbrevs, meta lines, column headers); naming them stops the next
+    // sub-caption line from inventing a third size nobody agreed to
+    // (UX review, 2026-09-05).
+    nano: 10,
+    micro: 11,
     caption: 12,
     footnote: 13,
     body: 15,
@@ -124,4 +162,21 @@ export function heatColor(profit: number, max: number): string {
     .padStart(2, '0');
   const base = profit > 0 ? colors.positive : colors.negative;
   return `${base}${alpha}`;
+}
+
+/**
+ * Matchup grade → its colour. Five steps across thirteen letters: the letter
+ * separates neighbours, the colour separates tiers.
+ *
+ * It lives here rather than in the board because two screens draw a grade —
+ * the Stats MATCHUP column and the player's detail header — and a second copy
+ * is how they drift apart. (It cannot live in `lib/matchup.ts`: that module is
+ * imported by the tsx verify scripts, and this file pulls in `react-native`,
+ * which they cannot resolve.)
+ */
+export function gradeColor(grade: MatchupGrade): string {
+  const letter = grade[0];
+  if (letter === 'A' || letter === 'B') return colors.gradeGood;
+  if (letter === 'C') return colors.gradeMid;
+  return colors.gradeBad;
 }
