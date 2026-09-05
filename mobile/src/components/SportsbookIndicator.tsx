@@ -14,12 +14,18 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import { usePreferredBooks, type BookKey } from '@/hooks/usePreferredBooks';
 import { booksName, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-export function SportsbookIndicator() {
+export function SportsbookIndicator({
+  coverageNote,
+}: {
+  /** Passed straight to the picker: what the board's current stat has at each
+   *  book. Display only — it never removes a book from the list. */
+  coverageNote?: (book: BookKey) => string | null;
+} = {}) {
   const { books } = usePreferredBooks();
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -55,7 +61,11 @@ export function SportsbookIndicator() {
         </Text>
         <Ionicons name="chevron-forward" size={12} color={colors.textTertiary} />
       </Pressable>
-      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <SportsbookPickerSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        coverageNote={coverageNote}
+      />
     </>
   );
 }

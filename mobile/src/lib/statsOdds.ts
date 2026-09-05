@@ -261,6 +261,72 @@ export function bookPostsMarket(
 }
 
 /**
+ * Which SIDES each of the member's books actually prices for this market on
+ * the slate — the answer to "why is FanDuel blank?", computed from the rows
+ * the board already loaded rather than a second read.
+ *
+ * IT IS PER SIDE BECAUSE THE FEED IS. Measured 2026-09-05 on the MLB slate:
+ * FanDuel and Caesars post no standard `batter_hits` market at all, and the
+ * milestone market we fold in for them (1+ / 2+ Hits) carries an OVER price
+ * and no Under. So "FanDuel has Hits lines" and "FanDuel has At-Most Hits
+ * lines" are different questions, and only the first is true — FanDuel had
+ * an Over price on 8 of the 12 MLB stats that day and an Under price on 2.
+ *
+ * Books with no row at all for the market are absent from the map, which is
+ * what a caller means by "we pull nothing for them here". A book is never
+ * dropped from the picker over it (Matt, 2026-09-05: "if we are getting
+ * betting lines for a Sportsbook we should show it as an option and display
+ * those lines … it doesn't matter if we don't have as many props as DK") —
+ * this drives what the row SAYS, not whether it exists.
+ */
+export interface BookSideCoverage {
+  over: boolean;
+  under: boolean;
+}
+
+export function bookCoverageForMarket(
+  rows: PropOddsByBookRow[],
+  market: string,
+  books: readonly string[],
+  gameIds?: Set<string> | null,
+): Map<string, BookSideCoverage> {
+  const wanted = new Set(books);
+  const out = new Map<string, BookSideCoverage>();
+  for (const r of rows) {
+    if (r.market !== market) continue;
+    if (!wanted.has(r.bookmaker)) continue;
+    if (gameIds && !gameIds.has(r.game_id)) continue;
+    const over = num(r.over_price) != null;
+    const under = num(r.under_price) != null;
+    // A row with a line but NO price on either side is not coverage. Letting
+    // it in would seat a book in the map with both sides false, and every
+    // caller reads presence in the map as "we have something here" — the
+    // board would then grey the direction control and name a side the book
+    // does not actually sell.
+    if (!over && !under) continue;
+    const seen = out.get(r.bookmaker) ?? { over: false, under: false };
+    if (over) seen.over = true;
+    if (under) seen.under = true;
+    out.set(r.bookmaker, seen);
+  }
+  return out;
+}
+
+/**
+ * Does ANY of the member's books price this side of the market on the slate?
+ * The board's Over/Under control reads it: an "At Most" view none of their
+ * books sells is a dead end, and Matt chose to close it rather than let the
+ * board answer it with a column of dashes (2026-09-05).
+ */
+export function anyBookPostsSide(
+  coverage: Map<string, BookSideCoverage>,
+  side: StatsOddsSide,
+): boolean {
+  for (const c of coverage.values()) if (side === 'under' ? c.under : c.over) return true;
+  return false;
+}
+
+/**
  * The games on the slate that have NOT started — the only ones with a line a
  * user can still take. The "latest" pre-game row for a game in progress is a
  * live number (Pittsburgh read −50000 up four runs on 2026-09-03), and the

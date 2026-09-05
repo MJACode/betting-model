@@ -37,6 +37,17 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * picker also lists DFS platforms (PrizePicks, Pick6); we carry no odds for
  * those, so listing them would be a checkbox that changes nothing.
  *
+ * COVERAGE IS SHOWN, NEVER ENFORCED (Matt, 2026-09-05: "if we are getting
+ * betting lines for a Sportsbook we should show it as an option and display
+ * those lines. It doesn't matter if we don't have as many props as DK"). He
+ * had opened this sheet with FanDuel and Caesars showing nothing and read it
+ * as us not carrying them; we do — measured that morning, both post Hits,
+ * RBIs, Runs, Total Bases and HR, but only through the milestone market,
+ * which is OVER-ONLY. So a row can carry a `coverageNote` saying what the
+ * board's current stat has at that book, and every row stays selectable
+ * whatever it says. Only the Stats screen passes one; Settings has no stat in
+ * context and shows the plain list.
+ *
  * DK's brand green is the only brand color used — the other books get a neutral
  * badge rather than an approximated hex (a wrong brand color that fails
  * contrast is worse than a consistent one), and no logos: docs/book_logos.md
@@ -45,9 +56,14 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 export function SportsbookPickerSheet({
   visible,
   onClose,
+  coverageNote,
 }: {
   visible: boolean;
   onClose: () => void;
+  /** What the caller's current context has at this book — "Hits: At Least
+   *  only", "No Hits lines today". Display only: it never disables a row and
+   *  never removes one. */
+  coverageNote?: (book: BookKey) => string | null;
 }) {
   const { books, setBooks } = usePreferredBooks();
   const [selected, setSelected] = useState<BookKey[]>(books);
@@ -119,6 +135,16 @@ export function SportsbookPickerSheet({
               const active = selected.includes(b);
               const isModel = b === MODEL_BOOK;
               const last = active && selected.length === 1;
+              // The lock line wins the one sub-line slot: it explains a
+              // control the member just tried to use, which the coverage note
+              // does not.
+              //
+              // The note is deliberately SELECTION-INDEPENDENT — it answers
+              // "what does this book have", not "what do your books have", so
+              // it reads the same whether the row is checked or not. `last`
+              // above reads the DRAFT (`selected`); do not be tempted to make
+              // the note follow it.
+              const note = last ? null : (coverageNote?.(b) ?? null);
               return (
                 <Pressable
                   key={b}
@@ -128,7 +154,9 @@ export function SportsbookPickerSheet({
                   accessibilityLabel={
                     last
                       ? `${bookName(b)}, selected. Your only sportsbook — choose another before removing it.`
-                      : bookName(b)
+                      : note
+                        ? `${bookName(b)}. ${note}`
+                        : bookName(b)
                   }
                   style={({ pressed }) => [
                     styles.row,
@@ -150,6 +178,8 @@ export function SportsbookPickerSheet({
                           Your only sportsbook — add another before removing this one
                         </Text>
                       </View>
+                    ) : note ? (
+                      <Text style={styles.rowSub}>{note}</Text>
                     ) : null}
                   </View>
                   {active ? (

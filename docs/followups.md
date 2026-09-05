@@ -805,3 +805,23 @@ measured cost is in front of Matt.
 Still open underneath it: **no NCAAF prop MODEL.** These rows are research —
 the Stats board's line column and betslip line legs. A college prop model is
 its own piece of work, and would need the CFBD player log as its substrate.
+
+## [ ] No slate-wide book-coverage answer the app can afford
+
+Found 2026-09-05 building the Stats picker's coverage note. The board can say
+"FanDuel posts no At-Most Hits lines today" for free, because it already holds
+that stat's rows. It cannot say "FanDuel has nothing at all today" without
+reading every market — and that read is not affordable: `explain analyze` on
+`v_latest_prop_odds_all_books` grouped by book for one date measured **17.5s**,
+and straight off `player_prop_odds` **8.5s** over 172,462 rows for 2026-09-05.
+Both are far past what a screen (or the statement timeout) will take.
+
+The fix is a small coverage table the prop ingestors maintain as they write —
+`(game_date, sport, bookmaker, market, has_over, has_under, games)`, one row
+per combination, refreshed each pass — which the app reads in milliseconds.
+It would also give the Discord and monitoring surfaces a cheap answer to "which
+books did we actually get tonight", which today is a table scan nobody runs.
+
+Not needed for anything shipped yet: Matt's rule is that a book we pull lines
+for stays in the picker whatever its depth (2026-09-05), so nothing currently
+depends on the slate-wide answer.
