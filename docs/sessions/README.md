@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 238 — the calibration chart and the opening-signal experiment link come off the Record screen |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 235 — latest-line state tables: the Stats/Picks line timeouts, fixed structurally |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 234 — the At-Most side is missing from the FEED, and the parser is exonerated |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 237 — Doubles and Triples were never blank because the market didn't exist; nobody had asked |

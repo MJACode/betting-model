@@ -11,23 +11,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import type { CompositeNavigationProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import type { RootStackParamList, TabParamList } from '@/types';
 import {
   fetchPublicTrackRecord,
   fetchTrackRecordDaily,
 } from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
-import { CalibrationChart } from '@/components/CalibrationChart';
 import { SettingsButton } from '@/components/SettingsButton';
-import { buildCalibration } from '@/lib/calibration';
-import { useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
-import { passesActionFilter } from '@/lib/thresholds';
 import {
   EMPTY_SUMMARY,
   groupBySport,
@@ -55,13 +46,6 @@ function roiColor(roi: number): string {
 }
 
 export function TrackRecordScreen() {
-  const navigation =
-    useNavigation<
-      CompositeNavigationProp<
-        BottomTabNavigationProp<TabParamList, 'TrackRecord'>,
-        NativeStackNavigationProp<RootStackParamList>
-      >
-    >();
   const [rows, setRows] = useState<TrackRecordRow[]>([]);
   const [daily, setDaily] = useState<TrackRecordDailyRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -128,19 +112,6 @@ export function TrackRecordScreen() {
       return { date, cumUnits: cum / 100 };
     });
   }, [visibleDaily]);
-
-  // Overall calibration across every settled BET pick that meets current cuts.
-  const { rows: settledPicks } = useSettledPicksSincePaperStart();
-  const calibration = useMemo(
-    () =>
-      buildCalibration(
-        settledPicks.filter(
-          (p) => passesActionFilter(p) && (sportSel === 'All' || p.sport === sportSel),
-        ),
-        { minTotal: 30 },
-      ),
-    [settledPicks, sportSel],
-  );
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
@@ -239,26 +210,6 @@ export function TrackRecordScreen() {
         </View>
 
         {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
-
-        {calibration ? (
-          <CalibrationChart
-            calibration={calibration}
-            flush
-            title="Calibration — when we say X, does it happen?"
-          />
-        ) : null}
-
-        {/* Link to the opening-signal vs live experiment */}
-        <Pressable
-          onPress={() => navigation.navigate('OpeningComparison')}
-          style={({ pressed }) => [styles.expLink, pressed && { opacity: 0.6 }]}
-        >
-          <Ionicons name="flask-outline" size={16} color={colors.tint} />
-          <Text style={styles.expLinkText}>
-            Experiment: lock our first signal vs chase the live line
-          </Text>
-          <Ionicons name="chevron-forward" size={15} color={colors.tint} />
-        </Pressable>
 
         {/* Honest framing — the record is not all green, and says so. */}
         <View style={styles.noteCard}>
@@ -433,17 +384,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   heroStatLabel: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
-  expLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
-  },
-  expLinkText: { flex: 1, fontSize: font.size.footnote, color: colors.tint, fontWeight: font.weight.medium },
   noteCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
