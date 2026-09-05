@@ -284,9 +284,45 @@ def test_the_lane_carries_its_own_thresholds():
 def test_the_thresholds_do_not_re_cut_what_the_lane_already_decided():
     """The cut is EV, applied in the executor BEFORE a decision is recorded as a
     bet. A second, different cut in the action filter would write picks and then
-    hide them -- the exact app/Discord divergence this release removes."""
+    hide them -- the exact app/Discord divergence this release removes.
+
+    ALL THREE gates, not just the two that are written inline. The first version
+    of this test asserted min_prob and min_edge only, and shipped a lane whose
+    PRICE floor fell through to the -200 house default: a live prop bet at -250
+    would have been written to `picks` and then hidden by the app's
+    passesActionFilter. The gap was invisible because the floor is not in
+    ACTION_THRESHOLDS at all -- it comes from config.min_odds_for, which is what
+    data.threshold_sync actually mirrors into model_action_thresholds.
+    """
     import config
     assert config.ACTION_THRESHOLDS[MODEL_ID] == {"min_prob": 0.0, "min_edge": 0.0}
+    # -1000 is far past any price a +EV live prop could carry; the point is that
+    # the floor cannot bind, not that it holds one particular value.
+    assert config.min_odds_for(MODEL_ID) < -1000, (
+        f"price floor {config.min_odds_for(MODEL_ID)} can re-cut a bet the lane "
+        f"already took -- it would be written to picks and hidden in the app")
+
+
+def test_the_synced_row_is_what_the_app_will_actually_read():
+    """threshold_sync mirrors config into model_action_thresholds, and the app,
+    Discord and push all gate on THAT row -- so the row, not the inline dict, is
+    the thing that has to be non-cutting. Built here the same way the sync builds
+    it, so a change to how the floor is derived cannot pass this test."""
+    import config
+    from config import ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS
+
+    assert MODEL_ID in ACTION_THRESHOLDS, "the sync only writes ACTION_THRESHOLDS keys"
+    t = ACTION_THRESHOLDS[MODEL_ID]
+    row = {
+        "min_prob": t["min_prob"],
+        "min_edge": t["min_edge"],
+        "min_odds": config.min_odds_for(MODEL_ID),
+        "prob_only": MODEL_ID in PROB_ONLY_MODELS,
+        "paused": MODEL_ID in PAUSED_MODELS,
+    }
+    assert row["paused"] is False, "the lane is LIVE (CLAUDE.md section 2)"
+    assert row["min_prob"] == 0.0 and row["min_edge"] == 0.0
+    assert row["min_odds"] < -1000
 
 
 def test_the_lane_can_actually_settle():
