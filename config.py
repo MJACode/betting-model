@@ -1020,10 +1020,18 @@ MODEL_MIN_ODDS: dict = {
     # divergence #489 removed, and it would have been reintroduced for the one
     # lane that release took live -- by a default nobody chose for it.
     #
-    # A price ceiling on live props may well be wanted. It belongs in the
-    # EXECUTOR, where the lane declines the bet, not here, where the pick is
-    # taken and then concealed from the person who has to place it.
-    "nfl_live_prop":             -100000,
+    # The ceiling now EXISTS, in the executor: nfl/live_model/config.MIN_PRICE
+    # is -140 (Matt, 2026-09-05), and the lane refuses a worse quote before the
+    # EV test rather than betting it and letting the board hide it. So this
+    # entry matches that number instead of being non-binding: the two agree, and
+    # nothing the lane writes can be filtered out here. -140 is also the blanket
+    # prop floor every MLB and WNBA prop model carries.
+    #
+    # KEEP THE TWO IN STEP. If the executor ceiling moves, move this with it --
+    # a display floor TIGHTER than the executor's is how a taken bet gets
+    # concealed (#491), and one looser is dead config that reads as a rule.
+    # tests/test_nfl_live_pick_writer.py asserts they match.
+    "nfl_live_prop":             -140,
 }
 
 
