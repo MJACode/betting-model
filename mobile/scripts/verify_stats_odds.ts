@@ -597,14 +597,48 @@ check(
   check('the board locks the direction pill to the side the member\'s books sell',
     screen2.includes("const underAvailable = !sideKnown || anyBookPostsSide(coverage, 'under');")
       && screen2.includes('const dirLocked = !underAvailable || !overAvailable;')
-      && screen2.includes('disabled={dirLocked}'));
+      && screen2.includes('if (dirLocked) return;'));
   check('and snaps the board off a side it just locked, so nobody is stranded',
-    screen2.includes("if (direction === 'under' && !underAvailable && overAvailable) setDirection('over');"));
+    screen2.includes('if (!has(fallback)) return;')
+      && screen2.includes('if (direction !== fallback) setDirection(fallback);'));
   check('the lock FAILS OPEN while the lines are loading or the read failed',
     screen2.includes("const sideKnown = coverageReady && slateGameIds.size > 0 && coverage.size > 0;")
       && screen2.includes("propLines.status === 'ok'"));
   check('the greyed pill names the book rather than going silent',
     screen2.includes('const dirLockNote =') && screen2.includes('booksName(books)'));
+  // UX review, 2026-09-05. Each of these was a finding; each is now a pin.
+  check('the lock reason joins the ONE coverage note, not a second caption',
+    screen2.includes('? { text: dirLockNote, canSwitch: true }')
+      && !screen2.includes('styles.dirLockNote'));
+  check('and it offers the action that lifts it — canSwitch opens the picker',
+    screen2.includes('? { text: dirLockNote, canSwitch: true }')
+      && screen2.includes('onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}'));
+  // Scoped to the style block itself: a loose [\\s\\S] window runs past the
+  // closing brace into later styles that legitimately use opacity.
+  const dirPillLockedBlock = screen2.slice(
+    screen2.indexOf('dirPillLocked: {'),
+    screen2.indexOf('},', screen2.indexOf('dirPillLocked: {')),
+  );
+  check('the locked pill sheds the chip rather than fading it (a dimmed bordered chip reads as a button)',
+    dirPillLockedBlock.includes("backgroundColor: 'transparent'")
+      && dirPillLockedBlock.includes("borderColor: 'transparent'")
+      && !dirPillLockedBlock.includes('opacity:'));
+  check('VoiceOver hears the side once, and no disabled state on static text',
+    !screen2.includes('accessibilityState={{ disabled: dirLocked }}')
+      && !screen2.includes('disabled={dirLocked}'));
+  check('the live pill gets a touch target, the locked one needs none',
+    screen2.includes('hitSlop={dirLocked ? undefined : 8}'));
+  check('the member\'s chosen side survives a snap and is restored',
+    screen2.includes('const requestedDirection = useRef<HitDirection>')
+      && screen2.includes('requestedDirection.current = d;')
+      && screen2.includes('if (direction !== wanted) setDirection(wanted);'));
+  check('the snap is announced, and only once per stat and book set',
+    screen2.includes('snapAnnounced.current = key;') && screen2.includes('showToast('));
+  check('and never runs in Totals mode, where there is no pill and no caption to explain it',
+    screen2.includes("if (effectiveMode !== 'hitRate') return;"));
+  check('every picker row carries a sub-line, the covered case included',
+    screen2.includes('return `Both sides for ${statLabel} ${when}`;')
+      && screen2.includes('return `At Least only for ${statLabel} ${when}`;'));
   // A POSITIVE sentence about the books takes booksName; booksNoneName is the
   // subject of a negative one and would invert the meaning at two books
   // ("Neither DraftKings nor FanDuel post only At Least lines").

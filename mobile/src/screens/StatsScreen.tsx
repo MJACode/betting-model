@@ -556,11 +556,16 @@ export function StatsScreen() {
     (book: string): string | null => {
       if (!coverageReady || slateGameIds.size === 0) return null;
       const statLabel = stat?.label ?? '';
+      // EVERY row gets one, including the fully-covered case. A slot used
+      // only for the bad news makes a covered book look like a book nobody
+      // checked (UX review); when every row carries a sub-line, the thin ones
+      // read as a variation rather than as the only rows with information.
+      const when = slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`;
       const c = coverageAll.get(book);
-      if (!c) return `No ${statLabel} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}`;
-      if (c.over && !c.under) return `${statLabel}: At Least only`;
-      if (c.under && !c.over) return `${statLabel}: At Most only`;
-      return null;
+      if (!c) return `No ${statLabel} lines ${when}`;
+      if (c.over && !c.under) return `At Least only for ${statLabel} ${when}`;
+      if (c.under && !c.over) return `At Most only for ${statLabel} ${when}`;
+      return `Both sides for ${statLabel} ${when}`;
     },
     [coverageAll, coverageReady, slateGameIds, stat, slateDayLabel, slate.date],
   );
@@ -582,10 +587,44 @@ export function StatsScreen() {
   const overAvailable = !sideKnown || anyBookPostsSide(coverage, 'over');
   // Only one side left: snap to it rather than leaving the member parked on a
   // view their books cannot price with the control to leave it greyed out.
+  //
+  // THE MEMBER'S CHOICE OUTLIVES THE SNAP. `requestedDirection` is what they
+  // last asked for, and it is restored the moment their books price it again
+  // — otherwise switching to a stat FanDuel prices one-sided would silently
+  // eat an At-Most they set deliberately, and switching back would not give
+  // it back (UX review). The snap is announced too: the prop read is async, so
+  // without a toast the hit-rate column, the headline and the row order all
+  // change under the thumb with nothing saying why.
+  const requestedDirection = useRef<HitDirection>('over');
+  const snapAnnounced = useRef<string | null>(null);
+  const chooseDirection = useCallback((d: HitDirection) => {
+    requestedDirection.current = d;
+    setDirection(d);
+  }, []);
   useEffect(() => {
-    if (direction === 'under' && !underAvailable && overAvailable) setDirection('over');
-    else if (direction === 'over' && !overAvailable && underAvailable) setDirection('under');
-  }, [direction, underAvailable, overAvailable]);
+    // Only where the control exists. In Totals mode there is no pill and no
+    // caption, so a snap there would be the silent rewrite this avoids; the
+    // empty-column note already explains that case.
+    if (effectiveMode !== 'hitRate') return;
+    const wanted = requestedDirection.current;
+    const has = (d: HitDirection) => (d === 'under' ? underAvailable : overAvailable);
+    if (has(wanted)) {
+      if (direction !== wanted) setDirection(wanted);
+      snapAnnounced.current = null;
+      return;
+    }
+    const fallback: HitDirection = wanted === 'under' ? 'over' : 'under';
+    if (!has(fallback)) return;
+    if (direction !== fallback) setDirection(fallback);
+    // Announced once per (stat, book set) — the effect re-runs on every rows
+    // refresh, and a toast on each would be worse than the silence it fixes.
+    const key = `${stat?.key ?? ''}|${books.join(',')}|${wanted}`;
+    if (snapAnnounced.current === key) return;
+    snapAnnounced.current = key;
+    showToast(
+      `No ${wanted === 'under' ? 'At Most' : 'At Least'} ${stat?.label ?? ''} lines at ${booksName(books)} — showing ${fallback === 'under' ? 'At Most' : 'At Least'}.`,
+    );
+  }, [effectiveMode, direction, underAvailable, overAvailable, stat, books]);
   const dirLocked = !underAvailable || !overAvailable;
   // Naming the book is the whole point: a greyed control with no reason is the
   // "why is FanDuel blank" question in a smaller box.
@@ -609,7 +648,14 @@ export function StatsScreen() {
   // scheduled day, so for a weekly sport this note is about SATURDAY from
   // Sunday onward. The column header already dates itself; the note used to
   // contradict it (UX review, 2026-09-05).
-  const noLinesNote =
+  //
+  // ONE PLACE ON THIS SCREEN FOR BOOK-COVERAGE COPY (UX review). The lock's
+  // reason is not a second caption under the ruler: it joins the note that
+  // already owns this — same info icon, same row, same "Change your
+  // sportsbooks ›" tail, which is the one action that lifts the lock. It sits
+  // LAST because it is the mildest of these states: the column is priced, just
+  // on one side only.
+  const noLinesNote: { text: string; canSwitch: boolean } | null =
     propMarket == null
       ? stat != null && sportHasAnyPropMarket(sport)
         ? { text: `No sportsbook posts ${stat.label} lines.`, canSwitch: false }
@@ -625,7 +671,9 @@ export function StatsScreen() {
                   : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}.`,
                 canSwitch: !oneWayMarket(propMarket, direction),
               }
-            : null;
+            : dirLockNote
+              ? { text: dirLockNote, canSwitch: true }
+              : null;
 
   // THE PILL ASKS. Matt, 2026-09-04, reversing the same morning's "the pill is
   // the bet link": "it shouldn't take you directly to the book, it should ask
@@ -1017,21 +1065,28 @@ export function StatsScreen() {
       {effectiveMode === 'hitRate' ? (
         <>
           <View style={styles.lineRow}>
-            {/* Locked to the one side the member's books actually sell —
-                greyed with the chevron dropped, so it reads as a label rather
-                than a control that ignores taps (Matt, 2026-09-05). The reason
-                sits under the ruler, where the column's other notes live. */}
+            {/* Locked to the one side the member's books actually sell. It
+                loses the chevron AND the chip's fill and border, because a
+                DIMMED BORDERED CHIP is iOS for "a button you cannot use right
+                now" and gets tapped again; a label has no container (UX
+                review). The text stays at full textSecondary strength rather
+                than being faded onto a chip, which would land at ~3.5:1.
+                The reason lives in the coverage note below, so this carries no
+                accessibilityState and no sentence — VoiceOver was reading the
+                whole thing twice, once here and once from the caption, and
+                announcing "dimmed" on an element declared as static text. */}
             <Pressable
               onPress={() => {
                 if (dirLocked) return;
-                setDirection((d) => (d === 'over' ? 'under' : 'over'));
+                chooseDirection(direction === 'over' ? 'under' : 'over');
               }}
-              disabled={dirLocked}
+              hitSlop={dirLocked ? undefined : 8}
               accessibilityRole={dirLocked ? 'text' : 'button'}
-              accessibilityState={{ disabled: dirLocked }}
               accessibilityLabel={
                 dirLocked
-                  ? `${direction === 'over' ? 'At Least' : 'At Most'}. ${dirLockNote ?? ''}`
+                  ? direction === 'over'
+                    ? 'At Least'
+                    : 'At Most'
                   : `${direction === 'over' ? 'At Least' : 'At Most'}. Switch to ${direction === 'over' ? 'At Most' : 'At Least'}.`
               }
               style={({ pressed }) => [
@@ -1054,7 +1109,6 @@ export function StatsScreen() {
               onChange={setLineN}
             />
           </View>
-          {dirLockNote ? <Text style={styles.dirLockNote}>{dirLockNote}</Text> : null}
           <View style={styles.headlineRow}>
             <View style={styles.headlineRule} />
             <Text style={styles.headlineText}>{lineHeadline}</Text>
@@ -2114,18 +2168,17 @@ const styles = StyleSheet.create({
     borderColor: colors.separator,
   },
   dirPillLocked: {
-    // Reads as a label, not a dead button: no press feedback, no chevron, and
-    // the same muted treatment the board's other non-interactive text carries.
-    opacity: 0.6,
+    // The container is what says "button", so the container goes. Padding is
+    // kept so the ruler beside it does not shift when the lock engages, and
+    // Nothing here fades the pill — dimming text onto a chip is the ~3.5:1
+    // case UX_REVIEW §5 names by hand, and the check in
+    // scripts/verify_stats_odds.ts greps this block for exactly that. The
+    // text keeps full textSecondary contrast instead.
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
   },
   dirPillTextLocked: {
     color: colors.textSecondary,
-  },
-  dirLockNote: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.xs,
   },
   dirPillText: {
     fontSize: font.size.footnote,

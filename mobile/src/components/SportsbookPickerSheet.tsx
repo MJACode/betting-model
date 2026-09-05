@@ -138,6 +138,12 @@ export function SportsbookPickerSheet({
               // The lock line wins the one sub-line slot: it explains a
               // control the member just tried to use, which the coverage note
               // does not.
+              //
+              // The note is deliberately SELECTION-INDEPENDENT — it answers
+              // "what does this book have", not "what do your books have", so
+              // it reads the same whether the row is checked or not. `last`
+              // above reads the DRAFT (`selected`); do not be tempted to make
+              // the note follow it.
               const note = last ? null : (coverageNote?.(b) ?? null);
               return (
                 <Pressable
