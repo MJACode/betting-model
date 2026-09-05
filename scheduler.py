@@ -123,6 +123,21 @@ RUN_NFL_WIND_CARD = os.environ.get("RUN_NFL_WIND_CARD", "1") != "0"
 # de-vig-Pinnacle-bet-the-outlier rule. RUN_NFL_PROP_CARD=0 disables it.
 RUN_NFL_PROP_CARD = os.environ.get("RUN_NFL_PROP_CARD", "1") != "0"
 
+# NCAAF player props (data/ingestors/ncaaf_prop_odds_ingestor.py). Matt turned
+# these on 2026-09-05 after the probe measured them: ~8.7 credits per event
+# against 68 events the feed lists, so ONE FULL PASS IS ~590 CREDITS and the
+# three below cost ~1,800 on a Saturday. That is affordable enough that the
+# ceiling is coverage, not money -- which is why this is three passes and not
+# hourly: the lines are the Stats board's research column, not a model input,
+# and nothing measured says a college prop line moves enough between 9am and
+# 1pm to be worth 11 more passes.
+#
+# Scheduled DAILY, not on Saturdays: college football also plays Thursday and
+# Friday nights and the odd Tuesday in November. A day with no events costs
+# NOTHING -- the ingestor returns before any paid call, and the /events listing
+# it reads first is free (measured: credits null).
+RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
+
 # NFL in-play gameday worker (nfl/live_model). Polls ESPN state every 10s and
 # prices the one validated lane, live pass attempts. Set RUN_NFL_LIVE=0 to
 # disable without a redeploy. It is PAPER ONLY: the executor records decisions
@@ -573,6 +588,16 @@ def run_nfl_poll(fast: bool = False) -> None:
     # Record what the models thought of every game this tick, and flag any
     # locked pick whose conditions have changed. Never re-prices anything.
     _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
+
+
+def run_ncaaf_prop_odds() -> None:
+    """One college prop pass: the scoped slate, every book, standard + alternate.
+
+    A clean no-op off-season and on days with no games -- the ingestor lists
+    events first (a free call) and returns before spending anything.
+    """
+    _run([sys.executable, "-m", "data.ingestors.ncaaf_prop_odds_ingestor"],
+         "ncaaf-prop-odds")
 
 
 def run_nfl_prop_card() -> None:
@@ -1116,6 +1141,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_PROP_CARD=0 — NFL prop card NOT scheduled.")
+
+    if RUN_NCAAF_PROP_ODDS:
+        # 9am / 1pm / 6pm ET: one fresh number before each of the day's kick
+        # waves (noon, 3:30, 7pm, and the 6pm pass carries the late window).
+        # Minute 35 keeps it clear of the :17 refresh pass and the :25 prop card.
+        sched.add_job(
+            run_ncaaf_prop_odds,
+            CronTrigger(hour="9,13,18", minute=35, timezone=TIMEZONE),
+            id="ncaaf_prop_odds",
+            name="NCAAF player props (9am/1pm/6pm ET)",
+            max_instances=1, coalesce=True, misfire_grace_time=1800,
+        )
+    else:
+        log.info("RUN_NCAAF_PROP_ODDS=0 — NCAAF player props NOT scheduled.")
 
     return sched
 
