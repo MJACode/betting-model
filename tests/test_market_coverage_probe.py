@@ -16,11 +16,15 @@ about the right keys, cost what it claims, and write nothing.
 """
 
 import inspect
+import io
+from pathlib import Path
 
 import pytest
 
 import config
 from scripts import probe_market_coverage as p
+
+ROOT = Path(__file__).parent.parent
 
 
 def test_the_probe_asks_about_every_market_we_pull_and_its_alternate():
@@ -89,3 +93,96 @@ def test_the_job_validates_its_sport_and_market_list():
         v({"sport": "MLB", "markets": "batter_hits"})
     with pytest.raises(ValueError):
         v({"sport": "CRICKET"})
+
+
+# ── what the probe found, and what was done about it ────────────────────────
+#
+# The 2026-09-05 probe asked 30 MLB keys on a live event and answered all
+# three questions stored data cannot:
+#
+#   SERVED but not pulled     batter_doubles, batter_triples,
+#                             batter_stolen_bases_alternate   -> added
+#   SUPPORTED but nobody      pitcher_hits_allowed_alternate,
+#   priced it                 pitcher_walks_alternate         -> dropped
+#                             (they had also produced zero rows all day)
+#   UNSUPPORTED key           batter_at_bats,
+#                             pitcher_home_runs_allowed,
+#                             pitcher_pitches                 -> stay blank
+
+def _board_markets(sport: str) -> set[str]:
+    """The player_prop_odds markets mobile/src/lib/statCatalog.ts can display.
+
+    Two routes and both are followed, because they are the thing that drifts:
+    a stat reaches its market THROUGH a model id (STAT_KEY_TO_MODEL ->
+    markets.PROP_MARKET_BY_MODEL) unless it has no model, in which case a
+    direct map carries it (STAT_KEY_TO_MARKET, and FOOTBALL_STAT_TO_MARKET for
+    the two leagues that have no prop model at all).
+    """
+    import re
+    cat = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts", encoding="utf-8").read()
+    mkt = io.open(ROOT / "mobile" / "src" / "lib" / "markets.ts", encoding="utf-8").read()
+
+    catalog = cat.split("export const STAT_CATALOG")[1].split("];")[0]
+    keys = {m.group(1) for m in re.finditer(
+        r"\{ key: '([a-z_0-9]+)'[^}]*sport: '" + sport + r"'", catalog)}
+
+    def table(src: str, name: str) -> dict[str, str]:
+        body = src.split(name)[1].split("};")[0]
+        return {m.group(1): m.group(2) for m in
+                re.finditer(r"^\s*([a-z_0-9]+): '([a-z_0-9]+)'", body, re.M)}
+
+    model_for = table(cat, "STAT_KEY_TO_MODEL")
+    market_for_model = table(mkt, "PROP_MARKET_BY_MODEL")
+    direct = table(cat, "STAT_KEY_TO_MARKET")
+    football = table(cat, "FOOTBALL_STAT_TO_MARKET")
+
+    out = set()
+    for k in keys:
+        if sport in ("NFL", "NCAAF"):
+            if k in football:
+                out.add(football[k])
+            continue
+        model = model_for.get(k)
+        if model and model in market_for_model:
+            out.add(market_for_model[model])
+        elif k in direct:
+            out.add(direct[k])
+    return out
+
+
+def test_the_mlb_board_and_the_mlb_pull_are_one_set():
+    """The invariant football already carries, now that MLB has a stat with a
+    market and no model: a market we pull that nothing can show is a credit
+    spent every pass, and a board column with no market is a permanent dash.
+
+    Model-backed stats resolve through their model id, so this compares the
+    MARKETS, not the route to them.
+    """
+    board = _board_markets("MLB")
+    pulled = set(config.PROP_MARKETS_ALL)
+    # Board stats whose market comes via a model resolve to the same keys.
+    from data.ingestors.prop_odds_ingestor import ALT_MARKET_REMAP
+    assert board, "the MLB board maps some markets"
+    assert board <= pulled, f"the board asks for markets we never pull: {board - pulled}"
+    assert pulled - board == set(), f"we pull markets nothing can display: {pulled - board}"
+    assert "batter_home_runs" in ALT_MARKET_REMAP.values(), "sanity: the HR remap still stands"
+
+
+def test_the_columns_the_probe_proved_available_are_pulled():
+    for m in ("batter_doubles", "batter_triples"):
+        assert m in config.PROP_MARKETS_ALL, f"{m} came back SERVED and is still not pulled"
+    assert "batter_stolen_bases_alternate" in config.PROP_ALT_MARKETS["MLB"]
+
+
+def test_the_alternates_nobody_prices_are_gone():
+    """Measured twice: zero rows across a full day of passes, and "supported,
+    but no book priced it" from the probe."""
+    for m in ("pitcher_hits_allowed_alternate", "pitcher_walks_alternate",
+              "pitcher_earned_runs_alternate", "pitcher_outs_alternate"):
+        assert m not in config.PROP_ALT_MARKETS["MLB"], f"{m} returns nothing and costs credits"
+
+
+def test_every_mlb_alternate_still_has_a_standard_market():
+    base = set(config.PROP_MARKETS_ALL)
+    for k in config.PROP_ALT_MARKETS["MLB"]:
+        assert k[:-len("_alternate")] in base, f"{k} has no standard market"

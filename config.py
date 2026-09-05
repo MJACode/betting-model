@@ -1958,6 +1958,15 @@ PROP_MARKETS_PITCHER = [
 ]
 PROP_MARKETS_BATTER = [
     "batter_hits",
+    # Doubles and triples: the Stats board has carried both columns since it
+    # shipped and both were permanently blank, because nobody had asked the
+    # feed whether it served them. The 2026-09-05 coverage probe did, and it
+    # does (scripts/probe_market_coverage.py) -- the gap was ours, not the
+    # source's. `batter_at_bats`, `pitcher_home_runs_allowed` and
+    # `pitcher_pitches` are the board's other blanks and the API does NOT
+    # know those keys, so those columns are correctly blank forever.
+    "batter_doubles",
+    "batter_triples",
     "batter_total_bases",
     "batter_home_runs",      # poisson (v2 — pitcher HR/9, gb%, park factor, platoon)
     "batter_rbis",
@@ -2008,10 +2017,15 @@ PROP_ALT_MARKETS = {
         "batter_rbis_alternate",
         "batter_runs_scored_alternate",
         "batter_walks_alternate",
+        "batter_stolen_bases_alternate",
         "pitcher_strikeouts_alternate",
-        "pitcher_hits_allowed_alternate",
-        "pitcher_walks_alternate",
     ],
+    # NOT here, measured twice: pitcher_hits_allowed_alternate and
+    # pitcher_walks_alternate produced ZERO rows across a full day of passes
+    # AND came back "supported, but no book priced it" from the coverage
+    # probe. pitcher_earned_runs_alternate and pitcher_outs_alternate are the
+    # same and were never added. An alternate nobody prices is ~2.5 credits
+    # per event call for nothing, on every pass.
     "WNBA": [
         "player_points_alternate",
         "player_rebounds_alternate",

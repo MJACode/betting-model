@@ -267,6 +267,28 @@ const FOOTBALL_STAT_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = 
   def_sacks: 'player_sacks',
 };
 
+/**
+ * Stats with a real market and NO model, outside football.
+ *
+ * The market normally comes THROUGH the model id, which is why a stat nobody
+ * models has always shown a dash however much data existed. Football needed
+ * its own map because neither league has a prop model at all; this is the
+ * same problem one stat at a time.
+ *
+ * Doubles and Triples have been columns on the MLB board since it shipped and
+ * blank the whole time, because nobody had asked the feed whether it served
+ * them. The 2026-09-05 coverage probe did, and it does. There is no doubles
+ * model and none is implied: like a football line, these are research.
+ *
+ * The board's other MLB blanks stay blank on purpose — the API does not know
+ * `batter_at_bats`, `pitcher_home_runs_allowed` or `pitcher_pitches`, so no
+ * key would help.
+ */
+const STAT_KEY_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = {
+  doubles: 'batter_doubles',
+  triples: 'batter_triples',
+};
+
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
@@ -294,7 +316,9 @@ export function propMarketForStat(def: StatDef | null): string | null {
     return FOOTBALL_STAT_TO_MARKET[def.key] ?? null;
   }
   const id = rawPropModelForStat(def);
-  return id ? propMarketForModel(id) : null;
+  // The model's market when a model prices it, else the stat's own — a stat
+  // nobody models can still be one every book prices (Doubles, Triples).
+  return (id ? propMarketForModel(id) : null) ?? STAT_KEY_TO_MARKET[def.key] ?? null;
 }
 
 /**
