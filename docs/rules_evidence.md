@@ -472,3 +472,35 @@ look-ahead pick in any sport could be pushed on the day it was written.
 **Deploy check before shipping.** Re-pointing the producers at `picks` risks a
 backlog flood on the first run. Counted first: exactly 2 rows — the two NFL
 picks. No burst.
+
+## `nfl_live_prop` went live without the §2 gate (2026-09-05)
+
+The rule and the override are in CLAUDE.md §2. The detail:
+
+Matt, after the gate was put to him: *"NFL should be live out of the gate, we
+should not do paper trading and delay this being an available feature."*
+
+**The record at that moment was zero, and could not have become anything else.**
+Zero `nfl_live%` rows in `picks`, zero in `model_action_thresholds`, and
+`nfl_live` appeared nowhere in `config.py`. The lane recorded every decision to
+a JSONL file on the Railway volume and alerted nobody — a complete audit log
+and not a record the platform can read. Nothing joined it to `games`, nothing
+settled it, no surface displayed it. So the §2 gate (≥50 settled picks, positive
+flat ROI, CalErr ≤5%) was not a waiting period for this model, it was
+unreachable: the lane could run every Sunday of the season and still report 0/50.
+
+Going live and becoming measurable were therefore the same change, which is why
+the usual "run it as paper first" answer did not apply here.
+
+**Scope is one lane.** `EV_THRESHOLDS` names four model ids; only
+`nfl_live_prop` has an implementation. `nfl_live_deriv` and `nfl_live_halftime`
+would trade `DERIVATIVE_MARKETS` — all half and quarter lines — and `games`
+stores full-game scores only (plus MLB's F5), so those picks could not be
+settled by anything in this repo. They stay unimplemented and must not write
+until a scores source exists.
+
+**Its thresholds are 0.0/0.0 on purpose.** The cut is EV, in
+`nfl/live_model/config.EV_THRESHOLDS`, applied by the executor before a decision
+is recorded as a bet. A second, different cut in `model_action_thresholds` would
+re-filter bets the model already took — picks written and never shown, the exact
+app/Discord divergence the same release removed.

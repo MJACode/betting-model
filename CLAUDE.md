@@ -365,16 +365,12 @@ model is paper-only — surfaced but not backed — until it clears:
 Models currently in that state are flagged as PAPER ONLY in their own section
 (e.g. `ncaaf_spread` — see `docs/sports/ncaaf.md`). Everything else is live.
 
-**One model is LIVE with the gate deliberately NOT met: `nfl_live_prop`.**
-(Matt, 2026-09-05: *"NFL should be live out of the gate, we should not do paper
-trading and delay this being an available feature."*) Its settled record when it
-went live was **zero bets** — it had recorded to a JSONL file on the Railway
-volume since it was built, so it had never written a settleable pick and could
-never have cleared the gate by waiting. Raised with him, restated, taken as his
-call. **Do not pause it, and do not "restore" the gate for it, without asking
-him.** Do re-sweep its cut once ~50 settled bets exist: it runs `min_prob 0.0 /
-min_edge 0.0` because the real cut is EV, in `nfl/live_model/config.EV_THRESHOLDS`,
-applied before a decision is ever recorded as a bet.
+**`nfl_live_prop` is LIVE with the gate deliberately NOT met** (Matt,
+2026-09-05). Settled record at go-live: **zero** — it wrote to a JSONL file, so
+it could never have cleared the gate by waiting. Raised, restated, his call.
+**Do not pause it or restore the gate without asking him.** Re-sweep its cut at
+~50 settled bets; it runs 0.0/0.0 because the cut is EV, in
+`nfl/live_model/config.EV_THRESHOLDS`. Detail: `docs/rules_evidence.md`.
 
 ---
 
