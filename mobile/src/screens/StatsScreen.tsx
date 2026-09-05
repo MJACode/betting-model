@@ -19,6 +19,7 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { HitModeSheet } from '@/components/HitModeSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
@@ -52,7 +53,8 @@ import {
   unstartedGameIds,
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
-import { computeHitRate, type HitDirection } from '@/lib/hitRate';
+import { computeHitRate } from '@/lib/hitRate';
+import { hitModeHeadline, hitModeLabel, selectionFor, type HitMode } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
@@ -206,9 +208,7 @@ function maxLineN(def: StatDef | null): number {
  *   at least N  →  value > N-0.5  ⇔  value >= N
  *   at most  N  →  value < N+0.5  ⇔  value <= N
  */
-function lineFor(n: number, direction: HitDirection): number {
-  return direction === 'over' ? n - 0.5 : n + 0.5;
-}
+
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
@@ -234,9 +234,13 @@ export function StatsScreen() {
   const [query, setQuery] = useState<string>('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('default');
-  // Hit Rate controls (front page): integer line + at least / at most.
+  // Hit Rate controls (front page): a whole-number ruler, plus which side of
+  // it the bet is on. The ruler starts at 1 for every mode: "at least 0" is
+  // every game, and "under 0" is fewer than none, which no game can be and no
+  // book prices (lib/hitMode.ts).
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
-  const [direction, setDirection] = useState<HitDirection>('over');
+  const [hitMode, setHitMode] = useState<HitMode>('atLeast');
+  const [modeOpen, setModeOpen] = useState<boolean>(false);
   const [minHitRate, setMinHitRate] = useState<string>('');
   const [maxHitRate, setMaxHitRate] = useState<string>('');
 
@@ -389,7 +393,10 @@ export function StatsScreen() {
     setLineN(defaultLineN(s));
   };
 
-  const line = useMemo(() => lineFor(lineN, direction), [lineN, direction]);
+  // The bet the board is about: a half-point line and a side. Everything
+  // downstream — the hit rate, the odds cell, the betslip leg — reads these
+  // two and never the mode (lib/hitMode.ts).
+  const { line, side } = useMemo(() => selectionFor(lineN, hitMode), [lineN, hitMode]);
 
   // ── The LINE column ────────────────────────────────────────────────────────
   // The user's sportsbook's current line for the number the RULER is on, for
@@ -479,11 +486,11 @@ export function StatsScreen() {
     return buildQuoteIndex(propLines.rows, {
       market: propMarket,
       line,
-      side: direction === 'under' ? 'under' : 'over',
+      side,
       books,
       gameIds: slateGameIds,
     });
-  }, [propLines, propMarket, line, direction, books, slateGameIds]);
+  }, [propLines, propMarket, line, side, books, slateGameIds]);
 
   // Leaderboard names that two players share once folded. Neither gets a quote:
   // a wrong price on the wrong player is worse than a dash (data/name_match.py).
@@ -507,7 +514,7 @@ export function StatsScreen() {
     propMarket != null &&
     propLines.market === propMarket &&
     slateGameIds.size > 0 &&
-    bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction);
+    bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, side);
   const showOdds = bookPosts && booksReady;
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
@@ -531,10 +538,10 @@ export function StatsScreen() {
           ? { text: `${stat?.label ?? ''} lines post once books price ${slateDayLabel} games.`, canSwitch: false }
           : !bookPosts
             ? {
-                text: oneWayMarket(propMarket, direction)
+                text: oneWayMarket(propMarket, side)
                   ? `${booksNoneName(books)} only posts the Yes side of ${propDisplayLabel(propMarket, stat?.label ?? '')}.`
                   : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}.`,
-                canSwitch: !oneWayMarket(propMarket, direction),
+                canSwitch: !oneWayMarket(propMarket, side),
               }
             : null;
 
@@ -590,7 +597,7 @@ export function StatsScreen() {
       if (seasonValues.statKey !== String(stat.key)) return []; // fetch in flight
       for (const r of seasonValues.rows) {
         const values = (r.values ?? []).map(Number);
-        const { hits, total, pct } = computeHitRate(values, line, direction);
+        const { hits, total, pct } = computeHitRate(values, line, side);
         if (total === 0) continue;
         const avg = values.reduce((s, v) => s + v, 0) / total;
         out.push({
@@ -615,7 +622,7 @@ export function StatsScreen() {
       }
       for (const [player_id, games] of byPlayer) {
         const values = games.map((g) => statValue(g, stat));
-        const { hits, total, pct } = computeHitRate(values, line, direction);
+        const { hits, total, pct } = computeHitRate(values, line, side);
         if (total === 0) continue;
         const avg = values.reduce((s, v) => s + v, 0) / total;
         const head = games[0];
@@ -647,7 +654,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, direction, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -691,7 +698,7 @@ export function StatsScreen() {
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // The headline under the ruler, e.g. "25+ Points" / "At most 2 Walks".
   const lineHeadline =
-    direction === 'over' ? `${lineN}+ ${stat?.label ?? ''}` : `At most ${lineN} ${stat?.label ?? ''}`;
+    hitModeHeadline(lineN, hitMode, stat?.label ?? '');
   // What a BET made from this column is called. Almost always the column's own
   // name; "Anytime TD" where the board asks Rush+Rec TDs, because no book
   // sells the column's version (markets.ts propDisplayLabel).
@@ -924,17 +931,17 @@ export function StatsScreen() {
         </ScrollView>
       </View>
 
-      {/* Line picker: at least / at most + a tick ruler, then the headline. */}
+      {/* Line picker: the mode, a tick ruler, then the headline. */}
       {effectiveMode === 'hitRate' ? (
         <>
           <View style={styles.lineRow}>
             <Pressable
-              onPress={() => setDirection((d) => (d === 'over' ? 'under' : 'over'))}
+              onPress={() => setModeOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Show bets that are ${hitModeLabel(hitMode)}. Change`}
               style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
             >
-              <Text style={styles.dirPillText}>
-                {direction === 'over' ? 'At Least' : 'At Most'}
-              </Text>
+              <Text style={styles.dirPillText}>{hitModeLabel(hitMode)}</Text>
               <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
             </Pressable>
             <LineRuler
@@ -1187,6 +1194,14 @@ export function StatsScreen() {
       )}
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <HitModeSheet
+        visible={modeOpen}
+        mode={hitMode}
+        lineN={lineN}
+        statLabel={stat?.label ?? ''}
+        onPick={setHitMode}
+        onClose={() => setModeOpen(false)}
+      />
       <AddLineSheet
         input={lineSheetInput}
         game={lineSheetGame}

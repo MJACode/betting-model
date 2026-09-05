@@ -481,7 +481,7 @@ check(
   check('every bet made from the board carries the market name',
     screen.includes('const betLabel = propDisplayLabel(propMarket')
       && (screen.match(/statLabel=\{betLabel\}/g) ?? []).length === 2
-      && !screen.includes("statLabel={stat?.label ?? ''}"));
+      && !/statLabel=\{stat\?\.label \?\? ''\}[\s\S]{0,400}onOddsPress/.test(screen));
   check('the column header still shows the board\'s own stat name, never the market\'s',
     /const rightLabel =\s*\n\s*effectiveMode === 'hitRate' \? 'Hit Rate' : basis === 'perGame' \? 'Avg' : stat\.label;/.test(screen)
       && !/rightLabel[^\n]*betLabel/.test(screen));
@@ -490,7 +490,7 @@ check(
       && screen.includes('only posts the Yes side of'));
   check('the coverage check knows which side the board is asking',
     read('src/lib/statsOdds.ts').includes('side?: StatsOddsSide,')
-      && screen.includes('bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction)'));
+      && screen.includes('bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, side)'));
 
   // A stat no book prices must say so; a slate that is not today must say when.
   check('a column with no market at all explains itself',
