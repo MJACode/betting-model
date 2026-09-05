@@ -413,6 +413,20 @@ ACTION_THRESHOLDS: dict = {
     # blind month at >= 50 flags.
     "wnba_prop_market":           {"min_prob": 0.0, "min_edge": 0.05},
     "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
+    # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
+    # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
+    # paper trading and delay this being an available feature") -- taken with
+    # the §2 go-live gate NOT met, deliberately and on his call. Settled record
+    # at that moment: ZERO bets. Do not "restore" the gate here without asking
+    # him; do re-sweep these numbers the moment ~50 settled bets exist.
+    #
+    # Floors of 0.0 are not placeholders, they are the design: this lane's cut
+    # is EV, enforced in nfl/live_model/config.EV_THRESHOLDS and applied by the
+    # executor BEFORE a decision is ever recorded as a bet. A second, different
+    # cut here would silently re-filter bets the model already took -- picks
+    # written and never shown, which is exactly the app/Discord divergence this
+    # release removes. Same reasoning as ncaaf_spread's 0.0 edge floor.
+    "nfl_live_prop": {"min_prob": 0.0, "min_edge": 0.0},
     "nfl_prop_pass_yards":         {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_completions":   {"min_prob": 0.55, "min_edge": 0.05},
@@ -1024,6 +1038,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.05,
     "nhl_puckline":             0.05,
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
+    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.00,   # card gates on |dev| >= 1.0; edge >= 0 drops juice-eaten quotes
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.08,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
@@ -1118,6 +1133,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
+    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.52,   # ~breakeven at -110, a sanity floor like wind's. Was 0.55, which
                                     # was set against a FLAT 0.5818 model prob; once the card began
                                     # pricing per deviation it silently became an edge filter (§28)

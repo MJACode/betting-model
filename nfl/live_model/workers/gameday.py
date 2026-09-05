@@ -589,10 +589,23 @@ def main() -> None:
     # A dry run spends nothing and reaches no decision, so it gets no
     # recorder: an empty audit log is honest, a log of nothing labelled as a
     # slate is not.
-    recorder = None if args.dry_run else JsonlRecorder()
+    # LIVE, not paper (2026-09-05, Matt: "NFL should be live out of the gate").
+    # Two recorders, in this order and doing different jobs:
+    #   JsonlRecorder  -- EVERY decision, bet or pass, on the volume. The audit
+    #                     trail; the passes are what answer "was a guard eating
+    #                     candidates", and they never belong in `picks`.
+    #   PicksRecorder  -- BETS ONLY, into Supabase, so the lane reaches the app,
+    #                     Discord and push and can actually settle.
+    # TeeRecorder isolates them: a Postgres outage must not cost the audit log,
+    # which is why the durable one is written first.
+    audit = None if args.dry_run else JsonlRecorder()
+    recorder = audit
+    if audit is not None:
+        from ..pick_writer import PicksRecorder, TeeRecorder
+        recorder = TeeRecorder(audit, PicksRecorder())
     worker = GamedayWorker(dry_run=args.dry_run, recorder=recorder)
-    if recorder is not None:
-        log.info("recording decisions to %s", recorder.path)
+    if audit is not None:
+        log.info("recording decisions to %s (and BETs to picks)", audit.path)
     if args.once:
         print(worker.tick())
         if recorder is not None:
