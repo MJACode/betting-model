@@ -173,7 +173,17 @@ export function PickCard({
     Boolean(onToggleSlip) && pick.dk_odds != null && pick.result == null && !preview;
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
+    // The card tap is the only route to the pick's breakdown now that the
+    // Context button is gone, so it has to announce itself: a settled pick
+    // renders no action buttons at all, and without this VoiceOver reads the
+    // card as inert text (UX review, 2026-09-05).
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${matchup}. ${pick.pick_label}. ${pick.signal_type}.`}
+      accessibilityHint="Opens the full breakdown, including recent form and matchup context."
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+    >
       <View style={styles.headerRow}>
         <Text style={styles.matchup} numberOfLines={1}>
           {matchup}

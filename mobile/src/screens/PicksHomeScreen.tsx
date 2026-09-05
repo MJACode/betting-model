@@ -305,12 +305,20 @@ function EmptyForView({
       />
     );
   }
-  return (
-    <EmptyState
-      title="No live signal bets"
-      subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check Today to see everything the model scored, or check back after the next refresh."
-    />
-  );
+  if (view === 'signals') {
+    return (
+      <EmptyState
+        title="No live signal bets"
+        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check Today to see everything the model scored, or check back after the next refresh."
+      />
+    );
+  }
+  // Exhaustive over View2 — a third view added later has to say what it shows
+  // here rather than silently inheriting the Signals copy (UX review). The
+  // null is unreachable; the annotation is what fails the build.
+  const exhaustive: never = view;
+  void exhaustive;
+  return null;
 }
 
 function SubTabBtn({
@@ -327,6 +335,10 @@ function SubTabBtn({
   return (
     <Pressable
       onPress={onPress}
+      hitSlop={{ top: 8, bottom: 8 }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={`${label}, ${count} ${label === 'Today' ? 'picks' : 'signals'}`}
       style={({ pressed }) => [styles.subTab, active && styles.subTabActive, pressed && styles.pressed]}
     >
       <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
@@ -381,7 +393,9 @@ const styles = StyleSheet.create({
   },
   subTab: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    // ~32pt tall, the iOS segmented-control height. spacing.xs left it at ~25pt
+    // and misses landed on the header behind it (UX review, 2026-09-05).
+    paddingVertical: spacing.sm,
     borderRadius: radii.sm - 2,
   },
   subTabActive: {

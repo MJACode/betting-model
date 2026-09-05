@@ -1,5 +1,5 @@
 /**
- * Sort + search helpers for the pick lists (Today, Signals, Movement views).
+ * Sort + search helpers for the pick lists (Today, Signals views).
  *
  * Every item carries `.pick` and an optional joined `.game`, so the generics
  * below work across all three views without coupling to any one of them.

@@ -19,7 +19,16 @@ export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
   return (
     <Pressable
       onPress={onPress}
-      hitSlop={6}
+      // Vertical slop only: the compact pills sit ~8pt apart in PickCard's
+      // actions row, so wider side slop would let the later sibling swallow
+      // taps meant for its neighbour (UX review, 2026-09-05).
+      hitSlop={{ top: 11, bottom: 11, left: 6, right: 6 }}
+      accessibilityRole="button"
+      accessibilityLabel={
+        inPlay
+          ? 'In your betslip. Tap to remove.'
+          : 'Add this bet to your betslip.'
+      }
       style={({ pressed }) => [
         styles.btn,
         compact && styles.btnCompact,
