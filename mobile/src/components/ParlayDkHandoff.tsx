@@ -52,8 +52,12 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+      {/* Backdrop tap dismisses, as every other sheet in the app does — the X
+          alone sits in the one corner a thumb cannot reach (UX review). */}
+      <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+        {/* accessible={false}: an accessible Pressable groups its children into
+            ONE VoiceOver element, which would leave the rows unreachable. */}
+        <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.header}>
             <Text style={styles.title}>Bet on {name}</Text>
             <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
@@ -70,6 +74,8 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
             onPress={() => {
               void openBookBetslip(book, firstLink);
             }}
+            accessibilityRole="button"
+            accessibilityLabel={`Open in ${name}`}
             style={({ pressed }) => [
               styles.openBtn,
               { backgroundColor: btn.bg },
@@ -117,6 +123,8 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
                     onPress={() => {
                       void openBookBetslip(book, item.betLink);
                     }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${item.label} to slip`}
                     style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
                     hitSlop={6}
                   >
@@ -131,8 +139,8 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
               </View>
             )}
           />
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }

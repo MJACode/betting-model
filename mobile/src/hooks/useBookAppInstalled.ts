@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 
 import { isBookAppInstalled } from '@/lib/sportsbookLinks';
 
@@ -13,12 +14,22 @@ export function useBookAppInstalled(book: string): boolean | null {
   const [installed, setInstalled] = useState<boolean | null>(null);
   useEffect(() => {
     let alive = true;
+    const ask = () => {
+      void isBookAppInstalled(book).then((v) => {
+        if (alive) setInstalled(v);
+      });
+    };
     setInstalled(null);
-    void isBookAppInstalled(book).then((v) => {
-      if (alive) setInstalled(v);
+    ask();
+    // The flow this exists for: tap "Get {book} on the App Store", install,
+    // come back. The sheet is mounted with its screen, so without this the
+    // store row would still be showing (UX review). Same pattern as useNow.
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') ask();
     });
     return () => {
       alive = false;
+      sub.remove();
     };
   }, [book]);
   return installed;

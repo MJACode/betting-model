@@ -21,13 +21,21 @@ import { colors } from '@/lib/theme';
 
 /** Where each book's betslip link can fall back to when we have no link. */
 interface BookApp {
-  /** Custom URL scheme, when we have a verified one. Others fall through to web
-   *  rather than guessing a scheme that would silently fail. A scheme here is
-   *  also how the app learns whether the book is INSTALLED — but only if the
-   *  build declares it in app.json's `LSApplicationQueriesSchemes` (iOS
-   *  answers `canOpenURL` for no other scheme). verify_book_links.ts pins
-   *  that every scheme below is declared there. */
+  /** Custom URL scheme, when we have a VERIFIED one (DraftKings, session 47).
+   *  It opens the app, and its `canOpenURL` answer is trusted both ways —
+   *  `false` means not installed. */
   scheme: string | null;
+  /** UNVERIFIED schemes the book's app may register (Matt, 2026-09-05: "This
+   *  should be the same for all the Sportsbook apps" — and no public source
+   *  names any book's scheme but DraftKings'). Used to ASK only, never to
+   *  open: a `true` from any of them proves the app is installed, since iOS
+   *  answers `true` only for a scheme some installed app registered; a `false`
+   *  proves nothing — the guess may simply be wrong — and leaves the answer
+   *  unknown, which is today's behaviour. So a wrong guess costs nothing and
+   *  a right one opens the app. Every entry, verified or not, must be declared
+   *  in app.json's `LSApplicationQueriesSchemes` or iOS answers `false`
+   *  regardless (verify_book_links.ts pins it; Apple caps the list at 50). */
+  candidateSchemes?: string[];
   web: string;
   /** Store page — only carried for books whose listing we've verified. */
   store: string | null;
@@ -51,9 +59,9 @@ const BOOK_APPS: Record<string, BookApp> = {
   // id below is Apple's own, taken from the apps.apple.com URL of the book's
   // listing — none is guessed. iOS only: Google Play package names are not
   // verified, so Android keeps the web fallback.
-  fanduel: { scheme: null, web: 'https://sportsbook.fanduel.com/', store: ios('id1413721906') },
-  betmgm: { scheme: null, web: 'https://sports.betmgm.com/', store: ios('id1430875409') },
-  williamhill_us: { scheme: null, web: 'https://sportsbook.caesars.com/', store: ios('id1413099571') },
+  fanduel: { scheme: null, candidateSchemes: ['fanduelsportsbook', 'fanduel-sportsbook', 'fdsportsbook', 'fanduel'], web: 'https://sportsbook.fanduel.com/', store: ios('id1413721906') },
+  betmgm: { scheme: null, candidateSchemes: ['betmgm', 'betmgmsports', 'betmgm-sports'], web: 'https://sports.betmgm.com/', store: ios('id1430875409') },
+  williamhill_us: { scheme: null, candidateSchemes: ['caesarssportsbook', 'caesars', 'williamhill', 'czrsportsbook'], web: 'https://sportsbook.caesars.com/', store: ios('id1413099571') },
   espnbet: { scheme: null, web: 'https://espnbet.com/', store: null },
   bovada: { scheme: null, web: 'https://www.bovada.lv/', store: null },
   pinnacle: { scheme: null, web: 'https://www.pinnacle.com/', store: null },
@@ -61,14 +69,14 @@ const BOOK_APPS: Record<string, BookApp> = {
   // schemes. The per-outcome betslip link from the odds feed is the primary
   // route; the store and then the site are the fallbacks when a row carries
   // no link.
-  fanatics: { scheme: null, web: 'https://sportsbook.fanatics.com/', store: ios('id1616738407') },
-  betrivers: { scheme: null, web: 'https://www.betrivers.com/', store: ios('id1635357259') },
-  hardrockbet: { scheme: null, web: 'https://www.hardrock.bet/', store: ios('id1572525917') },
-  ballybet: { scheme: null, web: 'https://www.ballybet.com/', store: ios('id1590852096') },
+  fanatics: { scheme: null, candidateSchemes: ['fanaticssportsbook', 'fanatics-sportsbook', 'fanaticsbet'], web: 'https://sportsbook.fanatics.com/', store: ios('id1616738407') },
+  betrivers: { scheme: null, candidateSchemes: ['betrivers', 'betriverssportsbook'], web: 'https://www.betrivers.com/', store: ios('id1635357259') },
+  hardrockbet: { scheme: null, candidateSchemes: ['hardrockbet', 'hardrocksportsbook'], web: 'https://www.hardrock.bet/', store: ios('id1572525917') },
+  ballybet: { scheme: null, candidateSchemes: ['ballybet', 'ballybetsportsbook'], web: 'https://www.ballybet.com/', store: ios('id1590852096') },
   // betPARX ships one app PER STATE (MD, PA, NJ) — resolved from the member's
   // state below; with none set there is no single page to send them to.
-  betparx: { scheme: null, web: 'https://www.betparx.com/', store: null },
-  rebet: { scheme: null, web: 'https://play.rebet.app/', store: ios('id6468762763') },
+  betparx: { scheme: null, candidateSchemes: ['betparx', 'betparxsportsbook'], web: 'https://www.betparx.com/', store: null },
+  rebet: { scheme: null, candidateSchemes: ['rebet'], web: 'https://play.rebet.app/', store: ios('id6468762763') },
 };
 
 /** An App Store page, iOS only (the id is Apple's; see BOOK_APPS). */
@@ -141,20 +149,32 @@ async function tryOpen(url: string, isScheme = false): Promise<boolean> {
  * iOS answers `canOpenURL` for a custom scheme only when the scheme is
  * declared in the build's `LSApplicationQueriesSchemes` (app.json), and
  * answers `false` — indistinguishable from "not installed" — for any other.
- * So the question is asked only for books with a verified scheme, on iOS,
- * and verify_book_links.ts pins that every such scheme is declared. Android
+ * So every scheme asked about here is declared there (verify_book_links.ts
+ * pins it). A verified scheme (`scheme`) is trusted both ways; an unverified
+ * candidate (`candidateSchemes`) only when it says yes — see BookApp. Android
  * needs a `<queries>` element the app does not declare, so it stays unknown
  * there. (Matt, 2026-09-05: "If I have the app for that Sportsbook, it should
- * just open my app.")
+ * just open my app" and "This should be the same for all the Sportsbook
+ * apps.")
  */
 export async function isBookAppInstalled(book: string): Promise<boolean | null> {
-  const scheme = BOOK_APPS[book]?.scheme;
-  if (!scheme || Platform.OS !== 'ios') return null;
-  try {
-    return await Linking.canOpenURL(scheme);
-  } catch {
-    return null;
+  const app = BOOK_APPS[book];
+  if (!app || Platform.OS !== 'ios') return null;
+  const verified = app.scheme ? [app.scheme] : [];
+  const candidates = (app.candidateSchemes ?? []).map((c) => `${c}://`);
+  if (verified.length === 0 && candidates.length === 0) return null;
+  // A `true` from ANY scheme is proof: iOS says yes only for a scheme some
+  // installed app registered. A `false` is proof only from the verified one.
+  let verifiedSaidNo = false;
+  for (const url of [...verified, ...candidates]) {
+    try {
+      if (await Linking.canOpenURL(url)) return true;
+      if (verified.includes(url)) verifiedSaidNo = true;
+    } catch {
+      // asked and not answered: no evidence either way
+    }
   }
+  return verifiedSaidNo ? false : null;
 }
 
 /**
@@ -165,7 +185,9 @@ export async function isBookAppInstalled(book: string): Promise<boolean | null> 
  *
  *   installed  → the betslip link (a universal link iOS routes to the app,
  *                with the bet on the slip), else the app itself by its
- *                scheme, else the book's site. Never the App Store: a member
+ *                VERIFIED scheme (a candidate is never opened — it might be
+ *                another app's), else the book's site, itself a universal
+ *                link iOS routes to the app. Never the App Store: a member
  *                who has the app is sent to a page whose only button is
  *                "Open" (Matt, 2026-09-05, with that page on screen).
  *   not        → the App Store, whatever link we hold — the bet is not

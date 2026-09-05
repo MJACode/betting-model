@@ -24,7 +24,30 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "LSApplicationQueriesSchemes": [
-          "dksb"
+          "dksb",
+          "fanduelsportsbook",
+          "fanduel-sportsbook",
+          "fdsportsbook",
+          "fanduel",
+          "betmgm",
+          "betmgmsports",
+          "betmgm-sports",
+          "caesarssportsbook",
+          "caesars",
+          "williamhill",
+          "czrsportsbook",
+          "fanaticssportsbook",
+          "fanatics-sportsbook",
+          "fanaticsbet",
+          "betrivers",
+          "betriverssportsbook",
+          "hardrockbet",
+          "hardrocksportsbook",
+          "ballybet",
+          "ballybetsportsbook",
+          "betparx",
+          "betparxsportsbook",
+          "rebet"
         ]
       }
     },
