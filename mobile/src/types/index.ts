@@ -548,7 +548,7 @@ export interface ParlayTrackRow {
 }
 
 export type TabParamList = {
-  // Merged Picks home (Today | Signals | Movement) replaces the old Picks +
+  // Merged Picks home (Today | Signals) replaces the old Picks +
   // Signals tabs. Live (in-play) is promoted to its own tab; Settings moved off
   // the tab bar to a top-right gear.
   Picks: undefined;
