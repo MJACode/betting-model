@@ -239,6 +239,37 @@ def _job_ncaaf_prop_odds(**kw):
                                         with_alternates=kw["with_alternates"])
 
 
+def _job_market_coverage(**kw):
+    from scripts.probe_market_coverage import probe
+    return probe(kw["sport"], kw["markets"])
+
+
+def _validate_market_coverage(args: dict) -> dict:
+    """Which books serve which prop markets. Writes nothing.
+
+    Stored data cannot answer this: a market we never REQUEST has no rows, and
+    no query can tell "no book prices it" from "we never asked". So this asks
+    -- one market per call, which costs the same as chunking and attributes an
+    unsupported key exactly.
+    """
+    from data.ingestors.odds_ingestor import SPORT_KEYS
+    sport = str(args.get("sport") or "").upper()
+    if sport not in SPORT_KEYS:
+        raise ValueError(f"unknown sport {sport!r}")
+    # `markets` ABSENT means "every candidate for this sport". An explicit
+    # empty list is a caller error, not a full sweep -- `or None` would have
+    # quietly turned one into the other, and a probe that asks 30 markets when
+    # it was told to ask none is a paid call nobody requested.
+    markets = args.get("markets")
+    if markets is not None:
+        if not isinstance(markets, list):
+            raise ValueError("markets must be a list")
+        markets = [str(m) for m in markets]
+        if not 1 <= len(markets) <= 60:
+            raise ValueError(f"markets out of range: {len(markets)}")
+    return {"sport": sport, "markets": markets}
+
+
 def _validate_ncaaf_prop_odds(args: dict) -> dict:
     """College props, measured before they are scheduled.
 
@@ -376,6 +407,7 @@ JOBS = {
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
     "ncaaf_prop_odds": (_job_ncaaf_prop_odds,  _validate_ncaaf_prop_odds),
+    "market_coverage": (_job_market_coverage,  _validate_market_coverage),
 }
 
 
