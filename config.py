@@ -1957,10 +1957,11 @@ PROP_MARKETS_ALL = PROP_MARKETS_PITCHER + PROP_MARKETS_BATTER
 # Matt, the same message: "WNBA and NBA same cost yes. Same with NFL NCAAF."
 # Basketball alternates ride the same ingestor and gate. NFL alternates ride
 # data/ingestors/nfl_prop_odds_ingestor.py, in their own request chunks so a
-# key the API rejects costs one chunk, never the standard markets. NCAAF has
-# no player-prop ingest at all (the football ingestor is keyed on nflverse
-# ids and americanfootball_nfl), so there is nothing to add alternates to;
-# that is an NCAAF prop ingestor first (docs/followups.md).
+# key the API rejects costs one chunk, never the standard markets. NCAAF had
+# no player-prop ingest at all when that was written; it got one the same day
+# (data/ingestors/ncaaf_prop_odds_ingestor.py, "Yes do it"), so its alternates
+# are here too -- scoped to games a book already prices, and OFF until the
+# probe's number is in front of Matt (RUN_NCAAF_PROP_ODDS).
 PROP_ALT_MARKETS = {
     "MLB": [
         "batter_hits_alternate",
@@ -1988,6 +1989,17 @@ PROP_ALT_MARKETS = {
         "player_blocks_alternate",
         "player_steals_alternate",
         "player_turnovers_alternate",
+    ],
+    "NCAAF": [
+        "player_pass_yds_alternate",
+        "player_pass_tds_alternate",
+        "player_pass_completions_alternate",
+        "player_pass_attempts_alternate",
+        "player_rush_yds_alternate",
+        "player_rush_attempts_alternate",
+        "player_reception_yds_alternate",
+        "player_receptions_alternate",
+        "player_sacks_alternate",
     ],
     "NFL": [
         "player_pass_yds_alternate",
@@ -2043,6 +2055,58 @@ PROP_MARKETS_NBA = [
 # rush/reception and first TD are all excluded — see docs/nfl_props_model.md §3
 # for the measurement behind each exclusion (two of them have NEGATIVE
 # out-of-sample R²: a tuned model is worse than the pooled mean).
+# NCAAF player prop markets (Matt, 2026-09-05: "Yes do it"). The Odds API uses
+# ONE key namespace for both football leagues, so these are the NFL keys under
+# the americanfootball_ncaaf sport key -- WHICH of them the API actually serves
+# for college is NOT assumed here. A key it does not support 422s its own
+# request chunk and is skipped (ncaaf_prop_odds_ingestor._event_props), and the
+# probe REPORTS which markets came back. Ordered to match the Stats tab's NCAAF
+# board (mobile/src/lib/statCatalog.ts), because that board -- not a model -- is
+# what these lines are for: NCAAF has four game-level models and no prop model,
+# so a college prop row is research, never a pick.
+PROP_MARKETS_NCAAF = [
+    "player_pass_yds",
+    "player_pass_tds",
+    "player_pass_completions",
+    "player_pass_attempts",
+    "player_pass_interceptions",
+    "player_rush_yds",
+    "player_rush_attempts",
+    "player_reception_yds",
+    "player_receptions",
+    "player_anytime_td",
+    "player_sacks",
+]
+# NOT pulled, though the feed offers them for football, because nothing can
+# DISPLAY them and an unreachable market is a credit spent on nothing
+# (tests/test_ncaaf_prop_odds.py pins the pull against the app's map in both
+# directions):
+#   player_rush_reception_yds  -- the board has no combined rush+rec yards
+#     column, only its two halves.
+#   player_tackles_assists     -- the board's def_tackles charges a shared
+#     tackle as a HALF (CFBD stores 5 solo + 9 assists as 9.5), the market
+#     counts solo + assists at FULL credit, so the price would sit beside a
+#     number on a different scale -- a different bet in the sense of
+#     docs/best_line.md §5 (UX review, 2026-09-05). It comes back with a
+#     full-credit column, which is a new StatDef.
+
+
+# WHICH college games get a prop pull. Measured 2026-09-05, a full Saturday:
+# 120 NCAAF games on the slate, 70 with a DraftKings game line, 39 FBS vs FBS,
+# 34 priced by our own models. Pulling all 120 is how a college slate costs
+# more than the entire MLB program -- and the 50 games with no DK line at all
+# (Lakeland at Carthage, Division III) have no player props to sell us.
+#
+# So the scope is "a book is already pricing this game": an event is pulled
+# only when DraftKings has posted a game line for it. That is self-maintaining
+# -- no hand-kept televised list to rot -- and it is the same signal a human
+# would use. NCAAF_PROP_MAX_EVENTS is the hard ceiling per pass regardless.
+NCAAF_PROP_REQUIRE_DK_LINE = os.environ.get("NCAAF_PROP_REQUIRE_DK_LINE", "1") != "0"
+NCAAF_PROP_MAX_EVENTS = int(os.environ.get("NCAAF_PROP_MAX_EVENTS", "80"))
+# OFF until the probe's measured number is in front of Matt. Turning this on is
+# a Railway variable, not a deploy.
+RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
+
 PROP_MARKETS_NFL = [
     "player_pass_yds",
     "player_pass_attempts",

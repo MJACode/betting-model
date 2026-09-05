@@ -791,11 +791,17 @@ test has to ALTER them in (`tests/test_pick_lock_survives_settlement.py` does).
 Small and mechanical: add both to each schema file, and check the same way for
 every other column production has grown.
 
-## [ ] NCAAF player props have no ingest, so NCAAF alternate lines have nothing to ride
+## [x] NCAAF player props have no ingest — DONE 2026-09-05
 
-Matt, 2026-09-05, approving alternates: "Same with NFL NCAAF." MLB, WNBA,
-NBA and NFL carry them (`config.PROP_ALT_MARKETS`). NCAAF cannot: the
-football prop ingestor (`data/ingestors/nfl_prop_odds_ingestor.py`) is keyed
-on nflverse game ids and `americanfootball_nfl`, and no NCAAF prop odds are
-pulled at all. An NCAAF prop ingestor (CFBD ids, `americanfootball_ncaaf`,
-the same parser) is the prerequisite; the alternate keys are the NFL ones.
+Raised when NCAAF alternates were approved with nothing to ride. Matt asked
+what it meant and then "Yes do it", so
+`data/ingestors/ncaaf_prop_odds_ingestor.py` exists: CFBD ids via
+`resolve_odds_api_school`, `americanfootball_ncaaf`, the shared parser, and
+`config.PROP_MARKETS_NCAAF` + the NCAAF alternates. Scoped to games
+DraftKings already prices (measured: 120 games on a Saturday, 70 lined) under
+a per-pass ceiling, and OFF (`RUN_NCAAF_PROP_ODDS=0`) until the probe's
+measured cost is in front of Matt.
+
+Still open underneath it: **no NCAAF prop MODEL.** These rows are research —
+the Stats board's line column and betslip line legs. A college prop model is
+its own piece of work, and would need the CFBD player log as its substrate.
