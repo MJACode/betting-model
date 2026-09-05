@@ -233,6 +233,12 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     # prop system has (the same join the snap counts use).
     "nfl_prop_pass_yards":          ("nfl_player", "passing_yards"),
     "nfl_prop_pass_attempts":       ("nfl_player", "attempts"),
+    # The LIVE pass-attempts lane (nfl/live_model, model_id nfl_live_prop). It
+    # trades the same market as nfl_prop_pass_attempts and settles against the
+    # same stat -- an in-play bet on attempts is graded by the full-game total,
+    # exactly like the pre-game one. Added 2026-09-05 when the lane went live;
+    # before that it recorded to a JSONL file and settled nowhere.
+    "nfl_live_prop":                ("nfl_player", "attempts"),
     "nfl_prop_pass_completions":    ("nfl_player", "completions"),
     "nfl_prop_pass_tds":            ("nfl_player", "passing_tds"),
     "nfl_prop_rush_yards":          ("nfl_player", "rushing_yards"),

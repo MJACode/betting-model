@@ -225,6 +225,31 @@ attribution is worse than none — it puts a decision in someone's mouth. Where 
 session's own user is the one directing, that is the name; where they are
 relaying ("Matt wants…"), the name is the originator, not the relayer.
 
+**THE APP, DISCORD AND PUSH SHOW THE SAME PICKS. THEY ARE IDENTICAL.**
+(Matt, 2026-09-05: *"The app and discord should always show the same picks.
+They should be identical."*) Every publishing surface reads **`picks`** and
+applies the **same `model_action_thresholds` cut** the app's
+`passesActionFilter` applies. A surface that reads anything else is a surface
+that will disagree, and the disagreement is always silent.
+
+Discord and push used to read `opening_signals`, which put the **capture step**
+between a pick and its channel — a gate the app does not have, and one that can
+only ever LOSE rows. Measured: **6 of 125 eligible BETs never published, all 6
+uncaptured, zero captured-then-unposted** (`docs/rules_evidence.md`).
+
+- **No publishing surface gets a date horizon.** A pick is publishable when its
+  game has **not started**, however far ahead it was written. The two Week 1
+  wind picks were written 9 days out against a 7-day capture window, so they
+  reached the app and nothing else. A horizon is a thing you can only fail at
+  quietly.
+- **`opening_signals` is the CLV / opening-signal shadow track, not a gate.**
+  It keeps its own window (`docs/opening_signals.md`). Never publish from it.
+- **The one guard that SHOULD bound the set is the started-game check.** The
+  pick is a legitimate bet of record; announcing it once the game is under way
+  sends the reader to a bet they cannot take.
+- **A new surface is a line in the parity tests**, not a copied query —
+  `tests/test_nfl_lookahead_signals.py` asserts the property over all of them.
+
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
 `.claude/rules/frontend.md` when a file under `mobile/` is opened.
@@ -339,6 +364,13 @@ model is paper-only — surfaced but not backed — until it clears:
 
 Models currently in that state are flagged as PAPER ONLY in their own section
 (e.g. `ncaaf_spread` — see `docs/sports/ncaaf.md`). Everything else is live.
+
+**`nfl_live_prop` is LIVE with the gate deliberately NOT met** (Matt,
+2026-09-05). Settled record at go-live: **zero** — it wrote to a JSONL file, so
+it could never have cleared the gate by waiting. Raised, restated, his call.
+**Do not pause it or restore the gate without asking him.** Re-sweep its cut at
+~50 settled bets; it runs 0.0/0.0 because the cut is EV, in
+`nfl/live_model/config.EV_THRESHOLDS`. Detail: `docs/rules_evidence.md`.
 
 ---
 

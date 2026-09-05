@@ -271,6 +271,18 @@ class Executor:
         """
         now = now or datetime.now(timezone.utc)
         ctx = dict(context or {})
+        # The BOOK's team names ride along on every decision. Quote.home_team
+        # explains why they exist at all: "the book's event id and ESPN's event
+        # id are unrelated strings, so the only thing the two feeds share is who
+        # is playing." `game_id` below is ESPN's, so these names are the ONLY
+        # bridge from a decision to the platform's `games` row -- which is what
+        # pick_writer.resolve_game_id joins on, and what settlement then needs.
+        # Also worth having in the JSONL audit log on its own: a decision log
+        # that cannot say who was playing is hard to read back a month later.
+        for _k, _v in (("home_team", getattr(quote, "home_team", None)),
+                       ("away_team", getattr(quote, "away_team", None))):
+            if _v and _k not in ctx:
+                ctx[_k] = _v
         market_prob = american_to_prob(quote.price)
         ev = expected_value(model_prob, quote.price)
 

@@ -413,6 +413,20 @@ ACTION_THRESHOLDS: dict = {
     # blind month at >= 50 flags.
     "wnba_prop_market":           {"min_prob": 0.0, "min_edge": 0.05},
     "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
+    # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
+    # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
+    # paper trading and delay this being an available feature") -- taken with
+    # the §2 go-live gate NOT met, deliberately and on his call. Settled record
+    # at that moment: ZERO bets. Do not "restore" the gate here without asking
+    # him; do re-sweep these numbers the moment ~50 settled bets exist.
+    #
+    # Floors of 0.0 are not placeholders, they are the design: this lane's cut
+    # is EV, enforced in nfl/live_model/config.EV_THRESHOLDS and applied by the
+    # executor BEFORE a decision is ever recorded as a bet. A second, different
+    # cut here would silently re-filter bets the model already took -- picks
+    # written and never shown, which is exactly the app/Discord divergence this
+    # release removes. Same reasoning as ncaaf_spread's 0.0 edge floor.
+    "nfl_live_prop": {"min_prob": 0.0, "min_edge": 0.0},
     "nfl_prop_pass_yards":         {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_completions":   {"min_prob": 0.55, "min_edge": 0.05},
@@ -995,6 +1009,21 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
+    # NFL LIVE pass attempts. Every other entry in this dict TIGHTENS the house
+    # default; this one loosens it, and it has to.
+    #
+    # This lane's cut is EV (nfl/live_model/config.EV_THRESHOLDS), applied by
+    # the executor BEFORE a decision is ever recorded as a bet. The -200 default
+    # would re-cut that after the fact: a live prop the lane bet at -250 gets
+    # written to `picks` and then hidden by the app's passesActionFilter and the
+    # Discord card's threshold join. Written but not shown is precisely the
+    # divergence #489 removed, and it would have been reintroduced for the one
+    # lane that release took live -- by a default nobody chose for it.
+    #
+    # A price ceiling on live props may well be wanted. It belongs in the
+    # EXECUTOR, where the lane declines the bet, not here, where the pick is
+    # taken and then concealed from the person who has to place it.
+    "nfl_live_prop":             -100000,
 }
 
 
@@ -1024,6 +1053,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.05,
     "nhl_puckline":             0.05,
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
+    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.00,   # card gates on |dev| >= 1.0; edge >= 0 drops juice-eaten quotes
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.08,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
@@ -1118,6 +1148,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
+    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.52,   # ~breakeven at -110, a sanity floor like wind's. Was 0.55, which
                                     # was set against a FLAT 0.5818 model prob; once the card began
                                     # pricing per deviation it silently became an edge filter (§28)
@@ -2298,9 +2329,18 @@ NFL_MODEL_FIRST_SEASON: int = int(os.environ.get("NFL_MODEL_FIRST_SEASON", "2015
 # be captured, and therefore only reach Discord and push, on GAME DAY, by which
 # time the opener's number has been corrected and the bet no longer exists.
 #
-# 7 matches the opener's own LEAD_HI_DAYS (nfl/models/opener_spread.py); the
-# wind card never reaches further than ~4 days out.
-NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "7"))
+# 7 -> 10 on 2026-09-05. The old value matched the opener's own LEAD_HI_DAYS,
+# and the comment here claimed "the wind card never reaches further than ~4 days
+# out". It does: scheduler.NFL_POLL_HORIZON_DAYS is 10, and Week 1 Sunday is 9
+# days from Friday. Both 2026-09-05 wind picks (game_date 2026-09-13) fell
+# outside the 7-day window and were never captured at all.
+#
+# This no longer gates DISCORD or PUSH -- both read `picks` directly now, so
+# neither has a date horizon to fall outside of. It still bounds the
+# opening-signal / CLV shadow track, which is why it is widened rather than
+# deleted: at 7 that track was silently dropping NFL look-ahead picks. 10
+# matches the poll horizon, so capture covers everything the poller can write.
+NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "10"))
 
 # How many seasons back the self-healing NFL player-stats ingest keeps loaded
 # (current season + this many prior). The first run after deploy backfills

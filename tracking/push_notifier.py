@@ -38,31 +38,63 @@ _EXPO_CHUNK = 100        # Expo accepts up to 100 messages per request
 # ── Detection ────────────────────────────────────────────────────────────────
 
 def _new_bet_signals(conn, target_date: str) -> list[dict]:
-    """Locked opening signals that clear the current action thresholds and
-    haven't been pushed yet. Joining model_action_thresholds applies the same
-    prob/edge/paused/prob_only cut the app's passesActionFilter uses, so we only
-    notify on genuinely bettable signals — not every raw BET cross."""
+    """Bettable picks that have not been pushed yet.
+
+    READS `picks`, NOT `opening_signals` (2026-09-05, Matt: "the app and discord
+    should always show the same picks. They should be identical"). The rule was
+    given about Discord; it applies here for the same reason and more sharply.
+    This is the APP's own notification, so a pick the app displays and the phone
+    stays silent about is the divergence in its purest form.
+
+    Push was the worst of the three surfaces. It read `opening_signals` (a gate
+    the app does not have -- see tracking/discord_notifier._new_signals for the
+    measured leak) AND bounded on `os.game_date = target_date`, without even the
+    look-ahead widening Discord carried. So a pick written days ahead -- every
+    NFL wind and opener pick, every NCAAF look-ahead -- could not be pushed on
+    the day it was written, and by its game day it had long since been ledgered
+    as old news or never captured at all. Both Week 1 wind picks of 2026-09-05
+    reached the app and notified nobody.
+
+    Mirrors the Discord producer exactly: same table, same thresholds row, same
+    first-BET-wins rule, same synthesised lock_key -- so the `push_sent` ledger
+    carries over and nothing already pushed pushes twice. The two ledger kinds
+    stay independent (`new_bet` here, `discord_signal` there), so neither
+    surface can suppress the other.
+    """
     rows = conn.execute("""
-        SELECT os.lock_key, os.pick_label, os.sport
-        FROM opening_signals os
-        JOIN model_action_thresholds t ON t.model_id = os.model_id
-        LEFT JOIN games g ON g.game_id = os.game_id
-        WHERE os.game_date = %s
-          AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
-          -- Never push a pre-game pick for a game already under way. Same guard
-          -- and same reasoning as the Discord producer: if it is wrong to post
-          -- a bet the reader cannot take, it is wrong to buzz their phone about
-          -- it. An unknown start time never suppresses (golf has none).
-          AND (g.commence_time IS NULL
-               OR g.commence_time::timestamptz > NOW())
-          AND t.paused = FALSE
-          AND os.model_probability >= t.min_prob
-          AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
-          AND NOT EXISTS (
-              SELECT 1 FROM push_sent s
-              WHERE s.lock_key = os.lock_key AND s.kind = 'new_bet'
-          )
-        ORDER BY os.locked_at
+        WITH bet AS (
+            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
+                   p.game_id || ':' || p.model_id
+                       || COALESCE(':' || p.player_id, '') AS lock_key,
+                   p.pick_label, p.sport, p.created_at
+            FROM picks p
+            JOIN model_action_thresholds t ON t.model_id = p.model_id
+            LEFT JOIN games g ON g.game_id = p.game_id
+            WHERE p.signal_type = 'BET'
+              AND (p.is_live IS NULL OR p.is_live = FALSE)
+              AND p.model_id NOT LIKE '%%_live_%%'
+              -- Never push a pre-game pick for a game already under way. Same
+              -- guard and same reasoning as the Discord producer: if it is
+              -- wrong to post a bet the reader cannot take, it is wrong to buzz
+              -- their phone about it. An unknown start time never suppresses
+              -- (golf has none).
+              AND (g.commence_time IS NULL
+                   OR g.commence_time::timestamptz > NOW())
+              AND (g.commence_time IS NOT NULL OR p.game_date >= %s)
+              AND t.paused = FALSE
+              AND p.model_probability >= t.min_prob
+              AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR p.dk_odds IS NULL
+                   OR p.dk_odds >= t.min_odds)
+            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
+                     p.created_at
+        )
+        SELECT lock_key, pick_label, sport FROM bet
+        WHERE NOT EXISTS (
+            SELECT 1 FROM push_sent s
+            WHERE s.lock_key = bet.lock_key AND s.kind = 'new_bet'
+        )
+        ORDER BY created_at
     """, (target_date,)).fetchall()
     return [{"lock_key": r[0], "label": r[1], "sport": r[2]} for r in rows]
 
