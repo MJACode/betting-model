@@ -17,7 +17,7 @@ Sports model picks & analytics
 
 ## Promotional Text (170 char max — editable without a new build)
 ```
-Daily MLB model output: projected win probability, calibration error, and edge vs. market for every game and major player prop. Research-only, no wagers placed in-app.
+Daily MLB model output: projected win probability, edge vs. market, and a public record for every game and major player prop. Research-only, no wagers placed in-app.
 ```
 
 ## Description (4000 char max)
@@ -38,7 +38,7 @@ WHAT YOU SEE
 - Signals tab: the subset of picks that clear per-model probability and
   edge thresholds.
 - Performance tab: a calendar heat-map of historical settled picks plus
-  rolling ROI, win-rate, and calibration metrics.
+  rolling ROI and win-rate.
 - Pick detail screens: rolling team and player trends (last 3, 5, 10, 20,
   season), weather (wind, temperature, dome status), and a plain-language
   breakdown of why the model leans the way it does.
@@ -53,10 +53,10 @@ WHAT IT IS NOT
 HOW IT WORKS
 The model is trained on roughly fifteen years of MLB game and player-game
 data (MLB Stats API, Baseball Savant, historical weather, umpire
-assignments). Predictions are calibrated post-training via Platt scaling so
-that a "65% pick" wins close to 65% of the time over a large sample.
-Calibration error is shown live in the Performance tab so you can audit the
-model honestly.
+assignments). Model scores are corrected on held-out folds after training, so
+that a "65% pick" wins close to 65% of the time over a large sample. The full
+settled record — wins, losses and closing-line value — is published in the app
+so you can audit the model honestly.
 ```
 
 ## Keywords (100 char max, comma-separated, no spaces)

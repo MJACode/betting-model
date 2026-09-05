@@ -547,7 +547,7 @@ export function SettingsScreen() {
 
         <LinkRow
           label="Live betting (beta)"
-          sub="In-play picks that update while games are running. The live models are still calibrating, so treat these as unproven."
+          sub="In-play picks that update while games are running. The live models are unproven — treat them that way."
           onPress={() => navigation.navigate('Tabs', { screen: 'Live' })}
         />
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
+import { BACKTEST_START, GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START } from '@/lib/recordStart';
 
 export function ExplainerScreen() {
   return (
@@ -78,12 +78,11 @@ export function ExplainerScreen() {
             advantage.
           </Bullet>
           <P>
-            Raw XGBoost outputs are overconfident, so every model passes its
-            scores through <Strong>Platt scaling</Strong> — a sigmoid
-            calibration fitted on cross-validation folds. The number you see
-            (e.g. <Mono>67.3%</Mono>) is the calibrated probability — what the
-            true win rate should be for a bin of picks at that prediction
-            level.
+            Raw XGBoost outputs are overconfident on their own, so every model
+            fits a correction on held-out folds and applies it to every score it
+            publishes. The number you see (e.g. <Mono>67.3%</Mono>) is that
+            adjusted probability — what the true win rate should be for a bin of
+            picks at that prediction level.
           </P>
         </Section>
 
@@ -214,8 +213,7 @@ export function ExplainerScreen() {
             We’re also running an experiment behind the scenes: we save the{' '}
             <Strong>first</Strong> time a game becomes a BET (the “opening
             signal”) and track that record separately, alongside how the line
-            moves afterward. The picks you act on are still the live ones above —
-            see Track Record → “Opening vs Live” for that comparison.
+            moves afterward. The picks you act on are still the live ones above.
           </P>
         </Section>
 
@@ -276,20 +274,21 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="Why we're different — calibration, not hype">
+        <Section heading="Why we're different — the whole record, not one number">
           <P>
-            Most picks services sell <Strong>accuracy</Strong> ("we hit 80%!").
-            We optimize for <Strong>calibration</Strong> instead — making a "65%"
-            actually win about 65% of the time. Research backs this: a 2024
-            University of Bath study found calibration-optimized betting models
-            massively outperformed accuracy-optimized ones over a full season.
+            Most picks services sell <Strong>accuracy</Strong> ("we hit 80%!") —
+            one hero number, chosen after the fact, with no way to check it. We
+            publish the full track record instead: wins, losses, pushes and,
+            where we have it, closing-line value on every settled pick —
+            including the models that aren't working.
           </P>
           <P>
-            That's why every model is Platt-scaled and gated at ≤5% calibration
-            error before it can go live, and why we publish a full track record
-            — wins, losses, and closing-line value — instead of a hero win-rate.
-            If a model isn't beating the closing line over a real sample, we'd
-            rather show you that than hide it.
+            A model isn't backed for real money until it has a real sample
+            behind it — {GO_LIVE_SETTLED_PICKS}+ settled picks with positive
+            ROI. In-play models are the exception: they're shown while that
+            record is still being built, so treat them as unproven. If a model
+            isn't beating the closing line over a real sample, we'd rather show
+            you that than hide it.
           </P>
         </Section>
 
