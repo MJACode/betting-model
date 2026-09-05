@@ -214,7 +214,8 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const total: GameLineLegSpec = { ...spread, market: 'totals', line: 8.5, side: 'over' };
   const totalRows = rows.map((r) => ({ ...r, market: 'totals', spread_home: null }));
   const totalLeg = gameLineLegFromRows(total, totalRows, game)!;
-  check('a total leg prices the Over at the board\'s number', totalLeg.americanOdds === -110 && totalLeg.label === 'WSH vs LAD Over 8.5', `${totalLeg.americanOdds} ${totalLeg.label}`);
+  check('a total leg prices the Over at the board\'s number, labelled home-first like the server', totalLeg.americanOdds === -110 && totalLeg.label === 'LAD vs WSH Over 8.5', `${totalLeg.americanOdds} ${totalLeg.label}`);
+  check('a whole-number line prints one decimal, byte for byte with pick_label', lineLegLabel({ ...total, line: 8 }) === 'LAD vs WSH Over 8.0' && lineLegLabel({ ...spread, line: -1 }) === 'LAD -1.0' && lineLegLabel({ ...away, line: 3 }) === 'WSH +3.0', `${lineLegLabel({ ...total, line: 8 })} ${lineLegLabel({ ...spread, line: -1 })}`);
   const totalFromAway: GameLineLegSpec = { ...total, team: 'WSH', opponent: 'LAD', isHome: false };
   check('the total is the game\'s, not the tapped team\'s: both rows make one leg', lineLegKey(total) === lineLegKey(totalFromAway));
   check('a total at another number is another bet', lineLegKey(total) !== lineLegKey({ ...total, line: 9 }));
@@ -242,6 +243,14 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the slip re-prices a game leg from its market\'s latest lines', resolved.includes('fetchGameLineRows(spec.game_id, spec.market)') && resolved.includes('gameLineLegFromRows('));
   const store = read('src/hooks/useLineLegs.ts');
   check('the store accepts a stored game spec', store.includes("if (s.kind === 'game')"));
+  check('the sheet warns before a second game line on one game', sheet.includes('A parlay takes one game line per game.'));
+  const teamsSrc = read('src/components/TeamsBoard.tsx');
+  check('the Teams board bounces back to the betslip like Players', teamsSrc.includes('onAdded={onAdded}') && read('src/screens/StatsScreen.tsx').includes("<TeamsBoard sport={sport} onAdded={fromParlay"));
+  check('VoiceOver hears the side of a total, not "o8.5"', teamsSrc.includes('`total over ${quote.line}`'));
+  const picks = read('src/screens/PicksHomeScreen.tsx');
+  check('the partial banner is one sentence with one reason and hides while reloading', picks.includes('{!error && !loading && partial ? (') && picks.includes('numberOfLines={3}') && picks.includes('accessibilityHint="Reloads today’s picks"'));
+  const hook = read('src/hooks/useTodayPicks.ts');
+  check('a look-ahead failure is named for what it is', hook.includes("swallow('the upcoming UFC card')") && !hook.includes("'UFC picks'"));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);

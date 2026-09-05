@@ -127,20 +127,25 @@ const num = (v: number | string | null | undefined): number | null => {
 const sameLine = (a: number | null, b: number | null): boolean =>
   a != null && b != null && Math.abs(a - b) < 1e-9;
 
+/** A game number the way scorer._build_pick_label prints it: a Python float,
+ *  so an integer line carries one decimal ("7.0", "+3.0"). */
+const fmtLine = (n: number): string => (Number.isInteger(n) ? n.toFixed(1) : String(n));
 /** "+1.5" / "-1.5" in the picks' own idiom (ASCII sign, like "WSH +1.5"). */
-const signed = (n: number): string => (n > 0 ? `+${n}` : `${n}`);
+const signed = (n: number): string => (n > 0 ? `+${fmtLine(n)}` : fmtLine(n));
 
 /** The proposition as the leg card and the sheet title show it. Game legs use
- *  the picks' own labels -- "LAD ML", "WSH +1.5", "SEA vs OAK Over 7.0" -- so
- *  a line leg is recognisable beside a model's pick for the same market. */
+ *  the picks' own labels, byte for byte (models/scorer.py _build_pick_label):
+ *  "LAD ML", "WSH +1.5", "SEA vs OAK Over 7.0" -- home team first on a total,
+ *  one decimal on a whole number -- so a line leg beside a model's pick for
+ *  the same market reads as the same game at the same number (UX review). */
 export function lineLegLabel(s: LineLegSpec): string {
   if (isGameSpec(s)) {
     if (s.market === 'h2h') return `${s.team} ML`;
     if (s.market === 'spreads') return `${s.team} ${s.line == null ? '' : signed(s.line)}`.trim();
-    const away = s.isHome ? s.opponent : s.team;
     const home = s.isHome ? s.team : s.opponent;
+    const away = s.isHome ? s.opponent : s.team;
     const side = s.side === 'under' ? 'Under' : 'Over';
-    return `${away} vs ${home} ${side} ${s.line ?? ''}`.trim();
+    return `${home} vs ${away} ${side} ${s.line == null ? '' : fmtLine(s.line)}`.trim();
   }
   const side = s.side === 'under' ? 'Under' : 'Over';
   return `${s.player_name} ${side} ${s.line} ${s.statLabel}`.trim();

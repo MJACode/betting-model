@@ -197,18 +197,20 @@ export function PicksHomeScreen() {
       {/* The picks loaded but something behind them did not — the odds views
           the line pills read, or one sport's look-ahead card. Say so and
           offer the retry; an empty pill and silence is how the 2026-09-04
-          timeouts went unseen here. */}
-      {!error && partial.length > 0 ? (
+          timeouts went unseen here. Hidden while reloading, so a tap on Retry
+          answers at once and the banner only returns if the reload fails
+          again (UX review). */}
+      {!error && !loading && partial ? (
         <Pressable
           onPress={() => void refresh()}
           accessibilityRole="button"
-          accessibilityLabel={`Couldn’t load ${partial.join('; ')}. Picks are unaffected. Retry`}
+          accessibilityLabel={partialSentence(partial)}
+          accessibilityHint="Reloads today’s picks"
           style={({ pressed }) => [styles.partialBanner, pressed && styles.partialPressed]}
         >
           <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
-          <Text style={styles.partialText}>
-            Couldn’t load {partial.join('; ')}. Picks are unaffected.{' '}
-            <Text style={styles.partialLink}>Retry</Text>
+          <Text style={styles.partialText} numberOfLines={3}>
+            {partialSentence(partial)} <Text style={styles.partialLink}>Retry</Text>
           </Text>
         </Pressable>
       ) : null}
@@ -352,6 +354,15 @@ function SubTabBtn({
   );
 }
 
+/** "Couldn’t load today’s lines, the line shop and the prop line shop —
+ *  statement timeout (57014). Today’s picks are unaffected." One sentence,
+ *  one reason, for the partial-load banner. */
+export function partialSentence(p: { whats: string[]; reason: string }): string {
+  const w = p.whats;
+  const list = w.length <= 1 ? w.join('') : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`;
+  return `Couldn’t load ${list} — ${p.reason}. Today’s picks are unaffected.`;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -434,7 +445,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     minHeight: 44,
   },
   partialPressed: {

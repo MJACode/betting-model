@@ -87,7 +87,15 @@ function tierColor(tier: Tier): string | undefined {
   return undefined;
 }
 
-export function TeamsBoard({ sport }: { sport: Sport }) {
+export function TeamsBoard({
+  sport,
+  onAdded,
+}: {
+  sport: Sport;
+  /** After a line is added — the Stats screen bounces back to the betslip
+   *  when the member came from there, on this board as on Players. */
+  onAdded?: () => void;
+}) {
   const groups = useMemo(() => teamGroupsForSport(sport), [sport]);
   const [stat, setStat] = useState<TeamStatDef | null>(() => defaultTeamStatFor(sport));
   const [rows, setRows] = useState<TeamStatsRow[]>([]);
@@ -409,6 +417,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         input={lineSheet ? teamLineSheetInput(lineSheet, sport) : null}
         game={lineSheet ? slate.games.find((g) => g.game_id === lineSheet.gameId) ?? null : null}
         onClose={() => setLineSheet(null)}
+        onAdded={onAdded}
       />
     </>
   );
@@ -507,7 +516,11 @@ function TeamLineCell({
   const filled = quote.book === MODEL_BOOK;
   const caption = teamLineCaption(quote);
   const what =
-    quote.market === 'h2h' ? 'moneyline' : quote.market === 'spreads' ? `spread ${caption}` : `total ${caption}`;
+    quote.market === 'h2h'
+      ? 'moneyline'
+      : quote.market === 'spreads'
+        ? `spread ${caption}`
+        : `total over ${quote.line}`; // spoken: the side, not the sighted "o8.5"
   return (
     <Pressable
       onPress={onPress}

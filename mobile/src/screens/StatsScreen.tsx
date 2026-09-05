@@ -782,7 +782,7 @@ export function StatsScreen() {
           <SportToggle />
         </View>
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
-        <TeamsBoard sport={sport} />
+        <TeamsBoard sport={sport} onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined} />
       </SafeAreaView>
     );
   }

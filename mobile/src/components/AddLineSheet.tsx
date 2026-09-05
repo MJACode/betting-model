@@ -6,7 +6,7 @@ import { showToast } from '@/components/Toast';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { formatAmerican } from '@/lib/format';
-import { lineLegKey, lineLegLabel, type LineSheetInput } from '@/lib/lineLegs';
+import { isGameSpec, lineLegKey, lineLegLabel, type LineSheetInput } from '@/lib/lineLegs';
 import { bookLabelShort, bookName, MODEL_BOOK } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
@@ -54,6 +54,14 @@ export function AddLineSheet({
   const spec = input?.spec ?? null;
   const key = spec ? lineLegKey(spec) : null;
   const inSlip = key != null && legs.has(key);
+  // A parlay takes one game line per game (parlay.ts isValidCombo). Say so
+  // HERE, before the add, when the slip already holds another game line on
+  // this game — "LAD ML" then "LAD -1.5" from one board is the likely
+  // sequence — rather than only on the betslip afterwards (UX review).
+  const sameGameLine =
+    spec && isGameSpec(spec)
+      ? legs.specs.find((s) => isGameSpec(s) && s.game_id === spec.game_id && lineLegKey(s) !== key) ?? null
+      : null;
 
   // Every bettable book pricing THIS side at THIS line, best payout first
   // (American odds are monotonic in payout; ties keep the board's order) —
@@ -108,7 +116,9 @@ export function AddLineSheet({
               the reference sheets put their one-line explainer, not as a
               caption under the list (UX review). */}
           <Text style={styles.subtitle}>
-            {input?.explainer ?? 'Add it to your betslip now — you’ll choose the sportsbook there.'}
+            {sameGameLine
+              ? `Your betslip already has ${lineLegLabel(sameGameLine)} on this game. A parlay takes one game line per game.`
+              : input?.explainer ?? 'Add it to your betslip now — you’ll choose the sportsbook there.'}
           </Text>
 
           <Text style={styles.sectionTitle}>Where it&apos;s posted</Text>
