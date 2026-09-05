@@ -141,6 +141,23 @@ EV_THRESHOLDS = {
 }
 MODEL_IDS = tuple(EV_THRESHOLDS)
 
+# The most juice this lane will lay, as an American price (Matt, 2026-09-05:
+# "-140 should be price ceiling"). A quote worse than this is REFUSED before the
+# EV test, so the lane never takes the bet at all.
+#
+# Enforced HERE and not in the display filter, deliberately. The same number in
+# config.MODEL_MIN_ODDS would have let the lane bet -250 and then hidden the
+# pick from the app, Discord and push -- taken and concealed from the person who
+# has to place it, which is the failure #491 fixed. A ceiling the model applies
+# is a decision; a ceiling the board applies is a disappearance.
+#
+# -140 matches the blanket prop floor every MLB and WNBA prop model carries, so
+# the live lane lays no more juice than the pre-game ones. It is a RISK rule,
+# not a measured cut: a live prop past -140 needs a very high model probability
+# to clear the 0.06 EV gate, and that is exactly where the model is least worth
+# trusting.
+MIN_PRICE = float(os.getenv("NFL_LIVE_MIN_PRICE", "-140"))
+
 # ------------------------------------------------------------------- sizing
 # Quarter Kelly with a further half haircut, hard capped. See the spec: the
 # live model starts with LESS trust than the pregame models, not equal.

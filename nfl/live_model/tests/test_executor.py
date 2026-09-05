@@ -17,7 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from live_model.config import (  # noqa: E402
-    EV_THRESHOLDS, MAX_DAILY_EXPOSURE_FRACTION, MAX_STAKE_FRACTION,
+    EV_THRESHOLDS, MAX_DAILY_EXPOSURE_FRACTION, MAX_STAKE_FRACTION, MIN_PRICE,
 )
 from live_model.executor import (  # noqa: E402
     Executor, derivative_lag, expected_value, is_hunt_state, kelly_stake,
@@ -283,3 +283,60 @@ def test_the_score_is_stamped_with_our_clock_not_the_feeds():
                     quote=quote(ts=between), model_prob=0.60,
                     model_id="nfl_live_halftime", now=observed)
     assert d.reason == "quote_predates_score"
+
+
+# ---------------------------------------------------------- the juice ceiling
+def test_a_quote_past_the_juice_ceiling_is_refused():
+    """Matt, 2026-09-05: "-140 should be price ceiling."
+
+    A more negative American price is more juice, so -250 is past a -140
+    ceiling. Refused whatever the model says: clearing the EV gate at -250 takes
+    a model probability high enough that the model is the thing least worth
+    trusting.
+    """
+    ex = Executor()
+    d = ex.evaluate(state=state(), quote=quote(price=-250), model_prob=0.95,
+                    model_id="nfl_live_prop", now=NOW)
+    assert d.bet is False
+    assert "price_past_ceiling" in d.reason, d.reason
+
+
+def test_the_ceiling_is_checked_before_the_edge():
+    """Eligibility, not an edge question. Pinned by giving the quote an EV so
+    large that any ordering bug would let it through as a bet."""
+    ex = Executor()
+    d = ex.evaluate(state=state(), quote=quote(price=-1000), model_prob=0.99,
+                    model_id="nfl_live_prop", now=NOW)
+    assert d.bet is False
+    assert "price_past_ceiling" in d.reason, d.reason
+
+
+def test_a_quote_at_the_ceiling_still_bets():
+    """The boundary is inclusive -- -140 is allowed, -141 is not. An
+    off-by-one here silently removes the whole -140 rung, which is where a lot
+    of prop pricing actually sits."""
+    ex = Executor()
+    d = ex.evaluate(state=state(), quote=quote(price=MIN_PRICE), model_prob=0.85,
+                    model_id="nfl_live_prop", now=NOW)
+    assert d.bet is True, d.reason
+
+
+def test_a_plus_price_is_never_juice():
+    """+120 is numerically greater than -140 and must pass the ceiling. A naive
+    abs() comparison would reject the best prices the lane can get."""
+    ex = Executor()
+    d = ex.evaluate(state=state(), quote=quote(price=150), model_prob=0.60,
+                    model_id="nfl_live_prop", now=NOW)
+    assert d.bet is True, d.reason
+
+
+def test_the_refusal_is_recorded_not_skipped():
+    """The audit log has to show the lane looked and declined -- that is the
+    difference between "no edge today" and "a guard has been eating every
+    candidate since week 3"."""
+    seen = []
+    ex = Executor(recorder=seen.append)
+    ex.evaluate(state=state(), quote=quote(price=-300), model_prob=0.95,
+                model_id="nfl_live_prop", now=NOW)
+    assert len(seen) == 1 and seen[0].bet is False
+    assert "price_past_ceiling" in seen[0].reason
