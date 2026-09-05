@@ -392,6 +392,49 @@ def _job_publish_x_results(**kw):
         conn.close()
 
 
+def _job_publish_discord_signals(**kw):
+    """Run the ordinary Discord signals producer NOW, instead of at :17.
+
+    WHY THIS EXISTS. 2026-09-05, Matt: two Week 1 nfl_wind_totals picks were on
+    the app board and had never reached Discord -- the capture leak #489 fixed
+    an hour earlier. By then the fix was deployed and both picks were
+    selectable, so nothing was left to repair; the only thing missing was
+    something to RUN the producer. notify_discord_signals is called from
+    exactly one place, the refresh pass at :17, and that pass had just been
+    killed mid-run by the deploy chain (the scheduler restarted 15:22:48Z).
+    "Post this pick now" therefore had no answer but "wait for the next cron",
+    which §1b says is not an answer -- the worker holds the webhooks and the
+    queue polls every five minutes.
+
+    NOTHING IS BYPASSED, and that is the whole safety argument. This calls the
+    ordinary producer by its ordinary name: the started-game guard still holds,
+    the model_action_thresholds cut still holds, and the push_sent ledger still
+    holds, so the job posts what is unposted and nothing else. Run it twice and
+    the second run posts zero. It changes WHEN the producer runs, never what it
+    selects -- which is also why it needs no date-list gate the way
+    notify_discord_restate does: a restatement re-publishes something already
+    sent, this one can only ever send something that never was.
+
+    target_date is optional and bounds only picks with NO commence_time (§the
+    _new_signals docstring); a pick whose game has a real start time in the
+    future is reached whatever date is passed. Omit it for "today".
+    """
+    from tracking.discord_notifier import notify_discord_signals
+
+    target_date = kw.get("target_date") or None
+    posted = notify_discord_signals(target_date=target_date)
+    return {"target_date": target_date or "today", "posted": posted}
+
+
+def _validate_publish_discord_signals(args: dict) -> dict:
+    raw = str(args.get("target_date") or "").strip()
+    if not raw:
+        return {}
+    if len(raw) != 10 or raw.count("-") != 2:
+        raise ValueError("target_date must be YYYY-MM-DD")
+    return {"target_date": raw}
+
+
 def _validate_publish_x_results(args: dict) -> dict:
     game_date = str(args.get("game_date") or "").strip()
     if len(game_date) != 10 or game_date.count("-") != 2:
@@ -401,6 +444,8 @@ def _validate_publish_x_results(args: dict) -> dict:
 
 JOBS = {
     "publish_x_results": (_job_publish_x_results, _validate_publish_x_results),
+    "publish_discord_signals": (_job_publish_discord_signals,
+                                _validate_publish_discord_signals),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
