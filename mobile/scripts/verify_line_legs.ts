@@ -151,7 +151,7 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const teams = read('src/components/TeamsBoard.tsx');
   check('the Teams pill, which still leaves the app, carries the arrow-out glyph', /name="open-outline"[^\n]*size=\{11\}/.test(teams));
   const sheet = read('src/components/AddLineSheet.tsx');
-  check('the sheet says under its title where the book is chosen', sheet.includes("you&apos;ll choose the sportsbook there"));
+  check('the sheet says under its title where the book is chosen', sheet.includes('you’ll choose the sportsbook there'));
   check('the sheet marks the member\'s own books', sheet.includes(">Yours<") && sheet.includes('usePreferredBooks()'));
   check('the sheet\'s title is the proposition', sheet.includes('const title = spec ? lineLegLabel(spec) : \'\';'));
   check('the close control is a button to VoiceOver', /accessibilityRole="button" accessibilityLabel="Close"/.test(sheet));

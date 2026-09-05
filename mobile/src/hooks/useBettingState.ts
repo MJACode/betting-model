@@ -29,7 +29,10 @@ import { useCallback, useEffect, useState } from 'react';
  */
 
 /** US jurisdictions with legal online sportsbooks, as the books spell them in
- *  their own URLs (lower-case two-letter codes). */
+ *  their own URLs (lower-case two-letter codes). Delaware is deliberately
+ *  absent: its only online book is BetRivers, on casino subdomains
+ *  (delawarepark.betrivers.com), so `de.betrivers.com` would not resolve —
+ *  a Delaware member is better served by the book's site than a dead host. */
 export const BETTING_STATES: { code: string; name: string }[] = [
   { code: 'az', name: 'Arizona' },
   { code: 'co', name: 'Colorado' },
@@ -45,6 +48,7 @@ export const BETTING_STATES: { code: string; name: string }[] = [
   { code: 'md', name: 'Maryland' },
   { code: 'ma', name: 'Massachusetts' },
   { code: 'mi', name: 'Michigan' },
+  { code: 'mo', name: 'Missouri' },
   { code: 'nv', name: 'Nevada' },
   { code: 'nh', name: 'New Hampshire' },
   { code: 'nj', name: 'New Jersey' },

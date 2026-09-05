@@ -19,6 +19,7 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
 import { GroupTabs, SegmentTabs } from '@/components/GroupTabs';
@@ -54,7 +55,7 @@ import {
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
-import { addDays, formatAmerican, todayET, weekdayET } from '@/lib/format';
+import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
@@ -433,17 +434,27 @@ export function StatsScreen() {
     [slateGames, oddsDate],
   );
 
-  // Teams whose game has STARTED. Their lines are hidden by design (a game in
-  // progress has no line a user can still take), and the cell says so instead
-  // of printing a dash that reads as "no line" — at 6:45pm on 2026-09-04 the
-  // 6:11 game's players had all gone blank while every other row was priced.
+  // Teams whose game is in progress or over. Their lines are hidden by design
+  // (no line a user can still take), and the cell says WHICH — "Live" or
+  // "Final", the words GameStatusPill uses — instead of printing a dash that
+  // reads as "no line": at 6:45pm on 2026-09-04 the 6:11 game's players had
+  // all gone blank while every other row was priced. A team with a game still
+  // to come (a doubleheader) gets no label: that game's line can still show.
   const startedTeams = useMemo(() => {
-    const out = new Set<string>();
+    const out = new Map<string, 'Live' | 'Final'>();
+    const pending = new Set<string>();
     for (const g of slateGames) {
-      if (g.game_date !== oddsDate || slateGameIds.has(g.game_id)) continue;
-      if (g.home_team) out.add(g.home_team);
-      if (g.away_team) out.add(g.away_team);
+      if (g.game_date !== oddsDate) continue;
+      const teams = [g.home_team, g.away_team].filter(Boolean) as string[];
+      if (slateGameIds.has(g.game_id)) {
+        teams.forEach((t) => pending.add(t));
+        continue;
+      }
+      const kind = gameStatus(g).kind;
+      const label = kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null;
+      if (label) teams.forEach((t) => out.set(t, label));
     }
+    pending.forEach((t) => out.delete(t));
     return out;
   }, [slateGames, oddsDate, slateGameIds]);
 
@@ -1066,7 +1077,7 @@ export function StatsScreen() {
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
                 quote={quote}
-                started={!!item.team && startedTeams.has(item.team)}
+                started={item.team ? startedTeams.get(item.team) ?? null : null}
                 showOdds={showOdds}
                 statLabel={stat?.label ?? ''}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
@@ -1107,7 +1118,7 @@ export function StatsScreen() {
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
                 quote={quote}
-                started={!!item.row.team && startedTeams.has(item.row.team)}
+                started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
                 showOdds={showOdds}
                 statLabel={stat?.label ?? ''}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
@@ -1139,6 +1150,7 @@ export function StatsScreen() {
         game={lineSheetGame}
         sport={sport}
         statLabel={stat?.label ?? ''}
+        boardHeadline={lineHeadline}
         onClose={() => setLineSheet(null)}
         onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
       />
@@ -1468,6 +1480,11 @@ function matchupTierWord(tier: MatchupInfo['tier']): string {
  *
  * Its own Pressable, so the tap doesn't bubble to the row (which opens the
  * player). */
+/** "2+" for over 1.5, "At most 1" for under 1.5 — lineHeadline's idiom. */
+export function offLineCaption(line: number, side: StatsOddsSide): string {
+  return side === 'under' ? `At most ${line - 0.5}` : `${line + 0.5}+`;
+}
+
 function OddsCell({
   quote,
   started,
@@ -1476,7 +1493,7 @@ function OddsCell({
   onPress,
 }: {
   quote: StatsOddsQuote | null;
-  started?: boolean;
+  started?: 'Live' | 'Final' | null;
   playerName: string;
   statLabel: string;
   onPress?: () => void;
@@ -1486,8 +1503,8 @@ function OddsCell({
     // and the cell says so — a dash there read as "the book never priced him".
     if (started) {
       return (
-        <View style={styles.oddsWrap} accessible accessibilityLabel={`${playerName}, game started`}>
-          <Text style={styles.oddsStarted}>Started</Text>
+        <View style={styles.oddsWrap} accessible accessibilityLabel={`${playerName}, game ${started.toLowerCase()}`}>
+          <Text style={styles.oddsStarted}>{started}</Text>
         </View>
       );
     }
@@ -1512,8 +1529,10 @@ function OddsCell({
   // here precisely because it is no longer printed on the row.
   const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
   // The book's OWN line, when it does not post the board's: printed under the
-  // price so the cell never reads as the ruler's number (statsOdds offLine).
-  const caption = quote.offLine ? `${sideWord === 'under' ? 'u' : 'o'}${quote.line}` : null;
+  // price in the BOARD'S idiom ("2+", "At most 1" — the header's vocabulary,
+  // not sportsbook notation) so it reads against the header without
+  // translation (UX review). statsOdds offLine.
+  const caption = quote.offLine ? offLineCaption(quote.line, quote.side) : null;
   return (
     <Pressable
       onPress={onPress}
@@ -1659,8 +1678,8 @@ function LeaderRow({
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   quote: StatsOddsQuote | null;
-  /** The player's game is in progress: no line, and the cell says why. */
-  started: boolean;
+  /** The player's game is live or over: no line, and the cell says which. */
+  started: 'Live' | 'Final' | null;
   showOdds: boolean;
   statLabel: string;
   onOddsPress?: () => void;
@@ -1736,8 +1755,8 @@ function HitRateRow({
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   quote: StatsOddsQuote | null;
-  /** The player's game is in progress: no line, and the cell says why. */
-  started: boolean;
+  /** The player's game is live or over: no line, and the cell says which. */
+  started: 'Live' | 'Final' | null;
   showOdds: boolean;
   statLabel: string;
   onOddsPress?: () => void;
@@ -2218,6 +2237,7 @@ const styles = StyleSheet.create({
   },
   oddsCaption: {
     fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
     color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 1,

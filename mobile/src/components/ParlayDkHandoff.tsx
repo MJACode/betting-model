@@ -1,8 +1,9 @@
 import React from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View, Linking } from 'react-native';
+import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { bookButtonColors, bookStoreUrl, openBookBetslip } from '@/lib/sportsbookLinks';
+import { useBettingState } from '@/hooks/useBettingState';
+import { bookButtonColors, bookStoreUrl, openBookBetslip, openBookStore } from '@/lib/sportsbookLinks';
 import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -39,7 +40,10 @@ interface Props {
 export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: Props) {
   const firstLink = legs.find((l) => l.betLink)?.betLink ?? null;
   const name = bookName(book);
-  const store = bookStoreUrl(book);
+  // Through the hook, not the sync read: betPARX's page depends on the state,
+  // which can land after this sheet mounts.
+  const { state } = useBettingState();
+  const store = bookStoreUrl(book, state);
   const btn = bookButtonColors(book);
 
   return (
@@ -48,7 +52,7 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
         <View style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>Bet on {name}</Text>
-            <Pressable onPress={onClose} hitSlop={8}>
+            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -78,15 +82,15 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
           {store ? (
             <Pressable
               onPress={() => {
-                void Linking.openURL(store).catch(() => {});
+                void openBookStore(book, state);
               }}
               accessibilityRole="link"
-              accessibilityLabel={`Don't have the ${name} app? Get it on the App Store`}
+              accessibilityLabel={`Get ${name} on the App Store`}
               hitSlop={6}
               style={({ pressed }) => [styles.storeRow, pressed && styles.pressed]}
             >
               <Ionicons name="download-outline" size={15} color={colors.tint} />
-              <Text style={styles.storeText}>Don&apos;t have the {name} app? Get it on the App Store</Text>
+              <Text style={styles.storeText}>Get {name} on the App Store</Text>
             </Pressable>
           ) : null}
 
@@ -184,6 +188,8 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.tint,
+    flexShrink: 1,
+    textAlign: 'center',
   },
   list: {
     flexGrow: 0,

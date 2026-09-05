@@ -383,8 +383,10 @@ export function SettingsScreen() {
             accessibilityLabel={`Your state: ${stateName ?? 'not set'}. Tap to change.`}
             style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
           >
-            <Text style={styles.bookRowName}>{stateName ?? 'Not set'}</Text>
-            <Text style={styles.bookRowChange}>Change</Text>
+            <Text style={[styles.bookRowName, !stateName && { color: colors.textTertiary }]}>
+              {stateName ?? 'Not set'}
+            </Text>
+            <Text style={styles.bookRowChange}>{stateName ? 'Change' : 'Set'}</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </Pressable>
         </View>

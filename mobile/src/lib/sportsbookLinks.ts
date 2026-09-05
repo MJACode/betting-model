@@ -78,6 +78,15 @@ const BETPARX_STORE_BY_STATE: Record<string, string> = {
   nj: 'id1605805764',
 };
 
+/** Open a book's App Store page, with the same failure path as the betslip
+ *  hand-off (an Alert, never a silent no-op). */
+export async function openBookStore(book: string, state: string | null = getBettingState()): Promise<boolean> {
+  const store = bookStoreUrl(book, state);
+  if (store && (await tryOpen(store))) return true;
+  Alert.alert(`Could not open the App Store`, `We couldn’t open ${bookName(book)}’s App Store page on this device.`);
+  return false;
+}
+
 /** The App Store page for a book, when we hold Apple's own id for it. */
 export function bookStoreUrl(book: string, state: string | null = getBettingState()): string | null {
   if (book === 'betparx') {
@@ -144,12 +153,14 @@ export async function openBookBetslip(
       if (await tryOpen(filled)) return true;
     } else if (linkNeedsState(link)) {
       // The link is a template and the member has not said which state their
-      // account is in. Say so once, then open the book's site rather than a
-      // URL that cannot resolve.
+      // account is in. The alert is the WHOLE answer: falling through to the
+      // store or the site would send them somewhere unrelated to the setting
+      // they were just asked to change (UX review).
       Alert.alert(
         `Which state do you bet in?`,
         `${bookName(book)} links need your state to open the app with the bet on your slip. Set it under Settings → Your state.`,
       );
+      return false;
     }
   }
 

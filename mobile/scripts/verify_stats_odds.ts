@@ -424,11 +424,12 @@ check(
   );
   check('an off-line row prices the side it posts even with the other side missing', under.get('george springer')?.price === 230);
   const stats = read('src/screens/StatsScreen.tsx');
-  check('the pill prints the off-line number under the price', stats.includes("const caption = quote.offLine ? `${sideWord === 'under' ? 'u' : 'o'}${quote.line}` : null;"));
+  check('the pill prints the off-line number under the price, in the board\'s idiom', stats.includes('const caption = quote.offLine ? offLineCaption(quote.line, quote.side) : null;') && stats.includes("return side === 'under' ? `At most ${line - 0.5}` : `${line + 0.5}+`;"));
   check('VoiceOver hears that it is the book\'s own line', stats.includes('the book’s own line, not the board’s'));
-  check('a started game says "Started", not a dash', stats.includes('<Text style={styles.oddsStarted}>Started</Text>'));
+  check('a live or finished game says Live / Final, not a dash', stats.includes('<Text style={styles.oddsStarted}>{started}</Text>') && stats.includes("kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null"));
+  check('a doubleheader team with a game still to come gets no label', stats.includes('pending.forEach((t) => out.delete(t));'));
   const teams = read('src/components/TeamsBoard.tsx');
-  check('the Teams board says "Started" too', teams.includes('<Text style={styles.lineStarted}>Started</Text>'));
+  check('the Teams board says Live / Final too', teams.includes('<Text style={styles.lineStarted}>{started}</Text>') && teams.includes('gameStatus(g).kind'));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

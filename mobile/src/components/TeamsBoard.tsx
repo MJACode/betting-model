@@ -32,7 +32,7 @@ import { BookMark } from '@/components/BookMark';
 import { showToast } from '@/components/Toast';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
-import { addDays, formatAmerican, todayET, weekdayET } from '@/lib/format';
+import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
@@ -205,15 +205,24 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
     () => unstartedGameIds(slate.games, new Date().toISOString()),
     [slate.games],
   );
-  // Teams whose game is in progress: the cell says "Started" rather than
-  // printing a dash that reads as "no line" (same as the Players board).
+  // Teams whose game is live or over: the cell says which ("Live" / "Final",
+  // GameStatusPill's words) rather than printing a dash that reads as "no
+  // line" (same as the Players board). A team with a game still to come gets
+  // no label.
   const startedTeams = useMemo(() => {
-    const out = new Set<string>();
+    const out = new Map<string, 'Live' | 'Final'>();
+    const pending = new Set<string>();
     for (const g of slate.games) {
-      if (unstarted.has(g.game_id)) continue;
-      if (g.home_team) out.add(g.home_team);
-      if (g.away_team) out.add(g.away_team);
+      const teams = [g.home_team, g.away_team].filter(Boolean) as string[];
+      if (unstarted.has(g.game_id)) {
+        teams.forEach((t) => pending.add(t));
+        continue;
+      }
+      const kind = gameStatus(g).kind;
+      const label = kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null;
+      if (label) teams.forEach((t) => out.set(t, label));
     }
+    pending.forEach((t) => out.delete(t));
     return out;
   }, [slate.games, unstarted]);
   const lineByTeam = useMemo(
@@ -359,7 +368,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
               def={stat}
               cuts={cuts}
               quote={quote}
-              started={startedTeams.has(item.team)}
+              started={startedTeams.get(item.team) ?? null}
               showLine={showLines}
               // The pill is the bet link: one tap to the book's own betslip.
               onLinePress={quote ? () => void openBookBetslip(quote.book, quote.link) : undefined}
@@ -406,7 +415,7 @@ function TeamRow({
   def: TeamStatDef;
   cuts: { lo: number; hi: number } | null;
   quote: TeamLineQuote | null;
-  started: boolean;
+  started: 'Live' | 'Final' | null;
   showLine: boolean;
   onLinePress?: () => void;
 }) {
@@ -462,15 +471,15 @@ function TeamLineCell({
 }: {
   quote: TeamLineQuote | null;
   team: string;
-  /** The team's game is in progress: no line, and the cell says why. */
-  started?: boolean;
+  /** The team's game is live or over: no line, and the cell says which. */
+  started?: 'Live' | 'Final' | null;
   onPress?: () => void;
 }) {
   if (quote == null) {
     if (started) {
       return (
-        <View style={styles.lineWrap} accessible accessibilityLabel={`${team}, game started`}>
-          <Text style={styles.lineStarted}>Started</Text>
+        <View style={styles.lineWrap} accessible accessibilityLabel={`${team}, game ${started.toLowerCase()}`}>
+          <Text style={styles.lineStarted}>{started}</Text>
         </View>
       );
     }

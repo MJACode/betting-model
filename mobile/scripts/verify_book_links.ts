@@ -58,6 +58,10 @@ check('whitespace is trimmed', fillBetslipLink('  https://sportsbook.draftkings.
 const src = read('src/lib/sportsbookLinks.ts');
 check('a template is filled before it is opened', src.includes('fillBetslipLink(link, getBettingState())'));
 check('a template with no state tells the member what to set', src.includes('Which state do you bet in?') && src.includes('Settings → Your state'));
+check('...and the alert is the whole answer — no fall-through to the store or the site', /Settings → Your state\.`,\n\s*\);\n\s*return false;/.test(src));
+const states = read('src/hooks/useBettingState.ts');
+check('Missouri is a state (BetMGM and Caesars live there since 2025-12-01)', states.includes("{ code: 'mo', name: 'Missouri' }"));
+check('Delaware is absent on purpose, with the reason', !states.includes("code: 'de'") && states.includes('delawarepark.betrivers.com'));
 const chain = src.slice(src.indexOf('export async function openBookBetslip'), src.indexOf('export function openBetslip'));
 const at = (needle: string) => chain.indexOf(needle);
 check('the chain is link → scheme → store → site', at('fillBetslipLink') < at('app.scheme') && at('app.scheme') < at('bookStoreUrl(book)') && at('bookStoreUrl(book)') < at('tryOpen(app.web)'));
@@ -74,7 +78,7 @@ for (const b of BETTABLE_BOOKS) {
 }
 check('every store id is a numeric Apple id (nothing hand-typed)', (src.match(/ios\('id(\d+)'\)/g) ?? []).length >= 8 && !/ios\('id[^\d']/.test(src));
 const handoff = read('src/components/ParlayDkHandoff.tsx');
-check('the hand-off sheet offers the store outright', handoff.includes('Get it on the App Store') && handoff.includes('bookStoreUrl(book)'));
+check('the hand-off sheet offers the store outright, through the same failure path as the bet button', handoff.includes('on the App Store') && handoff.includes('openBookStore(book, state)') && handoff.includes('useBettingState()'));
 
 // ── the state setting exists and is reachable ────────────────────────────────
 const settings = read('src/screens/SettingsScreen.tsx');
