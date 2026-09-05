@@ -499,8 +499,17 @@ check(
       && screen.includes('bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, side)'));
 
   // A stat no book prices must say so; a slate that is not today must say when.
-  check('a column with no market at all explains itself',
-    screen.includes('No sportsbook posts ${stat.label} lines.') && cat.includes('sportHasAnyPropMarket'));
+  // The sentence must NAME THE LEAGUE. It was unscoped while a column unpriced
+  // in one sport was unpriced in all of them; college carries and sacks broke
+  // that (the NFL prices both), so a flat claim is one the reader can
+  // disprove two taps away (UX review, 2026-09-05).
+  check('a column with no market at all explains itself, and says which league',
+    screen.includes('No sportsbook posts ${sport} ${stat.label} lines.')
+      && !screen.includes('No sportsbook posts ${stat.label} lines.')
+      && cat.includes('sportHasAnyPropMarket'));
+  check('and says it once about the group when the whole group is unpriced',
+    screen.includes('No sportsbook posts ${sport} ${stat.group.toLowerCase()} lines.')
+      && screen.includes('.every((s) => propMarketForStat(s) == null)'));
   check('the note dates itself to the slate, not to "today"',
     screen.includes('const slateDayLabel =') && screen.includes('weekdayET(slate.date)'));
   check('football starts filtered to the slate, and the two places that decide agree',

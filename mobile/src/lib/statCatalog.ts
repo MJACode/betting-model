@@ -267,6 +267,70 @@ const FOOTBALL_STAT_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = 
   def_sacks: 'player_sacks',
 };
 
+/**
+ * Columns one football league's books do not price, so the shared map above
+ * must not answer for them.
+ *
+ * The two leagues share a stat catalog and they do NOT share a market. On
+ * 2026-09-05 the first real college prop pass covered 31 games, 615 players
+ * and 7 books, and returned zero rows for `player_rush_attempts` and
+ * `player_sacks` — both of which rode in chunks whose other markets came back
+ * full, so we asked and nobody priced them. The NFL prices the same two keys
+ * (3,206 and 3,718 stored rows), so pruning them from the shared map would
+ * have blanked two working pro columns to fix two dead college ones.
+ *
+ * This is a MEASUREMENT, and it is reversible: if college books start posting
+ * carries or sacks, the entry comes out and the column fills.
+ *
+ * NOT HERE, DELIBERATELY: a market we chose not to PULL. The constant is named
+ * for what a probe found — we asked and no book answered — but its mechanism
+ * is "drop the LINE column", and the two come apart the first time someone
+ * stops ingesting a market they could have had, for credits, for latency, or
+ * for a 422 nobody chased. An entry added for THAT reason would make the
+ * board's own caption ("No sportsbook posts NCAAF … lines.") a lie about the
+ * books, silently, with nothing failing. A market we simply do not pull leaves
+ * this map alone and shows the empty state it has earned.
+ *
+ * Keyed by `Sport`, not `string`, and valued by real column keys: both typos
+ * this map invites — `NCAA` for `NCAAF`, and `sacks` for `def_sacks`, which is
+ * tempting because the board's LABEL really is "Sacks" — compile fine as
+ * strings, do nothing, and present as the exact bug this exists to remove.
+ */
+const FOOTBALL_MARKET_NOT_PRICED: Partial<
+  Record<Extract<Sport, 'NFL' | 'NCAAF'>, ReadonlyArray<keyof SeasonTotalsRow>>
+> = {
+  NCAAF: ['carries', 'def_sacks'],
+};
+
+/**
+ * Stats with a real market and NO model, outside football.
+ *
+ * The market normally comes THROUGH the model id, which is why a stat nobody
+ * models has always shown a dash however much data existed. Football needed
+ * its own map because neither league has a prop model at all; this is the
+ * same problem one stat at a time.
+ *
+ * Doubles and Triples have been columns on the MLB board since it shipped and
+ * blank the whole time, because nobody had asked the feed whether it served
+ * them. The 2026-09-05 coverage probe did, and it does. There is no doubles
+ * model and none is implied: like a football line, these are research.
+ *
+ * The board's other MLB blanks stay blank on purpose — the API does not know
+ * `batter_at_bats`, `pitcher_home_runs_allowed` or `pitcher_pitches`, so no
+ * key would help.
+ *
+ * KEYED `sport:key`, AND THAT GUARD IS THE POINT. `SeasonTotalsRow` keys are
+ * shared across sports — this file's own comments say a bare key cannot tell
+ * WNBA from NBA — so a bare map would let the next entry someone adds
+ * (`steals`, `threes`, `blocks`) resolve a basketball column onto a baseball
+ * market with nothing failing. Football gets its early return above instead,
+ * because there neither league has a prop model at all.
+ */
+const STAT_KEY_TO_MARKET: Record<string, string> = {
+  'MLB:doubles': 'batter_doubles',
+  'MLB:triples': 'batter_triples',
+};
+
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
@@ -291,10 +355,19 @@ export function propMarketForStat(def: StatDef | null): string | null {
   // is the whole answer for both, and returning early keeps a shared column
   // key (passing_yards) from ever resolving through some other sport's model.
   if (def.sport === 'NCAAF' || def.sport === 'NFL') {
+    if (FOOTBALL_MARKET_NOT_PRICED[def.sport as 'NFL' | 'NCAAF']?.includes(def.key)) {
+      return null;
+    }
     return FOOTBALL_STAT_TO_MARKET[def.key] ?? null;
   }
   const id = rawPropModelForStat(def);
-  return id ? propMarketForModel(id) : null;
+  // The model's market when a model prices it, else the stat's own — a stat
+  // nobody models can still be one every book prices (Doubles, Triples).
+  return (
+    (id ? propMarketForModel(id) : null) ??
+    STAT_KEY_TO_MARKET[`${def.sport}:${def.key}`] ??
+    null
+  );
 }
 
 /**

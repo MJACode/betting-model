@@ -270,7 +270,22 @@ check(
   // Shipping an accessible ramp two columns from an inaccessible one left the
   // board running two contrast standards with the accessible one on the
   // SECONDARY column (UX review, 2026-09-05).
-  /if \(pct >= 0\.6\) return colors\.gradeGood;/.test(stats) &&
+  //
+  // Asserted from hitRateColor's BODY, not from one line of it: `colors.avoid`
+  // is legitimately all over this screen for error text, and the ramp itself
+  // has since been rewritten around `hitRateBandOf`. What must hold is that
+  // the primary column's three outcomes are the grade tokens and neither of
+  // the BET/AVOID pair.
+  (() => {
+    const body = /function hitRateColor\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(stats)?.[1] ?? '';
+    return (
+      body.includes('colors.gradeGood') &&
+      body.includes('colors.gradeMid') &&
+      body.includes('colors.gradeBad') &&
+      !/colors\.(bet|avoid)\b/.test(body) &&
+      !/AMBER/.test(body)
+    );
+  })() &&
     !/AMBER/.test(stats) &&
     !/AMBER/.test(teams),
 );

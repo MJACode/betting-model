@@ -59,7 +59,7 @@ import {
   type BookSideCoverage,
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
-import { computeHitRate } from '@/lib/hitRate';
+import { computeHitRate, hitRateBandOf, hitRateColorDiscriminates } from '@/lib/hitRate';
 import { hitModeHeadline, hitModeLabel, hitModeLineLabel, selectionFor, thresholdLabel, type HitMode } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, gradeSpoken, type MatchupInfo } from '@/lib/matchup';
@@ -197,11 +197,16 @@ function shortDate(date: string): string {
  * left the board running two contrast standards side by side with the
  * accessible one on the SECONDARY column (UX review, 2026-09-05), so they are
  * now one ramp.
+ *
+ * `colorful === false` means every row on screen sits in the same band, so the
+ * ramp would be a verdict on the bet rather than a comparison between players
+ * — see `hitRateColorDiscriminates`. Accessible or not, a colour that says the
+ * same thing about every row says nothing about any of them.
  */
-function hitRateColor(pct: number): string {
-  if (pct >= 0.6) return colors.gradeGood;
-  if (pct >= 0.4) return colors.gradeMid;
-  return colors.gradeBad;
+function hitRateColor(pct: number, colorful: boolean): string {
+  if (!colorful) return colors.textPrimary;
+  const b = hitRateBandOf(pct);
+  return b === 'high' ? colors.gradeGood : b === 'mid' ? colors.gradeMid : colors.gradeBad;
 }
 
 /**
@@ -727,10 +732,34 @@ export function StatsScreen() {
   // sportsbooks ›" tail, which is the one action that lifts the lock. It sits
   // LAST because it is the mildest of these states: the column is priced, just
   // on one side only.
+  //
+  // THE NOTE NAMES THE LEAGUE, and that is not decoration. Until 2026-09-05 a
+  // column unpriced here was unpriced everywhere, so a flat "no sportsbook
+  // posts this" was true. Then college books turned out not to price carries
+  // or sacks while the NFL prices both, and the same sentence about the same
+  // word became something the user can disprove two taps away on the other
+  // football board — which makes the APP look wrong rather than the market
+  // look thin (UX review, 2026-09-05). Every sport gets the league word; it
+  // costs the others nothing and it is true for all of them.
+  //
+  // And when the whole active GROUP is unpriced it is said once, about the
+  // group. College defence is 0 of 6 after that same prune, so walking the
+  // Defense chips otherwise produces six identical sentences, which is how a
+  // reader learns to stop reading them.
+  const groupUnpriced =
+    stat != null &&
+    statsForSport(sport)
+      .filter((s) => s.group === stat.group)
+      .every((s) => propMarketForStat(s) == null);
   const noLinesNote: { text: string; canSwitch: boolean } | null =
     propMarket == null
       ? stat != null && sportHasAnyPropMarket(sport)
-        ? { text: `No sportsbook posts ${stat.label} lines.`, canSwitch: false }
+        ? {
+            text: groupUnpriced
+              ? `No sportsbook posts ${sport} ${stat.group.toLowerCase()} lines.`
+              : `No sportsbook posts ${sport} ${stat.label} lines.`,
+            canSwitch: false,
+          }
         : null
       : propLines.status !== 'ok' || slateGameIds.size === 0
         ? null
@@ -857,6 +886,17 @@ export function StatsScreen() {
         ),
       );
   }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+
+  // Does the hit-rate column span more than one colour band? A rare-event
+  // column (Doubles, Triples, Home Runs) does not — every player lands in the
+  // same band — and a whole column of one colour beside a live price reads as
+  // a verdict on the bet rather than a ranking of players. Computed over what
+  // is actually on screen, so the board never colours what it cannot
+  // distinguish.
+  const colorful = useMemo(
+    () => hitRateColorDiscriminates(hitRatePlayers.map((p) => p.pct)),
+    [hitRatePlayers],
+  );
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -1163,7 +1203,12 @@ export function StatsScreen() {
               onPress={() => setModeOpen(true)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
-              accessibilityLabel="Show bets that are"
+              // Not "Show bets that are": this control survives on a column
+              // with no line at all (NCAAF carries, sacks), where it is the
+              // only place left that would still say "bets" (UX review,
+              // 2026-09-05). The threshold is what it actually sets, priced
+              // or not.
+              accessibilityLabel="Threshold direction"
               accessibilityValue={{ text: hitModeLabel(hitMode) }}
               accessibilityHint="Opens the At Least, Over, Under options"
               style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
@@ -1366,6 +1411,7 @@ export function StatsScreen() {
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
                 showOdds={showOdds}
                 statLabel={betLabel}
+                colorful={colorful}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
@@ -2087,6 +2133,7 @@ function HitRateRow({
   started,
   showOdds,
   statLabel,
+  colorful,
   onOddsPress,
   tappable,
   onPress,
@@ -2098,6 +2145,8 @@ function HitRateRow({
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
+  /** Does the hit-rate column span more than one band? Colour only if so. */
+  colorful: boolean;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
   showOdds: boolean;
@@ -2106,7 +2155,7 @@ function HitRateRow({
   tappable: boolean;
   onPress: () => void;
 }) {
-  const pctColor = hitRateColor(player.pct);
+  const pctColor = hitRateColor(player.pct, colorful);
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
