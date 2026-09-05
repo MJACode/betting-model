@@ -82,7 +82,13 @@ passing the current cuts):
 | As published | 132 | 72-60 | +7.38u | +5.59% |
 | One row per pick | 112 | 62-50 | +5.68u | +5.07% |
 
-15% of the published record was copies. It reached a member's screen before it
+15% of the published record was copies. **Applied 2026-09-05** (Matt: *"Yes run
+python -m scripts.dedupe_picks"*): 69 rows removed — six more than the 63
+measured an hour earlier, written in the interval — snapshotted into
+`public.picks_dupes_removed_20260905`, `uq_picks_one_row_per_pick` created and
+the matview refreshed. The bottom row is now the published record.
+
+It reached a member's screen before it
 reached any dashboard, and it would have reached Retool identically — `q_performance`
 reads `v_public_track_record`, the app reads the same view, and both count rows.
 
@@ -105,8 +111,12 @@ definitions of "the same pick" that drift. Instead:
   `(game_date, model_id, game_id, player_id, pick_side)` unique on pre-game
   rows, and `_insert_picks` carries `ON CONFLICT DO NOTHING` so the losing side
   of a race drops its copy instead of aborting the pass;
-* `scripts/dedupe_picks.py` removes the 63 rows already written — keeping the
-  BET over a non-BET, then the earliest `created_at`, then the lowest pick_id;
+* `scripts/dedupe_picks.py` removes the rows already written — keeping the
+  BET over a non-BET, then the earliest `created_at`, then the lowest pick_id.
+  **Check what the copies disagree about before trusting the survivor:** the
+  two `Blake Snell Over 5.5 Ks` rows of 2026-05-09 were graded differently
+  (`NO_ACTION` and `LOSS`), so deleting the copy dropped the only row carrying
+  the right answer, and the survivor had to be regraded against the box score;
 * the `one_row_per_pick` CRIT health check says so out loud every morning.
 
 The index is deliberately keyed **without `scored_line`**: a copy written after
