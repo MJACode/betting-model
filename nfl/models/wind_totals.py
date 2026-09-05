@@ -116,8 +116,20 @@ SLATE_UNIT_CAP = 3.0     # total units live on any one day
 SLATE_RHO = 0.10         # within-slate outcome correlation, same weather system
 
 # Longest forecast lead with a MEASURED error distribution. Open-Meteo's
-# `previous_dayN` stops at 7, so leads beyond this have no calibration at all
-# and are staked at zero rather than silently clipped to the lead-5 row.
+# `previous_dayN` stops at 7, so leads beyond this have no calibration of their
+# own and CLIP to the lead-7 row -- probability and stake alike.
+#
+# The stake used to return 0 here instead of clipping, which made the two halves
+# of one model disagree: `model_under_prob` clipped and published a real
+# probability, `stake_units` refused to size it. The row still reached `picks`
+# as a BET (the publisher writes every card row), so the board carried bets
+# labelled `0.00u` -- a signal with an edge and no stake. Both Week 1 wind picks
+# on 2026-09-05 landed that way at a 8.7-day lead.
+#
+# Matt, 2026-09-05: "we should return stakes 7 days for signal picks." So the
+# stake now clips exactly as the probability always has. A lead-8 bet is sized
+# as a lead-7 bet -- an assumption, and a stated one: `calibrated_lead` stays
+# False on the row so the card and the eval board can still tell them apart.
 MAX_CALIBRATED_LEAD = 7
 
 # Shortest lead that is a MEASUREMENT. The lead-0 row is ERA5 truth, i.e. what
@@ -156,9 +168,9 @@ def model_under_prob(lead_days: int, threshold: float = 11.0) -> float:
     Leads are floored at `MIN_LIVE_LEAD`, because the lead-0 row is a
     perfect-knowledge upper bound rather than anything a forecast delivers.
     Leads past `MAX_CALIBRATED_LEAD` clip to the last measured row, so the
-    number returned there is an assumption rather than a measurement. Nothing
-    should be staked on it: `stake_units` returns zero beyond that lead, and
-    the card marks the row `calibrated_lead=False`.
+    number returned there is an assumption rather than a measurement. The card
+    marks the row `calibrated_lead=False` to say so; `stake_units` clips the
+    same way, so the probability and the stake describe the same bet.
     """
     lead = int(np.clip(round(lead_days), MIN_LIVE_LEAD, MAX_CALIBRATED_LEAD))
     thr = min(CALIBRATED_UNDER_RATE, key=lambda k: (k[0] != lead, abs(k[1] - threshold)))
@@ -201,12 +213,13 @@ def stake_units(p_model: float, price: float, lead_days: float | None = None,
     A reference bet (lead 3, threshold 11, -110) is 1.00 unit; -104 is 1.28
     units, -115 is 0.76, and a lead-7 bet at -110 is 0.58.
 
-    Returns 0 beyond `MAX_CALIBRATED_LEAD`: there is no measured forecast-error
-    distribution out there, so there is no probability to size against.
+    Beyond `MAX_CALIBRATED_LEAD` the stake CLIPS to the lead-7 row rather than
+    returning zero. `p_model` is already the clipped probability -- callers get
+    it from `model_under_prob`, which has always clipped -- so sizing against it
+    is what makes the stake describe the same bet the probability does. The
+    `lead_days` argument is kept for the caller's benefit and no longer gates.
     """
     if p_model is None or price is None or not np.isfinite(p_model) or not np.isfinite(price):
-        return 0.0
-    if lead_days is not None and round(float(lead_days)) > MAX_CALIBRATED_LEAD:
         return 0.0
     b = american_to_decimal(price) - 1.0
     if b <= 0:
@@ -379,18 +392,25 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
         edge = p_model - float(p_mkt)
         units = stake_units(p_model, int(px), lead_days)
 
-        if round(lead_days) > MAX_CALIBRATED_LEAD:
-            reason = (f"wind {wind:.1f} mph but lead {lead_days:.1f}d is beyond the "
-                      f"{MAX_CALIBRATED_LEAD}-day calibration")
-            qualifies = False
-        elif edge < min_edge:
-            reason = f"wind {wind:.1f} mph but edge {edge*100:+.2f}pp below {min_edge*100:.0f}pp"
+        # An uncalibrated lead is NOTED, never disqualifying. It used to set
+        # qualifies=False here while `select_bets` -- which has no lead gate --
+        # carried the same row onto the card anyway, so the eval board and the
+        # card disagreed about the same game. The stake clips to lead 7 now
+        # (see MAX_CALIBRATED_LEAD), so there is a real number to bet and the
+        # two agree; the caveat rides in the reason string instead.
+        lead_note = ("" if round(lead_days) <= MAX_CALIBRATED_LEAD else
+                     f", lead {lead_days:.1f}d clipped to the "
+                     f"{MAX_CALIBRATED_LEAD}-day calibration")
+        if edge < min_edge:
+            reason = (f"wind {wind:.1f} mph but edge {edge*100:+.2f}pp "
+                      f"below {min_edge*100:.0f}pp{lead_note}")
             qualifies = False
         elif units <= 0:
-            reason = f"wind {wind:.1f} mph but the model sizes this at zero units"
+            reason = f"wind {wind:.1f} mph but the model sizes this at zero units{lead_note}"
             qualifies = False
         else:
-            reason = f"wind {wind:.1f} mph, edge {edge*100:+.2f}pp, {units:.2f} units"
+            reason = (f"wind {wind:.1f} mph, edge {edge*100:+.2f}pp, "
+                      f"{units:.2f} units{lead_note}")
             qualifies = True
 
         out.append(eval_row(

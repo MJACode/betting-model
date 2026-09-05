@@ -26,6 +26,9 @@ export function HitModeSheet({
   statLabel,
   onPick,
   onClose,
+  overAvailable = true,
+  underAvailable = true,
+  unavailableNote,
 }: {
   visible: boolean;
   mode: HitMode;
@@ -34,6 +37,16 @@ export function HitModeSheet({
   statLabel: string;
   onPick: (mode: HitMode) => void;
   onClose: () => void;
+  /** Do the member's books price each side? A book that posts only the over —
+   *  FanDuel's and Caesars' milestone markets do — leaves At Least and Over
+   *  live and only Under unpriceable, so the ROW is marked rather than the
+   *  whole control locked. Both default true: fail open while the read is in
+   *  flight, exactly as the screen does. */
+  overAvailable?: boolean;
+  underAvailable?: boolean;
+  /** Why, naming the book. A greyed row with no reason is the "why is FanDuel
+   *  blank" question in a smaller box. */
+  unavailableNote?: string | null;
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -56,21 +69,36 @@ export function HitModeSheet({
             {HIT_MODES.map((m) => {
               const active = m.mode === mode;
               const preview = hitModeHeadline(lineN, m.mode, statLabel);
+              // The side this mode bets — it does not depend on the ruler.
+              const priced = m.mode === 'under' ? underAvailable : overAvailable;
               return (
                 <Pressable
                   key={m.mode}
                   onPress={() => {
+                    if (!priced) return;
                     onPick(m.mode);
                     onClose();
                   }}
+                  disabled={!priced}
                   accessibilityRole="radio"
-                  accessibilityState={{ checked: active }}
-                  accessibilityLabel={`${m.label} ${lineN}, that is ${preview}`}
-                  style={({ pressed }) => [styles.row, active && styles.rowActive, pressed && styles.pressed]}
+                  accessibilityState={{ checked: active, disabled: !priced }}
+                  accessibilityLabel={
+                    priced
+                      ? `${m.label} ${lineN}, that is ${preview}`
+                      : `${m.label} ${lineN}, not priced by your sportsbooks`
+                  }
+                  style={({ pressed }) => [
+                    styles.row,
+                    active && styles.rowActive,
+                    !priced && styles.rowDisabled,
+                    pressed && priced && styles.pressed,
+                  ]}
                 >
                   <View style={styles.rowBody}>
-                    <Text style={styles.rowName}>{m.label}</Text>
-                    <Text style={styles.rowPreview}>{preview}</Text>
+                    <Text style={[styles.rowName, !priced && styles.textDisabled]}>{m.label}</Text>
+                    <Text style={[styles.rowPreview, !priced && styles.textDisabled]}>
+                      {priced ? preview : 'Not priced by your sportsbooks'}
+                    </Text>
                   </View>
                   {active ? (
                     <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
@@ -80,6 +108,7 @@ export function HitModeSheet({
                 </Pressable>
               );
             })}
+            {unavailableNote ? <Text style={styles.note}>{unavailableNote}</Text> : null}
           </View>
         </Pressable>
       </Pressable>
@@ -143,6 +172,13 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
+  },
+  rowDisabled: { opacity: 0.45 },
+  textDisabled: { color: colors.textTertiary },
+  note: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
   },
   pressed: { opacity: 0.7 },
 });

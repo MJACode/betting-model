@@ -188,7 +188,7 @@ check(
     /borderWidth: 1\.5,\s*\n\s*borderColor: 'transparent',/.test(sheet)
       && sheet.includes('rowActive: { borderColor: colors.bet }'));
   check('the preview cannot be the thing that truncates',
-    sheet.includes('<Text style={styles.rowPreview}>{preview}</Text>')
+    /styles\.rowPreview[^\n]*\]\}>\s*\n\s*\{priced \? preview/.test(sheet)
       && !/rowPreview[^\n]*numberOfLines/.test(sheet));
 
   // The trigger is a pop-up button: label / value / hint, a menu glyph, and a

@@ -34,10 +34,42 @@ the recap is cross-sport), each falling back sensibly.
 
 | Function | Source of truth | Called from |
 |---|---|---|
-| `notify_discord_signals` | `opening_signals` ⋈ `model_action_thresholds` — the LOCKED bet of record, at the same cut as the app's `passesActionFilter` and the `docs/mobile_picks_prompt.md` query | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
+| `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `docs/mobile_picks_prompt.md` query. Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
 | `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
+
+### One board — the app, Discord and push publish the same set (2026-09-05)
+
+**The rule is CLAUDE.md §1b; the measurements are `docs/rules_evidence.md`.**
+
+`notify_discord_signals` and `push_notifier._new_bet_signals` read **`picks`**,
+not `opening_signals`. Reading the capture table put a gate in front of the
+channel that the app does not have, and capture can only ever LOSE rows relative
+to `picks` — it can never add one. Measured over every eligible BET from the
+first Discord signal to 2026-09-05: 125 eligible, 119 published, **6 missed, all
+6 uncaptured and none captured-then-unpublished.** Delivery was never the
+problem.
+
+Consequences worth knowing before touching either producer:
+
+- **There is no date horizon.** A pick publishes when its game has not started,
+  however far ahead it was written. `_lookahead_horizon` is retired. The two
+  Week 1 wind picks were 9 days out against a 7-day window and reached the app
+  and nothing else.
+- **The first BET wins.** `DISTINCT ON (game_id, model_id, player_id)` ordered
+  by `created_at` — deliberately coarser than the `picks` unique key added in
+  #487, which includes `pick_side`, so a pre-#311 side flip still collapses to
+  the one bet of record (§1c).
+- **The ledger key is unchanged.** Both producers synthesise
+  `game_id:model_id[:player_id]`, the key `capture_opening_signals` minted, so
+  `push_sent` history carries over and nothing already published republishes.
+  The two `kind`s stay independent, so neither surface suppresses the other.
+- **`opening_signals` is untouched** and still the opening-signal / CLV shadow
+  track (`docs/opening_signals.md`). It keeps its own horizon. Never publish
+  from it.
+- **The started-game guard stays** — on both surfaces. It is the one bound that
+  should exist.
 
 ### What a pick post shows (2026-08-24)
 

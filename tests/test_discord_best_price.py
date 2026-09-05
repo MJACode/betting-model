@@ -21,6 +21,8 @@ future edit that quietly starts gating on best_odds is the regression to catch.
 
 from __future__ import annotations
 
+import re
+
 import sys
 from pathlib import Path
 
@@ -139,7 +141,12 @@ def test_best_odds_never_reaches_the_qualifying_gate():
     # not against "is the string anywhere before the first WHERE" — that first
     # WHERE belongs to the LATERAL subquery, so the loose version stayed true
     # with the outer projection deleted and a mutation sailed through it.
-    assert "pk.best_book, pk.best_odds" in sql, (
+    # The ADJACENT PAIR in a select list is what makes this mutation-resistant:
+    # a bare "best_book somewhere in the function" check passed while the outer
+    # projection was deleted, because the old LATERAL mentioned the columns too.
+    # The alias is not the point and stopped being "pk." on 2026-09-05, when the
+    # producer began reading `picks` as its base table -- so match either.
+    assert re.search(r"\bpk?\.best_book,\s*pk?\.best_odds", sql), (
         "the outer SELECT must project the best price")
     assert '"best_book": r[14], "best_odds": r[15],' in fn, (
         "the row dict must read the projected columns")

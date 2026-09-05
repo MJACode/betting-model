@@ -29,6 +29,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ambiguousKeys,
+  anyBookPostsSide,
+  bookCoverageForMarket,
   bookPostsMarket,
   buildPickIndex,
   buildQuoteIndex,
@@ -506,6 +508,169 @@ check(
       && (screen.match(/defaultTonightOnly\(sport\)/g) ?? []).length === 2);
   check('the Stats board reads no model at all any more',
     !screen.includes('propModelForStat') && !screen.includes('useTodayPicks'));
+}
+
+// ── Per-book side coverage, and the Over/Under control it locks ─────────────
+// Matt, 2026-09-05: "Nothing shows for Cesar's and FanDuel. I think we should
+// have those lines … if we are getting betting lines for a Sportsbook we
+// should show it as an option and display those lines."
+//
+// We DO have them, and the rows below are the real ones: FanDuel and Caesars
+// post no standard `batter_hits` market at all that day, only the milestone
+// market (1+ / 2+ Hits) folded onto it — which carries an OVER price and no
+// Under. So their At-Least column is priced and their At-Most column can never
+// be, and the two facts must be told apart.
+{
+  const real = (
+    bookmaker: string,
+    market: string,
+    line: number,
+    over: number | null,
+    under: number | null,
+  ): PropOddsByBookRow =>
+    ({
+      game_id: 'MLB_2026-09-05_WSH_LAD',
+      market,
+      player_name: 'Mookie Betts',
+      bookmaker,
+      line,
+      over_price: over,
+      under_price: under,
+      over_link: null,
+      under_link: null,
+    }) as unknown as PropOddsByBookRow;
+
+  // v_latest_prop_odds_all_books, 2026-09-05, Betts, batter_hits(+alternate).
+  const rows = foldAlternateRows([
+    real('draftkings', 'batter_hits', 0.5, -237, 175),
+    real('draftkings', 'batter_hits_alternate', 1.5, 234, null),
+    real('fanduel', 'batter_hits_alternate', 0.5, -260, null),
+    real('fanduel', 'batter_hits_alternate', 1.5, 210, null),
+    real('williamhill_us', 'batter_hits_alternate', 0.5, -280, null),
+    real('williamhill_us', 'batter_hits_alternate', 1.5, 195, null),
+  ]);
+
+  const cov = bookCoverageForMarket(rows, 'batter_hits', [
+    'draftkings',
+    'fanduel',
+    'williamhill_us',
+    'betmgm',
+  ]);
+
+  check('FanDuel IS carried for Hits — the At-Least side is priced',
+    cov.get('fanduel')?.over === true, `-260 at 0.5`);
+  check('Caesars IS carried for Hits — the At-Least side is priced',
+    cov.get('williamhill_us')?.over === true, `-280 at 0.5`);
+  check('neither posts an At-Most Hits price, and that is recorded separately',
+    cov.get('fanduel')?.under === false && cov.get('williamhill_us')?.under === false);
+  check('DraftKings posts both sides', cov.get('draftkings')?.over === true && cov.get('draftkings')?.under === true);
+  check('a selected book with no row for the market is absent, not falsely covered',
+    !cov.has('betmgm'));
+  // Presence in the map is read as "we have something here" everywhere. A row
+  // carrying a line and no price on either side is not that.
+  check('a priced-at-neither-side row never seats a book in the map',
+    !bookCoverageForMarket(
+      [real('betmgm', 'batter_hits', 0.5, null, null)],
+      'batter_hits',
+      ['betmgm'],
+    ).has('betmgm'));
+  check('a book the member did not select never enters the map',
+    !bookCoverageForMarket(rows, 'batter_hits', ['draftkings']).has('fanduel'));
+  check('the sport bound holds here too',
+    bookCoverageForMarket(rows, 'batter_hits', ['fanduel'], new Set(['NBA_x'])).size === 0);
+
+  // The control the coverage locks.
+  const fdOnly = bookCoverageForMarket(rows, 'batter_hits', ['fanduel']);
+  check('a FanDuel member gets At Least and loses At Most',
+    anyBookPostsSide(fdOnly, 'over') && !anyBookPostsSide(fdOnly, 'under'));
+  const bothBooks = bookCoverageForMarket(rows, 'batter_hits', ['draftkings', 'fanduel']);
+  check('adding DraftKings gives the At-Most side back',
+    anyBookPostsSide(bothBooks, 'over') && anyBookPostsSide(bothBooks, 'under'));
+
+  const screen2 = read('src/screens/StatsScreen.tsx');
+  // THE PICKER'S NOTE IS COMPUTED OVER EVERY BOOK IT LISTS, not over the ones
+  // already selected. Off the selected set, a DraftKings-only member would see
+  // "No Hits lines today" under FanDuel, Caesars and every other unselected
+  // row — the precise false impression this change exists to remove.
+  check('the picker note reads coverage for every book the picker lists',
+    screen2.includes('bookCoverageForMarket(propLines.rows, propMarket, BOOKS, slateGameIds)')
+      && screen2.includes('const c = coverageAll.get(book);'));
+  check('while the direction lock still reads only the member\'s own books',
+    screen2.includes('bookCoverageForMarket(propLines.rows, propMarket, books, slateGameIds)')
+      && screen2.includes("anyBookPostsSide(coverage, 'under')"));
+  check('the board knows which side the member\'s books sell',
+    screen2.includes("const underAvailable = !sideKnown || anyBookPostsSide(coverage, 'under');")
+      && screen2.includes("const sideOfMode = useCallback((m: HitMode) => selectionFor(1, m).side, []);"));
+  check('a one-sided book marks the mode it cannot price rather than locking the control',
+    // Three modes, two sides: an over-only book leaves At Least AND Over live,
+    // so locking the whole pill (as the two-mode version had to) would now
+    // take away more than the books took.
+    read('src/components/HitModeSheet.tsx').includes("const priced = m.mode === 'under' ? underAvailable : overAvailable;")
+      && read('src/components/HitModeSheet.tsx').includes('disabled={!priced}')
+      && screen2.includes('overAvailable={overAvailable}'));
+  check('and snaps the board off a mode the books cannot price, so nobody is stranded',
+    screen2.includes('if (!modeAvailable(fallback)) return;')
+      && screen2.includes('if (hitMode !== fallback) setHitMode(fallback);'));
+  check('the lock FAILS OPEN while the lines are loading or the read failed',
+    screen2.includes("const sideKnown = coverageReady && slateGameIds.size > 0 && coverage.size > 0;")
+      && screen2.includes("propLines.status === 'ok'"));
+  check('the greyed pill names the book rather than going silent',
+    screen2.includes('const dirLockNote =') && screen2.includes('booksName(books)'));
+  // UX review, 2026-09-05. Each of these was a finding; each is now a pin.
+  check('the lock reason joins the ONE coverage note, not a second caption',
+    screen2.includes('? { text: dirLockNote, canSwitch: true }')
+      && !screen2.includes('styles.dirLockNote'));
+  check('and it offers the action that lifts it — canSwitch opens the picker',
+    screen2.includes('? { text: dirLockNote, canSwitch: true }')
+      && screen2.includes('onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}'));
+  // Scoped to the style block itself: a loose [\\s\\S] window runs past the
+  // closing brace into later styles that legitimately use opacity.
+  const dirPillLockedBlock = screen2.slice(
+    screen2.indexOf('dirPillLocked: {'),
+    screen2.indexOf('},', screen2.indexOf('dirPillLocked: {')),
+  );
+  check('the locked pill sheds the chip rather than fading it (a dimmed bordered chip reads as a button)',
+    dirPillLockedBlock.includes("backgroundColor: 'transparent'")
+      && dirPillLockedBlock.includes("borderColor: 'transparent'")
+      && !dirPillLockedBlock.includes('opacity:'));
+  check('VoiceOver hears the side once, and no disabled state on static text',
+    !screen2.includes('accessibilityState={{ disabled: dirLocked }}')
+      && !screen2.includes('disabled={dirLocked}'));
+  check('the pill always opens the menu, and always has a touch target',
+    // It is never locked now, so it is never a control without a target.
+    /onPress=\{\(\) => setModeOpen\(true\)\}\s*\n\s*hitSlop=/.test(screen2));
+  check('the member\'s chosen mode survives a snap and is restored',
+    screen2.includes("const requestedMode = useRef<HitMode>('atLeast');")
+      && screen2.includes('requestedMode.current = m;')
+      && screen2.includes('if (hitMode !== wanted) setHitMode(wanted);')
+      // and the picker applies through chooseMode, or the snap would forget it
+      && screen2.includes('onPick={chooseMode}'));
+  check('the snap is announced, and only once per stat and book set',
+    screen2.includes('snapAnnounced.current = key;') && screen2.includes('showToast('));
+  check('and never runs in Totals mode, where there is no pill and no caption to explain it',
+    screen2.includes("if (effectiveMode !== 'hitRate') return;"));
+  check('every picker row carries a sub-line, the covered case included',
+    screen2.includes('return `Both sides for ${statLabel} ${when}`;')
+      && screen2.includes('return `At Least only for ${statLabel} ${when}`;'));
+  // A POSITIVE sentence about the books takes booksName; booksNoneName is the
+  // subject of a negative one and would invert the meaning at two books
+  // ("Neither DraftKings nor FanDuel post only At Least lines").
+  check('and says it in the affirmative voice, not the negative helper',
+    /dirLockNote[\s\S]{0,400}booksName\(books\)/.test(screen2)
+      && !/dirLockNote[\s\S]{0,400}booksNoneName\(books\)/.test(screen2));
+
+  // The picker EXPLAINS, it never removes a book.
+  const picker = read('src/components/SportsbookPickerSheet.tsx');
+  check('the picker still lists every bettable book — coverage is a note, not a filter',
+    picker.includes('{BOOKS.map((b) => {')
+      && !/BOOKS\.filter\([^)]*coverage/.test(picker));
+  check('the note never disables a row',
+    !/disabled=\{[^}]*note/.test(picker) && picker.includes('const note = last ? null : (coverageNote?.(b) ?? null);'));
+  check('the note reaches VoiceOver as well as the eye',
+    picker.includes('`${bookName(b)}. ${note}`'));
+  check('the Stats screen is the only caller that passes one',
+    screen2.includes('coverageNote={coverageNote}')
+      && !read('src/screens/SettingsScreen.tsx').includes('coverageNote'));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
