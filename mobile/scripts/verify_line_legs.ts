@@ -17,15 +17,20 @@
  *  3. The betslip does not credit DraftKings with a leg it never posted, and
  *     the hand-off button falls through to a book that prices every leg.
  *  4. The pill opens the sheet; nothing on the Stats board opens a book.
+ *  5. (2026-09-05) A Teams-board pill asks the same way, and a GAME line leg
+ *     — moneyline, spread at the board's number, the total — is priced,
+ *     keyed and saved like a prop line leg, and counts as a game line for
+ *     the correlation guard.
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { isLineLeg, lineLegFromRows, lineLegKey, lineLegPickId, LINE_LEG_MODEL_ID } from '../src/lib/lineLegs';
-import { handoffBookFor, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
+import { gameLineLegFromRows, isLineLeg, lineLegFromRows, lineLegKey, lineLegLabel, lineLegPickId, LINE_LEG_MODEL_ID, propLineSheetInput, teamLineSheetInput, type GameLineLegSpec } from '../src/lib/lineLegs';
+import { handoffBookFor, isValidCombo, priceBooksForParlay, savedHandoffBookFor, savedLegToParlayLeg, toSavedParlay } from '../src/lib/parlay';
+import { buildTeamLineIndex, type StatsOddsQuote } from '../src/lib/statsOdds';
 import { marketClassForModel } from '../src/lib/markets';
-import type { GameRow, PropOddsByBookRow } from '../src/types';
+import type { GameRow, OddsByBookRow, PropOddsByBookRow } from '../src/types';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
@@ -149,7 +154,7 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   const handoff = read('src/components/ParlayDkHandoff.tsx');
   check('the hand-off row says "not posted" rather than "add manually" for an unposted line', handoff.includes('Not posted at {name}'));
   const teams = read('src/components/TeamsBoard.tsx');
-  check('the Teams pill, which still leaves the app, carries the arrow-out glyph', /name="open-outline"[^\n]*size=\{11\}/.test(teams));
+  check('the Teams pill no longer carries the arrow-out glyph: it does not leave the app', !/name="open-outline"/.test(teams));
   const sheet = read('src/components/AddLineSheet.tsx');
   check('the sheet says under its title where the book is chosen', sheet.includes('you’ll choose the sportsbook there'));
   check('the sheet marks the member\'s own books', sheet.includes(">Yours<") && sheet.includes('usePreferredBooks()'));
@@ -169,7 +174,8 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the sheet offers Remove when the leg is already in', sheet.includes("'Remove from betslip'"));
   check('the sheet never opens a book', !sheet.includes('openBookBetslip'));
   check('VoiceOver hint says what a tap does', stats.includes('accessibilityHint="Asks to add this line to your betslip"'));
-  check('the Teams board pill still opens the book (team line legs: follow-up, stated in the PR)', teams.includes('openBookBetslip('));
+  check('the Teams board pill opens the sheet and never a book', teams.includes('setLineSheet(quote)') && teams.includes('<AddLineSheet') && !teams.includes('openBookBetslip'));
+  check('the Teams pill hint says what a tap does', teams.includes('accessibilityHint="Asks to add this line to your betslip"'));
   const resolved = read('src/hooks/useResolvedSlip.ts');
   check('the slip re-prices line legs from the latest lines', resolved.includes('fetchPropLineRows(') && resolved.includes('lineLegFromRows('));
   check('a failed re-price HOLDS the leg rather than pruning it', resolved.includes('return [key, undefined]; // read failed: hold, never prune'));
@@ -177,6 +183,74 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the betslip bar counts line legs', bar.includes('slip.count + lineLegs.count'));
   const parlay = read('src/screens/ParlayScreen.tsx');
   check('the betslip removes and clears line legs through their own store', parlay.includes('lineLegs.remove(line.slipKey)') && parlay.includes('lineLegs.clear()'));
+}
+
+// ── 5. game line legs from the Teams board ──────────────────────────────────
+{
+  const grow = (bookmaker: string, extra: Partial<OddsByBookRow> = {}): OddsByBookRow => ({
+    game_id: game.game_id, game_date: '2026-09-04', market: 'spreads', bookmaker,
+    home_price: -120, away_price: 100, over_price: -110, under_price: -110, spread_home: -1.5, total_line: 8.5,
+    home_link: `https://${bookmaker}/home`, away_link: `https://${bookmaker}/away`, over_link: `https://${bookmaker}/over`, under_link: null,
+    snapshot_at: '2026-09-04T16:17:01-04:00', ...extra,
+  });
+  const rows = [grow('draftkings'), grow('fanduel', { home_price: -125, away_price: 105 }), grow('betmgm', { spread_home: -2.5, home_price: 110 }), grow('pinnacle', { home_price: -118 })];
+  const spread: GameLineLegSpec = { kind: 'game', game_id: game.game_id, sport: 'MLB', market: 'spreads', team: 'LAD', opponent: 'WSH', isHome: true, line: -1.5, side: null };
+  const leg = gameLineLegFromRows(spread, rows, game)!;
+  check('a spread leg is priced at DraftKings at the board\'s number', leg.americanOdds === -120 && leg.dkPriced === true && leg.pricedAt === 'draftkings', `${leg.americanOdds}`);
+  check('a book on a different number is a different bet and is left out', !leg.bookPrices.some((b) => b.bookmaker === 'betmgm'));
+  check('a reference-only book never prices a game leg', !leg.bookPrices.some((b) => b.bookmaker === 'pinnacle'));
+  check('the label is the picks\' own idiom', leg.label === 'LAD -1.5', leg.label);
+  check('a game line leg IS a game line for the correlation guard', leg.isGameLine === true);
+  check('the DraftKings link rides on the leg', leg.dkLink === 'https://draftkings/home');
+  const away: GameLineLegSpec = { ...spread, team: 'WSH', opponent: 'LAD', isHome: false, line: 1.5 };
+  const awayLeg = gameLineLegFromRows(away, rows, game)!;
+  check('the away side prices the away price at the mirrored number', awayLeg.americanOdds === 100 && awayLeg.label === 'WSH +1.5', `${awayLeg.americanOdds} ${awayLeg.label}`);
+  check('home and away spreads are different propositions', lineLegKey(spread) !== lineLegKey(away));
+
+  const ml: GameLineLegSpec = { ...spread, market: 'h2h', line: null };
+  const mlLeg = gameLineLegFromRows(ml, rows.map((r) => ({ ...r, market: 'h2h', spread_home: null })), game)!;
+  check('a moneyline leg has no number, so the book on another spread prices it too', mlLeg.label === 'LAD ML' && mlLeg.bookPrices.map((b) => b.bookmaker).sort().join() === 'betmgm,fanduel', `${mlLeg.label} ${mlLeg.bookPrices.map((b) => b.bookmaker).join()}`);
+
+  const total: GameLineLegSpec = { ...spread, market: 'totals', line: 8.5, side: 'over' };
+  const totalRows = rows.map((r) => ({ ...r, market: 'totals', spread_home: null }));
+  const totalLeg = gameLineLegFromRows(total, totalRows, game)!;
+  check('a total leg prices the Over at the board\'s number, labelled home-first like the server', totalLeg.americanOdds === -110 && totalLeg.label === 'LAD vs WSH Over 8.5', `${totalLeg.americanOdds} ${totalLeg.label}`);
+  check('a whole-number line prints one decimal, byte for byte with pick_label', lineLegLabel({ ...total, line: 8 }) === 'LAD vs WSH Over 8.0' && lineLegLabel({ ...spread, line: -1 }) === 'LAD -1.0' && lineLegLabel({ ...away, line: 3 }) === 'WSH +3.0', `${lineLegLabel({ ...total, line: 8 })} ${lineLegLabel({ ...spread, line: -1 })}`);
+  const totalFromAway: GameLineLegSpec = { ...total, team: 'WSH', opponent: 'LAD', isHome: false };
+  check('the total is the game\'s, not the tapped team\'s: both rows make one leg', lineLegKey(total) === lineLegKey(totalFromAway));
+  check('a total at another number is another bet', lineLegKey(total) !== lineLegKey({ ...total, line: 9 }));
+  check('no bettable book at the number → no leg (the slip prunes it)', gameLineLegFromRows(spread, [grow('pinnacle'), grow('draftkings', { spread_home: -2.5 })], game) === null);
+  check('the key says it is a game line', lineLegKey(spread).startsWith('line:') && lineLegKey(spread).includes('|spreads|LAD|-1.5|'));
+
+  const mlPick = { ...mlLeg, slipKey: 'pick', pickId: 1, modelId: 'mlb_moneyline', isGameLine: true };
+  check('the correlation guard refuses a game line leg beside a model game leg on the same game', !isValidCombo([leg, mlPick]));
+  check('and allows a game line leg beside a prop line leg', isValidCombo([leg, lineLegFromRows(spec, [row('draftkings', 0.5, -250, 184)], game)!]));
+
+  // The sheet's input from a Teams quote: every bettable book at the number.
+  const idx = buildTeamLineIndex(rows, [game], { market: 'spreads', books: ['draftkings'] });
+  const q = idx.get('LAD')!;
+  check('a team quote carries every book\'s row at its number', q.bookRows.map((r) => r.bookmaker).sort().join() === 'draftkings,fanduel,pinnacle', q.bookRows.map((r) => r.bookmaker).join());
+  const input = teamLineSheetInput(q, 'MLB');
+  check('the sheet lists bettable books only, best price first', input.prices.map((p) => p.book).join() === 'draftkings,fanduel' && input.prices[0]!.price === -120, input.prices.map((p) => `${p.book}:${p.price}`).join());
+  check('the sheet title is the proposition', lineLegLabel(input.spec) === 'LAD -1.5');
+  const pq: StatsOddsQuote = { playerKey: 'mookie betts', playerName: 'Mookie Betts', gameId: game.game_id, market: 'batter_hits', line: 1.5, side: 'over', book: 'betmgm', price: 230, link: null, bookRows: [row('betmgm', 1.5, 230, -320)] as unknown as StatsOddsQuote['bookRows'], offLine: true };
+  const pin = propLineSheetInput(pq, 'MLB', 'Hits', '1+ Hits');
+  check('an off-line prop quote explains itself under the title', (pin.explainer ?? '').startsWith('The board is on 1+ Hits; BetMGM only posts 2+.'), pin.explainer);
+  check('an on-line prop quote has no explainer', propLineSheetInput({ ...pq, offLine: false }, 'MLB', 'Hits', '2+ Hits').explainer === undefined);
+  const sheet = read('src/components/AddLineSheet.tsx');
+  check('the sheet takes the shared input and builds no prop spec of its own', sheet.includes('input: LineSheetInput | null') && !sheet.includes('player_name: quote.playerName'));
+  const resolved = read('src/hooks/useResolvedSlip.ts');
+  check('the slip re-prices a game leg from its market\'s latest lines', resolved.includes('fetchGameLineRows(spec.game_id, spec.market)') && resolved.includes('gameLineLegFromRows('));
+  const store = read('src/hooks/useLineLegs.ts');
+  check('the store accepts a stored game spec', store.includes("if (s.kind === 'game')"));
+  check('the sheet warns before a second game line on one game', sheet.includes('A parlay takes one game line per game.'));
+  const teamsSrc = read('src/components/TeamsBoard.tsx');
+  check('the Teams board bounces back to the betslip like Players', teamsSrc.includes('onAdded={onAdded}') && read('src/screens/StatsScreen.tsx').includes("<TeamsBoard sport={sport} onAdded={fromParlay"));
+  check('VoiceOver hears the side of a total, not "o8.5"', teamsSrc.includes('`total over ${quote.line}`'));
+  const picks = read('src/screens/PicksHomeScreen.tsx');
+  check('the partial banner is one sentence with one reason and hides while reloading', picks.includes('{!error && !loading && partial ? (') && picks.includes('numberOfLines={3}') && picks.includes('accessibilityHint="Reloads today’s picks"'));
+  const hook = read('src/hooks/useTodayPicks.ts');
+  check('a look-ahead failure is named for what it is', hook.includes("swallow('the upcoming UFC card')") && !hook.includes("'UFC picks'"));
 }
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);

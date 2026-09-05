@@ -754,3 +754,25 @@ very likely a better feature — it carries information `era` does not, where
 today it mostly restates it. Doing it properly means: fix the ingestor, rebuild
 all seasons, recompute 2026, re-sweep the thresholds, and stamp it
 `Updated-By:`. One decision, one owner, one session.
+
+## [ ] Doubleheaders collide under one game_id, and their props land on top of each other
+
+Found 2026-09-05 while designing the alternate-lines view. 1,546 (game,
+market, player, book) keys since 2026-08-29 carry TWO rows at the same
+`snapshot_at`, DraftKings included (163): `_build_game_id` is
+`MLB_<date>_<away>_<home>`, so both games of DET@CLE on 2026-09-04 write
+their props under `MLB_2026-09-04_DET_CLE`, and "the newest row" for Jose
+Ramirez is whichever game's batch inserted last. The Odds API gives each game
+its own event id; the game_id throws that away. Touches the odds ingestor,
+the prop ingestor, `games`, the scorer's `_latest_dk_prop_row` and
+settlement, so it is its own session: decide how a second game is keyed
+(the app's `startedTeams` map already treats a team with a game still to
+come as unstarted), then make both ingestors and the pick lock agree.
+
+## [ ] [needs-decision] Alternate prop lines for WNBA / NBA
+
+MLB alternates landed 2026-09-05 (`config.PROP_ALT_MARKETS`); the basketball
+keys (`player_points_alternate`, `player_rebounds_alternate`,
+`player_assists_alternate`, `player_threes_alternate`) cost the same ~2
+credits per market per event call and would follow the same 30-minute gate.
+Matt's call; nothing to build until then beyond adding the keys.

@@ -19,6 +19,7 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
@@ -662,6 +663,13 @@ export function StatsScreen() {
   // The headline under the ruler, e.g. "25+ Points" / "At most 2 Walks".
   const lineHeadline =
     direction === 'over' ? `${lineN}+ ${stat?.label ?? ''}` : `At most ${lineN} ${stat?.label ?? ''}`;
+  // What the tapped pill hands the add-to-betslip sheet: the proposition,
+  // every book's price for it, and the off-line explainer when the book's own
+  // number differs from the board's (lib/lineLegs.ts).
+  const lineSheetInput = useMemo(
+    () => (lineSheet ? propLineSheetInput(lineSheet, sport, stat?.label ?? '', lineHeadline) : null),
+    [lineSheet, sport, stat?.label, lineHeadline],
+  );
 
   /**
    * One definition of "what the hit-rate band is set to", so the collapsed
@@ -774,7 +782,7 @@ export function StatsScreen() {
           <SportToggle />
         </View>
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
-        <TeamsBoard sport={sport} />
+        <TeamsBoard sport={sport} onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined} />
       </SafeAreaView>
     );
   }
@@ -1146,11 +1154,8 @@ export function StatsScreen() {
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
       <AddLineSheet
-        quote={lineSheet}
+        input={lineSheetInput}
         game={lineSheetGame}
-        sport={sport}
-        statLabel={stat?.label ?? ''}
-        boardHeadline={lineHeadline}
         onClose={() => setLineSheet(null)}
         onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
       />
@@ -1182,7 +1187,7 @@ export function StatsScreen() {
               returnKeyType="search"
             />
             {query.length > 0 ? (
-              <Pressable onPress={() => setQuery('')} hitSlop={8}>
+              <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
                 <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
               </Pressable>
             ) : null}

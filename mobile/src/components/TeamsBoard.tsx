@@ -24,6 +24,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { AddLineSheet } from '@/components/AddLineSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { GroupTabs } from '@/components/GroupTabs';
 import { FilterChip } from '@/components/filters/FilterChip';
@@ -34,7 +35,8 @@ import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
-import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
+import { teamLineSheetInput } from '@/lib/lineLegs';
+import { bookButtonColors } from '@/lib/sportsbookLinks';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
 import { buildTonightSlate } from '@/lib/statsBoard';
 import {
@@ -85,7 +87,15 @@ function tierColor(tier: Tier): string | undefined {
   return undefined;
 }
 
-export function TeamsBoard({ sport }: { sport: Sport }) {
+export function TeamsBoard({
+  sport,
+  onAdded,
+}: {
+  sport: Sport;
+  /** After a line is added — the Stats screen bounces back to the betslip
+   *  when the member came from there, on this board as on Players. */
+  onAdded?: () => void;
+}) {
   const groups = useMemo(() => teamGroupsForSport(sport), [sport]);
   const [stat, setStat] = useState<TeamStatDef | null>(() => defaultTeamStatFor(sport));
   const [rows, setRows] = useState<TeamStatsRow[]>([]);
@@ -100,9 +110,16 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   // follows the stat (Over% beside the total, ATS% beside the spread, Win%
   // beside the moneyline — lib/statsOdds.teamLineMarketFor). No model, no
   // fallback outside the member's own books.
-  // `ready` gates the column: the pill is a direct hand-off to the book, so a
-  // tap before storage answers would open the wrong one (UX review).
+  // `ready` gates the column: the pill's book is the member's own, so a tap
+  // before storage answers would show the wrong one (UX review).
   const { books, ready: booksReady } = usePreferredBooks();
+  // THE PILL ASKS, here too (Matt, 2026-09-05: "Team line legs, yes build
+  // it"). A tap opens AddLineSheet with the team's line — its moneyline, its
+  // spread at the board's number, the game total — and every book's price
+  // for it; the one action puts a GAME line leg in our betslip
+  // (lib/lineLegs.ts). Until today this pill was the one control on the
+  // Stats tab that still left the app.
+  const [lineSheet, setLineSheet] = useState<TeamLineQuote | null>(null);
   const [slate, setSlate] = useState<{ date: string; isToday: boolean; games: GameRow[] }>({
     date: '',
     isToday: false,
@@ -313,7 +330,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
           returnKeyType="search"
         />
         {query.length > 0 ? (
-          <Pressable onPress={() => setQuery('')} hitSlop={8}>
+          <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
             <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
           </Pressable>
         ) : null}
@@ -370,8 +387,8 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
               quote={quote}
               started={startedTeams.get(item.team) ?? null}
               showLine={showLines}
-              // The pill is the bet link: one tap to the book's own betslip.
-              onLinePress={quote ? () => void openBookBetslip(quote.book, quote.link) : undefined}
+              // The pill asks: a tap opens the add-to-betslip sheet.
+              onLinePress={quote ? () => setLineSheet(quote) : undefined}
             />
           );
         }}
@@ -396,6 +413,12 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
       />
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <AddLineSheet
+        input={lineSheet ? teamLineSheetInput(lineSheet, sport) : null}
+        game={lineSheet ? slate.games.find((g) => g.game_id === lineSheet.gameId) ?? null : null}
+        onClose={() => setLineSheet(null)}
+        onAdded={onAdded}
+      />
     </>
   );
 }
@@ -460,7 +483,7 @@ function TeamRow({
 
 /** The user's sportsbook's number for this team's game, from its side, or a
  *  dash. Same filled, book-branded pill as the Players board, and the same
- *  one-tap hand-off to the book (Matt, 2026-09-04). The caption stays here —
+ *  ask-to-add-to-betslip tap (Matt, 2026-09-05). The caption stays here —
  *  unlike the Players board, the market genuinely varies row to row only by
  *  which stat is selected, and "ML" / "−1.5" / "o8.5" is what names it. */
 function TeamLineCell({
@@ -493,7 +516,11 @@ function TeamLineCell({
   const filled = quote.book === MODEL_BOOK;
   const caption = teamLineCaption(quote);
   const what =
-    quote.market === 'h2h' ? 'moneyline' : quote.market === 'spreads' ? `spread ${caption}` : `total ${caption}`;
+    quote.market === 'h2h'
+      ? 'moneyline'
+      : quote.market === 'spreads'
+        ? `spread ${caption}`
+        : `total over ${quote.line}`; // spoken: the side, not the sighted "o8.5"
   return (
     <Pressable
       onPress={onPress}
@@ -501,7 +528,7 @@ function TeamLineCell({
       hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
       accessibilityRole="button"
       accessibilityLabel={`${team} ${what}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`}
-      accessibilityHint={`Opens ${bookName(quote.book)}`}
+      accessibilityHint="Asks to add this line to your betslip"
       style={({ pressed }) => [styles.lineWrap, pressed && styles.pressed]}
     >
       <View
@@ -517,11 +544,8 @@ function TeamLineCell({
           {formatAmerican(quote.price)}
         </Text>
         <BookMark book={quote.book} size={12} color={filled ? c.fg : colors.textPrimary} />
-        {/* This pill still LEAVES the app — the Players pill asks to add a
-            betslip leg instead (AddLineSheet; team line legs are a follow-up)
-            — so it carries the arrow-out glyph every outbound control in the
-            app carries, where the Players pill carries none. */}
-        <Ionicons name="open-outline" size={11} color={filled ? c.fg : colors.textPrimary} accessibilityElementsHidden />
+        {/* No arrow-out glyph: the pill no longer leaves the app. It asks,
+            like the Players pill, and carries what that one carries. */}
       </View>
       {caption ? <Text style={styles.lineCaption}>{caption}</Text> : null}
     </Pressable>

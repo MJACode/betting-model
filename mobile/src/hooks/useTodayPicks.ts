@@ -37,28 +37,39 @@ export function useTodayPicks(date?: string) {
   const [data, setData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  // Reads that failed WITHOUT taking the board down: the odds views behind the
+  // line pills, or one sport's look-ahead card. What failed, deduped, plus the
+  // FIRST reason (the 2026-09-04 failure took three reads down with the same
+  // statement timeout; three copies of one Postgres sentence is not a
+  // message), so the screen can say "Couldn't load today's lines" rather than
+  // show an empty pill (Matt, 2026-09-05: "fix it").
+  const [partial, setPartial] = useState<{ whats: string[]; reason: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const whats: string[] = [];
+    let reason: string | null = null;
+    const note = (what: string) => (e: unknown) => {
+      if (!whats.includes(what)) whats.push(what);
+      if (reason == null) reason = errorText(e);
+      console.warn(`[useTodayPicks] ${what} failed`, e);
+    };
+    const swallow = (what: string) => (e: unknown) => {
+      note(what)(e);
+      return [] as EnrichedPick[];
+    };
     try {
       // Today's picks (all sports) + the upcoming UFC card. UFC events are
       // weekly, so the UFC tab shows the next card's picks ahead of fight day.
-      // The UFC fetch is enrichment — don't fail the whole feed on it.
+      // The look-ahead fetches are enrichment — don't fail the whole feed on
+      // them, but record each failure in `partial`.
       const [rows, ufcRows, golfRows, nflRows, ncaafRows] = await Promise.all([
-        fetchPicksForDate(target),
-        fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(
-          () => [] as EnrichedPick[],
-        ),
-        fetchUpcomingGolfPicks(target, addDays(target, GOLF_AHEAD_DAYS)).catch(
-          () => [] as EnrichedPick[],
-        ),
-        fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(
-          () => [] as EnrichedPick[],
-        ),
-        fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(
-          () => [] as EnrichedPick[],
-        ),
+        fetchPicksForDate(target, (what, e) => note(what)(e)),
+        fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
+        fetchUpcomingGolfPicks(target, addDays(target, GOLF_AHEAD_DAYS)).catch(swallow('the upcoming golf field')),
+        fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
+        fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('this week’s NCAAF card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
       // linger on the board for the rest of the day. A retired model's picks
@@ -73,6 +84,7 @@ export function useTodayPicks(date?: string) {
         (d) => !isGameOver(d.game, d.pick.sport) && !isModelRetired(d.pick.model_id),
       );
       setData(all);
+      setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
     } catch (e: unknown) {
       setError(errorText(e));
     } finally {
@@ -84,5 +96,5 @@ export function useTodayPicks(date?: string) {
     void load();
   }, [load]);
 
-  return { data, loading, error, refresh: load, date: target };
+  return { data, loading, error, partial, refresh: load, date: target };
 }

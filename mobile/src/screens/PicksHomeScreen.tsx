@@ -58,7 +58,7 @@ type View3 = 'today' | 'signals' | 'movement';
 
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
-  const { data: allData, loading, error, refresh, date } = useTodayPicks();
+  const { data: allData, loading, error, partial, refresh, date } = useTodayPicks();
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
@@ -192,6 +192,27 @@ export function PicksHomeScreen() {
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>Connection error: {error}</Text>
         </View>
+      ) : null}
+
+      {/* The picks loaded but something behind them did not — the odds views
+          the line pills read, or one sport's look-ahead card. Say so and
+          offer the retry; an empty pill and silence is how the 2026-09-04
+          timeouts went unseen here. Hidden while reloading, so a tap on Retry
+          answers at once and the banner only returns if the reload fails
+          again (UX review). */}
+      {!error && !loading && partial ? (
+        <Pressable
+          onPress={() => void refresh()}
+          accessibilityRole="button"
+          accessibilityLabel={partialSentence(partial)}
+          accessibilityHint="Reloads today’s picks"
+          style={({ pressed }) => [styles.partialBanner, pressed && styles.partialPressed]}
+        >
+          <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+          <Text style={styles.partialText} numberOfLines={3}>
+            {partialSentence(partial)} <Text style={styles.partialLink}>Retry</Text>
+          </Text>
+        </Pressable>
       ) : null}
 
       {view === 'today' && exposure ? (
@@ -333,6 +354,15 @@ function SubTabBtn({
   );
 }
 
+/** "Couldn’t load today’s lines, the line shop and the prop line shop —
+ *  statement timeout (57014). Today’s picks are unaffected." One sentence,
+ *  one reason, for the partial-load banner. */
+export function partialSentence(p: { whats: string[]; reason: string }): string {
+  const w = p.whats;
+  const list = w.length <= 1 ? w.join('') : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`;
+  return `Couldn’t load ${list} — ${p.reason}. Today’s picks are unaffected.`;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -405,6 +435,30 @@ const styles = StyleSheet.create({
   errorText: {
     color: colors.avoid,
     fontSize: font.size.footnote,
+  },
+  partialBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: radii.sm,
+    minHeight: 44,
+  },
+  partialPressed: {
+    opacity: 0.7,
+  },
+  partialText: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontSize: font.size.footnote,
+  },
+  partialLink: {
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
   },
   rgBanner: {
     flexDirection: 'row',

@@ -2634,6 +2634,18 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --        ORDER BY p.snapshot_at DESC LIMIT 1 ) l;
 --   GRANT SELECT ON v_latest_prop_odds_all_books TO anon, authenticated;
 --
+-- ALTERNATE LINES, 2026-09-05 (migration alternate_prop_lines_view, the file
+-- of the same name under data/migrations/). The prop ingestor writes The Odds
+-- API's `*_alternate` markets under their own key, one row per (player,
+-- line) -- config.PROP_ALT_MARKETS. The view keeps ONE newest row for a
+-- standard key (the line MOVES during the day; a per-line key would keep the
+-- morning's 0.5 beside the evening's 1.5) and, for an alternate key, returns
+-- EVERY row of the newest pass, found by equality on all five index columns
+-- (the probe's snapshot_at). A fourth LATERAL, UNION ALL of the two cases;
+-- same columns, same order; no new index. Measured after applying, 157-game
+-- date, market = batter_hits: 278 ms (was 310); 9,035 standard rows for
+-- 9,035 keys, i.e. unchanged for every existing reader.
+--
 -- ── IN-PLAY MULTI-BOOK (session: sportsbook-betting-line) ───────────────
 -- Applied via migration add_latest_inplay_odds_all_books_view.
 --

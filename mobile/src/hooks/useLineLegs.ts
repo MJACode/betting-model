@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
-import { lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
+import { isGameSpec, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
 
 /**
  * The betslip's LINE legs — Stats-board lines the user asked to add (Matt,
@@ -20,14 +20,24 @@ let cached: LineLegSpec[] | null = null;
 function isSpec(v: unknown): v is LineLegSpec {
   if (!v || typeof v !== 'object') return false;
   const s = v as Record<string, unknown>;
+  if (typeof s.game_id !== 'string' || typeof s.sport !== 'string') return false;
+  if (s.kind === 'game') {
+    // A Teams-board line (2026-09-05): a team's moneyline, spread or the total.
+    return (
+      (s.market === 'h2h' || s.market === 'spreads' || s.market === 'totals') &&
+      typeof s.team === 'string' &&
+      typeof s.opponent === 'string' &&
+      typeof s.isHome === 'boolean' &&
+      (s.line === null || typeof s.line === 'number') &&
+      (s.side === null || s.side === 'over' || s.side === 'under')
+    );
+  }
   return (
-    typeof s.game_id === 'string' &&
     typeof s.market === 'string' &&
     typeof s.player_name === 'string' &&
     typeof s.line === 'number' &&
     (s.side === 'over' || s.side === 'under') &&
-    typeof s.statLabel === 'string' &&
-    typeof s.sport === 'string'
+    typeof s.statLabel === 'string'
   );
 }
 
@@ -40,7 +50,7 @@ function sanitize(raw: unknown): LineLegSpec[] {
     const k = lineLegKey(v);
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push({ ...v, team: typeof v.team === 'string' ? v.team : null });
+    out.push(isGameSpec(v) ? v : { ...v, team: typeof v.team === 'string' ? v.team : null });
   }
   return out;
 }

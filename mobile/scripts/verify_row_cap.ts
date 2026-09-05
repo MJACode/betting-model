@@ -96,7 +96,7 @@ async function main() {
   const dated = reads.filter((r) => isSlate(r.stmt));
   const perGame = reads.filter((r) => !isSlate(r.stmt));
   check('seven slate all-books reads (Stats props, Teams lines, Picks x2, UFC / NFL / NCAAF windows)', dated.length === 7, `${dated.length}`);
-  check('three per-game reads (the pick detail x2, the line-leg re-price)', perGame.length === 3, `${perGame.length}`);
+  check('four per-game reads (the pick detail x2, the prop and game line-leg re-prices)', perGame.length === 4, `${perGame.length}`);
   // The Picks screen's two reads are bounded to the picks that render lines,
   // never the whole day (the 2026-09-04 UX review: 16 statements per mount).
   const picksReads = dated.filter((r) => r.stmt.includes(".in('game_id'"));

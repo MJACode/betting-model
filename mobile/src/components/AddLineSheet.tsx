@@ -6,13 +6,12 @@ import { showToast } from '@/components/Toast';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { formatAmerican } from '@/lib/format';
-import { lineLegKey, lineLegLabel, type LineLegSpec } from '@/lib/lineLegs';
-import { bookLabelShort, bookName, isBettableBook, MODEL_BOOK } from '@/lib/markets';
+import { isGameSpec, lineLegKey, lineLegLabel, type LineSheetInput } from '@/lib/lineLegs';
+import { bookLabelShort, bookName, MODEL_BOOK } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
-import type { StatsOddsQuote } from '@/lib/statsOdds';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { GameRow, PropOddsByBookRow } from '@/types';
+import type { GameRow } from '@/types';
 
 /**
  * "Add to betslip?" — what a tap on a Stats line pill opens.
@@ -29,65 +28,45 @@ import type { GameRow, PropOddsByBookRow } from '@/types';
  * research bet, priced at DraftKings when DraftKings posts the line and at
  * the best bettable book otherwise, never a model pick. Re-adding the same
  * proposition is a no-op; the button reads "Remove" when it is already in.
+ *
+ * One sheet for both boards (2026-09-05): a Players pill hands it a prop
+ * spec, a Teams pill a game spec — the moneyline, the spread at the board's
+ * number, the total — through lib/lineLegs.ts propLineSheetInput /
+ * teamLineSheetInput. The sheet itself does not know which it was given.
  */
 export function AddLineSheet({
-  quote,
+  input,
   game,
-  sport,
-  statLabel,
   onClose,
   onAdded,
-  boardHeadline,
 }: {
-  /** The pill that was tapped; null closes the sheet. */
-  quote: StatsOddsQuote | null;
+  /** The proposition and every bettable book's price for it; null closes. */
+  input: LineSheetInput | null;
   game: GameRow | null;
-  sport: string;
-  statLabel: string;
   onClose: () => void;
   /** Called after a successful add — the Stats screen uses it to bounce back
    *  to the betslip when the user came from there. */
   onAdded?: () => void;
-  /** The board's own headline ("1+ Hits"), so an off-line quote can say why
-   *  the title differs from the column it was tapped in. */
-  boardHeadline?: string;
 }) {
   const legs = useLineLegs();
   const { books: myBooks } = usePreferredBooks();
 
-  const spec: LineLegSpec | null = useMemo(() => {
-    if (!quote) return null;
-    const row = quote.bookRows[0] as PropOddsByBookRow | undefined;
-    return {
-      game_id: quote.gameId,
-      sport,
-      market: quote.market,
-      player_name: quote.playerName,
-      team: row?.team ?? null,
-      line: quote.line,
-      side: quote.side,
-      statLabel,
-    };
-  }, [quote, sport, statLabel]);
+  const spec = input?.spec ?? null;
   const key = spec ? lineLegKey(spec) : null;
   const inSlip = key != null && legs.has(key);
+  // A parlay takes one game line per game (parlay.ts isValidCombo). Say so
+  // HERE, before the add, when the slip already holds another game line on
+  // this game — "LAD ML" then "LAD -1.5" from one board is the likely
+  // sequence — rather than only on the betslip afterwards (UX review).
+  const sameGameLine =
+    spec && isGameSpec(spec)
+      ? legs.specs.find((s) => isGameSpec(s) && s.game_id === spec.game_id && lineLegKey(s) !== key) ?? null
+      : null;
 
   // Every bettable book pricing THIS side at THIS line, best payout first
-  // (American odds are monotonic in payout; ties keep the board's order).
-  const prices = useMemo(() => {
-    if (!quote) return [];
-    const rows = quote.bookRows as PropOddsByBookRow[];
-    const out: { book: string; price: number }[] = [];
-    for (const r of rows) {
-      if (!isBettableBook(r.bookmaker)) continue;
-      const raw = quote.side === 'under' ? r.under_price : r.over_price;
-      const price = raw == null || raw === ('' as unknown) ? null : Number(raw);
-      if (price == null || !Number.isFinite(price)) continue;
-      out.push({ book: r.bookmaker, price });
-    }
-    out.sort((a, b) => b.price - a.price);
-    return out;
-  }, [quote]);
+  // (American odds are monotonic in payout; ties keep the board's order) —
+  // already in that order from the input helper.
+  const prices = useMemo(() => input?.prices ?? [], [input]);
   const best = prices[0]?.price ?? null;
 
   // The title IS the proposition — the exact string the betslip's leg card
@@ -110,7 +89,7 @@ export function AddLineSheet({
   };
 
   return (
-    <Modal visible={quote != null} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={input != null} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable
         style={styles.backdrop}
         onPress={onClose}
@@ -137,9 +116,9 @@ export function AddLineSheet({
               the reference sheets put their one-line explainer, not as a
               caption under the list (UX review). */}
           <Text style={styles.subtitle}>
-            {quote?.offLine && boardHeadline
-              ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${quote.side === 'under' ? `at most ${quote.line - 0.5}` : `${quote.line + 0.5}+`}. Add it to your betslip now — you’ll choose the sportsbook there.`
-              : 'Add it to your betslip now — you’ll choose the sportsbook there.'}
+            {sameGameLine
+              ? `Your betslip already has ${lineLegLabel(sameGameLine)} on this game. A parlay takes one game line per game.`
+              : input?.explainer ?? 'Add it to your betslip now — you’ll choose the sportsbook there.'}
           </Text>
 
           <Text style={styles.sectionTitle}>Where it&apos;s posted</Text>

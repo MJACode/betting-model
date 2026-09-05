@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLineLegs } from '@/hooks/useLineLegs';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { lineLegFromRows, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
+import { gameLineLegFromRows, isGameSpec, lineLegFromRows, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
 import { canPruneSlip, resolveSlipLegs, type ParlayLeg } from '@/lib/parlay';
-import { fetchGameById, fetchPropLineRows } from '@/lib/queries';
+import { fetchGameById, fetchGameLineRows, fetchPropLineRows } from '@/lib/queries';
 import type { EnrichedPick } from '@/types';
 
 /**
@@ -34,7 +34,8 @@ import type { EnrichedPick } from '@/types';
  * store: each spec re-reads that player's latest lines and re-prices; a spec
  * whose read SUCCEEDED and priced nothing (game started, line pulled) is
  * pruned, a spec whose read failed is held — same rule as pick keys. They
- * follow the pick legs in slip order.
+ * follow the pick legs in slip order. A GAME line leg (the Teams board,
+ * 2026-09-05) re-reads its game market's latest lines the same way.
  */
 export function useResolvedSlip() {
   const slip = useParlaySlip();
@@ -91,11 +92,13 @@ export function useResolvedSlip() {
       specs.map(async (spec): Promise<[string, ParlayLeg | null | undefined]> => {
         const key = lineLegKey(spec);
         try {
-          const [rows, game] = await Promise.all([
-            fetchPropLineRows(spec.game_id, spec.market, spec.player_name),
-            fetchGameById(spec.game_id).catch(() => null),
-          ]);
-          return [key, lineLegFromRows(spec, rows, game)];
+          const game = fetchGameById(spec.game_id).catch(() => null);
+          if (isGameSpec(spec)) {
+            const rows = await fetchGameLineRows(spec.game_id, spec.market);
+            return [key, gameLineLegFromRows(spec, rows, await game)];
+          }
+          const rows = await fetchPropLineRows(spec.game_id, spec.market, spec.player_name);
+          return [key, lineLegFromRows(spec, rows, await game)];
         } catch {
           return [key, undefined]; // read failed: hold, never prune
         }
