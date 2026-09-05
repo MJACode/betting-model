@@ -182,6 +182,29 @@ def _run(cmd: list[str], label: str, cwd: Path | None = None,
         log.exception("ERROR %s crashed", label)
 
 
+def _publish_new_signals(label: str) -> None:
+    """Lock and deliver whatever BETs the job that just ran wrote.
+
+    THE RULE (2026-09-05, mike: "when there is a bet from the model, post the
+    pick"): a job that WRITES picks publishes them itself. Leaving that to the
+    next hourly refresh pass is how a UFC moneyline written 13 minutes before
+    its fight was first locked 43 minutes after the opening bell, and so was
+    never postable at all.
+
+    In-process, like the watchdog above, because the whole point is that it
+    reaches Discord: a subprocess reports failure as an exit code nobody reads.
+    `publish_new_signals` guards each surface itself and never raises; the
+    try here is for the import.
+    """
+    try:
+        from tracking.signal_publisher import publish_new_signals
+        out = publish_new_signals()
+        if any(out.values()):
+            log.info("publish [%s]: %s", label, out)
+    except Exception:  # noqa: BLE001 - publishing must never kill the scheduler
+        log.exception("ERROR publish after %s crashed", label)
+
+
 def run_daily_pipeline() -> None:
     # Bare invocation == run_pipeline.run_daily_pipeline() (settle, ingest, score,
     # game log, prop scoring, health check).
@@ -596,6 +619,13 @@ def run_nfl_poll(fast: bool = False) -> None:
     # Record what the models thought of every game this tick, and flag any
     # locked pick whose conditions have changed. Never re-prices anything.
     _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
+    # PUBLISH WHAT THE CARD JUST WROTE. Same reason as the pre-game poller
+    # (2026-09-05): a writer outside the refresh pass used to leave its picks
+    # sitting until the next :17 pass captured them, and inside the 3-hour fast
+    # window that lag can outlast the kickoff the pick was for. Idempotent and
+    # non-raising, so an extra call on a tick that wrote nothing is three cheap
+    # reads.
+    _publish_new_signals("nfl-poll")
 
 
 def run_ncaaf_prop_odds() -> None:
@@ -632,6 +662,10 @@ def run_nfl_prop_card() -> None:
     # a wider window would re-buy Thursday's board on every Sunday tick.
     _run([sys.executable, "-m", "scripts.nfl_prop_market_card",
           "--days", "2", "--fetch", "--publish"], "nfl-prop-card")
+    # As above: the card's `--publish` writes the PICK. Getting that pick onto
+    # the app and into Discord is this call, and waiting for the next refresh
+    # pass to do it is what lost a UFC bet on 2026-09-05.
+    _publish_new_signals("nfl-prop-card")
 
 
 def run_nfl_opener_card() -> None:
