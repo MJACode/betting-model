@@ -30,7 +30,7 @@ from pathlib import Path
 from .config import (
     DERIV_LAG_RATIO, EV_THRESHOLDS, KELLY_FRACTION, KELLY_HAIRCUT,
     MAX_DAILY_EXPOSURE_FRACTION, MAX_QUOTE_AGE_SEC, MAX_STAKE_FRACTION,
-    MAX_STATE_AGE_SEC, MIN_SECONDS_FOR_PRICING, SCRIPT_LEAD_TRIGGER,
+    MAX_STATE_AGE_SEC, MIN_PRICE, MIN_SECONDS_FOR_PRICING, SCRIPT_LEAD_TRIGGER,
 )
 from .engine.pricing import american_to_decimal, american_to_prob
 from .state import GameState
@@ -315,6 +315,19 @@ class Executor:
             return _mk(False, f"unknown_model:{model_id}")
         if not (0.0 < model_prob < 1.0):
             return _mk(False, "degenerate_model_prob")
+
+        # THE JUICE CEILING, before the EV test (Matt, 2026-09-05: "-140 should
+        # be price ceiling"). Deliberately not an edge question: a quote past the
+        # ceiling is ineligible however good the number looks, because clearing
+        # a 0.06 EV gate at -250 requires a model probability high enough that
+        # the model is the thing least worth trusting. A more negative American
+        # price is more juice, so the test is `<`; a plus price always passes.
+        #
+        # Refused rather than filtered downstream: this records a PASS with a
+        # reason, so the audit log shows the lane looked and declined. The same
+        # number in the display filter would have written the bet and hidden it.
+        if quote.price < MIN_PRICE:
+            return _mk(False, f"price_past_ceiling:{quote.price:.0f}<{MIN_PRICE:.0f}")
 
         threshold = EV_THRESHOLDS[model_id]
         if ev < threshold:

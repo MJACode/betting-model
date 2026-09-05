@@ -14,8 +14,8 @@ These tests cover the two ways that can go wrong now that it writes for real:
 a pick that cannot settle, and a pick written twice.
 """
 
+import subprocess
 import sys
-import types
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -296,11 +296,13 @@ def test_the_thresholds_do_not_re_cut_what_the_lane_already_decided():
     """
     import config
     assert config.ACTION_THRESHOLDS[MODEL_ID] == {"min_prob": 0.0, "min_edge": 0.0}
-    # -1000 is far past any price a +EV live prop could carry; the point is that
-    # the floor cannot bind, not that it holds one particular value.
-    assert config.min_odds_for(MODEL_ID) < -1000, (
-        f"price floor {config.min_odds_for(MODEL_ID)} can re-cut a bet the lane "
-        f"already took -- it would be written to picks and hidden in the app")
+    # The price floor is allowed to bind ONLY where the executor already refuses
+    # (see test_the_display_floor_matches_the_executors_ceiling). Tighter than
+    # the executor and a taken bet gets hidden, which is the #491 bug.
+    assert config.min_odds_for(MODEL_ID) <= _executor_min_price(), (
+        f"display floor {config.min_odds_for(MODEL_ID)} is TIGHTER than the "
+        f"executor's ceiling {_executor_min_price()} -- a bet the lane took "
+        f"would be written to picks and hidden in the app")
 
 
 def test_the_synced_row_is_what_the_app_will_actually_read():
@@ -322,7 +324,7 @@ def test_the_synced_row_is_what_the_app_will_actually_read():
     }
     assert row["paused"] is False, "the lane is LIVE (CLAUDE.md section 2)"
     assert row["min_prob"] == 0.0 and row["min_edge"] == 0.0
-    assert row["min_odds"] < -1000
+    assert row["min_odds"] <= _executor_min_price()
 
 
 def test_the_lane_can_actually_settle():
@@ -333,3 +335,60 @@ def test_the_lane_can_actually_settle():
     assert M[MODEL_ID] == ("nfl_player", "attempts")
     assert M["nfl_prop_pass_attempts"] == M[MODEL_ID], (
         "the live lane grades against the same stat as the pre-game one")
+
+
+# ── the juice ceiling ────────────────────────────────────────────────────────
+
+def _executor_min_price() -> float:
+    """The lane's own price ceiling, read from the standalone package."""
+    out = _probe_config("print(c.MIN_PRICE)")
+    return float(out[0])
+
+
+def _probe_config(expr: str) -> list[str]:
+    code = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(Path(__file__).parent.parent / 'nfl')!r})\n"
+        "from live_model import config as c\n" + expr + "\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code],
+                       cwd=str(Path(__file__).parent.parent / "nfl"),
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-2000:]
+    return r.stdout.strip().splitlines()
+
+
+def test_the_lane_refuses_a_quote_past_the_ceiling():
+    """Matt, 2026-09-05: "-140 should be price ceiling."
+
+    Refused BEFORE the EV test, so a juicy quote is ineligible however good the
+    number looks. A more negative American price is more juice, so -150 is past
+    a -140 ceiling and +120 is not.
+    """
+    assert _executor_min_price() == -140.0
+
+
+def test_the_display_floor_matches_the_executors_ceiling():
+    """The two numbers that drifted apart in #491, pinned together.
+
+    A display floor TIGHTER than the executor's ceiling hides a bet the lane
+    took -- that was the bug. One LOOSER is dead config that still reads as a
+    rule. They must be the same number.
+    """
+    import config
+    assert config.min_odds_for(MODEL_ID) == _executor_min_price(), (
+        f"MODEL_MIN_ODDS says {config.min_odds_for(MODEL_ID)}, the executor "
+        f"says {_executor_min_price()} -- keep them in step")
+
+
+def test_the_ceiling_is_a_refusal_not_a_filter():
+    """It has to record a PASS with a reason, so the audit log shows the lane
+    looked and declined. Filtering downstream would take the bet and hide it."""
+    import inspect
+    src = (Path(__file__).parent.parent / "nfl" / "live_model"
+           / "executor.py").read_text(encoding="utf-8")
+    i = src.index("if quote.price < MIN_PRICE:")
+    assert "_mk(False" in src[i:i + 200], (
+        "the ceiling must return a recorded PASS, not silently skip")
+    # Before the EV test: eligibility, not an edge question.
+    assert i < src.index("threshold = EV_THRESHOLDS[model_id]")
