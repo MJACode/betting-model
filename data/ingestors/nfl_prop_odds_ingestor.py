@@ -54,7 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import config
 from config import (
     ODDS_API_KEY, ODDS_API_BASE, ODDS_API_REGIONS, ODDS_API_BOOKMAKER,
-    ODDS_API_BOOKMAKERS_PARAM, PROP_MARKETS_NFL, NFL_ODDS_API_MAP,
+    ODDS_API_BOOKMAKERS_PARAM, PROP_MARKETS_NFL, PROP_ALT_MARKETS, NFL_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
 from data import local_store
@@ -202,6 +202,16 @@ def list_historical_events(snapshot_iso: str) -> tuple[list[dict], str | None]:
     return body.get("data", []), body.get("timestamp")
 
 
+def _market_chunks(markets: list[str]) -> list[list[str]]:
+    """Standard markets first, alternates after, never mixed in one chunk."""
+    standard = [m for m in markets if not m.endswith("_alternate")]
+    alternates = [m for m in markets if m.endswith("_alternate")]
+    out: list[list[str]] = []
+    for group in (standard, alternates):
+        out.extend(group[i:i + MARKET_CHUNK] for i in range(0, len(group), MARKET_CHUNK))
+    return out
+
+
 def _event_props(event_id: str, markets: list[str],
                  snapshot_iso: str | None = None,
                  regions: str | None = None,
@@ -212,7 +222,9 @@ def _event_props(event_id: str, markets: list[str],
     Markets are requested in chunks so one unsupported market cannot 422 the
     whole basket. A 422 on a chunk is logged and skipped — the remaining chunks
     still land, which is the difference between losing one market and losing the
-    event.
+    event. Alternate-line markets (`*_alternate`, config.PROP_ALT_MARKETS) are
+    chunked SEPARATELY from the standard ones, so a rejected alternate key can
+    cost its own chunk and never a standard market the models price off.
     """
     base = f"{ODDS_API_BASE}/sports/{SPORT_KEY}/events/{event_id}/odds"
     if snapshot_iso:
@@ -222,8 +234,7 @@ def _event_props(event_id: str, markets: list[str],
     stamp = None
     used_before = used_after = None
 
-    for i in range(0, len(markets), MARKET_CHUNK):
-        chunk = markets[i:i + MARKET_CHUNK]
+    for chunk in _market_chunks(markets):
         params = {
             "apiKey": ODDS_API_KEY, "regions": regions or ODDS_API_REGIONS,
             "markets": ",".join(chunk),
@@ -293,7 +304,9 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
             continue
         game_id, game_date = resolved
 
-        want = list(markets or PROP_MARKETS_NFL)
+        # The live slate carries the alternate lines (Matt, 2026-09-05); a
+        # backfill or probe that names its markets gets exactly those.
+        want = list(markets) if markets else list(PROP_MARKETS_NFL) + list(PROP_ALT_MARKETS.get("NFL", []))
         per_book, served_stamp, used = _event_props(ev["id"], want, snapshot_iso,
                                                     regions=regions, books=books)
         credits += used

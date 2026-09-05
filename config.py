@@ -1947,17 +1947,20 @@ PROP_MARKETS_ALL = PROP_MARKETS_PITCHER + PROP_MARKETS_BATTER
 # COST, measured 2026-09-04 in api_call_log rather than estimated: the MLB
 # prop event call (13 markets, 13 books) ran 705 times and averaged 32.0
 # credits; the 3-market F5 call at the same 13 books is a flat 6, i.e. ~2
-# credits per market. Eight more markets on every pass is therefore roughly
-# 11,000-14,000 credits/day. Matt approved ~7,000/day, so alternates are
-# requested at most every PROP_ALT_REFRESH_MIN minutes -- the daytime passes
-# are hourly already, the evening 10-minute passes carry them every third
-# pass -- which is ~370 calls/day, about 6,000-7,500 credits. The first day's
-# api_call_log is the number to read back. PROP_ALT_REFRESH_MIN=0 carries them
-# on every pass.
+# credits per market. Eight more MLB markets on every pass is therefore
+# roughly 11,000-14,000 credits/day. Shipped at a 30-minute cadence
+# (~6,000-7,500/day) on 2026-09-05; the same day Matt approved EVERY PASS at
+# the stated 11,000-14,000 ("Yes ... Can you make the change?"), so
+# PROP_ALT_REFRESH_MIN defaults to 0. A positive value restores the cadence
+# (prop_odds_ingestor.alt_markets_due) without a code change.
 #
-# Only sports with a board that shows them are listed. WNBA/NBA alternates
-# (player_points_alternate, ...) cost the same per market and are a separate
-# decision.
+# Matt, the same message: "WNBA and NBA same cost yes. Same with NFL NCAAF."
+# Basketball alternates ride the same ingestor and gate. NFL alternates ride
+# data/ingestors/nfl_prop_odds_ingestor.py, in their own request chunks so a
+# key the API rejects costs one chunk, never the standard markets. NCAAF has
+# no player-prop ingest at all (the football ingestor is keyed on nflverse
+# ids and americanfootball_nfl), so there is nothing to add alternates to;
+# that is an NCAAF prop ingestor first (docs/followups.md).
 PROP_ALT_MARKETS = {
     "MLB": [
         "batter_hits_alternate",
@@ -1969,8 +1972,38 @@ PROP_ALT_MARKETS = {
         "pitcher_hits_allowed_alternate",
         "pitcher_walks_alternate",
     ],
+    "WNBA": [
+        "player_points_alternate",
+        "player_rebounds_alternate",
+        "player_assists_alternate",
+        "player_threes_alternate",
+        "player_points_rebounds_assists_alternate",
+    ],
+    "NBA": [
+        "player_points_alternate",
+        "player_rebounds_alternate",
+        "player_assists_alternate",
+        "player_threes_alternate",
+        "player_points_rebounds_assists_alternate",
+        "player_blocks_alternate",
+        "player_steals_alternate",
+        "player_turnovers_alternate",
+    ],
+    "NFL": [
+        "player_pass_yds_alternate",
+        "player_pass_attempts_alternate",
+        "player_pass_completions_alternate",
+        "player_pass_tds_alternate",
+        "player_rush_yds_alternate",
+        "player_rush_attempts_alternate",
+        "player_reception_yds_alternate",
+        "player_receptions_alternate",
+        "player_rush_reception_yds_alternate",
+        "player_tackles_assists_alternate",
+        "player_sacks_alternate",
+    ],
 }
-PROP_ALT_REFRESH_MIN = int(os.environ.get("PROP_ALT_REFRESH_MIN", "30"))
+PROP_ALT_REFRESH_MIN = int(os.environ.get("PROP_ALT_REFRESH_MIN", "0"))
 
 # WNBA player prop markets (The Odds API basketball player-prop keys).
 # All modelled as Poisson count projections.

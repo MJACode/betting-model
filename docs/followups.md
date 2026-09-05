@@ -769,10 +769,11 @@ settlement, so it is its own session: decide how a second game is keyed
 (the app's `startedTeams` map already treats a team with a game still to
 come as unstarted), then make both ingestors and the pick lock agree.
 
-## [ ] [needs-decision] Alternate prop lines for WNBA / NBA
+## [ ] NCAAF player props have no ingest, so NCAAF alternate lines have nothing to ride
 
-MLB alternates landed 2026-09-05 (`config.PROP_ALT_MARKETS`); the basketball
-keys (`player_points_alternate`, `player_rebounds_alternate`,
-`player_assists_alternate`, `player_threes_alternate`) cost the same ~2
-credits per market per event call and would follow the same 30-minute gate.
-Matt's call; nothing to build until then beyond adding the keys.
+Matt, 2026-09-05, approving alternates: "Same with NFL NCAAF." MLB, WNBA,
+NBA and NFL carry them (`config.PROP_ALT_MARKETS`). NCAAF cannot: the
+football prop ingestor (`data/ingestors/nfl_prop_odds_ingestor.py`) is keyed
+on nflverse game ids and `americanfootball_nfl`, and no NCAAF prop odds are
+pulled at all. An NCAAF prop ingestor (CFBD ids, `americanfootball_ncaaf`,
+the same parser) is the prerequisite; the alternate keys are the NFL ones.
