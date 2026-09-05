@@ -220,6 +220,53 @@ const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
   'points', 'rebounds', 'assists', 'threes', 'pra',
 ]);
 
+/**
+ * Football stat key → the player_prop_odds market it is priced in.
+ *
+ * BOTH football leagues reach their market through this map rather than
+ * through a model, because neither has a prop model: NCAAF has four
+ * game-level models and no prop model, and PROP_MARKET_BY_MODEL carries no
+ * `nfl_` entry at all. Every other sport resolves its market THROUGH its
+ * model id, which is why football rows showed a dash however much data was
+ * stored — rawPropModelForStat returns null for both leagues, so the market
+ * lookup returned null with it. 103,693 NFL prop rows were already in the
+ * table and invisible for exactly this reason; college props (2026-09-05,
+ * Matt: "Yes do it") would have landed into the same blank column, so the
+ * map covers both rather than fixing one league and leaving the other.
+ *
+ * The two boards deliberately share column keys, so one map serves both.
+ * A stat with no entry has no market we pull, and its column correctly stays
+ * blank rather than borrowing a neighbouring market's number: solo tackles,
+ * TFL, passes defended and defensive INTs (no book prices them), rushing and
+ * receiving TDs separately (the book sells the combined "anytime" instead),
+ * and NFL targets.
+ *
+ * NOT HERE, DELIBERATELY: `def_tackles`. The book's `player_tackles_assists`
+ * counts solo + assists at FULL credit, while CFBD charges a shared tackle as
+ * a HALF (`tests/test_ncaaf_player_stats_ingestor.py`: 5 solo + 9 assists is
+ * stored as 9.5, and the book would say 14). Hanging that price beside this
+ * board's number would put the hit-rate percentage and the line on two
+ * different scales — a different bet, in the sense of docs/best_line.md §5.
+ * It comes back when the leaderboard carries a full-credit tackles column,
+ * which is a new StatDef and not this change.
+ */
+const FOOTBALL_STAT_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = {
+  passing_yards: 'player_pass_yds',
+  passing_tds: 'player_pass_tds',
+  completions: 'player_pass_completions',
+  attempts: 'player_pass_attempts',
+  interceptions: 'player_pass_interceptions',
+  rushing_yards: 'player_rush_yds',
+  carries: 'player_rush_attempts',
+  receptions: 'player_receptions',
+  receiving_yards: 'player_reception_yds',
+  // "Scores a touchdown": a Yes/No market the ingestor stores at the 0.5 line,
+  // which is what a 0.5 rush+rec TD board row asks. It is shown under the
+  // market's own name, not the column's — see propDisplayLabel in markets.ts.
+  rush_rec_tds: 'player_anytime_td',
+  def_sacks: 'player_sacks',
+};
+
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
@@ -235,12 +282,29 @@ export function propModelForStat(def: StatDef | null): string | null {
  * RBI "absent from display and not counted toward anything"); the Stats tab's
  * LINE column is the sportsbook's number, not the model's, so a retired model
  * must not blank it (Matt, 2026-09-03: "works separately from the models").
- * Null for stats no book prices (NCAAF, and anything with no market).
+ * Null for stats no book prices. Both football leagues resolve through their
+ * own map rather than a model, because neither has one (2026-09-05).
  */
 export function propMarketForStat(def: StatDef | null): string | null {
   if (!def) return null;
+  // Neither football league has a prop model to route through — the map above
+  // is the whole answer for both, and returning early keeps a shared column
+  // key (passing_yards) from ever resolving through some other sport's model.
+  if (def.sport === 'NCAAF' || def.sport === 'NFL') {
+    return FOOTBALL_STAT_TO_MARKET[def.key] ?? null;
+  }
   const id = rawPropModelForStat(def);
   return id ? propMarketForModel(id) : null;
+}
+
+/**
+ * Does ANY stat on this sport's board carry a market? Lets a blank column
+ * say "no sportsbook posts Solo Tackles lines" (nothing to wait for) rather
+ * than going silent, without claiming that on a sport we simply do not price
+ * at all — where the whole LINE column is absent and a note would be noise.
+ */
+export function sportHasAnyPropMarket(sport: StatDef['sport']): boolean {
+  return STAT_CATALOG.some((d) => d.sport === sport && propMarketForStat(d) != null);
 }
 
 /** The forward map with no retirement filter — the inverse below needs it so

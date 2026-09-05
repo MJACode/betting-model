@@ -62,6 +62,7 @@ def _parse(markets, book="draftkings"):
 def test_every_alternate_key_is_the_alternate_of_a_market_we_pull():
     bases = dict(m.PROP_MARKETS_BY_SPORT)
     bases["NFL"] = config.PROP_MARKETS_NFL
+    bases["NCAAF"] = config.PROP_MARKETS_NCAAF
     for sport, keys in config.PROP_ALT_MARKETS.items():
         base = set(bases[sport])
         for k in keys:
@@ -73,8 +74,14 @@ def test_every_alternate_key_is_the_alternate_of_a_market_we_pull():
 
 def test_the_sports_matt_approved_carry_alternates():
     """Matt, 2026-09-05: MLB, then "WNBA and NBA same cost yes. Same with NFL
-    NCAAF." NCAAF has no prop ingest to add them to (docs/followups.md)."""
-    assert set(config.PROP_ALT_MARKETS) == {"MLB", "WNBA", "NBA", "NFL"}
+    NCAAF."
+
+    NCAAF joined later the same day. It had no prop ingest when this test was
+    first written, which is why it was excluded then; asked what that meant,
+    Matt said "Yes do it", so it has one now
+    (data/ingestors/ncaaf_prop_odds_ingestor.py) and its alternates ride it.
+    """
+    assert set(config.PROP_ALT_MARKETS) == {"MLB", "WNBA", "NBA", "NFL", "NCAAF"}
     assert "player_double_double_alternate" not in config.PROP_ALT_MARKETS["NBA"], \
         "a Yes/No market has no milestone lines"
     assert "player_anytime_td_alternate" not in config.PROP_ALT_MARKETS["NFL"]

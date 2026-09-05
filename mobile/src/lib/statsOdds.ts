@@ -230,19 +230,33 @@ export function quoteForRow(
 }
 
 /**
- * Does ANY of the member's books post a line for this market on the slate?
- * Drives the "FanDuel doesn't post Hits lines" note, so an empty column reads
- * as their books' coverage rather than as a broken screen (UX_REVIEW §3).
+ * Does ANY of the member's books post a line for this market on the slate,
+ * ON THE SIDE THE BOARD IS ASKING? Drives the "FanDuel doesn't post Hits
+ * lines" note, so an empty column reads as their books' coverage rather than
+ * as a broken screen (UX_REVIEW §3).
+ *
+ * The side is load-bearing for a ONE-WAY market. `player_anytime_td` has a
+ * Yes price and no No price (the football ingestor says so in its own
+ * comment), so flipping the board to "At most 0" nulls every quote while a
+ * side-blind check still answers "yes, posted" — a full column of dashes
+ * under a DraftKings header with no explanation. MLB home runs have had the
+ * same shape all along; college football's most-tapped prop makes it
+ * reachable, so the check learned about sides (UX review, 2026-09-05).
  */
 export function bookPostsMarket(
   rows: PropOddsByBookRow[],
   market: string,
   books: readonly string[],
   gameIds?: Set<string> | null,
+  side?: StatsOddsSide,
 ): boolean {
   const set = new Set(books);
   return rows.some(
-    (r) => r.market === market && set.has(r.bookmaker) && (!gameIds || gameIds.has(r.game_id)),
+    (r) =>
+      r.market === market &&
+      set.has(r.bookmaker) &&
+      (!gameIds || gameIds.has(r.game_id)) &&
+      (!side || num(side === 'under' ? r.under_price : r.over_price) != null),
   );
 }
 

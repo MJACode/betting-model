@@ -460,5 +460,49 @@ check(
   check('the paged Stats read orders and keys by line', queries.includes(".order('line')") && queries.includes('propLineRowKey,'));
 }
 
+// ── football: the one sport that reaches its market without a model ────────
+{
+  const cat = read('src/lib/statCatalog.ts');
+  const mk = read('src/lib/markets.ts');
+  const screen = read('src/screens/StatsScreen.tsx');
+
+  check('both football leagues resolve through the shared map',
+    cat.includes("if (def.sport === 'NCAAF' || def.sport === 'NFL')") && cat.includes('FOOTBALL_STAT_TO_MARKET'));
+  check('neither league offers a model pick: rawPropModelForStat still bails on NCAAF',
+    cat.includes("if (def.sport === 'NCAAF') return null;"));
+  check('the half-credit tackles stat is NOT priced (CFBD halves a shared tackle, the book does not)',
+    !/def_tackles: 'player_/.test(cat));
+  check('a whole-credit sack maps normally', /def_sacks: 'player_sacks'/.test(cat));
+
+  // Anytime TD: priced off a 0.5 rush+rec TD row, but never CALLED that on a bet.
+  check('rush+rec TDs is priced by the anytime-TD market', /rush_rec_tds: 'player_anytime_td'/.test(cat));
+  check('a bet made from it is named for the market, not the column',
+    mk.includes("if (market === 'player_anytime_td') return 'Anytime TD';"));
+  check('every bet made from the board carries the market name',
+    screen.includes('const betLabel = propDisplayLabel(propMarket')
+      && (screen.match(/statLabel=\{betLabel\}/g) ?? []).length === 2
+      && !screen.includes("statLabel={stat?.label ?? ''}"));
+  check('the column header still shows the board\'s own stat name, never the market\'s',
+    /const rightLabel =\s*\n\s*effectiveMode === 'hitRate' \? 'Hit Rate' : basis === 'perGame' \? 'Avg' : stat\.label;/.test(screen)
+      && !/rightLabel[^\n]*betLabel/.test(screen));
+  check('the one-way market is named as such rather than showing silent dashes',
+    mk.includes("return market === 'player_anytime_td' && side === 'under';")
+      && screen.includes('only posts the Yes side of'));
+  check('the coverage check knows which side the board is asking',
+    read('src/lib/statsOdds.ts').includes('side?: StatsOddsSide,')
+      && screen.includes('bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction)'));
+
+  // A stat no book prices must say so; a slate that is not today must say when.
+  check('a column with no market at all explains itself',
+    screen.includes('No sportsbook posts ${stat.label} lines.') && cat.includes('sportHasAnyPropMarket'));
+  check('the note dates itself to the slate, not to "today"',
+    screen.includes('const slateDayLabel =') && screen.includes('weekdayET(slate.date)'));
+  check('football starts filtered to the slate, and the two places that decide agree',
+    screen.includes('function defaultTonightOnly(sport: Sport)')
+      && (screen.match(/defaultTonightOnly\(sport\)/g) ?? []).length === 2);
+  check('the Stats board reads no model at all any more',
+    !screen.includes('propModelForStat') && !screen.includes('useTodayPicks'));
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
