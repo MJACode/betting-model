@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 232 — the game time went under the name, and SPOT became a graded matchup difficulty |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 233 — the game time went under the name, and SPOT became a graded matchup difficulty |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 232 — the app and Discord are one board: publishing moved off the capture table |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 231 — the college prop probe came back 12x cheaper than I said, and Matt turned it on |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 230 — the same bet, eleven times: a lock that released when a pick was graded |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 229 — college football player props, built and measured before they are scheduled |

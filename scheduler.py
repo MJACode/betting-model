@@ -524,7 +524,15 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
 
 
 NFL_POLL_HORIZON_DAYS = 10.0   # start watching this far out
-NFL_FAST_WINDOW_HOURS = 3.0    # inside this, poll every 10 minutes
+NFL_FAST_WINDOW_HOURS = float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))
+# Inside this many hours to kickoff, poll every 10 minutes instead of hourly.
+#
+# 3 -> 24 on 2026-09-05 (Matt). The 10-minute tier was meant to cover the
+# run-up to kickoff and only reached T-3h, so T-24h..T-3h -- the window the
+# opener rule actually fires in, and where the wind forecast firms up --
+# resolved at one tick an hour. Cost is ~6 credits a tick (wind us,eu +
+# opener us,eu), so the extra 126 ticks a kickoff-day are ~750 credits
+# against a 4.71M balance and a ~46-76k/day burn: immaterial.
 
 
 def _nfl_lead_hours() -> float | None:
