@@ -1,5 +1,5 @@
 /**
- * Picks / Signals / Movement filtering — one bar, one sheet.
+ * Picks / Signals filtering — one bar, one sheet.
  *
  * Previously this shipped as two components stacked on top of each other
  * (QuickFilters for search + category + sort, PicksFilterBar for the modal,
@@ -96,10 +96,10 @@ interface Props {
   totalAll: number;
   /**
    * Restricts the Market options to the model types actually on screen.
-   * Used by the Signals/Movement views; undefined offers everything (Today).
+   * Used by the Signals view; undefined offers everything (Today).
    */
   availableModelIds?: string[];
-  /** Hide the Signal section (Signals/Movement are all BET — the chips are noise). */
+  /** Hide the Signal section (Signals are all BET — the chips are noise). */
   showSignals?: boolean;
   /** Noun for counts and the sheet footer, e.g. "pick" / "signal". */
   itemNoun?: string;
