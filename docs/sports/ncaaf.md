@@ -133,8 +133,10 @@ its opening number, which is rarely true by kickoff.
   leaderboard never offers "Add to play" — but it does now carry a LINE, from
   `data/ingestors/ncaaf_prop_odds_ingestor.py` (2026-09-05): college props are
   pulled for games DraftKings already prices, and the board reaches its market
-  through `NCAAF_STAT_TO_MARKET` rather than through a model, because it has
-  none. A college prop row is research and never a pick. `--backfill-players START END` fills
+  through `FOOTBALL_STAT_TO_MARKET` rather than through a model, because it has
+  none. A college prop row is research and never a pick. Live since 2026-09-05
+  at 9am/1pm/6pm ET (`RUN_NCAAF_PROP_ODDS=1`), ~590 credits a pass over the 68
+  events the feed lists — `docs/cloud_worker.md` has the measured breakdown. `--backfill-players START END` fills
   history (~17 calls per season).
 - Weather: `game_weather` rows for ~99% of 2014-2025 games (3pm-local
   Open-Meteo REANALYSIS — truth, not forecast; any historical weather edge is

@@ -39,11 +39,40 @@ def test_every_ncaaf_alternate_has_a_standard_market_we_pull():
         assert k[:-len("_alternate")] in base, f"{k} has no standard market"
 
 
-def test_college_props_are_off_until_the_probe_is_read():
-    """Matt approved the build on the condition the cost is measured first."""
+def test_turning_college_props_on_is_a_variable_not_a_deploy():
+    """Built off (2026-09-05) so the probe's cost reached Matt first; turned on
+    the same day once it had ("Yes turn on NCAAF prop odds"). The flag stays a
+    Railway variable in BOTH places that read it, so it can go back off without
+    a deploy."""
     import os
     if os.environ.get("RUN_NCAAF_PROP_ODDS") is None:
-        assert config.RUN_NCAAF_PROP_ODDS is False
+        assert config.RUN_NCAAF_PROP_ODDS is False, "the code default stays off"
+    sched = io.open(ROOT / "scheduler.py", encoding="utf-8").read()
+    assert 'os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"' in sched
+    assert "RUN_NCAAF_PROP_ODDS=0" in sched, "the off state must log why"
+
+
+def test_the_schedule_is_three_passes_on_game_day_not_hourly():
+    """Measured: ~8.7 credits/event over 68 events is ~590 per pass, so three
+    passes are ~1,800 on a Saturday. Hourly would be ~8,300 for lines that are
+    research, not a model input."""
+    sched = io.open(ROOT / "scheduler.py", encoding="utf-8").read()
+    assert 'CronTrigger(hour="9,13,18", minute=35, timezone=TIMEZONE)' in sched
+    assert 'id="ncaaf_prop_odds"' in sched
+    # Daily, not Saturday-only: college also plays Thursday and Friday nights,
+    # and a day with no events costs nothing (the /events listing is free).
+    assert "day_of_week" not in sched.split('id="ncaaf_prop_odds"')[0][-400:]
+
+
+def test_a_day_with_no_college_games_spends_nothing():
+    """The gate is the events listing, which is free — so leaving this
+    scheduled year-round costs nothing out of season."""
+    src = io.open(ROOT / "data" / "ingestors" / "ncaaf_prop_odds_ingestor.py",
+                  encoding="utf-8").read()
+    body = src.split("def run_ncaaf_prop_odds_ingestor")[1]
+    early = body.index("if not events:")
+    spend = body.index("_event_props(")
+    assert early < spend, "the empty-slate return must come before any paid call"
 
 
 def test_ncaaf_has_no_prop_model_and_this_does_not_add_one():
