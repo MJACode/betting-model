@@ -214,8 +214,7 @@ export function ExplainerScreen() {
             We’re also running an experiment behind the scenes: we save the{' '}
             <Strong>first</Strong> time a game becomes a BET (the “opening
             signal”) and track that record separately, alongside how the line
-            moves afterward. The picks you act on are still the live ones above —
-            see Track Record → “Opening vs Live” for that comparison.
+            moves afterward. The picks you act on are still the live ones above.
           </P>
         </Section>
 

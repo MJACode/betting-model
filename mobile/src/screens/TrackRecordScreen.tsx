@@ -209,7 +209,9 @@ export function TrackRecordScreen() {
           </View>
         </View>
 
-        {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
+        {/* Unconditional: EquityCurve carries its own "not enough settled days"
+            copy, and it is the only thing between the hero and the prose now. */}
+        <EquityCurve points={equity} width={chartWidth} />
 
         {/* Honest framing — the record is not all green, and says so. */}
         <View style={styles.noteCard}>
