@@ -54,6 +54,28 @@ def test_the_manifest_does_not_grow_stale_entries():
         f"them from data/anon_readable.py, or add the query that needs them.")
 
 
+def test_the_view_base_tables_are_granted_but_never_read_directly():
+    """latest_odds & co. are reached only through security_invoker views, so
+    the caller needs SELECT on them (the view runs as the caller) while no
+    `.from()` names them. Declared in their own list so the stale-entry check
+    above stays strict, and granted all the same."""
+    import pytest
+
+    from data.anon_readable import VIEW_BASE_TABLES, lock_down_sql
+
+    app = _app_relations()
+    plan = " | ".join(_plan())
+    for rel in VIEW_BASE_TABLES:
+        assert rel not in app, f"{rel} is read directly now; move it to ANON_READABLE"
+        assert rel not in all_readable(), rel
+        assert f'ON public."{rel}" TO anon, authenticated' in plan, rel
+        with pytest.raises(ValueError):
+            lock_down_sql(rel)
+    for view in ("v_latest_odds_all_books", "v_latest_prop_odds_all_books",
+                 "v_latest_dk_odds", "v_live_game_state_latest"):
+        assert view in ANON_READABLE, f"{view} is what the app reads; it must stay declared"
+
+
 def test_subscriptions_stays_authenticated_only():
     """Billing state must not be readable before sign-in. anon has never held
     SELECT on it; that is the right shape, so it is pinned."""

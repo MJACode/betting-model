@@ -69,6 +69,7 @@ from data.anon_readable import (
     AUTHENTICATED_ONLY,
     RPC_ANON_CALLABLE,
     RPC_REVOKE,
+    VIEW_BASE_TABLES,
     lock_down,
     closed_tables,
 )
@@ -135,6 +136,9 @@ def _plan() -> list[str]:
         stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     for rel in AUTHENTICATED_ONLY:
         stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
+    # The security_invoker views' base tables: the caller reads them too.
+    for rel in VIEW_BASE_TABLES:
+        stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     return stmts
 
 

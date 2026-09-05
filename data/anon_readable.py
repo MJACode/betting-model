@@ -87,6 +87,24 @@ def all_readable() -> tuple[str, ...]:
     """Every relation the app may read, either role."""
     return ANON_READABLE + AUTHENTICATED_ONLY
 
+
+# Read by the app only THROUGH a security_invoker view, never named in a
+# `.from()`. The view runs as the CALLER, so the caller needs SELECT on the base
+# table too -- exactly as `odds` and `games` are granted for v_latest_dk_odds --
+# but these tables have no `.from()` of their own, so they cannot sit in
+# ANON_READABLE without tripping the stale-entry check that keeps that list
+# honest. Granted by scripts/apply_anon_grants.py all the same, and refused by
+# lock_down_sql for the same reason the declared lists are.
+#
+# 2026-09-05: the three current-state tables behind v_latest_odds_all_books,
+# v_latest_prop_odds_all_books, v_latest_dk_odds and v_live_game_state_latest
+# (data/migrations/latest_line_state_tables.sql).
+VIEW_BASE_TABLES: tuple[str, ...] = (
+    "latest_odds",
+    "latest_prop_odds",
+    "latest_live_game_state",
+)
+
 # ── worker-only tables: the second lock ──────────────────────────────────────
 # mike, 2026-09-04: "enable rls on those three tables."
 #
@@ -205,7 +223,7 @@ def lock_down_sql(table: str) -> tuple[str, ...]:
     # layer down. Membership in the declared lists is NOT required, because the
     # repair script's backup table is named at runtime and is legitimately not
     # in any of them.
-    if table in all_readable():
+    if table in all_readable() or table in VIEW_BASE_TABLES:
         raise ValueError(
             f"{table!r} is in the app's read surface. Enabling RLS with no "
             f"policies would deny anon regardless of its GRANT, so the app "
