@@ -75,6 +75,47 @@ def test_it_reports_supported_but_empty_apart_from_unsupported():
     assert '"empty_but_supported"' in src
 
 
+def test_the_side_reader_takes_the_direction_from_either_field():
+    """The Odds API puts the side in `name` on some endpoints and in
+    `description` on others. Reading only one would report a missing Under
+    that is merely in the other field -- the false alarm this audit exists to
+    kill."""
+    assert p._side_of({"name": "Over", "description": "Gerrit Cole"}) == "over"
+    assert p._side_of({"name": "Gerrit Cole", "description": "Under"}) == "under"
+    # Yes/No markets are the same question in different words.
+    assert p._side_of({"name": "Yes", "description": "Aaron Judge"}) == "over"
+    assert p._side_of({"name": "Aaron Judge", "description": "No"}) == "under"
+    # Case and padding are the feed's, not ours, to be strict about.
+    assert p._side_of({"name": "  UNDER  "}) == "under"
+    # An outcome carrying neither is not silently counted as a side.
+    assert p._side_of({"name": "Aaron Judge", "description": "Anytime"}) is None
+    assert p._side_of({}) is None
+
+
+def test_the_probe_counts_sides_not_just_keys():
+    """A book serving `batter_hits` does not mean a member can bet At Most on
+    it. Measured 2026-09-05: Bally Bet and BetRivers serve standard MLB
+    markets OVER-ONLY, and the Stats board greys the At Most control out on
+    exactly that. The probe has to be able to say so."""
+    src = inspect.getsource(p.probe)
+    assert '"sides"' in src, "per (market, book) Over/Under counts"
+    assert '"one_sided"' in src, "the pairs with one side and not the other"
+    assert 'if bool(over) != bool(under):' in src, \
+        "one-sided means exactly one side present — not 'fewer unders than overs'"
+
+
+def test_a_two_sided_market_is_never_reported_one_sided():
+    """The flag is the difference between 'this book cannot offer At Most' and
+    'this book posted fewer Unders today'. Only the first is permanent."""
+    both = {"over": 36, "under": 36}
+    lopsided = {"over": 36, "under": 1}
+    over_only = {"over": 36, "under": 0}
+    assert bool(both["over"]) == bool(both["under"])
+    assert bool(lopsided["over"]) == bool(lopsided["under"]), \
+        "one Under still means the side exists"
+    assert bool(over_only["over"]) != bool(over_only["under"])
+
+
 def test_only_books_we_asked_for_are_ever_counted():
     src = inspect.getsource(p.probe)
     assert "if key not in LINE_SHOP_BOOKMAKERS:" in src

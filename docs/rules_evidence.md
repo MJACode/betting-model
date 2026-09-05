@@ -504,3 +504,64 @@ until a scores source exists.
 is recorded as a bet. A second, different cut in `model_action_thresholds` would
 re-filter bets the model already took — picks written and never shown, the exact
 app/Discord divergence the same release removed.
+
+---
+
+## The At-Most side is missing from the FEED, not from our parser (2026-09-05)
+
+The Stats board greys out its At Most / Under control when none of the member's
+books prices that side of the stat in view (#493, generalised to three modes by
+#492). That lock was built on counts of what OUR TABLE held, which answers
+"we have no Under" and not "there is no Under" — the §1b distinction that turned
+"Pinnacle history doesn't exist" into "we never asked for it". The counts looked
+like a bug worth chasing:
+
+    Bally Bet   batter_hits          1,614 standard rows,  0 with an Under
+    Bally Bet   pitcher_strikeouts      60 rows,           0 with an Under
+    BetRivers   (all standard)       6,637 rows,          58 with an Under
+    FanDuel     batter_stolen_bases  1,363 rows,           0 with an Under
+
+A sportsbook pricing strikeouts with no Under is not credible, so the suspicion
+was that `prop_odds_ingestor` dropped their Under outcomes.
+
+**It does not.** Measured off the raw per-event payload across two MLB events,
+counting outcomes before the parser touches them
+(`scripts/probe_market_coverage.py`, the `sides` and `one_sided` keys):
+
+| Book | Verdict |
+|---|---|
+| Bally Bet | hits, RBIs, total bases, stolen bases, outs — **over-only** |
+| BetRivers | hits, RBIs, total bases, outs — **over-only** |
+| FanDuel, Fanatics, Hard Rock | stolen bases — **over-only** |
+| DraftKings, BetMGM, betPARX, Fanatics, Hard Rock, ReBet, Caesars | every market they serve — both sides |
+
+Our stored rows matched the feed exactly. **The parser is exonerated and the
+lock is correct**: for those pairs the At-Most side does not exist to be shown,
+and no amount of extra requesting will produce it.
+
+**Two things follow, and both have already caught a wrong instinct.**
+
+- **A one-sided pair is per BOOK and per MARKET, never market-wide.** The
+  obvious-looking cleanup — teaching `markets.oneWayMarket` that
+  `batter_home_runs` is one-way, since it reads 0 Unders at DraftKings and
+  FanDuel — is WRONG. Across all history the market carries **55,263 rows with
+  an Under** out of 580,838, from ESPN BET (97.3%), Pinnacle (100%) and betPARX
+  (95.8%). Two of those are reference-only books, but betPARX is bettable, so a
+  betPARX member really can bet the No side and must not be told nobody offers
+  it. `oneWayMarket` is for markets no book prices on one side —
+  `player_anytime_td`, 41,332 rows and **zero** Unders — and the per-book
+  coverage map (`statsOdds.bookCoverageForMarket`) is what handles the rest.
+- **"One-sided" means exactly one side present, not fewer of one than the
+  other.** A book that posted 36 Overs and 1 Under still offers the side; the
+  flag has to be `bool(over) != bool(under)`, and a ratio test would grey out a
+  control the member could have used. Pinned by
+  `tests/test_market_coverage_probe.py`.
+
+Separately settled the same day: the milestone (`*_alternate`) markets are
+one-sided **by construction** — `alt_with_under` is 0 for every book including
+DraftKings, because "2+ hits" has no other side. A book that publishes a stat
+only under its alternate key (FanDuel for hits, RBIs, runs and total bases;
+Caesars for hits, RBIs, runs and strikeouts) therefore has no At-Most side for
+that stat at all, which is why the lock engages as often as it does: **22 of the
+one-sided (book, stat) pairs on the MLB board come from alternate-only
+coverage**, `batter_runs_scored` worst at 6 of 10 bettable books.

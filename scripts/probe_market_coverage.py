@@ -21,6 +21,24 @@ slate, books that publish a market ONLY under its alternate key:
     Fanatics         runs scored
     Rebet            hits
 
+WHICH SIDE, NOT JUST WHICH KEY (added 2026-09-05). Knowing a book serves
+`batter_hits` does not tell you a member can bet At Most on it, and the Stats
+board greys that control out when none of their books prices the side. Our
+table showed Bally Bet with 1,614 standard `batter_hits` rows and not one
+Under, which is not a credible thing for a sportsbook to do -- so either the
+feed is one-sided or our parser was dropping outcomes. Measured off two MLB
+events, the feed is one-sided and the parser is exonerated:
+
+    Bally Bet    hits, RBIs, total bases, stolen bases, outs   OVER-ONLY
+    BetRivers    hits, RBIs, total bases, outs                 OVER-ONLY
+    FanDuel / Fanatics / Hard Rock   stolen bases              OVER-ONLY
+    DraftKings, BetMGM, betPARX, Fanatics, Hard Rock, ReBet, Caesars
+                 every market they serve                       BOTH SIDES
+
+So `sides` below counts Over and Under outcomes per (book, market). A market
+a book serves on ONE side only is a real, permanent gap in what a member can
+be shown -- not a bug to chase and not something more requests can fix.
+
 STORED DATA CANNOT FINISH THIS AUDIT, which is the whole reason for this
 script. A market we never REQUEST has no rows, and no query over what we hold
 can distinguish "no book prices this" from "we never asked". The only way to
@@ -82,6 +100,25 @@ BOARD_BLANKS = {
 }
 
 
+# The Odds API puts the side in `name` for some endpoints and in `description`
+# for others -- the ingestor handles both (prop_odds_ingestor), and so must
+# this: reading only one field would report a missing side that is merely in
+# the other one, which is the false alarm this whole audit exists to kill.
+_OU = {"over", "under"}
+_YN = {"yes": "over", "no": "under"}
+
+
+def _side_of(outcome: dict) -> str | None:
+    """Which side is this outcome, whichever field carries it? None if neither."""
+    for field in ("name", "description"):
+        v = (outcome.get(field) or "").strip().lower()
+        if v in _OU:
+            return v
+        if v in _YN:
+            return _YN[v]
+    return None
+
+
 def _standard_markets(sport: str) -> list[str]:
     if sport == "NFL":
         return list(config.PROP_MARKETS_NFL)
@@ -141,6 +178,8 @@ def probe(sport: str, markets: list[str] | None = None) -> dict:
         served: dict[str, dict[str, int]] = {}
         unsupported: list[str] = []
         by_book: dict[str, list[str]] = defaultdict(list)
+        sides: dict[str, dict[str, dict[str, int]]] = defaultdict(dict)
+        one_sided: list[str] = []
         credits = 0
 
         for market in markets:
@@ -165,11 +204,18 @@ def probe(sport: str, markets: list[str] | None = None) -> dict:
                 key = book.get("key")
                 if key not in LINE_SHOP_BOOKMAKERS:
                     continue
-                n = sum(len(m.get("outcomes", [])) for m in book.get("markets", [])
-                        if m.get("key") == market)
-                if n:
-                    books[key] = n
+                outcomes = [o for m in book.get("markets", [])
+                            if m.get("key") == market
+                            for o in m.get("outcomes", [])]
+                if outcomes:
+                    books[key] = len(outcomes)
                     by_book[key].append(market)
+                    over = sum(1 for o in outcomes if _side_of(o) == "over")
+                    under = sum(1 for o in outcomes if _side_of(o) == "under")
+                    sides[market][key] = {"over": over, "under": under}
+                    if bool(over) != bool(under):
+                        one_sided.append(
+                            f"{key}|{market}|{'over' if over else 'under'}-only")
             if books:
                 served[market] = dict(sorted(books.items(), key=lambda kv: -kv[1]))
             time.sleep(0.4)
@@ -184,11 +230,18 @@ def probe(sport: str, markets: list[str] | None = None) -> dict:
                                     if m not in served and m not in unsupported],
             "served": served,
             "books": {b: sorted(ms) for b, ms in sorted(by_book.items())},
+            # Per (market, book) Over/Under outcome counts, and the pairs that
+            # came back with one side and not the other. A one-sided pair is a
+            # permanent limit on what the board can offer for that book, not a
+            # collection failure -- see the header.
+            "sides": {m: dict(sorted(bs.items())) for m, bs in sorted(sides.items())},
+            "one_sided": sorted(one_sided),
             "credits": credits,
         }
         logger.success(
             f"{sport} coverage probe: {len(served)}/{len(markets)} markets served, "
-            f"{len(unsupported)} unsupported keys, {credits} credits")
+            f"{len(unsupported)} unsupported keys, {len(one_sided)} one-sided "
+            f"(book, market) pairs, {credits} credits")
         return out
     finally:
         try:
