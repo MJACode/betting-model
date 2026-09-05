@@ -235,5 +235,16 @@
       "register": false,
       "statement_timeout_ms": 1800000
     }
+  },
+  {
+    "key": "ncaaf-prop-probe-2026-09-05",
+    "job_type": "ncaaf_prop_odds",
+    "requested_by": "matt",
+    "note": "MEASURE BEFORE SCHEDULING. Matt approved NCAAF player props 2026-09-05 (\"Yes do it\") on the condition the real cost is measured on one Saturday first. Writes nothing: reports credits per event, which of the 24 requested markets The Odds API actually serves for college, which books answer, and what one full scoped pass would cost. Today is a 120-game Saturday, 70 with a DK line, so it is the right day to ask. RUN_NCAAF_PROP_ODDS stays 0 until Matt sees this.",
+    "args": {
+      "probe": true,
+      "limit_events": 3,
+      "date": "2026-09-05"
+    }
   }
 ]

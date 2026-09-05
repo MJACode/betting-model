@@ -858,6 +858,45 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("published_record_window", ERROR, "CRIT", f"query failed: {exc}")
 
+        # ── One row per pick ─────────────────────────────────────────────────
+        # A pick is a pick (CLAUDE.md §1c), and a pick is ONE ROW. Every
+        # surface counts rows -- the app's record, Retool's q_performance, the
+        # graded matview, the custom-model backtest -- so a second copy of a
+        # pick inflates all of them at once and nothing else notices. Discord
+        # is the only surface immune, because it posts one message per
+        # opening_signals.lock_key.
+        #
+        # On 2026-09-04 a released lock wrote 11 copies of one Logan Allen prop
+        # (see models/scorer.py::_locked_prop_keys), and 20 of the 132 settled
+        # BETs in the published window were duplicates -- +7.38u published
+        # against +5.68u real. It reached a member's screen before it reached a
+        # dashboard. This is the check that would have caught it that morning.
+        #
+        # The key is the pick lock's key. uq_picks_one_row_per_pick enforces it
+        # once the table is clean; this stays as the check that says so out
+        # loud, and that keeps working if the index is ever dropped.
+        try:
+            dupes = _scalar(conn, """
+                SELECT COUNT(*) FROM (
+                    SELECT game_date, model_id, COUNT(*) AS n
+                    FROM picks
+                    WHERE is_live IS NOT TRUE AND game_date >= ?
+                    GROUP BY game_date, model_id, game_id,
+                             COALESCE(player_id, ''), pick_side
+                    HAVING COUNT(*) > 1
+                ) d
+            """, (PAPER_TRADING_START,))
+            if dupes:
+                r.add("one_row_per_pick", STALE, "CRIT",
+                      f"{dupes} pick(s) written more than once since "
+                      f"{PAPER_TRADING_START} — every published record counts "
+                      f"the copies; run python -m scripts.dedupe_picks")
+            else:
+                r.add("one_row_per_pick", OK, "CRIT",
+                      f"no pick written twice since {PAPER_TRADING_START}")
+        except Exception as exc:
+            r.add("one_row_per_pick", ERROR, "CRIT", f"query failed: {exc}")
+
         # ── Persist + summarize ──────────────────────────────────────────────
         checked_at = datetime.now(timezone.utc).isoformat()
         for res in r.results:

@@ -74,6 +74,33 @@ Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cade
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
 
+### College football player props (built, NOT scheduled)
+
+`data/ingestors/ncaaf_prop_odds_ingestor.py`, 2026-09-05. **Off by default**
+and deliberately not on any cron: `RUN_NCAAF_PROP_ODDS=0`.
+
+A college Saturday is 120 games against MLB's ~15, and a prop pull is one paid
+call per event, so this is the one ingestor whose cost is set by slate size
+rather than cadence. It is scoped to games DraftKings has already lined
+(`NCAAF_PROP_REQUIRE_DK_LINE=1`, 70 of 120 on the measured Saturday) under a
+hard per-pass ceiling (`NCAAF_PROP_MAX_EVENTS=80`), and the measured cost
+comes from the probe rather than an estimate:
+
+```
+python -m data.ingestors.ncaaf_prop_odds_ingestor --probe    # writes nothing
+```
+
+or as a worker job, which is how it runs here — `ncaaf_prop_odds` with
+`{"probe": true}` (`jobs/declared_jobs.json`). The probe reports credits per
+event, WHICH of the 24 requested markets The Odds API actually serves for
+college (it uses one key namespace for both football leagues and documents
+neither), which books answer, and what one full scoped pass would cost.
+
+To turn it on once that number is accepted: set `RUN_NCAAF_PROP_ODDS=1` and
+schedule it beside the refresh pass. Two or three passes on game day, not
+hourly — a Saturday at MLB's cadence would cost more than the whole MLB
+program.
+
 ### The NFL wind-totals card
 
 The standalone `nfl/` package's weekly bet card (`docs/sports/nfl.md`), automated on the
