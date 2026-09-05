@@ -769,6 +769,28 @@ settlement, so it is its own session: decide how a second game is keyed
 (the app's `startedTeams` map already treats a team with a game still to
 come as unstarted), then make both ingestors and the pick lock agree.
 
+**Second symptom, found 2026-09-05 and CONTAINED, not fixed:** the collision
+also duplicated PICKS. Game 1's final score settled a prop pick while game 2's
+`commence_time` kept the pre-game cutoff open, and both locks released a pick
+the moment it was graded — so every 10-minute pass wrote another copy. Eleven
+rows for one Logan Allen Over 4.5 Hits, and 20 of the 132 settled BETs in the
+published 09-01 window were copies (+7.38u published against +5.68u real). The
+locks now key on a pick's EXISTENCE, the prop scorers skip a game that already
+has a final score, and `uq_picks_one_row_per_pick` enforces one row per pick —
+so the collision can no longer inflate the record. It can still put game 1's
+score against game 2's pick, which is what this item is for.
+
+## [ ] `picks.player_id` and `picks.is_live` exist in production and in neither schema file
+
+Found 2026-09-05 writing tests against the real table. Both columns are read
+and written all over the scorer, the views and the app, and neither
+`data/db_setup.py`'s `SCHEMA_SQL` nor `data/supabase_schema.sql` declares
+them — they were added by hand and never written back. So a first-time setup
+builds a `picks` table the scorer cannot insert into, and every sqlite-backed
+test has to ALTER them in (`tests/test_pick_lock_survives_settlement.py` does).
+Small and mechanical: add both to each schema file, and check the same way for
+every other column production has grown.
+
 ## [ ] NCAAF player props have no ingest, so NCAAF alternate lines have nothing to ride
 
 Matt, 2026-09-05, approving alternates: "Same with NFL NCAAF." MLB, WNBA,
