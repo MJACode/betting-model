@@ -33,7 +33,7 @@ import { FilterField } from '@/components/filters/FilterField';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
 import type { ActivePill } from '@/components/filters/FilterBar';
 import { useSportFilter, type Sport } from '@/hooks/useSportFilter';
-import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import { usePreferredBooks, BOOKS } from '@/hooks/usePreferredBooks';
 import {
   fetchPropLinesForDate,
   fetchRecentGames,
@@ -42,14 +42,17 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
+import { bookLabel, bookName, booksLabel, booksName, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
+  anyBookPostsSide,
+  bookCoverageForMarket,
   bookPostsMarket,
   buildQuoteIndex,
   quoteForRow,
   unstartedGameIds,
+  type BookSideCoverage,
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
@@ -509,6 +512,93 @@ export function StatsScreen() {
     slateGameIds.size > 0 &&
     bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction);
   const showOdds = bookPosts && booksReady;
+
+  // The slate is not always today: buildTonightSlate falls back to the next
+  // scheduled day, so for a weekly sport this reads SATURDAY from Sunday
+  // onward. Declared here because both the picker's coverage note and the
+  // empty-column note below date themselves by it.
+  const slateDayLabel = slate.isToday || !slate.date ? 'today’s' : `${weekdayET(slate.date)}’s`;
+
+  // ── What each of the member's books actually prices for THIS stat ─────────
+  // Computed from the rows already on screen, so it costs nothing: a
+  // slate-wide coverage read against the odds view measured 8-17s on
+  // 2026-09-05 and is not something a screen can afford.
+  // TWO MAPS, over two different book sets, and the difference is load-bearing.
+  // `coverage` is the member's OWN books and drives the direction control.
+  // `coverageAll` is every book the picker lists, because the picker shows the
+  // ones they have NOT selected too — computing the note off the selected set
+  // would print "No Hits lines today" under every unselected book, which is
+  // the exact false impression this whole change exists to remove.
+  const coverage = useMemo(
+    () =>
+      propMarket != null && propLines.market === propMarket
+        ? bookCoverageForMarket(propLines.rows, propMarket, books, slateGameIds)
+        : new Map<string, BookSideCoverage>(),
+    [propLines, propMarket, books, slateGameIds],
+  );
+  const coverageAll = useMemo(
+    () =>
+      propMarket != null && propLines.market === propMarket
+        ? bookCoverageForMarket(propLines.rows, propMarket, BOOKS, slateGameIds)
+        : new Map<string, BookSideCoverage>(),
+    [propLines, propMarket, slateGameIds],
+  );
+
+  // The picker's per-book sub-line. It EXPLAINS, it never restricts (Matt,
+  // 2026-09-05: "if we are getting betting lines for a Sportsbook we should
+  // show it as an option and display those lines"). He read FanDuel's and
+  // Caesars' blank columns as us not carrying those books; we do — they post
+  // Hits through the milestone market, which is over-only, so the honest
+  // answer is a sentence on the row rather than a book removed from the list.
+  const coverageReady =
+    propMarket != null && propLines.market === propMarket && propLines.status === 'ok';
+  const coverageNote = useCallback(
+    (book: string): string | null => {
+      if (!coverageReady || slateGameIds.size === 0) return null;
+      const statLabel = stat?.label ?? '';
+      const c = coverageAll.get(book);
+      if (!c) return `No ${statLabel} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}`;
+      if (c.over && !c.under) return `${statLabel}: At Least only`;
+      if (c.under && !c.over) return `${statLabel}: At Most only`;
+      return null;
+    },
+    [coverageAll, coverageReady, slateGameIds, stat, slateDayLabel, slate.date],
+  );
+
+  // ── The Over/Under control ────────────────────────────────────────────────
+  // Matt, 2026-09-05, on FanDuel's near-empty At-Most column: hide the side
+  // none of their books sells rather than answer it with a column of dashes.
+  // FanDuel carried an Under price on 2 of the 12 MLB stats that day and
+  // Caesars on 3, because the milestone market the feed gives us for them is
+  // over-only.
+  //
+  // FAIL OPEN. While the lines are loading, when the read failed, when the
+  // slate has no unstarted game left, and on a stat no book prices at all
+  // (football's solo tackles, and every sport with no prop market), BOTH sides
+  // stay live: the board's hit rate is real research on its own and must never
+  // lose a control to a slow query.
+  const sideKnown = coverageReady && slateGameIds.size > 0 && coverage.size > 0;
+  const underAvailable = !sideKnown || anyBookPostsSide(coverage, 'under');
+  const overAvailable = !sideKnown || anyBookPostsSide(coverage, 'over');
+  // Only one side left: snap to it rather than leaving the member parked on a
+  // view their books cannot price with the control to leave it greyed out.
+  useEffect(() => {
+    if (direction === 'under' && !underAvailable && overAvailable) setDirection('over');
+    else if (direction === 'over' && !overAvailable && underAvailable) setDirection('under');
+  }, [direction, underAvailable, overAvailable]);
+  const dirLocked = !underAvailable || !overAvailable;
+  // Naming the book is the whole point: a greyed control with no reason is the
+  // "why is FanDuel blank" question in a smaller box.
+  // POSITIVE sentence, so it takes booksName. booksNoneName is the subject of
+  // a NEGATIVE one ("Neither DraftKings nor FanDuel has posted…") and would
+  // invert the meaning here the moment a second book was selected.
+  const dirLockNote = !dirLocked
+    ? null
+    : `${booksName(books)} ${books.length === 1 ? 'posts' : 'post'} only ${
+        underAvailable ? 'At Most' : 'At Least'
+      } lines for ${stat?.label ?? 'this stat'} ${
+        slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`
+      }.`;
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
   // STAT at all (nothing to wait for — six of the eighteen football columns,
@@ -519,7 +609,6 @@ export function StatsScreen() {
   // scheduled day, so for a weekly sport this note is about SATURDAY from
   // Sunday onward. The column header already dates itself; the note used to
   // contradict it (UX review, 2026-09-05).
-  const slateDayLabel = slate.isToday || !slate.date ? 'today’s' : `${weekdayET(slate.date)}’s`;
   const noLinesNote =
     propMarket == null
       ? stat != null && sportHasAnyPropMarket(sport)
@@ -812,7 +901,7 @@ export function StatsScreen() {
             <Text style={styles.title}>Stats</Text>
             <SettingsButton />
           </View>
-          <SportsbookIndicator />
+          <SportsbookIndicator coverageNote={coverageNote} />
           <SportToggle />
         </View>
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
@@ -883,7 +972,7 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
-        <SportsbookIndicator />
+        <SportsbookIndicator coverageNote={coverageNote} />
         <SportToggle />
       </View>
 
@@ -928,14 +1017,35 @@ export function StatsScreen() {
       {effectiveMode === 'hitRate' ? (
         <>
           <View style={styles.lineRow}>
+            {/* Locked to the one side the member's books actually sell —
+                greyed with the chevron dropped, so it reads as a label rather
+                than a control that ignores taps (Matt, 2026-09-05). The reason
+                sits under the ruler, where the column's other notes live. */}
             <Pressable
-              onPress={() => setDirection((d) => (d === 'over' ? 'under' : 'over'))}
-              style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
+              onPress={() => {
+                if (dirLocked) return;
+                setDirection((d) => (d === 'over' ? 'under' : 'over'));
+              }}
+              disabled={dirLocked}
+              accessibilityRole={dirLocked ? 'text' : 'button'}
+              accessibilityState={{ disabled: dirLocked }}
+              accessibilityLabel={
+                dirLocked
+                  ? `${direction === 'over' ? 'At Least' : 'At Most'}. ${dirLockNote ?? ''}`
+                  : `${direction === 'over' ? 'At Least' : 'At Most'}. Switch to ${direction === 'over' ? 'At Most' : 'At Least'}.`
+              }
+              style={({ pressed }) => [
+                styles.dirPill,
+                dirLocked && styles.dirPillLocked,
+                pressed && !dirLocked && styles.pressed,
+              ]}
             >
-              <Text style={styles.dirPillText}>
+              <Text style={[styles.dirPillText, dirLocked && styles.dirPillTextLocked]}>
                 {direction === 'over' ? 'At Least' : 'At Most'}
               </Text>
-              <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
+              {dirLocked ? null : (
+                <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
+              )}
             </Pressable>
             <LineRuler
               value={lineN}
@@ -944,6 +1054,7 @@ export function StatsScreen() {
               onChange={setLineN}
             />
           </View>
+          {dirLockNote ? <Text style={styles.dirLockNote}>{dirLockNote}</Text> : null}
           <View style={styles.headlineRow}>
             <View style={styles.headlineRule} />
             <Text style={styles.headlineText}>{lineHeadline}</Text>
@@ -1186,7 +1297,11 @@ export function StatsScreen() {
         />
       )}
 
-      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <SportsbookPickerSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        coverageNote={coverageNote}
+      />
       <AddLineSheet
         input={lineSheetInput}
         game={lineSheetGame}
@@ -1997,6 +2112,20 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
     borderWidth: 1,
     borderColor: colors.separator,
+  },
+  dirPillLocked: {
+    // Reads as a label, not a dead button: no press feedback, no chevron, and
+    // the same muted treatment the board's other non-interactive text carries.
+    opacity: 0.6,
+  },
+  dirPillTextLocked: {
+    color: colors.textSecondary,
+  },
+  dirLockNote: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xs,
   },
   dirPillText: {
     fontSize: font.size.footnote,
