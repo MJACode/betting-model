@@ -109,8 +109,9 @@ EXTRA_REQUEST_MARKETS = {"MLB": ["batter_home_runs_alternate"]}
 # every line the newest pass wrote for an alternate key
 # (data/migrations/alternate_prop_lines_view.sql).
 #
-# They are requested at most every config.PROP_ALT_REFRESH_MIN minutes
-# (_alt_markets_due) because each market costs ~2 credits per event call
+# They are requested every pass (config.PROP_ALT_REFRESH_MIN = 0, Matt's
+# call at the measured cost); a positive value makes alt_markets_due hold
+# them to that cadence, because each market costs ~2 credits per event call
 # (measured, config.py) and the evening pass runs every 10 minutes.
 ALT_LINE_MARKETS = frozenset(m for ms in PROP_ALT_MARKETS.values() for m in ms)
 

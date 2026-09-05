@@ -60,13 +60,85 @@ def _parse(markets, book="draftkings"):
 # ── config ───────────────────────────────────────────────────────────────────
 
 def test_every_alternate_key_is_the_alternate_of_a_market_we_pull():
+    bases = dict(m.PROP_MARKETS_BY_SPORT)
+    bases["NFL"] = config.PROP_MARKETS_NFL
     for sport, keys in config.PROP_ALT_MARKETS.items():
-        base = set(m.PROP_MARKETS_BY_SPORT[sport])
+        base = set(bases[sport])
         for k in keys:
             assert k.endswith("_alternate"), k
             assert k[:-len("_alternate")] in base, f"{k} has no standard market"
     assert "batter_home_runs_alternate" not in ALT_LINE_MARKETS, \
         "the HR alternate is model-facing and must be requested on every pass"
+
+
+def test_the_sports_matt_approved_carry_alternates():
+    """Matt, 2026-09-05: MLB, then "WNBA and NBA same cost yes. Same with NFL
+    NCAAF." NCAAF has no prop ingest to add them to (docs/followups.md)."""
+    assert set(config.PROP_ALT_MARKETS) == {"MLB", "WNBA", "NBA", "NFL"}
+    assert "player_double_double_alternate" not in config.PROP_ALT_MARKETS["NBA"], \
+        "a Yes/No market has no milestone lines"
+    assert "player_anytime_td_alternate" not in config.PROP_ALT_MARKETS["NFL"]
+
+
+# ── the football ingestor ────────────────────────────────────────────────────
+
+def test_football_alternates_never_share_a_chunk_with_a_standard_market():
+    from data.ingestors import nfl_prop_odds_ingestor as nfl
+    want = list(config.PROP_MARKETS_NFL) + list(config.PROP_ALT_MARKETS["NFL"])
+    chunks = nfl._market_chunks(want)
+    assert [mk for c in chunks for mk in c] == want, "every market, once, in order"
+    for c in chunks:
+        kinds = {mk.endswith("_alternate") for mk in c}
+        assert len(kinds) == 1, f"mixed chunk: {c}"
+        assert len(c) <= nfl.MARKET_CHUNK
+
+
+def test_football_live_slate_requests_alternates_and_a_backfill_does_not(monkeypatch):
+    from data.ingestors import nfl_prop_odds_ingestor as nfl
+    seen = []
+
+    def fake_event_props(event_id, markets, snapshot_iso=None, regions=None, books=None):
+        seen.append(list(markets))
+        return ([], None, 0)
+
+    monkeypatch.setattr(nfl, "_event_props", fake_event_props)
+
+    class Conn:
+        def commit(self): pass
+
+    games = {("KC", "BUF", "2026-09-07"): ("NFL_2026_01_KC_BUF", "2026-09-07")}
+    ev = [{"id": "1", "home_team": "Buffalo Bills", "away_team": "Kansas City Chiefs",
+           "commence_time": "2026-09-07T17:00:00Z"}]
+    nfl._ingest_events(Conn(), ev, games, None, "open")
+    nfl._ingest_events(Conn(), ev, games, "2025-10-05T14:00:00Z", "open", ["player_receptions"])
+    live, backfill = seen
+    assert set(config.PROP_ALT_MARKETS["NFL"]) <= set(live)
+    assert set(config.PROP_MARKETS_NFL) <= set(live)
+    assert backfill == ["player_receptions"]
+
+
+def test_a_rejected_football_alternate_chunk_costs_only_itself(monkeypatch):
+    from data.ingestors import nfl_prop_odds_ingestor as nfl
+    asked = []
+
+    class Resp:
+        def __init__(self, status, markets):
+            self.status_code, self.headers, self._m = status, {"x-requests-used": "10"}, markets
+        def json(self):
+            return {"bookmakers": [{"key": "draftkings", "markets": [{"key": mk, "outcomes": []} for mk in self._m]}]}
+
+    def fake_get(url, params, timeout=30):
+        mk = params["markets"].split(",")
+        asked.append(mk)
+        return Resp(422 if any(x.endswith("_alternate") for x in mk) else 200, mk)
+
+    monkeypatch.setattr(nfl, "_get", fake_get)
+    monkeypatch.setattr(nfl.time, "sleep", lambda s: None)
+    want = list(config.PROP_MARKETS_NFL) + list(config.PROP_ALT_MARKETS["NFL"])
+    per_book, _stamp, _credits = nfl._event_props("ev", want)
+    got = {m["key"] for _b, ms in per_book for m in ms}
+    assert got == set(config.PROP_MARKETS_NFL), "every standard market landed despite the rejected alternates"
+    assert not any(x.endswith("_alternate") for x in got)
 
 
 # ── the parser ───────────────────────────────────────────────────────────────
@@ -185,7 +257,8 @@ class _Conn:
 NOW = datetime(2026, 9, 5, 20, 0, tzinfo=timezone.utc)
 
 
-def test_alternates_are_due_when_there_are_none_yet():
+def test_alternates_are_due_when_there_are_none_yet(monkeypatch):
+    monkeypatch.setattr(m, "PROP_ALT_REFRESH_MIN", 30)
     assert alt_markets_due(_Conn(None), "MLB", "2026-09-05", now=NOW) is True
 
 
@@ -197,23 +270,34 @@ def test_alternates_are_due_only_once_the_newest_row_is_old_enough(monkeypatch):
     assert alt_markets_due(_Conn(stale), "MLB", "2026-09-05", now=NOW) is True
 
 
-def test_the_gate_asks_only_about_this_sports_alternate_keys():
+def test_the_gate_asks_only_about_this_sports_alternate_keys(monkeypatch):
+    monkeypatch.setattr(m, "PROP_ALT_REFRESH_MIN", 30)
     c = _Conn("2026-09-05T15:45:00-04:00")
     alt_markets_due(c, "MLB", "2026-09-05", now=NOW)
     (_sql, params), = c.sql
     assert params == ("2026-09-05", config.PROP_ALT_MARKETS["MLB"])
 
 
-def test_a_sport_with_no_alternates_never_asks():
+def test_a_sport_with_no_alternates_never_asks(monkeypatch):
+    monkeypatch.setattr(m, "PROP_ALT_REFRESH_MIN", 30)
     c = _Conn()
-    assert alt_markets_due(c, "WNBA", "2026-09-05", now=NOW) is False
+    assert alt_markets_due(c, "NHL", "2026-09-05", now=NOW) is False
     assert c.sql == []
 
 
 def test_a_failed_check_does_not_spend(monkeypatch):
-    """A broken gate that requested alternates on every pass would double the
-    approved budget silently; stale alternates are visible."""
+    """With a cadence set, a broken gate that requested alternates on every
+    pass would silently spend past it; stale alternates are visible."""
+    monkeypatch.setattr(m, "PROP_ALT_REFRESH_MIN", 30)
     assert alt_markets_due(_Conn(raise_=True), "MLB", "2026-09-05", now=NOW) is False
+
+
+def test_every_pass_is_the_default_matt_approved():
+    """2026-09-05: "Yes Alternates on every pass, at 11,000 to 14,000 credits
+    a day". A positive value restores the cadence without a code change."""
+    import os
+    if os.environ.get("PROP_ALT_REFRESH_MIN") is None:
+        assert config.PROP_ALT_REFRESH_MIN == 0
 
 
 def test_refresh_min_zero_means_every_pass(monkeypatch):
