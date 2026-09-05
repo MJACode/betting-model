@@ -131,9 +131,17 @@ def _board_markets(sport: str) -> set[str]:
         return {m.group(1): m.group(2) for m in
                 re.finditer(r"^\s*([a-z_0-9]+): '([a-z_0-9]+)'", body, re.M)}
 
+    def sport_keyed(src: str, name: str) -> dict[str, str]:
+        """STAT_KEY_TO_MARKET is keyed `SPORT:key` on purpose — SeasonTotalsRow
+        keys are shared across sports, so a bare `steals` would resolve a
+        basketball column onto a baseball market."""
+        body = src.split(name)[1].split("};")[0]
+        return {m.group(1): m.group(2) for m in
+                re.finditer(r"^\s*'([A-Z]+:[a-z_0-9]+)': '([a-z_0-9]+)'", body, re.M)}
+
     model_for = table(cat, "STAT_KEY_TO_MODEL")
     market_for_model = table(mkt, "PROP_MARKET_BY_MODEL")
-    direct = table(cat, "STAT_KEY_TO_MARKET")
+    direct = sport_keyed(cat, "STAT_KEY_TO_MARKET")
     football = table(cat, "FOOTBALL_STAT_TO_MARKET")
 
     out = set()
@@ -145,8 +153,8 @@ def _board_markets(sport: str) -> set[str]:
         model = model_for.get(k)
         if model and model in market_for_model:
             out.add(market_for_model[model])
-        elif k in direct:
-            out.add(direct[k])
+        elif f"{sport}:{k}" in direct:
+            out.add(direct[f"{sport}:{k}"])
     return out
 
 
@@ -186,3 +194,40 @@ def test_every_mlb_alternate_still_has_a_standard_market():
     base = set(config.PROP_MARKETS_ALL)
     for k in config.PROP_ALT_MARKETS["MLB"]:
         assert k[:-len("_alternate")] in base, f"{k} has no standard market"
+
+
+def test_the_stat_to_market_fallback_is_keyed_by_sport():
+    """A bare column key cannot tell WNBA from NBA -- SeasonTotalsRow keys are
+    shared -- so the map that bypasses the model route carries the sport, or
+    the next entry someone adds resolves onto another sport's market with
+    nothing failing."""
+    src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts", encoding="utf-8").read()
+    body = src.split("STAT_KEY_TO_MARKET")[1].split("};")[0]
+    import re
+    keys = re.findall(r"^\s*'?([A-Za-z_0-9:]+)'?:\s*'[a-z_0-9]+'", body, re.M)
+    assert keys, "the fallback map has entries"
+    for k in keys:
+        assert ":" in k and k.split(":")[0].isupper(), f"{k} is not sport-scoped"
+
+
+def test_the_hit_rate_ramp_can_switch_itself_off():
+    """A rare-event column lands every player in one band, so an absolute ramp
+    paints the whole column the AVOID colour beside a live price. The board
+    colours only when the colour distinguishes the rows on screen."""
+    src = io.open(ROOT / "mobile" / "src" / "lib" / "hitRate.ts", encoding="utf-8").read()
+    assert "hitRateColorDiscriminates" in src
+    screen = io.open(ROOT / "mobile" / "src" / "screens" / "StatsScreen.tsx",
+                     encoding="utf-8").read()
+    assert "hitRateColorDiscriminates" in screen, "the screen must consult it"
+    assert "colorful={colorful}" in screen, "and pass the answer to the row"
+
+
+def test_an_all_line_leg_slip_does_not_claim_a_model():
+    """Doubles and Triples have no model, so a slip built only of Stats line
+    legs must not label the odds-implied number "Model" or credit a model's
+    edge in the hold note."""
+    src = io.open(ROOT / "mobile" / "src" / "screens" / "ParlayScreen.tsx",
+                  encoding="utf-8").read()
+    assert "const modelBacked = legs.some((l) => !isLineLeg(l));" in src
+    assert "modelBacked ? 'Model' : 'Implied'" in src
+    assert "modelBacked={modelBacked}" in src

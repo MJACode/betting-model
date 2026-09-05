@@ -499,7 +499,21 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
  * (~15-25% vs ~5% on straights). We only build +EV combos, but we say so plainly
  * and warn hard when the combined EV is negative.
  */
-function ParlayHoldNote({ ev, exception }: { ev: number; exception: string | null }) {
+function ParlayHoldNote({
+  ev,
+  exception,
+  modelBacked,
+}: {
+  ev: number;
+  exception: string | null;
+  /**
+   * Does any leg carry a model's number? A slip built entirely of Stats line
+   * legs does not — Doubles and Triples have no model at all — so the positive
+   * branch must not credit "the model's combined probability" for a figure
+   * that is the books' own price multiplied out (UX review, 2026-09-05).
+   */
+  modelBacked: boolean;
+}) {
   const negative = ev < 0;
   // A Stats line leg DraftKings never posted is priced at another book, and
   // the note must not attribute that number to DraftKings (UX review).
@@ -515,8 +529,12 @@ function ParlayHoldNote({ ev, exception }: { ev: number; exception: string | nul
       />
       <Text style={[styles.holdNoteText, negative && styles.holdNoteTextBad]}>
         {negative
-          ? `Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value. ${priced}`
-          : `${priced} Parlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats the price.`}
+          ? modelBacked
+            ? `Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value. ${priced}`
+            : `Negative EV — these are your own lines at the books’ own prices, so the parlay hold is the whole story. Straight bets are the better value. ${priced}`
+          : modelBacked
+            ? `${priced} Parlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats the price.`
+            : `${priced} These are your own lines, priced at what the book is offering — no model has an opinion on them. Parlays carry far more hold (~15–25%) than straight bets (~5%).`}
       </Text>
     </View>
   );
@@ -656,6 +674,9 @@ function SlipBody({
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
   const allDk = legs.every((l) => l.dkPriced !== false);
+  // Every leg a Stats line the user chose themselves? Then nothing on this
+  // slip is a model's number, and two labels below must not say it is.
+  const modelBacked = legs.some((l) => !isLineLeg(l));
   const dkException = useMemo(() => {
     const off = legs.filter((l) => l.dkPriced === false);
     if (off.length === 0) return null;
@@ -733,7 +754,10 @@ function SlipBody({
         </View>
 
         <View style={styles.statsRow}>
-          <Stat label="Model" value={formatPct(metrics.parlayProb)} />
+          <Stat
+            label={modelBacked ? 'Model' : 'Implied'}
+            value={formatPct(metrics.parlayProb)}
+          />
           <Stat
             label="EV"
             value={formatPctSigned(metrics.ev)}
@@ -758,7 +782,7 @@ function SlipBody({
 
         <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
-        <ParlayHoldNote ev={metrics.ev} exception={dkException} />
+        <ParlayHoldNote ev={metrics.ev} exception={dkException} modelBacked={modelBacked} />
 
         <View style={styles.legsList}>
           {legs.map((leg) => (

@@ -56,7 +56,7 @@ import {
   type BookSideCoverage,
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
-import { computeHitRate } from '@/lib/hitRate';
+import { computeHitRate, hitRateBandOf, hitRateColorDiscriminates } from '@/lib/hitRate';
 import { hitModeHeadline, hitModeLabel, hitModeLineLabel, selectionFor, thresholdLabel, type HitMode } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
@@ -169,10 +169,15 @@ function shortDate(date: string): string {
   }).format(d);
 }
 
-function hitRateColor(pct: number): string {
-  if (pct >= 0.6) return colors.bet;
-  if (pct >= 0.4) return AMBER;
-  return colors.avoid;
+/**
+ * The ramp, when the column earns one. `colorful === false` means every row on
+ * screen sits in the same band, so the colour would be a verdict on the bet
+ * rather than a comparison between players — see `hitRateColorDiscriminates`.
+ */
+function hitRateColor(pct: number, colorful: boolean): string {
+  if (!colorful) return colors.textPrimary;
+  const b = hitRateBandOf(pct);
+  return b === 'high' ? colors.bet : b === 'mid' ? AMBER : colors.avoid;
 }
 
 /**
@@ -797,6 +802,17 @@ export function StatsScreen() {
       );
   }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
+  // Does the hit-rate column span more than one colour band? A rare-event
+  // column (Doubles, Triples, Home Runs) does not — every player lands in the
+  // same band — and a whole column of one colour beside a live price reads as
+  // a verdict on the bet rather than a ranking of players. Computed over what
+  // is actually on screen, so the board never colours what it cannot
+  // distinguish.
+  const colorful = useMemo(
+    () => hitRateColorDiscriminates(hitRatePlayers.map((p) => p.pct)),
+    [hitRatePlayers],
+  );
+
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
     const src: Array<{ team: string | null }> =
@@ -1292,6 +1308,7 @@ export function StatsScreen() {
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
                 showOdds={showOdds}
                 statLabel={betLabel}
+                colorful={colorful}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
@@ -1996,6 +2013,7 @@ function HitRateRow({
   started,
   showOdds,
   statLabel,
+  colorful,
   onOddsPress,
   tappable,
   onPress,
@@ -2005,6 +2023,8 @@ function HitRateRow({
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   quote: StatsOddsQuote | null;
+  /** Does the hit-rate column span more than one band? Colour only if so. */
+  colorful: boolean;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
   showOdds: boolean;
@@ -2013,7 +2033,7 @@ function HitRateRow({
   tappable: boolean;
   onPress: () => void;
 }) {
-  const pctColor = hitRateColor(player.pct);
+  const pctColor = hitRateColor(player.pct, colorful);
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>

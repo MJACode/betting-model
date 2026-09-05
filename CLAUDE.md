@@ -630,8 +630,7 @@ to be known BEFORE deciding which file to open.
 | Auth, billing, Discord membership (one membership, two surfaces) | `mobile/docs/{AUTHENTICATION,BILLING,DISCORD_LINKING}.md` |
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |
 | Live monitor dashboard | `docs/monitoring.md` |
-| Probability calibration (claimed vs realised) | `docs/probability_calibration.md` |
-| Calibration sweep + the weekly judgement pass (both worker crons) | `docs/probability_calibration.md` |
+| Calibration — claimed vs realised, the sweep, the weekly pass | `docs/probability_calibration.md` |
 | Health checks + retrain workflow | `docs/health_checks.md` |
 | Opening-signal shadow track | `docs/opening_signals.md` |
 | Signal-timing analysis + the full evaluation rule | `docs/signal_timing.md` |
@@ -647,7 +646,7 @@ to be known BEFORE deciding which file to open.
 | **Evidence behind the §1b and §7 rules** | `docs/rules_evidence.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | Best line on pre-game picks | `docs/best_line.md` |
-| **Which prop markets the feed actually serves (and the probe)** | `docs/market_coverage.md` |
+| Which prop markets the feed actually serves | `docs/market_coverage.md` |
 | **The historical team-stats leak** | `docs/team_stats_leak.md` |
 | Rebuilding the team-stats tables (scope) | `docs/team_stats_rebuild_scope.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |

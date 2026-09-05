@@ -50,3 +50,38 @@ export function hitFlags(
 ): boolean[] {
   return values.map((v) => isHit(v, line, direction));
 }
+
+/** The three colour bands the board ramps a hit rate through. */
+export type HitRateBandName = 'high' | 'mid' | 'low';
+
+/** Band boundaries. Display only — these price nothing and gate no bet. */
+export const HIT_RATE_BANDS = { high: 0.6, mid: 0.4 } as const;
+
+export function hitRateBandOf(pct: number): HitRateBandName {
+  if (pct >= HIT_RATE_BANDS.high) return 'high';
+  if (pct >= HIT_RATE_BANDS.mid) return 'mid';
+  return 'low';
+}
+
+/**
+ * Should the board colour hit rates at all, for THIS column?
+ *
+ * The ramp is absolute — green at 60%, amber at 40%, `colors.avoid` below —
+ * which reads as a comparison between players only while the column actually
+ * spans bands. On a rare-event column it does not: at "1+ Doubles" every
+ * hitter in the league sits at 10-30%, so the whole column renders the app's
+ * AVOID colour beside a +450 price that may well be the better side of that
+ * number, and one tap to "No Doubles" turns the same column into a wall of
+ * green beside heavy chalk. The colour stops distinguishing players and starts
+ * delivering a verdict on the bet — which this board is not entitled to give,
+ * because no model prices Doubles (UX review, 2026-09-05).
+ *
+ * So: colour when it discriminates, and otherwise let the percentage and the
+ * x/N sub-label carry it, as they already do. Both are always printed, so
+ * colour is never the only carrier of meaning here.
+ */
+export function hitRateColorDiscriminates(pcts: number[]): boolean {
+  if (pcts.length < 2) return false;
+  const first = hitRateBandOf(pcts[0]);
+  return pcts.some((p) => hitRateBandOf(p) !== first);
+}

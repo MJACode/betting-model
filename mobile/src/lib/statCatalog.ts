@@ -283,10 +283,17 @@ const FOOTBALL_STAT_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = 
  * The board's other MLB blanks stay blank on purpose — the API does not know
  * `batter_at_bats`, `pitcher_home_runs_allowed` or `pitcher_pitches`, so no
  * key would help.
+ *
+ * KEYED `sport:key`, AND THAT GUARD IS THE POINT. `SeasonTotalsRow` keys are
+ * shared across sports — this file's own comments say a bare key cannot tell
+ * WNBA from NBA — so a bare map would let the next entry someone adds
+ * (`steals`, `threes`, `blocks`) resolve a basketball column onto a baseball
+ * market with nothing failing. Football gets its early return above instead,
+ * because there neither league has a prop model at all.
  */
-const STAT_KEY_TO_MARKET: Partial<Record<keyof SeasonTotalsRow, string>> = {
-  doubles: 'batter_doubles',
-  triples: 'batter_triples',
+const STAT_KEY_TO_MARKET: Record<string, string> = {
+  'MLB:doubles': 'batter_doubles',
+  'MLB:triples': 'batter_triples',
 };
 
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
@@ -318,7 +325,11 @@ export function propMarketForStat(def: StatDef | null): string | null {
   const id = rawPropModelForStat(def);
   // The model's market when a model prices it, else the stat's own — a stat
   // nobody models can still be one every book prices (Doubles, Triples).
-  return (id ? propMarketForModel(id) : null) ?? STAT_KEY_TO_MARKET[def.key] ?? null;
+  return (
+    (id ? propMarketForModel(id) : null) ??
+    STAT_KEY_TO_MARKET[`${def.sport}:${def.key}`] ??
+    null
+  );
 }
 
 /**
