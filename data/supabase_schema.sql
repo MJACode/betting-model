@@ -2966,3 +2966,41 @@ REVOKE ALL ON live_calibration FROM anon, authenticated;
 -- Calibrated probability, stamped at score time. DISPLAY ONLY -- the decision
 -- path still runs on model_probability (models/probability_calibration.py).
 ALTER TABLE picks ADD COLUMN IF NOT EXISTS model_probability_cal NUMERIC;
+
+
+-- ── LATEST-LINE STATE TABLES (2026-09-05, migration latest_line_state_tables) ─
+-- "The newest row per key" over the odds log is no longer computed by a view.
+-- Three current-state tables hold it, maintained by triggers on the log tables
+-- at WRITE time, and v_latest_odds_all_books / v_latest_prop_odds_all_books /
+-- v_latest_dk_odds / v_live_game_state_latest are plain joins over them. Every
+-- previous shape of those views (DISTINCT ON, then the recursive skip scan
+-- documented above) walked the log and timed out on a big enough day:
+-- 10.5 s for one market on a 157-game Saturday, 17.9 s for v_latest_dk_odds on
+-- any day. After: 136 ms / 2.8 ms / 10.9 ms / 0.8 ms. The full measurements,
+-- the semantics and the backfill procedure are in the migration file
+-- (data/migrations/latest_line_state_tables.sql); the shape is pinned by
+-- tests/test_latest_odds_views.py and the behaviour by
+-- tests/test_latest_line_state.py against a real Postgres.
+--
+--   latest_odds            PK (game_id, market, bookmaker)                 newest pre-game odds row
+--   latest_prop_odds       PK (game_id, market, player_name, bookmaker, line)
+--                            standard market: the one newest row;
+--                            *_alternate: every line at the newest snapshot
+--   latest_live_game_state PK (game_id)                                    newest live_game_state row
+--
+-- Triggers: trg_latest_odds_insert / trg_latest_prop_odds_insert /
+-- trg_latest_live_game_state_insert (AFTER INSERT ... FOR EACH STATEMENT with a
+-- transition table: one DISTINCT ON over the batch, however it was written);
+-- trg_latest_odds_update / trg_latest_prop_odds_update (AFTER UPDATE FOR EACH
+-- ROW, WHEN a key/type/value column changed: recompute that key from the log,
+-- so relabelling a row in_play retires it). DELETEs are not trapped: the pruner
+-- keeps every key's newest pre-game row by construction.
+-- Rebuild / reconcile: latest_lines_rebuild_odds(from_snapshot, to_snapshot),
+-- latest_lines_rebuild_props(from_game_date, to_game_date),
+-- latest_lines_rebuild_live_state() -- never regress a state row to an older
+-- source, so they can run beside live ingestion and be repeated.
+-- Access: RLS on, "anon read <table>" SELECT policy, SELECT granted to anon +
+-- authenticated (they read through the security_invoker views), every write
+-- revoked; the trigger functions are SECURITY DEFINER with search_path pinned.
+-- Declared in data/anon_readable.VIEW_BASE_TABLES, not ANON_READABLE: nothing
+-- in mobile/src names them directly.

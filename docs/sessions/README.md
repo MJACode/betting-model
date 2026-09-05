@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 235 — latest-line state tables: the Stats/Picks line timeouts, fixed structurally |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 234 — the At-Most side is missing from the FEED, and the parser is exonerated |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 237 — Doubles and Triples were never blank because the market didn't exist; nobody had asked |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 236 — the Movement tab and the per-card Context button come off the Picks surface |

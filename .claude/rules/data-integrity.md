@@ -71,6 +71,26 @@ Every one of these is a way a number can be wrong while looking right.
   season — including `home_win_pct`, `away_win_pct` and `d_run_differential`, so
   the model has no notion of team record at all. Check `nunique` per feature per
   season, not just null rate.
+- **"THE NEWEST ROW PER KEY" OVER AN APPEND-ONLY LOG IS A STATE TABLE THE
+  WRITER MAINTAINS, NEVER A VIEW THE READER COMPUTES.** (2026-09-05, after
+  four sessions on one toast.) `odds` and `player_prop_odds` gain ~370k and
+  ~400k rows a day, and every "latest line" view was a walk over the log:
+  DISTINCT ON keyed on `game_date` (91 s → 3.4 s), then a recursive skip scan
+  (3.7 s → 0.3 s on 41 games) — and the skip scan took **10.5 s on a 157-game
+  Saturday** while `v_latest_dk_odds` had never been touched at all (**17.9 s**,
+  a full scan of the table on every open of the Picks screen). Each fix was
+  real, and each was measured on the day it was written. A read whose cost
+  scales with the log crosses any timeout on some day; the only shape that
+  holds is one whose cost scales with the ANSWER. `latest_odds`,
+  `latest_prop_odds` and `latest_live_game_state` are maintained by insert
+  triggers (`data/migrations/latest_line_state_tables.sql`); the views are
+  plain joins over them: **136 ms / 2.8 ms / 0.8 ms** for the same three reads.
+  Before writing a `DISTINCT ON`, a `LATERAL ... LIMIT 1` or a skip scan for
+  the app, ask what the read costs on the biggest day the log will ever have.
+  The trigger's cost is measured in `tests/test_latest_line_state.py` and in
+  `docs/rules_evidence.md`; a DELETE of a key's newest row is NOT trapped (the
+  pruner never does that), so if it ever must be, `latest_lines_rebuild_*`
+  reconciles a range.
 - **Leakage hides in "latest snapshot".** Every bulk feature loader that takes
   the newest odds row must bound on `snapshot_at <= commence_time` AND exclude
   `in_play`. Without it, 67% of completed 2026 WNBA games were featurized with a

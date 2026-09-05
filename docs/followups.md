@@ -868,6 +868,13 @@ Both are far past what a screen (or the statement timeout) will take.
 The fix is a small coverage table the prop ingestors maintain as they write —
 `(game_date, sport, bookmaker, market, has_over, has_under, games)`, one row
 per combination, refreshed each pass — which the app reads in milliseconds.
+
+**2026-09-05 update:** most of that table now exists. `latest_prop_odds`
+(migration `latest_line_state_tables`) holds one row per current line, so
+"which books post which markets today" is `SELECT bookmaker, market, count(*)
+FROM latest_prop_odds JOIN games USING (game_id) WHERE game_date = $1 GROUP BY
+1, 2` — a few thousand rows, milliseconds. What is left is an RPC (or a tiny
+view) for the app to call and the picker copy that reads it.
 It would also give the Discord and monitoring surfaces a cheap answer to "which
 books did we actually get tonight", which today is a table scan nobody runs.
 

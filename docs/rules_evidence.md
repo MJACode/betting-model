@@ -267,6 +267,50 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 
 ### Data integrity
 
+- **"The newest row per key" over an append-only log is a state table the
+  writer maintains, never a view the reader computes.** Four sessions on the
+  same toast — *"Couldn't load today's lines — canceling statement due to
+  statement timeout (57014)"* — and each fix changed how the log was WALKED:
+
+  | session | shape | measured on | result |
+  |---|---|---|---|
+  | 221 (09-04) | `game_date` leads the DISTINCT ON key | that day | 91 s → 3.4 s |
+  | 222 (09-04) | recursive skip scan, one probe per key | a 41-game day | 3.7 s → 0.3 s |
+  | 235 (09-05) | the same skip scan | a 157-game Saturday | **10.5 s** |
+
+  and `v_latest_dk_odds`, read by the Picks screen and three look-ahead cards,
+  had never been rewritten at all: **17.9 s** as `authenticated` — a sequential
+  scan of 1,089,880 DraftKings rows and a 105 MB disk sort to return 280 —
+  which is why it was **189 of the 282 timeouts** in the 24 hours before the
+  fix. No background scan was needed this time (session 222's poller seed was
+  gone); the day was simply bigger than the day the last fix was measured on,
+  which is the whole point: a read whose cost scales with the log (34,124
+  skip-scan steps, 34,078 heap fetches because the newest pages are never in
+  the visibility map) crosses any timeout on some day.
+
+  The fix (`data/migrations/latest_line_state_tables.sql`): three current-state
+  tables keyed per line, maintained by statement-level insert triggers with
+  transition tables and row-level update triggers gated by a WHEN clause, and
+  the four views as plain joins. Measured as `authenticated`, same slate:
+
+  | read | before | after |
+  |---|---|---|
+  | `v_latest_prop_odds_all_books`, today, `batter_hits` (Stats) | 10,512 ms | 136 ms |
+  | `v_latest_dk_odds`, today (Picks + look-ahead cards) | 17,945 ms | 2.8 ms |
+  | `v_latest_odds_all_books`, today (Teams) | 333 ms on 41 games | 10.9 ms |
+  | `v_live_game_state_latest`, today | 2,001 ms | 0.8 ms |
+  | `v_latest_prop_odds_all_books`, today, every market (Picks) | 1,570 ms on 41 games | 205 ms |
+
+  Semantics were checked, not assumed: the new tables were diffed against the
+  old views for 2026-09-05 inside one statement each — prop (10,058 rows),
+  game-line (3,441) and live-state (472) outputs identical both ways; the DK
+  view differed on 25 rows, every one an in-play row of a started game, which
+  is the one deliberate change (the old view had no `snapshot_type` filter, so
+  after first pitch it published a live price as "the latest DK line"). The
+  trigger behaviour is exercised on a real Postgres in
+  `tests/test_latest_line_state.py` (16 tests, every guard watched failing
+  under a mutation), and the writer's cost was measured with an explained
+  insert inside a rolled-back transaction — see the session entry.
 - **Leakage hides in "latest snapshot".** Every bulk feature loader that takes
   the newest odds row must bound on `snapshot_at <= commence_time` AND exclude
   `in_play`. Without it, 67% of completed 2026 WNBA games were featurized with a
