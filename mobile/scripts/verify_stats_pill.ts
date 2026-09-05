@@ -249,8 +249,8 @@ for (const [input, want] of [
   check(`lastName(${JSON.stringify(input)}) is the surname, not the suffix`, lastName(input) === want, lastName(input));
 }
 check(
-  'the MATCHUP column and its header share one constant, and its growth is bounded',
-  /colHeaderMatchup: \{ minWidth: MATCHUP_W/.test(stats) &&
+  'the GRADE column and its header share one constant, and its growth is bounded',
+  /colHeaderMatchup: \{\s*\n\s*minWidth: MATCHUP_W,/.test(stats) &&
     /matchupWrap: \{\s*\n\s*minWidth: MATCHUP_W,\s*\n\s*maxWidth:/.test(stats),
 );
 check(
@@ -259,16 +259,82 @@ check(
 );
 check(
   'the grade is coloured off its own ramp, not the BET/AVOID pair',
-  // colors.bet/avoid are this app's BET/AVOID semantics, and the hit-rate
-  // column is already a traffic light. They also fail AA outright at 2.22:1
-  // and 2.20:1, which is what the old tier colours were drawn in.
+  // colors.bet/avoid are this app's BET/AVOID semantics, and they fail AA
+  // outright at 2.22:1 and 2.20:1 — which is what the old tier colours were.
   /export function gradeColor/.test(theme) &&
-    /gradeA: '#/.test(theme) &&
-    !/gradeA: colors\.bet/.test(theme),
+    /gradeGood: '#/.test(theme) &&
+    !/gradeGood: colors\.bet/.test(theme),
+);
+check(
+  "BOTH of the board's traffic lights are on that ramp, not just the new one",
+  // Shipping an accessible ramp two columns from an inaccessible one left the
+  // board running two contrast standards with the accessible one on the
+  // SECONDARY column (UX review, 2026-09-05).
+  /if \(pct >= 0\.6\) return colors\.gradeGood;/.test(stats) &&
+    !/AMBER/.test(stats) &&
+    !/AMBER/.test(teams),
+);
+check(
+  'the ramp encodes RANK, not just category: lightness falls good -> bad',
+  // The first attempt tuned five steps to ~5:1 each, which made them
+  // iso-luminant (B was fractionally LIGHTER than A) — a reader could see two
+  // rows differed but not which was better, and deuteranopia collapsed the
+  // green and the olive together. Computed here, not asserted from a comment.
+  (() => {
+    const hex = (k: string) => (new RegExp(`${k}: '(#[0-9A-Fa-f]{6})'`).exec(theme) ?? [])[1];
+    const lin = (c: number) => { const x = c / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+    const lum = (h: string) => { const n = parseInt(h.slice(1), 16);
+      return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255); };
+    const ramp = ['gradeGood', 'gradeMid', 'gradeBad'].map(hex);
+    if (ramp.some((h) => !h)) return false;
+    const ls = (ramp as string[]).map(lum);
+    const monotone = ls[0] > ls[1] && ls[1] > ls[2];
+    // and every step still readable as TEXT on the card
+    const aa = ls.every((l) => 1.05 / (l + 0.05) >= 4.5);
+    return monotone && aa;
+  })(),
+);
+check(
+  'the header word fits its column, and the column carries the legend',
+  // "MATCHUP" needs ~56-58pt at 11pt semibold and truncated inside 52.
+  // And a bare "B+" says neither which end is good nor why some rows dash.
+  /\n\s+GRADE\n/.test(stats) && /title="Matchup grade"/.test(stats),
+);
+check(
+  "the cell's label does not re-announce the opponent the subline just took",
+  // Built on `text` it said "at SEA" (subline) then "vs LAA" (cell) — the same
+  // duplication the visual layer fixed, one layer down.
+  /accessibilityLabel=\{`Matchup grade \$\{gradeSpoken\(matchup\.grade\)\}\$\{matchup\.fact/.test(stats) &&
+    /fact: string \| null;/.test(matchup),
+);
+check(
+  'the detail screen spells the grade out too — a bare "+" is dropped by VoiceOver',
+  /accessibilityLabel=\{`Tonight's matchup, \$\{/.test(playerDetail) &&
+    /gradeSpoken\(matchupGrade\)/.test(playerDetail),
+);
+check(
+  'both boards answer the pull gesture',
+  // They were the only two lists in the app whose pull did nothing, and every
+  // row prints a clock now.
+  (stats.match(/refreshControl=\{<RefreshControl/g) ?? []).length === 2 &&
+    /refreshControl=\{<RefreshControl/.test(teams),
+);
+check(
+  'the teams row reserves height only when it HAS a game',
+  // A TeamRow is not tappable, so the height buys no touch target — reserved
+  // unconditionally it was dead space on every row of every off-day board.
+  /rowWithGame: \{ minHeight: 54 \}/.test(teams) &&
+    /subline \? styles\.rowWithGame : null/.test(teams),
+);
+check(
+  'the clock survives a background/resume, not just a tick',
+  // iOS suspends JS timers, so a resume showed the pre-suspend clock for up to
+  // a full interval — the exact case the hook exists for.
+  /AppState\.addEventListener/.test(read('src/hooks/useNow.ts')),
 );
 check(
   'and colour is never the only carrier — the LETTER is the fact, spelled out for VoiceOver',
-  /accessibilityLabel=\{`Matchup \$\{gradeSpoken\(matchup\.grade\)\}/.test(stats) &&
+  /accessibilityLabel=\{`Matchup grade \$\{gradeSpoken\(matchup\.grade\)\}/.test(stats) &&
     gradeSpoken('B+') === 'B plus' &&
     gradeSpoken('C-') === 'C minus' &&
     gradeSpoken('A') === 'A',
@@ -315,7 +381,9 @@ check(
 );
 check(
   'the row reserves a 44pt tap target, so a late subline cannot re-flow the list',
-  /minHeight: 44,/.test(stats) && /minHeight: 54,/.test(teams),
+  // Players only: that row IS the tap target and a full-width row cannot use
+  // hitSlop. The Teams row is not tappable and reserves conditionally instead.
+  /minHeight: 44,/.test(stats),
 );
 check(
   'the subline clears the AA contrast floor (textTertiary at 11pt does not)',

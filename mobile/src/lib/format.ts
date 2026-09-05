@@ -202,13 +202,7 @@ export function gameDayLabelET(iso: string | null | undefined): string | null {
   if (!iso) return null;
   try {
     const d = parseStamp(iso);
-    const dateET = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/New_York',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(d);
-    if (dateET === todayET()) return null;
+    if (etDate(d) === todayET()) return null;
     return new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York',
       weekday: 'short',

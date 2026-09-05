@@ -58,8 +58,19 @@ export interface MatchupInfo {
   grade: MatchupGrade | null;
   /** The 0..1 favourability percentile the grade came from. */
   score: number | null;
-  /** e.g. "vs LAA · S. Gray 5.90 ERA (R)" — the whole fact, in words. */
+  /** e.g. "vs LAA · S. Gray 5.90 ERA (R)" — the whole fact, for the detail screen. */
   text: string;
+  /**
+   * The fact WITHOUT the opponent, spoken: "S. Gray 5.90 ERA, right-handed".
+   *
+   * The MATCHUP cell's screen-reader label uses this, not `text`: the row's
+   * subline already announces "at SEA", so a label built on `text` said the
+   * opponent twice from two sources and in two idioms — "at SEA" then "vs LAA"
+   * (UX review, 2026-09-05). Same duplication the visual layer fixed, one
+   * layer down. The handedness is a word here rather than "(R)", which
+   * VoiceOver reads as punctuation.
+   */
+  fact: string | null;
   row: TonightMatchupRow;
 }
 
@@ -144,6 +155,13 @@ export function gradeSpoken(grade: MatchupGrade): string {
   return grade;
 }
 
+/** "R" → "right-handed". Spoken labels get words, not initials. */
+function handWord(hand: string | null | undefined): string {
+  if (hand === 'R') return ', right-handed';
+  if (hand === 'L') return ', left-handed';
+  return '';
+}
+
 const num = (v: number | string | null | undefined): number | null => {
   if (v == null) return null;
   const n = typeof v === 'number' ? v : parseFloat(v);
@@ -200,6 +218,7 @@ function gradeBatter(m: TonightMatchupRow): MatchupInfo {
       grade: null,
       score: null,
       text: `vs ${m.opponent} · ${m.opp_starter_name ?? 'starter TBD'}`,
+      fact: m.opp_starter_name ? shortName(m.opp_starter_name) : null,
       row: m,
     };
   }
@@ -208,6 +227,7 @@ function gradeBatter(m: TonightMatchupRow): MatchupInfo {
     grade: gradeFor(score),
     score,
     text: `vs ${m.opponent} · ${shortName(m.opp_starter_name)} ${era.toFixed(2)} ERA${hand}`,
+    fact: `${shortName(m.opp_starter_name)} ${era.toFixed(2)} ERA${handWord(m.opp_starter_hand)}`,
     row: m,
   };
 }
@@ -217,7 +237,7 @@ function gradePitcher(m: TonightMatchupRow): MatchupInfo {
   const woba = num(m.opp_team_woba);
   const kPct = num(m.opp_team_k_pct);
   if (woba == null && kPct == null) {
-    return { grade: null, score: null, text: `vs ${m.opponent}`, row: m };
+    return { grade: null, score: null, text: `vs ${m.opponent}`, fact: null, row: m };
   }
   // Both signs point the same way — toward "good for the pitcher".
   const zs: number[] = [];
@@ -233,6 +253,7 @@ function gradePitcher(m: TonightMatchupRow): MatchupInfo {
     grade: gradeFor(score),
     score,
     text: `vs ${m.opponent} · ${bits.join(', ')}`,
+    fact: bits.join(', '),
     row: m,
   };
 }
@@ -240,12 +261,13 @@ function gradePitcher(m: TonightMatchupRow): MatchupInfo {
 /** WNBA scorer vs the opposing defense: high def rating = favorable. */
 function gradeWnba(m: TonightMatchupRow): MatchupInfo {
   const def = num(m.opp_def_rating);
-  if (def == null) return { grade: null, score: null, text: `vs ${m.opponent}`, row: m };
+  if (def == null) return { grade: null, score: null, text: `vs ${m.opponent}`, fact: null, row: m };
   const score = normalCdf(z(def, ANCHORS.wnbaDefRtg));
   return {
     grade: gradeFor(score),
     score,
     text: `vs ${m.opponent} · DefRtg ${def.toFixed(1)}`,
+    fact: `${def.toFixed(1)} defensive rating`,
     row: m,
   };
 }

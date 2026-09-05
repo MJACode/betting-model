@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,6 +25,7 @@ import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
 import { GroupTabs, SegmentTabs } from '@/components/GroupTabs';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
@@ -143,13 +145,22 @@ const SEASON = new Date().getUTCFullYear();
  *     perfectly and then clips the PRICE at about fontScale 1.3, which is the
  *     one number on the row a user came for.
  */
-// The MATCHUP column holds two characters now, not a stacked opponent + fact
+// The GRADE column holds two characters now, not a stacked opponent + fact
 // (2026-09-05), so it gives ~24pt back to the player name — which is exactly
 // where the new subline needs it.
-const MATCHUP_W = 52;
+//
+// The header word is GRADE, not MATCHUP: "MATCHUP" at 11pt semibold needs
+// ~56-58pt and truncated to "MATCHU…" inside a 52pt box (UX review). It is
+// also the more honest label — the cell IS a grade, and the subline above
+// already says who the opponent is, so "MATCHUP" promises a fixture the column
+// no longer prints.
+//
+// 64, not 52, because the header carries the LEGEND: "B+" explains nothing on
+// its own — not which end is good, not what it is graded against, not why some
+// rows are a dash — where the two-line cell it replaces explained itself by
+// printing "S. Gray 5.90 ERA". Still 12pt narrower than the old SPOT column.
+const MATCHUP_W = 64;
 const ODDS_W = 62;
-
-const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   { value: 3, label: 'L3' },
@@ -172,10 +183,20 @@ function shortDate(date: string): string {
   }).format(d);
 }
 
+/**
+ * The board's PRIMARY number, on the same ramp as the matchup grade.
+ *
+ * It was `colors.bet` / `#FF9500` / `colors.avoid` — 2.22:1, 2.20:1 and
+ * 3.55:1 on the card, all three below the AA floor for 13pt bold text. That
+ * predates this change, but adding an accessible ramp two columns to the right
+ * left the board running two contrast standards side by side with the
+ * accessible one on the SECONDARY column (UX review, 2026-09-05), so they are
+ * now one ramp.
+ */
 function hitRateColor(pct: number): string {
-  if (pct >= 0.6) return colors.bet;
-  if (pct >= 0.4) return AMBER;
-  return colors.avoid;
+  if (pct >= 0.6) return colors.gradeGood;
+  if (pct >= 0.4) return colors.gradeMid;
+  return colors.gradeBad;
 }
 
 /**
@@ -1195,6 +1216,11 @@ export function StatsScreen() {
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           initialNumToRender={20}
+          // Every row prints a clock now, so the board can visibly go stale
+          // between fetches — and it was the one list screen in the app whose
+          // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
+          // ages the LABELS; this is how a user re-reads the DATA.
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
         />
       ) : (
         <FlatList
@@ -1237,6 +1263,11 @@ export function StatsScreen() {
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           initialNumToRender={20}
+          // Every row prints a clock now, so the board can visibly go stale
+          // between fetches — and it was the one list screen in the app whose
+          // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
+          // ages the LABELS; this is how a user re-reads the DATA.
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
         />
       )}
 
@@ -1674,7 +1705,7 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
     <View
       style={styles.matchupWrap}
       accessible
-      accessibilityLabel={`Matchup ${gradeSpoken(matchup.grade)}, ${matchup.text}`}
+      accessibilityLabel={`Matchup grade ${gradeSpoken(matchup.grade)}${matchup.fact ? `, ${matchup.fact}` : ''}`}
     >
       <Text style={[styles.matchupGrade, { color: gradeColor(matchup.grade) }]} numberOfLines={1}>
         {matchup.grade}
@@ -1712,9 +1743,25 @@ function ColumnHeader({
         </Text>
       ) : null}
       {showMatchup ? (
-        <Text style={[styles.colHeaderRight, styles.colHeaderMatchup]} numberOfLines={1}>
-          MATCHUP
-        </Text>
+        <View style={styles.colHeaderMatchup}>
+          <Text style={styles.colHeaderRight} numberOfLines={1}>
+            GRADE
+          </Text>
+          <InfoTooltip
+            title="Matchup grade"
+            body={
+              'How hard tonight\u2019s spot is for this player, graded against the ' +
+              'rest of the league this season. A+ is the easiest matchup on the ' +
+              'board and F the hardest.\n\n' +
+              'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
+              'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
+              'opposing defence\u2019s rating.\n\n' +
+              'A dash means the starter isn\u2019t confirmed yet — an unknown matchup ' +
+              'is never graded as average.'
+            }
+            accessibilityLabel="What the matchup grade means"
+          />
+        </View>
       ) : null}
     </View>
   );
@@ -2230,7 +2277,14 @@ const styles = StyleSheet.create({
     lineHeight: font.size.caption * 1.35,
   },
   noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
-  colHeaderMatchup: { minWidth: MATCHUP_W, textAlign: 'right' },
+  // A row, not a Text: the legend lives in the header (see MATCHUP_W).
+  colHeaderMatchup: {
+    minWidth: MATCHUP_W,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+  },
   // Rows are deliberately compact — more players visible per screen.
   row: {
     flexDirection: 'row',

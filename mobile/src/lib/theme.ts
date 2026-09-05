@@ -55,26 +55,35 @@ export const colors = {
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
 
-  // ── Matchup difficulty ramp (the Stats board's MATCHUP column) ───────────
-  // Five steps across the A→F grade scale, NOT the bet/avoid pair. Two
-  // reasons they are their own colours:
+  // ── The board's good / average / bad ramp ────────────────────────────────
+  // Used by BOTH traffic lights on the Stats board: the matchup grade and the
+  // hit-rate percentage. One standard, because the alternative shipped for
+  // half a day — an accessible ramp in the MATCHUP column two columns away
+  // from an inaccessible one on the board's primary number.
   //
-  //   1. `bet` / `avoid` are BET/AVOID semantics. A row already carries a
-  //      hit-rate traffic light and a price; a third thing in the same green
-  //      reads as a side to take rather than a spot to weigh.
-  //   2. `bet` (#34C759) is 2.22:1 on bgCard and AMBER (#FF9500) is 2.20:1 —
-  //      both FAIL WCAG AA for text, and the old three-tier column was drawn
-  //      in exactly those. Every value below is ≥ 4.9:1 on white (measured,
-  //      2026-09-05), because here the colour sits on a two-character word
-  //      that has to be read, not on a filled pill.
+  // Three properties, all measured (2026-09-05):
   //
-  // C is grey on purpose: average is not a signal, and 13 grades with a
-  // coloured middle turn the column into noise.
-  gradeA: '#17803D', // 5.01:1
-  gradeB: '#4D7C0F', // 4.99:1
-  gradeC: '#6E6E73', // 5.07:1
-  gradeD: '#C2410C', // 5.18:1
-  gradeF: '#B3261E', // 6.54:1
+  //   1. NOT `bet` / `avoid`. Those are BET/AVOID semantics, and a row already
+  //      carries a price; a third thing in the same green reads as a side to
+  //      take rather than a spot to weigh.
+  //   2. Every step clears WCAG AA for text. `bet` is 2.22:1 on bgCard,
+  //      `#FF9500` is 2.20:1 and `avoid` is 3.55:1 — the three the board used
+  //      for both columns until now, all below the 4.5:1 floor, on numbers
+  //      that have to be read.
+  //   3. LIGHTNESS FALLS MONOTONICALLY good -> bad, which is the property the
+  //      first attempt at this ramp missed: tuning five steps to ~5:1 each
+  //      made them iso-luminant (relative luminance 0.1596 / 0.1603 / 0.1570 /
+  //      0.1528 — B was fractionally LIGHTER than A), so a reader could see
+  //      that two rows differed but not which was better, and under
+  //      deuteranopia the green and the olive collapsed together. Colour that
+  //      encodes a rank has to vary in lightness, not only in hue.
+  //
+  // Three steps, not five: the LETTER already carries thirteen steps of order,
+  // so the colour only has to say good / average / bad — and three levels that
+  // differ in lightness say it better than five that do not.
+  gradeGood: '#198438', // L 0.1699 ·  4.77:1
+  gradeMid: '#5F5F64', //  L 0.1154 ·  6.35:1
+  gradeBad: '#7A1712', //  L 0.0479 · 10.72:1
 
   // Confidence
   high: '#34C759',
@@ -167,9 +176,7 @@ export function heatColor(profit: number, max: number): string {
  */
 export function gradeColor(grade: MatchupGrade): string {
   const letter = grade[0];
-  if (letter === 'A') return colors.gradeA;
-  if (letter === 'B') return colors.gradeB;
-  if (letter === 'C') return colors.gradeC;
-  if (letter === 'D') return colors.gradeD;
-  return colors.gradeF;
+  if (letter === 'A' || letter === 'B') return colors.gradeGood;
+  if (letter === 'C') return colors.gradeMid;
+  return colors.gradeBad;
 }

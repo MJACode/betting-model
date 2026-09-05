@@ -41,7 +41,7 @@ import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
-import type { MatchupGrade } from '@/lib/matchup';
+import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
@@ -184,15 +184,26 @@ export function PlayerStatsScreen() {
                 player opened from anywhere else shows nothing here rather than
                 an empty row. */}
             {matchupText ? (
-              <Text style={styles.matchupLine} numberOfLines={2}>
+              // Labelled, because VoiceOver drops a bare "+" and would
+              // announce a B+ as a B — gradeSpoken exists for exactly this and
+              // the screen that now OWNS this fact was the one mis-speaking it
+              // (UX review, 2026-09-05).
+              <View
+                style={styles.matchupRow}
+                accessible
+                accessibilityLabel={`Tonight's matchup, ${
+                  matchupGrade ? `${gradeSpoken(matchupGrade)}, ` : ''
+                }${matchupText.replace(/ · /g, ', ')}`}
+              >
                 {matchupGrade ? (
                   <Text style={[styles.matchupGrade, { color: gradeColor(matchupGrade) }]}>
                     {matchupGrade}
-                    {'  '}
                   </Text>
                 ) : null}
-                {matchupText}
-              </Text>
+                <Text style={styles.matchupLine} numberOfLines={2}>
+                  {matchupText}
+                </Text>
+              </View>
             ) : null}
           </View>
           {/* Recent news, top right — the sentence behind the number. Hidden
@@ -516,12 +527,26 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  // Its own row rather than a third meta line: at the same size and colour as
+  // `meta` directly above it, the fact the GRADE column now depends on was
+  // visually indistinguishable from the player's identity subtitle, and a
+  // reader scanned straight past it (UX review, 2026-09-05).
+  matchupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
   matchupLine: {
+    flex: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-    marginTop: 4,
   },
   matchupGrade: {
+    fontSize: font.size.body,
     fontWeight: font.weight.bold,
   },
   windowRow: {

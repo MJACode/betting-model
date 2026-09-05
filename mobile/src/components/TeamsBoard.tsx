@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -74,7 +75,6 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
 
-const AMBER = '#FF9500'; // mid tertile (no theme token)
 
 /**
  * Seasons to try, newest first. Every league except MLB/WNBA is out of season
@@ -88,9 +88,9 @@ function seasonCandidates(): number[] {
 }
 
 function tierColor(tier: Tier): string | undefined {
-  if (tier === 'good') return colors.bet;
-  if (tier === 'bad') return colors.avoid;
-  if (tier === 'mid') return AMBER;
+  if (tier === 'good') return colors.gradeGood;
+  if (tier === 'bad') return colors.gradeBad;
+  if (tier === 'mid') return colors.gradeMid;
   return undefined;
 }
 
@@ -383,7 +383,7 @@ export function TeamsBoard({
         <View style={styles.colHeader}>
           <Text style={styles.colHeaderRank}>RK</Text>
           <Text style={styles.colHeaderName}>
-            TEAM{season ? `  ·  ${season}` : ''}
+            TEAM{season ? ` · ${season}` : ''}
           </Text>
           <Text style={styles.colHeaderRight} numberOfLines={1}>
             {stat.label.toUpperCase()}
@@ -439,6 +439,9 @@ export function TeamsBoard({
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
         initialNumToRender={20}
+        // The board prints a clock on every row now, and this was one of the
+        // two lists in the app whose pull gesture did nothing (UX review).
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
       />
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
@@ -483,7 +486,7 @@ function TeamRow({
   const sample = def.sample ? sampleFor(row, def) : null;
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, subline ? styles.rowWithGame : null]}>
       <Text style={styles.rank}>{rank}</Text>
       <View style={styles.rowMain}>
         <Text style={styles.rowName} numberOfLines={1}>
@@ -658,14 +661,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
     paddingHorizontal: spacing.lg,
     paddingVertical: 5,
-    // Three lines once the slate lands (name, game, record) and two before it
-    // does — reserving the taller height stops the list re-flowing when the
-    // query returns (UX review, 2026-09-05).
-    minHeight: 54,
     gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
+  // Reserved ONLY on a row that has a game. A TeamRow is not tappable, so the
+  // height buys no touch target — it exists so the list does not re-flow when
+  // the slate query settles. Unconditional, it was ~14pt of dead space on
+  // every row of every off-day board (UX review, 2026-09-05).
+  rowWithGame: { minHeight: 54 },
   rowMain: { flex: 1, minWidth: 0 },
   rank: {
     width: 20,
