@@ -40,7 +40,8 @@ import { buildPickIndex, slipPickFor } from '@/lib/statsOdds';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
@@ -50,6 +51,10 @@ export function PlayerStatsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
   const fromParlay = route.params.fromParlay === true;
+  // Handed over by the Stats board; absent when the player was opened from
+  // anywhere else. Typed loosely on the route (a string) and narrowed here.
+  const matchupText = route.params.matchupText ?? null;
+  const matchupGrade = (route.params.matchupGrade as MatchupGrade | undefined) ?? null;
   // Older navigation state (a screen restored from a build before player detail
   // went multi-sport) carries no sport — MLB was the only one that could open it.
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
@@ -171,6 +176,35 @@ export function PlayerStatsScreen() {
           <View style={styles.headerText}>
             <Text style={styles.playerName}>{playerName}</Text>
             <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
+            {/* Tonight's matchup, in full. The Stats board's MATCHUP column is
+                a bare grade as of 2026-09-05, so this is where the FACT behind
+                it lives for a sighted user — Matt's own alternative home for it
+                ("have it be in the player data when you click on a record",
+                2026-09-04). Only present when the board handed it over, so a
+                player opened from anywhere else shows nothing here rather than
+                an empty row. */}
+            {matchupText ? (
+              // Labelled, because VoiceOver drops a bare "+" and would
+              // announce a B+ as a B — gradeSpoken exists for exactly this and
+              // the screen that now OWNS this fact was the one mis-speaking it
+              // (UX review, 2026-09-05).
+              <View
+                style={styles.matchupRow}
+                accessible
+                accessibilityLabel={`Tonight's matchup, ${
+                  matchupGrade ? `${gradeSpoken(matchupGrade)}, ` : ''
+                }${matchupText.replace(/ · /g, ', ')}`}
+              >
+                {matchupGrade ? (
+                  <Text style={[styles.matchupGrade, { color: gradeColor(matchupGrade) }]}>
+                    {matchupGrade}
+                  </Text>
+                ) : null}
+                <Text style={styles.matchupLine} numberOfLines={2}>
+                  {matchupText}
+                </Text>
+              </View>
+            ) : null}
           </View>
           {/* Recent news, top right — the sentence behind the number. Hidden
               when the feed has nothing on this player, so the header never
@@ -280,10 +314,16 @@ export function PlayerStatsScreen() {
                 </View>
                 <View style={styles.stepper}>
                   <Text style={styles.stepperLabel}>At least</Text>
+                  {/* Icon-only, so the label is the only thing VoiceOver has
+                      — an unlabelled glyph button is announced as "button" and
+                      nothing else. Pre-existing; cleared here because this
+                      change brought the file into the reviewed set. */}
                   <Pressable
                     onPress={() => stepLine(-1)}
                     hitSlop={8}
                     style={styles.stepBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Lower the line"
                   >
                     <Ionicons name="remove" size={18} color={colors.tint} />
                   </Pressable>
@@ -292,6 +332,8 @@ export function PlayerStatsScreen() {
                     onPress={() => stepLine(1)}
                     hitSlop={8}
                     style={styles.stepBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Raise the line"
                   >
                     <Ionicons name="add" size={18} color={colors.tint} />
                   </Pressable>
@@ -485,6 +527,28 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  // Its own row rather than a third meta line: at the same size and colour as
+  // `meta` directly above it, the fact the GRADE column now depends on was
+  // visually indistinguishable from the player's identity subtitle, and a
+  // reader scanned straight past it (UX review, 2026-09-05).
+  matchupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  matchupLine: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  matchupGrade: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.bold,
+  },
   windowRow: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
@@ -562,7 +626,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   statCellLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
   },
@@ -661,7 +725,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   gameStatLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
   },

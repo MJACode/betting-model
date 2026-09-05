@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +26,7 @@ import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
 import { GroupTabs, SegmentTabs } from '@/components/GroupTabs';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
@@ -33,6 +35,7 @@ import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterField } from '@/components/filters/FilterField';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
 import type { ActivePill } from '@/components/filters/FilterBar';
+import { useNow } from '@/hooks/useNow';
 import { useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { usePreferredBooks, BOOKS } from '@/hooks/usePreferredBooks';
 import {
@@ -59,17 +62,21 @@ import {
 import { computeHitRate } from '@/lib/hitRate';
 import { hitModeHeadline, hitModeLabel, hitModeLineLabel, selectionFor, thresholdLabel, type HitMode } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
-import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
+import { buildMatchupMap, gradeMatchup, gradeSpoken, type MatchupInfo } from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
+  buildSlateGameIndex,
   buildTonightSlate,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
   isStatParticipant,
+  slateGameFor,
+  slateSubline,
+  sublineSpoken,
   sortLabel,
   sortOptionsFor,
   type SortKey,
@@ -87,7 +94,7 @@ import {
   type StatDef,
 } from '@/lib/statCatalog';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type {
   EnrichedPick,
@@ -143,10 +150,22 @@ const SEASON = new Date().getUTCFullYear();
  *     perfectly and then clips the PRICE at about fontScale 1.3, which is the
  *     one number on the row a user came for.
  */
-const SPOT_W = 76;
+// The GRADE column holds two characters now, not a stacked opponent + fact
+// (2026-09-05), so it gives ~24pt back to the player name — which is exactly
+// where the new subline needs it.
+//
+// The header word is GRADE, not MATCHUP: "MATCHUP" at 11pt semibold needs
+// ~56-58pt and truncated to "MATCHU…" inside a 52pt box (UX review). It is
+// also the more honest label — the cell IS a grade, and the subline above
+// already says who the opponent is, so "MATCHUP" promises a fixture the column
+// no longer prints.
+//
+// 64, not 52, because the header carries the LEGEND: "B+" explains nothing on
+// its own — not which end is good, not what it is graded against, not why some
+// rows are a dash — where the two-line cell it replaces explained itself by
+// printing "S. Gray 5.90 ERA". Still 12pt narrower than the old SPOT column.
+const MATCHUP_W = 64;
 const ODDS_W = 62;
-
-const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   { value: 3, label: 'L3' },
@@ -169,10 +188,20 @@ function shortDate(date: string): string {
   }).format(d);
 }
 
+/**
+ * The board's PRIMARY number, on the same ramp as the matchup grade.
+ *
+ * It was `colors.bet` / `#FF9500` / `colors.avoid` — 2.22:1, 2.20:1 and
+ * 3.55:1 on the card, all three below the AA floor for 13pt bold text. That
+ * predates this change, but adding an accessible ramp two columns to the right
+ * left the board running two contrast standards side by side with the
+ * accessible one on the SECONDARY column (UX review, 2026-09-05), so they are
+ * now one ramp.
+ */
 function hitRateColor(pct: number): string {
-  if (pct >= 0.6) return colors.bet;
-  if (pct >= 0.4) return AMBER;
-  return colors.avoid;
+  if (pct >= 0.6) return colors.gradeGood;
+  if (pct >= 0.4) return colors.gradeMid;
+  return colors.gradeBad;
 }
 
 /**
@@ -217,6 +246,10 @@ export function StatsScreen() {
   // the pill's line to the betslip (AddLineSheet below), so a tap in the
   // seeded-default frame would add DraftKings' number for a FanDuel member.
   const { books, ready: booksReady } = usePreferredBooks();
+  // Every clock-derived cell on this board reads THIS value, so the start
+  // time, the Live/Final label and the "is it still bettable" filter all age
+  // together on one tick (useNow).
+  const now = useNow();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   // The "hasn't posted lines" note is the switch — an instruction sits with
@@ -448,9 +481,9 @@ export function StatsScreen() {
     () =>
       unstartedGameIds(
         slateGames.filter((g) => g.game_date === oddsDate),
-        new Date().toISOString(),
+        new Date(now).toISOString(),
       ),
-    [slateGames, oddsDate],
+    [slateGames, oddsDate, now],
   );
 
   // Teams whose game is in progress or over. Their lines are hidden by design
@@ -469,13 +502,15 @@ export function StatsScreen() {
         teams.forEach((t) => pending.add(t));
         continue;
       }
+      // `now` is not read here, but gameStatus reads the clock internally —
+      // the dependency below is what makes this re-derive on the tick.
       const kind = gameStatus(g).kind;
       const label = kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null;
       if (label) teams.forEach((t) => out.set(t, label));
     }
     pending.forEach((t) => out.delete(t));
     return out;
-  }, [slateGames, oddsDate, slateGameIds]);
+  }, [slateGames, oddsDate, slateGameIds, now]);
 
   const quoteByPlayerKey = useMemo(() => {
     if (!propMarket || propLines.market !== propMarket) return new Map<string, StatsOddsQuote>();
@@ -649,6 +684,32 @@ export function StatsScreen() {
         } lines for ${stat?.label ?? 'this stat'} ${
           slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`
         }.`;
+
+  // ── The subline: "9:40 PM ET · @ SEA" under every row's name ───────────────
+  // Matt, 2026-09-05, from a competitor screenshot. Keyed off `games` rather
+  // than the MLB/WNBA matchup views so it lands in EVERY sport at once — the
+  // football boards have no matchup feed at all and would otherwise be the two
+  // that got nothing.
+  const slateGameIndex = useMemo(
+    () => buildSlateGameIndex(slateGames, slate, new Date(now).toISOString()),
+    [slateGames, slate, now],
+  );
+  const sublineFor = useCallback(
+    (row: { team?: string | null; player_name?: string | null }): string | null => {
+      const match = slateGameFor(row, slateGameIndex);
+      if (!match) return null;
+      // Two rules, both learned the hard way (UX review, 2026-09-05):
+      //   - the status is looked up by the key the row actually MATCHED on, not
+      //     by `row.team` — a UFC row has no team, so keying on it left every
+      //     fight advertising a start time hours after it ended;
+      //   - and it is only handed to the subline when the price column is
+      //     hidden, because that column prints the very same word.
+      const started = showOdds ? null : startedTeams.get(match.key) ?? null;
+      return slateSubline(match.game, started);
+    },
+    [slateGameIndex, startedTeams, showOdds],
+  );
+
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
   // STAT at all (nothing to wait for — six of the eighteen football columns,
@@ -814,9 +875,18 @@ export function StatsScreen() {
   // have no per-game player stats to chart.
   const playerDetail = supportsPlayerDetail(sport);
 
+  /** The board's matchup for a team, as the two params the detail screen takes. */
+  const matchupParams = (team?: string | null) => {
+    const m = team ? matchupByTeam.get(team) : undefined;
+    if (!m) return {};
+    const graded = gradeMatchup(sport, playerType, m);
+    return { matchupText: graded.text, matchupGrade: graded.grade ?? undefined };
+  };
+
   const openPlayer = (p: {
     player_id: string;
     player_name: string;
+    team?: string | null;
     player_type?: SeasonTotalsRow['player_type'];
   }) => {
     // Called directly rather than via `playerDetail` above: it is a type guard,
@@ -832,6 +902,9 @@ export function StatsScreen() {
       // The pill goes to the sportsbook now, so the leg is added one screen
       // deeper — carry the round-trip with us.
       fromParlay: fromParlay || undefined,
+      // The matchup FACT rides along, because the board's column is now just
+      // the grade (MatchupCell). Computed here rather than refetched there.
+      ...matchupParams(p.team),
     });
   };
 
@@ -1288,6 +1361,7 @@ export function StatsScreen() {
                 player={item}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
+                subline={sublineFor(item)}
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
                 showOdds={showOdds}
@@ -1312,6 +1386,11 @@ export function StatsScreen() {
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           initialNumToRender={20}
+          // Every row prints a clock now, so the board can visibly go stale
+          // between fetches — and it was the one list screen in the app whose
+          // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
+          // ages the LABELS; this is how a user re-reads the DATA.
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
         />
       ) : (
         <FlatList
@@ -1329,6 +1408,7 @@ export function StatsScreen() {
                 basis={basis}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
+                subline={sublineFor(item.row)}
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
                 showOdds={showOdds}
@@ -1353,6 +1433,11 @@ export function StatsScreen() {
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           initialNumToRender={20}
+          // Every row prints a clock now, so the board can visibly go stale
+          // between fetches — and it was the one list screen in the app whose
+          // pull gesture did nothing (UX review, 2026-09-05). The 60s tick
+          // ages the LABELS; this is how a user re-reads the DATA.
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
         />
       )}
 
@@ -1696,28 +1781,6 @@ function fmtValue(value: number, basis: Basis): string {
   return basis === 'perGame' ? value.toFixed(1) : String(Math.round(value));
 }
 
-function matchupColor(tier: MatchupInfo['tier']): string {
-  if (tier === 'favorable') return colors.bet;
-  if (tier === 'tough') return colors.avoid;
-  return colors.textSecondary;
-}
-
-/**
- * The tier IN WORDS, for the accessibility label.
- *
- * There used to be only `matchupTierLabel`, returning the three-letter glyph
- * FAV / TGH / NEU that the cell printed. When the cell stopped printing it and
- * the label started carrying it instead, the label inherited the glyph — so
- * VoiceOver announced "TGH spot" and "NEU spot" ("new spot"), while sighted
- * users had colour alone. An abbreviation drawn on screen is a label; spoken,
- * it is noise.
- */
-function matchupTierWord(tier: MatchupInfo['tier']): string {
-  if (tier === 'favorable') return 'Favourable';
-  if (tier === 'tough') return 'Tough';
-  return 'Neutral';
-}
-
 /** Right-hand LINE cell: the user's sportsbook's price for the number the
  * board is on, or a dash.
  *
@@ -1814,32 +1877,31 @@ function OddsCell({
   );
 }
 
-/** SPOT: tonight's opponent, and the one fact that decides whether it is a good
- * spot to bet into.
+/** MATCHUP: how hard this spot is, as one letter.
  *
- * This column is where the opposing pitcher went when the row lost its subline
- * (Matt, 2026-09-04: "nothing under the player name"). Dropping it outright
- * would have cost a PROP research board its most load-bearing fact after the
- * hit rate — a 70% hit rate into a 6.45-ERA lefty is not the same bet as 70%
- * into Skubal — so the fact moved from under the name into the table, which is
- * the pattern the NBA's own leaderboards use and what Matt asked the designer
- * to arbitrate.
+ * Matt, 2026-09-05: "update spot column to just be difficulty of that match up
+ * and have a bigger scale besides low med and high". So the cell is the grade
+ * and nothing else — the opponent moved under the name the same day, and the
+ * FACT behind the grade (the opposing starter and his ERA, the defence's
+ * rating) moved to the player's detail screen, which was Matt's own alternative
+ * home for it on 2026-09-04 ("or have it be in the player data when you click
+ * on a record"). It is also still spoken in full here, in the cell's label.
  *
- * The tier colours the PITCHER, not the opponent. Two reasons it moved off
- * `vs HOU`: `colors.bet` / `colors.avoid` are this app's BET/AVOID semantics,
- * so a green team abbreviation on a board full of prices reads as "bet
- * Houston"; and the hit-rate column 60pt away is already green/amber/red about
- * something else, so the row carried two traffic lights meaning different
- * things. On the fact, the colour reads as "this pitcher is the reason", which
- * is what it actually encodes.
+ * The grade is a percentile against MEASURED league distributions, not the
+ * three hand-set cliffs it replaces — `lib/matchup.ts` carries the numbers and
+ * why the old bands called 77% of WNBA matchups favourable.
  *
- * Colour is never the only carrier: the cell's accessibility label says the
- * tier in words (matchupTierWord — it used to say "TGH", which is not a word).
- * The em-dash placeholder keeps the two-line rail straight when a sport has no
- * detail to print.
+ * Colour is the `colors.grade*` ramp, NOT bet/avoid: those are this app's
+ * BET/AVOID semantics and the hit-rate column 60pt away is already a traffic
+ * light. It is also never the only carrier — the letter is the fact, the
+ * colour only speeds up the scan, and the label spells the letter out
+ * ("B plus", because VoiceOver reads a bare "+" as nothing).
+ *
+ * An ungraded matchup is a DASH, never a C: grading a starter we do not know
+ * as average invents the one fact this column exists to report.
  */
 function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
-  if (!matchup) {
+  if (!matchup?.grade) {
     return (
       <View
         style={styles.matchupWrap}
@@ -1850,18 +1912,14 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
       </View>
     );
   }
-  const c = matchupColor(matchup.tier);
   return (
     <View
       style={styles.matchupWrap}
       accessible
-      accessibilityLabel={`${matchupTierWord(matchup.tier)} spot, ${matchup.text}`}
+      accessibilityLabel={`Matchup grade ${gradeSpoken(matchup.grade)}${matchup.fact ? `, ${matchup.fact}` : ''}`}
     >
-      <Text style={styles.matchupOppName} numberOfLines={1}>
-        vs {matchup.row.opponent}
-      </Text>
-      <Text style={[styles.matchupDetail, { color: c }]} numberOfLines={1}>
-        {matchup.detail ?? '—'}
+      <Text style={[styles.matchupGrade, { color: gradeColor(matchup.grade) }]} numberOfLines={1}>
+        {matchup.grade}
       </Text>
     </View>
   );
@@ -1896,9 +1954,25 @@ function ColumnHeader({
         </Text>
       ) : null}
       {showMatchup ? (
-        <Text style={[styles.colHeaderRight, styles.colHeaderMatchup]} numberOfLines={1}>
-          SPOT
-        </Text>
+        <View style={styles.colHeaderMatchup}>
+          <Text style={styles.colHeaderRight} numberOfLines={1}>
+            GRADE
+          </Text>
+          <InfoTooltip
+            title="Matchup grade"
+            body={
+              'How hard tonight\u2019s spot is for this player, graded against the ' +
+              'rest of the league this season. A+ is the easiest matchup on the ' +
+              'board and F the hardest.\n\n' +
+              'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
+              'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
+              'opposing defence\u2019s rating.\n\n' +
+              'A dash means the starter isn\u2019t confirmed yet — an unknown matchup ' +
+              'is never graded as average.'
+            }
+            accessibilityLabel="What the matchup grade means"
+          />
+        </View>
       ) : null}
     </View>
   );
@@ -1912,6 +1986,7 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
+  subline,
   quote,
   started,
   showOdds,
@@ -1927,6 +2002,8 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
+  subline: string | null;
   quote: StatsOddsQuote | null;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
@@ -1945,7 +2022,7 @@ function LeaderRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}`
+            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
@@ -1954,6 +2031,19 @@ function LeaderRow({
           {row.player_name}
           {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
         </Text>
+        {subline ? (
+          // The spoken form goes on the Text itself, not only in the row's
+          // label: a row that is NOT tappable (NHL, UFC, Golf) sets
+          // `accessible={false}` above, so VoiceOver reads this line on its own
+          // and would say "at sign SEA" (UX review, 2026-09-05).
+          <Text
+            style={styles.rowSubline}
+            numberOfLines={1}
+            accessibilityLabel={sublineSpoken(subline)}
+          >
+            {subline}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
@@ -1992,6 +2082,7 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
+  subline,
   quote,
   started,
   showOdds,
@@ -2004,6 +2095,8 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
+  subline: string | null;
   quote: StatsOddsQuote | null;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
@@ -2023,7 +2116,7 @@ function HitRateRow({
         accessibilityRole={tappable ? 'button' : undefined}
         accessibilityLabel={
           tappable
-            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}`
+            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}${subline ? `, ${sublineSpoken(subline)}` : ''}`
             : undefined
         }
         accessibilityHint={tappable ? 'Opens this player' : undefined}
@@ -2032,6 +2125,19 @@ function HitRateRow({
           {player.player_name}
           {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
         </Text>
+        {subline ? (
+          // The spoken form goes on the Text itself, not only in the row's
+          // label: a row that is NOT tappable (NHL, UFC, Golf) sets
+          // `accessible={false}` above, so VoiceOver reads this line on its own
+          // and would say "at sign SEA" (UX review, 2026-09-05).
+          <Text
+            style={styles.rowSubline}
+            numberOfLines={1}
+            accessibilityLabel={sublineSpoken(subline)}
+          >
+            {subline}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.valueWrap}>
         <Text style={[styles.value, { color: pctColor }]}>
@@ -2185,7 +2291,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   filterBadgeText: {
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.bold,
     color: colors.textInverse,
   },
@@ -2363,14 +2469,14 @@ const styles = StyleSheet.create({
   },
   colHeaderRank: {
     width: 20,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
   colHeaderName: {
     flex: 1,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -2378,7 +2484,7 @@ const styles = StyleSheet.create({
   colHeaderRight: {
     width: 48,
     textAlign: 'right',
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -2400,7 +2506,14 @@ const styles = StyleSheet.create({
     lineHeight: font.size.caption * 1.35,
   },
   noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
-  colHeaderMatchup: { minWidth: SPOT_W, textAlign: 'right' },
+  // A row, not a Text: the legend lives in the header (see MATCHUP_W).
+  colHeaderMatchup: {
+    minWidth: MATCHUP_W,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+  },
   // Rows are deliberately compact — more players visible per screen.
   row: {
     flexDirection: 'row',
@@ -2408,6 +2521,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
     paddingHorizontal: spacing.lg,
     paddingVertical: 5,
+    // The row is a tap target that opens the player, and a full-width row
+    // cannot use hitSlop without overlapping its neighbours — so the height
+    // has to be the target (HIG 44pt). It also stops the list re-flowing when
+    // the slate query lands: a one-line row (~26pt) and a two-line row with a
+    // subline (~40pt) both fit inside 44, so nothing moves under the thumb
+    // (UX review, 2026-09-05).
+    minHeight: 44,
     gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
@@ -2429,9 +2549,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   rowTeam: {
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
+  },
+  // "9:40 PM ET · @ SEA". Quieter than the name, but NOT quieter than the AA
+  // floor: textTertiary (#3C3C4399) composites to ~3.4:1 on the card, and 11pt
+  // is not large text, so the hierarchy is carried by SIZE and position rather
+  // than by contrast (UX review, 2026-09-05).
+  rowSubline: {
+    fontSize: font.size.micro,
+    color: colors.textSecondary,
+    marginTop: 1,
   },
   valueWrap: {
     alignItems: 'flex-end',
@@ -2443,7 +2572,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   valueLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
   },
   // minWidth, not width: the price and its column grow together at large text
@@ -2511,20 +2640,19 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   matchupWrap: {
-    minWidth: SPOT_W,
-    maxWidth: SPOT_W * 1.4,
+    minWidth: MATCHUP_W,
+    maxWidth: MATCHUP_W * 1.4,
     flexShrink: 1,
     alignItems: 'flex-end',
   },
-  matchupOppName: {
-    fontSize: font.size.caption,
+  // One letter (two with a modifier), so it can carry the row's weight — it is
+  // the only thing in the column and it has to be legible at a glance down 25
+  // rows. Bumped from caption because a bold "B+" at 12pt reads as a footnote
+  // rather than a grade.
+  matchupGrade: {
+    fontSize: font.size.footnote,
     fontWeight: font.weight.bold,
     letterSpacing: 0.2,
-  },
-  matchupDetail: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    marginTop: 1,
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
