@@ -483,8 +483,11 @@ export function StatsScreen() {
   // football boards have no matchup feed at all and would otherwise be the two
   // that got nothing.
   //
-  // Rebuilt when the clock crosses a game's start (`startedTeams` already
-  // re-derives then), which is the only thing that changes what it prints.
+  // The clock is read once per rebuild, exactly as `slateGameIds` and
+  // `startedTeams` above read it: a board left open across a first pitch keeps
+  // the pick it made until the slate reloads. That is the existing behaviour of
+  // every other time-sensitive cell on this row, and diverging here would give
+  // one line on the row a different notion of "now" than the price beside it.
   const slateGameIndex = useMemo(
     () => buildSlateGameIndex(slateGames, slate, new Date().toISOString()),
     [slateGames, slate],
