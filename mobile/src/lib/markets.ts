@@ -73,6 +73,35 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
   nba_prop_player_dd: 'player_double_double',
 };
 
+/**
+ * What to CALL a market where the bet is shown, when the board's column name
+ * is not the proposition the book sells.
+ *
+ * Almost always they are the same thing: an "Over 5.5 Receptions" board row
+ * buys Over 5.5 receptions. `player_anytime_td` is the exception — the board
+ * asks it as "Rush+Rec TDs" with a 0.5 line, but no book sells that; they
+ * sell "Anytime Touchdown Scorer", which also pays on a return touchdown the
+ * board's rush+rec history never counted. A betslip leg reading "Over 0.5
+ * Rush+Rec TDs" is a proposition the user cannot find at their sportsbook,
+ * so the LEG and the sheet use this name while the column header keeps its
+ * own (UX review, 2026-09-05).
+ */
+export function propDisplayLabel(market: string | null, statLabel: string): string {
+  if (market === 'player_anytime_td') return 'Anytime TD';
+  return statLabel;
+}
+
+/**
+ * Is this market sold on one side only, so the board's other side can never
+ * have a price? `player_anytime_td` is Yes/No with no No price (the football
+ * ingestor's own comment says so), and the board's "At most 0" view asks for
+ * exactly that missing side. Naming it is the difference between a column of
+ * dashes and a column of dashes with a reason.
+ */
+export function oneWayMarket(market: string | null, side: 'over' | 'under'): boolean {
+  return market === 'player_anytime_td' && side === 'under';
+}
+
 export function propMarketForModel(modelId: string): string | null {
   return PROP_MARKET_BY_MODEL[modelId] ?? null;
 }

@@ -32,8 +32,7 @@ import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterField } from '@/components/filters/FilterField';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
 import type { ActivePill } from '@/components/filters/FilterBar';
-import { useSportFilter } from '@/hooks/useSportFilter';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
   fetchPropLinesForDate,
@@ -43,7 +42,7 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK, propMarketForModel } from '@/lib/markets';
+import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK, oneWayMarket, propDisplayLabel } from '@/lib/markets';
 import { bookButtonColors } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
@@ -76,7 +75,7 @@ import {
   defaultStatFor,
   defaultThresholdFor,
   propMarketForStat,
-  propModelForStat,
+  sportHasAnyPropMarket,
   statValue,
   statsForSport,
   supportsHitRate,
@@ -176,6 +175,23 @@ function hitRateColor(pct: number): string {
  * "6+ Strikeouts". Stat defaults are half-lines (0.5 / 5.5) so the ceiling is
  * the first whole number that clears them.
  */
+/**
+ * Does this sport's board start filtered to the slate?
+ *
+ * Football does. Its leaderboard is national — 136 college programs — while
+ * props are pulled only for games a book already prices (~70 of a 120-game
+ * Saturday), so an unfiltered board is mostly dashes: every one of them
+ * honest, none of them explained. Baseball's slate is nearly the whole league
+ * every day, so the filter would only hide players.
+ *
+ * Stated once because the initial value and the sport-change reset have to
+ * agree, and they did not when this was written inline (UX review,
+ * 2026-09-05).
+ */
+function defaultTonightOnly(sport: Sport): boolean {
+  return sport === 'NCAAF' || sport === 'NFL';
+}
+
 function defaultLineN(def: StatDef | null): number {
   return Math.max(1, Math.ceil(defaultThresholdFor(def)));
 }
@@ -200,7 +216,6 @@ export function StatsScreen() {
   const { sport } = useSportFilter();
   // Today's board — hangs a live price off each leaderboard row, and backs the
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
-  const { data: todayPicks } = useTodayPicks();
   // The user's sportsbooks: the column prints the best of THOSE books and
   // nothing else. `ready` gates the odds column, not just a label: a tap adds
   // the pill's line to the betslip (AddLineSheet below), so a tap in the
@@ -242,7 +257,7 @@ export function StatsScreen() {
   const [matchups, setMatchups] = useState<TonightMatchupRow[]>([]);
   // "Playing tonight": who is actually in action. Read from `games`, so unlike
   // the matchup views above this works for every sport.
-  const [tonightOnly, setTonightOnly] = useState<boolean>(false);
+  const [tonightOnly, setTonightOnly] = useState<boolean>(() => defaultTonightOnly(sport));
   const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
   // The slate's raw games. The prop-odds view has no sport column and
   // `player_points` is both an NBA and a WNBA market, so the odds read is
@@ -270,7 +285,7 @@ export function StatsScreen() {
     setStat(next);
     setQuery('');
     setTeamFilter(null);
-    setTonightOnly(false); // a different sport is a different slate
+    setTonightOnly(defaultTonightOnly(sport)); // a different sport is a different slate
     setLineN(defaultLineN(next));
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
@@ -390,11 +405,11 @@ export function StatsScreen() {
   // link. Adding a leg to our own betslip lives one tap deeper, on the
   // player's detail screen, which is where a researcher lands anyway.
   //
-  // A retired model resolves to null here (propModelForStat filters it), so
-  // Home Runs and RBIs keep their leaderboard and get no betslip button — but
-  // their LINE column still shows, because that comes from the market, not
-  // from a model.
-  const propModel = propModelForStat(stat);
+  // The MARKET, not the model: a retired model's stat keeps its LINE column
+  // (Matt, 2026-09-03: "works separately from the models"), and football
+  // resolves here without a model at all, having none. This screen no longer
+  // reads a model for anything — the betslip button lives one tap deeper, on
+  // the player's detail screen, which is where a researcher lands anyway.
   const propMarket = propMarketForStat(stat);
 
   // Prop lines for the slate date. Bounded to one market, and re-read when the
@@ -492,22 +507,36 @@ export function StatsScreen() {
     propMarket != null &&
     propLines.market === propMarket &&
     slateGameIds.size > 0 &&
-    bookPostsMarket(propLines.rows, propMarket, books, slateGameIds);
+    bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction);
   const showOdds = bookPosts && booksReady;
-  // The column has nothing honest to show — say why, once, in words. Two
-  // reasons look identical as an empty column and are not: the chosen book has
-  // not posted this stat (switch books), or no book has yet (wait).
+  // The column has nothing honest to show — say why, once, in words. Three
+  // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
+  // STAT at all (nothing to wait for — six of the eighteen football columns,
+  // solo tackles and passes defended among them), the chosen book has not
+  // posted it (switch books), or no book has yet (wait).
+  //
+  // The slate is not always today: buildTonightSlate falls back to the next
+  // scheduled day, so for a weekly sport this note is about SATURDAY from
+  // Sunday onward. The column header already dates itself; the note used to
+  // contradict it (UX review, 2026-09-05).
+  const slateDayLabel = slate.isToday || !slate.date ? 'today’s' : `${weekdayET(slate.date)}’s`;
   const noLinesNote =
-    propMarket == null || propLines.status !== 'ok' || slateGameIds.size === 0
-      ? null
-      : propLines.rows.length === 0
-        ? { text: `${stat?.label ?? ''} lines post once books price today’s games.`, canSwitch: false }
-        : !bookPosts
-          ? {
-              text: `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines today.`,
-              canSwitch: true,
-            }
-          : null;
+    propMarket == null
+      ? stat != null && sportHasAnyPropMarket(sport)
+        ? { text: `No sportsbook posts ${stat.label} lines.`, canSwitch: false }
+        : null
+      : propLines.status !== 'ok' || slateGameIds.size === 0
+        ? null
+        : propLines.rows.length === 0
+          ? { text: `${stat?.label ?? ''} lines post once books price ${slateDayLabel} games.`, canSwitch: false }
+          : !bookPosts
+            ? {
+                text: oneWayMarket(propMarket, direction)
+                  ? `${booksNoneName(books)} only posts the Yes side of ${propDisplayLabel(propMarket, stat?.label ?? '')}.`
+                  : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines ${slateDayLabel === 'today’s' ? 'today' : `on ${weekdayET(slate.date)}`}.`,
+                canSwitch: !oneWayMarket(propMarket, direction),
+              }
+            : null;
 
   // THE PILL ASKS. Matt, 2026-09-04, reversing the same morning's "the pill is
   // the bet link": "it shouldn't take you directly to the book, it should ask
@@ -663,12 +692,17 @@ export function StatsScreen() {
   // The headline under the ruler, e.g. "25+ Points" / "At most 2 Walks".
   const lineHeadline =
     direction === 'over' ? `${lineN}+ ${stat?.label ?? ''}` : `At most ${lineN} ${stat?.label ?? ''}`;
+  // What a BET made from this column is called. Almost always the column's own
+  // name; "Anytime TD" where the board asks Rush+Rec TDs, because no book
+  // sells the column's version (markets.ts propDisplayLabel).
+  const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
+
   // What the tapped pill hands the add-to-betslip sheet: the proposition,
   // every book's price for it, and the off-line explainer when the book's own
   // number differs from the board's (lib/lineLegs.ts).
   const lineSheetInput = useMemo(
-    () => (lineSheet ? propLineSheetInput(lineSheet, sport, stat?.label ?? '', lineHeadline) : null),
-    [lineSheet, sport, stat?.label, lineHeadline],
+    () => (lineSheet ? propLineSheetInput(lineSheet, sport, betLabel, lineHeadline) : null),
+    [lineSheet, sport, betLabel, lineHeadline],
   );
 
   /**
@@ -1087,7 +1121,7 @@ export function StatsScreen() {
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
                 showOdds={showOdds}
-                statLabel={stat?.label ?? ''}
+                statLabel={betLabel}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
@@ -1128,7 +1162,7 @@ export function StatsScreen() {
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
                 showOdds={showOdds}
-                statLabel={stat?.label ?? ''}
+                statLabel={betLabel}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}

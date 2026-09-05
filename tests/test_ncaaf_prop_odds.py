@@ -226,14 +226,49 @@ def test_the_job_defaults_to_probing_and_caps_its_sample():
 
 # ── the app's half ───────────────────────────────────────────────────────────
 
-def test_the_app_maps_ncaaf_stats_only_to_markets_we_pull():
-    """NCAAF is the one sport whose board reaches its market without a model
-    (it has none), so the two lists have to be checked against each other."""
+def _football_map() -> set[str]:
+    """The markets mobile/src/lib/statCatalog.ts can actually display."""
     src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts",
                   encoding="utf-8").read()
-    block = src.split("NCAAF_STAT_TO_MARKET")[1].split("};")[0]
-    mapped = {line.split("'")[1] for line in block.splitlines() if "'player_" in line}
+    block = src.split("FOOTBALL_STAT_TO_MARKET")[1].split("};")[0]
+    return {line.split("'")[1] for line in block.splitlines() if "'player_" in line}
+
+
+def test_what_we_pull_and_what_the_board_can_show_are_the_same_set():
+    """Both directions, because each failure costs something different.
+
+    A market the board asks for but we never pull is a permanently blank
+    column. A market we pull but the board cannot show is a credit spent on
+    nothing, every event, every pass -- which is how `player_tackles_assists`
+    and `player_rush_reception_yds` came out of the college pull (UX review,
+    2026-09-05).
+
+    Football is the sport where this can go wrong quietly: it is the only one
+    whose board reaches its market WITHOUT a model, so nothing else ties the
+    two lists together.
+    """
+    mapped = _football_map()
+    pulled = set(config.PROP_MARKETS_NCAAF)
     assert mapped, "the map is present"
-    assert mapped <= set(config.PROP_MARKETS_NCAAF), \
-        f"the board asks for markets the ingestor never pulls: {mapped - set(config.PROP_MARKETS_NCAAF)}"
-    assert "player_pass_yds" in mapped and "player_tackles_assists" in mapped
+    assert mapped == pulled, (
+        f"board-only: {mapped - pulled}  |  pulled-but-unshowable: {pulled - mapped}")
+
+
+def test_the_half_credit_tackle_market_is_in_neither_list():
+    """CFBD charges a shared tackle as a half and the book counts it whole, so
+    a tackles price beside this board's number is a different bet."""
+    assert "player_tackles_assists" not in _football_map()
+    assert "player_tackles_assists" not in config.PROP_MARKETS_NCAAF
+    src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts",
+                  encoding="utf-8").read()
+    assert "def_tackles" not in src.split("FOOTBALL_STAT_TO_MARKET")[1].split("};")[0]
+
+
+def test_the_map_serves_both_football_leagues():
+    """NFL had 103,693 prop rows stored and invisible for the same reason
+    NCAAF's would have been: no prop model to route the market lookup through.
+    One map, both leagues -- or the pros stay dashed while college works."""
+    src = io.open(ROOT / "mobile" / "src" / "lib" / "statCatalog.ts",
+                  encoding="utf-8").read()
+    assert "def.sport === 'NCAAF' || def.sport === 'NFL'" in src
+    assert "NCAAF_STAT_TO_MARKET" not in src, "renamed: it is not NCAAF-only"

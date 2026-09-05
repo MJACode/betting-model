@@ -1999,8 +1999,6 @@ PROP_ALT_MARKETS = {
         "player_rush_attempts_alternate",
         "player_reception_yds_alternate",
         "player_receptions_alternate",
-        "player_rush_reception_yds_alternate",
-        "player_tackles_assists_alternate",
         "player_sacks_alternate",
     ],
     "NFL": [
@@ -2076,11 +2074,22 @@ PROP_MARKETS_NCAAF = [
     "player_rush_attempts",
     "player_reception_yds",
     "player_receptions",
-    "player_rush_reception_yds",
     "player_anytime_td",
-    "player_tackles_assists",
     "player_sacks",
 ]
+# NOT pulled, though the feed offers them for football, because nothing can
+# DISPLAY them and an unreachable market is a credit spent on nothing
+# (tests/test_ncaaf_prop_odds.py pins the pull against the app's map in both
+# directions):
+#   player_rush_reception_yds  -- the board has no combined rush+rec yards
+#     column, only its two halves.
+#   player_tackles_assists     -- the board's def_tackles charges a shared
+#     tackle as a HALF (CFBD stores 5 solo + 9 assists as 9.5), the market
+#     counts solo + assists at FULL credit, so the price would sit beside a
+#     number on a different scale -- a different bet in the sense of
+#     docs/best_line.md §5 (UX review, 2026-09-05). It comes back with a
+#     full-credit column, which is a new StatDef.
+
 
 # WHICH college games get a prop pull. Measured 2026-09-05, a full Saturday:
 # 120 NCAAF games on the slate, 70 with a DraftKings game line, 39 FBS vs FBS,
