@@ -21,9 +21,25 @@ import { colors } from '@/lib/theme';
 
 /** Where each book's betslip link can fall back to when we have no link. */
 interface BookApp {
-  /** Custom URL scheme, when we have a verified one. Others fall through to web
-   *  rather than guessing a scheme that would silently fail. */
+  /** Custom URL scheme, when we have a VERIFIED one (DraftKings, session 47).
+   *  It opens the app, and its `canOpenURL` answer is trusted both ways —
+   *  `false` means not installed. */
   scheme: string | null;
+  /** UNVERIFIED schemes the book's app may register (Matt, 2026-09-05: "This
+   *  should be the same for all the Sportsbook apps" — and no public source
+   *  names any book's scheme but DraftKings'). Used to ASK only, never to
+   *  open: a `true` from any of them proves the app is installed, since iOS
+   *  answers `true` only for a scheme some installed app registered; a `false`
+   *  proves nothing — the guess may simply be wrong — and leaves the answer
+   *  unknown, which is today's behaviour. So a wrong guess costs nothing and
+   *  a right one opens the app. Every entry, verified or not, must be declared
+   *  in app.json's `LSApplicationQueriesSchemes` or iOS answers `false`
+   *  regardless (verify_book_links.ts pins it; Apple caps the list at 50).
+   *  A candidate must name the SPORTSBOOK product, never the bare brand:
+   *  `fanduel://` is as likely FanDuel's fantasy app, `betmgm://` its casino,
+   *  `caesars://` its rewards app — and a yes from a sibling app would hide
+   *  the store from the member it was meant for (UX review). */
+  candidateSchemes?: string[];
   web: string;
   /** Store page — only carried for books whose listing we've verified. */
   store: string | null;
@@ -47,9 +63,9 @@ const BOOK_APPS: Record<string, BookApp> = {
   // id below is Apple's own, taken from the apps.apple.com URL of the book's
   // listing — none is guessed. iOS only: Google Play package names are not
   // verified, so Android keeps the web fallback.
-  fanduel: { scheme: null, web: 'https://sportsbook.fanduel.com/', store: ios('id1413721906') },
-  betmgm: { scheme: null, web: 'https://sports.betmgm.com/', store: ios('id1430875409') },
-  williamhill_us: { scheme: null, web: 'https://sportsbook.caesars.com/', store: ios('id1413099571') },
+  fanduel: { scheme: null, candidateSchemes: ['fanduelsportsbook', 'fanduel-sportsbook', 'fdsportsbook'], web: 'https://sportsbook.fanduel.com/', store: ios('id1413721906') },
+  betmgm: { scheme: null, candidateSchemes: ['betmgmsports', 'betmgm-sports', 'betmgmsportsbook'], web: 'https://sports.betmgm.com/', store: ios('id1430875409') },
+  williamhill_us: { scheme: null, candidateSchemes: ['caesarssportsbook', 'czrsportsbook', 'williamhillsportsbook'], web: 'https://sportsbook.caesars.com/', store: ios('id1413099571') },
   espnbet: { scheme: null, web: 'https://espnbet.com/', store: null },
   bovada: { scheme: null, web: 'https://www.bovada.lv/', store: null },
   pinnacle: { scheme: null, web: 'https://www.pinnacle.com/', store: null },
@@ -57,14 +73,14 @@ const BOOK_APPS: Record<string, BookApp> = {
   // schemes. The per-outcome betslip link from the odds feed is the primary
   // route; the store and then the site are the fallbacks when a row carries
   // no link.
-  fanatics: { scheme: null, web: 'https://sportsbook.fanatics.com/', store: ios('id1616738407') },
-  betrivers: { scheme: null, web: 'https://www.betrivers.com/', store: ios('id1635357259') },
-  hardrockbet: { scheme: null, web: 'https://www.hardrock.bet/', store: ios('id1572525917') },
-  ballybet: { scheme: null, web: 'https://www.ballybet.com/', store: ios('id1590852096') },
+  fanatics: { scheme: null, candidateSchemes: ['fanaticssportsbook', 'fanatics-sportsbook', 'fanaticsbet'], web: 'https://sportsbook.fanatics.com/', store: ios('id1616738407') },
+  betrivers: { scheme: null, candidateSchemes: ['betrivers', 'betriverssportsbook'], web: 'https://www.betrivers.com/', store: ios('id1635357259') },
+  hardrockbet: { scheme: null, candidateSchemes: ['hardrockbet', 'hardrocksportsbook'], web: 'https://www.hardrock.bet/', store: ios('id1572525917') },
+  ballybet: { scheme: null, candidateSchemes: ['ballybet', 'ballybetsportsbook'], web: 'https://www.ballybet.com/', store: ios('id1590852096') },
   // betPARX ships one app PER STATE (MD, PA, NJ) — resolved from the member's
   // state below; with none set there is no single page to send them to.
-  betparx: { scheme: null, web: 'https://www.betparx.com/', store: null },
-  rebet: { scheme: null, web: 'https://play.rebet.app/', store: ios('id6468762763') },
+  betparx: { scheme: null, candidateSchemes: ['betparx', 'betparxsportsbook'], web: 'https://www.betparx.com/', store: null },
+  rebet: { scheme: null, candidateSchemes: ['rebet'], web: 'https://play.rebet.app/', store: ios('id6468762763') },
 };
 
 /** An App Store page, iOS only (the id is Apple's; see BOOK_APPS). */
@@ -131,22 +147,74 @@ async function tryOpen(url: string, isScheme = false): Promise<boolean> {
 }
 
 /**
+ * Is the book's app on this phone? `true` / `false` when the build can ask,
+ * `null` when it cannot — and an unknown is NOT a no.
+ *
+ * iOS answers `canOpenURL` for a custom scheme only when the scheme is
+ * declared in the build's `LSApplicationQueriesSchemes` (app.json), and
+ * answers `false` — indistinguishable from "not installed" — for any other.
+ * So every scheme asked about here is declared there (verify_book_links.ts
+ * pins it). A verified scheme (`scheme`) is trusted both ways; an unverified
+ * candidate (`candidateSchemes`) only when it says yes — see BookApp. Android
+ * needs a `<queries>` element the app does not declare, so it stays unknown
+ * there. (Matt, 2026-09-05: "If I have the app for that Sportsbook, it should
+ * just open my app" and "This should be the same for all the Sportsbook
+ * apps.")
+ */
+export async function isBookAppInstalled(book: string): Promise<boolean | null> {
+  const app = BOOK_APPS[book];
+  if (!app || Platform.OS !== 'ios') return null;
+  const verified = app.scheme ? [app.scheme] : [];
+  const candidates = (app.candidateSchemes ?? []).map((c) => `${c}://`);
+  if (verified.length === 0 && candidates.length === 0) return null;
+  // A `true` from ANY scheme is proof: iOS says yes only for a scheme some
+  // installed app registered. A `false` is proof only from the verified one.
+  // Asked in parallel — this sits on the tap-to-open path (UX review).
+  const ask = (url: string): Promise<boolean | null> =>
+    Linking.canOpenURL(url).catch(() => null); // asked and not answered: no evidence either way
+  const answers = await Promise.all([...verified, ...candidates].map(ask));
+  if (answers.some((a) => a === true)) return true;
+  const verifiedSaidNo = answers.slice(0, verified.length).some((a) => a === false);
+  return verifiedSaidNo ? false : null;
+}
+
+/**
  * Open a pre-filled betslip at `book`.
  *
- * Fallback chain: the betslip link (placeholders filled) → the book's app
- * (where we have a verified scheme) → its App Store page → the book's
- * website. Returns true once something opened.
+ * Whether the book's app is installed decides the route when the build can
+ * tell (`isBookAppInstalled`):
  *
- * WHAT CANNOT BE DETECTED: whether the app is installed. iOS answers
- * canOpenURL only for schemes declared in LSApplicationQueriesSchemes, and the
- * build declares none, so a filled universal link is opened and iOS itself
- * decides — the app when it is installed, Safari when it is not. The hand-off
- * sheet therefore also offers the store page outright (ParlayDkHandoff).
+ *   installed  → the betslip link (a universal link iOS routes to the app,
+ *                with the bet on the slip), else the app itself by its
+ *                VERIFIED scheme (a candidate is never opened — it might be
+ *                another app's), else the book's site, itself a universal
+ *                link iOS routes to the app. Never the App Store: a member
+ *                who has the app is sent to a page whose only button is
+ *                "Open" (Matt, 2026-09-05, with that page on screen).
+ *   not        → the App Store, whatever link we hold — the bet is not
+ *                placeable without the app (Matt, 2026-09-04) — else the site.
+ *   unknown    → link → store → site, the pre-detection chain: a filled
+ *                universal link opens the app when it is there and Safari
+ *                when it is not, and with no link the store is where a member
+ *                without the app needs to be. The hand-off sheet also offers
+ *                the store outright in this case (ParlayDkHandoff).
+ *
+ * Returns true once something opened.
  */
 export async function openBookBetslip(
   book: string,
   link: string | null | undefined,
 ): Promise<boolean> {
+  const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
+  const installed = await isBookAppInstalled(book);
+
+  if (installed === false) {
+    const store = bookStoreUrl(book);
+    if (store && (await tryOpen(store))) return true;
+    if (await tryOpen(app.web)) return true;
+    return couldNotOpen(book);
+  }
+
   if (link && link.trim()) {
     const filled = fillBetslipLink(link, getBettingState());
     if (filled) {
@@ -164,16 +232,24 @@ export async function openBookBetslip(
     }
   }
 
-  const app = BOOK_APPS[book] ?? BOOK_APPS[MODEL_BOOK];
-  if (app.scheme && (await tryOpen(app.scheme, true))) return true;
-  // No usable link and no app scheme we can query: the STORE before the site.
-  // A member who has the app sees its page with "Open"; one who does not is
-  // where they need to be to get it (Matt, 2026-09-04) — the book's web root
-  // helps neither, since the bet is not on it.
+  if (installed === true) {
+    if (app.scheme && (await tryOpen(app.scheme, true))) return true;
+    if (await tryOpen(app.web)) return true;
+    return couldNotOpen(book);
+  }
+
+  // Unknown: the scheme cannot be queried on this build, so it is not tried.
+  // The STORE before the site — a member who has the app sees its page with
+  // "Open"; one who does not is where they need to be to get it (Matt,
+  // 2026-09-04) — the book's web root helps neither, since the bet is not on
+  // it.
   const store = bookStoreUrl(book);
   if (store && (await tryOpen(store))) return true;
   if (await tryOpen(app.web)) return true;
+  return couldNotOpen(book);
+}
 
+function couldNotOpen(book: string): false {
   Alert.alert(
     `Could not open ${bookName(book)}`,
     `We couldn’t open the ${bookName(book)} app or website on this device.`,
