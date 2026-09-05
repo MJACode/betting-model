@@ -38,6 +38,8 @@ the recap is cross-sport), each falling back sensibly.
 | `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
+| `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` |
+| `_job_publish_discord_signals` | calls `notify_discord_signals` unchanged | `worker_jobs`, claimed by the worker every 5 min |
 
 ### One board — the app, Discord and push publish the same set (2026-09-05)
 
@@ -70,6 +72,71 @@ Consequences worth knowing before touching either producer:
   from it.
 - **The started-game guard stays** — on both surfaces. It is the one bound that
   should exist.
+
+### The repair paths read the same board too (2026-09-05)
+
+**One board is a property of every producer, not just the two that publish.**
+#489 moved `notify_discord_signals` and the push notifier onto `picks` and left
+`_locked_signals` and `_delete_posted` on `opening_signals` — so the one path
+whose entire job is to REPAIR a channel still read the table whose gate caused
+the damage.
+
+What that would have done, measured against production for `game_date =
+2026-09-13`: the capture-table query returns **0 rows**, the `picks` query
+returns **both Week 1 wind picks**. A restatement of that slate would have
+posted nothing and said nothing about it — as incomplete as the post it was
+correcting, in exactly the same silent shape.
+
+The delete half was worse. `_delete_posted` clears the stale message a
+restatement replaces, and joined to the capture table it can only ever find
+CAPTURED message ids — so an uncaptured pick's original post would have survived
+its own correction, leaving **two different numbers standing in the channel**.
+That is worse than either number alone, and nobody would go looking for it.
+
+Both now read `picks`, through the same `model_action_thresholds` cut and the
+same synthesised `lock_key`, so all the producers select from one board.
+
+- **The restate path has NO started-game guard, deliberately**, and it is the
+  one producer where that is correct. `_new_signals` refuses a started game
+  because ANNOUNCING a bet nobody can still take sends a member to a live
+  number. A restatement is not an announcement: it corrects something already
+  published, for a date that is normally over by the time anyone writes the
+  correction. Adding the guard would make restating a past slate a permanent
+  no-op. A test pins the asymmetry so it does not get "fixed" later.
+- **`_locked_signals` still takes the whole date**, ledger and all, so a
+  restatement covers the slate rather than whatever happens to be unposted.
+  That is the one way it differs from `_new_signals`.
+
+### `publish_discord_signals` — running the producer off-schedule
+
+`notify_discord_signals` is called from exactly ONE place, the refresh pass at
+:17. On 2026-09-05 that pass was killed mid-run by a deploy chain (the scheduler
+logged its restart at 15:22:48Z), and the answer to "post this pick now" was
+"wait an hour" — which §1b says is not an answer. The worker holds the webhooks
+and claims `worker_jobs` every five minutes.
+
+```sql
+INSERT INTO worker_jobs (dedupe_key, job_type, args, requested_by, note)
+VALUES ('publish-discord-<date>', 'publish_discord_signals', '{}'::jsonb,
+        'claude', 'why this is being forced');
+```
+
+**NOTHING IS BYPASSED, and that is the whole safety argument.** It calls the
+ordinary producer by its ordinary name: the started-game guard, the thresholds
+cut and the `push_sent` ledger all live inside that function, so the job posts
+what is unposted and no more, and a second run posts zero. It changes WHEN the
+producer runs, never what it selects — which is also why it needs no date-list
+gate the way `notify_discord_restate` does: it cannot reach a pick that was
+already sent, so there is nothing to re-publish by accident.
+
+`args` is optional; `target_date` bounds only picks with NO `commence_time`, so
+a future kickoff is reached whatever date is passed. Omit it for today.
+
+**The tell this exists to kill**: a producer invoked by exactly one cron is
+indistinguishable from a broken producer whenever that cron misses a tick. On
+2026-09-05 `push_sent` last held a `discord_signal` at 09:22 ET while three MLB
+picks written at 11:22 sat unposted beside the two NFL ones, and nothing
+anywhere said so.
 
 ### What a pick post shows (2026-08-24)
 
@@ -170,7 +237,7 @@ the only symptom was an absence.**
 
 | Producer | Called from | Failure signature |
 |---|---|---|
-| `notify_discord_signals` | `--step push-notifications` (6am + every refresh pass) | a sport with no locked signal for `game_date = today` posts nothing — indistinguishable from "no picks today" |
+| `notify_discord_signals` | `--step push-notifications` (6am + every refresh pass) | a sport with no eligible BET posts nothing — indistinguishable from "no picks today". **And the step is its only caller**, so a refresh pass that dies (a deploy restart, a crash) is the same silence: 2026-09-05, the 11:17 pass was killed at 15:22:48Z and two NFL picks sat unposted for an hour with nothing logged. `publish_discord_signals` is the way out; `push_sent` is how you see it. (Pre-2026-09-05 this row read "no LOCKED signal for `game_date = today`" — both the capture gate and the date bound are gone, see §30.) |
 | `notify_discord_live` | end of `models/live_scorer.run_live_scorer` AND `ncaaf_live.gameday.write_picks` | caller swallows and logs; a raise inside the notifier is invisible outside the Railway log |
 | `notify_discord_results` | inside `step_settle` | refuses `game_date >= today`, so a mid-slate call is a silent no-op by design |
 

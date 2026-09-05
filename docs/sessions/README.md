@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 235 — Doubles and Triples were never blank because the market didn't exist; nobody had asked |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 236 — Doubles and Triples were never blank because the market didn't exist; nobody had asked |
+| 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 235 — the wind bet that showed in the app and not in Discord, and the repair path that still read the abandoned table |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 234 — the game time went under the name, and SPOT became a graded matchup difficulty |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 233 — "nothing shows for Cesar's and FanDuel": we have their lines, and the side we do not have is the one that was on screen |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 232 — the app and Discord are one board: publishing moved off the capture table |
