@@ -74,7 +74,7 @@ export function useTodayPicks(date?: string) {
       // Drop games that have already finished — once a game ends it shouldn't
       // linger on the board for the rest of the day. A retired model's picks
       // are dropped here too (Matt, 2026-09-02: "absent from display and not
-      // counted toward anything"). This hook feeds the Today/Signals/Movement
+      // counted toward anything"). This hook feeds the Today/Signals
       // board, the sport-toggle counts, the Models cards' live lists and the
       // Stats odds pills, so one filter at the source keeps all of them in
       // agreement — before this, the board drew a retired BET as a green,

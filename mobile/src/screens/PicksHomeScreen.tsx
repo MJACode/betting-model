@@ -1,16 +1,14 @@
 /**
  * Merged Picks tab — a single home for the daily board with a
- * `Today | Signals | Movement` segmented control. Replaces the old separate
+ * `Today | Signals` segmented control. Replaces the old separate
  * Picks and Signals tabs (which both showed BET picks and read as redundant):
  *   - Today    = every scored pick today (the old Picks tab).
  *   - Signals  = picks that crossed the bet line and are still live.
- *   - Movement = live signals annotated with how the DK line has moved since we
- *                locked them.
  *
  * Picks lock the first time a model scores them each day (game markets at the
  * first run, props at their first signal) and never change again for the rest
- * of the day, so there's no "dropped to AVOID" state to track — Movement is the
- * only thing that changes after a signal locks.
+ * of the day, so there's no "dropped to AVOID" state to track. How the DK line
+ * has moved since a pick locked lives on the pick's detail screen.
  *
  * Reuses the shared filter/sort/search pipeline (PickFilters +
  * applyFilter/sortPicks/searchPicks) and the same PickCard list — so the only
@@ -45,7 +43,7 @@ import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
-import { movedSignals, movementTally, signalCountsBySport } from '@/lib/lineMovementBoard';
+import { signalCountsBySport } from '@/lib/lineMovementBoard';
 import { slipKeyForPick } from '@/lib/parlay';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -54,7 +52,7 @@ import { formatCurrency, formatPct } from '@/lib/format';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type View3 = 'today' | 'signals' | 'movement';
+type View2 = 'today' | 'signals';
 
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
@@ -69,7 +67,7 @@ export function PicksHomeScreen() {
   const { byGame: liveStates } = useLiveGameStates(date);
   const { settings: rg } = useResponsibleGambling();
 
-  const [view, setView] = useState<View3>('today');
+  const [view, setView] = useState<View2>('today');
   const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
@@ -103,13 +101,10 @@ export function PicksHomeScreen() {
     () => todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)),
     [todayData],
   );
-  const moved = useMemo(() => movedSignals(live), [live]);
-  const tally = useMemo(() => movementTally(moved), [moved]);
 
-  const activeItems: EnrichedPick[] =
-    view === 'today' ? todayData : view === 'signals' ? live : moved;
+  const activeItems: EnrichedPick[] = view === 'today' ? todayData : live;
 
-  // Signals + Movement are the paid surface; Today (every scored pick, with
+  // Signals is the paid surface; Today (every scored pick, with
   // model % and edge) stays free. `entitled` is true whenever billing is off,
   // so this is inert until the flag flips.
   const { entitled } = useEntitlement();
@@ -154,13 +149,9 @@ export function PicksHomeScreen() {
   const subtitle =
     view === 'today'
       ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored`
-      : view === 'signals'
-        ? `${date} · ${live.length} live${
-            signalExposure > 0
-              ? ` · ${formatUnits(signalExposure)} staked`
-              : ''
-          }`
-        : `${date} · ${tally.toward} toward · ${tally.against} against`;
+      : `${date} · ${live.length} live${
+          signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : ''
+        }`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -168,11 +159,11 @@ export function PicksHomeScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Picks</Text>
           <InfoTooltip
-            title="Today, Signals & Movement"
+            title="Today & Signals"
             body={
-              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.'
+              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.'
             }
-            accessibilityLabel="About Today, Signals and Movement"
+            accessibilityLabel="About Today and Signals"
           />
           <View style={styles.headerRight}>
             <BetslipButton />
@@ -184,7 +175,6 @@ export function PicksHomeScreen() {
         <View style={styles.subTabs}>
           <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
           <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} />
-          <SubTabBtn label="Movement" count={moved.length} active={view === 'movement'} onPress={() => setView('movement')} />
         </View>
       </View>
 
@@ -294,7 +284,7 @@ function EmptyForView({
   date,
   hasAny,
 }: {
-  view: View3;
+  view: View2;
   sport: string;
   date: string;
   hasAny: boolean;
@@ -315,18 +305,10 @@ function EmptyForView({
       />
     );
   }
-  if (view === 'signals') {
-    return (
-      <EmptyState
-        title="No live signal bets"
-        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check Movement to see how lines are moving, or check back after the next refresh."
-      />
-    );
-  }
   return (
     <EmptyState
-      title="No line movement yet"
-      subtitle="Your locked signals haven't moved much since we locked them. As the DK line moves toward or against your number, those signals collect here."
+      title="No live signal bets"
+      subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check Today to see everything the model scored, or check back after the next refresh."
     />
   );
 }

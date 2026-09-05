@@ -27,7 +27,6 @@ import { AddToPlayButton } from './AddToPlayButton';
 import { BookLinesRow } from './BookLinesRow';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
-import { PickContextSheet, pickHasContext } from './PickContextSheet';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
 
@@ -56,11 +55,9 @@ export function PickCard({
   item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
 }: Props) {
   const { pick, game } = item;
-  const [contextOpen, setContextOpen] = React.useState(false);
   // Live picks are DraftKings only (Matt, 2026-09-03): the in-play model reads
   // DK's line and the bet is placed there, so the user's book never applies.
   const live = pick.is_live === true;
-  const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -338,28 +335,14 @@ export function PickCard({
         />
       ) : null}
 
-      {hasContext || canTrack || canSlip ? (
+      {canTrack || canSlip ? (
         <View style={styles.actionsRow}>
-          {hasContext ? (
-            <Pressable
-              onPress={() => setContextOpen(true)}
-              hitSlop={6}
-              style={({ pressed }) => [styles.contextBtn, pressed && styles.pressed]}
-            >
-              <Ionicons name="information-circle-outline" size={15} color={colors.tint} />
-              <Text style={styles.contextBtnText}>Context</Text>
-            </Pressable>
-          ) : (
-            <View />
-          )}
-          <View style={styles.actionsRight}>
-            {canSlip ? (
-              <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} compact />
-            ) : null}
-            {canTrack ? (
-              <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
-            ) : null}
-          </View>
+          {canSlip ? (
+            <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} compact />
+          ) : null}
+          {canTrack ? (
+            <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
+          ) : null}
         </View>
       ) : null}
 
@@ -383,10 +366,6 @@ export function PickCard({
             {timing.label}
           </Text>
         </View>
-      ) : null}
-
-      {contextOpen ? (
-        <PickContextSheet enriched={item} visible onClose={() => setContextOpen(false)} />
       ) : null}
     </Pressable>
   );
@@ -581,13 +560,9 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.sm,
-  },
-  actionsRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: spacing.sm,
+    marginTop: spacing.sm,
   },
   // The post-time footer: last line of the card, under the action buttons.
   timingRow: {
@@ -601,21 +576,5 @@ const styles = StyleSheet.create({
   // wrapping (UX review, 2026-09-03).
   timingText: {
     flexShrink: 1,
-  },
-  contextBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radii.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.tint,
-    backgroundColor: colors.bgCard,
-  },
-  contextBtnText: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.tint,
   },
 });
