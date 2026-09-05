@@ -32,6 +32,7 @@ import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterField } from '@/components/filters/FilterField';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
 import type { ActivePill } from '@/components/filters/FilterBar';
+import { useNow } from '@/hooks/useNow';
 import { useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
@@ -54,7 +55,7 @@ import {
 } from '@/lib/statsOdds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { supportsPlayerDetail } from '@/lib/playerLog';
-import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
+import { buildMatchupMap, gradeMatchup, gradeSpoken, type MatchupInfo } from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import {
   EMPTY_SLATE,
@@ -68,6 +69,7 @@ import {
   isStatParticipant,
   slateGameFor,
   slateSubline,
+  sublineSpoken,
   sortLabel,
   sortOptionsFor,
   type SortKey,
@@ -85,7 +87,7 @@ import {
   type StatDef,
 } from '@/lib/statCatalog';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type {
   EnrichedPick,
@@ -141,7 +143,10 @@ const SEASON = new Date().getUTCFullYear();
  *     perfectly and then clips the PRICE at about fontScale 1.3, which is the
  *     one number on the row a user came for.
  */
-const SPOT_W = 76;
+// The MATCHUP column holds two characters now, not a stacked opponent + fact
+// (2026-09-05), so it gives ~24pt back to the player name — which is exactly
+// where the new subline needs it.
+const MATCHUP_W = 52;
 const ODDS_W = 62;
 
 const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
@@ -224,6 +229,10 @@ export function StatsScreen() {
   // the pill's line to the betslip (AddLineSheet below), so a tap in the
   // seeded-default frame would add DraftKings' number for a FanDuel member.
   const { books, ready: booksReady } = usePreferredBooks();
+  // Every clock-derived cell on this board reads THIS value, so the start
+  // time, the Live/Final label and the "is it still bettable" filter all age
+  // together on one tick (useNow).
+  const now = useNow();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   // The "hasn't posted lines" note is the switch — an instruction sits with
@@ -448,9 +457,9 @@ export function StatsScreen() {
     () =>
       unstartedGameIds(
         slateGames.filter((g) => g.game_date === oddsDate),
-        new Date().toISOString(),
+        new Date(now).toISOString(),
       ),
-    [slateGames, oddsDate],
+    [slateGames, oddsDate, now],
   );
 
   // Teams whose game is in progress or over. Their lines are hidden by design
@@ -469,37 +478,15 @@ export function StatsScreen() {
         teams.forEach((t) => pending.add(t));
         continue;
       }
+      // `now` is not read here, but gameStatus reads the clock internally —
+      // the dependency below is what makes this re-derive on the tick.
       const kind = gameStatus(g).kind;
       const label = kind === 'live' ? 'Live' : kind === 'final' || kind === 'ended' ? 'Final' : null;
       if (label) teams.forEach((t) => out.set(t, label));
     }
     pending.forEach((t) => out.delete(t));
     return out;
-  }, [slateGames, oddsDate, slateGameIds]);
-
-  // ── The subline: "9:40 PM ET · @ SEA" under every row's name ───────────────
-  // Matt, 2026-09-05, from a competitor screenshot. Keyed off `games` rather
-  // than the MLB/WNBA matchup views so it lands in EVERY sport at once — the
-  // football boards have no matchup feed at all and would otherwise be the two
-  // that got nothing.
-  //
-  // The clock is read once per rebuild, exactly as `slateGameIds` and
-  // `startedTeams` above read it: a board left open across a first pitch keeps
-  // the pick it made until the slate reloads. That is the existing behaviour of
-  // every other time-sensitive cell on this row, and diverging here would give
-  // one line on the row a different notion of "now" than the price beside it.
-  const slateGameIndex = useMemo(
-    () => buildSlateGameIndex(slateGames, slate, new Date().toISOString()),
-    [slateGames, slate],
-  );
-  const sublineFor = useCallback(
-    (row: { team?: string | null; player_name?: string | null }): string | null =>
-      slateSubline(
-        slateGameFor(row, slateGameIndex),
-        row.team ? startedTeams.get(row.team) ?? null : null,
-      ),
-    [slateGameIndex, startedTeams],
-  );
+  }, [slateGames, oddsDate, slateGameIds, now]);
 
   const quoteByPlayerKey = useMemo(() => {
     if (!propMarket || propLines.market !== propMarket) return new Map<string, StatsOddsQuote>();
@@ -536,6 +523,32 @@ export function StatsScreen() {
     slateGameIds.size > 0 &&
     bookPostsMarket(propLines.rows, propMarket, books, slateGameIds, direction);
   const showOdds = bookPosts && booksReady;
+
+  // ── The subline: "9:40 PM ET · @ SEA" under every row's name ───────────────
+  // Matt, 2026-09-05, from a competitor screenshot. Keyed off `games` rather
+  // than the MLB/WNBA matchup views so it lands in EVERY sport at once — the
+  // football boards have no matchup feed at all and would otherwise be the two
+  // that got nothing.
+  const slateGameIndex = useMemo(
+    () => buildSlateGameIndex(slateGames, slate, new Date(now).toISOString()),
+    [slateGames, slate, now],
+  );
+  const sublineFor = useCallback(
+    (row: { team?: string | null; player_name?: string | null }): string | null => {
+      const match = slateGameFor(row, slateGameIndex);
+      if (!match) return null;
+      // Two rules, both learned the hard way (UX review, 2026-09-05):
+      //   - the status is looked up by the key the row actually MATCHED on, not
+      //     by `row.team` — a UFC row has no team, so keying on it left every
+      //     fight advertising a start time hours after it ended;
+      //   - and it is only handed to the subline when the price column is
+      //     hidden, because that column prints the very same word.
+      const started = showOdds ? null : startedTeams.get(match.key) ?? null;
+      return slateSubline(match.game, started);
+    },
+    [slateGameIndex, startedTeams, showOdds],
+  );
+
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
   // STAT at all (nothing to wait for — six of the eighteen football columns,
@@ -693,9 +706,18 @@ export function StatsScreen() {
   // have no per-game player stats to chart.
   const playerDetail = supportsPlayerDetail(sport);
 
+  /** The board's matchup for a team, as the two params the detail screen takes. */
+  const matchupParams = (team?: string | null) => {
+    const m = team ? matchupByTeam.get(team) : undefined;
+    if (!m) return {};
+    const graded = gradeMatchup(sport, playerType, m);
+    return { matchupText: graded.text, matchupGrade: graded.grade ?? undefined };
+  };
+
   const openPlayer = (p: {
     player_id: string;
     player_name: string;
+    team?: string | null;
     player_type?: SeasonTotalsRow['player_type'];
   }) => {
     // Called directly rather than via `playerDetail` above: it is a type guard,
@@ -711,6 +733,9 @@ export function StatsScreen() {
       // The pill goes to the sportsbook now, so the leg is added one screen
       // deeper — carry the round-trip with us.
       fromParlay: fromParlay || undefined,
+      // The matchup FACT rides along, because the board's column is now just
+      // the grade (MatchupCell). Computed here rather than refetched there.
+      ...matchupParams(p.team),
     });
   };
 
@@ -1510,39 +1535,8 @@ function BoardModeToggle({
   );
 }
 
-/**
- * The subline as words. VoiceOver skips a bare "·" and reads "@ SEA" as
- * "at sign SEA", so the separator becomes a comma and the away marker becomes
- * the word — the row's label has to say the same thing the row shows.
- */
-function sublineSpoken(subline: string): string {
-  return subline.replace(/ · /g, ', ').replace(/(^|, )@ /, '$1at ');
-}
-
 function fmtValue(value: number, basis: Basis): string {
   return basis === 'perGame' ? value.toFixed(1) : String(Math.round(value));
-}
-
-function matchupColor(tier: MatchupInfo['tier']): string {
-  if (tier === 'favorable') return colors.bet;
-  if (tier === 'tough') return colors.avoid;
-  return colors.textSecondary;
-}
-
-/**
- * The tier IN WORDS, for the accessibility label.
- *
- * There used to be only `matchupTierLabel`, returning the three-letter glyph
- * FAV / TGH / NEU that the cell printed. When the cell stopped printing it and
- * the label started carrying it instead, the label inherited the glyph — so
- * VoiceOver announced "TGH spot" and "NEU spot" ("new spot"), while sighted
- * users had colour alone. An abbreviation drawn on screen is a label; spoken,
- * it is noise.
- */
-function matchupTierWord(tier: MatchupInfo['tier']): string {
-  if (tier === 'favorable') return 'Favourable';
-  if (tier === 'tough') return 'Tough';
-  return 'Neutral';
 }
 
 /** Right-hand LINE cell: the user's sportsbook's price for the number the
@@ -1641,44 +1635,31 @@ function OddsCell({
   );
 }
 
-/** SPOT: tonight's opponent, and the one fact that decides whether it is a good
- * spot to bet into.
+/** MATCHUP: how hard this spot is, as one letter.
  *
- * This column is where the opposing pitcher went when the row lost its subline
- * (Matt, 2026-09-04: "nothing under the player name"). Dropping it outright
- * would have cost a PROP research board its most load-bearing fact after the
- * hit rate — a 70% hit rate into a 6.45-ERA lefty is not the same bet as 70%
- * into Skubal — so the fact moved from under the name into the table, which is
- * the pattern the NBA's own leaderboards use and what Matt asked the designer
- * to arbitrate.
+ * Matt, 2026-09-05: "update spot column to just be difficulty of that match up
+ * and have a bigger scale besides low med and high". So the cell is the grade
+ * and nothing else — the opponent moved under the name the same day, and the
+ * FACT behind the grade (the opposing starter and his ERA, the defence's
+ * rating) moved to the player's detail screen, which was Matt's own alternative
+ * home for it on 2026-09-04 ("or have it be in the player data when you click
+ * on a record"). It is also still spoken in full here, in the cell's label.
  *
- * The tier colours the PITCHER, not the opponent. Two reasons it moved off
- * `vs HOU`: `colors.bet` / `colors.avoid` are this app's BET/AVOID semantics,
- * so a green team abbreviation on a board full of prices reads as "bet
- * Houston"; and the hit-rate column 60pt away is already green/amber/red about
- * something else, so the row carried two traffic lights meaning different
- * things. On the fact, the colour reads as "this pitcher is the reason", which
- * is what it actually encodes.
+ * The grade is a percentile against MEASURED league distributions, not the
+ * three hand-set cliffs it replaces — `lib/matchup.ts` carries the numbers and
+ * why the old bands called 77% of WNBA matchups favourable.
  *
- * Colour is never the only carrier: the cell's accessibility label says the
- * tier in words (matchupTierWord — it used to say "TGH", which is not a word).
- * The em-dash placeholder keeps the two-line rail straight when a sport has no
- * detail to print.
+ * Colour is the `colors.grade*` ramp, NOT bet/avoid: those are this app's
+ * BET/AVOID semantics and the hit-rate column 60pt away is already a traffic
+ * light. It is also never the only carrier — the letter is the fact, the
+ * colour only speeds up the scan, and the label spells the letter out
+ * ("B plus", because VoiceOver reads a bare "+" as nothing).
+ *
+ * An ungraded matchup is a DASH, never a C: grading a starter we do not know
+ * as average invents the one fact this column exists to report.
  */
-function MatchupCell({
-  matchup,
-  showOpponent,
-}: {
-  matchup: MatchupInfo | null;
-  /**
-   * False once the row's own subline is printing "vs HOU" under the name
-   * (2026-09-05). Two copies of the opponent 100pt apart on one row is not
-   * emphasis, it is a bug the reader has to rule out — so the column keeps the
-   * FACT the subline cannot carry and drops the half it now duplicates.
-   */
-  showOpponent: boolean;
-}) {
-  if (!matchup) {
+function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
+  if (!matchup?.grade) {
     return (
       <View
         style={styles.matchupWrap}
@@ -1689,23 +1670,14 @@ function MatchupCell({
       </View>
     );
   }
-  const c = matchupColor(matchup.tier);
   return (
     <View
       style={styles.matchupWrap}
       accessible
-      accessibilityLabel={`${matchupTierWord(matchup.tier)} spot, ${matchup.text}`}
+      accessibilityLabel={`Matchup ${gradeSpoken(matchup.grade)}, ${matchup.text}`}
     >
-      {showOpponent ? (
-        <Text style={styles.matchupOppName} numberOfLines={1}>
-          vs {matchup.row.opponent}
-        </Text>
-      ) : null}
-      <Text
-        style={[styles.matchupDetail, showOpponent && styles.matchupDetailStacked, { color: c }]}
-        numberOfLines={1}
-      >
-        {matchup.detail ?? '—'}
+      <Text style={[styles.matchupGrade, { color: gradeColor(matchup.grade) }]} numberOfLines={1}>
+        {matchup.grade}
       </Text>
     </View>
   );
@@ -1741,7 +1713,7 @@ function ColumnHeader({
       ) : null}
       {showMatchup ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderMatchup]} numberOfLines={1}>
-          SPOT
+          MATCHUP
         </Text>
       ) : null}
     </View>
@@ -1802,7 +1774,15 @@ function LeaderRow({
           {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
         </Text>
         {subline ? (
-          <Text style={styles.rowSubline} numberOfLines={1}>
+          // The spoken form goes on the Text itself, not only in the row's
+          // label: a row that is NOT tappable (NHL, UFC, Golf) sets
+          // `accessible={false}` above, so VoiceOver reads this line on its own
+          // and would say "at sign SEA" (UX review, 2026-09-05).
+          <Text
+            style={styles.rowSubline}
+            numberOfLines={1}
+            accessibilityLabel={sublineSpoken(subline)}
+          >
             {subline}
           </Text>
         ) : null}
@@ -1819,7 +1799,7 @@ function LeaderRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} showOpponent={!subline} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -1888,7 +1868,15 @@ function HitRateRow({
           {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
         </Text>
         {subline ? (
-          <Text style={styles.rowSubline} numberOfLines={1}>
+          // The spoken form goes on the Text itself, not only in the row's
+          // label: a row that is NOT tappable (NHL, UFC, Golf) sets
+          // `accessible={false}` above, so VoiceOver reads this line on its own
+          // and would say "at sign SEA" (UX review, 2026-09-05).
+          <Text
+            style={styles.rowSubline}
+            numberOfLines={1}
+            accessibilityLabel={sublineSpoken(subline)}
+          >
             {subline}
           </Text>
         ) : null}
@@ -1910,7 +1898,7 @@ function HitRateRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} showOpponent={!subline} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -2045,7 +2033,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   filterBadgeText: {
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.bold,
     color: colors.textInverse,
   },
@@ -2205,14 +2193,14 @@ const styles = StyleSheet.create({
   },
   colHeaderRank: {
     width: 20,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
   colHeaderName: {
     flex: 1,
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -2220,7 +2208,7 @@ const styles = StyleSheet.create({
   colHeaderRight: {
     width: 48,
     textAlign: 'right',
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
@@ -2242,7 +2230,7 @@ const styles = StyleSheet.create({
     lineHeight: font.size.caption * 1.35,
   },
   noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
-  colHeaderMatchup: { minWidth: SPOT_W, textAlign: 'right' },
+  colHeaderMatchup: { minWidth: MATCHUP_W, textAlign: 'right' },
   // Rows are deliberately compact — more players visible per screen.
   row: {
     flexDirection: 'row',
@@ -2250,6 +2238,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
     paddingHorizontal: spacing.lg,
     paddingVertical: 5,
+    // The row is a tap target that opens the player, and a full-width row
+    // cannot use hitSlop without overlapping its neighbours — so the height
+    // has to be the target (HIG 44pt). It also stops the list re-flowing when
+    // the slate query lands: a one-line row (~26pt) and a two-line row with a
+    // subline (~40pt) both fit inside 44, so nothing moves under the thumb
+    // (UX review, 2026-09-05).
+    minHeight: 44,
     gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
@@ -2271,15 +2266,17 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   rowTeam: {
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
   },
-  // "9:40 PM ET · @ SEA". Deliberately the quietest text on the row: it is
-  // context for the name above it, never a number the eye should stop on.
+  // "9:40 PM ET · @ SEA". Quieter than the name, but NOT quieter than the AA
+  // floor: textTertiary (#3C3C4399) composites to ~3.4:1 on the card, and 11pt
+  // is not large text, so the hierarchy is carried by SIZE and position rather
+  // than by contrast (UX review, 2026-09-05).
   rowSubline: {
-    fontSize: 11,
-    color: colors.textTertiary,
+    fontSize: font.size.micro,
+    color: colors.textSecondary,
     marginTop: 1,
   },
   valueWrap: {
@@ -2292,7 +2289,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   valueLabel: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
   },
   // minWidth, not width: the price and its column grow together at large text
@@ -2360,23 +2357,20 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   matchupWrap: {
-    minWidth: SPOT_W,
-    maxWidth: SPOT_W * 1.4,
+    minWidth: MATCHUP_W,
+    maxWidth: MATCHUP_W * 1.4,
     flexShrink: 1,
     alignItems: 'flex-end',
   },
-  matchupOppName: {
-    fontSize: font.size.caption,
+  // One letter (two with a modifier), so it can carry the row's weight — it is
+  // the only thing in the column and it has to be legible at a glance down 25
+  // rows. Bumped from caption because a bold "B+" at 12pt reads as a footnote
+  // rather than a grade.
+  matchupGrade: {
+    fontSize: font.size.footnote,
     fontWeight: font.weight.bold,
     letterSpacing: 0.2,
   },
-  matchupDetail: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-  },
-  // Only when the opponent line sits above it — alone in the cell the fact
-  // centres against the name block instead of hanging a pixel low.
-  matchupDetailStacked: { marginTop: 1 },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
   retryBtn: {

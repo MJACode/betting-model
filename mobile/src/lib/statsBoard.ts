@@ -24,7 +24,7 @@
 // Relative, not '@/…': the verify script below runs this module under tsx,
 // which does not resolve the bundler alias for a VALUE import (a type-only
 // import is erased, which is why '@/types' can stay).
-import { formatGameTimeET, parseStamp, todayET } from './format';
+import { formatGameTimeET, weekdayShortET } from './format';
 import type { GameRow } from '@/types';
 
 // ── 1. Sort ──
@@ -189,8 +189,21 @@ export interface SlateGame {
   game: GameRow;
   /** The other side, from this row's perspective. */
   opponent: string;
-  isHome: boolean;
+  /**
+   * True at home, false away, NULL where the fixture has no home side.
+   *
+   * A UFC `games` row stores the two FIGHTERS in `home_team`/`away_team` —
+   * they are slots, not venues — so reading them as home/away printed
+   * "vs Amanda Nunes" on one fighter's row and "@ Ronda Rousey" on the other's
+   * FOR THE SAME BOUT, which reads as two different fixtures on one board (UX
+   * review, 2026-09-05). Golf is the same shape (`away_team = 'FIELD'`) and is
+   * safe today only because it has no player leaderboard yet.
+   */
+  isHome: boolean | null;
 }
+
+/** Sports whose `games` row has no home side — see `SlateGame.isHome`. */
+const NEUTRAL_SITE_SPORTS = new Set(['UFC', 'GOLF']);
 
 /**
  * key → the game that key plays on the slate date. Keyed by BOTH team abbrevs,
@@ -226,32 +239,53 @@ export function buildSlateGameIndex(
       .sort((a, b) => String(a.commence_time ?? '').localeCompare(String(b.commence_time ?? '')));
     const upcoming = sorted.find((g) => !!g.commence_time && g.commence_time > nowIso);
     const game = upcoming ?? sorted[sorted.length - 1];
-    const isHome = game.home_team === key;
-    out.set(key, { game, opponent: isHome ? game.away_team : game.home_team, isHome });
+    const isHome = NEUTRAL_SITE_SPORTS.has(game.sport) ? null : game.home_team === key;
+    out.set(key, {
+      game,
+      opponent: game.home_team === key ? game.away_team : game.home_team,
+      isHome,
+    });
   }
   return out;
 }
 
-/** The slate game for a leaderboard row — team first, then name (UFC). */
+/**
+ * The key a leaderboard row matched on — team first, then name (UFC).
+ *
+ * Returned alongside the game because the CALLER needs it too: the board's
+ * Live/Final map is keyed the same way, and looking that up by `row.team`
+ * alone left every UFC row advertising a start time hours after the fight
+ * ended (UX review, 2026-09-05).
+ */
 export function slateGameFor(
   row: { team?: string | null; player_name?: string | null },
   index: Map<string, SlateGame>,
-): SlateGame | null {
+): { key: string; game: SlateGame } | null {
   if (row.team) {
     const byTeam = index.get(row.team);
-    if (byTeam) return byTeam;
+    if (byTeam) return { key: row.team, game: byTeam };
   }
-  if (row.player_name) return index.get(row.player_name) ?? null;
+  if (row.player_name) {
+    const byName = index.get(row.player_name);
+    if (byName) return { key: row.player_name, game: byName };
+  }
   return null;
 }
 
 /**
  * The subline itself: "9:40 PM ET · @ SEA".
  *
- * `started` is the board's own Live/Final label for the row's team — once the
- * game is under way its start time is not the fact a bettor needs, and printing
- * "9:40 PM ET" beside a price the board has already blanked reads as a stale
- * screen. A slate that is not today gets a weekday in front ("SAT 1:00 PM ET"),
+ * `started` is the board's Live/Final label for this row, and it is passed
+ * ONLY when the price column is hidden. Two rules meet here:
+ *   - once a game is under way its start time is not the fact a bettor needs;
+ *   - but the price cell already prints "Live"/"Final" to explain its missing
+ *     number, and the same word twice on one row reads as a bug the reader has
+ *     to rule out (UX review, 2026-09-05) — the same duplication the opponent
+ *     had against the MATCHUP column.
+ * So when the price column is visible it owns the status and the subline keeps
+ * the start time; when it is hidden the subline takes the status over.
+ *
+ * A slate that is not today gets a weekday in front ("SAT 1:00 PM ET"),
  * because a bare clock time on Sunday's board is the wrong day, not the wrong
  * hour.
  *
@@ -263,7 +297,8 @@ export function slateSubline(
   started: 'Live' | 'Final' | null,
 ): string | null {
   if (!entry) return null;
-  const side = `${entry.isHome ? 'vs' : '@'} ${entry.opponent}`;
+  // No home side, no "@": both fighters on a card see the same fixture.
+  const side = entry.isHome === null ? `vs ${entry.opponent}` : `${entry.isHome ? 'vs' : '@'} ${entry.opponent}`;
   if (started) return `${started} · ${side}`;
   const time = formatGameTimeET(entry.game.commence_time);
   if (!time) return side;
@@ -271,22 +306,16 @@ export function slateSubline(
   return `${day ? `${day} ` : ''}${time} · ${side}`;
 }
 
-/** 'SAT' for a stamp on a future ET day; null when it falls today. */
-function weekdayShortET(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  try {
-    const d = parseStamp(iso);
-    const dateET = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/New_York',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(d);
-    if (dateET === todayET()) return null;
-    return new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' })
-      .format(d)
-      .toUpperCase();
-  } catch {
-    return null;
-  }
+/**
+ * The subline as words. VoiceOver skips a bare "·" and reads "@ SEA" as
+ * "at sign SEA", so the separator becomes a comma and the away marker becomes
+ * the word.
+ *
+ * It lives beside `slateSubline` rather than in the screen because the subline
+ * renders in THREE places — the two Players rows and the Teams row — and the
+ * first version, defined in StatsScreen, reached only the tappable one (UX
+ * review, 2026-09-05).
+ */
+export function sublineSpoken(subline: string): string {
+  return subline.replace(/ · /g, ', ').replace(/(^|, )@ /, '$1at ');
 }

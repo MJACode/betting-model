@@ -299,9 +299,25 @@ check(
 // Row → game, matching isOnSlate: team first, then the name (UFC has no team).
 const ufcCard = [subGame({ game_id: 'ufc1', sport: 'UFC', home_team: 'Alex Perez', away_team: 'Matheus Nicolau' })];
 const ufcIdx = buildSlateGameIndex(ufcCard, { date: SUB_TODAY, keys: new Set(['Alex Perez']), isToday: true }, NOW);
-check('a UFC fighter finds his bout by NAME', slateGameFor({ team: null, player_name: 'Alex Perez' }, ufcIdx)?.opponent === 'Matheus Nicolau');
-check('a team row finds its game by ABBREV', slateGameFor({ team: 'LAD', player_name: 'M. Betts' }, idx)?.opponent === 'WSH');
+const ufcMatch = slateGameFor({ team: null, player_name: 'Alex Perez' }, ufcIdx);
+check('a UFC fighter finds his bout by NAME', ufcMatch?.game.opponent === 'Matheus Nicolau');
+// The KEY comes back too, because the caller looks the Live/Final label up by
+// it: keying that on `row.team` alone left every UFC row advertising a start
+// time hours after the fight ended (UX review, 2026-09-05).
+check('and the matched key comes back with it, for the status lookup', ufcMatch?.key === 'Alex Perez');
+const ladMatch = slateGameFor({ team: 'LAD', player_name: 'M. Betts' }, idx);
+check('a team row finds its game by ABBREV', ladMatch?.game.opponent === 'WSH' && ladMatch?.key === 'LAD');
 check('a row with neither gets nothing', slateGameFor({ team: 'SEA', player_name: 'Nobody' }, idx) === null);
+// A UFC card has no home side: both fighters must see the SAME fixture, or the
+// board shows one bout as two.
+check(
+  'neither fighter gets an "@" — a bout is not a venue',
+  (slateSubline(ufcMatch?.game ?? null, null) ?? '').endsWith('· vs Matheus Nicolau') &&
+    (slateSubline(
+      slateGameFor({ team: null, player_name: 'Matheus Nicolau' }, ufcIdx)?.game ?? null,
+      null,
+    ) ?? '').endsWith('· vs Alex Perez'),
+);
 // The football boards are the reason this lives here and not in lib/matchup:
 // they have no matchup feed at all, so a matchup-view subline would have
 // shipped to two sports and skipped six.
@@ -309,7 +325,7 @@ const nflSlate = [subGame({ game_id: 'nfl1', sport: 'NFL', home_team: 'SEA', awa
 check(
   'a sport with no matchup feed still gets a subline',
   (slateSubline(
-    slateGameFor({ team: 'SF' }, buildSlateGameIndex(nflSlate, { date: SUB_TODAY, keys: new Set(['SF']), isToday: true }, NOW)),
+    slateGameFor({ team: 'SF' }, buildSlateGameIndex(nflSlate, { date: SUB_TODAY, keys: new Set(['SF']), isToday: true }, NOW))?.game ?? null,
     null,
   ) ?? '').endsWith('· @ SEA'),
 );

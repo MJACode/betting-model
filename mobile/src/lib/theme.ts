@@ -5,6 +5,8 @@
 
 import { Platform } from 'react-native';
 
+import type { MatchupGrade } from './matchup';
+
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
 export const colors = {
@@ -53,6 +55,27 @@ export const colors = {
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
 
+  // ── Matchup difficulty ramp (the Stats board's MATCHUP column) ───────────
+  // Five steps across the A→F grade scale, NOT the bet/avoid pair. Two
+  // reasons they are their own colours:
+  //
+  //   1. `bet` / `avoid` are BET/AVOID semantics. A row already carries a
+  //      hit-rate traffic light and a price; a third thing in the same green
+  //      reads as a side to take rather than a spot to weigh.
+  //   2. `bet` (#34C759) is 2.22:1 on bgCard and AMBER (#FF9500) is 2.20:1 —
+  //      both FAIL WCAG AA for text, and the old three-tier column was drawn
+  //      in exactly those. Every value below is ≥ 4.9:1 on white (measured,
+  //      2026-09-05), because here the colour sits on a two-character word
+  //      that has to be read, not on a filled pill.
+  //
+  // C is grey on purpose: average is not a signal, and 13 grades with a
+  // coloured middle turn the column into noise.
+  gradeA: '#17803D', // 5.01:1
+  gradeB: '#4D7C0F', // 4.99:1
+  gradeC: '#6E6E73', // 5.07:1
+  gradeD: '#C2410C', // 5.18:1
+  gradeF: '#B3261E', // 6.54:1
+
   // Confidence
   high: '#34C759',
   med: '#FF9500',
@@ -97,6 +120,12 @@ export const font = {
     default: 'System',
   }),
   size: {
+    // Below caption. Both were already in the StyleSheets as literals (row
+    // team abbrevs, meta lines, column headers); naming them stops the next
+    // sub-caption line from inventing a third size nobody agreed to
+    // (UX review, 2026-09-05).
+    nano: 10,
+    micro: 11,
     caption: 12,
     footnote: 13,
     body: 15,
@@ -124,4 +153,23 @@ export function heatColor(profit: number, max: number): string {
     .padStart(2, '0');
   const base = profit > 0 ? colors.positive : colors.negative;
   return `${base}${alpha}`;
+}
+
+/**
+ * Matchup grade → its colour. Five steps across thirteen letters: the letter
+ * separates neighbours, the colour separates tiers.
+ *
+ * It lives here rather than in the board because two screens draw a grade —
+ * the Stats MATCHUP column and the player's detail header — and a second copy
+ * is how they drift apart. (It cannot live in `lib/matchup.ts`: that module is
+ * imported by the tsx verify scripts, and this file pulls in `react-native`,
+ * which they cannot resolve.)
+ */
+export function gradeColor(grade: MatchupGrade): string {
+  const letter = grade[0];
+  if (letter === 'A') return colors.gradeA;
+  if (letter === 'B') return colors.gradeB;
+  if (letter === 'C') return colors.gradeC;
+  if (letter === 'D') return colors.gradeD;
+  return colors.gradeF;
 }

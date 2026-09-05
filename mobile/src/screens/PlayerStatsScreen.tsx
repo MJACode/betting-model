@@ -40,7 +40,8 @@ import { buildPickIndex, slipPickFor } from '@/lib/statsOdds';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import type { MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
@@ -50,6 +51,10 @@ export function PlayerStatsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playerId, playerName, playerType } = route.params;
   const fromParlay = route.params.fromParlay === true;
+  // Handed over by the Stats board; absent when the player was opened from
+  // anywhere else. Typed loosely on the route (a string) and narrowed here.
+  const matchupText = route.params.matchupText ?? null;
+  const matchupGrade = (route.params.matchupGrade as MatchupGrade | undefined) ?? null;
   // Older navigation state (a screen restored from a build before player detail
   // went multi-sport) carries no sport — MLB was the only one that could open it.
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
@@ -171,6 +176,24 @@ export function PlayerStatsScreen() {
           <View style={styles.headerText}>
             <Text style={styles.playerName}>{playerName}</Text>
             <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
+            {/* Tonight's matchup, in full. The Stats board's MATCHUP column is
+                a bare grade as of 2026-09-05, so this is where the FACT behind
+                it lives for a sighted user — Matt's own alternative home for it
+                ("have it be in the player data when you click on a record",
+                2026-09-04). Only present when the board handed it over, so a
+                player opened from anywhere else shows nothing here rather than
+                an empty row. */}
+            {matchupText ? (
+              <Text style={styles.matchupLine} numberOfLines={2}>
+                {matchupGrade ? (
+                  <Text style={[styles.matchupGrade, { color: gradeColor(matchupGrade) }]}>
+                    {matchupGrade}
+                    {'  '}
+                  </Text>
+                ) : null}
+                {matchupText}
+              </Text>
+            ) : null}
           </View>
           {/* Recent news, top right — the sentence behind the number. Hidden
               when the feed has nothing on this player, so the header never
@@ -484,6 +507,14 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  matchupLine: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  matchupGrade: {
+    fontWeight: font.weight.bold,
   },
   windowRow: {
     paddingHorizontal: spacing.lg,

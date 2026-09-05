@@ -28,7 +28,7 @@
 
 import { readFileSync } from 'node:fs';
 
-import { lastName } from '../src/lib/matchup';
+import { gradeFor, gradeSpoken, lastName, normalCdf } from '../src/lib/matchup';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -44,6 +44,7 @@ const stats = read('src/screens/StatsScreen.tsx');
 const teams = read('src/components/TeamsBoard.tsx');
 const player = read('src/screens/PlayerStatsScreen.tsx');
 const bookMark = read('src/components/BookMark.tsx');
+const theme = read('src/lib/theme.ts');
 const groupTabs = read('src/components/GroupTabs.tsx');
 
 // ── 1. The pill asks, on Players and on Teams ───────────────────────────────
@@ -155,30 +156,84 @@ check(
   /const BOOK_GLYPHS[:\s]/.test(bookMark),
 );
 
-// ── 3b. The matchup moved into the table, it did not vanish ────────────────
+// ── 3b. The matchup column: a graded difficulty, and where the fact went ───
 // Matt, 2026-09-04: "Add it as a widened spot column or have it be in the
-// player data when you click on a record … Whatever the design thinks is best
-// usability and UI." The designer's answer was the column, explicitly against
-// the detail screen: a board whose matchup lives one tap deeper "can no longer
-// be scanned for a bet, only for a name."
+// player data when you click on a record." Then 2026-09-05: "update spot
+// column to just be difficulty of that match up and have a bigger scale
+// besides low med and high."
+//
+// So the column is now ONE letter, and 09-04's other option became load-bearing
+// rather than rejected: the fact behind the grade moved to the player's detail
+// screen. What is pinned here is that both halves happened — if the column got
+// its grade and the fact went nowhere, the ERA left the product.
 
 const matchup = read('src/lib/matchup.ts');
+const playerDetail = read('src/screens/PlayerStatsScreen.tsx');
+
 check(
-  'every matchup carries the one fact the SPOT column prints',
-  /detail: string \| null;/.test(matchup),
+  'the scale is bigger than three tiers',
+  // The literal ask. Thirteen letters, and the old union is gone.
+  /'A\+' \| 'A' \| 'A-'/.test(matchup) &&
+    !/'favorable' \| 'neutral' \| 'tough'/.test(matchup),
 );
 check(
-  'a batter matchup names the opposing starter AND his ERA',
-  // The ERA, not the arm: the tier colour separates only the tails (cliffs at
-  // 4.60 / 3.40 around a ~4.10 league average), and `text` — the only other
-  // carrier — now reaches a screen reader and nothing else.
-  /detail: `\$\{lastName\(m\.opp_starter_name\)\} \$\{era\.toFixed\(2\)\}`/.test(matchup),
+  'an ungraded matchup is a dash, never a C',
+  // Grading an unknown starter as average invents the one fact the column
+  // exists to report. Executed, not grepped.
+  gradeFor(null) === null && gradeFor(NaN) === null,
+);
+check(
+  'the grade is a percentile against MEASURED anchors, not remembered cliffs',
+  // The old bands called 77% of WNBA matchups favourable because they assumed a
+  // ~101 league-average defensive rating; the measured 2026 figure is 106.5.
+  // Anything that reintroduces a bare comparison against a magic number here
+  // should fail this.
+  /const ANCHORS = \{/.test(matchup) &&
+    /wnbaDefRtg: \{ median: 106\.46/.test(matchup) &&
+    !/era >= 4\.6/.test(matchup),
+);
+// The grade boundaries and the CDF are pure, so RUN them.
+check('a median matchup grades C-ish, not A', ['C', 'C+'].includes(gradeFor(normalCdf(0)) ?? ''));
+check('a bottom-decile spot fails', gradeFor(normalCdf(-1.6)) === 'F' || gradeFor(normalCdf(-1.6)) === 'D-');
+check('a top-decile spot is an A', (gradeFor(normalCdf(1.4)) ?? '').startsWith('A'));
+check(
+  'the scale is monotone — a better spot never grades worse',
+  (() => {
+    const order = ['F','D-','D','D+','C-','C','C+','B-','B','B+','A-','A','A+'];
+    let prev = -1;
+    for (let zi = -3; zi <= 3; zi += 0.05) {
+      const idx = order.indexOf(gradeFor(normalCdf(zi)) ?? '');
+      if (idx < prev) return false;
+      prev = idx;
+    }
+    return true;
+  })(),
+);
+check(
+  'every grade is reachable — a band nothing can land in is a lie about the scale',
+  (() => {
+    const seen = new Set<string>();
+    for (let zi = -4; zi <= 4; zi += 0.01) seen.add(gradeFor(normalCdf(zi)) ?? '');
+    return seen.size === 13;
+  })(),
+);
+check(
+  'a batter matchup still names the opposing starter AND his ERA',
+  // `text` is the sole carrier now that the cell prints only a letter — it
+  // reaches the cell's screen-reader label AND the player detail screen.
+  /text: `vs \$\{m\.opponent\} · \$\{shortName\(m\.opp_starter_name\)\} \$\{era\.toFixed\(2\)\} ERA\$\{hand\}`/.test(
+    matchup,
+  ),
 );
 check(
   'a named starter with no ERA yet is named, not called TBD',
-  /detail: m\.opp_starter_name \? `\$\{lastName\(m\.opp_starter_name\)\}\$\{hand\}` : 'TBD'/.test(
-    matchup,
-  ),
+  /\$\{m\.opp_starter_name \?\? 'starter TBD'\}/.test(matchup),
+);
+check(
+  'the fact has somewhere to go: the player detail screen prints it',
+  // Without this the column change deletes the ERA from the product for every
+  // sighted user.
+  /matchupText \? \(/.test(playerDetail) && /styles\.matchupLine/.test(playerDetail),
 );
 // lastName is pure and importable, so this RUNS it rather than grepping the
 // source for a constant name — the first version asserted /SUFFIXES/, which
@@ -194,52 +249,38 @@ for (const [input, want] of [
   check(`lastName(${JSON.stringify(input)}) is the surname, not the suffix`, lastName(input) === want, lastName(input));
 }
 check(
-  'the SPOT column and its header share one constant, and its growth is bounded',
-  /colHeaderMatchup: \{ minWidth: SPOT_W/.test(stats) &&
-    /matchupWrap: \{\s*\n\s*minWidth: SPOT_W,\s*\n\s*maxWidth:/.test(stats),
+  'the MATCHUP column and its header share one constant, and its growth is bounded',
+  /colHeaderMatchup: \{ minWidth: MATCHUP_W/.test(stats) &&
+    /matchupWrap: \{\s*\n\s*minWidth: MATCHUP_W,\s*\n\s*maxWidth:/.test(stats),
 );
 check(
   'and both right-hand columns can give, so the player NAME is not the only one that does',
   (stats.match(/^\s+flexShrink: 1,$/gm) ?? []).length >= 2,
 );
 check(
-  'the tier colours the FACT, not the team abbreviation',
-  // colors.bet/avoid are BET/AVOID semantics: a green team name on a board of
-  // prices reads as a side, and the hit-rate column is already a traffic light.
-  /style=\{\[styles\.matchupDetail,[^\]]*\{ color: c \}\]\}/.test(stats) &&
-    /<Text style=\{styles\.matchupOppName\}/.test(stats),
+  'the grade is coloured off its own ramp, not the BET/AVOID pair',
+  // colors.bet/avoid are this app's BET/AVOID semantics, and the hit-rate
+  // column is already a traffic light. They also fail AA outright at 2.22:1
+  // and 2.20:1, which is what the old tier colours were drawn in.
+  /export function gradeColor/.test(theme) &&
+    /gradeA: '#/.test(theme) &&
+    !/gradeA: colors\.bet/.test(theme),
 );
 check(
-  'and colour is never the only carrier — the label says the tier IN WORDS',
-  // Not the FAV/TGH/NEU glyph: spoken, "TGH" is noise and "NEU" is "new".
-  /accessibilityLabel=\{`\$\{matchupTierWord\(matchup\.tier\)\} spot/.test(stats) &&
-    /return 'Favourable';/.test(stats),
-);
-check(
-  'the two-line rail stays straight when a sport has no detail',
-  /\{matchup\.detail \?\? '—'\}/.test(stats),
+  'and colour is never the only carrier — the LETTER is the fact, spelled out for VoiceOver',
+  /accessibilityLabel=\{`Matchup \$\{gradeSpoken\(matchup\.grade\)\}/.test(stats) &&
+    gradeSpoken('B+') === 'B plus' &&
+    gradeSpoken('C-') === 'C minus' &&
+    gradeSpoken('A') === 'A',
 );
 
-// ── 3c. …and then the opponent came back under the name (2026-09-05) ───────
+// ── 3c. …and the opponent came back under the name (2026-09-05) ────────────
 // Matt, from a competitor screenshot: "add the time of the game and who they
-// are playing under the name … for all sports". That REVERSES 3b's premise
-// for half the SPOT column — so the invariant to hold is not "the column
-// keeps its opponent line", it is that the opponent appears ONCE on a row.
-check(
-  'the SPOT column yields its opponent line to the subline that now carries it',
-  /showOpponent=\{!subline\}/.test(stats) && /\{showOpponent \? \(/.test(stats),
-);
-check(
-  'and it keeps the FACT, which the subline cannot carry',
-  // If this ever goes, the ERA left the product: `text` reaches a screen
-  // reader and nothing else (3b).
-  /\{matchup\.detail \?\? '—'\}/.test(stats),
-);
+// are playing under the name … for all sports".
 check(
   'the subline is sourced from the slate, not the MLB/WNBA matchup views',
   // The matchup views cover two sports. `games` covers eight — "for all
-  // sports" is the whole ask, and buildSlateGameIndex is the only reason the
-  // football boards get one.
+  // sports" is the whole ask.
   /buildSlateGameIndex\(slateGames, slate/.test(stats) &&
     /const sublineFor = useCallback\(/.test(stats),
 );
@@ -249,12 +290,42 @@ check(
     (stats.match(/styles\.rowSubline/g) ?? []).length === 2,
 );
 check(
-  'VoiceOver hears the game too, in words rather than "at sign SEA"',
-  /sublineSpoken\(subline\)/.test(stats) && /replace\(\/\(\^\|, \)@ \/, '\$1at '\)/.test(stats),
+  'VoiceOver hears the game on every row, tappable or not',
+  // The non-tappable sports (NHL, UFC, Golf) set accessible={false} on the
+  // name block, so the label has to sit on the subline Text itself.
+  (stats.match(/accessibilityLabel=\{sublineSpoken\(subline\)\}/g) ?? []).length === 2 &&
+    /accessibilityLabel=\{sublineSpoken\(subline\)\}/.test(teams),
 );
 check(
   'the teams board carries the same subline, from the same helper',
   /slateSubline\(/.test(teams) && /buildSlateGameIndex\(/.test(teams),
+);
+check(
+  'the status word is printed once per row, not beside a price that says it too',
+  // OddsCell / TeamLineCell already print "Live"/"Final" to explain a missing
+  // number. The subline only takes the status when that column is hidden.
+  /showOdds \? null : startedTeams\.get\(match\.key\)/.test(stats) &&
+    /showLines \? null : startedTeams\.get\(item\.team\)/.test(teams),
+);
+check(
+  'and the status is looked up by the key the row MATCHED on, so UFC rows get one',
+  // A UFC row has no team; keying on row.team left every fight advertising a
+  // start time hours after it ended.
+  /startedTeams\.get\(match\.key\)/.test(stats),
+);
+check(
+  'the row reserves a 44pt tap target, so a late subline cannot re-flow the list',
+  /minHeight: 44,/.test(stats) && /minHeight: 54,/.test(teams),
+);
+check(
+  'the subline clears the AA contrast floor (textTertiary at 11pt does not)',
+  (stats.match(/rowSubline: \{[\s\S]{0,120}?color: colors\.textSecondary/g) ?? []).length === 1 &&
+    /rowSubline: \{ fontSize: font\.size\.micro, color: colors\.textSecondary/.test(teams),
+);
+check(
+  'one clock feeds every time-derived cell, so the board ages together',
+  /const now = useNow\(\)/.test(stats) && /const now = useNow\(\)/.test(teams) &&
+    (stats.match(/new Date\(now\)\.toISOString\(\)/g) ?? []).length === 2,
 );
 
 // ── 4. What the review caught: three regressions that must not come back ────
