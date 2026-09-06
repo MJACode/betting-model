@@ -881,3 +881,31 @@ books did we actually get tonight", which today is a table scan nobody runs.
 Not needed for anything shipped yet: Matt's rule is that a book we pull lines
 for stays in the picker whatever its depth (2026-09-05), so nothing currently
 depends on the slate-wide answer.
+
+---
+
+## [ ] Two publishers can now post the same pick twice
+
+Opened 2026-09-05 by #505, which made every pick-WRITER publish rather than
+leaving it to the refresh pass. There are now two processes that can call
+`notify_discord_signals` / `notify_signal_changes` for the same date: the
+refresh pass (`worker`, at :17 and every 10 minutes in the evening) and the
+pre-game line poller (`pollers`, every 30 seconds, whenever a tick writes a
+BET). The NFL card jobs are a third.
+
+`push_sent` is `UNIQUE(lock_key, kind)` and is written AFTER a successful post,
+so it cannot stop a second POST that was already in flight — only the second
+ledger row. Both producers read "unposted BETs", so if their reads straddle the
+same ~1-2 second window the same pick goes to the channel twice.
+
+Small: it needs both producers inside the same couple of seconds AND the same
+pick. Not zero: the poller ticks 2,880 times a day.
+
+The fix is a Postgres advisory lock around the publish sequence --
+`pg_try_advisory_lock` on a fixed key at the top of
+`tracking.signal_publisher.publish_new_signals`, skipping the run when it is
+not acquired (the other producer is already doing it). For that to bind, the
+refresh pass has to go through the same helper rather than calling the two
+notifiers directly in `run_pipeline.step_push_notifications` -- which is the
+§1b shape anyway (one helper, every caller), but it changes that step's
+failure reporting, so it wants its own PR rather than being tacked on.
