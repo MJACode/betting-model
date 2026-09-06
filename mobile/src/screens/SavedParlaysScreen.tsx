@@ -243,8 +243,12 @@ function SavedParlayCard({
           {parlay.legs.length}-Leg · {formatAmerican(metrics.americanOdds)}
         </Text>
         <Text style={styles.cardMeta}>
-          {parlay.sport} ·{' '}
-          {parlay.updatedAt ? `edited ${savedAgo(parlay.updatedAt)}` : savedAgo(parlay.createdAt)}
+          {/* One clock, and it is the ORIGIN one: the list is ordered by
+              createdAt, so labelling an edited card with its edit time made
+              the meta column stop reading in order (UX review). The edit is
+              marked, not timed. */}
+          {parlay.sport} · {savedAgo(parlay.createdAt)}
+          {parlay.updatedAt ? ' · edited' : ''}
         </Text>
       </View>
 

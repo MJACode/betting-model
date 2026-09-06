@@ -723,6 +723,12 @@ export function updateSavedParlay(
     ...toSavedParlay(legs, sport),
     id: prev.id,
     createdAt: prev.createdAt,
+    // A save's sport is part of its identity, not something to recompute: the
+    // builder derives `sport` from the legs that RE-RESOLVED, and a leg rebuilt
+    // from a snapshot carries no pick and no game — so an older NFL save whose
+    // picks have aged off the board (exactly the case an edit is for) would
+    // come back relabelled 'MLB', the builder's fallback (UX review).
+    sport: prev.sport,
     updatedAt: new Date().toISOString(),
   };
 }

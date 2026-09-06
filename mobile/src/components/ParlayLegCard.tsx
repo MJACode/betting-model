@@ -19,7 +19,10 @@ interface Props {
 /** Compact card for a single parlay leg, modeled on PickCard. Read-mostly with
  * trailing remove / swap controls. */
 export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
-  const matchup = matchupForLeg(leg.game);
+  // A leg rebuilt from a saved parlay carries no live game, but its snapshot
+  // kept the matchup — so it reads "MIL @ CHC / Over 8.5" here the same way it
+  // does on the saved card, instead of losing the game it belongs to.
+  const matchup = matchupForLeg(leg.game) ?? leg.saved?.matchup ?? null;
   return (
     <View style={styles.card}>
       <View style={styles.body}>
@@ -58,6 +61,8 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
             <Pressable
               onPress={onSwap}
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Swap ${leg.label} for another leg`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
             >
               <Ionicons name="swap-horizontal-outline" size={20} color={colors.tint} />
@@ -67,6 +72,8 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
             <Pressable
               onPress={onRemove}
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${leg.label} from the slip`}
               style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
             >
               <Ionicons name="close-circle-outline" size={20} color={colors.avoid} />

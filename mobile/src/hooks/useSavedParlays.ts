@@ -16,6 +16,39 @@ const STORAGE_KEY = 'savedParlays.v1';
 const listeners = new Set<(items: SavedParlay[]) => void>();
 let cached: SavedParlay[] | null = null;
 
+/**
+ * Which saved parlay the betslip is currently an EDIT of — a module store, not
+ * screen state, because the Betslip screen is POPPED mid-edit on the commonest
+ * gesture there is: "Find players to add" navigates to the tabs (which pops
+ * it), and adding a leg pushes a FRESH Betslip. Held in component state the
+ * binding died on that trip, so "Edit in builder → add a player → save" filed
+ * a duplicate again — the exact bug it was meant to fix (UX review).
+ *
+ * Cleared when the slip empties or is cleared: a slip with nothing left in it
+ * is no longer that parlay, and the next save is a new one.
+ */
+const editingListeners = new Set<(id: string | null) => void>();
+let editingId: string | null = null;
+
+export function setEditingParlayId(id: string | null): void {
+  if (editingId === id) return;
+  editingId = id;
+  editingListeners.forEach((fn) => fn(id));
+}
+
+export function useEditingParlayId(): string | null {
+  const [id, setId] = useState<string | null>(editingId);
+  useEffect(() => {
+    const listener = (v: string | null) => setId(v);
+    editingListeners.add(listener);
+    setId(editingId); // a mount after the setter ran still sees it
+    return () => {
+      editingListeners.delete(listener);
+    };
+  }, []);
+  return id;
+}
+
 function sanitize(raw: unknown): SavedParlay[] {
   if (!Array.isArray(raw)) return [];
   const out: SavedParlay[] = [];
