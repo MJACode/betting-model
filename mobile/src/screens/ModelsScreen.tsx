@@ -19,7 +19,7 @@ import {
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { betTypeLabel, MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
-import { isModelPaused, isModelRetired } from '@/lib/thresholds';
+import { isLiveModel, isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
@@ -263,6 +263,17 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // MIN_PICKS_FOR_COLOURED_ROI. The number still shows; it just stops wearing
   // the colour that claims it means something.
   const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
+  // The 50-pick go-live gate is a PRE-GAME rule. In-play models ship live while
+  // their record is still being built — CLAUDE.md §2, and the Explainer and
+  // onboarding both already state that exception. Naming the gate on a live row
+  // claimed a bar the model is not held to, and read as "not real money yet",
+  // which it is not (Matt, 2026-09-06: ncaaf_live_win_prob). The small-sample
+  // caveat stays either way: 0-1 rendering -100% is not a result, which is
+  // exactly what MIN_PICKS_FOR_COLOURED_ROI exists to say.
+  const gated = !isLiveModel(modelId);
+  const thinNote = gated
+    ? `${stats.picks} of ${GO_LIVE_SETTLED_PICKS} settled · too few to judge`
+    : `${stats.picks} settled · too few to judge`;
   const roiColor = thin
     ? colors.textSecondary
     : stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
@@ -274,7 +285,11 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
         (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
-        (thin && stats.picks > 0 ? `, only ${stats.picks} of ${GO_LIVE_SETTLED_PICKS} settled picks` : '') +
+        (thin && stats.picks > 0
+          ? gated
+            ? `, only ${stats.picks} of ${GO_LIVE_SETTLED_PICKS} settled picks`
+            : `, only ${stats.picks} settled pick${stats.picks === 1 ? '' : 's'}, too few to judge`
+          : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced` : '')
       }
       style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
@@ -292,9 +307,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             {decided > 0 ? ` · ${stats.wins}–${stats.losses}${stats.pushes > 0 ? `–${stats.pushes}` : ''}` : ''}
           </Text>
           {thin && stats.picks > 0 ? (
-            <Text style={styles.subtle}>
-              {stats.picks} of {GO_LIVE_SETTLED_PICKS} settled · too few to judge
-            </Text>
+            <Text style={styles.subtle}>{thinNote}</Text>
           ) : null}
           {unpriced > 0 ? (
             // Its own line: on a 375pt phone the sub-line has ~160pt, and a

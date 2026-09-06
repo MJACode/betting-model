@@ -17,6 +17,7 @@ import {
   fetchTrackRecordDaily,
 } from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
+import { isLiveModel } from '@/lib/thresholds';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import { SettingsButton } from '@/components/SettingsButton';
 import {
@@ -226,8 +227,9 @@ export function TrackRecordScreen() {
             short by design, and the percentages will move a lot for a while.{'\n\n'}
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
-            profitable, some aren’t yet, and we show them all. A new model is shown but not
-            backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive ROI. A
+            profitable, some aren’t yet, and we show them all. A new pre-game model is shown
+            but not backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive
+            ROI; in-play models are the exception and run live while that record builds. A
             pick that had no
             DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
@@ -305,6 +307,9 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
   // The view counts every settled pick in the W-L but stakes only the priced
   // ones (require_price_for_published_units), so name the gap when there is one.
   const unpriced = Number(row.picks ?? 0) - Math.round(Number(row.staked_flat ?? 0) / 100);
+  // Same rule as the Models tab: the go-live gate is a pre-game rule, so an
+  // in-play row says how thin it is without naming a bar it is not held to.
+  const gated = !isLiveModel(row.model_id);
   return (
     <View style={styles.modelRow}>
       <View style={{ flex: 1 }}>
@@ -316,7 +321,9 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
           {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
           {decided < MIN_PICKS_FOR_COLOURED_ROI
-            ? ` · ${decided} of ${GO_LIVE_SETTLED_PICKS} settled`
+            ? gated
+              ? ` · ${decided} of ${GO_LIVE_SETTLED_PICKS} settled`
+              : ` · too few to judge`
             : ''}
         </Text>
       </View>
