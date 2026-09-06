@@ -82,6 +82,18 @@ export interface ParlayLeg {
   /** The book `americanOdds` came from, for a line leg DraftKings did not
    * post — so its card can say "−115 · FD" rather than imply DraftKings. */
   pricedAt?: string;
+  /**
+   * The snapshot this leg was rebuilt from (savedLegToParlayLeg), when it came
+   * out of a SavedParlay rather than off today's board.
+   *
+   * A restored leg cannot be re-priced — there is no live pick behind it — so
+   * the snapshot IS its pricing: which books had it, and the betslip link each
+   * one carried at save time. Without this the edit → re-save round trip threw
+   * all of that away: every leg came back `pick: null` with an empty
+   * `bookPrices`, so the re-saved parlay carried no book links and no DK link,
+   * and its hand-off collapsed to "DraftKings, add every leg by hand".
+   */
+  saved?: SavedParlayLeg;
 }
 
 export interface ParlayMetrics {
@@ -455,6 +467,15 @@ function legPriceAtBook(
     if (leg.dkPriced === false) return null;
     return { decimal: leg.decimalOdds, link: leg.pick?.dk_bet_link ?? leg.dkLink ?? null };
   }
+  // A leg restored from a saved parlay is priced by its SNAPSHOT: the books
+  // whose keys the save recorded are the books that had it, at the price the
+  // save recorded. Before this a restored leg looked book-agnostic (below) and
+  // was credited to every book on earth with no link to show for it.
+  const savedLinks = leg.saved?.bookLinks;
+  if (savedLinks) {
+    if (!(book in savedLinks)) return null;
+    return { decimal: leg.decimalOdds, link: savedLinks[book] ?? null };
+  }
   // Only a hand-entered custom leg is book-agnostic (the user quoted a market
   // number, not one book's). A Stats line leg always carries `dkPriced`, so a
   // DraftKings-only line leg is NOT credited to every other book.
@@ -638,6 +659,10 @@ export interface SavedParlayLeg {
 export interface SavedParlay {
   id: string;
   createdAt: string; // ISO timestamp
+  /** Last time "Edit in builder" wrote back over this save (updateSavedParlay).
+   * Absent on a parlay that has never been edited. `createdAt` is left alone —
+   * when the slip was first put together is part of what it means. */
+  updatedAt?: string;
   sport: string;
   legs: SavedParlayLeg[];
 }
@@ -649,7 +674,13 @@ export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
     sport,
-    legs: legs.map((l) => ({
+    // A leg rebuilt from an earlier save has no live pick to re-snapshot, so it
+    // re-saves AS ITS SNAPSHOT. Mapping it through the branches below instead
+    // silently downgraded it — `pick == null` made it read as a custom leg, so
+    // it lost its game, its per-book links and its DraftKings link, and an
+    // edited parlay could only ever hand off to DraftKings with every leg
+    // marked "no link — add manually".
+    legs: legs.map((l) => (l.saved != null ? l.saved : {
       pickId: l.pickId,
       slipKey: l.slipKey,
       label: l.label,
@@ -671,6 +702,28 @@ export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
           : undefined,
       dkPriced: l.dkPriced,
     })),
+  };
+}
+
+/**
+ * Write an edited leg set back over an existing save, keeping its identity.
+ *
+ * "Edit in builder" used to be a one-way door: it seeded the builder, and
+ * saving from there INSERTED a second parlay, so an edit left the original
+ * standing beside its replacement (Matt, 2026-09-06 — "I tried to edit and it
+ * duplicated the records"). The id and `createdAt` are the save's identity and
+ * survive; `updatedAt` records the edit.
+ */
+export function updateSavedParlay(
+  prev: SavedParlay,
+  legs: ParlayLeg[],
+  sport: string,
+): SavedParlay {
+  return {
+    ...toSavedParlay(legs, sport),
+    id: prev.id,
+    createdAt: prev.createdAt,
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -749,6 +802,10 @@ export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
     bestBook: null, // saved snapshots don't carry live multi-book prices
     bookPrices: [],
     dkPriced: sl.dkPriced,
+    dkLink: sl.dkBetLink,
+    // The snapshot travels WITH the leg, so an edit → re-save round trip keeps
+    // the book coverage and the betslip links the save was made with.
+    saved: sl,
     pick: null,
     game: null,
   };

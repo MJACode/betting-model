@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
-import { toSavedParlay, type ParlayLeg, type SavedParlay } from '@/lib/parlay';
+import { toSavedParlay, updateSavedParlay, type ParlayLeg, type SavedParlay } from '@/lib/parlay';
 
 /**
  * Saved parlays — self-contained snapshots the user keeps to revisit and bet
@@ -79,6 +79,26 @@ export function useSavedParlays() {
     return parlay;
   }, []);
 
+  /**
+   * Write an edited leg set back over an existing save — the other half of
+   * "Edit in builder". Without it the builder's only verb was INSERT, so
+   * editing a saved parlay left the original standing beside its replacement.
+   * The save keeps its id, its created time and its place in the list; only
+   * the legs (and `updatedAt`) change. Returns null when the id is gone —
+   * deleted from the list while the builder was open — and the caller inserts
+   * instead, so an edit can never be silently dropped.
+   */
+  const update = useCallback((id: string, legs: ParlayLeg[], sport: string): SavedParlay | null => {
+    const cur = cached ?? [];
+    const idx = cur.findIndex((p) => p.id === id);
+    if (idx < 0) return null;
+    const next = updateSavedParlay(cur[idx], legs, sport);
+    const items = [...cur];
+    items[idx] = next;
+    persist(items).catch((err) => console.warn('[savedParlays] update failed', err));
+    return next;
+  }, []);
+
   const remove = useCallback((id: string) => {
     const cur = cached ?? [];
     persist(cur.filter((p) => p.id !== id)).catch((err) =>
@@ -98,5 +118,5 @@ export function useSavedParlays() {
     persist([]).catch((err) => console.warn('[savedParlays] clear failed', err));
   }, []);
 
-  return { items, count: items.length, ready, save, remove, restore, clear };
+  return { items, count: items.length, ready, save, update, remove, restore, clear };
 }

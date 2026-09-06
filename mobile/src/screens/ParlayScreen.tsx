@@ -115,6 +115,14 @@ export function ParlayScreen() {
   // Session-only hand-entered legs (not persisted — they resolve against no
   // pick row, so there is nothing stable to key them on).
   const [manualCustom, setManualCustom] = useState<ParlayLeg[]>([]);
+  /**
+   * The saved parlay this slip is an edit of, so the next save writes back over
+   * it instead of inserting a second record. Set two ways: by "Edit in builder"
+   * (the restore payload), and by the builder's own save — after "Save parlay"
+   * the slip on screen IS that saved parlay, so tapping save again updates it
+   * rather than filing a duplicate. Cleared when the slip is cleared.
+   */
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [customOpen, setCustomOpen] = useState<boolean>(false);
   const [customLabel, setCustomLabel] = useState<string>('');
   const [customOddsText, setCustomOddsText] = useState<string>('');
@@ -181,6 +189,9 @@ export function ParlayScreen() {
     slip.clear();
     lineLegs.clear();
     setManualCustom([]);
+    // A cleared slip is no longer the saved parlay it was seeded from — the
+    // next save is a new one, not a write over the old.
+    setEditingId(null);
   }, [slip, lineLegs]);
 
   // Only reachable when the board isn't trusted (offline, empty slate) — the
@@ -214,6 +225,7 @@ export function ParlayScreen() {
     slip.clear();
     restorePending.slipKeys.forEach((key) => slip.add(key));
     setManualCustom(restorePending.customLegs);
+    setEditingId(restorePending.editingId ?? null);
     consumeRestore();
   }, [restorePending]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -233,50 +245,54 @@ export function ParlayScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* PINNED, not scrolled with the slip. The close chevron is this screen's
+          only way out (it renders its own header, so there is no stack back
+          button), and it used to sit at the top of the ScrollView — on a slip
+          long enough to scroll, the exit scrolled off with it. */}
+      <View style={styles.header}>
+        <View style={styles.titleRow}>
+          <View style={styles.titleLeft}>
+            <Pressable
+              onPress={() => navigation.goBack()}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Close betslip"
+              style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
+            </Pressable>
+            <Text style={styles.title}>Betslip</Text>
+            {slipCount > 0 ? (
+              <View style={styles.countBadge}>
+                <Text style={styles.countBadgeText}>{slipCount}</Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={styles.rightActions}>
+            <Pressable
+              onPress={() => navigation.navigate('SavedParlays')}
+              hitSlop={8}
+              style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
+            >
+              <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
+              <Text style={styles.savedLinkText}>
+                Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
+              </Text>
+            </Pressable>
+            <SettingsButton />
+          </View>
+        </View>
+        <Text style={styles.subtitle}>
+          {legs.length === 0
+            ? 'The bets you add show up here'
+            : `${legs.length} leg${legs.length === 1 ? '' : 's'} · tap a leg to remove it`}
+        </Text>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
       >
-        <View style={styles.header}>
-          <View style={styles.titleRow}>
-            <View style={styles.titleLeft}>
-              <Pressable
-                onPress={() => navigation.goBack()}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="Close betslip"
-                style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
-              >
-                <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
-              </Pressable>
-              <Text style={styles.title}>Betslip</Text>
-              {slipCount > 0 ? (
-                <View style={styles.countBadge}>
-                  <Text style={styles.countBadgeText}>{slipCount}</Text>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.rightActions}>
-              <Pressable
-                onPress={() => navigation.navigate('SavedParlays')}
-                hitSlop={8}
-                style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
-              >
-                <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
-                <Text style={styles.savedLinkText}>
-                  Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
-                </Text>
-              </Pressable>
-              <SettingsButton />
-            </View>
-          </View>
-          <Text style={styles.subtitle}>
-            {legs.length === 0
-              ? 'The bets you add show up here'
-              : `${legs.length} leg${legs.length === 1 ? '' : 's'} · tap a leg to remove it`}
-          </Text>
-        </View>
-
         {error ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>Connection error: {error}</Text>
@@ -302,6 +318,8 @@ export function ParlayScreen() {
             onFindPlayers={goFindPlayers}
             onClear={handleClear}
             onClearStale={handleClearStale}
+            editingId={editingId}
+            onSaved={setEditingId}
           />
         )}
       </ScrollView>
@@ -386,8 +404,24 @@ export function ParlayScreen() {
  * every leg — "Bet on FanDuel" must never open a slip FanDuel cannot take.
  * No book has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
  */
-function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
-  const { save } = useSavedParlays();
+function ParlayActions({
+  legs,
+  sport,
+  editingId,
+  droppedCount,
+  onSaved,
+}: {
+  legs: ParlayLeg[];
+  sport: string;
+  /** The saved parlay this slip is an edit of, or null for a new one. */
+  editingId: string | null;
+  /** Legs the board could not price back — they are NOT in `legs`, so updating
+   *  a save would drop them. The caption says so before the tap. */
+  droppedCount: number;
+  /** Called with the id the slip now lives under, so a second tap updates it. */
+  onSaved: (id: string) => void;
+}) {
+  const { save, update } = useSavedParlays();
   const [handoffOpen, setHandoffOpen] = useState(false);
   // `ready` gates the button: the hook seeds to DraftKings and resolves storage
   // in an effect, so without it a FanDuel member sees a green "Bet on
@@ -428,19 +462,47 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   // book cannot take (UX review).
   const partial = bookReady && handoff.priced < handoff.total;
 
+  /**
+   * Save is an INSERT once and an UPDATE thereafter.
+   *
+   * It used to be an insert every time, so the two commonest gestures each
+   * left a duplicate behind: editing a saved parlay and saving it, and simply
+   * tapping "Save parlay" twice. `editingId` is the record this slip already
+   * IS — set by "Edit in builder", and by the first save — so a later save
+   * writes over it. An id that no longer exists (deleted while the builder was
+   * open) falls back to an insert rather than losing the slip.
+   */
   const onSave = useCallback(() => {
-    save(legs, sport);
+    if (editingId) {
+      const updated = update(editingId, legs, sport);
+      if (updated) {
+        onSaved(updated.id);
+        showToast('Saved parlay updated');
+        return;
+      }
+    }
+    const parlay = save(legs, sport);
+    onSaved(parlay.id);
     showToast('Saved · find it under “Saved” at the top of your betslip');
-  }, [save, legs, sport]);
+  }, [save, update, editingId, onSaved, legs, sport]);
 
   if (legs.length === 0) return null;
 
   return (
     <>
       <View style={styles.parlayActions}>
-        <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
-          <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
-          <Text style={styles.saveBtnText}>Save parlay</Text>
+        <Pressable
+          onPress={onSave}
+          accessibilityRole="button"
+          accessibilityLabel={editingId ? 'Update saved parlay' : 'Save parlay'}
+          style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}
+        >
+          <Ionicons
+            name={editingId ? 'bookmark' : 'bookmark-outline'}
+            size={18}
+            color={colors.tint}
+          />
+          <Text style={styles.saveBtnText}>{editingId ? 'Update parlay' : 'Save parlay'}</Text>
         </Pressable>
         <Pressable
           onPress={() => setHandoffOpen(true)}
@@ -464,6 +526,14 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
           </Text>
         </Pressable>
       </View>
+
+      {editingId ? (
+        <Text style={[styles.handoffFallback, droppedCount > 0 && styles.handoffFallbackWarn]}>
+          {droppedCount > 0
+            ? `This slip is saved · ${droppedCount} leg${droppedCount === 1 ? '' : 's'} couldn’t be priced, so “Update parlay” saves it without ${droppedCount === 1 ? 'it' : 'them'}`
+            : 'This slip is saved · “Update parlay” writes over that save instead of adding another'}
+        </Text>
+      ) : null}
 
       {partial ? (
         <Text style={styles.handoffFallback}>
@@ -656,6 +726,8 @@ function SlipBody({
   onFindPlayers,
   onClear,
   onClearStale,
+  editingId,
+  onSaved,
 }: {
   legs: ParlayLeg[];
   metrics: CorrelatedMetrics;
@@ -670,6 +742,8 @@ function SlipBody({
   onFindPlayers: () => void;
   onClear: () => void;
   onClearStale: () => void;
+  editingId: string | null;
+  onSaved: (id: string) => void;
 }) {
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
@@ -790,7 +864,13 @@ function SlipBody({
           ))}
         </View>
 
-        <ParlayActions legs={legs} sport={sport} />
+        <ParlayActions
+          legs={legs}
+          sport={sport}
+          editingId={editingId}
+          droppedCount={staleCount + removedCount}
+          onSaved={onSaved}
+        />
       </View>
 
       <View style={styles.manualActions}>
@@ -841,6 +921,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+    // Pinned above the scroll view — the hairline is what keeps a scrolled leg
+    // card from reading as part of the title block.
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
   },
   titleRow: {
     flexDirection: 'row',
@@ -1195,6 +1279,9 @@ const styles = StyleSheet.create({
     backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
+  },
+  handoffFallbackWarn: {
+    color: colors.med,
   },
   handoffFallback: {
     marginTop: spacing.xs,
