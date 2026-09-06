@@ -1378,10 +1378,33 @@ PREGAME_POLL_RESEED_SEC: int = int(os.environ.get("PREGAME_POLL_RESEED_SEC", 900
 # Kill switch, so the loop can be stopped from Railway without a deploy.
 RUN_PREGAME_POLLER: bool = os.environ.get("RUN_PREGAME_POLLER", "1") == "1"
 # Hard daily cap on this loop's Odds API burn, mirroring LIVE_DAILY_CREDIT_CAP.
-# 30s x 24h x ~13 credits is ~37k, so 60k is ~1.6x headroom and still ~1.2% of
-# a monthly plan. Set = 0 to run uncapped.
+#
+# 60,000 -> 200,000 (2026-09-05, mike: "the credits are fine"). The old value
+# was derived, not measured: "30s x 24h x ~13 credits is ~37k, so 60k is ~1.6x
+# headroom". The 13-credit sweep is long gone -- the poller now sweeps five
+# sports -- and the cap BOUND ON A LIVE DAY:
+#
+#   17:09 ET  pregame poller: daily credit cap reached (60000 >= 60000) - skipping
+#
+# and it repeated that on every 30-second tick for the rest of the night, on
+# 09-04 as well. A capped poller fetches nothing, scores nothing and therefore
+# PUBLISHES nothing (tracking/signal_publisher.py), so the cap was silently
+# switching off the evening -- exactly when NFL, NCAAF and UFC lines cross.
+#
+# 200k covers the measured shape: 60,000 units burned in the ~10 hours to
+# 17:09 ET extrapolates to ~144k over a full day, and 200k is ~1.4x that.
+#
+# THE UNIT IS `api_call_log.credits`, WHICH IS NOT THE API'S OWN COUNTER.
+# Summed per source over 2026-09-05 the log reports ~201k credits across all
+# loops while `odds_api_quota` moved 93,492 for the same day -- the log
+# overstates by roughly 2x. The cap is enforced in log units, so it is written
+# in log units; the real plan cost of this change is on the order of +30k API
+# credits a day against 4,661,626 remaining. Read `odds_api_quota`, never this
+# comment, before quoting a number (section 1b).
+#
+# Set = 0 to run uncapped.
 PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
-    os.environ.get("PREGAME_POLL_DAILY_CREDIT_CAP", 60000))
+    os.environ.get("PREGAME_POLL_DAILY_CREDIT_CAP", 200000))
 # Sports the poller watches. NHL is excluded while it is out of season -- its
 # per-event 3-way pull returns 422 on every event and costs 32 wasted round
 # trips a pass.
