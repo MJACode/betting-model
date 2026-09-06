@@ -1,5 +1,3 @@
-import { isLiveModel } from './thresholds';
-
 /**
  * The official live date — the one place the app states when the record starts.
  *
@@ -69,46 +67,41 @@ export const SHADOW_TRACK_START = '2026-04-14';
  * The row is NEVER hidden — "nothing hidden, nothing cherry-picked" is the
  * promise on the same screen. What changes is only that the number stops
  * wearing the bet/avoid colour that says "this is a result", and the row says
- * how far off the real bar it is. 50 is the platform's own go-live gate
- * (CLAUDE.md §2); 10 is the floor for treating a percentage as signal at all.
+ * that it is provisional. 10 is the floor for treating a percentage as signal
+ * at all.
+ *
+ * It deliberately does NOT carry the platform's >= 50-settled go-live gate any
+ * more. That number was exported here purely to be quoted at members, and
+ * quoting it announced "not backed yet" about live models. The gate still
+ * governs backing server-side; it is not app copy.
  */
 export const MIN_PICKS_FOR_COLOURED_ROI = 10;
-export const GO_LIVE_SETTLED_PICKS = 50;
 
 /**
  * The ONE sentence every surface uses for "this record is too thin to read".
  *
  * Two callers — the Models tab's built-in rows and the Record tab's model rows.
- * It lives here, beside the two constants it reasons about, for the same reason
- * `RETIRED_RULE_CAPTION` exists in `lib/modelMeta`: this state had already
- * drifted into FOUR phrasings across those two screens (different sentence,
- * different count, and a pre-game branch on one screen that never said "too few
- * to judge" at all), so a user checking one model in both tabs could not tell
- * whether they were reading the same caveat or two different ones.
+ * It lives here, beside the constant that triggers it, for the same reason
+ * `RETIRED_RULE_CAPTION` exists in `lib/modelMeta`: this state had drifted into
+ * four phrasings across those two screens before it was pulled together.
  *
- * The branch is the go-live gate's SCOPE. The >= 50-settled bar is a PRE-GAME
- * rule (CLAUDE.md §2): in-play models ship live while their record is still
- * being built, which `ExplainerScreen` and `OnboardingModal` both already say.
- * Quoting a live model's distance from a bar it is not held to announced "not
- * backed yet" about a model that is backed (Matt, 2026-09-06, on
- * `ncaaf_live_win_prob` reading "1 of 50 settled").
+ * It says NOTHING about a go-live gate, and it takes no count. It used to read
+ * "N of 50 settled · too few to judge", quoting the >= 50-settled bar from
+ * CLAUDE.md §2 — which announced "this model is not backed yet" on every row
+ * that had not reached it (Matt, 2026-09-06: *"Remove all paper trading ... we
+ * are not doing paper trading"*, first on `ncaaf_live_win_prob`, then on
+ * `ncaaf_spread` showing the same line). The platform is live; a
+ * progress bar toward being backed described something it does not do.
  *
- * A live row therefore keeps the caution and drops the gate — and drops the
- * COUNT with it, because without "of 50" a bare number is no longer progress
- * toward anything, and the line above it already renders that same number as
- * "1 pick · 0-1".
+ * What survives is arithmetic, not status: below MIN_PICKS_FOR_COLOURED_ROI
+ * decided bets a percentage is noise — `ncaaf_live_win_prob` is 0-1 and renders
+ * -100% — so the number stops wearing the bet/avoid colour and this line says
+ * why. Never returns empty: grey on its own does not explain itself.
  *
- * `settled` is settled PICKS, pushes included — the unit CLAUDE.md §2 states the
- * gate in ("50 settled picks"), so the number and the word agree. It is
- * deliberately not `wins + losses`, which is the separate question of how much
- * of the record has a W or an L to read.
- *
- * Never returns empty. The greyed-out ROI (MIN_PICKS_FOR_COLOURED_ROI) is the
- * only other signal that a number is provisional, and a grey -100% still reads
- * as a result to anyone who does not know what the grey means.
+ * The go-live gate itself is untouched and still real. It lives server-side
+ * (`models/backtester.GO_LIVE_MIN_PICKS`) where it governs whether a model is
+ * backed; it is simply no longer narrated to members row by row.
  */
-export function thinSampleCaption(modelId: string, settled: number): string {
-  return isLiveModel(modelId)
-    ? 'Too few to judge yet'
-    : `${settled} of ${GO_LIVE_SETTLED_PICKS} settled · too few to judge`;
+export function thinSampleCaption(): string {
+  return 'Too few to judge yet';
 }

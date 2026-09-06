@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { BACKTEST_START, GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START } from '@/lib/recordStart';
+import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
 
 export function ExplainerScreen() {
   return (
@@ -283,12 +283,12 @@ export function ExplainerScreen() {
             including the models that aren't working.
           </P>
           <P>
-            A model isn't backed for real money until it has a real sample
-            behind it — {GO_LIVE_SETTLED_PICKS}+ settled picks with positive
-            ROI. In-play models are the exception: they're shown while that
-            record is still being built, so treat them as unproven. If a model
-            isn't beating the closing line over a real sample, we'd rather show
-            you that than hide it.
+            A percentage on a handful of bets isn't a result. Every model's
+            record is here from its first settled pick, and until there are
+            enough of them to read, the number is greyed out and marked too
+            early to judge rather than being hidden. If a model isn't beating
+            the closing line over a real sample, we'd rather show you that than
+            hide it.
           </P>
         </Section>
 
