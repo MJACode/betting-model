@@ -41,8 +41,11 @@ const VIEW_FOR_TYPE: Record<string, PicksView> = {
   live_signals: 'live',
   // A fresh BET is a signal, so Signals is the shortest path to it.
   new_bets: 'signals',
-  // A pick that flipped to AVOID is no longer a signal: Signals is the one
-  // board it is guaranteed NOT to be on. Today shows everything scored.
+  // LINE MOVEMENT, not a retraction (CLAUDE.md §1c): the pick stands at the
+  // number it was given and what changed is the market — which is why the push
+  // itself says "moved past the bet line" rather than "flipped to AVOID". Once
+  // the line has moved past the cut it is no longer a signal, so Signals is the
+  // one board it is guaranteed NOT to be on. Today shows everything scored.
   dropped: 'today',
 };
 
