@@ -867,6 +867,21 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
     cost one call per event, which is the expensive shape, and none of them is
     what a fast pre-game watch is for.
 
+    IT ALSO UPSERTS THE GAMES IT SEES, which is not tidiness. `odds` carries a
+    foreign key to `games`, and `_insert_odds` writes its whole batch in one
+    statement — so a single quote for a game with no `games` row does not fail
+    alone, it takes the entire tick's odds write with it. Until 2026-09-06 this
+    function DISCARDED `game_rows`, so the 30-second poller could never be the
+    first writer to see a game: it had to wait for a refresh pass to create the
+    row, up to an hour later and in practice not until the evening pass. That
+    is the opposite of what a continuous watcher is for (mike: "as soon as
+    lines open in a market we can bet").
+
+    It calls the same `_upsert_games` the hourly pass calls, so a game seen
+    first by the poller is identical to one seen first by the pass. Best-effort
+    and never fatal: if the upsert fails, the odds rows for that sport are
+    dropped rather than sent at a constraint that will reject them.
+
     Never raises: one sport's failure returns that sport's rows as empty and
     leaves the others intact, because a poller that dies on one bad payload is
     indistinguishable from a quiet market.
@@ -894,7 +909,26 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
                     game_rows, odds_rows, _known_fighter_slugs(conn))
             except Exception as exc:                          # noqa: BLE001
                 logger.warning(f"pregame fetch: UFC phantom filter skipped ({exc})")
+        if game_rows:
+            try:
+                conn = conn or get_connection()
+                _upsert_games(conn, game_rows)
+                conn.commit()
+            except Exception as exc:                          # noqa: BLE001
+                # Drop this sport's odds rather than hand _insert_odds a batch
+                # that will fail the FK and lose every other sport with it.
+                logger.warning(f"pregame fetch: {sp} games upsert failed "
+                               f"({exc}) — skipping {len(odds_rows)} odds row(s)")
+                continue
         rows.extend(odds_rows)
+    # Close what we opened. Previously this connection was created only on the
+    # UFC path and never closed; it is now opened on most ticks, and a 30-second
+    # loop leaking one connection per tick exhausts the pooler in hours.
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:                                      # noqa: BLE001
+            pass
     return rows
 
 

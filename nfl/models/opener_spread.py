@@ -81,6 +81,8 @@ not raise the unit on a good month.
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 
 # Books carrying home/away sign flips in the Odds API feed. Screened across 40
@@ -96,9 +98,65 @@ EXCHANGES = {"matchbook"}
 
 REFERENCE = "pinnacle"
 
+# THE SOFT SIDE MUST BE A BOOK THE READER CAN ACTUALLY BET AT.
+#
+# Until 2026-09-06 the rule took the largest deviation at ANY clean book, and
+# the feed is full of books nobody here holds. Measured on the live Week-1
+# board that morning: of seven qualifying bets, the two largest edges were at
+# onexbet (+7.32pp) and betus (+5.92pp). mike: "no can't bet on these remove
+# them". A pick naming an unplaceable book is worse than no pick — §1c makes it
+# permanent, and it enters the track record as a bet that was never available.
+#
+# Canonical list is config.BETTABLE_BOOKS (derived from LINE_SHOP_BOOKMAKERS,
+# which mike curated as the books the app quotes a price at). The literal below
+# is a FALLBACK for standalone use: this package runs without the repo root on
+# sys.path in backtests and one-off scripts, where `import config` finds
+# nothing. tests/test_nfl_opener.py asserts the two agree, so the copy cannot
+# drift unnoticed.
+_BETTABLE_FALLBACK = ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
+                      "fanatics,betrivers,hardrockbet,ballybet,betparx,rebet")
+
+
+def _bettable_books() -> set[str]:
+    """The placement venues, read fresh so an env override applies at call time."""
+    env = os.environ.get("BETTABLE_BOOKS")
+    if env:
+        return {b.strip().lower() for b in env.split(",") if b.strip()}
+    try:
+        from config import BETTABLE_BOOKS as _cfg
+        return {b.strip().lower() for b in _cfg}
+    except Exception:                                          # noqa: BLE001
+        return {b.strip().lower() for b in _BETTABLE_FALLBACK.split(",")}
+
+
 DEPLOY_THRESHOLD = 1.0   # |soft_home_line - pinnacle_home_line|, points
-LEAD_LO_DAYS = 2.0       # the validated window: T-7 to T-2
-LEAD_HI_DAYS = 7.0
+
+# THE FIRE WINDOW: T-LEAD_HI_DAYS .. T-LEAD_LO_DAYS.
+#
+# The early bound was 7.0 — the span the backtest measured — and on 2026-09-06
+# that bound was costing real bets. Pinnacle had posted for all 16 Week-1
+# games and seven carried a qualifying deviation, but the Sunday slate sat
+# 172.5h out (7.19 days), so the card watched them and fired nothing. mike:
+# "we need to remove any t-7 rules on nfl opener it needs to be as soon as
+# pinnacle Lines are released".
+#
+# So the early bound is now the CARD'S WATCH HORIZON rather than a number of
+# its own: whenever Pinnacle is up and a soft book is stale, the bet is live.
+# Pinnacle typically posts ~T-6.5, which is inside the old window anyway — this
+# only changes the case where it posts EARLY, which is exactly the case that
+# was being dropped.
+#
+# STATED PLAINLY, BECAUSE IT IS A REAL COST: bets taken before T-7 are outside
+# the backtested span. The mechanism is the same one the backtest measured (a
+# soft book carrying a number Pinnacle has already moved off), and the edge is
+# larger the staler the soft number, so the direction is not in doubt — but the
+# +2.27pp excess was never measured out there. Watch these separately.
+#
+# THE LATE BOUND IS UNCHANGED at T-2, deliberately. mike asked for the T-7 rule
+# only, and dropping T-2 as well would be a different model: inside two days
+# the soft books have corrected and the backtest has nothing to say about it.
+LEAD_LO_DAYS = 2.0
+LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 
 # Pooled validated ATS at the deployment threshold. Kept for reference and as
 # the fallback: this is what the card used for EVERY bet until 2026-08-22.
@@ -217,6 +275,28 @@ def edge_tier(edge: float) -> str:
     return EDGE_TIERS[-1][1]
 
 
+def clean_board(frame: pd.DataFrame) -> pd.DataFrame:
+    """The spreads rows this rule is allowed to look at.
+
+    ONE function, called by both the selection and the evaluation, because the
+    two must agree about what is on the board. If `evaluate_board` counted a
+    book the selection cannot bet, the pick history would record "qualifies"
+    for bets that never appear — a discrepancy with no error attached, which
+    is the shape §7 keeps warning about.
+
+    Pinnacle is kept regardless of the bettable list: it is the REFERENCE the
+    deviation is measured from, never a side to take. Filtering it out here
+    would leave the rule with nothing to compare against and silently return
+    an empty card.
+    """
+    if frame.empty:
+        return frame
+    keep = _bettable_books() | {REFERENCE}
+    return frame[(frame.market == "spreads")
+                 & (~frame.book.isin(DEFECTIVE_BOOKS | EXCHANGES))
+                 & (frame.book.isin(keep))].copy()
+
+
 def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
                        threshold: float = DEPLOY_THRESHOLD) -> pd.DataFrame:
     """
@@ -227,8 +307,7 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
     Mirrors backtest_opener's "first" variant at this snapshot: qualifying
     books ranked by |dev| descending, top one taken per game.
     """
-    sp = frame[(frame.market == "spreads")
-               & (~frame.book.isin(DEFECTIVE_BOOKS | EXCHANGES))].copy()
+    sp = clean_board(frame)
     if sp.empty:
         return pd.DataFrame()
 
@@ -314,8 +393,7 @@ def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
     """
     from data_ingest.pick_eval import eval_row
 
-    sp = frame[(frame.market == "spreads")
-               & (~frame.book.isin(DEFECTIVE_BOOKS | EXCHANGES))].copy()
+    sp = clean_board(frame)
 
     out: list[dict] = []
     for g in sched.itertuples():

@@ -66,6 +66,8 @@ from config import (
     UFC_SCORE_AHEAD_DAYS,
     GOLF_SCORE_AHEAD_DAYS,
     NCAAF_SCORE_AHEAD_DAYS,
+    GAME_SCORE_AHEAD_DAYS,
+    GAME_SCORE_AHEAD_SPORTS,
     NCAAF_TOTALS_MAX_LEAD_DAYS,
     PROP_MARKETS_NFL,
     today_et,
@@ -2175,25 +2177,45 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         bankroll = _get_current_bankroll(conn)
         logger.info(f"Current bankroll: ${bankroll:,.2f}")
 
-        # Fetch today's games — plus upcoming UFC fights. UFC events are weekly
-        # and DK prices them days ahead, so same-day-only scoring would leave
-        # the UFC surface empty until fight day.
+        # Fetch today's games, plus every look-ahead window.
+        #
+        # UFC and NCAAF have had one for a while: both price days ahead, so
+        # same-day-only scoring left their surfaces empty until game day.
+        #
+        # MLB/NBA/NHL/WNBA joined them on 2026-09-06. They were same-day only,
+        # which meant a line that opened for TOMORROW sat stored and unscored
+        # until the date rolled over — measured at 4-6 hours per MLB slate, and
+        # bounded only by how early DK posted before midnight (see
+        # config.GAME_SCORE_AHEAD_DAYS for the numbers). mike: "I want as soon
+        # as lines open in a market we can bet."
+        #
+        # The DAY BOUND here is the outer edge of the search. The thing that
+        # actually admits a look-ahead game is a DraftKings price, applied just
+        # below — "the line has opened" is a fact about the market, not about
+        # the calendar.
         ufc_horizon = (
             date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
         ).isoformat()
         ncaaf_horizon = (
             date.fromisoformat(target_date) + timedelta(days=NCAAF_SCORE_AHEAD_DAYS)
         ).isoformat()
-        games = conn.execute("""
+        game_horizon = (
+            date.fromisoformat(target_date) + timedelta(days=GAME_SCORE_AHEAD_DAYS)
+        ).isoformat()
+        _ahead_marks = ",".join(["?"] * len(GAME_SCORE_AHEAD_SPORTS))
+        games = conn.execute(f"""
             SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
             FROM games
             WHERE home_score IS NULL
               AND (game_date = ?
                    OR (sport = 'UFC' AND game_date > ? AND game_date <= ?)
-                   OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?))
+                   OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?)
+                   OR (sport IN ({_ahead_marks})
+                       AND game_date > ? AND game_date <= ?))
             ORDER BY sport, game_date
         """, (target_date, target_date, ufc_horizon,
-              target_date, ncaaf_horizon)).fetchall()
+              target_date, ncaaf_horizon,
+              *GAME_SCORE_AHEAD_SPORTS, target_date, game_horizon)).fetchall()
 
         # Narrow to the caller's subset BEFORE the price prefilter and the
         # feature build, or the restriction saves nothing.
@@ -2261,6 +2283,43 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 # empty the board. Worst case we pay the old cost.
                 logger.warning(f"NCAAF price pre-filter failed ({exc}); scoring all")
                 ncaaf_unpriced = set()
+
+        # THE SAME GATE FOR THE NEW LOOK-AHEAD SPORTS, and here it is not only
+        # a cost filter — it is the rule.
+        #
+        # "As soon as lines open in a market we can bet" is a statement about
+        # the MARKET, so a future game earns its way in by having a DraftKings
+        # price, not by being inside a day count. Without this, widening the
+        # window would hand the models every scheduled game in the next week
+        # and invite a locked pick (§1c, irreversible) off a market that has
+        # not opened yet.
+        #
+        # TODAY'S GAMES ARE NEVER FILTERED. They were scored before this change
+        # whether or not DK had posted, several models handle a missing price
+        # themselves, and quietly dropping them here would be a behaviour
+        # change nobody asked for hiding inside a look-ahead feature.
+        #
+        # Fails OPEN for the same reason as the NCAAF filter above.
+        ahead_unpriced: set = set()
+        _ahead = [g for g in games
+                  if g[1] in GAME_SCORE_AHEAD_SPORTS and g[3] > target_date]
+        if _ahead:
+            try:
+                priced = {r[0] for r in conn.execute(f"""
+                    SELECT DISTINCT o.game_id FROM odds o
+                    WHERE o.bookmaker = ?
+                      AND o.game_id IN ({",".join(["?"] * len(_ahead))})
+                """, (ODDS_API_BOOKMAKER, *[g[0] for g in _ahead])).fetchall()}
+                ahead_unpriced = {g[0] for g in _ahead if g[0] not in priced}
+                if ahead_unpriced:
+                    logger.info(
+                        f"Look-ahead: skipping {len(ahead_unpriced)} of "
+                        f"{len(_ahead)} future game(s) {ODDS_API_BOOKMAKER} "
+                        f"has not priced yet")
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(f"Look-ahead price pre-filter failed ({exc}); "
+                               f"scoring all")
+                ahead_unpriced = set()
 
         # Check for postponed MLB games via the official schedule API
         postponed_ids = _get_postponed_games(target_date)
@@ -2429,7 +2488,15 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                       WHERE game_date >= %s AND game_date <= %s
                         AND (commence_time IS NULL OR commence_time > %s)
                   )""" + _sc,
-                (target_date, max(ncaaf_horizon, ufc_horizon), now_utc) + _sp)
+                (target_date,
+                 # EVERY look-ahead horizon, not just the two that existed when
+                 # this was written. The bound has to cover the whole window
+                 # the loop below re-inserts over, or the newly-scored future
+                 # games accumulate a fresh NONE row every pass with nothing
+                 # ever clearing the last one — duplicates on exactly the games
+                 # this change just started scoring.
+                 max(ncaaf_horizon, ufc_horizon, game_horizon),
+                 now_utc) + _sp)
 
             logger.info(f"Cleared unsettled picks for games not yet started")
 
@@ -2441,7 +2508,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
-            if game_id in ncaaf_unpriced:
+            if game_id in ncaaf_unpriced or game_id in ahead_unpriced:
                 continue
 
             # Skip postponed games

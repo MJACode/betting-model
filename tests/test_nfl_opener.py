@@ -356,3 +356,132 @@ class TestPublishOpenerInsertOnce:
                             lambda: (_ for _ in ()).throw(AssertionError("no DB touch")))
         monkeypatch.setattr(pub, "CARDS_DIR", tmp_path)
         assert pub.publish_opener("2026-09-16") == 0
+
+
+class TestBettableBooksOnly:
+    """A pick must name a book the reader can actually walk up to.
+
+    The rule used to take the largest deviation at any clean book, and the feed
+    carries plenty of books nobody here holds. Measured on the live Week-1
+    board (2026-09-06), the two biggest edges of the seven that qualified were
+    at onexbet (+7.32pp) and betus (+5.92pp). mike: "no can't bet on these
+    remove them". §1c makes such a pick permanent, so this filter is the only
+    thing standing between an unbettable quote and the track record.
+    """
+
+    def test_unbettable_book_is_not_selected(self):
+        # onexbet at |dev| 2.5 would win the "largest deviation" contest
+        # outright. It must not appear at all.
+        rows = _both_sides("pinnacle", -3.5, -110, -110) + \
+               _both_sides("onexbet", -1.0, -105, -115)
+        assert len(card.select_opener_bets(_frame(rows), _sched())) == 0
+
+    def test_falls_through_to_the_best_BETTABLE_book(self):
+        # THE ORDERING TRAP, and the reason the filter runs before the
+        # deviation is computed rather than after. onexbet carries the biggest
+        # deviation; a filter applied to the RESULT would pick onexbet, reject
+        # it, and return nothing — silently losing the fanduel bet that was
+        # always there.
+        rows = _both_sides("pinnacle", -3.5, -110, -110) + \
+               _both_sides("onexbet", -1.0, -105, -115) + \
+               _both_sides("fanduel", -2.0, -108, -112)
+        bets = card.select_opener_bets(_frame(rows), _sched())
+        assert len(bets) == 1
+        assert bets.iloc[0].book == "fanduel" and bets.iloc[0].dev == 1.5
+
+    def test_pinnacle_survives_the_filter_as_the_reference(self):
+        # Pinnacle is NOT bettable, but removing it would leave nothing to
+        # measure against and the card would return empty for the wrong
+        # reason — a silent failure that looks exactly like a quiet market.
+        assert "pinnacle" not in opener_model._bettable_books()
+        rows = _both_sides("pinnacle", -3.5, -110, -110) + \
+               _both_sides("betmgm", -2.0, -108, -112)
+        bets = card.select_opener_bets(_frame(rows), _sched())
+        assert len(bets) == 1 and bets.iloc[0].pin_home_line == -3.5
+
+    def test_evaluate_board_sees_the_same_books_as_the_selection(self):
+        # If the audit trail counted a book the selection cannot take, the
+        # history would read "qualifies" for bets that never appear.
+        rows = _both_sides("pinnacle", -3.5, -110, -110) + \
+               _both_sides("onexbet", -1.0, -105, -115)
+        evals = opener_model.evaluate_board(_frame(rows), _sched())
+        mia = [e for e in evals if e["game_id"] == "2026_02_NYJ_MIA"][0]
+        assert int(mia["qualifies"]) == 0
+        assert "onexbet" not in str(mia.get("current_book") or "")
+
+    def test_env_override_is_read_at_call_time(self, monkeypatch):
+        # Narrowed to ONE book while a WIDER deviation sits at another, so the
+        # env var is the only thing that can produce this answer. Asserting
+        # merely that an override ALLOWS a book would pass against the old
+        # unfiltered code too, and prove nothing.
+        monkeypatch.setenv("BETTABLE_BOOKS", "fanduel")
+        rows = _both_sides("pinnacle", -3.5, -110, -110) + \
+               _both_sides("onexbet", -1.0, -105, -115) + \
+               _both_sides("fanduel", -2.0, -108, -112)
+        bets = card.select_opener_bets(_frame(rows), _sched())
+        assert len(bets) == 1
+        assert bets.iloc[0].book == "fanduel" and bets.iloc[0].dev == 1.5
+
+    def test_standalone_fallback_matches_the_platform_config(self):
+        # The model carries a literal copy of the list for standalone runs
+        # (backtests, one-off scripts) where the repo root is not on sys.path.
+        # A copy that drifts is a copy that lies, so pin them together.
+        import config as platform_config
+        fallback = {b.strip() for b in opener_model._BETTABLE_FALLBACK.split(",")}
+        assert fallback == set(platform_config.BETTABLE_BOOKS)
+
+    def test_no_unlicensed_book_hides_in_the_default(self):
+        # The named offenders from the 2026-09-06 board, plus the rest of the
+        # offshore group that was one qualifying deviation away from the same
+        # problem.
+        books = opener_model._bettable_books()
+        for bad in ("onexbet", "betus", "coolbet", "gtbets", "lowvig",
+                    "bovada", "matchbook"):
+            assert bad not in books, bad
+
+
+class TestFireWindow:
+    """T-7 is gone; T-2 is not."""
+
+    def test_game_beyond_T7_is_inside_the_fire_window(self, tmp_path, monkeypatch):
+        # THE MEASURED CASE, tested where the window actually lives.
+        # select_opener_bets never sees a lead time — load_window_schedule is
+        # what decides which games reach it — so a test written against the
+        # selection would have passed on the OLD code and proved nothing.
+        #
+        # On 2026-09-06 the Week-1 Sunday slate sat 172.5h out (7.19 days) with
+        # Pinnacle posted and seven qualifying deviations, and the old bound
+        # (LEAD_HI_DAYS = 7.0) watched them and fired nothing.
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        now = datetime.now(timezone.utc)
+
+        def _kick(delta_days):
+            k = (now + timedelta(days=delta_days)).astimezone(et)
+            return f"{k:%Y-%m-%d},{k:%H:%M}"
+
+        d = tmp_path / "data"
+        d.mkdir()
+        (d / "games.csv").write_text(
+            "season,week,gameday,gametime,away_team,home_team\n"
+            f"2026,1,{_kick(7.19)},BUF,HOU\n"    # was excluded by T-7
+            f"2026,1,{_kick(1.0)},NYJ,TEN\n"     # excluded by T-2, must STAY out
+            f"2026,1,{_kick(4.0)},SF,LA\n",      # inside either way
+            encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        # No hi_days argument on purpose: the DEFAULT is the thing that
+        # changed. Passing 10.0 explicitly would have driven the old code to
+        # the right answer too.
+        teams = set(card.load_window_schedule().home_team)
+        assert "HOU" in teams, "the 7.19-day game must now be fireable"
+        assert "LA" in teams
+        assert "TEN" not in teams, "the T-2 late bound must still exclude it"
+
+    def test_early_bound_is_the_watch_horizon_and_late_bound_is_unchanged(self):
+        # mike asked for the T-7 rule to go, not the T-2 one. Dropping both
+        # would be a different model: inside two days the soft books have
+        # corrected and the backtest says nothing about that region.
+        assert opener_model.LEAD_LO_DAYS == 2.0
+        assert opener_model.LEAD_HI_DAYS >= 10.0

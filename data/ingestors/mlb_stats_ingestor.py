@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import os
 import requests
 import sqlite3
 import time
@@ -474,25 +475,35 @@ def _fetch_savant_pitcher_stats(season: int) -> dict[str, dict]:
 
 
 def _build_pitcher_rows(season: int, as_of_date: str,
-                         conn) -> list[dict]:
+                         conn, season_stats: tuple | None = None) -> list[dict]:
     """
-    Build mlb_pitcher_stats rows for today's probable starters.
+    Build mlb_pitcher_stats rows for the probable starters on `as_of_date`.
     Season stats come from MLB Stats API + Baseball Savant.
+
+    `season_stats` is an optional pre-fetched (mlb_stats, savant_stats) pair.
+    The two fetches inside are per-SEASON and identical for every date, but
+    they are the expensive part of this function — a full stat line for every
+    pitcher in the league plus a Savant CSV. A caller looping over dates
+    (run_probables_refresh) fetches once and passes them in; callers that do
+    not care keep the old behaviour by omitting the argument.
     """
     if not STATSAPI_AVAILABLE:
         logger.warning("MLB-StatsAPI not available — skipping pitcher rows")
         return []
 
-    mlb_stats    = _fetch_mlb_api_pitcher_stats(season)
-    savant_stats = _fetch_savant_pitcher_stats(season)
-    if not mlb_stats:
-        # Early season: try prior season as baseline for pitcher stats
-        fallback = season - 1
-        logger.warning(
-            f"No MLB API pitcher data for {season} — falling back to {fallback}"
-        )
-        mlb_stats    = _fetch_mlb_api_pitcher_stats(fallback)
-        savant_stats = _fetch_savant_pitcher_stats(fallback)
+    if season_stats is not None:
+        mlb_stats, savant_stats = season_stats
+    else:
+        mlb_stats    = _fetch_mlb_api_pitcher_stats(season)
+        savant_stats = _fetch_savant_pitcher_stats(season)
+        if not mlb_stats:
+            # Early season: try prior season as baseline for pitcher stats
+            fallback = season - 1
+            logger.warning(
+                f"No MLB API pitcher data for {season} — falling back to {fallback}"
+            )
+            mlb_stats    = _fetch_mlb_api_pitcher_stats(fallback)
+            savant_stats = _fetch_savant_pitcher_stats(fallback)
 
     # Get today's probable starters from StatsAPI
     try:
@@ -1876,6 +1887,122 @@ def backfill_player_handedness() -> dict:
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
+
+PROBABLES_MAX_AGE_MIN = int(os.environ.get("REFRESH_PROBABLES_MAX_AGE_MIN", "60"))
+
+
+def _probables_are_fresh(conn, dates: list[str]) -> bool:
+    """True when every date already has a row written inside the max-age window.
+
+    Same shape as the injury and weather refreshes: the step runs on every pass
+    but only opens a socket when the data is actually stale. Without this, ~42
+    passes a day would each pull a league-wide pitcher stat line and a Savant
+    CSV to re-learn a starter list that changes a few times a day. ESPN has
+    IP-blocked this worker twice; do not give another upstream the same reason.
+
+    Unknown freshness counts as STALE — a probe that cannot answer must not be
+    able to switch the refresh off (§7).
+
+    THE AGE COMPARISON HAPPENS IN THE DATABASE, and that is not a stylistic
+    preference. `created_at` is a TEXT column defaulted to `(now())::text`, so
+    it holds UTC in the form '2026-09-06 10:05:31.654854+00'. A cutoff built
+    from a naive local `datetime.now().isoformat()` differs in two ways at
+    once: it is ET rather than UTC (four hours), and it separates date from
+    time with 'T' rather than a space. Lexicographically 'T' > ' ', so the
+    string compare would have judged every row stale forever — the guard would
+    have run on all ~42 passes a day, which is exactly the burn it exists to
+    prevent, while looking like it worked.
+
+    Letting Postgres cast the column and subtract the interval keeps both
+    sides in one frame and removes the question.
+    """
+    try:
+        fresh = {str(r[0]) for r in conn.execute("""
+            SELECT game_date
+            FROM mlb_pitcher_stats
+            WHERE game_date = ANY(%s)
+            GROUP BY game_date
+            HAVING MAX(created_at::timestamptz) >= now() - (%s || ' minutes')::interval
+        """, (dates, PROBABLES_MAX_AGE_MIN)).fetchall()}
+    except Exception:                                          # noqa: BLE001
+        return False
+    # A date with no rows at all does not come back from the query, so set
+    # equality covers both "never loaded" and "loaded too long ago".
+    return fresh == set(dates)
+
+
+def run_probables_refresh(days_ahead: int = 1, season: int = None,
+                          force: bool = False) -> dict:
+    """Refresh mlb_pitcher_stats for today AND the next `days_ahead` dates.
+
+    WHY THIS IS SEPARATE FROM run_mlb_stats_ingestor. That entry point rebuilds
+    every team's season aggregates before it touches pitchers — right for a 6am
+    daily run, far too heavy for a step that has to keep up with a refresh pass.
+    This does the pitcher half only.
+
+    WHY IT EXISTS AT ALL. The scorer's look-ahead (config.GAME_SCORE_AHEAD_DAYS)
+    lets an MLB game be priced the day before it is played, and MLB game models
+    fail CLOSED without a probable starter — score_game skips any game missing
+    home/away_starter_era rather than 0-filling an impossible 0.00 ERA. Measured
+    2026-09-06: mlb_pitcher_stats held nothing past that same day. So the
+    widened window would have selected tomorrow's games and skipped every one of
+    them — a feature that silently does nothing, which is worse than one that is
+    switched off. MLB names probables a day or more ahead and statsapi.schedule
+    takes any date; this is a lookup we were simply never making.
+
+    THE SEASON STATS ARE FETCHED ONCE, not once per date. They are per-season
+    and identical across the loop, and they are the expensive part: a league-wide
+    stat line plus a Savant CSV. Fetching them per date turned an 8-day window
+    into 8 of each.
+
+    Idempotent — _upsert_pitcher_stats keys on (player_id, game_date), so a
+    starter named early and changed later is corrected rather than duplicated.
+    Never raises: a probables fetch that fails costs the pass its MLB
+    look-ahead, not the pass.
+    """
+    today = date.today()
+    season = season or today.year
+    dates = [(today + timedelta(days=o)).isoformat()
+             for o in range(0, max(0, days_ahead) + 1)]
+
+    conn = get_connection()
+    out: dict = {}
+    try:
+        if not force and _probables_are_fresh(conn, dates):
+            logger.info(f"MLB probables: fresh within {PROBABLES_MAX_AGE_MIN}min "
+                        f"for {len(dates)} date(s) — skipping fetch")
+            return {"skipped": "fresh", "dates": dates}
+
+        season_stats = None
+        try:
+            mlb_stats = _fetch_mlb_api_pitcher_stats(season)
+            savant_stats = _fetch_savant_pitcher_stats(season)
+            if not mlb_stats:
+                fallback = season - 1
+                logger.warning(f"No MLB API pitcher data for {season} — "
+                               f"falling back to {fallback}")
+                mlb_stats = _fetch_mlb_api_pitcher_stats(fallback)
+                savant_stats = _fetch_savant_pitcher_stats(fallback)
+            season_stats = (mlb_stats, savant_stats)
+        except Exception as exc:                              # noqa: BLE001
+            # Let _build_pitcher_rows fetch for itself rather than abandoning
+            # the refresh: slower, but it still produces the starter list.
+            logger.warning(f"probables: season stat prefetch failed ({exc})")
+
+        for d in dates:
+            try:
+                rows = _build_pitcher_rows(season, d, conn,
+                                           season_stats=season_stats)
+                out[d] = _upsert_pitcher_stats(conn, rows)
+                conn.commit()
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(f"probables refresh {d} failed: {exc}")
+                out[d] = 0
+        logger.success(f"MLB probables: {out}")
+        return out
+    finally:
+        conn.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run MLB stats ingestor")
