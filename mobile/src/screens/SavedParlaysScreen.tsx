@@ -69,7 +69,10 @@ export function SavedParlaysScreen() {
     const customLegs = sp.legs
       .filter((l) => l.pickId < 0 || !l.slipKey)
       .map(savedLegToParlayLeg);
-    setParlayRestore({ slipKeys, customLegs });
+    // The id goes with it: saving from the builder writes back over THIS
+    // record. Without it "Edit in builder" was an insert, so an edited parlay
+    // left the original standing beside its replacement.
+    setParlayRestore({ slipKeys, customLegs, editingId: sp.id });
     navigation.navigate('Betslip');
   };
 
@@ -92,11 +95,11 @@ export function SavedParlaysScreen() {
 
   const undoDelete = useCallback(() => {
     if (undoTimer.current) clearTimeout(undoTimer.current);
-    setUndo((sp) => {
-      if (sp) restore(sp);
-      return null;
-    });
-  }, [restore]);
+    // The restore happens HERE, not inside the setState updater: an updater has
+    // to be pure, and React is free to run it twice.
+    if (undo) restore(undo);
+    setUndo(null);
+  }, [undo, restore]);
 
   const confirmClearAll = useCallback(() => {
     Alert.alert('Clear all saved parlays?', `This removes all ${items.length}.`, [
@@ -240,7 +243,12 @@ function SavedParlayCard({
           {parlay.legs.length}-Leg · {formatAmerican(metrics.americanOdds)}
         </Text>
         <Text style={styles.cardMeta}>
+          {/* One clock, and it is the ORIGIN one: the list is ordered by
+              createdAt, so labelling an edited card with its edit time made
+              the meta column stop reading in order (UX review). The edit is
+              marked, not timed. */}
           {parlay.sport} · {savedAgo(parlay.createdAt)}
+          {parlay.updatedAt ? ' · edited' : ''}
         </Text>
       </View>
 

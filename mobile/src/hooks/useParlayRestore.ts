@@ -16,6 +16,12 @@ import type { ParlayLeg } from '@/lib/parlay';
 export interface ParlayRestorePayload {
   slipKeys: string[];
   customLegs: ParlayLeg[];
+  /**
+   * The saved parlay this slip is an EDIT of, when it came from "Edit in
+   * builder". The builder saves back over that record instead of inserting a
+   * second one; absent (a "New parlay") means the next save is an insert.
+   */
+  editingId?: string;
 }
 
 const listeners = new Set<(p: ParlayRestorePayload | null) => void>();

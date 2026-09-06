@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -28,7 +29,7 @@ import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { isLineLeg } from '@/lib/lineLegs';
-import { useSavedParlays } from '@/hooks/useSavedParlays';
+import { setEditingParlayId, useEditingParlayId, useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -115,6 +116,22 @@ export function ParlayScreen() {
   // Session-only hand-entered legs (not persisted — they resolve against no
   // pick row, so there is nothing stable to key them on).
   const [manualCustom, setManualCustom] = useState<ParlayLeg[]>([]);
+  /**
+   * The saved parlay this slip is an edit of, so the next save writes back over
+   * it instead of inserting a second record. Set two ways: by "Edit in builder"
+   * (the restore payload), and by the builder's own save — after "Save parlay"
+   * the slip on screen IS that saved parlay, so tapping save again updates it
+   * rather than filing a duplicate.
+   *
+   * It lives in a module store (useSavedParlays) rather than here BECAUSE this
+   * screen gets popped mid-edit: "Find players to add" navigates to the tabs,
+   * which pops the Betslip, and adding a leg pushes a fresh one. Screen state
+   * died on that trip and the save went back to inserting duplicates.
+   */
+  const editingId = useEditingParlayId();
+  // Drives the pinned header's separator: shown only once content has scrolled
+  // under it, the way every native stack header in this app behaves.
+  const [scrolled, setScrolled] = useState<boolean>(false);
   const [customOpen, setCustomOpen] = useState<boolean>(false);
   const [customLabel, setCustomLabel] = useState<string>('');
   const [customOddsText, setCustomOddsText] = useState<string>('');
@@ -181,6 +198,9 @@ export function ParlayScreen() {
     slip.clear();
     lineLegs.clear();
     setManualCustom([]);
+    // A cleared slip is no longer the saved parlay it was seeded from — the
+    // next save is a new one, not a write over the old.
+    setEditingParlayId(null);
   }, [slip, lineLegs]);
 
   // Only reachable when the board isn't trusted (offline, empty slate) — the
@@ -214,8 +234,17 @@ export function ParlayScreen() {
     slip.clear();
     restorePending.slipKeys.forEach((key) => slip.add(key));
     setManualCustom(restorePending.customLegs);
+    setEditingParlayId(restorePending.editingId ?? null);
     consumeRestore();
   }, [restorePending]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Removing the last leg ends the edit, the same way "Clear" does. Without
+  // this the binding outlived the slip: empty it leg by leg, build a brand new
+  // slip, and "Update parlay" would have overwritten the parlay you edited an
+  // hour ago with something that shares nothing with it.
+  useEffect(() => {
+    if (!resolving && legs.length === 0 && editingId) setEditingParlayId(null);
+  }, [resolving, legs.length, editingId]);
 
   const customOdds = parseAmerican(customOddsText);
   const customValid = customLabel.trim().length > 0 && customOdds != null;
@@ -233,49 +262,61 @@ export function ParlayScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      {/* PINNED, not scrolled with the slip. The close chevron is this screen's
+          only way out (it renders its own header, so there is no stack back
+          button), and it used to sit at the top of the ScrollView — on a slip
+          long enough to scroll, the exit scrolled off with it. */}
+      <View style={[styles.header, scrolled && styles.headerScrolled]}>
+        <View style={styles.titleRow}>
+          <View style={styles.titleLeft}>
+            <Pressable
+              onPress={() => navigation.goBack()}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Close betslip"
+              style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
+            </Pressable>
+            <Text style={styles.title}>Betslip</Text>
+            {slipCount > 0 ? (
+              <View style={styles.countBadge}>
+                <Text style={styles.countBadgeText}>{slipCount}</Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={styles.rightActions}>
+            <Pressable
+              onPress={() => navigation.navigate('SavedParlays')}
+              hitSlop={8}
+              style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
+            >
+              <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
+              <Text style={styles.savedLinkText}>
+                Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
+              </Text>
+            </Pressable>
+            <SettingsButton />
+          </View>
+        </View>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
+        onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 0)}
+        scrollEventThrottle={16}
       >
-        <View style={styles.header}>
-          <View style={styles.titleRow}>
-            <View style={styles.titleLeft}>
-              <Pressable
-                onPress={() => navigation.goBack()}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="Close betslip"
-                style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
-              >
-                <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
-              </Pressable>
-              <Text style={styles.title}>Betslip</Text>
-              {slipCount > 0 ? (
-                <View style={styles.countBadge}>
-                  <Text style={styles.countBadgeText}>{slipCount}</Text>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.rightActions}>
-              <Pressable
-                onPress={() => navigation.navigate('SavedParlays')}
-                hitSlop={8}
-                style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
-              >
-                <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
-                <Text style={styles.savedLinkText}>
-                  Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
-                </Text>
-              </Pressable>
-              <SettingsButton />
-            </View>
-          </View>
-          <Text style={styles.subtitle}>
-            {legs.length === 0
-              ? 'The bets you add show up here'
-              : `${legs.length} leg${legs.length === 1 ? '' : 's'} · tap a leg to remove it`}
-          </Text>
-        </View>
+        {/* Descriptive, not a control — so it scrolls, and only the title row
+            and its buttons stay pinned (HIG: navigation bars keep controls and
+            the title; descriptive text belongs to the content). It also states
+            the MODE, which is why the "Update parlay" button needs no standing
+            caption of its own. */}
+        <Text style={styles.subtitle}>
+          {legs.length === 0
+            ? 'The bets you add show up here'
+            : `${editingId ? 'Editing a saved parlay · ' : ''}${legs.length} leg${legs.length === 1 ? '' : 's'} · tap a leg to remove it`}
+        </Text>
 
         {error ? (
           <View style={styles.errorBanner}>
@@ -302,6 +343,8 @@ export function ParlayScreen() {
             onFindPlayers={goFindPlayers}
             onClear={handleClear}
             onClearStale={handleClearStale}
+            editingId={editingId}
+            onSaved={setEditingParlayId}
           />
         )}
       </ScrollView>
@@ -317,7 +360,12 @@ export function ParlayScreen() {
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Custom leg</Text>
-              <Pressable onPress={closeCustom} hitSlop={8}>
+              <Pressable
+                onPress={closeCustom}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>
             </View>
@@ -386,8 +434,24 @@ export function ParlayScreen() {
  * every leg — "Bet on FanDuel" must never open a slip FanDuel cannot take.
  * No book has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
  */
-function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
-  const { save } = useSavedParlays();
+function ParlayActions({
+  legs,
+  sport,
+  editingId,
+  droppedCount,
+  onSaved,
+}: {
+  legs: ParlayLeg[];
+  sport: string;
+  /** The saved parlay this slip is an edit of, or null for a new one. */
+  editingId: string | null;
+  /** Legs the board could not price back — they are NOT in `legs`, so updating
+   *  a save would drop them. The caption says so before the tap. */
+  droppedCount: number;
+  /** Called with the id the slip now lives under, so a second tap updates it. */
+  onSaved: (id: string) => void;
+}) {
+  const { save, update } = useSavedParlays();
   const [handoffOpen, setHandoffOpen] = useState(false);
   // `ready` gates the button: the hook seeds to DraftKings and resolves storage
   // in an effect, so without it a FanDuel member sees a green "Bet on
@@ -428,19 +492,65 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   // book cannot take (UX review).
   const partial = bookReady && handoff.priced < handoff.total;
 
-  const onSave = useCallback(() => {
-    save(legs, sport);
+  /**
+   * Save is an INSERT once and an UPDATE thereafter.
+   *
+   * It used to be an insert every time, so the two commonest gestures each
+   * left a duplicate behind: editing a saved parlay and saving it, and simply
+   * tapping "Save parlay" twice. `editingId` is the record this slip already
+   * IS — set by "Edit in builder", and by the first save — so a later save
+   * writes over it. An id that no longer exists (deleted while the builder was
+   * open) falls back to an insert rather than losing the slip.
+   */
+  const applySave = useCallback(() => {
+    if (editingId) {
+      const updated = update(editingId, legs, sport);
+      if (updated) {
+        onSaved(updated.id);
+        showToast('Saved parlay updated');
+        return;
+      }
+    }
+    const parlay = save(legs, sport);
+    onSaved(parlay.id);
     showToast('Saved · find it under “Saved” at the top of your betslip');
-  }, [save, legs, sport]);
+  }, [save, update, editingId, onSaved, legs, sport]);
+
+  // An update that drops legs is a delete with extra steps, and there is no
+  // undo behind it — so it asks first, naming what goes. An update that keeps
+  // every leg does not: confirming a save nobody can lose anything to is noise.
+  const onSave = useCallback(() => {
+    if (!editingId || droppedCount === 0) {
+      applySave();
+      return;
+    }
+    Alert.alert(
+      'Update without those legs?',
+      `${droppedCount} leg${droppedCount === 1 ? '' : 's'} in this parlay ${droppedCount === 1 ? 'is' : 'are'} no longer on the board. Updating saves it without ${droppedCount === 1 ? 'it' : 'them'}, and that can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Update', style: 'destructive', onPress: applySave },
+      ],
+    );
+  }, [applySave, editingId, droppedCount]);
 
   if (legs.length === 0) return null;
 
   return (
     <>
       <View style={styles.parlayActions}>
-        <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
-          <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
-          <Text style={styles.saveBtnText}>Save parlay</Text>
+        <Pressable
+          onPress={onSave}
+          accessibilityRole="button"
+          accessibilityLabel={editingId ? 'Update saved parlay' : 'Save parlay'}
+          style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}
+        >
+          <Ionicons
+            name={editingId ? 'bookmark' : 'bookmark-outline'}
+            size={18}
+            color={colors.tint}
+          />
+          <Text style={styles.saveBtnText}>{editingId ? 'Update parlay' : 'Save parlay'}</Text>
         </Pressable>
         <Pressable
           onPress={() => setHandoffOpen(true)}
@@ -464,6 +574,24 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
           </Text>
         </Pressable>
       </View>
+
+      {/* The mode itself is stated in the subtitle and on the button — no
+          standing caption here, which would render forever under an ordinary
+          save and stack with the hand-off captions below. What DOES belong
+          here is the loss: updating writes the shorter slip over the save.
+          Shaped like the same-game warning above, because colour alone is not
+          a signal — colors.med measures 2.20:1 on this card, half the AA
+          floor, so the tint, the icon and the wording all have to carry it. */}
+      {editingId && droppedCount > 0 ? (
+        <View style={[styles.warnBanner, styles.updateWarn]}>
+          <Ionicons name="warning-outline" size={16} color={colors.med} />
+          <Text style={styles.warnText}>
+            {droppedCount} leg{droppedCount === 1 ? '' : 's'}{' '}
+            {droppedCount === 1 ? 'is' : 'are'} no longer on the board —
+            “Update parlay” saves this slip without {droppedCount === 1 ? 'it' : 'them'}.
+          </Text>
+        </View>
+      ) : null}
 
       {partial ? (
         <Text style={styles.handoffFallback}>
@@ -656,6 +784,8 @@ function SlipBody({
   onFindPlayers,
   onClear,
   onClearStale,
+  editingId,
+  onSaved,
 }: {
   legs: ParlayLeg[];
   metrics: CorrelatedMetrics;
@@ -670,6 +800,8 @@ function SlipBody({
   onFindPlayers: () => void;
   onClear: () => void;
   onClearStale: () => void;
+  editingId: string | null;
+  onSaved: (id: string) => void;
 }) {
   // Every leg priced at DraftKings? A Stats line leg DK never posted is not,
   // and four labels below attribute the slip's number to DK only when it is.
@@ -790,7 +922,13 @@ function SlipBody({
           ))}
         </View>
 
-        <ParlayActions legs={legs} sport={sport} />
+        <ParlayActions
+          legs={legs}
+          sport={sport}
+          editingId={editingId}
+          droppedCount={staleCount + removedCount}
+          onSaved={onSaved}
+        />
       </View>
 
       <View style={styles.manualActions}>
@@ -841,6 +979,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+  },
+  // Pinned above the scroll view — the hairline is what keeps a scrolled leg
+  // card from reading as part of the title block, so it appears only when
+  // there IS something under it (scroll-edge appearance, as the native
+  // headers on every other stack screen do).
+  headerScrolled: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
   },
   titleRow: {
     flexDirection: 'row',
@@ -896,11 +1042,15 @@ const styles = StyleSheet.create({
     color: colors.tint,
   },
   subtitle: {
+    // Leads the scroll view now (it used to sit inside the header), so it owns
+    // both the gutter and the gap under the title row.
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.md,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-    marginTop: 4,
   },
   errorBanner: {
+    marginTop: spacing.md,
     backgroundColor: colors.avoidSoft,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
@@ -1195,6 +1345,12 @@ const styles = StyleSheet.create({
     backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
+  },
+  // The same-game warning is laid out for a full-width row above the actions;
+  // here it sits inside the result card, under the button pair.
+  updateWarn: {
+    marginTop: spacing.sm,
+    marginHorizontal: 0,
   },
   handoffFallback: {
     marginTop: spacing.xs,

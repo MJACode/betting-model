@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
-import { toSavedParlay, type ParlayLeg, type SavedParlay } from '@/lib/parlay';
+import { toSavedParlay, updateSavedParlay, type ParlayLeg, type SavedParlay } from '@/lib/parlay';
 
 /**
  * Saved parlays — self-contained snapshots the user keeps to revisit and bet
@@ -15,6 +15,39 @@ const STORAGE_KEY = 'savedParlays.v1';
 
 const listeners = new Set<(items: SavedParlay[]) => void>();
 let cached: SavedParlay[] | null = null;
+
+/**
+ * Which saved parlay the betslip is currently an EDIT of — a module store, not
+ * screen state, because the Betslip screen is POPPED mid-edit on the commonest
+ * gesture there is: "Find players to add" navigates to the tabs (which pops
+ * it), and adding a leg pushes a FRESH Betslip. Held in component state the
+ * binding died on that trip, so "Edit in builder → add a player → save" filed
+ * a duplicate again — the exact bug it was meant to fix (UX review).
+ *
+ * Cleared when the slip empties or is cleared: a slip with nothing left in it
+ * is no longer that parlay, and the next save is a new one.
+ */
+const editingListeners = new Set<(id: string | null) => void>();
+let editingId: string | null = null;
+
+export function setEditingParlayId(id: string | null): void {
+  if (editingId === id) return;
+  editingId = id;
+  editingListeners.forEach((fn) => fn(id));
+}
+
+export function useEditingParlayId(): string | null {
+  const [id, setId] = useState<string | null>(editingId);
+  useEffect(() => {
+    const listener = (v: string | null) => setId(v);
+    editingListeners.add(listener);
+    setId(editingId); // a mount after the setter ran still sees it
+    return () => {
+      editingListeners.delete(listener);
+    };
+  }, []);
+  return id;
+}
 
 function sanitize(raw: unknown): SavedParlay[] {
   if (!Array.isArray(raw)) return [];
@@ -79,6 +112,26 @@ export function useSavedParlays() {
     return parlay;
   }, []);
 
+  /**
+   * Write an edited leg set back over an existing save — the other half of
+   * "Edit in builder". Without it the builder's only verb was INSERT, so
+   * editing a saved parlay left the original standing beside its replacement.
+   * The save keeps its id, its created time and its place in the list; only
+   * the legs (and `updatedAt`) change. Returns null when the id is gone —
+   * deleted from the list while the builder was open — and the caller inserts
+   * instead, so an edit can never be silently dropped.
+   */
+  const update = useCallback((id: string, legs: ParlayLeg[], sport: string): SavedParlay | null => {
+    const cur = cached ?? [];
+    const idx = cur.findIndex((p) => p.id === id);
+    if (idx < 0) return null;
+    const next = updateSavedParlay(cur[idx], legs, sport);
+    const items = [...cur];
+    items[idx] = next;
+    persist(items).catch((err) => console.warn('[savedParlays] update failed', err));
+    return next;
+  }, []);
+
   const remove = useCallback((id: string) => {
     const cur = cached ?? [];
     persist(cur.filter((p) => p.id !== id)).catch((err) =>
@@ -98,5 +151,5 @@ export function useSavedParlays() {
     persist([]).catch((err) => console.warn('[savedParlays] clear failed', err));
   }, []);
 
-  return { items, count: items.length, ready, save, remove, restore, clear };
+  return { items, count: items.length, ready, save, update, remove, restore, clear };
 }
