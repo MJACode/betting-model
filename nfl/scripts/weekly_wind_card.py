@@ -49,6 +49,11 @@ MAX_FIRE_LEAD = _wind_totals.MAX_FIRE_LEAD
 # 40 books on 1.4M quotes; see scripts/screen_books.py. Excluded everywhere.
 DEFECTIVE_BOOKS = {"betanysports", "betsson", "nordicbet", "tipico_de"}
 
+# Books a bet can actually be PLACED at — the same list the opener card uses.
+# See data_ingest/books.py for why it exists and why it is derived rather than
+# retyped.
+from data_ingest.books import bettable_books
+
 # Exchange: quoted price is gross of commission, so treat separately if used.
 EXCHANGES = {"matchbook"}
 
@@ -92,7 +97,28 @@ def attach_forecast(g: pd.DataFrame, days: int = 9) -> pd.DataFrame:
 
 
 def attach_odds(g: pd.DataFrame, regions: str, dry_run: bool) -> pd.DataFrame:
-    """Best available UNDER price at the best (highest) total, defective books removed."""
+    """Best available UNDER price at the best (highest) total, at a book we can bet.
+
+    "BEST AVAILABLE" HAS TO MEAN AVAILABLE TO US. This sorted the whole feed by
+    total then price and took the top row, and the feed is full of books nobody
+    here holds — so the card kept selecting numbers that could not be played.
+    Measured on the Week-1 board (2026-09-06): of the five picks this model had
+    locked, three named gtbets, lowvig and onexbet. mike: "no can't bet on
+    these remove them."
+
+    §1c makes those permanent, so the ones already written cannot be retracted;
+    this stops the next one. It is the same filter the opener card got hours
+    earlier, from the same shared list — the two cards must not disagree about
+    which books exist (CLAUDE.md §1b: a change to how one model operates is
+    assessed against all of them).
+
+    EXPECT FEWER AND SMALLER EDGES, not the same ones at different books. The
+    unbettable books were often quoting the best number precisely because they
+    were the loosest, so removing them lowers the top total and the price at
+    it, and some games will now fall under `min_edge` and not fire at all. That
+    is the correct answer to "what could we actually have bet", not a
+    regression.
+    """
     g = g.copy()
     for c in ("best_book", "best_total", "best_under_px", "best_over_px", "n_books"):
         g[c] = pd.NA
@@ -112,6 +138,15 @@ def attach_odds(g: pd.DataFrame, regions: str, dry_run: bool) -> pd.DataFrame:
 
     d = snapshot_to_frame(res.payload, "live")
     d = d[(d.market == "totals") & (~d.book.isin(DEFECTIVE_BOOKS))]
+    # Unlike the opener there is no reference book to preserve here: wind
+    # de-vigs the SAME book's over/under, so a quote we cannot bet has no role
+    # at all and is dropped outright.
+    bettable = bettable_books()
+    n_before = int(d.book.nunique()) if not d.empty else 0
+    d = d[d.book.isin(bettable)]
+    if n_before:
+        print(f"books: {int(d.book.nunique()) if not d.empty else 0} bettable "
+              f"of {n_before} quoting", file=sys.stderr)
     if d.empty:
         print("WARNING: no totals returned by the odds feed", file=sys.stderr)
         return g

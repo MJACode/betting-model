@@ -107,26 +107,20 @@ REFERENCE = "pinnacle"
 # them". A pick naming an unplaceable book is worse than no pick — §1c makes it
 # permanent, and it enters the track record as a bet that was never available.
 #
-# Canonical list is config.BETTABLE_BOOKS (derived from LINE_SHOP_BOOKMAKERS,
-# which mike curated as the books the app quotes a price at). The literal below
-# is a FALLBACK for standalone use: this package runs without the repo root on
-# sys.path in backtests and one-off scripts, where `import config` finds
-# nothing. tests/test_nfl_opener.py asserts the two agree, so the copy cannot
-# drift unnoticed.
-_BETTABLE_FALLBACK = ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
-                      "fanatics,betrivers,hardrockbet,ballybet,betparx,rebet")
-
-
+# THE LIST LIVES IN data_ingest/books.py, because the WIND card needs exactly
+# the same one (2026-09-06), and two cards that disagree about which books are
+# bettable is the bug rather than the fix.
+#
+# Imported INSIDE the function, not at module scope. This module is loaded by
+# absolute path from places that do not have nfl/ on sys.path (the platform
+# test suite, backtests), where a top-level `from data_ingest...` raises
+# ModuleNotFoundError and takes the whole model down with it. `evaluate_board`
+# imports pick_eval the same way and for the same reason — measured here: a
+# module-scope version of this import broke evaluate_board on the first run.
 def _bettable_books() -> set[str]:
-    """The placement venues, read fresh so an env override applies at call time."""
-    env = os.environ.get("BETTABLE_BOOKS")
-    if env:
-        return {b.strip().lower() for b in env.split(",") if b.strip()}
-    try:
-        from config import BETTABLE_BOOKS as _cfg
-        return {b.strip().lower() for b in _cfg}
-    except Exception:                                          # noqa: BLE001
-        return {b.strip().lower() for b in _BETTABLE_FALLBACK.split(",")}
+    """The placement venues. See data_ingest/books.py for the list and why."""
+    from data_ingest.books import bettable_books
+    return bettable_books()
 
 
 DEPLOY_THRESHOLD = 1.0   # |soft_home_line - pinnacle_home_line|, points
