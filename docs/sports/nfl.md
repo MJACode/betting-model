@@ -54,6 +54,27 @@ in-week during the season.
 - **Deployed threshold in code is 11.0 mph** (`DEPLOY_THRESHOLD` in
   `weekly_wind_card.py`), not the 12 quoted in the validation summary. `--threshold 12`
   overrides to match the published number.
+- **Wind fires only inside 4 days of kickoff** (`MAX_FIRE_LEAD` in
+  `nfl/models/wind_totals.py`, mike 2026-09-06). Polling still starts at T-10 —
+  the eval board wants the whole slate and the opener needs the window — but
+  nothing LOCKS past T-4. Three separate lead constants, do not conflate them:
+  `MIN_LIVE_LEAD` (1) floors the probability, `MAX_CALIBRATED_LEAD` (7) is where
+  the measured error distribution stops and the stake clips, `MAX_FIRE_LEAD` (4)
+  is where we are willing to commit money.
+
+  Why it was needed: making the stake clip past lead 7 (Matt, 2026-09-05) was
+  right on its own terms, but the zero stake had been the de-facto firing gate.
+  With it gone and the poll horizon at 10 days, **all five Week 1 picks locked
+  at leads of 7.2–8.7 days, every one carrying `model_probability` 0.5489 — the
+  lead-7 clip value — and 5 of 11 outdoor games qualified (45%) against a
+  validated ~19%.** Waiting costs nothing: the rule is a standing closing-line
+  inefficiency, not a race, and `CALIBRATED_UNDER_RATE` rises as the lead falls
+  (0.5489 at 7 days → 0.5671 at 3 → 0.5735 at 1). Since the pick is insert-once,
+  firing early bought the worse number permanently.
+  Pinned by `tests/test_nfl_wind_fire_window.py`.
+- **The five Week 1 picks written before the gate STAY** (CLAUDE.md §1c). They
+  were picks; the line moving under them — or the window tightening over them —
+  does not retract them.
 - 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
 - First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
   shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.

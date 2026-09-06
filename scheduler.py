@@ -632,6 +632,16 @@ def run_nfl_poll(fast: bool = False) -> None:
     along at one-minute intervals, which is most of the cost and none of the
     benefit.
 
+    So what is left here is WIND, and its firing stays inside the model's
+    validated window: wind does not fire past `wind_totals.MAX_FIRE_LEAD`.
+    Watching from T-10 buys the first fireable moment, not an earlier bet.
+
+    That was an ASPIRATION in this comment and not true in the code between
+    2026-09-05 and 2026-09-06: nothing gated wind firing, so the `--days` handed
+    to the card below -- the poll horizon, 10 -- was the firing window too, and
+    all five Week 1 picks locked at leads of 7.2 to 8.7 days. The gate now lives
+    in the model where every caller gets it, not in this argument.
+
     Cost is ~2 credits a tick (wind's own fetch), and zero when no game is
     inside the horizon, which is most of the year.
     """

@@ -642,6 +642,7 @@ to be known BEFORE deciding which file to open.
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |
 | **Evidence behind the §1b and §7 rules** | `docs/rules_evidence.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
+| **NFL wind: how far out it may fire, and the lead evidence** | `docs/nfl_wind_lead_evidence.md` |
 | Best line on pre-game picks | `docs/best_line.md` |
 | Which prop markets the feed actually serves | `docs/market_coverage.md` |
 | **The historical team-stats leak** | `docs/team_stats_leak.md` |

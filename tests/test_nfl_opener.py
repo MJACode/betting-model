@@ -405,9 +405,17 @@ class TestBettableBooksOnly:
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
                _both_sides("onexbet", -1.0, -105, -115)
         evals = opener_model.evaluate_board(_frame(rows), _sched())
-        mia = [e for e in evals if e["game_id"] == "2026_02_NYJ_MIA"][0]
+        # Matched on the suffix: eval_row normalises to the platform's
+        # `NFL_<season>_<week>_<away>_<home>` form, and pinning the exact
+        # string here would make this test about the id format rather than
+        # about which books the board is allowed to see.
+        mia = [e for e in evals if str(e["game_id"]).endswith("2026_02_NYJ_MIA")][0]
         assert int(mia["qualifies"]) == 0
         assert "onexbet" not in str(mia.get("current_book") or "")
+        # The soft side is empty because the only soft quote was unbettable —
+        # that is a different state from "Pinnacle has not posted", and the
+        # audit trail has to say which.
+        assert mia["reason"] == "no clean soft book quoting"
 
     def test_env_override_is_read_at_call_time(self, monkeypatch):
         # Narrowed to ONE book while a WIDER deviation sits at another, so the
@@ -427,7 +435,12 @@ class TestBettableBooksOnly:
         # (backtests, one-off scripts) where the repo root is not on sys.path.
         # A copy that drifts is a copy that lies, so pin them together.
         import config as platform_config
-        fallback = {b.strip() for b in opener_model._BETTABLE_FALLBACK.split(",")}
+        import importlib.util as _ilu
+        _bspec = _ilu.spec_from_file_location(
+            "nfl_books", ROOT / "nfl" / "data_ingest" / "books.py")
+        books_mod = _ilu.module_from_spec(_bspec)
+        _bspec.loader.exec_module(books_mod)
+        fallback = {b.strip() for b in books_mod.BETTABLE_FALLBACK.split(",")}
         assert fallback == set(platform_config.BETTABLE_BOOKS)
 
     def test_no_unlicensed_book_hides_in_the_default(self):

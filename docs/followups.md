@@ -1007,3 +1007,102 @@ refresh pass has to go through the same helper rather than calling the two
 notifiers directly in `run_pipeline.step_push_notifications` -- which is the
 §1b shape anyway (one helper, every caller), but it changes that step's
 failure reporting, so it wants its own PR rather than being tacked on.
+
+---
+
+## [x] The locked-pick monitor has never written a row: the eval CSV and `picks` use different game_id shapes
+
+**FIXED 2026-09-06** (same session that found it). `pick_eval.eval_row` now
+normalises to the `NFL_`-prefixed id, which fixes wind and opener at once
+because both feed that one helper. Pinned by
+`tests/test_nfl_pick_monitor.py::TestTheJoinKeyMatchesPicks`, run against the
+unfixed code first. Leaving this here for a week per the file's convention.
+
+Found 2026-09-06 (mike, asking why the wind model was firing on nearly half the
+Week 1 slate). `nfl_pick_status_history` holds **0 rows for every model**, and
+`condition_status` is NULL on all five live `nfl_wind_totals` picks.
+
+It is not a missing dump and it is not a schema problem. The monitor runs
+cleanly on every hourly tick and says so:
+
+```
+04:00  START nfl-pick-monitor
+       NFL pick monitor 2026-09-06: 0 locked pick(s) observed
+       DONE  nfl-pick-monitor (exit 0)
+```
+
+— repeated at 05:01, 06:02, 07:03, 08:04, 09:04, 10:05, 11:06. It printed the
+post-loop message rather than `no evaluation dump — nothing to do`, so the CSV
+was read and had rows. The loop found none of them.
+
+**The join key does not match.** `nfl/data_ingest/pick_eval.py` writes
+`game_id` as the bare nflverse id and its own field comment calls it "the join
+key to picks" — but `scripts/nfl_wind_publisher.py` writes
+`game_id = f"NFL_{nflverse_id}"` (its module docstring says so at line 12). So
+`current.get((game_id, model_id))` in `scripts/nfl_pick_monitor.py:latest_per_pick`
+looks up `NFL_2026_01_CLE_JAX` in a dict keyed `2026_01_CLE_JAX` and misses
+every time. `written` stays 0 and the run exits 0, which looks exactly like
+"nothing changed".
+
+**Why it is load-bearing.** Wind became insert-once on 2026-08-22 and the
+scheduler comment justifies the lock with "every later tick records whether the
+conditions still hold (`nfl_pick_status_history`) without touching the bet".
+That sentence is currently false. A pick locked at a 12 mph forecast whose wind
+collapses to 8 mph before kickoff is flagged nowhere — not in the table, not on
+the pick, not in the app.
+
+**It has already cost something concrete.** `CLE @ JAX Under 40.5` locked on
+2026-09-05 at a **14.0 mph** forecast. The card's dry run the next day, still
+seven days from kickoff, reads **4.3 mph** at the same stadium — the lowest on
+the board. The pick stands (§1c, and correctly), but the premise for it is
+gone, and there is nowhere that says so: not `nfl_pick_status_history`, not
+`picks.condition_status`, not the app. That is the exact scenario
+`nfl_pick_monitor`'s docstring describes as "the case this whole mechanism
+exists for".
+
+Fix is one line at the write side or the read side; prefer normalising in
+`pick_eval.eval_row` so the CSV's own comment becomes true. **The test has to
+watch it fail** (§1b): assert a published pick's `game_id` resolves against a
+dump produced by `evaluate_board` — the current suite passes with the bug in.
+
+## [x] 43 of the 2026 NFL schedule rows have a BLANK roof and are scored as open-air
+
+**FIXED 2026-09-06.** `weather.open_air_mask` / `RETRACTABLE_STADIUMS`; a blank
+roof at one of the five retractable venues is not eligible until the state is
+known. The card's board went from 11 "outdoor" to 9 open-air on the Week 1
+slate, dropping exactly BUF @ HOU and BAL @ IND. Pinned by four tests in
+`tests/test_nfl_wind_fire_window.py`, including two that re-derive the venue set
+from `games.csv` so the constant cannot drift. Leaving this here for a week.
+
+Found alongside the item above. `nfl/data/games.csv` for season 2026:
+
+```
+outdoors 177   dome 52   (blank) 43
+```
+
+The 43 blanks are exactly five stadiums — `ATL97`, `DAL00`, `HOU00`, `IND00`,
+`PHO00` — every one of them a **retractable** roof. Prior seasons carry `open`
+or `closed` per game (128 and 621 rows), which is the roof state on the day;
+2026 has not been played, so the state is empty.
+
+`INDOOR_ROOFS = {"dome", "closed"}` and `select_bets` filters with
+`~games.roof.isin(INDOOR_ROOFS)`, so a blank is **outdoor**. Two of the five
+live Week 1 wind picks are on that basis:
+
+| pick | stadium | roof in csv | forecast wind |
+|---|---|---|---|
+| BUF @ HOU Under 44.5 | HOU00 (NRG) | *(blank)* | 12 mph |
+| BAL @ IND Under 48.5 | IND00 (Lucas Oil) | *(blank)* | 11 mph |
+
+Both venues close the roof for most games. A wind under bet on a game played
+under a closed roof has no premise at all — the forecast is for air the players
+never stand in.
+
+This inflates the fire rate on its own: it adds 2 games to an 11-game outdoor
+denominator that should be 9, and both of them qualified.
+
+Options, in order of honesty: treat a blank roof at a known retractable venue
+as **not eligible** until the state is known (the model loses nothing — a
+genuinely open roof re-qualifies once the state lands); or source the roof
+state pre-game rather than from the schedule file. Do NOT default blank to
+`outdoors`, which is what happens today by omission.
