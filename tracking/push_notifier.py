@@ -29,6 +29,7 @@ import requests
 from loguru import logger
 
 from data.db import get_connection
+from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _MAX_LABELS = 3          # labels listed in a summary body before "+N more"
@@ -191,52 +192,65 @@ def notify_signal_changes(target_date: str | None = None, dry_run: bool = False)
 
     conn = get_connection()
     try:
-        new_bets = _new_bet_signals(conn, target_date)
-        dropped = _dropped_signals(conn, target_date)
-        if not new_bets and not dropped:
-            logger.info(f"Push: no new/dropped signals for {target_date}")
-            return 0
-
-        tokens = [r[0] for r in conn.execute(
-            "SELECT token FROM device_push_tokens WHERE enabled = TRUE"
-        ).fetchall()]
-
-        logger.info(
-            f"Push: {len(new_bets)} new, {len(dropped)} dropped for {target_date}; "
-            f"{len(tokens)} device(s)"
-        )
-
-        if dry_run:
-            for s in new_bets:
-                logger.info(f"[dry-run] new_bet → {s['label']}")
-            for s in dropped:
-                logger.info(f"[dry-run] dropped → {s['label']}")
-            return 0
-
-        # Ledger regardless of token count, so a signal with zero devices online
-        # isn't re-detected forever (it would spam once a device registers late).
-        sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-        messages = _build_messages(tokens, new_bets, dropped) if tokens else []
-        sent = _expo_send(messages) if messages else 0
-
-        for s in new_bets:
-            conn.execute(
-                "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'new_bet', %s) "
-                "ON CONFLICT (lock_key, kind) DO NOTHING",
-                (s["lock_key"], sent_at),
-            )
-        for s in dropped:
-            conn.execute(
-                "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'dropped', %s) "
-                "ON CONFLICT (lock_key, kind) DO NOTHING",
-                (s["lock_key"], sent_at),
-            )
-        conn.commit()
-
-        logger.success(f"✓ Push: {sent} message(s) sent to {len(tokens)} device(s)")
-        return sent
+        # Read -> send -> ledger is not atomic, and `pollers` and `worker` both
+        # publish now, so two overlapping runs would each read an empty ledger
+        # and each push. The Discord half of that race was VISIBLE on
+        # 2026-09-06 (one card, posted twice); this half just sends a member
+        # the same alert twice. See tracking/publish_lock.py.
+        with publish_lock(conn, PUSH_SIGNALS_LOCK, "Push") as owned:
+            if not owned:
+                return 0
+            return _send_signal_changes(conn, target_date, dry_run)
     finally:
         conn.close()
+
+
+def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
+    """The body of notify_signal_changes, under the publisher lock."""
+    new_bets = _new_bet_signals(conn, target_date)
+    dropped = _dropped_signals(conn, target_date)
+    if not new_bets and not dropped:
+        logger.info(f"Push: no new/dropped signals for {target_date}")
+        return 0
+
+    tokens = [r[0] for r in conn.execute(
+        "SELECT token FROM device_push_tokens WHERE enabled = TRUE"
+    ).fetchall()]
+
+    logger.info(
+        f"Push: {len(new_bets)} new, {len(dropped)} dropped for {target_date}; "
+        f"{len(tokens)} device(s)"
+    )
+
+    if dry_run:
+        for s in new_bets:
+            logger.info(f"[dry-run] new_bet → {s['label']}")
+        for s in dropped:
+            logger.info(f"[dry-run] dropped → {s['label']}")
+        return 0
+
+    # Ledger regardless of token count, so a signal with zero devices online
+    # isn't re-detected forever (it would spam once a device registers late).
+    sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+    messages = _build_messages(tokens, new_bets, dropped) if tokens else []
+    sent = _expo_send(messages) if messages else 0
+
+    for s in new_bets:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'new_bet', %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (s["lock_key"], sent_at),
+        )
+    for s in dropped:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'dropped', %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (s["lock_key"], sent_at),
+        )
+    conn.commit()
+
+    logger.success(f"✓ Push: {sent} message(s) sent to {len(tokens)} device(s)")
+    return sent
 
 
 # ── Track-a-bet line-change alerts ───────────────────────────────────────────
