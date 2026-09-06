@@ -2,7 +2,7 @@ import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { HIT_MODES, hitModeHeadline, type HitMode } from '@/lib/hitMode';
+import { HIT_MODES, hitModeHeadline, rulerValueLabel, type HitMode } from '@/lib/hitMode';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
@@ -15,9 +15,12 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * single-select, applied on tap, the row it opened from being the feedback.
  *
  * Each row carries what the bet would actually be called at the current ruler
- * position, because the three modes overlap on a whole-number stat — "Over 1"
- * IS "2+" — and a picker that hid that would be inviting the user to hunt for
- * a difference that is not there.
+ * position — "1+ Hits", "Over 0.5 Hits", "Under 0.5 Hits". THIS SHEET IS THE
+ * ONE PLACE THE THREE IDIOMS APPEAR TOGETHER, which is why the equivalence
+ * lives here and nowhere else: At Least and Over name the SAME bet at the
+ * same price, in the fan's words and the book's, and a user who could not see
+ * the two side by side would go hunting for a difference that is not there.
+ * The board itself then speaks only the one they chose (lib/hitMode.ts).
  */
 export function HitModeSheet({
   visible,
@@ -32,7 +35,8 @@ export function HitModeSheet({
 }: {
   visible: boolean;
   mode: HitMode;
-  /** The ruler's current whole number, for the preview on each row. */
+  /** The ruler's current stop, for the preview on each row. Each mode prints
+   *  it in its own idiom, so the sheet shows one bet under three names. */
   lineN: number;
   statLabel: string;
   onPick: (mode: HitMode) => void;
@@ -61,9 +65,16 @@ export function HitModeSheet({
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
+          {/* SAYS THE EQUIVALENCE OUT LOUD, because two of the rows below name
+              the same bet and this sheet is the only place they appear
+              together. A subtitle that described the modes without naming both
+              numbers left the duplicate looking like a mistake and sent the
+              user hunting for a difference that is not there (UX review,
+              2026-09-06). */}
           <Text style={styles.subtitle}>
-            At Least {lineN} counts games with {lineN} or more. Over {lineN} counts{' '}
-            {lineN + 1} or more. The line and the price follow.
+            At Least {lineN} and Over {rulerValueLabel(lineN, 'over')} are the same bet at the same
+            price — At Least is how a fan says it, Over is how your sportsbook posts it. Under{' '}
+            {rulerValueLabel(lineN, 'under')} is the other side of it.
           </Text>
           <View style={styles.list}>
             {HIT_MODES.map((m) => {
@@ -82,10 +93,13 @@ export function HitModeSheet({
                   disabled={!priced}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: active, disabled: !priced }}
+                  // One shape for both branches. They had drifted into two —
+                  // the priced one stuttering the mode word, the unpriced one
+                  // dropping the stat label (UX review, 2026-09-06). The row's
+                  // own name is spoken by rowName either way, so neither
+                  // repeats it.
                   accessibilityLabel={
-                    priced
-                      ? `${m.label} ${lineN}, that is ${preview}`
-                      : `${m.label} ${lineN}, not priced by your sportsbooks`
+                    priced ? preview : `${preview}, not priced by your sportsbooks`
                   }
                   style={({ pressed }) => [
                     styles.row,

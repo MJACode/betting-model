@@ -235,7 +235,11 @@ const spec = { game_id: game.game_id, sport: 'MLB', market: 'batter_hits', playe
   check('the sheet title is the proposition', lineLegLabel(input.spec) === 'LAD -1.5');
   const pq: StatsOddsQuote = { playerKey: 'mookie betts', playerName: 'Mookie Betts', gameId: game.game_id, market: 'batter_hits', line: 1.5, side: 'over', book: 'betmgm', price: 230, link: null, bookRows: [row('betmgm', 1.5, 230, -320)] as unknown as StatsOddsQuote['bookRows'], offLine: true };
   const pin = propLineSheetInput(pq, 'MLB', 'Hits', '1+ Hits');
-  check('an off-line prop quote explains itself under the title', (pin.explainer ?? '').startsWith('The board is on 1+ Hits; BetMGM only posts 2+.'), pin.explainer);
+  // The book's own number, in the book's own words (2026-09-06). It read
+  // "only posts 2+" until then — the fan's idiom for a line the sentence had
+  // just quoted the board's half-point version of, two vocabularies in one
+  // breath.
+  check('an off-line prop quote explains itself under the title', (pin.explainer ?? '').startsWith('The board is on 1+ Hits; BetMGM only posts Over 1.5.'), pin.explainer);
   check('an on-line prop quote has no explainer', propLineSheetInput({ ...pq, offLine: false }, 'MLB', 'Hits', '2+ Hits').explainer === undefined);
   const sheet = read('src/components/AddLineSheet.tsx');
   check('the sheet takes the shared input and builds no prop spec of its own', sheet.includes('input: LineSheetInput | null') && !sheet.includes('player_name: quote.playerName'));
