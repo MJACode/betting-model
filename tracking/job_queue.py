@@ -458,6 +458,75 @@ def _validate_publish_discord_signals(args: dict) -> dict:
     return {"target_date": raw}
 
 
+def _job_discord_probe(**kw):
+    """Ask Discord WHICH CHANNEL each configured webhook actually points at.
+
+    WHY THIS EXISTS. 2026-09-05, mike: "there are NO UFC picks in the channel."
+    The ledger disagreed -- `push_sent` holds a `discord_signal` row for
+    `UFC_2026-09-05_ryan-spann_mario-pinto:ufc_total_rounds` WITH a Discord
+    message_id, which is only written after a webhook returned 2xx and handed
+    back a message. So a message was created somewhere. The one thing neither
+    the ledger nor the code can tell you is WHERE: routing is
+    `DISCORD_WEBHOOK_{SPORT}` (config.DISCORD_WEBHOOKS), the URL lives only in
+    the worker's environment, and a URL pointing at the wrong channel looks
+    identical to a correct one from every angle except Discord's.
+
+    So ask Discord. `GET /api/webhooks/{id}/{token}` returns the webhook's own
+    metadata -- channel_id, guild_id, its display name -- and POSTS NOTHING.
+    No member sees anything; this cannot publish a pick, delete one, or touch
+    the ledger.
+
+    THE URL IS NEVER RETURNED. Only the ids and the webhook's display name go
+    into the job result, which is stored in Postgres and read by a human: a
+    webhook URL is a bearer credential, and a job result is not the place for
+    one.
+
+    Reading the answer: two sports sharing a channel_id, or a sport whose
+    channel_id equals the free/ops channel, is the bug. A 404 means the webhook
+    was deleted after it last posted.
+    """
+    import requests
+
+    import config
+
+    targets = {f"sport:{sport}": url
+               for sport, url in config.DISCORD_WEBHOOKS.items()}
+    for label, attr in (("default", "DISCORD_WEBHOOK_DEFAULT"),
+                        ("live", "DISCORD_WEBHOOK_LIVE"),
+                        ("results", "DISCORD_WEBHOOK_RESULTS"),
+                        ("free", "DISCORD_WEBHOOK_FREE"),
+                        ("ops", "DISCORD_WEBHOOK_OPS")):
+        url = getattr(config, attr, "") or ""
+        if url:
+            targets[label] = url
+
+    out: dict = {}
+    for label, url in sorted(targets.items()):
+        try:
+            # Strip any query string (?wait=true and friends) -- the metadata
+            # endpoint is the bare webhook URL.
+            resp = requests.get(url.split("?")[0], timeout=15)
+            if resp.status_code == 200:
+                body = resp.json()
+                out[label] = {"status": 200,
+                              "channel_id": body.get("channel_id"),
+                              "guild_id": body.get("guild_id"),
+                              "webhook_name": body.get("name")}
+            else:
+                out[label] = {"status": resp.status_code,
+                              "body": resp.text[:200]}
+        except Exception as exc:                              # noqa: BLE001
+            out[label] = {"error": str(exc)[:200]}
+
+    channels = [v.get("channel_id") for v in out.values() if v.get("channel_id")]
+    out["_summary"] = {
+        "probed": len(targets),
+        "distinct_channels": len(set(channels)),
+        "collisions": sorted({c for c in channels if channels.count(c) > 1}),
+    }
+    return out
+
+
 def _validate_publish_x_results(args: dict) -> dict:
     game_date = str(args.get("game_date") or "").strip()
     if len(game_date) != 10 or game_date.count("-") != 2:
@@ -470,6 +539,8 @@ JOBS = {
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
+    # Read-only: asks Discord which channel each webhook points at.
+    "discord_probe": (_job_discord_probe, lambda a: {}),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
