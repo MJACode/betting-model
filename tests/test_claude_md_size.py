@@ -44,7 +44,15 @@ def _read(path: str) -> str:
 
 
 def test_claude_md_stays_small_enough_to_load_every_session() -> None:
-    size = os.path.getsize(CLAUDE_MD)
+    # CONTENT bytes, not bytes on disk. os.path.getsize() counts the line
+    # endings the platform happens to have checked out, and this repo is
+    # developed on Windows (autocrlf) while the worker runs Linux -- ~660
+    # bytes of difference on a 900-line file, purely from CR characters that
+    # cost a session nothing. Measured on disk, the same commit passed on one
+    # machine and failed on the other, which is a false alarm about the one
+    # thing this test exists to make people notice. The limit is a context
+    # budget, so it is measured the way a reader loads it: normalised.
+    size = len(_read(CLAUDE_MD).encode("utf-8"))
     assert size <= MAX_BYTES, (
         f"CLAUDE.md is {size:,} bytes (limit {MAX_BYTES:,}). It is re-read at the "
         "start of every session, so every byte is a permanent context tax. Move "

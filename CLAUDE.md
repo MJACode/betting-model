@@ -167,19 +167,10 @@ pregame number and the clock; the edge is predicting where true remaining
 production deviates from that. Do not rebuild a player projection from scratch
 and throw the pregame line away.
 
-**What the evidence actually is, so nobody re-derives the conviction:**
-`config.LIVE_MODELS` holds three models — `mlb_live_total_runs`,
-`ncaaf_live_win_prob`, `ncaaf_live_total` — and **not one is a player prop.**
-There has never been a live player prop model in production, so the settled
-live-prop record is **zero bets**. The ~400 settled picks that look like live
-props are the session-114 repair population: PRE-GAME prop picks flagged
-`is_live` because they were scored against an in-play price after first pitch.
-`tracking/discord_notifier.py` already excludes them by `model_id LIKE
-'%_live_%'` precisely because counting them publishes fabricated losses. Do not
-read that population as live-prop evidence in either direction.
-The nearest real signal is `mlb_live_total_runs` at **+15.94% over 87 settled
-bets, 95% CI [-2.8%, +34.7%]** — promising, unproven, and a game total rather
-than a prop.
+**The settled live-prop record is ZERO BETS — there has never been a live
+player prop model in production, and the ~400 settled picks that look like one
+are not.** Do not read them as evidence in either direction; the numbers and
+the population are in `docs/rules_evidence.md`.
 
 **A CHANGE TO HOW ONE MODEL OPERATES IS ASSESSED AGAINST ALL OF THEM.**
 (Repo-level rule, 2026-08-29.) Before shipping an operational change — how a
