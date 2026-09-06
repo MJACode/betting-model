@@ -21,6 +21,104 @@
 
 ---
 
+## [ ] [needs-decision] Two merged mobile changes are undelivered until the 1.1.0 native build ships
+
+Found 2026-09-05 (session 239), checking whether the calibration removal had
+actually reached users rather than trusting a green workflow.
+
+**#504 bumped `mobile/app.json` to version 1.1.0** to ship
+`LSApplicationQueriesSchemes` (an Info.plist key only a new binary can carry).
+`runtimeVersion` policy is `appVersion`, so **every OTA now targets runtime
+1.1.0, and every installed binary is 1.0.0.** Nothing picks them up.
+
+The evidence, from the run history:
+
+- **OTA run #71** (#504) **failed** — correctly. The workflow hard-fails any push
+  that moves `mobile/package.json` or `mobile/app.json`, because an OTA cannot
+  add native config to an installed binary.
+- **OTA run #72** (#503, the calibration removal) **succeeded** — but only because
+  that squash commit did not itself touch `app.json`; the bump was already on
+  master. The guard only inspects the current push. It published a bundle to a
+  runtime version nobody is running.
+
+So the guard did its job for #504 and was structurally unable to catch #503.
+Nothing is broken and nothing is lost — both changes wait on master — but
+**a green OTA run is not proof of delivery while `version` is ahead of the
+shipped binary**, and that is not obvious from the workflow's output.
+
+**Unblocks both:** run `mobile-build.yml` for the 1.1.0 native build, ship it,
+and the already-published bundle applies on install. Matt's call — it is a
+TestFlight / App Store path.
+
+**Worth fixing while there:** the OTA job could compare `app.json`'s `version`
+against the last native build tag and warn (not fail) when it publishes to a
+runtime no released binary matches. That is the check that would have said
+"published, but to nobody" on run #72.
+
+---
+
+## [ ] [needs-decision] The Explainer's "Why we're different" no longer differentiates
+
+Found 2026-09-05 (session 239), in the UX review of the calibration removal.
+**Matt: "I will add new content later."** Left as-is deliberately, waiting on him.
+
+The section used to claim a different OBJECTIVE FUNCTION — most services sell
+accuracy, we optimise for calibration — with an external citation behind it.
+Calibration came out of the UI, so the rewrite argues from the published record
+instead. That is true, but it is the third place the app says it: the Track
+Record subtitle ("Nothing hidden, nothing cherry-picked") and its "Read this
+first" card already do. A differentiator that restates a promise made twice
+elsewhere is not one.
+
+**Two replacements that are true and genuinely unusual**, if he wants a starting
+point rather than a blank page:
+
+- **CLV as the skill metric.** "Beat the close" is already computed, already on
+  the Record screen, and is the one number that separates edge from variance.
+  Almost no consumer picks product publishes it.
+- **The pick rule (CLAUDE.md §1c).** "A pick is a pick" — once written, the
+  number never changes, even when the line moves against us. That is a real,
+  checkable commitment competitors do not make, and the app already enforces it.
+
+Touch `mobile/src/screens/ExplainerScreen.tsx`, the section headed "Why we're
+different — the whole record, not one number".
+
+---
+
+## [ ] Dead code: OpeningComparisonScreen has no entry point
+
+Found 2026-09-05 (session 239a). The Record tab's "Experiment: lock our first
+signal vs chase the live line" link was that screen's ONLY route in, and it was
+removed at Matt's request.
+
+Still shipping in the bundle with no way to reach it: `OpeningComparisonScreen.tsx`
+(~200 lines), the `OpeningComparison` route in `App.tsx` (annotated in the
+`SignIn` style so it does not read as live), the `OpeningComparison` key in
+`RootStackParamList`, and `fetchOpeningVsLive` / `fetchOpeningSlices` plus
+`OpeningVsLiveRow` / `OpeningSliceRow` in `queries.ts` / `types/index.ts`.
+
+**The shadow track itself is unaffected** — it keeps running server-side and
+keeps its own window (`docs/opening_signals.md`). This is only about whether the
+screen stays compiled. Matt's call: delete the lot, or restore one entry point.
+
+---
+
+## [ ] Two icon-only buttons in Settings are silent to VoiceOver
+
+Found 2026-09-05 (session 239), by `ux_scan.mts` — the only two BLOCKER-level
+findings in the app.
+
+`mobile/src/screens/SettingsScreen.tsx:423` and `:434` are icon-only
+`<Pressable>`s with no `accessibilityLabel`, so a screen-reader user hears
+nothing at all. Pre-existing and byte-identical on master, which is why they were
+declined on the calibration PR rather than fixed there — but they are real, and
+the fix is one prop each.
+
+While in that file, `ExplainerScreen.tsx:414` carries a `fontSize: 13` literal
+that should be `font.size.*`.
+
+---
+
 ## [ ] Nothing tells us when a market we pruned starts being priced
 
 Found 2026-09-05 (session 237), in the UX review of the college prop prune.
