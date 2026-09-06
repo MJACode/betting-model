@@ -14,7 +14,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { computeHitRate, hitFlags, isHit } from '../src/lib/hitRate';
-import { HIT_MODES, hitModeHeadline, hitModeLineLabel, selectionFor, type HitMode } from '../src/lib/hitMode';
+import {
+  HIT_MODES,
+  hitModeHeadline,
+  hitModeLineLabel,
+  rulerValue,
+  rulerValueLabel,
+  selectionFor,
+  type HitMode,
+} from '../src/lib/hitMode';
 
 const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 import { STAT_CATALOG, defaultThresholdFor, type StatDef } from '../src/lib/statCatalog';
@@ -92,27 +100,38 @@ check(
 //
 // Matt, with a competitor's Leaders tab: "add this feature where the user can
 // say they want to show bets that are at least ... or if they want to say
-// over or under." The ruler picks a WHOLE number; the mode says which side.
-// Everything downstream reads only the (line, side) this resolves to, so the
-// translation is the whole feature and these are its cases.
+// over or under." Then, 2026-09-06: "I want to fix how over under is
+// displayed" — the MODE now chooses the idiom and the ruler is drawn in it,
+// so every mode shares one set of stops and At Least 1 and Over 0.5 are the
+// same bet under two names. Everything downstream reads only the (line, side)
+// this resolves to, so the translation is the whole feature and these are its
+// cases.
 {
-  const cases: [number, HitMode, number, 'over' | 'under', string][] = [
-    // ruler, mode,      line, side,     headline
-    [1, 'atLeast', 0.5, 'over', '1+ Hits'],
-    [1, 'over',    1.5, 'over', '2+ Hits'],
-    [1, 'under',   0.5, 'under', 'No Hits'],
-    [2, 'atLeast', 1.5, 'over', '2+ Hits'],
-    [2, 'over',    2.5, 'over', '3+ Hits'],
-    [2, 'under',   1.5, 'under', '1 or fewer Hits'],
-    [3, 'under',   2.5, 'under', '2 or fewer Hits'],
+  const cases: [number, HitMode, number, 'over' | 'under', string, string][] = [
+    // stop, mode,      line, side,     headline,            ruler face
+    [1, 'atLeast', 0.5, 'over',  '1+ Hits',          '1'],
+    [1, 'over',    0.5, 'over',  'Over 0.5 Hits',    '0.5'],
+    [1, 'under',   0.5, 'under', 'Under 0.5 Hits',   '0.5'],
+    [2, 'atLeast', 1.5, 'over',  '2+ Hits',          '2'],
+    [2, 'over',    1.5, 'over',  'Over 1.5 Hits',    '1.5'],
+    [2, 'under',   1.5, 'under', 'Under 1.5 Hits',   '1.5'],
+    [3, 'under',   2.5, 'under', 'Under 2.5 Hits',   '2.5'],
   ];
-  for (const [n, mode, line, side, headline] of cases) {
+  for (const [n, mode, line, side, headline, face] of cases) {
     const sel = selectionFor(n, mode);
-    check(`${mode} ${n} is line ${line} ${side}`,
+    check(`${mode} stop ${n} is line ${line} ${side}`,
       sel.line === line && sel.side === side, `${sel.line} ${sel.side}`);
-    check(`${mode} ${n} reads "${headline}"`,
+    check(`${mode} stop ${n} reads "${headline}"`,
       hitModeHeadline(n, mode, 'Hits') === headline, hitModeHeadline(n, mode, 'Hits'));
+    check(`${mode} stop ${n} shows "${face}" on the ruler`,
+      rulerValueLabel(n, mode) === face, rulerValueLabel(n, mode));
   }
+
+  // The competitor's board, and the bug that started this: Over's first stop
+  // is the book's smallest line. It used to be 1.5, so "Over 0.5 Hits" — the
+  // most-bet prop there is — could not be reached in Over mode at all.
+  check('Over starts at the line the book starts at',
+    rulerValue(1, 'over') === 0.5 && hitModeHeadline(1, 'over', 'Hits') === 'Over 0.5 Hits');
 
   // Every line is a HALF point, so no game ever lands on it: a counting stat
   // is a whole number, and a push would make "hit rate" a lie.
@@ -123,15 +142,19 @@ check(
     }
   }
 
-  // The modes OVERLAP on a whole-number stat, which is the point: a book sells
-  // "Over 1.5 Hits" and a fan asks for "2+". Both must name the same bet at
-  // the same price, or the board is telling two stories.
-  const overN = selectionFor(1, 'over');
-  const atLeastNext = selectionFor(2, 'atLeast');
-  check('Over N is exactly At Least N+1 — same line, same side',
-    overN.line === atLeastNext.line && overN.side === atLeastNext.side);
-  check('and both are called the same thing',
-    hitModeHeadline(1, 'over', 'Hits') === hitModeHeadline(2, 'atLeast', 'Hits'));
+  // The modes OVERLAP, which is the point: a book sells "Over 0.5 Hits" and a
+  // fan asks for "1+". They are one bet at one price, so switching the mode
+  // must move the BET nowhere — only the words on it.
+  for (const n of [1, 2, 7]) {
+    const over = selectionFor(n, 'over');
+    const atLeast = selectionFor(n, 'atLeast');
+    check(`stop ${n}: At Least and Over are one bet, named twice`,
+      over.line === atLeast.line && over.side === atLeast.side
+        && hitModeHeadline(n, 'over', 'Hits') !== hitModeHeadline(n, 'atLeast', 'Hits'));
+  }
+  check('and Under is the other side of that same line',
+    selectionFor(2, 'under').line === selectionFor(2, 'over').line
+      && selectionFor(2, 'under').side === 'under');
 
   // The three modes against real per-game values.
   const games = [0, 1, 2, 3, 1, 0];
@@ -140,10 +163,11 @@ check(
     return computeHitRate(games, line, side).hits;
   };
   check('At Least 1 counts every game with a hit', rate(1, 'atLeast') === 4, `${rate(1, 'atLeast')}`);
-  check('Over 1 counts only multi-hit games', rate(1, 'over') === 2, `${rate(1, 'over')}`);
-  check('Under 1 counts only the hitless games', rate(1, 'under') === 2, `${rate(1, 'under')}`);
-  check('the three modes at one ruler partition the games',
-    rate(1, 'atLeast') + rate(1, 'under') === games.length);
+  check('Over 0.5 counts the same games — it is the same bet', rate(1, 'over') === 4, `${rate(1, 'over')}`);
+  check('Over 1.5 counts only multi-hit games', rate(2, 'over') === 2, `${rate(2, 'over')}`);
+  check('Under 0.5 counts only the hitless games', rate(1, 'under') === 2, `${rate(1, 'under')}`);
+  check('a stop\'s two sides partition the games',
+    rate(1, 'over') + rate(1, 'under') === games.length);
 
   // The control opens a real menu. It used to be a two-way toggle wearing a
   // chevron-down, which promised one and gave a flip.
@@ -160,26 +184,38 @@ check(
     sheet.includes('hitModeHeadline(lineN, m.mode, statLabel)'));
   check('the rows are radios to VoiceOver', sheet.includes('accessibilityRole="radio"'));
 
-  // ── the UX review's fixes ────────────────────────────────────────────────
-  // The headline speaks the fan's idiom; the book's number for the same bet
-  // sits beside it, so the step from "ruler 1 + Over" to "2+ Hits" is on
-  // screen instead of in the user's head.
-  check('the book\'s own line is shown beside the headline',
+  // ── the ruler is drawn in the mode's idiom (2026-09-06) ─────────────────
+  // Over and Under ARE the book's line, so the second copy of it that used to
+  // sit beside the headline would now be the same string twice. At Least
+  // keeps it: its headline is "2+ Hits", and without this the number the book
+  // posts is nowhere on screen (UX review, 2026-09-05).
+  check('the book\'s own line is what Over and Under are called',
     hitModeLineLabel(1, 'atLeast') === 'Over 0.5'
-      && hitModeLineLabel(1, 'over') === 'Over 1.5'
-      && hitModeLineLabel(1, 'under') === 'Under 0.5',
+      && hitModeLineLabel(1, 'over') === 'Over 0.5'
+      && hitModeLineLabel(2, 'under') === 'Under 1.5',
     [1, 2].map((n) => hitModeLineLabel(n, 'over')).join());
-  check('and the screen renders it', screen.includes('hitModeLineLabel(lineN, hitMode)'));
+  check('the screen shows it beside the headline in At Least only',
+    /\{hitMode === 'atLeast' \? \(\s*\n\s*<Text style=\{styles\.headlineLine\}>\{hitModeLineLabel\(lineN, hitMode\)\}<\/Text>/
+      .test(screen));
+  check('and the ruler prints the stop in that same idiom',
+    screen.includes('format={(n) => rulerValueLabel(n, hitMode)}')
+      && screen.includes('const faceOf = format ?? String;')
+      && screen.includes('{labeled ? faceOf(v) : \'\'}')
+      && screen.includes('<Text style={styles.tickValueActive}>{faceOf(value)}</Text>'));
+  check('VoiceOver reads the face, not the stop index',
+    screen.includes('accessibilityValue={{ min, max, now: value, text: faceOf(value) }}'));
 
-  // "N or fewer" keeps the stat label plural, which singularising cannot:
-  // "3PM", "PRA", "RBI", "Total Bases" defeat every strip-the-s rule.
-  check('the under idiom never disagrees with its own noun',
-    hitModeHeadline(2, 'under', 'Hits') === '1 or fewer Hits'
-      && hitModeHeadline(2, 'under', 'Total Bases') === '1 or fewer Total Bases');
-  check('the idiom has ONE home, so the three places cannot disagree',
+  // Two idioms, two homes, and neither is spoken in the other's sentence.
+  // The betslip explainer quotes the board headline and the book's number in
+  // ONE sentence, so it is the place they would clash.
+  check('the fan idiom keeps the stat label plural, which singularising cannot',
+    hitModeHeadline(2, 'atLeast', 'Hits') === '2+ Hits'
+      && hitModeHeadline(2, 'atLeast', 'Total Bases') === '2+ Total Bases');
+  check('each idiom has ONE home, so the places that speak it cannot disagree',
     read('src/lib/hitMode.ts').includes('export function thresholdLabel(')
-      && screen.includes('return thresholdLabel(line, side);')
-      && read('src/lib/lineLegs.ts').includes('thresholdLabel(quote.line, quote.side)')
+      && read('src/lib/hitMode.ts').includes('export function bookLineLabel(')
+      && screen.includes('return bookLineLabel(line, side);')
+      && read('src/lib/lineLegs.ts').includes('bookLineLabel(quote.line, quote.side)')
       && !/`\$\{[^}]*- 0\.5\} or fewer`/.test(screen + read('src/lib/lineLegs.ts')));
 
   // A selected row must not change size in a three-row list built for
@@ -216,9 +252,11 @@ check(
       && screen.includes("accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}"));
   check('its ticks are decoration', /accessibilityElementsHidden[\s\S]{0,120}styles\.tickCol/.test(screen));
 
-  // Under mode costs a notch at the top; the ruler gives it back.
-  check('the ruler reaches the old At Most ceiling in under mode',
-    screen.includes("max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}"));
+  // Every mode resolves a stop to the same line now, so the ceiling is one
+  // number and a mode change leaves the ruler where it stands.
+  check('every mode runs over the same stops',
+    screen.includes('max={maxLineN(stat)}')
+      && !screen.includes("hitMode === 'under' ? 1 : 0"));
 
   // The JSDoc of the deleted lineFor() documented the OLD mapping.
   check('no stale mapping comment survives the deleted helper',

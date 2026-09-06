@@ -43,7 +43,7 @@
  */
 
 import { americanToDecimal } from '@/lib/format';
-import { thresholdLabel } from '@/lib/hitMode';
+import { bookLineLabel } from '@/lib/hitMode';
 import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
@@ -320,7 +320,7 @@ export function propLineSheetInput(
   const explainer =
     quote.offLine && boardHeadline
       ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${
-          thresholdLabel(quote.line, quote.side)
+          bookLineLabel(quote.line, quote.side)
         }. Add it to your betslip now — you’ll choose the sportsbook there.`
       : undefined;
   return { spec, prices, explainer };
