@@ -910,6 +910,19 @@ function SlipBody({
 
         <CorrelatedExtras m={metrics} allDk={allDk} />
 
+        {/* The staleness caveat has to follow the leg to the screen the bet is
+            placed from, not stay on the board it was picked off. One line, and
+            only when a live leg is actually in the slip. */}
+        {legs.some((l) => l.isLive) ? (
+          <View style={styles.liveLegNote}>
+            <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+            <Text style={styles.liveLegNoteText}>
+              This slip has an in-play leg. Live prices are DraftKings’ and can be up to
+              ~45s old — check the number at DK before you place it.
+            </Text>
+          </View>
+        ) : null}
+
         <BetslipBooksRow legs={legs} />
 
         <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
@@ -1309,6 +1322,19 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  liveLegNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  // Amber as the icon, dark text for the sentence: colors.med is 1.97:1 on the
+  // page ground and this is a disclosure, not decoration.
+  liveLegNoteText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
   },
   legsList: {
     paddingTop: spacing.sm,

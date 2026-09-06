@@ -448,10 +448,10 @@ export type RootStackParamList = {
   // navigate('TrackRecord') callers (typed against RootStackParamList) still
   // resolve — at runtime React Navigation finds the tab.
   TrackRecord: undefined;
-  // Live (in-play) is a bottom tab now, but kept here so navigate('Live')
-  // callers typed against RootStackParamList still resolve (React Navigation
-  // finds the tab at runtime).
-  Live: undefined;
+  // No `Live` entry: the in-play board stopped being a route on 2026-09-06 and
+  // became a segment on Picks. Anything that wants it navigates to the segment
+  // —  navigate('Tabs', { screen: 'Picks', params: { view: 'live' } }) — and a
+  // stale navigate('Live') is now a type error rather than a silent no-op.
   OpeningComparison: undefined;
   // The betslip. A pushed screen rather than a tab: it's empty most of the
   // time, and the persistent betslip bar (components/BetslipBar) is what
@@ -548,11 +548,16 @@ export interface ParlayTrackRow {
 }
 
 export type TabParamList = {
-  // Merged Picks home (Today | Signals) replaces the old Picks +
-  // Signals tabs. Live (in-play) is promoted to its own tab; Settings moved off
-  // the tab bar to a top-right gear.
-  Picks: undefined;
-  Live: undefined;
+  // Merged Picks home (Today | Signals | Live) replaces the old Picks +
+  // Signals tabs, and since 2026-09-06 the Live tab as well — live is a
+  // conditional third segment here, not a sixth tab (see PicksHomeScreen's
+  // header for the measurement behind that). Settings moved off the tab bar to
+  // a top-right gear.
+  //
+  // `view` opens the screen on a given segment. It is what Settings' "Live
+  // betting" row targets, and the hook a live push notification needs when the
+  // notification-response handler is built (there is none today).
+  Picks: { view?: 'today' | 'signals' | 'live' } | undefined;
   TrackRecord: undefined;
   Performance: undefined;
   Models: undefined;

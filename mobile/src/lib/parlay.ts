@@ -58,6 +58,11 @@ export interface ParlayLeg {
   gameId: string; // pick.game_id — correlation grouping
   modelId: string;
   isGameLine: boolean; // MODEL_META[modelId].type === 'game'
+  /** pick.is_live — an IN-PLAY leg. Live picks became addable to the slip on
+   *  2026-09-06, and the slip is the screen the bet is actually placed from, so
+   *  the leg has to say it is live there rather than only on the board it came
+   *  from. False for custom/saved legs. */
+  isLive: boolean;
   isFavorite: boolean; // dk_odds < 0
   label: string; // pick.pick_label
   modelProb: number; // pick.model_probability
@@ -171,6 +176,7 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     gameId: p.game_id,
     modelId: p.model_id,
     isGameLine: isGameLineModel(p.model_id),
+    isLive: p.is_live === true,
     isFavorite: p.dk_odds < 0,
     label: p.pick_label,
     modelProb: p.model_probability,
@@ -380,6 +386,7 @@ export function makeCustomLeg(label: string, americanOdds: number): ParlayLeg {
     gameId: `custom:${pickId}`, // unique; correlation never groups custom legs anyway
     modelId: CUSTOM_MODEL_ID,
     isGameLine: false,
+    isLive: false, // hand-entered: no pick behind it, so nothing to be in play
     isFavorite: americanOdds < 0,
     label: label.trim(),
     modelProb,
@@ -799,6 +806,10 @@ export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
     gameId: sl.gameId ?? `custom:${sl.pickId}`,
     modelId: sl.modelId,
     isGameLine: sl.isGameLine,
+    // A saved parlay is a snapshot of a bet already placed or planned; its legs
+    // are re-priced from stored numbers, never from the live board, so the
+    // in-play caveat cannot apply to them.
+    isLive: false,
     isFavorite: sl.isFavorite,
     label: sl.label,
     modelProb: sl.modelProb,

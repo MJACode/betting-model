@@ -21,3 +21,23 @@ and pulls real references from the Mobbin MCP server; it reports and never
 edits. Mobbin being unavailable is a status line in the report, not a reason to
 skip the review. A front-end PR opened without the review in its body is
 incomplete — the same way a threshold change without `Updated-By:` is.
+
+**A HOOK REACHABLE FROM AN APP-ROOT COMPONENT MUST NOT USE `useFocusEffect`.**
+(2026-09-06, found by the UX review, second occurrence of the shape.)
+`useFocusEffect` calls `useNavigation()`, which THROWS — "Couldn't find a
+navigation object" — when neither `NavigationContext` nor
+`NavigationContainerRefContext` is in scope. `BetslipBar` and `ToastHost` are
+mounted in `App.tsx` as SIBLINGS of `<NavigationContainer>`, deliberately, so
+they cover the tabs and pushed screens alike. Every hook on their path is
+therefore outside both contexts, and a focus-aware hook there crashes on render
+— for `BetslipBar`, that is any user with something in their betslip, on every
+screen.
+
+Wiring live picks into `useResolvedSlip` did exactly this. The fix is a plain
+`useEffect` variant for that path: `useLivePicksUnfocused` is the shape, and
+`useTodayPicks` has always followed the rule for the same reason.
+
+**`ux_scan` cannot catch this** — it has no cross-file reachability.
+`tests/test_mobile_live_segment.py::test_no_app_root_component_reaches_a_focus_aware_hook`
+walks the import graph symbol by symbol from `BetslipBar` and is the tripwire.
+Add a new app-root component to that test's roots when you mount one.

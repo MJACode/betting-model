@@ -392,7 +392,7 @@ so a cloud worker can't reach it any more than Actions could. Unchanged.
    (`idle for 4 passes, exiting` → `DONE live-loop (exit 0)`) — normal. During games it
    stays running (skipped-tick warnings are the heartbeat), and Supabase accumulates rows
    in `live_game_state`, `live_credit_telemetry`, and `picks` with `is_live = true` (they
-   surface on the mobile Live tab).
+   surface on the mobile Picks tab's Live segment).
 3. **Morning after cutover:** ask Claude mobile "how's the system?" — the daily run's
    `system_health.py` (Step 12) writes `system_health_checks`; confirm feeds are fresh
    (coming from the worker, not stale).
