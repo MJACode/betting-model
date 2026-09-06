@@ -61,15 +61,26 @@ def test_a_parallel_step_that_fails_is_still_recorded():
         fake.write_text('#!/usr/bin/env bash\ncase "$1" in BAD-*) exit 1;; *) exit 0;; esac\n')
         fake.chmod(0o755)
 
+        # POSIX paths, and the stub run THROUGH bash. This harness feeds
+        # paths into a bash string, and on Windows -- where this repo's only
+        # quality gate is actually run (section 7) -- a native path arrives
+        # with backslashes, which bash eats as escapes. sed was handed a path
+        # that did not exist, printed nothing, and `eval ""` defined no par()
+        # at all: the harness reported TOTAL=0 and the test failed for a
+        # reason with nothing to do with the pass it guards. Running the stub
+        # via `bash` also drops the dependency on an exec bit that a Windows
+        # filesystem does not carry.
+        sh_path = (ROOT / "scripts" / "refresh_pass.sh").as_posix()
+        fake_sh = fake.as_posix()
         harness = f'''
 set -uo pipefail
 FAILED_STEPS=()
 STEPS_TOTAL=0
 PAR_DIR="$(mktemp -d)"
 trap 'rm -rf "$PAR_DIR"' EXIT
-eval "$(sed -n '/^par() {{/,/^}}/p' {ROOT}/scripts/refresh_pass.sh \
-        | sed 's|python run_pipeline.py --step "$1"|{fake} "$1"|')"
-eval "$(sed -n '/^par_wait() {{/,/^}}/p' {ROOT}/scripts/refresh_pass.sh)"
+eval "$(sed -n '/^par() {{/,/^}}/p' "{sh_path}" \
+        | sed 's|python run_pipeline.py --step "$1"|bash "{fake_sh}" "$1"|')"
+eval "$(sed -n '/^par_wait() {{/,/^}}/p' "{sh_path}")"
 par ok-one
 par BAD-one
 par ok-two

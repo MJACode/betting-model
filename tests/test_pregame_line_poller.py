@@ -134,14 +134,32 @@ def test_a_zero_cap_means_uncapped(monkeypatch):
     assert not over_credit_cap(10_000_000)
 
 
-def test_the_cap_leaves_headroom_over_the_measured_burn():
+# The burn this cap has to clear, MEASURED rather than derived. On 2026-09-05
+# the poller logged "daily credit cap reached (60000 >= 60000)" at 17:09 ET and
+# repeated it on every 30-second tick until midnight; it had run since ~07:00,
+# so 60,000 units in ~10 hours is ~6,000/hour and ~144,000 over a full day.
+# Units are `api_call_log.credits`, which is what the cap is enforced in.
+MEASURED_DAILY_BURN_UNITS = 144_000
+
+
+def test_the_cap_covers_a_full_day_of_the_measured_burn():
     """
-    ~13 credits per sweep x 2,880 sweeps/day is ~37k. A cap below that would
-    silently stop the loop mid-afternoon every day — the same mistake the live
-    loop's first cap made (config's LIVE_DAILY_CREDIT_CAP comment).
+    The old assertion here was `cap > 2,880 sweeps x 13 credits` — a DERIVED
+    number from when the poller swept fewer sports. It passed at 60,000 while
+    the real loop was hitting that cap at 5pm and going dark for the whole
+    evening, which is precisely when NFL, NCAAF and UFC lines cross. A capped
+    poller fetches nothing, scores nothing and publishes nothing.
+
+    So the bar is now the measured burn, not a model of it.
     """
-    sweeps = 86400 / config.PREGAME_POLL_INTERVAL_SEC
-    assert config.PREGAME_POLL_DAILY_CREDIT_CAP > sweeps * 13
+    assert config.PREGAME_POLL_DAILY_CREDIT_CAP >= MEASURED_DAILY_BURN_UNITS, (
+        "the cap binds before midnight — the poller will stop watching prices, "
+        "and stop publishing, part-way through the day")
+
+
+def test_the_cap_still_bounds_a_runaway_loop():
+    """It is a runaway guard, not a budget. Raising it must not remove it."""
+    assert 0 < config.PREGAME_POLL_DAILY_CREDIT_CAP <= 4 * MEASURED_DAILY_BURN_UNITS
 
 
 # ── the board-wipe trap ───────────────────────────────────────────────────────

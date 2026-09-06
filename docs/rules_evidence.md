@@ -609,3 +609,25 @@ Caesars for hits, RBIs, runs and strikeouts) therefore has no At-Most side for
 that stat at all, which is why the lock engages as often as it does: **22 of the
 one-sided (book, stat) pairs on the MLB board come from alternate-only
 coverage**, `batter_runs_scored` worst at 6 of 10 bettable books.
+
+## Live player props: what the "zero bets" record actually is
+
+Moved out of CLAUDE.md §1b on 2026-09-05 (the file was 569 bytes over its own
+36,000-byte budget, which `tests/test_claude_md_size.py` enforces). The RULE
+stays there: live props are an untested hypothesis, and the settled record is
+zero bets. This is the measurement behind it.
+
+`config.LIVE_MODELS` holds three models — `mlb_live_total_runs`,
+`ncaaf_live_win_prob`, `ncaaf_live_total` — and **not one is a player prop.**
+There has never been a live player prop model in production, so the settled
+live-prop record is **zero bets**. The ~400 settled picks that look like live
+props are the session-114 repair population: PRE-GAME prop picks flagged
+`is_live` because they were scored against an in-play price after first pitch.
+`tracking/discord_notifier.py` already excludes them by `model_id LIKE
+'%_live_%'` precisely because counting them publishes fabricated losses. Do not
+read that population as live-prop evidence in either direction.
+
+The nearest real signal is `mlb_live_total_runs` at **+15.94% over 87 settled
+bets, 95% CI [-2.8%, +34.7%]** — promising, unproven, and a game total rather
+than a prop.
+
