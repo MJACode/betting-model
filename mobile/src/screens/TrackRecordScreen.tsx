@@ -32,7 +32,7 @@ import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
-import { GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI } from '@/lib/recordStart';
+import { GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 
 /** First day of the tracked record. Every published number starts here.
  *  The official live date — see lib/recordStart, which is the one place it is
@@ -226,8 +226,10 @@ export function TrackRecordScreen() {
             short by design, and the percentages will move a lot for a while.{'\n\n'}
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
-            profitable, some aren’t yet, and we show them all. A new model is shown but not
-            backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive ROI. A
+            profitable, some aren’t yet, and we show them all. A new pre-game model is shown
+            but not backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive
+            ROI; in-play models are the exception and run live while that record builds, so
+            treat them as unproven. A
             pick that had no
             DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
@@ -315,10 +317,16 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {row.wins}–{row.losses}
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
           {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
-          {decided < MIN_PICKS_FOR_COLOURED_ROI
-            ? ` · ${decided} of ${GO_LIVE_SETTLED_PICKS} settled`
-            : ''}
         </Text>
+        {decided < MIN_PICKS_FOR_COLOURED_ROI ? (
+          // Its own line, not a fourth segment: the sub-line is already three
+          // segments wide beside the ROI column, and a mid-phrase wrap orphans
+          // the one segment that qualifies the number next to it. Same shape
+          // the Models tab already uses for the same reason.
+          <Text style={styles.modelSub}>
+            {thinSampleCaption(row.model_id, Number(row.picks ?? 0))}
+          </Text>
+        ) : null}
       </View>
       <Text
         style={[
@@ -455,7 +463,10 @@ const styles = StyleSheet.create({
     borderTopColor: colors.separator,
   },
   modelName: { fontSize: font.size.body, color: colors.textPrimary, fontWeight: font.weight.medium },
-  modelSub: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  // textSecondary, not textTertiary: tertiary on this ground is ~3.4:1 and
+  // below the AA floor (UX_REVIEW §5), and this style now carries the caveat
+  // line that exists to stop a thin ROI being read as a result.
+  modelSub: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.md },
   empty: {
     fontSize: font.size.footnote,

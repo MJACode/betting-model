@@ -21,7 +21,7 @@ import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from
 import { betTypeLabel, MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { BACKTEST_START_LABEL, GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI } from '@/lib/recordStart';
+import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -263,6 +263,10 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // MIN_PICKS_FOR_COLOURED_ROI. The number still shows; it just stops wearing
   // the colour that claims it means something.
   const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
+  // One sentence, shared with the Record tab's rows, branching on whether the
+  // go-live gate applies to this model at all — see thinSampleCaption, which
+  // carries the reasoning and is the only place either wording is written.
+  const thinNote = thinSampleCaption(modelId, stats.picks);
   const roiColor = thin
     ? colors.textSecondary
     : stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
@@ -274,7 +278,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
         (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
-        (thin && stats.picks > 0 ? `, only ${stats.picks} of ${GO_LIVE_SETTLED_PICKS} settled picks` : '') +
+        (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced` : '')
       }
       style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
@@ -292,9 +296,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             {decided > 0 ? ` · ${stats.wins}–${stats.losses}${stats.pushes > 0 ? `–${stats.pushes}` : ''}` : ''}
           </Text>
           {thin && stats.picks > 0 ? (
-            <Text style={styles.subtle}>
-              {stats.picks} of {GO_LIVE_SETTLED_PICKS} settled · too few to judge
-            </Text>
+            <Text style={styles.subtle}>{thinNote}</Text>
           ) : null}
           {unpriced > 0 ? (
             // Its own line: on a 375pt phone the sub-line has ~160pt, and a
@@ -555,7 +557,12 @@ const styles = StyleSheet.create({
   },
   subtle: {
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    // textTertiary on bgCard is ~3.4:1 — below the AA floor, and UX_REVIEW §5
+    // says size does not exempt it. These three lines are the only users of
+    // this style, and one of them is the caveat that exists to stop a member
+    // reading a -100% on one bet as a result; it cannot be the least legible
+    // text on the row.
+    color: colors.textSecondary,
     marginTop: 1,
   },
   roi: {
