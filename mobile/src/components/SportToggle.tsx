@@ -21,13 +21,22 @@ import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
  * their usual sport had no way to know another one had bets waiting — during
  * the Sept/Oct MLB-NFL overlap that meant missing NFL entirely. The badge is
  * the cross-sport signal: green count = actionable bets on that board.
+ *
+ * `liveSports` marks the sports with an in-play pick standing right now, with
+ * the same 6pt red dot the LIVE pill on a card uses (GameStatusPill) — one live
+ * mark in the app, not two. This is what replaced the Live bottom tab on
+ * 2026-09-06: the tab was always on screen but never said WHICH sport was live,
+ * so a user on MLB still had to tap through all eight to find the NCAAF game.
+ * The dot says it from wherever they are.
  */
 export function SportToggle({
   available,
   signalCounts,
+  liveSports,
 }: {
   available?: Set<string>;
   signalCounts?: Record<string, number>;
+  liveSports?: Set<string>;
 }) {
   const { sport, setSport } = useSportFilter();
   const scrollRef = React.useRef<ScrollView>(null);
@@ -54,6 +63,7 @@ export function SportToggle({
           const active = s === sport;
           const muted = available != null && !available.has(s) && !active;
           const count = signalCounts?.[s] ?? 0;
+          const isLive = liveSports?.has(s) ?? false;
           return (
             <Pressable
               key={s}
@@ -64,13 +74,14 @@ export function SportToggle({
               }}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={
-                count > 0
-                  ? `${s}, ${count} signal${count === 1 ? '' : 's'}`
-                  : muted
-                    ? `${s}, no picks today`
-                    : s
-              }
+              accessibilityLabel={[
+                s,
+                count > 0 ? `${count} signal${count === 1 ? '' : 's'}` : null,
+                isLive ? 'in play now' : null,
+                count === 0 && !isLive && muted ? 'no picks today' : null,
+              ]
+                .filter(Boolean)
+                .join(', ')}
               style={({ pressed }) => [
                 styles.segment,
                 active && styles.segmentActive,
@@ -78,6 +89,7 @@ export function SportToggle({
               ]}
             >
               <View style={styles.segmentInner}>
+                {isLive ? <View style={styles.liveDot} /> : null}
                 <Text
                   style={[styles.label, active && styles.labelActive, muted && styles.labelMuted]}
                 >
@@ -124,10 +136,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeText: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     lineHeight: 13,
     fontWeight: font.weight.bold,
-    color: '#FFFFFF',
+    color: colors.textInverse,
+  },
+  // The same 6pt red dot GameStatusPill draws inside the LIVE pill. Copied by
+  // value rather than shared, like the pill's own, but deliberately identical:
+  // two different live marks in one app is how "is this live?" stops being
+  // answerable at a glance.
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.avoid,
   },
   segment: {
     paddingHorizontal: spacing.md,

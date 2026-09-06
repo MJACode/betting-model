@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useLineLegs } from '@/hooks/useLineLegs';
+import { useLivePicks, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { gameLineLegFromRows, isGameSpec, lineLegFromRows, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
@@ -36,24 +37,45 @@ import type { EnrichedPick } from '@/types';
  * pruned, a spec whose read failed is held — same rule as pick keys. They
  * follow the pick legs in slip order. A GAME line leg (the Teams board,
  * 2026-09-05) re-reads its game market's latest lines the same way.
+ *
+ * LIVE PICKS (2026-09-06, Matt) can be added to the slip, so the board resolved
+ * against is today's picks PLUS the in-play ones. This is not optional
+ * plumbing: fetchPicksForDate excludes is_live rows by construction
+ * (queries.ts), so without the live half a live key resolves to nothing, and
+ * this hook's own self-cleaning would then read that as "the pick went away"
+ * and PRUNE it — the add would land, the badge would tick up, and the leg would
+ * vanish a second later with no explanation. Pruning is also held whenever the
+ * live fetch is in flight or errored, for exactly the reason the pre-game half
+ * is: a failed read looks identical to an empty board.
+ *
+ * The live poll here is the IDLE cadence. This hook is mounted app-wide by the
+ * betslip bar, and it only needs a live pick to exist for its leg to price —
+ * the fast poll belongs to the screen the user is actually reading.
  */
 export function useResolvedSlip() {
   const slip = useParlaySlip();
   const lineLegs = useLineLegs();
   const picks = useTodayPicks();
   const { data, loading, error } = picks;
+  const livePicks = useLivePicks({ pollMs: LIVE_IDLE_POLL_MS });
+
+  // Pre-game first: a key can only ever match one of the two (a pick is in-play
+  // or it is not), and resolveSlipLegs keeps the first leg per key regardless.
+  const board = useMemo(() => [...data, ...livePicks.data], [data, livePicks.data]);
 
   const { legs: pickLegs, missingKeys } = useMemo(
-    () => resolveSlipLegs(data, slip.keys),
-    [data, slip.keys],
+    () => resolveSlipLegs(board, slip.keys),
+    [board, slip.keys],
   );
 
-  // A board we can trust to say a key is genuinely gone.
+  // A board we can trust to say a key is genuinely gone. Both halves have to be
+  // settled and clean — the live half being mid-flight or errored is exactly
+  // when a live key looks dead without being dead.
   const boardKnown = canPruneSlip({
     slipReady: slip.ready,
-    loading,
-    error,
-    boardSize: data.length,
+    loading: loading || livePicks.loading,
+    error: error ?? livePicks.error,
+    boardSize: board.length,
   });
 
   const [removed, setRemoved] = useState(0);
@@ -168,7 +190,7 @@ export function useResolvedSlip() {
     /** True while we genuinely cannot yet say what is in the slip. */
     resolving:
       !ready ||
-      (loading && data.length === 0 && slip.count > 0) ||
+      ((loading || livePicks.loading) && board.length === 0 && slip.count > 0) ||
       (lineLoading && lineLegs.count > 0 && priced.size === 0),
   };
 }
