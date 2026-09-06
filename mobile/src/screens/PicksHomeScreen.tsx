@@ -94,8 +94,6 @@ export function PicksHomeScreen() {
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
-  // In-play score + inning for games that have started (polls every 30s).
-  const { byGame: liveStates } = useLiveGameStates(date);
   const { settings: rg } = useResponsibleGambling();
 
   const [view, setView] = useState<PicksView>('today');
@@ -111,7 +109,14 @@ export function PicksHomeScreen() {
     loading: liveLoading,
     error: liveError,
     refresh: refreshLive,
+    dates: liveDates,
   } = useLivePicks({ pollMs: view === 'live' ? LIVE_POLL_MS : LIVE_IDLE_POLL_MS });
+
+  // In-play score + inning for games that have started (polls every 30s).
+  // Over the SAME window the live picks were read across, not just today, so a
+  // game that kicked off late keeps its score and clock after midnight ET
+  // instead of freezing at the rollover (liveSlateDatesET).
+  const { byGame: liveStates } = useLiveGameStates(liveDates);
 
   const todayData = useMemo(
     () => allData.filter((d) => d.pick.sport === sport),

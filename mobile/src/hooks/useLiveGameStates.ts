@@ -14,18 +14,27 @@ import type { LiveGameStateRow } from '@/types';
 
 const POLL_INTERVAL_MS = 30_000;
 
-export function useLiveGameStates(date: string) {
+/**
+ * `dates` is one ET date, or the live-slate window from liveSlateDatesET(). The
+ * Picks screen passes the window, because a game that kicked off late still
+ * carries yesterday's game_date after midnight ET — and its score and clock
+ * would otherwise stop updating exactly when the game is most live.
+ */
+export function useLiveGameStates(dates: string | string[]) {
   const [rows, setRows] = useState<LiveGameStateRow[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Keyed on the VALUE, not the array identity: a caller that builds the list
+  // inline would otherwise tear down and restart the poll on every render.
+  const key = Array.isArray(dates) ? dates.join(',') : dates;
 
   const refresh = useCallback(async () => {
     try {
-      setRows(await fetchLiveGameStates(date));
+      setRows(await fetchLiveGameStates(key.split(',')));
     } catch {
       // Enrichment only — a failure must never blank the board. Keep the last
       // known state; a stale row is dropped by the freshness filter below.
     }
-  }, [date]);
+  }, [key]);
 
   useFocusEffect(
     useCallback(() => {
