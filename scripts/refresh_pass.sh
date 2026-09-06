@@ -103,6 +103,13 @@ par lineups
 # mean fetching 42 times: ESPN has IP-blocked this worker twice.
 par injuries-refresh
 par weather-refresh
+# MLB probable starters for today AND the look-ahead window. The scorer
+# can now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB
+# game models fail CLOSED without a starter -- so without this the widened
+# window would select tomorrow's games and skip every one of them.
+# Self-limiting like the two above (REFRESH_PROBABLES_MAX_AGE_MIN), so
+# running it on all ~42 passes does not mean 42 fetches.
+par probables-refresh
 # The news behind the number, for the prop screens' Recent News sheet.
 # Same self-limiting max-age guard as the two above
 # (config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN), so sharing a group with the

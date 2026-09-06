@@ -2588,10 +2588,50 @@ UFC_SYNTHETIC_TOTAL_3RD: float = 2.5
 UFC_SYNTHETIC_TOTAL_5RD: float = 4.5
 
 # UFC events are weekly, and DK prices fights days in advance — score fights up
-# to this many days ahead so picks are visible before fight day (MLB/WNBA stay
-# same-day only). Each scoring run re-deletes and re-scores unstarted UFC picks
-# in this window, so signal flips are handled the same way as same-day picks.
+# to this many days ahead so picks are visible before fight day. Each scoring
+# run re-deletes and re-scores unstarted UFC picks in this window, so signal
+# flips are handled the same way as same-day picks.
 UFC_SCORE_AHEAD_DAYS: int = int(os.environ.get("UFC_SCORE_AHEAD_DAYS", "7"))
+
+# THE GAME-LEVEL LOOK-AHEAD, for the sports that had none: MLB, NBA, NHL, WNBA.
+#
+# Until 2026-09-06 the scorer selected `game_date = target_date` — today, and
+# only today — with carve-outs for UFC, NCAAF and golf. So a line that opened
+# for TOMORROW was fetched, diffed and stored by the 30-second pre-game poller
+# and then dropped on the floor, because the game was not in the day's set.
+#
+# Measured before changing it. First stored DK odds row vs first pick, per MLB
+# slate, ET:
+#     09-04 slate   odds 09-03 20:16   first pick 09-04 00:20   4h04m
+#     09-05 slate   odds 09-04 20:22   first pick 09-05 00:21   3h59m
+#     09-06 slate   odds 09-05 18:16   first pick 09-06 00:19   6h03m
+# Every slate's first pick landed at 00:19-00:21 — the `:17` overnight refresh,
+# the first pass after the date rolled over. The dead window is simply how
+# early DK posted before midnight, so it grows the earlier they post.
+#
+# mike, 2026-09-06: "I want as soon as lines open in a market we can bet."
+#
+# THE REAL GATE IS A DRAFTKINGS PRICE, NOT THIS NUMBER. A look-ahead game is
+# only scored when DK actually quotes it (see the price pre-filter in
+# run_scorer), which is what "the line has opened" means operationally. This
+# constant is the outer bound on how far that search runs, and it binds
+# differently by sport: DK posts MLB about a day out, so it never binds there,
+# while NBA and NHL are priced weeks ahead and this is what stops the scorer
+# locking a January game in October. Raise it per sport if that is wanted —
+# it is deliberately one dial rather than four, because four dials is four
+# things to forget.
+#
+# INTERACTION WITH THE PICK LOCK (§1c), which is the point of the change and
+# also its risk: a BET now locks at the number available the EVENING BEFORE
+# rather than at 00:19. That is earlier CLV on every game-level model in four
+# sports. It is also irreversible per §1c, so the DK-price gate matters — a
+# game with no price cannot produce a locked pick off a half-formed market.
+GAME_SCORE_AHEAD_DAYS: int = int(os.environ.get("GAME_SCORE_AHEAD_DAYS", "7"))
+
+# The sports the constant above applies to. NCAAF, UFC and golf keep their own
+# horizons (they had look-ahead already and their models were validated with
+# it); this is the set that was same-day-only.
+GAME_SCORE_AHEAD_SPORTS: tuple = ("MLB", "NBA", "NHL", "WNBA")
 
 # NCAAF plays one slate a week and DK prices it days ahead, so same-day-only
 # scoring left the board empty for six days out of seven — and, worse, made the

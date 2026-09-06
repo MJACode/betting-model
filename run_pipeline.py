@@ -367,6 +367,30 @@ def step_mlb_stats(run_date: str) -> bool:
         return False
 
 
+def step_probables_refresh(run_date: str) -> bool:
+    """Load MLB probable starters for today AND the look-ahead window.
+
+    The scorer can now price tomorrow's MLB games (config.GAME_SCORE_AHEAD_DAYS),
+    and MLB game models fail closed without a probable starter — so without this
+    step the widened window selects tomorrow's games and skips every one of them.
+    Measured 2026-09-06: mlb_pitcher_stats held no row past that day.
+
+    Cheap enough for every refresh pass: one MLB schedule call per date plus an
+    idempotent upsert, and the season-stat fetches inside are the same ones the
+    6am run already makes.
+    """
+    try:
+        from config import GAME_SCORE_AHEAD_DAYS
+        from data.ingestors.mlb_stats_ingestor import run_probables_refresh
+        result = run_probables_refresh(days_ahead=GAME_SCORE_AHEAD_DAYS,
+                                       season=int(run_date[:4]))
+        logger.success(f"✓ MLB probables: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ MLB probables failed: {exc}")
+        return False
+
+
 def step_savant(run_date: str) -> bool:
     """Refresh Baseball Savant season-to-date metrics.
 
@@ -1740,7 +1764,8 @@ Examples:
                                  "apply-view-migrations", "refresh-outcomes", "refresh-team-board",
                                  "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
-                                 "odds", "prop-odds", "mlb_stats", "savant", "bullpen",
+                                 "odds", "prop-odds", "mlb_stats", "probables-refresh",
+                                 "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news",
                                  "player-news-refresh",
                                  "umpires", "public-betting", "scoring",
@@ -1788,6 +1813,7 @@ Examples:
             "injuries":     lambda: step_injuries(run_date),
             # The intraday variants. Same producers, self-limiting so a
             # 10-minute pass cadence cannot become a 10-minute fetch cadence.
+            "probables-refresh": lambda: step_probables_refresh(run_date),
             "injuries-refresh": lambda: step_injuries(
                 run_date, max_age_min=config.REFRESH_INJURY_MAX_AGE_MIN),
             "weather-refresh":  lambda: step_weather(
