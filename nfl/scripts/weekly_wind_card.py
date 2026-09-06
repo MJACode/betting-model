@@ -187,7 +187,7 @@ def main() -> int:
     waiting = windy[windy.lead_days > MAX_FIRE_LEAD]
     if len(waiting):
         print(f"\n{len(waiting)} game(s) over the wind bar but outside the "
-              f"{MAX_FIRE_LEAD:.0f}-day firing window — watching, not betting:")
+              f"{MAX_FIRE_LEAD:.0f}-day firing window -- watching, not betting:")
         print(waiting[["matchup", "lead_days", "forecast_wind"]]
               .sort_values("lead_days").to_string(index=False,
                                                   float_format=lambda x: f"{x:.1f}"))

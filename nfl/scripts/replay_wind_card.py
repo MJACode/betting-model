@@ -146,7 +146,13 @@ def main() -> int:
           .to_string(index=False, float_format=lambda x: f"{x:.1f}"))
 
     w = cached_totals(w, a.lead)
-    bets = select_bets(w, threshold=a.threshold)
+    # The live firing gate (`MAX_FIRE_LEAD`, 4 days) is DEPLOYMENT POLICY, not a
+    # property of the rule, and this harness exists to replay the rule at a lead
+    # the caller chooses -- `--lead` accepts 1-7, and leads 5/6/7 in
+    # CALIBRATED_UNDER_RATE were checked with exactly this. Inheriting the gate
+    # would make `--lead 5` and above return "no qualifying bets" silently, which
+    # looks identical to a calm week.
+    bets = select_bets(w, threshold=a.threshold, max_fire_lead=float(a.lead))
     if bets.empty:
         n = int((w.forecast_wind >= a.threshold).sum())
         print(f"\nno qualifying bets ({n} game(s) cleared the wind threshold but "

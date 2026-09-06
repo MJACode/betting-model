@@ -115,3 +115,51 @@ def test_a_waiting_game_is_not_reported_as_a_collapsed_premise(wind):
                                  "reason": row["reason"]})
     assert not still
     assert status != "GONE", f"waiting read as a collapsed premise: {row['reason']}"
+
+
+def test_every_offline_caller_of_select_bets_opts_out_of_the_live_gate(wind):
+    """A backtest that silently inherits a deployment policy reports a lie.
+
+    `MAX_FIRE_LEAD` is where we are willing to commit MONEY, not a property of
+    the rule. `replay_wind_card.py --lead 5` builds a frame at lead 5 and is how
+    leads 5/6/7 in CALIBRATED_UNDER_RATE were checked; with the default gate it
+    would print "no qualifying bets", which is indistinguishable from a calm
+    week. Caught 2026-09-06 by reading the callers rather than the suite --
+    nothing under `nfl/scripts/` is otherwise exercised here.
+
+    Static, deliberately: these scripts need the odds cache and the weather
+    cache (108 MB, gitignored) to run at all. The property is cheap to state and
+    the failure mode is silence, which is the combination that earns a tripwire.
+    """
+    live = {"weekly_wind_card.py"}          # the one caller the gate is FOR
+    offenders = []
+    for path in sorted((NFL_ROOT / "scripts").glob("*.py")):
+        src = path.read_text(encoding="utf-8")      # cp1252 default would raise here
+        if "select_bets(" not in src or path.name in live:
+            continue
+        for line in src.splitlines():
+            if "select_bets(" in line and "def " not in line and "=" != line.strip()[:1]:
+                if "max_fire_lead" not in line:
+                    offenders.append(f"{path.name}: {line.strip()}")
+    assert not offenders, (
+        "offline caller(s) of select_bets inherit the live firing gate and will "
+        "silently report zero bets past lead "
+        f"{wind.MAX_FIRE_LEAD}: " + "; ".join(offenders))
+
+
+def test_a_waiting_row_keeps_its_line_price_and_edge(wind):
+    """The board's job is the locked-pick record, so a waiting row is not blank.
+
+    A pick locked before the gate existed sits in the waiting branch for the
+    days between `MAX_FIRE_LEAD` and its own lock. Gating before pricing would
+    blank the line, the price and the edge for exactly that window.
+
+    Concrete case, measured 2026-09-06: CLE @ JAX locked at a 14.0 mph forecast
+    on 09-05 and read 4.3 mph the next day, still 7 days from kickoff.
+    """
+    row = wind.evaluate_board(_slate(8.7))[0]
+    assert not int(row["qualifies"])
+    assert "waiting" in row["reason"]
+    assert row["current_line"] == 40.5, row
+    assert row["current_price"] == -105, row
+    assert row["edge"] not in (None, ""), "the waiting row lost its edge"

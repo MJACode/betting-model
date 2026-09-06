@@ -1045,6 +1045,15 @@ That sentence is currently false. A pick locked at a 12 mph forecast whose wind
 collapses to 8 mph before kickoff is flagged nowhere — not in the table, not on
 the pick, not in the app.
 
+**It has already cost something concrete.** `CLE @ JAX Under 40.5` locked on
+2026-09-05 at a **14.0 mph** forecast. The card's dry run the next day, still
+seven days from kickoff, reads **4.3 mph** at the same stadium — the lowest on
+the board. The pick stands (§1c, and correctly), but the premise for it is
+gone, and there is nowhere that says so: not `nfl_pick_status_history`, not
+`picks.condition_status`, not the app. That is the exact scenario
+`nfl_pick_monitor`'s docstring describes as "the case this whole mechanism
+exists for".
+
 Fix is one line at the write side or the read side; prefer normalising in
 `pick_eval.eval_row` so the CSV's own comment becomes true. **The test has to
 watch it fail** (§1b): assert a published pick's `game_id` resolves against a

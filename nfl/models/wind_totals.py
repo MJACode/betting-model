@@ -420,19 +420,6 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
             continue
 
         lead_days = float(getattr(r, "lead_days", 0.0))
-        if lead_days > max_fire_lead:
-            # Deliberately NOT worded "beyond the": `nfl_pick_monitor._GONE_MARKERS`
-            # reads that phrase as the premise having collapsed, and this is the
-            # opposite -- the wind is there, we are simply not committing money
-            # this far out yet. A locked pick can only reach this branch if the
-            # window is tightened underneath it, and GONE would overstate that.
-            out.append(eval_row(
-                qualifies=False,
-                reason=(f"wind {wind:.1f} mph, waiting: lead {lead_days:.1f}d is "
-                        f"outside the {max_fire_lead:.0f}-day firing window"),
-                **common))
-            continue
-
         px = getattr(r, "best_under_px", None)
         total = getattr(r, "best_total", None)
         if px is None or pd.isna(px) or total is None or pd.isna(total):
@@ -459,7 +446,25 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
         lead_note = ("" if round(lead_days) <= MAX_CALIBRATED_LEAD else
                      f", lead {lead_days:.1f}d clipped to the "
                      f"{MAX_CALIBRATED_LEAD}-day calibration")
-        if edge < min_edge:
+        if lead_days > max_fire_lead:
+            # Checked AFTER pricing on purpose, so the row still carries the
+            # line, the price and the edge. A locked pick sits in this branch
+            # for the days between the firing window and its lock, and the whole
+            # job of this board is the locked-pick record -- a row that says
+            # "waiting" and nothing else would be a hole in exactly the window
+            # someone would want to inspect. Measured 2026-09-06: CLE @ JAX
+            # locked at a 14.0 mph forecast on 09-05 and read 4.3 mph the next
+            # day, still 7 days out. That is the row that has to keep its
+            # numbers.
+            #
+            # Deliberately NOT worded "beyond the": `nfl_pick_monitor._GONE_MARKERS`
+            # reads that phrase as the premise having collapsed, and this is the
+            # opposite -- the wind is there, we are simply not committing money
+            # this far out yet.
+            reason = (f"wind {wind:.1f} mph, waiting: lead {lead_days:.1f}d is "
+                      f"outside the {max_fire_lead:.0f}-day firing window")
+            qualifies = False
+        elif edge < min_edge:
             reason = (f"wind {wind:.1f} mph but edge {edge*100:+.2f}pp "
                       f"below {min_edge*100:.0f}pp{lead_note}")
             qualifies = False
