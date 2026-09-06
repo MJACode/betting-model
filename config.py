@@ -1746,6 +1746,40 @@ SHARP_BOOKMAKERS = [
     if b.strip()
 ]
 
+# Books a bet can ACTUALLY BE PLACED AT. Distinct from every list above, which
+# answer different questions: LINE_SHOP_BOOKMAKERS is what we FETCH,
+# SHARP_BOOKMAKERS is what we BELIEVE, and this is what we can WALK UP TO.
+#
+# It exists because a model that names its own book can name one the reader has
+# no account at, and under §1c that pick is permanent. On 2026-09-06 the opener
+# card's seven qualifying Week-1 bets sat at onexbet (2), betus (2), coolbet,
+# fanduel and draftkings; mike: "no can't bet on these remove them". Two of the
+# three largest edges were at books with no US licence.
+#
+# DERIVED, not retyped. LINE_SHOP_BOOKMAKERS is the list mike curated on
+# 2026-09-03 precisely because those are the books the app shows a price at, so
+# bettable = that list minus the two entries carried for ANALYSIS rather than
+# for placement:
+#   pinnacle — the sharp REFERENCE the opener rule measures against. Betting
+#              the reference is not a strategy, it is the absence of one.
+#   bovada   — offshore; added 2026-08-25 for the NCAAF cross-book opener
+#              research, never as a placement venue.
+# Adding a book to LINE_SHOP_BOOKMAKERS therefore makes it bettable, which is
+# the right default: that list is already "books mike holds".
+#
+# THE FAILURE MODES ARE NOT SYMMETRIC, so when in doubt leave a book OUT. Too
+# narrow loses a bet we could have had — recoverable, and it shows up as a
+# missing row. Too wide LOCKS AN UNPLACEABLE PICK FOREVER, and §1c means
+# nothing can take it back.
+NON_BETTABLE_BOOKMAKERS = {"pinnacle", "bovada"}
+BETTABLE_BOOKS = [
+    b.strip().lower()
+    for b in (os.environ.get("BETTABLE_BOOKS") or ",".join(
+        b for b in LINE_SHOP_BOOKMAKERS if b not in NON_BETTABLE_BOOKMAKERS
+    )).split(",")
+    if b.strip()
+]
+
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
 # Both odds tables are append-only (~21 snapshots per proposition per day), but the
 # ONLY readers of non-DK rows are the DISTINCT ON all-books views, which return just
