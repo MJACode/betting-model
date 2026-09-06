@@ -128,19 +128,22 @@ def main() -> int:
                     help="only for showing the stake in money on the printed card")
     a = ap.parse_args()
 
-    # Two windows, deliberately different.
+    # Two windows, and since 2026-09-06 they share an early bound.
     #
-    # WATCH from 10 days out: the poller ticks hourly from there, and every
-    # observation of every game is recorded so a locked pick's history is
-    # continuous rather than starting when the bet fires.
+    # WATCH from 10 days out: every observation of every game is recorded, so a
+    # locked pick's history is continuous rather than starting when it fires.
     #
-    # FIRE only inside the VALIDATED T-7..T-2 window. Polling early is not
-    # betting early. Pinnacle does not post until ~T-6.5, so there is usually
-    # nothing to compare against before T-7 anyway, and the backtest measured
-    # deviations only inside T-7..T-2 — firing outside it would be
-    # extrapolation dressed up as a signal.
+    # FIRE from the same horizon down to T-2. This used to stop at T-7, which
+    # sounds conservative and was not: Pinnacle had posted for the whole Week-1
+    # board on 2026-09-06 with seven qualifying deviations, and the card sat on
+    # them because the Sunday games were 7.19 days out. Waiting is not free
+    # here — the edge IS the soft book's staleness, and every hour of it is an
+    # hour the soft book might correct. See opener_spread.LEAD_HI_DAYS for what
+    # this costs in evidence: pre-T-7 bets are outside the backtested span.
+    #
+    # The LATE bound is untouched at T-2.
     watch = load_window_schedule(lo_days=0.0, hi_days=a.watch_days)
-    sched = load_window_schedule()
+    sched = load_window_schedule(hi_days=a.watch_days)
     if watch.empty:
         print(f"No games inside the {a.watch_days:.0f}-day watch horizon.")
         return 0

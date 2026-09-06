@@ -402,7 +402,14 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
-                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
+                  # "nfl_poll_fast", not "nfl_poll_10min": the id was renamed
+                  # when the fast tier moved to T-24h and this entry was not,
+                  # so it named a job that does not exist. Inert today because
+                  # the pipeline role owns everything NOT in _POLLER_JOBS, but
+                  # a dead name in a role map is a trap set for whoever
+                  # inverts the sets later.
+                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_fast",
+                  "nfl_opener_poll",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "calibration_watch"}
@@ -557,6 +564,25 @@ NFL_FAST_WINDOW_HOURS = float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))
 # opener us,eu), so the extra 126 ticks a kickoff-day are ~750 credits
 # against a 4.71M balance and a ~46-76k/day burn: immaterial.
 
+# The opener's own cadence, in minutes. ONE, because the thing it is watching
+# for is instantaneous: Pinnacle posting a number a soft book has not answered
+# yet. Everything else about the rule is slow -- the deviation itself decays at
+# ~4.8%/day, and BUF@HOU sat at -2.50 unchanged from 2026-09-04 to 09-06 -- so
+# this interval buys FIRST DETECTION, not protection from a fast-fading edge.
+# That distinction is worth keeping straight if anyone later asks whether the
+# spend is justified; the honest answer is that it buys hours at the front, not
+# seconds at the back.
+#
+# Not tuned below a minute: APScheduler's cron granularity is a minute, and the
+# measured feed age (7s for Pinnacle) means sub-minute polling would mostly
+# re-read a number we already hold.
+NFL_OPENER_POLL_MINUTES = max(1, int(os.environ.get("NFL_OPENER_POLL_MINUTES", "1")))
+# Runaway guard, not a budget. 2 credits x 1440 ticks = 2,880/day in season, so
+# the default sits ~2x above a normal day and only trips on a loop that has
+# stopped standing down. 0 disables the cap entirely.
+NFL_OPENER_POLL_DAILY_CREDIT_CAP = float(
+    os.environ.get("NFL_OPENER_POLL_DAILY_CREDIT_CAP", "6000"))
+
 
 def _nfl_lead_hours() -> float | None:
     """Hours to the next NFL kickoff, or None if nothing is scheduled ahead."""
@@ -596,13 +622,17 @@ def run_nfl_poll(fast: bool = False) -> None:
     exclusive — the hourly one stands down inside the fast window so a tick is
     never paid for twice.
 
-    Firing is unchanged and stays inside each model's VALIDATED window. Polling
-    early does not mean betting early: at 10 days out Pinnacle has not posted
-    (it arrives ~T-6.5), so the opener has nothing to compare against, and wind
-    has no measured calibration beyond 7 days. Watching from T-10 buys the
-    first fireable moment, not an earlier bet.
+    THE OPENER IS NO LONGER RUN HERE (2026-09-06). It moved to its own
+    minute-cadence job below, because the two models want opposite things from
+    a schedule: wind wants the LATEST forecast and is better the longer it
+    waits, while the opener is racing a soft book's correction and wants the
+    FIRST moment Pinnacle posts. Running the opener at wind's cadence made the
+    slower model set the pace for the faster one. Keeping them in one tick
+    would also mean dragging the wind card, the pick monitor and the publisher
+    along at one-minute intervals, which is most of the cost and none of the
+    benefit.
 
-    Cost is ~4 credits a tick (2 markets x 2 regions), and zero when no game is
+    Cost is ~2 credits a tick (wind's own fetch), and zero when no game is
     inside the horizon, which is most of the year.
     """
     lead = _nfl_lead_hours()
@@ -615,7 +645,6 @@ def run_nfl_poll(fast: bool = False) -> None:
     label = "fast" if fast else "hourly"
     log.info("NFL poll (%s): next kickoff in %.1fh", label, lead)
     run_nfl_wind_card(int(NFL_POLL_HORIZON_DAYS), "us,eu")
-    run_nfl_opener_card()
     # Record what the models thought of every game this tick, and flag any
     # locked pick whose conditions have changed. Never re-prices anything.
     _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
@@ -669,15 +698,33 @@ def run_nfl_prop_card() -> None:
 
 
 def run_nfl_opener_card() -> None:
-    # The daily opener-spread card (nfl/scripts/daily_opener_card.py) — the
-    # OTHER validated NFL rule: in the T-7..T-2 window, bet the side Pinnacle
-    # favours at a soft book's stale number when it deviates >= 1.0 points.
-    # Runs DAILY (the live approximation of "first qualifying moment"; the
-    # number corrects only ~4.8%/day so daily resolution loses little). The
-    # publisher's insert-once lock means later runs can only ADD games, never
-    # re-price one — the opposite of the wind card's delete+replace, because
-    # this edge IS staleness. 2 credits/run (us,eu spreads); free off-season
-    # and the card itself no-ops politely when the key is absent.
+    """One opener tick: fetch the board, fire what qualifies, publish it.
+
+    THE OPENER RULE: wherever a bettable book's spread deviates >= 1.0 pt from
+    Pinnacle's, bet the side Pinnacle favours at the stale number. The edge IS
+    the staleness, so the pick is insert-once — later ticks can only ADD games,
+    never re-price one.
+
+    CADENCE, and why it is not the daily run it used to be. "First qualifying
+    moment" was approximated at DAILY resolution on the theory that the number
+    corrects only ~4.8% a day. That theory is about how fast the deviation
+    DECAYS, and it says nothing about when the deviation APPEARS — which is a
+    single instant, the one Pinnacle posts. mike, 2026-09-06: "it needs to be
+    as soon as pinnacle Lines are released like within a minute or seconds -
+    else the edge disappears."
+
+    Measured against the feed before choosing the interval, because polling
+    faster than the source updates is pure spend: on 2026-09-06 the Odds API
+    reported Pinnacle's NFL spreads `last_update` at 7 SECONDS old (FanDuel 7s,
+    DraftKings 40s, BetMGM 44s). The source moves sub-minute, so a one-minute
+    poll is resolution we can actually use rather than the same number fetched
+    sixty times.
+
+    2 credits/run (us,eu spreads) = 2,880/day while a game is inside the
+    10-day horizon, ~432k over a season against 4.59M remaining. Zero
+    off-season: the caller returns before spending anything when the board is
+    empty. Bounded by NFL_OPENER_POLL_DAILY_CREDIT_CAP as a backstop.
+    """
     env = dict(BASE_ENV)
     key = env.get("THE_ODDS_API_KEY") or env.get("ODDS_API_KEY")
     if key:
@@ -687,6 +734,59 @@ def run_nfl_opener_card() -> None:
     if key:
         _run([sys.executable, "-m", "scripts.nfl_wind_publisher", "--opener"],
              "nfl-opener-publish")
+        # The card + publisher write the pick; this is what carries it to
+        # Discord and push. Without it a minute-cadence lock would still wait
+        # for the next :17 refresh pass to be announced, which throws away
+        # exactly the latency this job was created to buy.
+        _publish_new_signals("nfl-opener-poll")
+
+
+def _opener_credits_used_today() -> float:
+    """This job's own Odds API burn today, from the telemetry probe.
+
+    Unknown burn is treated as ZERO rather than as over-cap: an unreadable
+    probe must not silently switch the model off. The Odds API's own quota is
+    the real backstop, and the cap here is a guard against a runaway loop, not
+    a billing control.
+    """
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            row = conn.execute("""
+                SELECT COALESCE(SUM(credits), 0) FROM api_call_log
+                WHERE host = 'api.the-odds-api.com'
+                  AND source = 'nfl-opener-card'
+                  AND ts >= date_trunc('day', now() AT TIME ZONE 'America/New_York')
+            """).fetchone()
+            return float(row[0]) if row else 0.0
+        finally:
+            conn.close()
+    except Exception as exc:                                  # noqa: BLE001
+        log.warning("opener poll: credit read failed (%s) — treating as 0", exc)
+        return 0.0
+
+
+def run_nfl_opener_poll() -> None:
+    """The minute-cadence opener watch. Free when no game is on the board.
+
+    Separate from run_nfl_poll so the opener's cadence is not tied to wind's —
+    see the note there. Gated the same way: nothing inside the 10-day horizon
+    means an immediate return with no socket opened, which is what makes a
+    year-round every-minute schedule affordable.
+    """
+    lead = _nfl_lead_hours()
+    if lead is None or lead > NFL_POLL_HORIZON_DAYS * 24:
+        return                                  # nothing on the board: free
+
+    cap = NFL_OPENER_POLL_DAILY_CREDIT_CAP
+    if cap:
+        used = _opener_credits_used_today()
+        if used >= cap:
+            log.warning("opener poll: daily credit cap reached (%.0f >= %s) — skipping",
+                        used, cap)
+            return
+    run_nfl_opener_card()
 
 
 # ---------------------------------------------------------------------------
@@ -1153,8 +1253,25 @@ def build_scheduler() -> BlockingScheduler:
             CronTrigger(minute="*/10", timezone=TIMEZONE),
             kwargs={"fast": True},
             id="nfl_poll_fast",
-            name="NFL poll (every 10 min inside 3h of kickoff)",
+            name=f"NFL poll (every 10 min inside {NFL_FAST_WINDOW_HOURS:g}h of kickoff)",
             max_instances=1, coalesce=True, misfire_grace_time=120,
+        )
+        # The opener, on its own clock. See run_nfl_opener_card for why it is
+        # not a tier of the job above: wind wants the latest forecast, the
+        # opener wants the first instant Pinnacle posts, and one schedule
+        # cannot serve both.
+        #
+        # misfire_grace_time is 30s, far tighter than the jobs above, and that
+        # is the point: a tick that has already been overtaken by the next one
+        # has nothing left to contribute, and running it late would spend 2
+        # credits to re-read a board the newer tick already read. coalesce
+        # collapses a backlog to one run for the same reason.
+        sched.add_job(
+            run_nfl_opener_poll,
+            CronTrigger(minute=f"*/{NFL_OPENER_POLL_MINUTES}", timezone=TIMEZONE),
+            id="nfl_opener_poll",
+            name=f"NFL opener poll (every {NFL_OPENER_POLL_MINUTES} min, 10-day horizon)",
+            max_instances=1, coalesce=True, misfire_grace_time=30,
         )
     else:
         log.info("RUN_NFL_WIND_CARD=0 — NFL polling NOT scheduled.")
