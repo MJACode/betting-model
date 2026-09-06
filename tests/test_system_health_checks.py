@@ -165,7 +165,15 @@ def _add_signal(c, *, sport="MLB", model="mlb_moneyline", locked=200,
               " (model_id, min_prob, min_edge, prob_only, paused, min_odds)"
               " VALUES (?,?,?,?,?,NULL)", (model, min_prob, min_edge, prob_only, paused))
     lock_key = f"G1:{model}{suffix}"
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # THE SAME CLOCK THE CHECK USES. run_system_health() derives run_date from
+    # a naive datetime.now() -- local time, which is ET on the worker (TZ is set
+    # in Railway) and ET on the machine the suite is actually run on. Stamping
+    # the fixture row in UTC instead made these tests fail every evening after
+    # 8pm ET and pass again after midnight: the row landed on TOMORROW's date,
+    # the check's `game_date <= run_date` bound dropped it, and an undelivered
+    # signal read as delivered. Nothing about the check was wrong; the fixture
+    # was, and the failure looked exactly like a regression in delivery.
+    today = datetime.now().strftime("%Y-%m-%d")
     c.execute(
         "INSERT INTO opening_signals (lock_key, game_id, model_id, sport,"
         " game_date, pick_side, pick_label, model_probability, edge, locked_at)"
