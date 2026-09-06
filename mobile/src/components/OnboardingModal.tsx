@@ -19,7 +19,7 @@ const SLIDES: Slide[] = [
     icon: 'shield-checkmark-outline',
     title: 'Graded in public, not hype',
     body:
-      'Every market has its own model, and every pick it makes goes on the record — wins and losses, nothing hidden. A record that is still only a handful of bets is marked too early to judge, rather than hidden until it looks good.',
+      "Every market has its own model, and every pick it makes goes on the record — wins and losses, nothing hidden. A model's record is here from its first settled pick, even when that is one bet.",
   },
   {
     icon: 'trending-up-outline',

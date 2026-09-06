@@ -226,10 +226,10 @@ export function TrackRecordScreen() {
             short by design, and the percentages will move a lot for a while.{'\n\n'}
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
-            profitable, some aren’t yet, and we show them all — a model with only a handful
-            of settled picks has its percentage greyed out and marked too early to read,
-            rather than being hidden until it looks good. A
-            pick that had no
+            profitable, some aren’t yet, and we show them all. Every sample here is still
+            small, and a few dozen settled bets tells you very little in either direction —
+            where a model has too few to read, its percentage is greyed out and labelled
+            rather than hidden. A pick that had no
             DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
           </Text>
@@ -317,11 +317,13 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
           {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
         </Text>
-        {decided < MIN_PICKS_FOR_COLOURED_ROI ? (
+        {decided < MIN_PICKS_FOR_COLOURED_ROI && Number(row.staked_flat ?? 0) > 0 ? (
           // Its own line, not a fourth segment: the sub-line is already three
           // segments wide beside the ROI column, and a mid-phrase wrap orphans
           // the one segment that qualifies the number next to it. Same shape
-          // the Models tab already uses for the same reason.
+          // the Models tab already uses for the same reason — and, like that
+          // screen, it only fires when there is an ROI to qualify: an all-
+          // unpriced model renders "—", which "N unpriced" already explains.
           <Text style={styles.modelSub}>{thinSampleCaption()}</Text>
         ) : null}
       </View>

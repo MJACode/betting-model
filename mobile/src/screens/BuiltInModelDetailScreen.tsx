@@ -26,7 +26,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { isUnlockedPreview, passesActionFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
-import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -121,8 +121,14 @@ export function BuiltInModelDetailScreen() {
   const decided = stats.wins + stats.losses;
   // Settled with no book price: in the W-L, not in the money (flatPnl).
   const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
-  const roiColor =
-    stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
+  // The row that opened this screen greys a thin ROI and captions it; the
+  // drill-down is where a member lingers and screenshots, so it cannot be the
+  // one surface that shows the same 1-bet number in full bet-green with no
+  // qualifier. Same constant, same caption, same rule.
+  const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
+  const roiColor = thin
+    ? colors.textSecondary
+    : stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -200,7 +206,7 @@ export function BuiltInModelDetailScreen() {
                 label="Flat ROI"
                 value={stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
                 tint={roiColor}
-                caption="vs $100 flat per bet"
+                caption={thin && stats.stakedFlat > 0 ? thinSampleCaption() : 'vs $100 flat per bet'}
               />
               <StatTile
                 label="P&L"

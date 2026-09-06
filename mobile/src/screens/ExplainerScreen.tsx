@@ -286,9 +286,8 @@ export function ExplainerScreen() {
             A percentage on a handful of bets isn't a result. Every model's
             record is here from its first settled pick, and until there are
             enough of them to read, the number is greyed out and marked too
-            early to judge rather than being hidden. If a model isn't beating
-            the closing line over a real sample, we'd rather show you that than
-            hide it.
+            early to judge. If a model isn't beating the closing line over a
+            real sample, we'd rather show you that than hide it.
           </P>
         </Section>
 
