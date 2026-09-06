@@ -1,3 +1,5 @@
+import { isLiveModel } from './thresholds';
+
 /**
  * The official live date — the one place the app states when the record starts.
  *
@@ -72,3 +74,41 @@ export const SHADOW_TRACK_START = '2026-04-14';
  */
 export const MIN_PICKS_FOR_COLOURED_ROI = 10;
 export const GO_LIVE_SETTLED_PICKS = 50;
+
+/**
+ * The ONE sentence every surface uses for "this record is too thin to read".
+ *
+ * Two callers — the Models tab's built-in rows and the Record tab's model rows.
+ * It lives here, beside the two constants it reasons about, for the same reason
+ * `RETIRED_RULE_CAPTION` exists in `lib/modelMeta`: this state had already
+ * drifted into FOUR phrasings across those two screens (different sentence,
+ * different count, and a pre-game branch on one screen that never said "too few
+ * to judge" at all), so a user checking one model in both tabs could not tell
+ * whether they were reading the same caveat or two different ones.
+ *
+ * The branch is the go-live gate's SCOPE. The >= 50-settled bar is a PRE-GAME
+ * rule (CLAUDE.md §2): in-play models ship live while their record is still
+ * being built, which `ExplainerScreen` and `OnboardingModal` both already say.
+ * Quoting a live model's distance from a bar it is not held to announced "not
+ * backed yet" about a model that is backed (Matt, 2026-09-06, on
+ * `ncaaf_live_win_prob` reading "1 of 50 settled").
+ *
+ * A live row therefore keeps the caution and drops the gate — and drops the
+ * COUNT with it, because without "of 50" a bare number is no longer progress
+ * toward anything, and the line above it already renders that same number as
+ * "1 pick · 0-1".
+ *
+ * `settled` is settled PICKS, pushes included — the unit CLAUDE.md §2 states the
+ * gate in ("50 settled picks"), so the number and the word agree. It is
+ * deliberately not `wins + losses`, which is the separate question of how much
+ * of the record has a W or an L to read.
+ *
+ * Never returns empty. The greyed-out ROI (MIN_PICKS_FOR_COLOURED_ROI) is the
+ * only other signal that a number is provisional, and a grey -100% still reads
+ * as a result to anyone who does not know what the grey means.
+ */
+export function thinSampleCaption(modelId: string, settled: number): string {
+  return isLiveModel(modelId)
+    ? 'Too few to judge yet'
+    : `${settled} of ${GO_LIVE_SETTLED_PICKS} settled · too few to judge`;
+}
