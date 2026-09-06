@@ -17,7 +17,6 @@ import {
   fetchTrackRecordDaily,
 } from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
-import { isLiveModel } from '@/lib/thresholds';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import { SettingsButton } from '@/components/SettingsButton';
 import {
@@ -33,7 +32,7 @@ import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
-import { GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI } from '@/lib/recordStart';
+import { GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 
 /** First day of the tracked record. Every published number starts here.
  *  The official live date — see lib/recordStart, which is the one place it is
@@ -229,7 +228,8 @@ export function TrackRecordScreen() {
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
             profitable, some aren’t yet, and we show them all. A new pre-game model is shown
             but not backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive
-            ROI; in-play models are the exception and run live while that record builds. A
+            ROI; in-play models are the exception and run live while that record builds, so
+            treat them as unproven. A
             pick that had no
             DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
@@ -307,9 +307,6 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
   // The view counts every settled pick in the W-L but stakes only the priced
   // ones (require_price_for_published_units), so name the gap when there is one.
   const unpriced = Number(row.picks ?? 0) - Math.round(Number(row.staked_flat ?? 0) / 100);
-  // Same rule as the Models tab: the go-live gate is a pre-game rule, so an
-  // in-play row says how thin it is without naming a bar it is not held to.
-  const gated = !isLiveModel(row.model_id);
   return (
     <View style={styles.modelRow}>
       <View style={{ flex: 1 }}>
@@ -320,12 +317,16 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {row.wins}–{row.losses}
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
           {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
-          {decided < MIN_PICKS_FOR_COLOURED_ROI
-            ? gated
-              ? ` · ${decided} of ${GO_LIVE_SETTLED_PICKS} settled`
-              : ` · too few to judge`
-            : ''}
         </Text>
+        {decided < MIN_PICKS_FOR_COLOURED_ROI ? (
+          // Its own line, not a fourth segment: the sub-line is already three
+          // segments wide beside the ROI column, and a mid-phrase wrap orphans
+          // the one segment that qualifies the number next to it. Same shape
+          // the Models tab already uses for the same reason.
+          <Text style={styles.modelSub}>
+            {thinSampleCaption(row.model_id, Number(row.picks ?? 0))}
+          </Text>
+        ) : null}
       </View>
       <Text
         style={[
@@ -462,7 +463,10 @@ const styles = StyleSheet.create({
     borderTopColor: colors.separator,
   },
   modelName: { fontSize: font.size.body, color: colors.textPrimary, fontWeight: font.weight.medium },
-  modelSub: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  // textSecondary, not textTertiary: tertiary on this ground is ~3.4:1 and
+  // below the AA floor (UX_REVIEW §5), and this style now carries the caveat
+  // line that exists to stop a thin ROI being read as a result.
+  modelSub: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.md },
   empty: {
     fontSize: font.size.footnote,
