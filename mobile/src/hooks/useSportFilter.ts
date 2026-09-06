@@ -23,10 +23,12 @@ async function load(): Promise<Sport> {
   if (cached) return cached;
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    cached =
-      raw === 'WNBA' || raw === 'MLB' || raw === 'NBA' || raw === 'UFC' || raw === 'GOLF' || raw === 'NHL'
-        ? (raw as Sport)
-        : DEFAULT_SPORT;
+    // Validate against SPORTS, never a hand-written list. This was six literals
+    // that omitted NFL and NCAAF, so selecting either was silently reverted to
+    // MLB on the next cold start — in September, the two sports in season. A
+    // list that has to be edited alongside SPORTS is a list that will drift
+    // again the next time a sport is added.
+    cached = SPORTS.includes(raw as Sport) ? (raw as Sport) : DEFAULT_SPORT;
   } catch {
     cached = DEFAULT_SPORT;
   }
