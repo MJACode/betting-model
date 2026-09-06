@@ -177,10 +177,13 @@ def test_the_app_has_its_own_copy_of_the_slate_window():
     assert "export function liveSlateDatesET" in src, (
         "the app needs config.live_slate_dates() in TypeScript -- without it "
         "every live read is pinned to one date")
-    assert "LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET = 6" in src, (
+    # Read config's value rather than hard-coding 6 on both sides, so moving the
+    # cut in config.py fails HERE rather than diverging silently on a phone.
+    # NOTE: config's value is env-overridable and the app's is a literal, so a
+    # Railway-only override still diverges. Flagged for Matt, not fixed here.
+    assert (f"LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET = "
+            f"{config.LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET}") in src, (
         "the app's lookback must mirror config.LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET")
-    assert config.LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET == 6, (
-        "config moved; move mobile/src/lib/format.ts with it")
 
 
 def test_the_apps_live_reads_take_a_LIST_of_dates():

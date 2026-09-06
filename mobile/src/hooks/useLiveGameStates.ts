@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { reconcileLiveSnapshots } from '@/lib/format';
+import { liveSlateDatesET, reconcileLiveSnapshots } from '@/lib/format';
 import { fetchLiveGameStates } from '@/lib/queries';
 import type { LiveGameStateRow } from '@/types';
 
@@ -70,7 +70,16 @@ export function useLiveGameState(date: string | null, gameId: string | null) {
       // Reconcile over the whole slate, not just this game — the "poller is
       // alive but this game went quiet" signal needs the other games for
       // context, and the detail screen must agree with the card.
-      const all = await fetchLiveGameStates(date);
+      //
+      // "The whole slate" means the SAME rows the card reconciled over, or the
+      // two can disagree: pollerAlive is derived from the freshest row in the
+      // set it is handed, so a board reading two dates and a detail screen
+      // reading one can mark the same game terminal in one place and live in
+      // the other (UX review, 2026-09-06). Only widened when this pick's own
+      // date is inside the live window — a settled pick from last month must
+      // still reconcile against its own day.
+      const window = liveSlateDatesET();
+      const all = await fetchLiveGameStates(window.includes(date) ? window : date);
       setRow(reconcileLiveSnapshots(all, Date.now()).get(gameId) ?? null);
     } catch {
       // Enrichment only.

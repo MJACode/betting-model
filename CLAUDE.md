@@ -8,11 +8,9 @@
 > pipelines, thresholds, the mobile prompt, Discord, the live loop. The map is
 > §9.
 >
-> **This file was 909 KB (~225k tokens) and was re-read in full every session.**
-> On 2026-08-30 the 192-entry session log moved to `docs/sessions/` and the
-> reference sections moved to `docs/`. Keep it that way: append your session
-> summary to `docs/sessions/<YYYY-MM>.md`, and only PROMOTE something into this
-> file when it becomes a rule that governs future work.
+> **Keep it that way** (this file was once 909 KB, re-read every session):
+> append your session summary to `docs/sessions/<YYYY-MM>.md`, and only PROMOTE
+> something into this file when it becomes a rule that governs future work.
 >
 > **Read Section 0 first — it is the required format for every reply.**
 
@@ -229,33 +227,40 @@ applies the **same `model_action_thresholds` cut** the app's
 `passesActionFilter` applies. A surface that reads anything else is a surface
 that will disagree, and the disagreement is always silent.
 
-Discord and push used to read `opening_signals`, which put the **capture step**
-between a pick and its channel — a gate the app does not have, and one that can
-only ever LOSE rows. Measured: **6 of 125 eligible BETs never published, all 6
-uncaptured, zero captured-then-unposted** (`docs/rules_evidence.md`).
+A surface that adds a GATE the app does not have can only lose rows, and does it
+silently — that was `opening_signals` between a pick and its channel, measured
+at 6 of 125 eligible BETs never published (`docs/rules_evidence.md`).
 
 - **No publishing surface gets a date horizon.** A pick is publishable when its
-  game has **not started**, however far ahead it was written. The two Week 1
-  wind picks were written 9 days out against a 7-day capture window, so they
-  reached the app and nothing else. A horizon is a thing you can only fail at
-  quietly.
+  game has **not started**, however far ahead it was written. A horizon is a
+  thing you can only fail at quietly.
 - **`opening_signals` is the CLV / opening-signal shadow track, not a gate.**
   It keeps its own window (`docs/opening_signals.md`). Never publish from it.
 - **The one guard that SHOULD bound the set is the started-game check.** The
   pick is a legitimate bet of record; announcing it once the game is under way
   sends the reader to a bet they cannot take.
+- **A LIVE surface resolves its window with `config.live_slate_dates()`, never
+  with today** — a game keeps the game_date of its KICKOFF, so a 10:37pm ET start
+  is still being played after the calendar rolls. The app's mirror is
+  `liveSlateDatesET()` (`mobile/src/lib/format.ts`); the two are pinned together
+  by `tests/test_live_slate_midnight.py`.
+- **ONE PUBLISHER AT A TIME — a ledger cannot PREVENT a duplicate, only record
+  one.** Read → send → ledger is deliberately in that order, so two processes in
+  the same window both send and the second INSERT is swallowed: one ledger row,
+  two messages. `pollers` and `worker` both call `publish_new_signals`, so this
+  is live. Every publisher takes the advisory lock in
+  `tracking/publish_lock.py`.
 - **A new surface is a line in the parity tests**, not a copied query —
-  `tests/test_nfl_lookahead_signals.py` asserts the property over all of them.
+  `tests/test_nfl_lookahead_signals.py` and `tests/test_publisher_lock.py`
+  assert those properties over all of them.
 
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
 `.claude/rules/frontend.md` when a file under `mobile/` is opened.
 
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
-(Repo-level rule, 2026-08-30.) The changelog convention that built this file was
-"update CLAUDE.md after every commit". Over 192 sessions that grew it to
-**909 KB — roughly 225k tokens re-read at the start of every session.** The
-split:
+(Repo-level rule, 2026-08-30.) "Update CLAUDE.md after every commit" grew this
+file to 909 KB — ~225k tokens re-read at the start of every session. The split:
 
 - Every session appends its summary to **`docs/sessions/<YYYY-MM>.md`**, newest
   first, and adds a row to `docs/sessions/README.md`. Same detail as before —
@@ -326,18 +331,9 @@ answer is "nothing".
 
 ### How this was found
 
-The NCAAF live loop pre-dated its lock and delete-and-replaced every ~45s:
-
-```
-16:14:38  INSERT  Over 44.5  -115    <- the bet of record
-16:15:31  DELETE  Over 44.5
-16:15:31  INSERT  Over 45.5  -115
-   ...    (delete + insert, every pass)
-16:41:12  INSERT  Over 54.5  -120    <- what survived, ten points later
-```
-
-Only the first ever existed as a signal. Everything after it is the same lane
-re-priced, and publishing the last one is publishing a bet nobody was given.
+The NCAAF live loop delete-and-replaced its own pick every ~45s, walking Over
+44.5 -115 to Over 54.5 -120 in 27 minutes. Only the first ever existed as a
+signal. The transcript is in `docs/rules_evidence.md`.
 
 ---
 

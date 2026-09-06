@@ -21,7 +21,10 @@
  * again at 5am.
  */
 
-import { liveSlateDatesET, LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET, todayET } from '../src/lib/format';
+import {
+  gameStatus, liveSlateDatesET, LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET, todayET,
+} from '../src/lib/format';
+import type { GameRow } from '../src/types';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -90,11 +93,46 @@ check(
 
 // The mirror of config.live_slate_dates. If these drift, the app and the
 // backend disagree about which games are live and the disagreement is silent.
+// The Python side is pinned to this literal by
+// tests/test_live_slate_midnight.py::test_the_app_has_its_own_copy_of_the_slate_window,
+// which reads config's own value rather than hard-coding 6 on both sides.
 check(
-  'the lookback hour still mirrors config.LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET',
+  'the lookback hour is a plausible mirror of config.py',
   LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET === 6,
   'change config.py and this together, or the surfaces diverge',
 );
+
+// ── what the wider window must NOT do ───────────────────────────────────
+//
+// The window keeps a late game on the board past midnight, which is the point.
+// It must not keep a FINISHED one there. NCAAF and NFL have no live-state
+// poller (that is MLB only), so the blind window in gameStatus() is the only
+// thing that ends them, and the 6h default outlived a football game by hours --
+// under the old game_date filter that lie was truncated at midnight, and it no
+// longer is (UX review, 2026-09-06).
+
+function finishedFootball(sport: string, hoursAgo: number): GameRow {
+  return {
+    game_id: `${sport}_2026-09-05_ucla_california`, sport, season: 2026,
+    game_date: '2026-09-05', home_team: 'California', away_team: 'UCLA',
+    home_score: null, away_score: null, home_score_f5: null, away_score_f5: null,
+    commence_time: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+    home_win: null, home_win_reg: null, went_to_ot: 0,
+  };
+}
+
+for (const sport of ['NCAAF', 'NFL']) {
+  check(
+    `${sport}: still LIVE three hours after kickoff`,
+    gameStatus(finishedFootball(sport, 3), null).kind === 'live',
+    'a game genuinely in progress must survive the window',
+  );
+  check(
+    `${sport}: no longer LIVE five hours after kickoff`,
+    gameStatus(finishedFootball(sport, 5), null).kind !== 'live',
+    'else a finished late game stays on the live board with a stale in-play price',
+  );
+}
 
 console.log(failures === 0 ? '\nAll live-slate checks passed.' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -297,6 +297,18 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   NHL: 5 * 3_600_000,
   NBA: 5 * 3_600_000,
   WNBA: 5 * 3_600_000,
+  // Football, and the reason these two are named rather than left on the
+  // default: they are the sports that play late and are NOT covered by the live
+  // poller, so the blind window is all they have. Once the app's live board
+  // carries the whole slate window (liveSlateDatesET), a 10:37pm ET kickoff is
+  // no longer dropped at midnight by a game_date filter — so the 6h default
+  // would have kept a finished NCAAF game reading LIVE until 4:37am, with a
+  // stale in-play price and a betslip hand-off (UX review, 2026-09-06). A
+  // college game runs ~3h25m and an NFL game ~3h10m; 4h leaves weather-delay
+  // margin. The durable fix is a real end-of-game signal for non-MLB sports,
+  // server-side — this is a display bound, not a substitute for one.
+  NCAAF: 4 * 3_600_000,
+  NFL: 4 * 3_600_000,
   // A UFC card runs from the first prelim through the main event.
   UFC: 8 * 3_600_000,
   // A golf "game" row is a whole tournament (commence_time = the earliest

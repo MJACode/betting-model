@@ -21,6 +21,32 @@
 
 ---
 
+## [ ] One NCAAF game exists twice in `games`, under its ET id and its UTC id
+
+Found 2026-09-06 (session 245) while tracing why a live NCAAF pick never reached
+the app. Not the cause of that bug, and not fixed there.
+
+```
+NCAAF_2026-09-05_ucla_california   data_source 'live'  commence 2026-09-06T02:37:00+00:00  45-24
+NCAAF_2026-09-06_ucla_california   data_source 'cfbd'  commence 2026-09-06T02:30:00.000Z   45-24
+```
+
+One football game. The odds feed keyed it by its **ET** date (kickoff 10:37pm ET
+on the 5th); the CFBD import keyed it by the **UTC** date (02:30Z on the 6th).
+Both rows now carry the same final, so nothing double-counts *today* — but the
+picks reference the `09-05` id and the settlement path reads whatever it joins
+to, so this is a live settlement and track-record hazard the next time the two
+rows disagree, or the next time a model scores against the wrong one.
+
+**What to check before fixing:** how wide this is. Every NCAAF night game after
+8pm ET is a candidate, and NBA/NHL west-coast games have the same shape.
+`SELECT` on `games` grouped by `(sport, home_team, away_team,
+date_trunc('day', commence_time))` having `count(*) > 1` is the query. The fix is
+in the ingestor's id derivation (ET, everywhere, per CLAUDE.md §4), plus a
+one-off merge of the duplicates that PRESERVES the earlier row's identity —
+picks point at it (§1c: `created_at` and the pick's game_id are part of the bet
+of record, not metadata).
+
 ## [ ] [needs-decision] Two merged mobile changes are undelivered until the 1.1.0 native build ships
 
 Found 2026-09-05 (session 239), checking whether the calibration removal had
