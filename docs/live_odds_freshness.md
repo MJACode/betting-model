@@ -289,8 +289,9 @@ Because the floor is real whatever the source turns out to be:
   pre-game one, because a pre-game price is stable for hours while a live price
   is ≤45s old by construction. Left at 0.20 for MLB — measured, not skipped: its
   worst edge bucket is at the BOTTOM (0.10–0.12 = −63.5%), 0.16–0.18 = +17.3%.
-- **Disclosure** (#286): every live Discord post and the Live tab name the
-  measured number and resolve to an action.
+- **Disclosure** (#286): every live Discord post and the app's Live segment
+  (a segment on Picks, not a tab, since 2026-09-06) name the measured number
+  and resolve to an action.
 - **Audit trail** (#282): live prices for every sport are written to `odds` with
   the feed's own publish clock, so this question is answerable with a query
   instead of an argument.
