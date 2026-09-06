@@ -547,6 +547,14 @@ export interface ParlayTrackRow {
   settled_at: string | null;
 }
 
+/**
+ * The Picks screen's segmented control. Lives here rather than on the screen
+ * because three things need it — the screen, the tab param list below, and the
+ * push router in lib/ — and lib/ importing a type from screens/ inverts the
+ * layering. It was spelled out inline in all three.
+ */
+export type PicksView = 'today' | 'signals' | 'live';
+
 export type TabParamList = {
   // Merged Picks home (Today | Signals | Live) replaces the old Picks +
   // Signals tabs, and since 2026-09-06 the Live tab as well — live is a
@@ -557,7 +565,7 @@ export type TabParamList = {
   // `view` opens the screen on a given segment. It is what Settings' "Live
   // betting" row targets, and the hook a live push notification needs when the
   // notification-response handler is built (there is none today).
-  Picks: { view?: 'today' | 'signals' | 'live' } | undefined;
+  Picks: { view?: PicksView } | undefined;
   TrackRecord: undefined;
   Performance: undefined;
   Models: undefined;

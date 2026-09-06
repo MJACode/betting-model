@@ -101,6 +101,23 @@ def test_the_route_helper_only_sets_sport_when_it_is_unambiguous():
     )
 
 
+def test_every_summary_producer_can_deep_link_a_single_pick():
+    """Two pushes of the same shape must not behave differently.
+
+    _dropped_signals had no pick_id, so a one-pick "moved past the bet line"
+    push dumped the reader on the whole Today board to find it while the
+    identical new_bets push opened the pick (UX review, 2026-09-06).
+    """
+    src = _read(NOTIFIER)
+    for fn in ("_new_bet_signals", "_dropped_signals", "_new_live_signals"):
+        body = re.search(rf"def {fn}\(.*?\n\n\n", src, re.S)
+        assert body, f"{fn} not found"
+        assert '"pick_id"' in body.group(0), (
+            f"{fn} does not carry pick_id, so its single-pick push cannot "
+            "deep-link the way the other producers' do"
+        )
+
+
 def test_a_single_pick_deep_links_and_a_batch_does_not():
     from tracking.push_notifier import _route
 
@@ -117,10 +134,22 @@ def test_a_single_pick_deep_links_and_a_batch_does_not():
     assert "pickId" not in _route("new_bets", [{"sport": "MLB", "pick_id": None}])
 
 
+def test_the_line_change_glyph_matches_its_direction():
+    """The glyph is read before the sentence on a lock screen.
+
+    📈 on "moved against you" says the opposite of the alert, on the push with
+    the shortest reaction window (UX review, 2026-09-06).
+    """
+    src = _read(NOTIFIER)
+    assert "f\"{'📉' if a['against'] else '📈'} Line {arrow}\"" in src, (
+        "the line-change title uses one glyph for both directions"
+    )
+
+
 def test_the_line_change_push_carries_the_pick_it_is_about():
     """It is always one tracked bet, so it can always open that bet."""
     src = _read(NOTIFIER)
-    m = re.search(r"\"title\": f\"📈 Line \{arrow\}\".*?\}\)", src, re.S)
+    m = re.search(r"\"title\": f\"\{'📉'.*?\}\)", src, re.S)
     assert m, "the line-change message literal moved"
     assert '"pickId": a["pick_id"]' in m.group(0)
     # ...and the alert dict must actually carry it, or that is a KeyError in
@@ -187,9 +216,26 @@ def test_the_app_handles_the_cold_start_tap():
         "every test, because there the app is already running"
     )
     assert "addNotificationResponseReceivedListener" in src
-    assert "coldStartHandledRef" in src, (
-        "the cold-start response is sticky for the life of the process; without "
-        "a once-guard every remount re-navigates and the user is trapped"
+
+    # ...and the effect that fetches it must MOUNT ONCE. `ready` always goes
+    # false -> true on launch (onReady fires after the first render), so an
+    # effect that depends on it is guaranteed one teardown -- which used to
+    # cancel the in-flight cold-start lookup while a once-guard stopped it
+    # being retried. The launch tap was dropped on essentially every cold
+    # start, and the warm path worked, so nothing on a dev phone showed it.
+    m = re.search(r"getLastNotificationResponseAsync.*?\}, (\[[^\]]*\])\);", src, re.S)
+    assert m, "the subscribe effect's dependency array moved"
+    assert m.group(1).strip() == "[]", (
+        f"the notification-response effect depends on {m.group(1)}; it must be "
+        "[] or its teardown cancels the launch tap it exists to handle"
+    )
+
+    # The cold-start call belongs inside the same try as the listener: without a
+    # native module the property access throws synchronously, past .catch.
+    body = re.search(r"try \{(.*?)\} catch", src, re.S)
+    assert body and "getLastNotificationResponseAsync" in body.group(1), (
+        "the cold-start native call sits outside the try that guards the "
+        "listener -- a launch crash on a build without expo-notifications"
     )
 
 
@@ -230,7 +276,7 @@ def test_the_board_route_switches_sport_before_navigating():
     m = re.search(r"case 'board':(.*?)return;", src, re.S)
     assert m, "the board branch moved"
     body = m.group(1)
-    set_at = body.index("setSportGlobal")
+    set_at = body.index("setSportForVisit")
     nav_at = body.index("navRef.navigate")
     assert set_at < nav_at, "the sport switch must precede the navigate"
 
@@ -238,7 +284,7 @@ def test_the_board_route_switches_sport_before_navigating():
 def test_the_sport_setter_is_callable_outside_react():
     """The router runs from a notification callback, with no component around it."""
     src = _read(ROOT / "mobile" / "src" / "hooks" / "useSportFilter.ts")
-    assert re.search(r"export function setSportGlobal\(", src), (
-        "setSportGlobal is gone — the push router cannot set the sport from a "
+    assert re.search(r"export function setSportForVisit\(", src), (
+        "setSportForVisit is gone — the push router cannot set the sport from a "
         "non-component callback without it"
     )

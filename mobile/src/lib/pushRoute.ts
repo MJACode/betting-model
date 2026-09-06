@@ -1,5 +1,5 @@
 import { SPORTS, type Sport } from '@/hooks/useSportFilter';
-import type { PicksView } from '@/screens/PicksHomeScreen';
+import type { PicksView } from '@/types';
 
 /**
  * Where a tapped notification should land.

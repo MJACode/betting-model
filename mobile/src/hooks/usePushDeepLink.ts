@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import type { NavigationContainerRef } from '@react-navigation/native';
 
 import { routeForPush, type PushRoute } from '@/lib/pushRoute';
-import { setSportGlobal } from '@/hooks/useSportFilter';
+import { setSportForVisit } from '@/hooks/useSportFilter';
 import type { RootStackParamList } from '@/types';
 
 type NavRef = NavigationContainerRef<RootStackParamList>;
@@ -22,7 +22,7 @@ function navigateTo(navRef: NavRef, route: PushRoute): void {
       // lands shows the wrong sport's picks for a frame and then swaps under
       // the reader. A null sport means the push spanned several, and then the
       // user's own selection is left alone — picking one would hide the rest.
-      if (route.sport) setSportGlobal(route.sport);
+      if (route.sport) setSportForVisit(route.sport);
       navRef.navigate('Tabs', { screen: 'Picks', params: { view: route.view } });
       return;
   }
@@ -55,21 +55,27 @@ function navigateTo(navRef: NavRef, route: PushRoute): void {
  */
 export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
   const pendingRef = useRef<PushRoute | null>(null);
-  const coldStartHandledRef = useRef(false);
-
-  const dispatch = useCallback(
-    (route: PushRoute) => {
-      if (ready && navRef.isReady()) navigateTo(navRef, route);
-      else pendingRef.current = route;
-    },
-    [navRef, ready],
-  );
+  // `ready` in a ref, read at dispatch time. It must NOT be an effect
+  // dependency: `ready` always goes false -> true on launch (onReady fires
+  // after the first render), so a dependency on it guarantees one teardown —
+  // and the teardown used to cancel the in-flight cold-start lookup while the
+  // once-guard stopped it ever being retried. The launch tap, the case this
+  // hook exists for, was dropped on essentially every cold start, and the
+  // warm path worked perfectly, so nothing on a developer's phone showed it
+  // (UX review, 2026-09-06).
+  const readyRef = useRef(ready);
+  useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
 
   useEffect(() => {
-    let cancelled = false;
+    const dispatch = (route: PushRoute) => {
+      if (readyRef.current && navRef.isReady()) navigateTo(navRef, route);
+      else pendingRef.current = route;
+    };
 
     const handle = (response: Notifications.NotificationResponse | null) => {
-      if (cancelled || !response) return;
+      if (!response) return;
       const route = routeForPush(response.notification.request.content.data);
       // null is the deliberate outcome for a payload this build cannot read:
       // the app simply opens, which is what tapping a notification did before
@@ -80,25 +86,23 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
     let sub: Notifications.Subscription | undefined;
     try {
       sub = Notifications.addNotificationResponseReceivedListener(handle);
-    } catch (err) {
-      // No native module (a build without expo-notifications) — the same guard
-      // usePushNotifications uses. Deep linking is inert, the app is fine.
-      console.warn('[push] response listener unavailable', err);
-    }
-
-    // The launch tap, consumed once.
-    if (!coldStartHandledRef.current) {
-      coldStartHandledRef.current = true;
+      // The launch tap. INSIDE the same try: without a native module the
+      // property access throws synchronously, out of the effect body, where
+      // the .catch below never sees it — a red screen on launch instead of the
+      // inert no-op the guard promises.
       Notifications.getLastNotificationResponseAsync()
         .then(handle)
         .catch((err) => console.warn('[push] cold-start response unavailable', err));
+    } catch (err) {
+      // No native module (a build without expo-notifications) — the same guard
+      // usePushNotifications uses. Deep linking is inert, the app is fine.
+      console.warn('[push] notifications unavailable', err);
     }
 
-    return () => {
-      cancelled = true;
-      sub?.remove();
-    };
-  }, [dispatch]);
+    return () => sub?.remove();
+    // Mounted once, for the app's lifetime. navRef is a stable container ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Replay whatever arrived before the navigator could take it.
   useEffect(() => {

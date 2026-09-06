@@ -143,7 +143,8 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
     """Signals we previously pushed as new_bet whose live pick is now AVOID
     (flipped against us), still pre-settlement, not yet pushed as dropped."""
     rows = conn.execute("""
-        SELECT DISTINCT os.lock_key, os.pick_label, os.sport, os.locked_at
+        SELECT DISTINCT os.lock_key, os.pick_label, os.sport, os.locked_at,
+               p.pick_id
         FROM opening_signals os
         JOIN push_sent prior
           ON prior.lock_key = os.lock_key AND prior.kind = 'new_bet'
@@ -163,7 +164,8 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
           )
         ORDER BY os.locked_at
     """, (target_date,)).fetchall()
-    return [{"lock_key": r[0], "label": r[1], "sport": r[2]} for r in rows]
+    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[4]}
+            for r in rows]
 
 
 # ── Message building ─────────────────────────────────────────────────────────
@@ -186,9 +188,17 @@ def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]
         events.append((title, _summary_body([s["label"] for s in new_bets]),
                        _route("new_bets", new_bets)))
     if dropped:
-        title = f"⚠️ {len(dropped)} signal{'s' if len(dropped) != 1 else ''} flipped to AVOID"
-        # Lands on Today, not Signals: a flipped pick is no longer a signal, so
-        # the Signals board is the one place it is guaranteed NOT to be.
+        # LINE MOVEMENT, not a retraction. "flipped to AVOID" told the reader
+        # their locked pick had been taken back, while the app's own tooltip
+        # says "a signal shown here won't flip to AVOID later" — two surfaces
+        # describing one pick differently, which CLAUDE.md §1b forbids. §1c
+        # settles which is true: the pick stands at the number it was given,
+        # and what changed is the market. The wording now says that.
+        title = (f"📉 {len(dropped)} pick{'s' if len(dropped) != 1 else ''} "
+                 "moved past the bet line")
+        # Lands on Today, not Signals: once the line has moved past the cut the
+        # pick is no longer a signal, so Signals is the one board it is
+        # guaranteed NOT to be on.
         events.append((title, _summary_body([s["label"] for s in dropped]),
                        _route("dropped", dropped)))
 
@@ -376,7 +386,11 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
                 arrow = "moved against you" if a["against"] else "moved in your favor"
                 messages.append({
                     "to": token,
-                    "title": f"📈 Line {arrow}",
+                    # The GLYPH is read before the sentence on a lock screen, so
+                    # a rising green chart on "moved against you" says the
+                    # opposite of the alert, on the shortest reaction window we
+                    # have (UX review).
+                    "title": f"{'📉' if a['against'] else '📈'} Line {arrow}",
                     "body": f"{a['label']}: {a['locked']:+d} → {a['current']:+d}",
                     # Always one pick, so this is the one push that can always
                     # open the bet itself — which is the whole point when the
@@ -459,7 +473,10 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
             return 0
 
         sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-        title = f"🔴 {len(new)} live bet signal{'s' if len(new) != 1 else ''}"
+        # "live pick" is what the board calls these (PicksHomeScreen's
+        # itemNoun), and the tap now lands on that board — so the push should
+        # not invent a third noun for it.
+        title = f"🔴 {len(new)} live pick{'s' if len(new) != 1 else ''}"
         body = _summary_body([s["label"] for s in new])
         data = _route("live_signals", new)
         messages = [{

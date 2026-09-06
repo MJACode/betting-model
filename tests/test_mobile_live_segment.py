@@ -101,10 +101,20 @@ def test_settings_points_at_the_live_segment():
 
 
 def test_picks_carries_a_live_view():
-    src = _read(PICKS)
-    m = re.search(r"export type PicksView = ([^;]+);", src)
-    assert m, "PicksView not found"
+    """PicksView is declared once, in types, and includes 'live'.
+
+    It used to be spelled out inline in three places -- the screen, the tab
+    param list, and (after the push router landed) lib/pushRoute, which also had
+    lib/ importing a type from screens/ and inverting the layering.
+    """
+    m = re.search(r"export type PicksView = ([^;]+);", _read(TYPES))
+    assert m, "PicksView is not declared in types/index.ts"
     assert "'live'" in m.group(1), m.group(1)
+    # and nothing re-spells it
+    for path, label in ((PICKS, "PicksHomeScreen"), (MOBILE / "src" / "lib" / "pushRoute.ts", "pushRoute")):
+        assert not re.search(r"type PicksView = '", _read(path)), (
+            f"{label} re-declares PicksView instead of importing it"
+        )
 
 
 def test_the_live_segment_renders_only_when_something_is_live():
