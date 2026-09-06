@@ -565,17 +565,6 @@ your case; the rules below are complete as stated, the evidence is why.
 - **In-sample is in-sample.** Cuts swept on live picks regress forward. State
   which samples are trustworthy by volume and which are not.
 
-### Banned copy
-
-- **A GUARD THAT GREPS FOR A BANNED WORD DOES NOT CATCH THE SAME CLAIM MADE AS
-  A NUMBER.** `verify_live_record_start.ts` has banned "paper" in `screens/` and
-  `components/` since 2026-08-30 and passed throughout, while four app surfaces
-  told members a model was "not backed for real money until 50+ settled picks"
-  — §2's go-live gate, quoted at them row by row, which is the banned concept
-  with the word removed. When you ban a concept, ban the CONSTANT that computes
-  it too, and sweep for the concept (`grep` the constant name, not the word)
-  before declaring a surface clean. Evidence: `docs/rules_evidence.md`.
-
 ### Data integrity, and Operations
 
 **These moved to `.claude/rules/` on 2026-09-03** and load automatically when

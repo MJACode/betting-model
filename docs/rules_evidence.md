@@ -669,7 +669,10 @@ claim; the call is the test, and it is two seconds.
 
 ## A banned word is not a banned claim (2026-09-06)
 
-The rule is in CLAUDE.md §7 ("Banned copy"). This is what was measured.
+The rule is in `.claude/rules/frontend.md`, which loads whenever Claude opens a
+file under `mobile/` — not in CLAUDE.md, because it governs front-end copy only
+and CLAUDE.md is at its size cap (`tests/test_claude_md_size.py`). This is what
+was measured.
 
 CLAUDE.md §2 has said "The platform is LIVE — this is not a paper-trading
 system. Do not describe it as paper trading in any user-facing surface" since
