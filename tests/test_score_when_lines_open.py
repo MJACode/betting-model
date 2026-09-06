@@ -250,3 +250,38 @@ class _FakeConn:
 
     def close(self):
         pass
+
+
+class TestProbablesDoesNotExhaustThePool:
+    """It opens its own connection, so it must not run in the parallel group.
+
+    Shipped as `par probables-refresh` on 2026-09-06 and was the ninth
+    concurrent connection against a Supabase session pool of FIFTEEN. Measured
+    in production the same afternoon: EMAXCONNSESSION at 20:17Z and 22:40Z,
+    and on the second failure it took `odds`, `prop-odds` and `health-check`
+    with it — a step added to widen the board stopped the board being priced.
+
+    The pass is not the place to discover how many sockets are already open.
+    """
+
+    def _pass_src(self):
+        return (Path(__file__).parent.parent / "scripts" / "refresh_pass.sh"
+                ).read_text(encoding="utf-8")
+
+    def test_probables_runs_sequentially(self):
+        src = self._pass_src()
+        assert "step probables-refresh" in src
+        assert "par probables-refresh" not in src, (
+            "probables-refresh opens its own DB connection; running it in the "
+            "parallel group exhausted the 15-connection session pool")
+
+    def test_probables_still_precedes_scoring(self):
+        # Ordering is load-bearing: MLB game models fail closed without a
+        # starter, so a pass that scores before loading probables produces
+        # nothing for the look-ahead window.
+        src = self._pass_src()
+        assert src.index("step probables-refresh") < src.index("step scoring")
+
+    def test_probables_runs_after_the_parallel_group_completes(self):
+        src = self._pass_src()
+        assert src.index("par_wait") < src.index("step probables-refresh")
