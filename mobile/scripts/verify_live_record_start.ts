@@ -126,6 +126,32 @@ check('a small-sample floor exists and is below the go-live gate',
   MIN_PICKS_FOR_COLOURED_ROI > 0 && MIN_PICKS_FOR_COLOURED_ROI < 50,
   String(MIN_PICKS_FOR_COLOURED_ROI));
 
+// The PAPER check above greps for a WORD, and passed for days while four
+// surfaces made the same claim as a NUMBER: "not backed for real money until
+// 50+ settled picks" is §2's go-live gate quoted at members, which is the
+// banned concept with the banned word removed (CLAUDE.md §7, "Banned copy").
+// So ban the thing that computes it, in two halves.
+//
+// Half one — the rendered surfaces carry no gate copy. Scoped to screens/ and
+// components/ for the same reason PAPER is: those are the files whose strings
+// reach a member. A source comment that explains the rule is not a claim made
+// to anyone, which is why lib/ is not swept for prose.
+const GATE = /GO_LIVE_SETTLED_PICKS|\bnot backed\b|\bisn't backed\b|\d+\s*\+?\s*settled picks\b/i;
+const gateCopy = FILES.filter((f) => {
+  const rel = relative(SRC, f).replace(/\\/g, '/');
+  return /screens\/|components\//.test(rel) && GATE.test(readFileSync(f, 'utf-8'));
+});
+check('no user-facing screen quotes the go-live gate at members',
+  gateCopy.length === 0, gateCopy.map((f) => relative(SRC, f)).join(', '));
+
+// Half two — and the constant is gone, so there is nothing to quote. This is
+// the half that actually holds: a screen cannot interpolate a number the app
+// does not define, whatever wording the next author reaches for.
+const rs = readFileSync(join(SRC, 'lib/recordStart.ts'), 'utf-8');
+check('the app defines no go-live-gate constant to render',
+  !/export const GO_LIVE_SETTLED_PICKS/.test(rs),
+  'the gate governs backing server-side (models/backtester.GO_LIVE_MIN_PICKS), not app copy');
+
 // ── 3. The mirror: the Models tab reads Retool's view ────────────────────────
 const queries = readFileSync(join(SRC, 'lib/queries.ts'), 'utf-8');
 check('fetchPublishedModelRecord reads v_public_track_record',

@@ -41,3 +41,27 @@ Wiring live picks into `useResolvedSlip` did exactly this. The fix is a plain
 `tests/test_mobile_live_segment.py::test_no_app_root_component_reaches_a_focus_aware_hook`
 walks the import graph symbol by symbol from `BetslipBar` and is the tripwire.
 Add a new app-root component to that test's roots when you mount one.
+
+**A GUARD THAT GREPS FOR A BANNED WORD DOES NOT CATCH THE SAME CLAIM MADE AS A
+NUMBER.** (2026-09-06, Matt: *"Remove all paper trading. we are not doing paper
+trading."*) `mobile/scripts/verify_live_record_start.ts` has banned "paper" in
+`screens/` and `components/` since 2026-08-30 and passed on every run — while
+four surfaces told members a model was **"not backed for real money until 50+
+settled picks"**. That is CLAUDE.md §2's go-live gate quoted at them row by row:
+the banned concept with the banned word removed.
+
+So when you ban a concept from user copy, **ban the CONSTANT that computes it
+too**, and sweep for the constant (`grep` its name) rather than for the wording
+before calling a surface clean. `GO_LIVE_SETTLED_PICKS` no longer exists in the
+app for exactly this reason; the gate still governs backing server-side
+(`models/backtester.GO_LIVE_MIN_PICKS`), where it is not copy.
+`verify_live_record_start.ts` now checks both halves, and the structural one —
+the app defines no gate constant to render — is the half that holds.
+
+**A rule's scope is not a complaint's scope.** The first fix at this was scoped
+to in-play models, because §2 genuinely does exempt them from the gate. It was
+still wrong: the objection was that the claim was being made at all, not about
+which models were entitled to make it, and `ncaaf_spread` kept the line two rows
+above the card in the same screenshot. When a fix is scoped by a RULE rather
+than by the reported SYMPTOM, check the other rows on the same screen first.
+Measured story: `docs/rules_evidence.md`.
