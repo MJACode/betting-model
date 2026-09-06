@@ -116,6 +116,42 @@ STADIUM_COORDS = {
 # Roof values that mean weather cannot affect the game.
 INDOOR_ROOFS = {"dome", "closed"}
 
+# Venues whose roof OPENS AND CLOSES, so the roof value is a per-game
+# observation rather than a property of the stadium. Derived from games.csv
+# rather than from memory: these are exactly the stadium_ids whose history
+# contains an 'open' or a 'closed' row, and no others.
+#
+#   ATL97 Mercedes-Benz      open 18 / closed 56    (76% closed)
+#   DAL00 AT&T               open  9 / closed 136   (94% closed)
+#   HOU00 NRG                open 46 / closed 159   (78% closed)
+#   IND00 Lucas Oil          open 34 / closed 119   (78% closed)
+#   PHO00 State Farm         open 21 / closed 151   (88% closed)
+#
+# WHY THIS EXISTS. nflverse records the roof state of a game that has been
+# PLAYED, so a future game has none -- and every one of the 43 blank-roof rows
+# in the 2026 schedule is one of these five venues. `~roof.isin(INDOOR_ROOFS)`
+# reads a blank as OUTDOOR, so the wind model was pricing an open-air forecast
+# for stadiums that are closed three-quarters of the time or more. Two of the
+# five Week 1 picks live on 2026-09-06 were on that basis (NRG and Lucas Oil).
+#
+# A wind under on a game played under a closed roof has no premise at all, so a
+# blank here is NOT eligible until the state is known. That loses nothing: if
+# the roof is in fact open, the state lands before kickoff and the game
+# re-qualifies inside the firing window.
+RETRACTABLE_STADIUMS = {"ATL97", "DAL00", "HOU00", "IND00", "PHO00"}
+
+
+def open_air_mask(games) -> "pd.Series":
+    """Boolean mask: games the weather can actually reach.
+
+    Use this instead of `~games.roof.isin(INDOOR_ROOFS)`, which silently treats
+    an unknown roof state as open air. See RETRACTABLE_STADIUMS.
+    """
+    roof = games.roof.fillna("").astype(str).str.strip()
+    known = roof != ""
+    retractable = games.stadium_id.isin(RETRACTABLE_STADIUMS)
+    return ~roof.isin(INDOOR_ROOFS) & (known | ~retractable)
+
 
 class OpenMeteoError(RuntimeError):
     pass
@@ -266,7 +302,7 @@ def wind_at_kickoff(hourly: pd.DataFrame, games: pd.DataFrame, col: str,
 
 def coverage_check(games: pd.DataFrame) -> dict:
     """Fail loudly on an unmapped stadium rather than silently dropping a game."""
-    outdoor = games[~games.roof.isin(INDOOR_ROOFS)]
+    outdoor = games[open_air_mask(games)]
     missing = sorted(set(outdoor.stadium_id.dropna()) - set(STADIUM_COORDS))
     return {"outdoor_games": len(outdoor),
             "stadiums": outdoor.stadium_id.nunique(),

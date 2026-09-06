@@ -323,9 +323,9 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
     Indoor games are dropped before this is called; if any survive, they are
     dropped here too rather than silently scored.
     """
-    from data_ingest.weather import INDOOR_ROOFS
+    from data_ingest.weather import open_air_mask
 
-    g = games[~games.roof.isin(INDOOR_ROOFS)].copy()
+    g = games[open_air_mask(games)].copy()
     g = g[g.forecast_wind >= threshold]
     # Nothing fires outside the firing window. The card is run against the
     # 10-day poll horizon so the eval board sees the whole slate, so without
@@ -394,7 +394,7 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
     deleting the pick.
     """
     from data_ingest.pick_eval import eval_row
-    from data_ingest.weather import INDOOR_ROOFS
+    from data_ingest.weather import INDOOR_ROOFS, RETRACTABLE_STADIUMS
 
     out: list[dict] = []
     for r in games.itertuples():
@@ -402,8 +402,20 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
         common = dict(game_id=r.game_id, model_id="nfl_wind_totals",
                       kick_utc=r.kick_utc, lead_hours=lead_h)
 
-        if getattr(r, "roof", None) in INDOOR_ROOFS:
+        roof = str(getattr(r, "roof", "") or "").strip()
+        if roof in INDOOR_ROOFS:
             out.append(eval_row(qualifies=False, reason="indoor", **common))
+            continue
+        if not roof and getattr(r, "stadium_id", None) in RETRACTABLE_STADIUMS:
+            # nflverse only records a roof state for a game that has been
+            # PLAYED, and these five venues are closed 76-94% of the time. An
+            # unknown state is not an open-air game. `open_air_mask` drops the
+            # row from the card; the board says why rather than going silent.
+            out.append(eval_row(
+                qualifies=False,
+                reason=(f"retractable roof at {getattr(r, 'stadium_id', '?')} "
+                        "and the roof state is not known yet"),
+                **common))
             continue
 
         wind = getattr(r, "forecast_wind", None)

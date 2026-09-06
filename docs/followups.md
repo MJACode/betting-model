@@ -1010,7 +1010,13 @@ failure reporting, so it wants its own PR rather than being tacked on.
 
 ---
 
-## [ ] The locked-pick monitor has never written a row: the eval CSV and `picks` use different game_id shapes
+## [x] The locked-pick monitor has never written a row: the eval CSV and `picks` use different game_id shapes
+
+**FIXED 2026-09-06** (same session that found it). `pick_eval.eval_row` now
+normalises to the `NFL_`-prefixed id, which fixes wind and opener at once
+because both feed that one helper. Pinned by
+`tests/test_nfl_pick_monitor.py::TestTheJoinKeyMatchesPicks`, run against the
+unfixed code first. Leaving this here for a week per the file's convention.
 
 Found 2026-09-06 (mike, asking why the wind model was firing on nearly half the
 Week 1 slate). `nfl_pick_status_history` holds **0 rows for every model**, and
@@ -1059,7 +1065,14 @@ Fix is one line at the write side or the read side; prefer normalising in
 watch it fail** (§1b): assert a published pick's `game_id` resolves against a
 dump produced by `evaluate_board` — the current suite passes with the bug in.
 
-## [ ] 43 of the 2026 NFL schedule rows have a BLANK roof and are scored as open-air
+## [x] 43 of the 2026 NFL schedule rows have a BLANK roof and are scored as open-air
+
+**FIXED 2026-09-06.** `weather.open_air_mask` / `RETRACTABLE_STADIUMS`; a blank
+roof at one of the five retractable venues is not eligible until the state is
+known. The card's board went from 11 "outdoor" to 9 open-air on the Week 1
+slate, dropping exactly BUF @ HOU and BAL @ IND. Pinned by four tests in
+`tests/test_nfl_wind_fire_window.py`, including two that re-derive the venue set
+from `games.csv` so the constant cannot drift. Leaving this here for a week.
 
 Found alongside the item above. `nfl/data/games.csv` for season 2026:
 

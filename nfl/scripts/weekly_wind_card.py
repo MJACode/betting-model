@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_ingest.weather import (STADIUM_COORDS, INDOOR_ROOFS, DEPLOY_THRESHOLD,
+                                 open_air_mask,
                                  fetch_live_forecast, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
 from _nfl_models import load_nfl_model
@@ -71,7 +72,7 @@ def attach_forecast(g: pd.DataFrame, days: int = 9) -> pd.DataFrame:
     if cov["missing_coords"]:
         raise SystemExit(f"FATAL: no coordinates for stadium(s) {cov['missing_coords']}. "
                          "Add them to STADIUM_COORDS before betting this slate.")
-    outdoor = g[~g.roof.isin(INDOOR_ROOFS)].copy()
+    outdoor = g[open_air_mask(g)].copy()
     if outdoor.empty:
         return outdoor
     frames = []
@@ -150,7 +151,7 @@ def main() -> int:
         print("No games in window.")
         return 0
     print(f"{len(sched)} games in the next {a.days} days "
-          f"({(~sched.roof.isin(INDOOR_ROOFS)).sum()} outdoor)", file=sys.stderr)
+          f"({int(open_air_mask(sched).sum())} open-air)", file=sys.stderr)
 
     g = attach_forecast(sched)
     if g.empty:

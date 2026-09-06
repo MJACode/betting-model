@@ -163,3 +163,95 @@ def test_a_waiting_row_keeps_its_line_price_and_edge(wind):
     assert row["current_line"] == 40.5, row
     assert row["current_price"] == -105, row
     assert row["edge"] not in (None, ""), "the waiting row lost its edge"
+
+
+def _retractable_slate(roof: str) -> "pd.DataFrame":
+    """BUF @ HOU at NRG, the real Week 1 pick, at a firable lead."""
+    kick = pd.Timestamp.now("UTC") + pd.Timedelta(days=2)
+    return pd.DataFrame([{
+        "game_id": "2026_01_BUF_HOU", "matchup": "BUF @ HOU",
+        "kick_utc": kick.isoformat(), "stadium_id": "HOU00", "roof": roof,
+        "lead_days": 2.0, "forecast_wind": 14.0, "exp_true_wind": 13.0,
+        "best_book": "lowvig", "best_total": 44.5,
+        "best_under_px": -105, "best_over_px": -105,
+    }])
+
+
+def test_a_retractable_venue_with_an_unknown_roof_does_not_fire(wind):
+    """Two of the five Week 1 picks were priced this way.
+
+    nflverse records a roof state for a game that has been PLAYED, so every
+    future game at these venues has a blank. `~roof.isin(INDOOR_ROOFS)` reads
+    blank as OUTDOOR, and NRG is closed 78% of the time. A wind under on a game
+    under a closed roof has no premise at all.
+
+    All 43 blank-roof rows in the 2026 schedule are one of the five retractable
+    venues, so this is not an edge case -- it is every one of their home games.
+    """
+    assert wind.select_bets(_retractable_slate("")).empty, (
+        "a blank roof at a retractable venue was treated as open air")
+
+
+def test_the_same_venue_fires_once_the_roof_is_known_open(wind):
+    """The gate DEFERS the bet; it does not cancel it. Nothing is given up."""
+    assert len(wind.select_bets(_retractable_slate("open"))) == 1
+
+
+def test_a_closed_roof_is_still_indoor(wind):
+    assert wind.select_bets(_retractable_slate("closed")).empty
+
+
+def test_a_blank_roof_at_a_NON_retractable_venue_is_unaffected(wind):
+    """Only the five retractable venues are ambiguous. Do not over-reach.
+
+    An open-air stadium with a missing roof value is still an open-air stadium,
+    and dropping it would silently shrink the board.
+    """
+    g = _retractable_slate("")
+    g.loc[0, "stadium_id"] = "BUF00"          # Highmark: open air, never roofed
+    assert len(wind.select_bets(g)) == 1
+
+
+def test_the_board_says_why_rather_than_going_silent(wind):
+    row = wind.evaluate_board(_retractable_slate(""))[0]
+    assert not int(row["qualifies"])
+    assert "roof state is not known" in row["reason"], row["reason"]
+
+
+def test_the_retractable_set_is_exactly_what_games_csv_says(wind):
+    """Derived, not remembered. If nflverse adds a venue this must be updated.
+
+    A stadium is retractable iff its history contains an 'open' or a 'closed'
+    row -- that is what those values MEAN. Re-deriving here is what keeps the
+    hardcoded set honest as the schedule file grows.
+    """
+    import csv, collections, io as _io
+    from pathlib import Path as _P
+    rows = list(csv.DictReader(
+        _io.open(_P(__file__).resolve().parents[1] / "nfl" / "data" / "games.csv",
+                 encoding="utf-8")))
+    seen = collections.defaultdict(set)
+    for r in rows:
+        seen[r["stadium_id"]].add((r.get("roof") or "").strip())
+    derived = {sid for sid, vals in seen.items() if {"open", "closed"} & vals}
+    from data_ingest.weather import RETRACTABLE_STADIUMS
+    assert derived == RETRACTABLE_STADIUMS, (
+        f"games.csv says {sorted(derived)}, the constant says "
+        f"{sorted(RETRACTABLE_STADIUMS)}")
+
+
+def test_every_blank_roof_row_is_a_retractable_venue(wind):
+    """The premise of the whole fix: blank == retractable, with no exceptions.
+
+    If a plain open-air stadium ever shows up blank, dropping unknown roofs
+    would start silently costing real bets and this approach needs revisiting.
+    """
+    import csv, io as _io
+    from pathlib import Path as _P
+    from data_ingest.weather import RETRACTABLE_STADIUMS
+    rows = list(csv.DictReader(
+        _io.open(_P(__file__).resolve().parents[1] / "nfl" / "data" / "games.csv",
+                 encoding="utf-8")))
+    blank = {r["stadium_id"] for r in rows if not (r.get("roof") or "").strip()}
+    assert blank <= RETRACTABLE_STADIUMS, (
+        f"blank roof at non-retractable venue(s): {sorted(blank - RETRACTABLE_STADIUMS)}")
