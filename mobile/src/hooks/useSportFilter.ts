@@ -35,6 +35,16 @@ async function load(): Promise<Sport> {
   return cached;
 }
 
+/**
+ * Set the sport from OUTSIDE React — the push router does this before
+ * navigating to a sport-scoped board, and it runs from a notification callback
+ * with no component around it. Same module store the hook drives, so every
+ * mounted `useSportFilter` re-renders through the listener set.
+ */
+export function setSportGlobal(v: Sport): void {
+  void save(v).catch((err) => console.warn('[sportFilter] set failed', err));
+}
+
 async function save(v: Sport) {
   cached = v;
   listeners.forEach((fn) => fn(v));
