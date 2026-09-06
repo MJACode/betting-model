@@ -131,3 +131,101 @@ class TestWindPublisherLock:
         opener = src[src.index("def publish_opener("):]
         assert "INSERT-ONCE LOCK" in opener
         assert "DELETE FROM picks" not in opener.upper()
+
+
+class TestTheJoinKeyMatchesPicks:
+    """The monitor wrote NOTHING for its whole life, and exited 0 doing it.
+
+    Measured 2026-09-06: `nfl_pick_status_history` held 0 rows for every model
+    and `condition_status` was NULL on all five live wind picks, while the
+    worker logged
+
+        NFL pick monitor 2026-09-06: 0 locked pick(s) observed
+
+    on every hourly tick. Not a missing dump and not a schema problem -- the
+    post-loop message only prints when the CSV was read and had rows.
+
+    `pick_eval.eval_row` wrote the BARE nflverse id and its field comment called
+    it "the join key to picks". Both publishers write `NFL_{nflverse_id}`. So
+    `latest_per_pick` keys the dump on `2026_01_CLE_JAX`, the monitor looks up
+    `NFL_2026_01_CLE_JAX`, misses every time, and reports a clean run.
+
+    It is load-bearing: the 2026-08-22 insert-once lock is justified in
+    scheduler.py by "every later tick records whether the conditions still
+    hold", and that had never once happened.
+    """
+
+    def test_eval_row_emits_the_id_the_publisher_writes(self):
+        import sys as _sys
+        nfl = str(ROOT / "nfl")
+        _sys.path.insert(0, nfl)
+        try:
+            from data_ingest.pick_eval import eval_row
+        finally:
+            _sys.path.remove(nfl)
+        row = eval_row(game_id="2026_01_CLE_JAX", model_id="nfl_wind_totals",
+                       kick_utc="2026-09-13T17:00:00+00:00", lead_hours=96.0,
+                       qualifies=True, reason="wind 14.0 mph")
+        assert row["game_id"] == "NFL_2026_01_CLE_JAX", (
+            "the eval dump's game_id must be the one picks.game_id holds, or "
+            "the monitor's lookup misses every row and exits 0")
+
+    def test_an_already_prefixed_id_is_not_double_prefixed(self):
+        import sys as _sys
+        nfl = str(ROOT / "nfl")
+        _sys.path.insert(0, nfl)
+        try:
+            from data_ingest.pick_eval import eval_row
+        finally:
+            _sys.path.remove(nfl)
+        row = eval_row(game_id="NFL_2026_01_CLE_JAX", model_id="nfl_wind_totals",
+                       kick_utc="2026-09-13T17:00:00+00:00", lead_hours=96.0,
+                       qualifies=False, reason="indoor")
+        assert row["game_id"] == "NFL_2026_01_CLE_JAX"
+
+    def test_the_monitor_lookup_actually_resolves(self):
+        """The failure end to end, at the shape the monitor uses.
+
+        `latest_per_pick` keys on (game_id, model_id) and the monitor looks the
+        pick's own game_id up in it. Asserting on that dict is what makes this a
+        test of the JOIN rather than of a string format.
+        """
+        import sys as _sys
+        nfl = str(ROOT / "nfl")
+        _sys.path.insert(0, nfl)
+        try:
+            from data_ingest.pick_eval import eval_row
+        finally:
+            _sys.path.remove(nfl)
+        dump = [eval_row(game_id="2026_01_CLE_JAX", model_id="nfl_wind_totals",
+                         kick_utc="2026-09-13T17:00:00+00:00", lead_hours=96.0,
+                         qualifies=True, reason="wind 14.0 mph")]
+        latest = latest_per_pick(dump)
+        # what scripts/nfl_wind_publisher.py put in picks.game_id
+        assert ("NFL_2026_01_CLE_JAX", "nfl_wind_totals") in latest
+
+    def test_the_publisher_still_writes_the_prefix_this_assumes(self):
+        """If the publisher ever drops the prefix, fix eval_row, not this."""
+        src = (ROOT / "scripts" / "nfl_wind_publisher.py").read_text(encoding="utf-8")
+        assert 'f"NFL_{nflverse_id}"' in src
+
+    def test_the_opener_dump_gets_the_same_id(self):
+        """Both models feed eval_row, which is why the fix lives there.
+
+        `opener_spread.evaluate_board` passes a bare `g.game_id` exactly as the
+        wind model does, and `nfl_wind_publisher.publish_opener` writes the same
+        `NFL_` prefix. Without this the "fixes both at once" claim is asserted
+        in a commit message and tested nowhere.
+        """
+        import sys as _sys
+        nfl = str(ROOT / "nfl")
+        _sys.path.insert(0, nfl)
+        try:
+            from data_ingest.pick_eval import eval_row
+        finally:
+            _sys.path.remove(nfl)
+        row = eval_row(game_id="2026_02_NYJ_BUF", model_id="nfl_opener_spread",
+                       kick_utc="2026-09-20T17:00:00+00:00", lead_hours=120.0,
+                       qualifies=False, reason="no clean soft book quoting")
+        assert row["game_id"] == "NFL_2026_02_NYJ_BUF"
+        assert ("NFL_2026_02_NYJ_BUF", "nfl_opener_spread") in latest_per_pick([row])

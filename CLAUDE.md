@@ -133,6 +133,12 @@ So the shape of an honest report is "the sandbox can't reach it, so I'm going
 via Railway / WebSearch / you" — never "this can't be done." If a blocker is
 real, name which of the four routes was tried and why each failed.
 
+**A "requires authentication" banner is a CLAIM, not a test.** The session-start
+notice listing MCP servers as needing OAuth was wrong for Railway AND Supabase
+on 2026-09-05 — both answered on the first call, no auth step — and repeating it
+instead of spending two seconds on the call cost a turn mid-incident. Try the
+tool. Evidence: `docs/rules_evidence.md`.
+
 **THE CURRENT STATE OF A SYSTEM IS NOT ITS CAPABILITY, AND WORK YOU CAN DO IS
 NOT AN ACTION ITEM FOR MATT.** (Added 2026-09-01.) Two halves, both common:
 
@@ -636,6 +642,7 @@ to be known BEFORE deciding which file to open.
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |
 | **Evidence behind the §1b and §7 rules** | `docs/rules_evidence.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
+| **NFL wind: how far out it may fire, and the lead evidence** | `docs/nfl_wind_lead_evidence.md` |
 | Best line on pre-game picks | `docs/best_line.md` |
 | Which prop markets the feed actually serves | `docs/market_coverage.md` |
 | **The historical team-stats leak** | `docs/team_stats_leak.md` |

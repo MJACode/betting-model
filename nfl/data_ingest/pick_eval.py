@@ -27,8 +27,32 @@ import csv
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Both publishers write `picks.game_id` as "NFL_" + the nflverse id
+# (scripts/nfl_wind_publisher.py, and its docstring at line 12). This dump is
+# joined to `picks` on that column, so it has to speak the same id.
+#
+# It did not, for its whole life. The models hand `evaluate_board` the bare
+# nflverse id, this module wrote it through unchanged under a field comment
+# claiming it was "the join key to picks", and
+# scripts/nfl_pick_monitor.latest_per_pick keyed the dump on it. Every lookup
+# missed. Measured 2026-09-06: `nfl_pick_status_history` held 0 rows for every
+# model, `picks.condition_status` was NULL on all five live wind picks, and the
+# worker logged "0 locked pick(s) observed" hourly and exited 0 -- which is
+# exactly what a quiet week looks like.
+#
+# Normalised HERE rather than in each model, because both wind and opener feed
+# this one helper and the opener would otherwise have to be fixed separately.
+_PICKS_ID_PREFIX = "NFL_"
+
+
+def _picks_game_id(game_id: str) -> str:
+    """The nflverse id as `picks.game_id` holds it. Idempotent."""
+    gid = str(game_id)
+    return gid if gid.startswith(_PICKS_ID_PREFIX) else _PICKS_ID_PREFIX + gid
+
+
 EVAL_CSV_FIELDS = [
-    "game_id",         # nflverse id, the join key to picks
+    "game_id",         # "NFL_" + nflverse id -- the join key to picks.game_id
     "model_id",        # nfl_wind_totals | nfl_opener_spread
     "observed_at",     # ISO-8601 UTC, the tick
     "kick_utc",
@@ -54,7 +78,7 @@ def eval_row(game_id: str, model_id: str, kick_utc, lead_hours,
     def _num(v):
         return "" if v is None else v
     return {
-        "game_id": game_id,
+        "game_id": _picks_game_id(game_id),
         "model_id": model_id,
         "observed_at": observed_at or datetime.now(timezone.utc).isoformat(),
         "kick_utc": str(kick_utc),

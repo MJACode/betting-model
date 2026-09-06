@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_ingest.weather import (STADIUM_COORDS, INDOOR_ROOFS, DEPLOY_THRESHOLD,
+                                 open_air_mask,
                                  fetch_live_forecast, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
 from _nfl_models import load_nfl_model
@@ -42,10 +43,16 @@ _wind_totals = load_nfl_model("wind_totals")
 select_bets = _wind_totals.select_bets
 UNIT_PCT = _wind_totals.UNIT_PCT
 MAX_CALIBRATED_LEAD = _wind_totals.MAX_CALIBRATED_LEAD
+MAX_FIRE_LEAD = _wind_totals.MAX_FIRE_LEAD
 
 # Books carrying home/away sign flips in the Odds API feed. Screened across all
 # 40 books on 1.4M quotes; see scripts/screen_books.py. Excluded everywhere.
 DEFECTIVE_BOOKS = {"betanysports", "betsson", "nordicbet", "tipico_de"}
+
+# Books a bet can actually be PLACED at — the same list the opener card uses.
+# See data_ingest/books.py for why it exists and why it is derived rather than
+# retyped.
+from data_ingest.books import bettable_books
 
 # Exchange: quoted price is gross of commission, so treat separately if used.
 EXCHANGES = {"matchbook"}
@@ -70,7 +77,7 @@ def attach_forecast(g: pd.DataFrame, days: int = 9) -> pd.DataFrame:
     if cov["missing_coords"]:
         raise SystemExit(f"FATAL: no coordinates for stadium(s) {cov['missing_coords']}. "
                          "Add them to STADIUM_COORDS before betting this slate.")
-    outdoor = g[~g.roof.isin(INDOOR_ROOFS)].copy()
+    outdoor = g[open_air_mask(g)].copy()
     if outdoor.empty:
         return outdoor
     frames = []
@@ -90,7 +97,28 @@ def attach_forecast(g: pd.DataFrame, days: int = 9) -> pd.DataFrame:
 
 
 def attach_odds(g: pd.DataFrame, regions: str, dry_run: bool) -> pd.DataFrame:
-    """Best available UNDER price at the best (highest) total, defective books removed."""
+    """Best available UNDER price at the best (highest) total, at a book we can bet.
+
+    "BEST AVAILABLE" HAS TO MEAN AVAILABLE TO US. This sorted the whole feed by
+    total then price and took the top row, and the feed is full of books nobody
+    here holds — so the card kept selecting numbers that could not be played.
+    Measured on the Week-1 board (2026-09-06): of the five picks this model had
+    locked, three named gtbets, lowvig and onexbet. mike: "no can't bet on
+    these remove them."
+
+    §1c makes those permanent, so the ones already written cannot be retracted;
+    this stops the next one. It is the same filter the opener card got hours
+    earlier, from the same shared list — the two cards must not disagree about
+    which books exist (CLAUDE.md §1b: a change to how one model operates is
+    assessed against all of them).
+
+    EXPECT FEWER AND SMALLER EDGES, not the same ones at different books. The
+    unbettable books were often quoting the best number precisely because they
+    were the loosest, so removing them lowers the top total and the price at
+    it, and some games will now fall under `min_edge` and not fire at all. That
+    is the correct answer to "what could we actually have bet", not a
+    regression.
+    """
     g = g.copy()
     for c in ("best_book", "best_total", "best_under_px", "best_over_px", "n_books"):
         g[c] = pd.NA
@@ -110,6 +138,15 @@ def attach_odds(g: pd.DataFrame, regions: str, dry_run: bool) -> pd.DataFrame:
 
     d = snapshot_to_frame(res.payload, "live")
     d = d[(d.market == "totals") & (~d.book.isin(DEFECTIVE_BOOKS))]
+    # Unlike the opener there is no reference book to preserve here: wind
+    # de-vigs the SAME book's over/under, so a quote we cannot bet has no role
+    # at all and is dropped outright.
+    bettable = bettable_books()
+    n_before = int(d.book.nunique()) if not d.empty else 0
+    d = d[d.book.isin(bettable)]
+    if n_before:
+        print(f"books: {int(d.book.nunique()) if not d.empty else 0} bettable "
+              f"of {n_before} quoting", file=sys.stderr)
     if d.empty:
         print("WARNING: no totals returned by the odds feed", file=sys.stderr)
         return g
@@ -149,7 +186,7 @@ def main() -> int:
         print("No games in window.")
         return 0
     print(f"{len(sched)} games in the next {a.days} days "
-          f"({(~sched.roof.isin(INDOOR_ROOFS)).sum()} outdoor)", file=sys.stderr)
+          f"({int(open_air_mask(sched).sum())} open-air)", file=sys.stderr)
 
     g = attach_forecast(sched)
     if g.empty:
@@ -176,12 +213,27 @@ def main() -> int:
 
     bets = select_bets(g, threshold=a.threshold, bankroll=a.bankroll)
 
+    # Games that clear the wind bar but are not yet inside the firing window.
+    # Reported on EVERY run, not just dry runs: the card is polled from T-10 and
+    # fires at T-4, so "no qualifying bets" is the normal state for most of the
+    # week and it has to be distinguishable from "no wind anywhere". Without
+    # this, the dry-run line below counted every game over the threshold and
+    # invited a rerun that could not fire any of them.
+    windy = g[g.forecast_wind >= a.threshold]
+    waiting = windy[windy.lead_days > MAX_FIRE_LEAD]
+    if len(waiting):
+        print(f"\n{len(waiting)} game(s) over the wind bar but outside the "
+              f"{MAX_FIRE_LEAD:.0f}-day firing window -- watching, not betting:")
+        print(waiting[["matchup", "lead_days", "forecast_wind"]]
+              .sort_values("lead_days").to_string(index=False,
+                                                  float_format=lambda x: f"{x:.1f}"))
+
     if bets.empty:
         print(f"\nNo qualifying bets at threshold {a.threshold} mph.")
         if a.dry_run:
-            n = int((g.forecast_wind >= a.threshold).sum())
-            print(f"(dry run: {n} game(s) clear the wind threshold; rerun without "
-                  f"--dry-run to price them)")
+            n = int((windy.lead_days <= MAX_FIRE_LEAD).sum())
+            print(f"(dry run: {n} game(s) clear the wind threshold AND the firing "
+                  f"window; rerun without --dry-run to price them)")
         return 0
 
     print(f"\n=== WIND UNDER CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")
