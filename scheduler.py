@@ -577,11 +577,16 @@ NFL_FAST_WINDOW_HOURS = float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))
 # measured feed age (7s for Pinnacle) means sub-minute polling would mostly
 # re-read a number we already hold.
 NFL_OPENER_POLL_MINUTES = max(1, int(os.environ.get("NFL_OPENER_POLL_MINUTES", "1")))
-# Runaway guard, not a budget. 2 credits x 1440 ticks = 2,880/day in season, so
-# the default sits ~2x above a normal day and only trips on a loop that has
-# stopped standing down. 0 disables the cap entirely.
-NFL_OPENER_POLL_DAILY_CREDIT_CAP = float(
-    os.environ.get("NFL_OPENER_POLL_DAILY_CREDIT_CAP", "6000"))
+# NO CREDIT CAP HERE, DELIBERATELY, and it is a DATABASE decision rather than a
+# spend one. The cap I shipped on 2026-09-06 read api_call_log to total the
+# day's burn, which opened a database connection EVERY MINUTE purely to decide
+# whether to spend money -- against a Supabase session pool of 15 that was
+# already dropping `odds` with EMAXCONNSESSION. A guard that costs a connection
+# a minute to protect a budget nobody asked for is a bad trade twice over.
+#
+# mike has said repeatedly, most recently 2026-09-06: "I dont care about credit
+# usage. I have said this countless times". The Odds API's own quota is the
+# real backstop, and RUN_NFL_WIND_CARD=0 stops the job without a deploy.
 
 
 def _nfl_lead_hours() -> float | None:
@@ -733,7 +738,7 @@ def run_nfl_opener_card() -> None:
     2 credits/run (us,eu spreads) = 2,880/day while a game is inside the
     10-day horizon, ~432k over a season against 4.59M remaining. Zero
     off-season: the caller returns before spending anything when the board is
-    empty. Bounded by NFL_OPENER_POLL_DAILY_CREDIT_CAP as a backstop.
+    empty.
     """
     env = dict(BASE_ENV)
     key = env.get("THE_ODDS_API_KEY") or env.get("ODDS_API_KEY")
@@ -751,32 +756,6 @@ def run_nfl_opener_card() -> None:
         _publish_new_signals("nfl-opener-poll")
 
 
-def _opener_credits_used_today() -> float:
-    """This job's own Odds API burn today, from the telemetry probe.
-
-    Unknown burn is treated as ZERO rather than as over-cap: an unreadable
-    probe must not silently switch the model off. The Odds API's own quota is
-    the real backstop, and the cap here is a guard against a runaway loop, not
-    a billing control.
-    """
-    try:
-        from data.db import get_connection
-        conn = get_connection()
-        try:
-            row = conn.execute("""
-                SELECT COALESCE(SUM(credits), 0) FROM api_call_log
-                WHERE host = 'api.the-odds-api.com'
-                  AND source = 'nfl-opener-card'
-                  AND ts >= date_trunc('day', now() AT TIME ZONE 'America/New_York')
-            """).fetchone()
-            return float(row[0]) if row else 0.0
-        finally:
-            conn.close()
-    except Exception as exc:                                  # noqa: BLE001
-        log.warning("opener poll: credit read failed (%s) — treating as 0", exc)
-        return 0.0
-
-
 def run_nfl_opener_poll() -> None:
     """The minute-cadence opener watch. Free when no game is on the board.
 
@@ -788,14 +767,6 @@ def run_nfl_opener_poll() -> None:
     lead = _nfl_lead_hours()
     if lead is None or lead > NFL_POLL_HORIZON_DAYS * 24:
         return                                  # nothing on the board: free
-
-    cap = NFL_OPENER_POLL_DAILY_CREDIT_CAP
-    if cap:
-        used = _opener_credits_used_today()
-        if used >= cap:
-            log.warning("opener poll: daily credit cap reached (%.0f >= %s) — skipping",
-                        used, cap)
-            return
     run_nfl_opener_card()
 
 
