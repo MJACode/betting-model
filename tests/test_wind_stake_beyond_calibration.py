@@ -17,6 +17,15 @@ picks of 2026-09-05 -- CLE @ JAX Under 40.5 (-105) and BUF @ HOU Under 44.5
 Matt, 2026-09-05: "we should return stakes 7 days for signal picks." So the
 stake clips exactly as the probability always has.
 
+UPDATE 2026-09-06 (mike). The clipping above is UNCHANGED and still pinned
+here. What changed is that such a row no longer reaches the card at all: the
+zero stake had been the de-facto firing gate, and removing it let every bet
+lock outside the calibration. Firing is now gated explicitly by
+`MAX_FIRE_LEAD`, so the two tests that went end-to-end through `select_bets`
+pass `max_fire_lead` to isolate the stake question from the firing question --
+and then assert the default gate holds. See
+tests/test_nfl_wind_fire_window.py.
+
 Run in a SUBPROCESS with cwd=nfl/, the way the scheduler runs the card:
 `nfl/models/` and the platform's `models/` are different packages with the same
 name, and importing the NFL one in-process shadows the platform's for the rest
@@ -83,16 +92,28 @@ def test_the_probability_was_already_clipping():
         "carry 0.5489, so a change here changes what those bets meant")
 
 
-def test_an_uncalibrated_lead_still_reaches_the_card_with_units():
-    """End to end through select_bets: the row that used to arrive at 0.00u."""
+_CLE_JAX = (
+    "import pandas as pd\n"
+    "g = pd.DataFrame([{'game_id': '2026_01_CLE_JAX', 'matchup': 'CLE @ JAX',\n"
+    "  'kick_utc': '2026-09-13 17:00:00+00:00', 'stadium_id': 'JAX00',\n"
+    "  'roof': 'outdoors', 'lead_days': 8.71, 'forecast_wind': 14.0,\n"
+    "  'exp_true_wind': 12.0, 'best_book': 'onexbet', 'best_total': 40.5,\n"
+    "  'best_under_px': -105, 'best_over_px': -115}])\n"
+)
+
+
+def test_an_uncalibrated_lead_is_sized_rather_than_zeroed_on_the_card():
+    """End to end through select_bets: the row that used to arrive at 0.00u.
+
+    `max_fire_lead` is widened here ON PURPOSE. Since 2026-09-06 the default
+    gate stops this lead-8.71 row before sizing ever happens, so at the default
+    the test would pass for the wrong reason -- an empty card is not evidence
+    that a clipped stake is non-zero. Widening isolates the stake question;
+    the test below re-asserts the gate.
+    """
     out = _probe(
-        "import pandas as pd\n"
-        "g = pd.DataFrame([{'game_id': '2026_01_CLE_JAX', 'matchup': 'CLE @ JAX',\n"
-        "  'kick_utc': '2026-09-13 17:00:00+00:00', 'stadium_id': 'JAX00',\n"
-        "  'roof': 'outdoors', 'lead_days': 8.71, 'forecast_wind': 14.0,\n"
-        "  'exp_true_wind': 12.0, 'best_book': 'onexbet', 'best_total': 40.5,\n"
-        "  'best_under_px': -105, 'best_over_px': -115}])\n"
-        "b = w.select_bets(g, threshold=11.0, bankroll=1.0)\n"
+        _CLE_JAX +
+        "b = w.select_bets(g, threshold=11.0, bankroll=1.0, max_fire_lead=99)\n"
         "print(len(b))\n"
         "print(float(b.units.iloc[0]))\n"
         "print(bool(b.calibrated_lead.iloc[0]))\n"
@@ -105,26 +126,49 @@ def test_an_uncalibrated_lead_still_reaches_the_card_with_units():
         "assumption and the card has to keep saying so")
 
 
+def test_at_the_default_gate_that_same_row_does_not_fire_at_all():
+    """The 2026-09-06 change, stated against the pick that motivated both.
+
+    CLE @ JAX at a 8.71-day lead is the bet from the docstring above. Sizing it
+    was right; LOCKING it eight days out was not, and the publisher is
+    insert-once, so the two decisions could not be separated once it fired.
+    """
+    out = _probe(_CLE_JAX +
+                 "print(len(w.select_bets(g, threshold=11.0, bankroll=1.0)))\n"
+                 "print(w.MAX_FIRE_LEAD)\n")
+    assert int(out[0]) == 0, (
+        f"a lead-8.71 bet fired at the default gate (MAX_FIRE_LEAD={out[1]})")
+
+
 def test_the_eval_board_agrees_with_the_card():
     """They used to disagree about the same game.
 
     `evaluate_board` disqualified an uncalibrated lead outright while
-    `select_bets` -- which has no lead gate at all -- carried the same row onto
+    `select_bets` -- which had no lead gate at all -- carried the same row onto
     the card. The eval board feeds the locked-pick history, so the record said
     "does not qualify" about a bet that was live.
+
+    Checked at BOTH gate settings, because the 2026-09-06 gate is a second
+    chance to reintroduce exactly this bug: it has to be applied to both halves
+    or the board and the card part company again.
     """
     out = _probe(
-        "import pandas as pd\n"
-        "g = pd.DataFrame([{'game_id': '2026_01_CLE_JAX', 'matchup': 'CLE @ JAX',\n"
-        "  'kick_utc': '2026-09-13 17:00:00+00:00', 'stadium_id': 'JAX00',\n"
-        "  'roof': 'outdoors', 'lead_days': 8.71, 'forecast_wind': 14.0,\n"
-        "  'exp_true_wind': 12.0, 'best_book': 'onexbet', 'best_total': 40.5,\n"
-        "  'best_under_px': -105, 'best_over_px': -115}])\n"
-        "rows = w.evaluate_board(g, threshold=11.0)\n"
-        "print(bool(rows[0]['qualifies']))\n"
-        "print(rows[0]['reason'])\n"
+        _CLE_JAX +
+        "wide = w.evaluate_board(g, threshold=11.0, max_fire_lead=99)[0]\n"
+        "tight = w.evaluate_board(g, threshold=11.0)[0]\n"
+        # `qualifies` is the STRING "1"/"0" (pick_eval.eval_row), so bool() of
+        # it is True either way and the assertion below could never have failed.
+        # int() first. Found 2026-09-06 by writing a case that should fail it.
+        "print(bool(int(wide['qualifies'])))\n"
+        "print(wide['reason'])\n"
+        "print(bool(int(tight['qualifies'])))\n"
+        "print(tight['reason'])\n"
     )
     assert out[0] == "True", (
         f"the eval board still disqualifies the card's own bet: {out[1]}")
     assert "clipped" in out[1], (
         f"the caveat must survive into the reason string, got: {out[1]}")
+    assert out[2] == "False", (
+        f"the board fired a row the card will not: {out[3]}")
+    assert "firing window" in out[3], (
+        f"the board must say WHY it is waiting, got: {out[3]}")

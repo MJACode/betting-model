@@ -75,10 +75,16 @@ def test_the_cleanup_never_touches_a_started_game_or_a_live_row():
 
 def test_the_cleanup_covers_the_whole_look_ahead_window():
     """Stopping at today would leave duplicate no-signal rows on exactly the
-    boards scored furthest ahead -- NCAAF and UFC both reach a week out."""
+    boards scored furthest ahead -- NCAAF and UFC both reach a week out, and
+    since 2026-09-06 so do MLB/NBA/NHL/WNBA (config.GAME_SCORE_AHEAD_DAYS).
+
+    EVERY horizon has to be in here, not just the ones that existed when the
+    delete was written. That is the whole failure mode: a horizon added to the
+    SELECT and forgotten here grows duplicate NONE rows on precisely the games
+    the new window just started scoring."""
     d = _between("# Housekeeping for the pairs the lock deliberately leaves open.",
                  "logger.info(f\"Cleared unsettled picks")
-    assert "max(ncaaf_horizon, ufc_horizon)" in d
+    assert "max(ncaaf_horizon, ufc_horizon, game_horizon)" in d
 
 
 def test_the_prop_and_live_locks_are_unchanged():

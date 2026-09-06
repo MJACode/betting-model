@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_ingest.weather import (INDOOR_ROOFS, DEPLOY_THRESHOLD, ISSUED_FORECAST_START,
+                                 open_air_mask,
                                  fetch_issued_forecasts, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
 from data_ingest.parse import snapshot_to_frame
@@ -49,7 +50,11 @@ def load_week(season: int, week: int) -> pd.DataFrame:
 
 
 def issued_wind(g: pd.DataFrame, lead: int) -> pd.DataFrame:
-    outdoor = g[~g.roof.isin(INDOOR_ROOFS)].copy()
+    # Same eligibility rule as the live card, or the harness and production
+    # disagree about which games exist. Identical on a PLAYED week -- a
+    # blank roof only occurs on an unplayed game -- so this changes no
+    # historical replay; it keeps the two in step for future ones.
+    outdoor = g[open_air_mask(g)].copy()
     if outdoor.empty:
         return outdoor
     cov = coverage_check(g)
@@ -146,7 +151,13 @@ def main() -> int:
           .to_string(index=False, float_format=lambda x: f"{x:.1f}"))
 
     w = cached_totals(w, a.lead)
-    bets = select_bets(w, threshold=a.threshold)
+    # The live firing gate (`MAX_FIRE_LEAD`, 4 days) is DEPLOYMENT POLICY, not a
+    # property of the rule, and this harness exists to replay the rule at a lead
+    # the caller chooses -- `--lead` accepts 1-7, and leads 5/6/7 in
+    # CALIBRATED_UNDER_RATE were checked with exactly this. Inheriting the gate
+    # would make `--lead 5` and above return "no qualifying bets" silently, which
+    # looks identical to a calm week.
+    bets = select_bets(w, threshold=a.threshold, max_fire_lead=float(a.lead))
     if bets.empty:
         n = int((w.forecast_wind >= a.threshold).sum())
         print(f"\nno qualifying bets ({n} game(s) cleared the wind threshold but "

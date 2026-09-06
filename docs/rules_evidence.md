@@ -631,6 +631,41 @@ The nearest real signal is `mlb_live_total_runs` at **+15.94% over 87 settled
 bets, 95% CI [-2.8%, +34.7%]** — promising, unproven, and a game total rather
 than a prop.
 
+## The MCP "requires authentication" banner, and why it is not evidence
+
+2026-09-05, during the UFC delivery incident. The session opened with a
+harness-generated notice:
+
+> The following MCP servers require authentication before their tools can be
+> used: Claude_Code_Remote, Gmail, Google_Drive, Railway, Retool, Supabase,
+> mobbin. This session is non-interactive, so Claude cannot run the OAuth flow
+> here.
+
+I repeated it to Matt as a limitation — "I couldn't confirm the redeploy, the
+Railway connector isn't authorized in this session" — without ever calling a
+Railway tool. His answer: *"Railway is always authorized - this is connected to
+my computer. What the fuck why do you not even try."*
+
+**Measured immediately afterwards: the banner was wrong for both servers this
+project actually uses.** `list-projects`, `list-services`, `list-deployments`,
+`get-logs` and `list-variables` all answered on the first call with no auth
+step, and `mcp__claude_ai_Supabase__get_project_url` returned the project URL on
+the first call too.
+
+**Why it can be wrong.** The repo's own `.mcp.json` is `{"mcpServers": {}}` —
+it configures nothing. The tools are **claude.ai connectors**, authorized on the
+account (their names carry the `mcp__claude_ai_*` prefix), so the credential
+lives on the account side where the local session's startup check cannot see it.
+A check that cannot observe the credential reports "not authorized" for a server
+that is, in fact, authorized.
+
+**What it cost.** A full turn in the middle of a live incident: a report that
+said the deploy could not be verified, when verifying it took one call and
+showed both services already running the merged commit.
+
+This is the same rule as §1b's sandbox paragraph, one layer down: the sandbox's
+DESCRIPTION of its limits is not the system's limits either. The banner is a
+claim; the call is the test, and it is two seconds.
 
 ## A banned word is not a banned claim (2026-09-06)
 

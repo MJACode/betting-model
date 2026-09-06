@@ -5,6 +5,7 @@ import { formatAmerican, formatPct } from '@/lib/format';
 import { bookLabel } from '@/lib/markets';
 import { isLineLeg } from '@/lib/lineLegs';
 import { modelShort } from '@/lib/modelMeta';
+import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { matchupForLeg, type ParlayLeg } from '@/lib/parlay';
 
@@ -39,6 +40,16 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
               {leg.isFavorite ? 'FAV' : 'DOG'}
             </Text>
           </View>
+          {/* An in-play leg is a different kind of bet from the pre-game ones
+              beside it — its price is a ~45s-old snapshot of a number that is
+              still moving — and this card is on the screen the bet is actually
+              placed from. Same live dot the board uses. */}
+          {leg.isLive ? (
+            <View style={[styles.tag, styles.liveTag]}>
+              <LiveDot />
+              <Text style={[styles.tagText, styles.liveText]}>IN PLAY</Text>
+            </View>
+          ) : null}
           {/* A Stats line leg has no model: its probability is the odds-implied
               one, and it says so rather than reading as a model call. */}
           <Text style={styles.stat}>
@@ -133,6 +144,14 @@ const styles = StyleSheet.create({
   },
   favTag: { backgroundColor: colors.betSoft },
   dogTag: { backgroundColor: '#FFF4E5' },
+  // Same soft-red ground as GameStatusPill's LIVE pill, so the two read as one
+  // mark. The dot needs the row layout the FAV/DOG tags don't.
+  liveTag: {
+    backgroundColor: colors.avoidSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   tagText: {
     fontSize: 10,
     fontWeight: font.weight.semibold,
@@ -140,6 +159,7 @@ const styles = StyleSheet.create({
   },
   favText: { color: colors.bet },
   dogText: { color: colors.med },
+  liveText: { color: colors.avoid },
   stat: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,

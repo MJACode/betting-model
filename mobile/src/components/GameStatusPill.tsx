@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { gameDayLabelET, gameStatus, inningLong, inningShort } from '@/lib/format';
+import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii } from '@/lib/theme';
 import type { GameRow, LiveGameStateRow } from '@/types';
 
@@ -38,7 +39,7 @@ export function GameStatusPill({ game, compact = true, live }: Props) {
         {scoreStr ? <Text style={styles.scoreText}>{scoreStr}</Text> : null}
         {inningStr ? <Text style={styles.inningText}>{inningStr}</Text> : null}
         <View style={[styles.pill, styles.livePill]}>
-          <View style={styles.liveDot} />
+          <LiveDot />
           <Text style={styles.liveText}>LIVE</Text>
         </View>
       </View>
@@ -98,12 +99,6 @@ const styles = StyleSheet.create({
   },
   livePill: {
     backgroundColor: colors.avoidSoft,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.avoid,
   },
   liveText: {
     fontSize: 10,

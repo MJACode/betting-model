@@ -19,7 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 243 — the go-live gate comes out of the app's copy entirely |
+| 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 245 — the go-live gate comes out of the app's copy entirely |
+| 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 244 — the Live tab was empty 81% of the time, so it became a segment |
+| 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 243 — the wind model was firing at 8 days out, and the gate that used to stop it was a side effect |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 242 — the go-live gate stops being quoted at models it does not apply to |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 241 — the parlay save → edit → save round trip, and the exit that scrolled away |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 240 — "when there is a bet from the model, post the pick": publishing moves to whoever writes the pick |

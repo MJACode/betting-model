@@ -13,7 +13,7 @@ live_game_state_poller (15s, free MLB API)
       → live_trigger_orchestrator (debounce + credit cap)
          → live_odds_ingestor (bulk DK fetch, snapshot_type='in_play', ~3 credits)
             → live_scorer (LIVE_MODELS) → picks with is_live=true
-               → mobile Live tab (fetchLivePicks polls every 30s)
+               → mobile Picks tab, Live segment (fetchLivePicks polls every 30s)
 ```
 
 One process runs the whole loop: `python -m data.ingestors.live_trigger_orchestrator --loop`.
@@ -150,13 +150,29 @@ trained, so this is optional for now.
 
 ### Mobile
 
-The Live tab (Phase 5, built session 31) polls `fetchLivePicks`
+The Live board polls `fetchLivePicks`
 (is_live=true, **signal_type='BET' only** as of session 105 — AVOID/fade live picks are still
-written + settled for model tracking but not surfaced on the actionable Live board) every 30s
-while focused. Live picks are EXCLUDED from the Picks tab query
+written + settled for model tracking but not surfaced on the actionable Live board) while
+focused. Live picks are EXCLUDED from the pre-game Picks query
 (`.not('is_live','is',true)`) so the churning in-play board never mixes with the locked pre-game
 board. `modelMeta.ts` renders LIVE ML / LIVE O/U / LIVE RL chips; `thresholds.ts` carries the
 65%/10% placeholders.
+
+**It stopped being its own bottom tab on 2026-09-06 (matt)** and became a third segment on the
+Picks screen — `Today | Signals | Live` — rendered ONLY when the selected sport has an in-play
+pick standing. It was the same PickCard over the same sport filter (both screens already called
+`useSportFilter`) in a lossy copy of the Picks header, and it was empty most of the time:
+measured over the 30 days to 2026-09-06, 175 live BETs on 25 of 31 days, ~5.3h of board
+occupancy per active day — empty ~81% of the clock, and empty 100% of it for NBA, NHL, NFL, UFC
+and GOLF (the only sports firing were MLB 123, NCAAF 51, WNBA 1). Which sport is live is carried
+by a red dot on the sport chips (`SportToggle` `liveSports`), which the tab never said. The poll
+is 30s while the segment is open and 120s elsewhere, since the Picks screen is open for most of
+a session. `tests/test_mobile_live_segment.py` pins the properties with silent failure modes.
+
+**Live picks are addable to the betslip as of 2026-09-06 (matt).** `useResolvedSlip` therefore
+resolves against pre-game **and** live picks: `fetchPicksForDate` excludes `is_live` rows by
+construction, and that hook prunes any key its board cannot resolve, so a live add on the
+pre-game board alone would have landed, ticked the badge and then silently deleted itself.
 
 **Bet on DraftKings** already works on live BET picks — the live scorer captures the DK betslip
 deep link (`dk_bet_link`) from the in-play odds feed (`includeLinks`), so the same PickCard

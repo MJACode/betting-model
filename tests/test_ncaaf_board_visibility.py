@@ -232,8 +232,13 @@ def test_unpriced_ncaaf_games_are_skipped_before_the_feature_build():
     round trips to produce nothing. Scoring ran ~10 minutes before this.
 
     The skip must sit BEFORE the sport dispatch, or it saves nothing.
+
+    The line gained a second clause on 2026-09-06, when MLB/NBA/NHL/WNBA got a
+    look-ahead of their own and a price gate to go with it (`ahead_unpriced`).
+    The property under test is unchanged: whatever the skip set is built from,
+    it is consulted before any feature is built.
     """
-    skip = _SRC.index("            if game_id in ncaaf_unpriced:")
+    skip = _SRC.index("            if game_id in ncaaf_unpriced")
     assert skip < _SRC.index('elif sport == "NCAAF":'), (
         "the skip must precede the feature build to be worth anything")
 

@@ -199,6 +199,7 @@ function buildLeg<R extends { bookmaker: string }>(
     pickId: lineLegPickId(key),
     slipKey: key,
     gameId: spec.game_id,
+    isLive: false, // a line leg is a pre-game line the user picked off the board
     modelId: LINE_LEG_MODEL_ID,
     isGameLine: isGameSpec(spec),
     isFavorite: americanOdds < 0,

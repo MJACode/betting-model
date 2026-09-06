@@ -14,7 +14,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { PicksHomeScreen } from '@/screens/PicksHomeScreen';
-import { LiveScreen } from '@/screens/LiveScreen';
 import { ParlayScreen } from '@/screens/ParlayScreen';
 import { SavedParlaysScreen } from '@/screens/SavedParlaysScreen';
 import { PerformanceScreen } from '@/screens/PerformanceScreen';
@@ -62,7 +61,6 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
-  Live: 'radio-outline',
   TrackRecord: 'shield-checkmark-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
@@ -124,7 +122,6 @@ function TabsRoot() {
       )}
     >
       <Tab.Screen name="Picks" component={PicksHomeScreen} />
-      <Tab.Screen name="Live" component={LiveScreen} />
       <Tab.Screen
         name="TrackRecord"
         component={TrackRecordScreen}
