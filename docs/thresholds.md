@@ -141,6 +141,40 @@ The per-model OR-block is **generated from `config.py`**, never transcribed —
 with the scorer. The three hand-maintained copies this replaces had drifted by
 2026-08-30: The block pasted into Claude mobile carries 42 model ids; `config.py` yields 41. Three are missing (`nba_over_under`, `nba_spread`, `nfl_prop_market`) and four are stale — paused models still listed, which surfaces picks the scorer has stopped making.
 
+### UFC — the first every-pick evaluation (2026-09-05)
+
+Run it yourself: `python -m scripts.ufc_threshold_sweep`.
+
+**Why it did not exist before.** `mv_scored_pick_outcomes` grades the whole
+scored universe for MLB and WNBA and **does not cover UFC**, and `picks.result`
+is only ever written for BETs (`paper_tracker` settles `signal_type = 'BET'`).
+So every UFC number anyone had ever quoted came from a BET-only sample — the
+one CLAUDE.md §7 says cannot see what a looser cut would draw from. The script
+grades all of it from `ufc_fight_log` + `games` with the same
+`rounds_completed` helper production settles with: **135 graded picks** (13 BET,
+60 AVOID, 62 NONE) against 10 settled BETs before.
+
+**What it says. Do not loosen these cuts to get more picks into the channel.**
+
+`ufc_total_rounds` (live cut prob ≥ 0.62, edge ≥ 0.08) is **negative in all 42
+cells of the grid** — from −19% at the loosest (0.50/0.02, 18 bets) to −100% in
+several. The live cut is **−41% over 6 priced bets**. There is no positive cell
+to move to. §7's instruction for exactly this shape: say so and retrain, rather
+than shipping the least-bad cell.
+
+`ufc_moneyline` (live cut 0.65 / 0.08) is positive only at the loosest cuts and
+only on tiny samples — best cell 0.50/0.02 at **+13.9% over 12 bets** — and the
+time split kills it: every positive cell earns all of it in the EARLY half
+(+67% to +104% on 1–3 bets) with the late half negative (−2% to −20%) in every
+single one. No plateau, no sample, no case for a change.
+
+**So the quiet UFC channel is a model problem, not a threshold problem and not
+a delivery problem.** Delivery was the bug and is fixed (#505 publishes on
+write; #513 verified the webhook points at the UFC channel). What is left is
+that the models fire ~3 times on a 13-fight card and the one that fires most
+loses money at every cut. The honest next step is a retrain of
+`ufc_total_rounds`, or pausing it, and neither is a threshold move.
+
 ### Review Cadence
 
 All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 72% / edge ≥ 12%; O/U prob ≥ 72% / edge ≥ 15%; RL prob ≥ 70% / edge ≥ 12% (re-optimized 2026-06-03 from settled-pick sweep — see threshold tables above).
