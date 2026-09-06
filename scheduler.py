@@ -596,11 +596,17 @@ def run_nfl_poll(fast: bool = False) -> None:
     exclusive — the hourly one stands down inside the fast window so a tick is
     never paid for twice.
 
-    Firing is unchanged and stays inside each model's VALIDATED window. Polling
-    early does not mean betting early: at 10 days out Pinnacle has not posted
-    (it arrives ~T-6.5), so the opener has nothing to compare against, and wind
-    has no measured calibration beyond 7 days. Watching from T-10 buys the
-    first fireable moment, not an earlier bet.
+    Firing stays inside each model's VALIDATED window. Polling early does not
+    mean betting early: at 10 days out Pinnacle has not posted (it arrives
+    ~T-6.5), so the opener has nothing to compare against, and wind does not
+    fire past `wind_totals.MAX_FIRE_LEAD`. Watching from T-10 buys the first
+    fireable moment, not an earlier bet.
+
+    That was an ASPIRATION in this comment and not true in the code between
+    2026-09-05 and 2026-09-06: nothing gated wind firing, so the `--days` handed
+    to the card below -- the poll horizon, 10 -- was the firing window too, and
+    all five Week 1 picks locked at leads of 7.2 to 8.7 days. The gate now lives
+    in the model where every caller gets it, not in this argument.
 
     Cost is ~4 credits a tick (2 markets x 2 regions), and zero when no game is
     inside the horizon, which is most of the year.

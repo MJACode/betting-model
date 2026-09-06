@@ -42,6 +42,7 @@ _wind_totals = load_nfl_model("wind_totals")
 select_bets = _wind_totals.select_bets
 UNIT_PCT = _wind_totals.UNIT_PCT
 MAX_CALIBRATED_LEAD = _wind_totals.MAX_CALIBRATED_LEAD
+MAX_FIRE_LEAD = _wind_totals.MAX_FIRE_LEAD
 
 # Books carrying home/away sign flips in the Odds API feed. Screened across all
 # 40 books on 1.4M quotes; see scripts/screen_books.py. Excluded everywhere.
@@ -176,12 +177,27 @@ def main() -> int:
 
     bets = select_bets(g, threshold=a.threshold, bankroll=a.bankroll)
 
+    # Games that clear the wind bar but are not yet inside the firing window.
+    # Reported on EVERY run, not just dry runs: the card is polled from T-10 and
+    # fires at T-4, so "no qualifying bets" is the normal state for most of the
+    # week and it has to be distinguishable from "no wind anywhere". Without
+    # this, the dry-run line below counted every game over the threshold and
+    # invited a rerun that could not fire any of them.
+    windy = g[g.forecast_wind >= a.threshold]
+    waiting = windy[windy.lead_days > MAX_FIRE_LEAD]
+    if len(waiting):
+        print(f"\n{len(waiting)} game(s) over the wind bar but outside the "
+              f"{MAX_FIRE_LEAD:.0f}-day firing window — watching, not betting:")
+        print(waiting[["matchup", "lead_days", "forecast_wind"]]
+              .sort_values("lead_days").to_string(index=False,
+                                                  float_format=lambda x: f"{x:.1f}"))
+
     if bets.empty:
         print(f"\nNo qualifying bets at threshold {a.threshold} mph.")
         if a.dry_run:
-            n = int((g.forecast_wind >= a.threshold).sum())
-            print(f"(dry run: {n} game(s) clear the wind threshold; rerun without "
-                  f"--dry-run to price them)")
+            n = int((windy.lead_days <= MAX_FIRE_LEAD).sum())
+            print(f"(dry run: {n} game(s) clear the wind threshold AND the firing "
+                  f"window; rerun without --dry-run to price them)")
         return 0
 
     print(f"\n=== WIND UNDER CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")

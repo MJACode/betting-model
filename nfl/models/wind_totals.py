@@ -132,6 +132,43 @@ SLATE_RHO = 0.10         # within-slate outcome correlation, same weather system
 # False on the row so the card and the eval board can still tell them apart.
 MAX_CALIBRATED_LEAD = 7
 
+# Longest lead at which a bet may FIRE. Separate question from the two above,
+# and the one that decides how many bets exist.
+#
+# `MAX_CALIBRATED_LEAD` says where the numbers stop being measured;
+# `MAX_FIRE_LEAD` says where we are willing to commit money. They came apart on
+# 2026-09-05: making the stake clip past lead 7 was right on its own terms (a
+# probability and a stake that describe different bets is a bug), but it removed
+# the only thing that had been stopping leads 8-10 from being sized, and the
+# scheduler polls from T-10. Nothing else gated firing, so every bet moved
+# outside the calibration at once.
+#
+# MEASURED 2026-09-06, Week 1, after mike asked why nearly half the slate was an
+# under. All five live picks fired at leads 7.2 / 7.5 / 8.0 / 8.2 / 8.7 days --
+# not one inside the calibrated range -- and all five carried
+# `model_probability` 0.5489, which is the (7, 11) row exactly. That is the clip
+# value, on every pick, so the published probability was an assumption every
+# time. Five of eleven outdoor games qualified (45%) against a validated rate of
+# ~38 bets a season, roughly 19% of outdoor games.
+#
+# There is no edge lost by waiting, which is the thing that makes this cheap.
+# The rule is a standing closing-line inefficiency and not a race (see the
+# module docstring: "can be placed at any time up to kickoff"), and
+# CALIBRATED_UNDER_RATE RISES as the lead falls -- 0.5489 at 7 days, 0.5671 at
+# 3, 0.5735 at 1. Firing early buys nothing and costs ~2pp, and since the
+# 2026-08-22 insert-once lock it buys it permanently: the pick can never be
+# re-priced when the forecast sharpens.
+#
+# mike, 2026-09-06, choosing 4 over 7: 7 is only the boundary of the arithmetic,
+# 4 is the window the runbook's Thursday scan actually used and the closest
+# honest match to where the day-3 headline validation lives. Leads 5-7 are
+# measured, so this is deliberately tighter than the data strictly requires.
+#
+# This gates FIRING only. The stake still clips past `MAX_CALIBRATED_LEAD` --
+# Matt's 2026-09-05 change stands, and the eval board still prices every game in
+# the poll window so a locked pick's history keeps accumulating.
+MAX_FIRE_LEAD = 4.0
+
 # Shortest lead that is a MEASUREMENT. The lead-0 row is ERA5 truth, i.e. what
 # the rule scores with perfect knowledge of the wind, and no forecast ever
 # delivers it. Betting ten minutes before kickoff still gets a forecast, not the
@@ -270,7 +307,8 @@ class Bet:
 
 
 def select_bets(games: pd.DataFrame, threshold: float = 11.0,
-                min_edge: float = MIN_EDGE, bankroll: float = 1.0) -> pd.DataFrame:
+                min_edge: float = MIN_EDGE, bankroll: float = 1.0,
+                max_fire_lead: float = MAX_FIRE_LEAD) -> pd.DataFrame:
     """
     Apply the frozen rule to a slate.
 
@@ -289,6 +327,12 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
 
     g = games[~games.roof.isin(INDOOR_ROOFS)].copy()
     g = g[g.forecast_wind >= threshold]
+    # Nothing fires outside the firing window. The card is run against the
+    # 10-day poll horizon so the eval board sees the whole slate, so without
+    # this the window is set by whatever `--days` the caller passed.
+    # `evaluate_board` applies the same gate at the same point and says so in
+    # its reason string -- the two must not disagree about one game again.
+    g = g[g.lead_days <= max_fire_lead]
     if g.empty:
         return pd.DataFrame(columns=[f.name for f in Bet.__dataclass_fields__.values()])
 
@@ -337,7 +381,8 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
 
 
 def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
-                   min_edge: float = MIN_EDGE) -> list[dict]:
+                   min_edge: float = MIN_EDGE,
+                   max_fire_lead: float = MAX_FIRE_LEAD) -> list[dict]:
     """
     Model's current view of EVERY outdoor game in the window, qualifying or
     not. Feeds the locked-pick history; it never selects anything.
@@ -374,6 +419,20 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
                 **common))
             continue
 
+        lead_days = float(getattr(r, "lead_days", 0.0))
+        if lead_days > max_fire_lead:
+            # Deliberately NOT worded "beyond the": `nfl_pick_monitor._GONE_MARKERS`
+            # reads that phrase as the premise having collapsed, and this is the
+            # opposite -- the wind is there, we are simply not committing money
+            # this far out yet. A locked pick can only reach this branch if the
+            # window is tightened underneath it, and GONE would overstate that.
+            out.append(eval_row(
+                qualifies=False,
+                reason=(f"wind {wind:.1f} mph, waiting: lead {lead_days:.1f}d is "
+                        f"outside the {max_fire_lead:.0f}-day firing window"),
+                **common))
+            continue
+
         px = getattr(r, "best_under_px", None)
         total = getattr(r, "best_total", None)
         if px is None or pd.isna(px) or total is None or pd.isna(total):
@@ -382,7 +441,6 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
                                 **common))
             continue
 
-        lead_days = float(getattr(r, "lead_days", 0.0))
         p_model = model_under_prob(lead_days, threshold)
         over_px = getattr(r, "best_over_px", None)
         if over_px is not None and pd.notna(over_px):
