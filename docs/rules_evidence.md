@@ -631,3 +631,58 @@ The nearest real signal is `mlb_live_total_runs` at **+15.94% over 87 settled
 bets, 95% CI [-2.8%, +34.7%]** — promising, unproven, and a game total rather
 than a prop.
 
+
+## A banned word is not a banned claim (2026-09-06)
+
+The rule is in CLAUDE.md §7 ("Banned copy"). This is what was measured.
+
+CLAUDE.md §2 has said "The platform is LIVE — this is not a paper-trading
+system. Do not describe it as paper trading in any user-facing surface" since
+the 2026-08-29 recap-footer incident, and `verify_live_record_start.ts` enforces
+it mechanically:
+
+```ts
+const PAPER = /\bpaper[- ]?(only|trading)?\b/i;   // over screens/ and components/
+```
+
+It passed on every run. It was passing on 2026-09-06 when Matt sent a screenshot
+of the NCAAF Models tab reading **"1 of 50 settled · too few to judge"** and
+said *"Remove the paper trading for live win probability. we are not doing paper
+trading."*
+
+**The word was never there. The number was.** `50` is `GO_LIVE_SETTLED_PICKS`,
+§2's own go-live gate, and four surfaces were narrating each model's distance
+from it:
+
+| Surface | The claim |
+|---|---|
+| `ModelsScreen` row | `N of 50 settled · too few to judge` |
+| `TrackRecordScreen` row | ` · N of 50 settled` |
+| `ExplainerScreen` | "A model isn't backed for real money until … 50+ settled picks with positive ROI" |
+| `OnboardingModal` | "A model is not backed for real money until it has 50+ settled picks…" |
+
+**It then cost a second round.** Session 242 read §2 carefully, saw that the
+gate is a PRE-GAME rule with in-play models named as the exception, and scoped
+the fix to in-play rows — which is what §2 says, and still the wrong cut.
+`ncaaf_spread` is pre-game, kept the line, and was sitting two rows above the
+card in the screenshot 242 was answering. Matt, an hour later: *"Remove all
+paper trading. I see spread opener for NCAAF has the same message. Update that
+one as well and any others."*
+
+Two lessons, in order of how much they cost:
+
+1. **Sweep for the CONSTANT, not the word.** `grep -rn GO_LIVE_SETTLED_PICKS`
+   returns all four surfaces in one call and would have made 242 a single round.
+   A guard on a word is a guard on a spelling.
+2. **A rule's scope is not a complaint's scope.** §2 genuinely does exempt
+   in-play models, so scoping to them was defensible from the document and wrong
+   about the objection: the complaint was about a claim being made at all, not
+   about which models were entitled to make it. When a fix is scoped by a rule
+   rather than by the reported symptom, check the OTHER rows on the same screen
+   before shipping.
+
+Fixed in session 243: `thinSampleCaption` returns one gate-free string,
+`GO_LIVE_SETTLED_PICKS` is deleted from `lib/recordStart`, and the three prose
+surfaces keep their sample-size honesty without the status claim. The gate
+itself is untouched server-side (`models/backtester.GO_LIVE_MIN_PICKS = 50`) —
+whether that business rule survives is a separate decision for Matt.
