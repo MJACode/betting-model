@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useLineLegs } from '@/hooks/useLineLegs';
-import { useLivePicks, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
+import { useLivePicksUnfocused, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { gameLineLegFromRows, isGameSpec, lineLegFromRows, lineLegKey, type LineLegSpec } from '@/lib/lineLegs';
@@ -48,16 +48,18 @@ import type { EnrichedPick } from '@/types';
  * live fetch is in flight or errored, for exactly the reason the pre-game half
  * is: a failed read looks identical to an empty board.
  *
- * The live poll here is the IDLE cadence. This hook is mounted app-wide by the
- * betslip bar, and it only needs a live pick to exist for its leg to price —
- * the fast poll belongs to the screen the user is actually reading.
+ * The live poll here is the IDLE cadence, and it is the UNFOCUSED variant. This
+ * hook is mounted app-wide by BetslipBar, which sits OUTSIDE
+ * NavigationContainer — so a focus-aware hook here throws on render for anyone
+ * with a non-empty slip. It only needs a live pick to exist for its leg to
+ * price; the fast poll belongs to the screen the user is actually reading.
  */
 export function useResolvedSlip() {
   const slip = useParlaySlip();
   const lineLegs = useLineLegs();
   const picks = useTodayPicks();
   const { data, loading, error } = picks;
-  const livePicks = useLivePicks({ pollMs: LIVE_IDLE_POLL_MS });
+  const livePicks = useLivePicksUnfocused({ pollMs: LIVE_IDLE_POLL_MS });
 
   // Pre-game first: a key can only ever match one of the two (a pick is in-play
   // or it is not), and resolveSlipLegs keeps the first leg per key regardless.

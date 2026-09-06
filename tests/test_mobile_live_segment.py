@@ -177,6 +177,102 @@ def test_the_slip_resolves_against_live_picks_too():
     )
 
 
+def test_no_app_root_component_reaches_a_focus_aware_hook():
+    """useFocusEffect calls useNavigation(), which THROWS outside the navigator.
+
+    BetslipBar is mounted at the app root as a sibling of <NavigationContainer>
+    so one bar covers the tabs and pushed screens alike, so every hook on its
+    path is outside both NavigationContext and NavigationContainerRefContext.
+    Wiring live picks into useResolvedSlip (which BetslipBar calls) put
+    useFocusEffect on that path and crashed on render for any user with
+    something in their betslip, on every screen (UX review, 2026-09-06).
+
+    This is a class of bug ux_scan cannot see -- it has no cross-file
+    reachability -- and it is the second time a hook has moved into an app-root
+    component. So the property is pinned over the whole transitive import graph
+    rather than on the one hook that broke.
+
+    The walk is SYMBOL-level, not file-level: useLivePicks.ts legitimately holds
+    both a focus-aware variant (for screens) and an unfocused one, so "this file
+    mentions useFocusEffect" is not the question. The question is whether the
+    functions actually reachable from the root call it.
+    """
+    src_dir = MOBILE / "src"
+    root = src_dir / "components" / "BetslipBar.tsx"
+    assert root.exists(), f"{root} moved -- re-point this test"
+
+    def symbol_bodies(path: Path) -> dict[str, str]:
+        """Top-level function declarations in a module, by name.
+
+        Body = source from the declaration to the next top-level declaration,
+        which is coarse but never UNDER-reports a call, so it cannot make this
+        test pass by missing something.
+        """
+        src = _read(path)
+        decls = [
+            (m.start(), m.group(1))
+            for m in re.finditer(r"^(?:export )?function (\w+)", src, re.M)
+        ]
+        out: dict[str, str] = {}
+        for i, (pos, name) in enumerate(decls):
+            end = decls[i + 1][0] if i + 1 < len(decls) else len(src)
+            out[name] = src[pos:end]
+        return out
+
+    def imports_of(path: Path) -> dict[str, Path]:
+        """Imported local symbol -> the module file it came from."""
+        out: dict[str, Path] = {}
+        for names, spec in re.findall(r"import \{([^}]+)\} from '@/([^']+)'", _read(path)):
+            target = None
+            for suffix in (".ts", ".tsx"):
+                cand = src_dir / f"{spec}{suffix}"
+                if cand.exists():
+                    target = cand
+                    break
+            if target is None:
+                continue
+            for raw in names.split(","):
+                name = raw.strip().removeprefix("type ").split(" as ")[-1].strip()
+                if name:
+                    out[name] = target
+        return out
+
+    offenders: list[str] = []
+    seen: set[tuple[Path, str]] = set()
+    # The root module's own top-level code counts, whatever it is named.
+    stack = [(root, name) for name in symbol_bodies(root)]
+    while stack:
+        path, name = stack.pop()
+        if (path, name) in seen:
+            continue
+        seen.add((path, name))
+        body = symbol_bodies(path).get(name)
+        if body is None:
+            continue
+        if "useFocusEffect" in body:
+            offenders.append(f"{path.relative_to(ROOT)}::{name}")
+            continue
+        for sym, target in imports_of(path).items():
+            if re.search(rf"\b{re.escape(sym)}\b", body):
+                stack.append((target, sym))
+
+    assert not offenders, (
+        "these functions are reachable from an app-root component mounted "
+        f"outside NavigationContainer and use useFocusEffect: {offenders}. "
+        "useNavigation() throws there. Use a plain useEffect variant "
+        "(see useLivePicksUnfocused) on that path."
+    )
+
+
+def test_the_slip_uses_the_unfocused_live_hook():
+    src = _read(SLIP)
+    assert "useLivePicksUnfocused" in src, (
+        "useResolvedSlip must use the unfocused variant -- it is mounted by "
+        "BetslipBar, outside NavigationContainer"
+    )
+    assert "useLivePicks(" not in src, "the focus-aware variant is back on the slip path"
+
+
 def test_pruning_is_held_while_the_live_half_is_unknown():
     """A failed live read looks identical to 'your live leg is gone'."""
     src = _read(SLIP)

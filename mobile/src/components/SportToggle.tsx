@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
 
@@ -89,7 +90,7 @@ export function SportToggle({
               ]}
             >
               <View style={styles.segmentInner}>
-                {isLive ? <View style={styles.liveDot} /> : null}
+                {isLive ? <LiveDot /> : null}
                 <Text
                   style={[styles.label, active && styles.labelActive, muted && styles.labelMuted]}
                 >
@@ -124,7 +125,7 @@ const styles = StyleSheet.create({
   segmentInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: spacing.xs,
   },
   badge: {
     minWidth: 16,
@@ -140,16 +141,6 @@ const styles = StyleSheet.create({
     lineHeight: 13,
     fontWeight: font.weight.bold,
     color: colors.textInverse,
-  },
-  // The same 6pt red dot GameStatusPill draws inside the LIVE pill. Copied by
-  // value rather than shared, like the pill's own, but deliberately identical:
-  // two different live marks in one app is how "is this live?" stops being
-  // answerable at a glance.
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.avoid,
   },
   segment: {
     paddingHorizontal: spacing.md,
