@@ -263,10 +263,9 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // MIN_PICKS_FOR_COLOURED_ROI. The number still shows; it just stops wearing
   // the colour that claims it means something.
   const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
-  // One sentence, shared with the Record tab's rows, branching on whether the
-  // go-live gate applies to this model at all — see thinSampleCaption, which
-  // carries the reasoning and is the only place either wording is written.
-  const thinNote = thinSampleCaption(modelId, stats.picks);
+  // One sentence, shared with the Record tab's rows and gate-free — see
+  // thinSampleCaption, which is the only place this wording is written.
+  const thinNote = thinSampleCaption();
   const roiColor = thin
     ? colors.textSecondary
     : stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;

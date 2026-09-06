@@ -32,7 +32,7 @@ import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
-import { GO_LIVE_SETTLED_PICKS, LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 
 /** First day of the tracked record. Every published number starts here.
  *  The official live date — see lib/recordStart, which is the one place it is
@@ -226,11 +226,10 @@ export function TrackRecordScreen() {
             short by design, and the percentages will move a lot for a while.{'\n\n'}
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {LIVE_RECORD_START_SHORT}. Some models are
-            profitable, some aren’t yet, and we show them all. A new pre-game model is shown
-            but not backed until it clears {GO_LIVE_SETTLED_PICKS} settled picks with positive
-            ROI; in-play models are the exception and run live while that record builds, so
-            treat them as unproven. A
-            pick that had no
+            profitable, some aren’t yet, and we show them all. Every sample here is still
+            small, and a few dozen settled bets tells you very little in either direction —
+            where a model has too few to read, its percentage is greyed out and labelled
+            rather than hidden. A pick that had no
             DraftKings price when we posted it counts in the
             win–loss record but stakes nothing, so it is marked unpriced and left out of ROI.
           </Text>
@@ -318,14 +317,14 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
           {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
         </Text>
-        {decided < MIN_PICKS_FOR_COLOURED_ROI ? (
+        {decided < MIN_PICKS_FOR_COLOURED_ROI && Number(row.staked_flat ?? 0) > 0 ? (
           // Its own line, not a fourth segment: the sub-line is already three
           // segments wide beside the ROI column, and a mid-phrase wrap orphans
           // the one segment that qualifies the number next to it. Same shape
-          // the Models tab already uses for the same reason.
-          <Text style={styles.modelSub}>
-            {thinSampleCaption(row.model_id, Number(row.picks ?? 0))}
-          </Text>
+          // the Models tab already uses for the same reason — and, like that
+          // screen, it only fires when there is an ROI to qualify: an all-
+          // unpriced model renders "—", which "N unpriced" already explains.
+          <Text style={styles.modelSub}>{thinSampleCaption()}</Text>
         ) : null}
       </View>
       <Text
