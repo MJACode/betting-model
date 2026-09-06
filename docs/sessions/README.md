@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 242 — the go-live gate stops being quoted at models it does not apply to |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 241 — the parlay save → edit → save round trip, and the exit that scrolled away |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 240 — "when there is a bet from the model, post the pick": publishing moves to whoever writes the pick |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 239 — calibration comes out of the app UI entirely, and the opening-signal experiment link with it |
