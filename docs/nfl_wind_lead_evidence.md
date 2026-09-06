@@ -84,13 +84,23 @@ essentially no edge over the base rate.** Flagged at lead 3: **47.5% under**
 
 Context before anyone acts on it:
 
-- **This is the known-losing slice, independently confirmed.** `wind_totals.py`
-  already says so in its LIVE RISK block: *"2024 and 2025 both lost on observed
+- **It is CONSISTENT with what the model already says about these seasons, but
+  it is not the same measurement, and the difference matters.**
+  `wind_totals.py`'s LIVE RISK block says *"2024 and 2025 both lost on observed
   wind (−8.09u and +1.73u at −110 in ERA5 terms; −3.64u and −3.55u in the
-  published nflverse terms)."* 2024–2025 are the only seasons with
-  issued-forecast coverage, so they are the only seasons this method can reach.
-  This is not a new contradiction — it is the same two seasons, reached by a
-  different route, agreeing.
+  published nflverse terms)."* That is the **observed-wind** flag — ERA5 or the
+  nflverse `wind` column, i.e. the rule's ceiling with knowledge no bettor has.
+  The number above is the **lead-3 issued-forecast** flag, which is what
+  production actually bets. So this is not a restatement of the docstring: it
+  is, as far as anything in this repo shows, the **first measurement of the
+  DEPLOYED population** for those seasons. That makes it a stronger signal than
+  the docstring's, not a weaker one.
+- **Read the base rate next to it.** The model shrinks toward a **51.74%**
+  outdoor base rate (2016–2025). The 2024–2025 outdoor base measured here is
+  **46.0%** (n=378). A 5.7pp fall in the UNCONDITIONAL under rate is a
+  whole-board phenomenon, not a wind one — so the honest statement is that the
+  flag added **+1.5pp over a base that had itself moved a long way**. Do not
+  over-read a two-season base rate either; both numbers are small samples.
 - **It is 2 seasons of a 10-season validation** (2016–2025, 58.09%, n=408).
   n=101 at a CI of [37.8, 57.3] cannot overturn that, and cannot confirm it.
 - The two readings `wind_totals.py` names are still the live ones and still

@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_ingest.weather import (INDOOR_ROOFS, DEPLOY_THRESHOLD, ISSUED_FORECAST_START,
+                                 open_air_mask,
                                  fetch_issued_forecasts, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
 from data_ingest.parse import snapshot_to_frame
@@ -49,7 +50,11 @@ def load_week(season: int, week: int) -> pd.DataFrame:
 
 
 def issued_wind(g: pd.DataFrame, lead: int) -> pd.DataFrame:
-    outdoor = g[~g.roof.isin(INDOOR_ROOFS)].copy()
+    # Same eligibility rule as the live card, or the harness and production
+    # disagree about which games exist. Identical on a PLAYED week -- a
+    # blank roof only occurs on an unplayed game -- so this changes no
+    # historical replay; it keeps the two in step for future ones.
+    outdoor = g[open_air_mask(g)].copy()
     if outdoor.empty:
         return outdoor
     cov = coverage_check(g)

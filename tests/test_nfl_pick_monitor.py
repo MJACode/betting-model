@@ -208,3 +208,24 @@ class TestTheJoinKeyMatchesPicks:
         """If the publisher ever drops the prefix, fix eval_row, not this."""
         src = (ROOT / "scripts" / "nfl_wind_publisher.py").read_text(encoding="utf-8")
         assert 'f"NFL_{nflverse_id}"' in src
+
+    def test_the_opener_dump_gets_the_same_id(self):
+        """Both models feed eval_row, which is why the fix lives there.
+
+        `opener_spread.evaluate_board` passes a bare `g.game_id` exactly as the
+        wind model does, and `nfl_wind_publisher.publish_opener` writes the same
+        `NFL_` prefix. Without this the "fixes both at once" claim is asserted
+        in a commit message and tested nowhere.
+        """
+        import sys as _sys
+        nfl = str(ROOT / "nfl")
+        _sys.path.insert(0, nfl)
+        try:
+            from data_ingest.pick_eval import eval_row
+        finally:
+            _sys.path.remove(nfl)
+        row = eval_row(game_id="2026_02_NYJ_BUF", model_id="nfl_opener_spread",
+                       kick_utc="2026-09-20T17:00:00+00:00", lead_hours=120.0,
+                       qualifies=False, reason="no clean soft book quoting")
+        assert row["game_id"] == "NFL_2026_02_NYJ_BUF"
+        assert ("NFL_2026_02_NYJ_BUF", "nfl_opener_spread") in latest_per_pick([row])
