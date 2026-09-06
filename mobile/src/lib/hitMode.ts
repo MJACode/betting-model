@@ -110,17 +110,32 @@ export function hitModeLineLabel(n: number, mode: HitMode): string {
 
 /**
  * "Over 1.5" / "Under 1.5" — a half-point line named the way the sportsbook
- * posts it.
+ * posts it. `short` gives the book's own abbreviation, "O 1.5" / "U 1.5",
+ * for the one place the words do not fit: the caption under a 62pt odds pill,
+ * where "Under 224.5" wrapped to two lines and made one row of a 25-row
+ * scanning board taller than its neighbours (UX review, 2026-09-06).
  *
  * ONE home for the book's idiom, because three places speak it: the Over /
- * Under headline, the caption on an odds pill whose book posts a different
- * number, and the add-to-betslip explainer that quotes both in one sentence.
- * The explainer reads "The board is on Over 0.5 Hits; FanDuel only posts Over
- * 1.5" — one sentence, one vocabulary. It said "… only posts 2+" until
- * 2026-09-06, which put the fan's idiom and the book's in the same breath.
+ * Under headline, that caption, and the add-to-betslip explainer.
  */
-export function bookLineLabel(line: number, side: HitDirection): string {
-  return `${side === 'under' ? 'Under' : 'Over'} ${line}`;
+export function bookLineLabel(line: number, side: HitDirection, short = false): string {
+  const word = side === 'under' ? (short ? 'U' : 'Under') : short ? 'O' : 'Over';
+  return `${word} ${line}`;
+}
+
+/**
+ * The book's number in the idiom the BOARD is currently speaking.
+ *
+ * Both places that name a book's own line — the caption under an off-line odds
+ * pill, and the add-to-betslip explainer that quotes the board headline and
+ * that line in ONE sentence — read this, so neither can end up half in one
+ * vocabulary. The explainer had started reading "The board is on 2+ Hits;
+ * FanDuel only posts Over 2.5" in At Least mode: the 2026-09-06 fix cured
+ * Over/Under and broke At Least, which is what a hard-coded idiom does the
+ * moment a second one exists (UX review).
+ */
+export function modeLineLabel(line: number, side: HitDirection, mode: HitMode, short = false): string {
+  return mode === 'atLeast' ? thresholdLabel(line, side) : bookLineLabel(line, side, short);
 }
 
 /**
@@ -129,6 +144,11 @@ export function bookLineLabel(line: number, side: HitDirection): string {
  *
  * The other vocabulary, and the one At Least is named in. One home for the
  * same reason `bookLineLabel` has one.
+ *
+ * The `'under'` branch is reachable only through `modeLineLabel`, and only if
+ * At Least ever gains an under side — it has none today, so no board in At
+ * Least mode can produce one. Kept rather than deleted because a half idiom
+ * is what invites the next person to inline the other half somewhere else.
  *
  * The stat label always stays PLURAL — "1 or fewer Hits", never "1 or fewer
  * Hit" — because no strip-the-s rule survives "3PM", "PRA", "RBI", "Total

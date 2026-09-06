@@ -65,13 +65,16 @@ export function HitModeSheet({
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
-          {/* What SEPARATES the rows, since two of them are the same bet: the
-              side, and whose words the board uses. Not a worked example of
-              each — the previews below already are that. */}
+          {/* SAYS THE EQUIVALENCE OUT LOUD, because two of the rows below name
+              the same bet and this sheet is the only place they appear
+              together. A subtitle that described the modes without naming both
+              numbers left the duplicate looking like a mistake and sent the
+              user hunting for a difference that is not there (UX review,
+              2026-09-06). */}
           <Text style={styles.subtitle}>
-            At Least counts games with {lineN} or more, the way a fan asks for it. Over and
-            Under are the same threshold as your sportsbook posts it — a {rulerValueLabel(lineN, 'over')}{' '}
-            line. The price follows either way.
+            At Least {lineN} and Over {rulerValueLabel(lineN, 'over')} are the same bet at the same
+            price — At Least is how a fan says it, Over is how your sportsbook posts it. Under{' '}
+            {rulerValueLabel(lineN, 'under')} is the other side of it.
           </Text>
           <View style={styles.list}>
             {HIT_MODES.map((m) => {
@@ -90,10 +93,13 @@ export function HitModeSheet({
                   disabled={!priced}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: active, disabled: !priced }}
+                  // One shape for both branches. They had drifted into two —
+                  // the priced one stuttering the mode word, the unpriced one
+                  // dropping the stat label (UX review, 2026-09-06). The row's
+                  // own name is spoken by rowName either way, so neither
+                  // repeats it.
                   accessibilityLabel={
-                    priced
-                      ? `${m.label}, that is ${preview}`
-                      : `${m.label} ${rulerValueLabel(lineN, m.mode)}, not priced by your sportsbooks`
+                    priced ? preview : `${preview}, not priced by your sportsbooks`
                   }
                   style={({ pressed }) => [
                     styles.row,

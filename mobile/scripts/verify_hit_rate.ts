@@ -18,6 +18,7 @@ import {
   HIT_MODES,
   hitModeHeadline,
   hitModeLineLabel,
+  modeLineLabel,
   rulerValue,
   rulerValueLabel,
   selectionFor,
@@ -182,6 +183,13 @@ check(
   check('every mode is offered', HIT_MODES.length === 3 && sheet.includes('HIT_MODES.map'));
   check('each row previews the bet it would make, since the modes overlap',
     sheet.includes('hitModeHeadline(lineN, m.mode, statLabel)'));
+  // Two rows name the same bet, and this sheet is the only place they appear
+  // together — so it is the only place that can say so.
+  check('the sheet states the equivalence its own rows create',
+    /At Least \{lineN\} and Over \{rulerValueLabel\(lineN, 'over'\)\} are the same bet at the same/
+      .test(sheet));
+  check('and both a11y branches have one shape',
+    sheet.includes('priced ? preview : `${preview}, not priced by your sportsbooks`'));
   check('the rows are radios to VoiceOver', sheet.includes('accessibilityRole="radio"'));
 
   // ── the ruler is drawn in the mode's idiom (2026-09-06) ─────────────────
@@ -202,8 +210,34 @@ check(
       && screen.includes('const faceOf = format ?? String;')
       && screen.includes('{labeled ? faceOf(v) : \'\'}')
       && screen.includes('<Text style={styles.tickValueActive}>{faceOf(value)}</Text>'));
-  check('VoiceOver reads the face, not the stop index',
-    screen.includes('accessibilityValue={{ min, max, now: value, text: faceOf(value) }}'));
+
+  // ── the UX review's fixes, 2026-09-06 ───────────────────────────────────
+  // A face carrying a decimal is up to four characters, and the old fixed
+  // 26pt pitch left "23.5" and "24.5" abutting with a point of air.
+  check('the tick pitch follows the widest face, not the stop count',
+    screen.includes('const faceChars = Math.max(faceOf(min).length, faceOf(max).length);')
+      && screen.includes('const tickW = count <= 30 ? Math.max(26, faceChars * 8 + 6) : TICK_W;'));
+  // VoiceOver drives the ruler and nothing else: a bare "0.5" never says which
+  // bet it is setting, because the side and the stat are other elements.
+  check('the adjustable announces the whole bet, not the bare face',
+    screen.includes('accessibilityValue={{ min, max, now: value, text: describeOf(value) }}')
+      && screen.includes('describe={(n) => hitModeHeadline(n, hitMode, stat?.label ?? \'\')}')
+      && screen.includes('const describeOf = describe ?? faceOf;'));
+  // The board headline and the book's own number appear in ONE sentence in the
+  // betslip explainer, and in one column on the board. Hard-coding either
+  // idiom breaks the other mode — which is exactly what the first pass did.
+  check('the book\'s number follows the board\'s idiom, in both places that print it',
+    modeLineLabel(2.5, 'over', 'atLeast') === '3+'
+      && modeLineLabel(2.5, 'over', 'over') === 'Over 2.5'
+      && modeLineLabel(2.5, 'over', 'over', true) === 'O 2.5'
+      && modeLineLabel(2.5, 'under', 'under', true) === 'U 2.5');
+  check('the explainer takes it from the board rather than assuming one',
+    screen.includes('modeLineLabel(l, sd, hitMode),')
+      && read('src/lib/lineLegs.ts').includes('numberLabel(quote.line, quote.side)'));
+  check('the off-line caption is the short form, on one line, in that idiom',
+    screen.includes('offLineCaption(quote.line, quote.side, hitMode)')
+      && screen.includes('return modeLineLabel(line, side, mode, true);')
+      && /styles\.oddsCaption\} numberOfLines=\{1\}/.test(screen));
 
   // Two idioms, two homes, and neither is spoken in the other's sentence.
   // The betslip explainer quotes the board headline and the book's number in
@@ -211,12 +245,12 @@ check(
   check('the fan idiom keeps the stat label plural, which singularising cannot',
     hitModeHeadline(2, 'atLeast', 'Hits') === '2+ Hits'
       && hitModeHeadline(2, 'atLeast', 'Total Bases') === '2+ Total Bases');
-  check('each idiom has ONE home, so the places that speak it cannot disagree',
+  check('each idiom has ONE home, and one switch between them',
     read('src/lib/hitMode.ts').includes('export function thresholdLabel(')
       && read('src/lib/hitMode.ts').includes('export function bookLineLabel(')
-      && screen.includes('return bookLineLabel(line, side);')
-      && read('src/lib/lineLegs.ts').includes('bookLineLabel(quote.line, quote.side)')
-      && !/`\$\{[^}]*- 0\.5\} or fewer`/.test(screen + read('src/lib/lineLegs.ts')));
+      && read('src/lib/hitMode.ts').includes('export function modeLineLabel(')
+      && !/`\$\{[^}]*- 0\.5\} or fewer`/.test(screen + read('src/lib/lineLegs.ts'))
+      && !/'Over ' \+|`Over \$\{/.test(screen + read('src/lib/lineLegs.ts')));
 
   // A selected row must not change size in a three-row list built for
   // comparison, and the preview is the reason the row exists.
@@ -252,11 +286,14 @@ check(
       && screen.includes("accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}"));
   check('its ticks are decoration', /accessibilityElementsHidden[\s\S]{0,120}styles\.tickCol/.test(screen));
 
-  // Every mode resolves a stop to the same line now, so the ceiling is one
-  // number and a mode change leaves the ruler where it stands.
-  check('every mode runs over the same stops',
-    screen.includes('max={maxLineN(stat)}')
-      && !screen.includes("hitMode === 'under' ? 1 : 0"));
+  // Every mode resolves a stop to the same line, so a mode change leaves the
+  // bet where it stands — but Under n names "n-1 or fewer", so it needs one
+  // extra stop to reach the ceiling the other two express at maxLineN.
+  check('Under can still say what At Least can say',
+    screen.includes("max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}"));
+  check('and it is exactly the ceiling At Least reaches',
+    hitModeHeadline(10, 'atLeast', 'Hits') === '10+ Hits'
+      && hitModeHeadline(11, 'under', 'Hits') === 'Under 10.5 Hits');
 
   // The JSDoc of the deleted lineFor() documented the OLD mapping.
   check('no stale mapping comment survives the deleted helper',

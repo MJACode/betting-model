@@ -61,10 +61,10 @@ import {
 } from '@/lib/statsOdds';
 import { computeHitRate, hitRateBandOf, hitRateColorDiscriminates } from '@/lib/hitRate';
 import {
-  bookLineLabel,
   hitModeHeadline,
   hitModeLabel,
   hitModeLineLabel,
+  modeLineLabel,
   rulerValueLabel,
   selectionFor,
   type HitMode,
@@ -973,8 +973,13 @@ export function StatsScreen() {
   // every book's price for it, and the off-line explainer when the book's own
   // number differs from the board's (lib/lineLegs.ts).
   const lineSheetInput = useMemo(
-    () => (lineSheet ? propLineSheetInput(lineSheet, sport, betLabel, lineHeadline) : null),
-    [lineSheet, sport, betLabel, lineHeadline],
+    () =>
+      lineSheet
+        ? propLineSheetInput(lineSheet, sport, betLabel, lineHeadline, (l, sd) =>
+            modeLineLabel(l, sd, hitMode),
+          )
+        : null,
+    [lineSheet, sport, betLabel, lineHeadline, hitMode],
   );
 
   /**
@@ -1231,16 +1236,20 @@ export function StatsScreen() {
                   it does not navigate. */}
               <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
             </Pressable>
-            {/* Every mode runs over the SAME stops and resolves each one to
-                the same half-point line — only the face differs, so the bet
-                survives a mode change unmoved and the ceiling is one number
-                (lib/hitMode.ts). */}
+            {/* Every mode resolves a stop to the SAME half-point line — only
+                the face differs — so a mode change renames the bet without
+                moving it (lib/hitMode.ts). The stops are not quite the same
+                SET, though: Under n names "n-1 or fewer", so it needs one
+                extra to reach the ceiling At Least and Over both express at
+                maxLineN. Without it "10 or fewer Hits" is unsayable while
+                "10+ Hits" is (UX review, 2026-09-06). */}
             <LineRuler
               value={lineN}
               min={1}
-              max={maxLineN(stat)}
+              max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}
               onChange={setLineN}
               format={(n) => rulerValueLabel(n, hitMode)}
+              describe={(n) => hitModeHeadline(n, hitMode, stat?.label ?? '')}
               a11yLabel={`${stat?.label ?? ''} line`}
             />
           </View>
@@ -1431,6 +1440,7 @@ export function StatsScreen() {
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
                 showOdds={showOdds}
                 statLabel={betLabel}
+                hitMode={hitMode}
                 colorful={colorful}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
@@ -1479,6 +1489,7 @@ export function StatsScreen() {
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
                 showOdds={showOdds}
                 statLabel={betLabel}
+                hitMode={hitMode}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
@@ -1698,6 +1709,7 @@ function LineRuler({
   max,
   onChange,
   format,
+  describe,
   a11yLabel,
 }: {
   a11yLabel: string;
@@ -1711,6 +1723,9 @@ function LineRuler({
    *  Snapping stays on the integer stop either way, so a scroll offset still
    *  divides cleanly. */
   format?: (n: number) => string;
+  /** The whole bet at that stop, for VoiceOver — "Over 0.5 Hits". Defaults to
+   *  the face. */
+  describe?: (n: number) => string;
 }) {
   const [width, setWidth] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
@@ -1719,8 +1734,15 @@ function LineRuler({
   // Short rulers (hits, Ks) get wide ticks with every value labeled — the old
   // look, now scrollable. Long rulers (points, yards) get dense ticks with
   // labels every 5th/10th value so the strip stays legible and flickable.
-  const tickW = count <= 30 ? 26 : TICK_W;
   const faceOf = format ?? String;
+  // The pitch follows the FACE, not the count: an Over/Under face carries a
+  // decimal ("23.5" against "23"), and at the old fixed 26 the labels on a
+  // short ruler abutted with about a point of air — one run of digits at
+  // default Dynamic Type, overlapping above it — while the opaque centre pill
+  // grew wide enough to cover its neighbours (UX review, 2026-09-06).
+  const describeOf = describe ?? faceOf;
+  const faceChars = Math.max(faceOf(min).length, faceOf(max).length);
+  const tickW = count <= 30 ? Math.max(26, faceChars * 8 + 6) : TICK_W;
   const labelEvery = count > 120 ? 10 : count > 30 ? 5 : 1;
   // Pad each end by half the viewport so the first/last values can reach the
   // centre marker.
@@ -1776,8 +1798,10 @@ function LineRuler({
       accessibilityLabel={a11yLabel}
       // `text` overrides `now` for VoiceOver, which is the point: the stop
       // index is meaningless to a user, and in Over mode the face is 0.5
-      // where the index is 1.
-      accessibilityValue={{ min, max, now: value, text: faceOf(value) }}
+      // where the index is 1. It announces the whole BET rather than the bare
+      // face, because the side and the stat live on other elements and this is
+      // the one element a screen-reader user actually drives (UX review).
+      accessibilityValue={{ min, max, now: value, text: describeOf(value) }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => {
         const next = e.nativeEvent.actionName === 'increment' ? value + 1 : value - 1;
@@ -1870,12 +1894,13 @@ function fmtValue(value: number, basis: Basis): string {
  *
  * Its own Pressable, so the tap doesn't bubble to the row (which opens the
  * player). */
-/** "Over 1.5" / "Under 1.5" — the book's own name for the number IT posts,
- *  which is what this caption is about. It spoke the fan's idiom ("2+") until
- *  2026-09-06, which read as a third number next to a board headline and a
- *  book line that were both already half-points. */
-export function offLineCaption(line: number, side: StatsOddsSide): string {
-  return bookLineLabel(line, side);
+/** The book's own number for the line IT posts, in the idiom the board is
+ *  speaking — "3+" in At Least, "O 2.5" in Over/Under. Abbreviated because
+ *  this sits in a 62pt column: "Under 224.5" wrapped to two lines and made one
+ *  row of a 25-row board taller than its neighbours (UX review, 2026-09-06).
+ *  The pill's accessibilityLabel keeps the full words. */
+export function offLineCaption(line: number, side: StatsOddsSide, mode: HitMode): string {
+  return modeLineLabel(line, side, mode, true);
 }
 
 function OddsCell({
@@ -1883,12 +1908,15 @@ function OddsCell({
   started,
   playerName,
   statLabel,
+  hitMode,
   onPress,
 }: {
   quote: StatsOddsQuote | null;
   started?: 'Live' | 'Final' | null;
   playerName: string;
   statLabel: string;
+  /** Which idiom the board is speaking, for the off-line caption. */
+  hitMode: HitMode;
   onPress?: () => void;
 }) {
   if (quote == null) {
@@ -1922,10 +1950,10 @@ function OddsCell({
   // here precisely because it is no longer printed on the row.
   const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
   // The book's OWN line, when it does not post the board's: printed under the
-  // price in the BOARD'S idiom ("2+", "At most 1" — the header's vocabulary,
-  // not sportsbook notation) so it reads against the header without
+  // price in whichever idiom the header is speaking — "3+" in At Least, the
+  // book's own "O 2.5" in Over/Under — so it reads against the header without
   // translation (UX review). statsOdds offLine.
-  const caption = quote.offLine ? offLineCaption(quote.line, quote.side) : null;
+  const caption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;
   return (
     <Pressable
       onPress={onPress}
@@ -1952,7 +1980,11 @@ function OddsCell({
         </Text>
         <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>
-      {caption ? <Text style={styles.oddsCaption}>{caption}</Text> : null}
+      {caption ? (
+        <Text style={styles.oddsCaption} numberOfLines={1}>
+          {caption}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -2071,6 +2103,7 @@ function LeaderRow({
   started,
   showOdds,
   statLabel,
+  hitMode,
   onOddsPress,
   tappable,
   onPress,
@@ -2089,6 +2122,8 @@ function LeaderRow({
   started: 'Live' | 'Final' | null;
   showOdds: boolean;
   statLabel: string;
+  /** Passed through to the odds cell's off-line caption. */
+  hitMode: HitMode;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -2134,6 +2169,7 @@ function LeaderRow({
           started={started}
           playerName={row.player_name ?? ''}
           statLabel={statLabel}
+          hitMode={hitMode}
           onPress={onOddsPress}
         />
       ) : null}
@@ -2167,6 +2203,7 @@ function HitRateRow({
   started,
   showOdds,
   statLabel,
+  hitMode,
   colorful,
   onOddsPress,
   tappable,
@@ -2185,6 +2222,8 @@ function HitRateRow({
   started: 'Live' | 'Final' | null;
   showOdds: boolean;
   statLabel: string;
+  /** Passed through to the odds cell's off-line caption. */
+  hitMode: HitMode;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -2236,6 +2275,7 @@ function HitRateRow({
           started={started}
           playerName={player.player_name}
           statLabel={statLabel}
+          hitMode={hitMode}
           onPress={onOddsPress}
         />
       ) : null}
