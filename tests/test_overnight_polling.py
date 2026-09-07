@@ -78,4 +78,8 @@ def test_the_overnight_pass_is_the_ordinary_one():
     achieves nothing. `mode` is unset, i.e. the default hourly chain."""
     job = _jobs()["overnight_refresh"]
     assert not job.kwargs.get("mode"), "overnight must run the full hourly chain"
-    assert job.func is scheduler.run_refresh_pass
+    # Unwrapped: since 2026-09-06 every registered job is wrapped by the
+    # heartbeat recorder (scheduler._with_heartbeat), which uses functools.wraps
+    # and so preserves the original under __wrapped__. The property under test
+    # is unchanged -- overnight runs the ORDINARY pass, not a cut-down one.
+    assert getattr(job.func, "__wrapped__", job.func) is scheduler.run_refresh_pass

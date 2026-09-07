@@ -273,3 +273,56 @@ def test_unparseable_timestamp_does_not_crash_the_watchdog(sink, monkeypatch):
     # Unknown age is not evidence of a stall — it must not manufacture an alert.
     assert result["status"] == "ok"
     assert sink == []
+
+
+def test_a_silent_failure_alerter_is_caught_by_the_watchdog(sink, monkeypatch):
+    """WHO WATCHES THE WATCHER.
+
+    failure_alerter reports every other failure, and reports on its own
+    heartbeat too — which is worth nothing when it is the thing that died. So
+    the check lives in the watchdog: a separate schedule, on both services,
+    with no dependency on the alerter being alive.
+    """
+    from datetime import timedelta
+
+    import tracking.job_heartbeat as jh
+
+    monkeypatch.setattr(
+        jh, "stale_jobs",
+        lambda conn, now=None: [("failure_alerter", 90.0, 45)])
+    _working_db(monkeypatch, NOW.isoformat())
+
+    result = hw.run_watchdog(now=NOW)
+
+    assert result["status"] == "alerter_silent"
+    assert len(sink) == 1
+    assert "failure_alerter" in sink[0]["payload"]["embeds"][0]["description"]
+
+
+def test_a_stalled_pipeline_outranks_a_silent_alerter(sink, monkeypatch):
+    """If passes have stopped, THAT is the finding. A silent alerter is a
+    symptom of it, and reporting both would split one incident in two."""
+    from datetime import timedelta
+
+    import tracking.job_heartbeat as jh
+
+    monkeypatch.setattr(
+        jh, "stale_jobs",
+        lambda conn, now=None: [("failure_alerter", 90.0, 45)])
+    stale = (NOW - timedelta(minutes=config.WATCHDOG_STALE_MINUTES + 30)).isoformat()
+    _working_db(monkeypatch, stale)
+
+    assert hw.run_watchdog(now=NOW)["status"] == "pipeline_stalled"
+
+
+def test_an_unreadable_heartbeat_table_does_not_raise_a_second_alarm(
+        sink, monkeypatch):
+    import tracking.job_heartbeat as jh
+
+    def _boom(conn, now=None):
+        raise RuntimeError("relation does not exist")
+
+    monkeypatch.setattr(jh, "stale_jobs", _boom)
+    _working_db(monkeypatch, NOW.isoformat())
+
+    assert hw.run_watchdog(now=NOW)["status"] == "ok"

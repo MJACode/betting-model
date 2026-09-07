@@ -134,6 +134,22 @@ def _newest_run_age_minutes(conn, now: datetime) -> float | None:
     return (now - parsed).total_seconds() / 60.0
 
 
+def _alerter_is_silent(conn, now: datetime) -> bool:
+    """True when the failure alerter has stopped recording runs.
+
+    Best-effort and FAILS QUIET: an unreadable heartbeat table must not raise a
+    second alarm on top of whatever is already wrong. The database being
+    unreachable is already `db_unreachable`, which is checked first.
+    """
+    try:
+        from tracking.job_heartbeat import stale_jobs
+        return any(job_id == "failure_alerter"
+                   for job_id, _, _ in stale_jobs(conn, now))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Watchdog could not read the alerter heartbeat: {exc}")
+        return False
+
+
 def run_watchdog(now: datetime | None = None) -> dict:
     """Run both checks, alert on what is wrong, and report what it found.
 
@@ -172,6 +188,24 @@ def run_watchdog(now: datetime | None = None) -> dict:
                     f"row started **{age:.0f} minutes ago** — over the "
                     f"{config.WATCHDOG_STALE_MINUTES}-minute limit. The scheduler "
                     "is not completing passes."
+                )
+            elif _alerter_is_silent(conn, now):
+                # WHO WATCHES THE WATCHER. tracking/failure_alerter.py reports
+                # every other failure to the ops channel, and reports on its own
+                # heartbeat too -- which is worth exactly nothing when it is the
+                # thing that has died. So the check lives HERE, in the one
+                # component that runs on both services, on its own schedule, and
+                # keeps no dependency on the alerter being alive.
+                #
+                # Ranked BELOW pipeline_stalled on purpose: if passes have
+                # stopped, that is the finding, and a silent alerter is a
+                # symptom of it rather than a second incident.
+                status = "alerter_silent"
+                detail = (
+                    "The database is reachable and passes are completing, but "
+                    "`failure_alerter` has not recorded a run inside its "
+                    "allowance. **Every other failure alert is therefore off** "
+                    "— the channel being quiet no longer means anything."
                 )
         finally:
             # The watchdog runs every 15 minutes forever; a leaked connection
