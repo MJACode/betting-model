@@ -351,6 +351,22 @@ answer is "nothing".
   NONE rows for games that have not started, and the UFC/GOLF/NCAAF look-ahead
   window, where picks are explicitly not yet locked and re-score until game
   morning (`docs/sports/{ufc,golf,ncaaf}.md`). A BET is never in that set.
+- **A pick the model should never have PRODUCED is VOIDED, never deleted.**
+  (mike, 2026-09-07.) §1c protects a bet against LINE MOVEMENT — the number
+  moved, the bet still happened. It does not protect a row a model emitted while
+  firing OUTSIDE its validated window, or on a game that was never eligible.
+  But deleting one throws away the evidence that it happened, and that evidence
+  is usually how the bug was found. So the row stays and stops counting:
+  `result='NO_ACTION'` (the repo's existing void — already excluded from net,
+  ROI and the record app-wide) plus `condition_status='VOID'` and the reason in
+  `condition_note`. **`created_at`, the line and the price are never touched**,
+  and the game keeps its insert-once lock so nothing silently re-fires.
+  Use **`scripts/void_picks.py`** (dry-run by default, `--apply` to write). It
+  REFUSES a pick already graded WIN/LOSS/PUSH — voiding one of those is
+  rewriting a settled result, not correcting a bug. First use: the six
+  `nfl_wind_totals` Week 1 picks that fired at 7.2–8.7 day leads before the
+  firing gate landed; all six had lost their premise by then
+  (`docs/nfl_wind_lead_evidence.md`).
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
