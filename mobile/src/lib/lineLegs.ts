@@ -43,7 +43,7 @@
  */
 
 import { americanToDecimal } from '@/lib/format';
-import { thresholdLabel } from '@/lib/hitMode';
+import { bookLineLabel } from '@/lib/hitMode';
 import type { LegBookPrice, ParlayLeg } from '@/lib/parlay';
 import { bookName, isBettableBook, linkForSide, MODEL_BOOK, priceForSide } from '@/lib/markets';
 import type { StatsOddsQuote, TeamLineQuote } from '@/lib/statsOdds';
@@ -303,6 +303,13 @@ export function propLineSheetInput(
   sport: string,
   statLabel: string,
   boardHeadline?: string,
+  /** How to name the book's own line. `boardHeadline` is written in whichever
+   *  idiom the board is speaking, and this sentence quotes both in one breath
+   *  — so the second half has to follow the first or the explainer reads "The
+   *  board is on 2+ Hits; FanDuel only posts Over 2.5" (UX review,
+   *  2026-09-06). Defaults to the book's own notation for callers with no
+   *  board behind them. */
+  numberLabel: (line: number, side: 'over' | 'under') => string = bookLineLabel,
 ): LineSheetInput {
   const rows = quote.bookRows as PropOddsByBookRow[];
   const spec: PropLineLegSpec = {
@@ -320,7 +327,7 @@ export function propLineSheetInput(
   const explainer =
     quote.offLine && boardHeadline
       ? `The board is on ${boardHeadline}; ${bookName(quote.book)} only posts ${
-          thresholdLabel(quote.line, quote.side)
+          numberLabel(quote.line, quote.side)
         }. Add it to your betslip now — you’ll choose the sportsbook there.`
       : undefined;
   return { spec, prices, explainer };
