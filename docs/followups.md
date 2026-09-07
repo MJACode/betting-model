@@ -98,8 +98,10 @@ the line or the price.
 **Done 2026-09-07 (mike: "fix the labels").**
 `data/migrations/ncaaf_fcs_visitor_names_2026_09_07.sql`, applied from the
 worker's own pass, renames the visitor on the nine `games` rows, writes CFBD's
-final onto each, and replaces the wrong name in all 44 labels on those rows
-(the six BETs and the pre-game NONE rows) once, whole-word. The Discord and
+final onto each, and replaces the wrong name in the 27 labels on those rows that
+carry it (the six BETs and the pre-game NONE rows naming the visitor; the
+other 16 of 43 name only the home team) once, whole-word. Verified on the
+worker's 22:30 UTC pass: 27 corrected, 0 still wrong. The Discord and
 app posts that already went out under the wrong name are not rewritten.
 
 ## [ ] The inning-gate replay misses 13 games production actually bet
