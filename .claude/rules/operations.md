@@ -50,8 +50,17 @@ before anyone noticed it.
 - **An empty board and a broken pipeline look identical.** Prefer writing a
   "declined, and here is why" row over `return []`. Check
   `pipeline_runs.failed_steps` before blaming thresholds, and `push_sent` before
-  believing a notifier ever worked — nothing is ledgered unless a POST confirmed,
-  so a `kind` with zero rows means it has NEVER succeeded.
+  believing a notifier ever worked — a `kind` with zero rows has NEVER
+  succeeded. **But a `kind` with MANY rows has not necessarily succeeded
+  either, and this line used to claim it had** ("nothing is ledgered unless a
+  POST confirmed"). That is not true of the push producers: all three ledger
+  *regardless of token count*, deliberately, so a signal with no device online
+  is not re-detected forever. Measured 2026-09-06 — **1,158 `new_bet` and 578
+  `live_signal` rows against ZERO rows in `device_push_tokens`**, i.e. every
+  one of those was `messages = []`, `_expo_send` never called, lock_key written
+  anyway. No push has ever reached a phone. **So the ledger is evidence a
+  signal was CONSIDERED, and the recipient table is the evidence it was SENT —
+  check both.** (`docs/push_notifications.md` carries the query.)
 - **A health check must not gate on the thing that breaks.** Two checks reported
   SKIPPED for the entire outage they existed to catch, because they keyed off
   data the failing feed produces.

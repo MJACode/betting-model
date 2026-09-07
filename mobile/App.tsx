@@ -38,6 +38,7 @@ import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useOtaUpdates } from '@/hooks/useOtaUpdates';
+import { usePushDeepLink } from '@/hooks/usePushDeepLink';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
@@ -200,10 +201,21 @@ export default function App() {
   // navigate, and the focused route name to know where it's floating.
   const navRef = useNavigationContainerRef<RootStackParamList>();
   const [routeName, setRouteName] = useState<string | undefined>(undefined);
+  const [navReady, setNavReady] = useState(false);
   const tabBarHeight = useTabBarHeight();
   const syncRoute = useCallback(() => {
     setRouteName(navRef.getCurrentRoute()?.name);
   }, [navRef]);
+  const onNavReady = useCallback(() => {
+    setNavReady(true);
+    syncRoute();
+  }, [syncRoute]);
+
+  // Send a tapped notification to the pick or board it is about. Mounted here,
+  // beside the container ref it navigates with — the same reason BetslipBar is
+  // out here. Covers the tap that LAUNCHES the app, not just the one that
+  // arrives while it is already running.
+  usePushDeepLink(navRef, navReady);
   const openBetslip = useCallback(() => {
     navRef.navigate('Betslip');
   }, [navRef]);
@@ -217,7 +229,7 @@ export default function App() {
       <NavigationContainer
         ref={navRef}
         theme={NAV_THEME}
-        onReady={syncRoute}
+        onReady={onNavReady}
         onStateChange={syncRoute}
       >
         <Stack.Navigator>

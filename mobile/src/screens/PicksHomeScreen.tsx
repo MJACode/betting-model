@@ -79,10 +79,10 @@ import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { isUnlockedPreview, passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
 import { formatCurrency, formatPct, gameStatus } from '@/lib/format';
-import type { EnrichedPick, RootStackParamList, TabParamList } from '@/types';
+import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-export type PicksView = 'today' | 'signals' | 'live';
+export type { PicksView };
 
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
@@ -175,6 +175,8 @@ export function PicksHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport]);
 
+  const requestedView = route.params?.view;
+
   // The live board emptying out (last game ended) has to move the user too —
   // the segment is about to disappear from under them. SAY SO: this swaps the
   // whole list and drops the caveat block under a scrolling finger, and a
@@ -182,7 +184,13 @@ export function PicksHomeScreen() {
   useEffect(() => {
     if (view === 'live' && !liveLoading && liveData.length === 0) {
       setView('today');
-      showToast('Last in-play game finished — showing today’s board');
+      showToast(
+        // Someone arriving from a notification never saw the Live board, so
+        // "last in-play game finished" reports on a screen they were never on.
+        requestedView === 'live'
+          ? 'That game has finished — showing today’s board'
+          : 'Last in-play game finished — showing today’s board',
+      );
     }
   }, [view, liveLoading, liveData.length]);
 
@@ -193,7 +201,6 @@ export function PicksHomeScreen() {
   // switch tabs and land on whatever segment was already showing. The param is
   // cleared after use so a second tap works and a back-navigation does not
   // re-trigger it.
-  const requestedView = route.params?.view;
   useEffect(() => {
     if (!requestedView) return;
     setView(requestedView);
@@ -304,8 +311,13 @@ export function PicksHomeScreen() {
             <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
             <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} />
             {/* Conditional by design — see the file header. No live picks in this
-                sport, no segment, so there is no empty slot to learn to ignore. */}
-            {liveData.length > 0 ? (
+                sport, no segment, so there is no empty slot to learn to ignore.
+                `|| view === 'live'` covers arrival by push: the route sets the
+                view before useLivePicks has fetched, and without this the
+                control renders with NO segment selected for the whole fetch,
+                which reads as a rendering bug rather than a load. The effect
+                below removes it once the fetch confirms the board is empty. */}
+            {liveData.length > 0 || view === 'live' ? (
               <SubTabBtn
                 label="Live"
                 count={liveData.length}

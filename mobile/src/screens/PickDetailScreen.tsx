@@ -36,6 +36,7 @@ import type { Sport } from '@/hooks/useSportFilter';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
+import { EmptyState } from '@/components/EmptyState';
 import { fetchPickById } from '@/lib/queries';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
@@ -67,9 +68,16 @@ export function PickDetailScreen() {
   const [data, setData] = useState<EnrichedPick | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by Retry. This screen used to be reachable only from a card whose
+  // row had already loaded; a `line_change` push can now land here on a cold
+  // start with no network, on the one notification about money already
+  // committed (UX review, 2026-09-06).
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
+    setError(null);
     fetchPickById(pickId)
       .then((row) => {
         if (mounted) setData(row);
@@ -83,7 +91,7 @@ export function PickDetailScreen() {
     return () => {
       mounted = false;
     };
-  }, [pickId]);
+  }, [pickId, attempt]);
 
   if (loading) {
     return (
@@ -94,9 +102,28 @@ export function PickDetailScreen() {
   }
 
   if (error || !data) {
+    // A failed FETCH and a pick that is genuinely gone are different answers
+    // and need different words: one is worth retrying, the other never will be.
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <Text style={styles.error}>{error ?? 'Pick not found'}</Text>
+        <EmptyState
+          title={error ? 'Couldn’t load this pick' : 'This pick is no longer on the board'}
+          subtitle={
+            error
+              ? `${error} Check your connection and try again.`
+              : 'It may have settled, or the market was pulled. Open Picks to see what’s live now.'
+          }
+        />
+        {error ? (
+          <Pressable
+            onPress={() => setAttempt((n) => n + 1)}
+            accessibilityRole="button"
+            accessibilityLabel="Try loading this pick again"
+            style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
+          >
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -693,10 +720,21 @@ const styles = StyleSheet.create({
   loadingTrend: {
     marginTop: spacing.md,
   },
-  error: {
-    color: colors.avoid,
-    padding: spacing.lg,
+  retry: {
+    alignSelf: 'center',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    // 44pt minimum touch target (UX_REVIEW §4).
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  retryPressed: {
+    opacity: 0.6,
+  },
+  retryText: {
+    color: colors.tint,
     fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
   },
   viewStatsBtn: {
     flexDirection: 'row',

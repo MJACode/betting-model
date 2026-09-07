@@ -101,10 +101,20 @@ def test_settings_points_at_the_live_segment():
 
 
 def test_picks_carries_a_live_view():
-    src = _read(PICKS)
-    m = re.search(r"export type PicksView = ([^;]+);", src)
-    assert m, "PicksView not found"
+    """PicksView is declared once, in types, and includes 'live'.
+
+    It used to be spelled out inline in three places -- the screen, the tab
+    param list, and (after the push router landed) lib/pushRoute, which also had
+    lib/ importing a type from screens/ and inverting the layering.
+    """
+    m = re.search(r"export type PicksView = ([^;]+);", _read(TYPES))
+    assert m, "PicksView is not declared in types/index.ts"
     assert "'live'" in m.group(1), m.group(1)
+    # and nothing re-spells it
+    for path, label in ((PICKS, "PicksHomeScreen"), (MOBILE / "src" / "lib" / "pushRoute.ts", "pushRoute")):
+        assert not re.search(r"type PicksView = '", _read(path)), (
+            f"{label} re-declares PicksView instead of importing it"
+        )
 
 
 def test_the_live_segment_renders_only_when_something_is_live():
@@ -198,8 +208,26 @@ def test_no_app_root_component_reaches_a_focus_aware_hook():
     functions actually reachable from the root call it.
     """
     src_dir = MOBILE / "src"
-    root = src_dir / "components" / "BetslipBar.tsx"
-    assert root.exists(), f"{root} moved -- re-point this test"
+    # Every component App.tsx mounts OUTSIDE <NavigationContainer>. Add one here
+    # when you mount one; that is the whole membership rule.
+    roots = [
+        src_dir / "components" / "BetslipBar.tsx",
+        src_dir / "hooks" / "usePushDeepLink.ts",
+    ]
+    for root in roots:
+        assert root.exists(), f"{root} moved -- re-point this test"
+
+    def strip_comments(src: str) -> str:
+        """Blank out comments, keeping line count so offsets stay meaningful.
+
+        Only CODE can call a hook. Prose is where these rules get discussed --
+        the files that obey this one explain why in their own headers -- so
+        matching comments reports the compliant file as the offender.
+        """
+        src = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), src, flags=re.S)
+        return "\n".join(
+            "" if line.strip().startswith("//") else line for line in src.splitlines()
+        )
 
     def symbol_bodies(path: Path) -> dict[str, str]:
         """Top-level function declarations in a module, by name.
@@ -208,7 +236,7 @@ def test_no_app_root_component_reaches_a_focus_aware_hook():
         which is coarse but never UNDER-reports a call, so it cannot make this
         test pass by missing something.
         """
-        src = _read(path)
+        src = strip_comments(_read(path))
         decls = [
             (m.start(), m.group(1))
             for m in re.finditer(r"^(?:export )?function (\w+)", src, re.M)
@@ -222,7 +250,9 @@ def test_no_app_root_component_reaches_a_focus_aware_hook():
     def imports_of(path: Path) -> dict[str, Path]:
         """Imported local symbol -> the module file it came from."""
         out: dict[str, Path] = {}
-        for names, spec in re.findall(r"import \{([^}]+)\} from '@/([^']+)'", _read(path)):
+        for names, spec in re.findall(
+            r"import (?:type )?\{([^}]+)\} from '@/([^']+)'", _read(path)
+        ):
             target = None
             for suffix in (".ts", ".tsx"):
                 cand = src_dir / f"{spec}{suffix}"
@@ -240,7 +270,7 @@ def test_no_app_root_component_reaches_a_focus_aware_hook():
     offenders: list[str] = []
     seen: set[tuple[Path, str]] = set()
     # The root module's own top-level code counts, whatever it is named.
-    stack = [(root, name) for name in symbol_bodies(root)]
+    stack = [(root, name) for root in roots for name in symbol_bodies(root)]
     while stack:
         path, name = stack.pop()
         if (path, name) in seen:
