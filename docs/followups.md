@@ -87,16 +87,20 @@ FROM live l JOIN cfbd c ON c.home_team = l.home_team
   AND abs(c.game_date::date - l.game_date::date) <= 1 AND c.away_team <> l.away_team;
 ```
 
-## [ ] [needs-decision] Six live NCAAF picks are labelled with the wrong opponent
+## [x] Six live NCAAF picks are labelled with the wrong opponent - FIXED 2026-09-07
 
-Same session. `pick_label` reads "Indiana @ Purdue Over 45.5 (live)"; the game
+Same session. `pick_label` read "Indiana @ Purdue Over 45.5 (live)"; the game
 was Indiana State @ Purdue, and the bet was on DK's live total for that game
 (the live loop prices from the pregame line and the live state, not from team
 identity). §1c protects the row as the bet of record; a DISPLAY label is not
-the line or the price. Decide whether to correct the six labels (pick_ids
-1639470, 1642661, 1669133, 1687014, 1691201, 1692823) and the nine mis-named
-`games` rows' `away_team`, or leave them with this note as the record. The
-Discord and app posts already went out under the wrong name either way.
+the line or the price.
+
+**Done 2026-09-07 (mike: "fix the labels").**
+`data/migrations/ncaaf_fcs_visitor_names_2026_09_07.sql`, applied from the
+worker's own pass, renames the visitor on the nine `games` rows, writes CFBD's
+final onto each, and replaces the wrong name in all 44 labels on those rows
+(the six BETs and the pre-game NONE rows) once, whole-word. The Discord and
+app posts that already went out under the wrong name are not rewritten.
 
 ## [ ] The inning-gate replay misses 13 games production actually bet
 
