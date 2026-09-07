@@ -49,6 +49,32 @@ from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_d
 
 OPTUNA_TRIALS = 100         # hyperparameter search trials
 CV_FOLDS      = 5           # stratified k-fold for Optuna objective
+# Folds for the COUNT objective only (_poisson_objective). 3, not CV_FOLDS' 5.
+#
+# The two were the same number by accident, never by a decision -- the gamma
+# path (_squared_objective) has always used 3 and nothing documented why the
+# count path used 5. Measured 2026-09-07, same seed, same 40 trials, same data,
+# only the fold count varying:
+#
+#     model                 5-fold    3-fold    time     MAE d    OU acc d
+#     nfl_prop_pass_attempts 1016s      534s    -47%    -0.001      -0.004
+#     nfl_prop_receptions    1403s      630s    -55%    -0.002      +0.001
+#     nfl_prop_sacks         1084s      933s    -14%    +0.001      +0.001
+#
+# 14-55% faster, averaging ~39% -- NOT the flat halving the first two models
+# suggested, which is why the third was run before shipping. sacks is the big
+# dataset (62k rows) and gains least, so the saving is largest exactly where
+# the search is cheapest already. The accuracy differences are noise
+# throughout: 0.001-0.002 MAE on targets of 7.2, 1.7 and 0.39.
+#
+# A 4-hour retrain of the twelve NFL prop models is what made this worth
+# measuring rather than assuming.
+#
+# SEPARATE FROM CV_FOLDS ON PURPOSE. CV_FOLDS also sizes _time_ordered_cv's
+# TimeSeriesSplit, which every GAME model tunes through and which was not part
+# of this measurement. Lowering one number would have silently re-tuned models
+# nobody looked at.
+COUNT_CV_FOLDS = 3
 CALIBRATION_FOLDS = 5       # Platt scaling CV folds
 RANDOM_STATE  = 42
 
@@ -737,7 +763,7 @@ def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> flo
         "verbosity":        0,
     }
 
-    kf = KFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    kf = KFold(n_splits=COUNT_CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
     scores = []
 
     for train_idx, val_idx in kf.split(X):

@@ -60,6 +60,12 @@ SPORT_KEYS = {
 # Markets to pull (full-game)
 MARKETS = ["h2h", "spreads", "totals"]
 
+# Stamped on every row the /historical endpoint writes, and protected by name
+# in data/prune_odds.py. Rows from the live poll carry NULL. Without the stamp
+# the pruner cannot tell a paid 2024 snapshot from a disposable line-shop row
+# -- and did not, on the 2026-09-01 MLB backfill (see prune_odds.PROTECTED_SOURCES).
+HISTORICAL_ODDS_SOURCE = "odds_api_historical"
+
 # MLB first-5-innings markets (pulled only for MLB)
 MLB_F5_MARKETS = ["h2h_1st_5_innings", "spreads_1st_5_innings", "totals_1st_5_innings"]
 
@@ -782,6 +788,8 @@ def _process_events(events: list[dict], sport: str,
                     "draw_sid":      None,
                     "over_sid":      None,
                     "under_sid":     None,
+                    # NULL for the live poll; the historical backfill overwrites.
+                    "source":        None,
                 }
 
                 if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
@@ -819,24 +827,30 @@ def _upsert_games(conn: DBConnection, game_rows: list[dict]) -> int:
 
 
 def _insert_odds(conn: DBConnection, odds_rows: list[dict]) -> int:
-    """Insert odds snapshot rows (always append — no dedup)."""
+    """Insert odds snapshot rows (always append — no dedup).
+
+    `source` is optional on the way in: live_price_log and pregame_line_poller
+    build their own rows and predate the column. They write NULL.
+    """
     sql = """
         INSERT INTO odds (
             game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
             home_price, away_price, draw_price,
             spread_home, total_line, over_price, under_price,
             home_link, away_link, draw_link, over_link, under_link,
-            home_sid, away_sid, draw_sid, over_sid, under_sid
+            home_sid, away_sid, draw_sid, over_sid, under_sid, source
         ) VALUES (
             %(game_id)s, %(sport)s, %(market)s, %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
             %(home_price)s, %(away_price)s, %(draw_price)s,
             %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s,
             %(home_link)s, %(away_link)s, %(draw_link)s, %(over_link)s, %(under_link)s,
-            %(home_sid)s, %(away_sid)s, %(draw_sid)s, %(over_sid)s, %(under_sid)s
+            %(home_sid)s, %(away_sid)s, %(draw_sid)s, %(over_sid)s, %(under_sid)s,
+            %(source)s
         )
     """
-    conn.executemany(sql, odds_rows)
-    return len(odds_rows)
+    rows = [r if "source" in r else {**r, "source": None} for r in odds_rows]
+    conn.executemany(sql, rows)
+    return len(rows)
 
 
 def _log_pipeline(conn: DBConnection, run_date: str,
@@ -1116,6 +1130,8 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     game_rows, odds_rows = _process_events(
         events, sport, "open", snapshot_at
     )
+    for r in odds_rows:
+        r["source"] = HISTORICAL_ODDS_SOURCE
 
     conn = get_connection()
     try:
@@ -1243,7 +1259,8 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
 def run_historical_odds_range(sport: str, start: str, end: str,
                               hours_utc: list[int] | None = None,
                               bookmakers: list[str] | None = None,
-                              credit_cap: int = 25_000) -> dict:
+                              credit_cap: int = 25_000,
+                              markets: list[str] | None = None) -> dict:
     """Backfill a DATE RANGE of historical odds, several snapshots per day.
 
     This is what makes market-movement features trainable on more than the 2026
@@ -1271,14 +1288,16 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     sport_key = SPORT_KEYS[sport]
     hours = sorted(set(hours_utc or [12, 22]))
     books = bookmakers or ODDS_HISTORY_BOOKMAKERS
-    markets = MARKETS[:]
+    # The cost is PER MARKET, so the caller chooses which to fund. NCAAF
+    # 2023-2025 funded spreads + totals (20 a call); MLB funded all three.
+    markets = list(markets or MARKETS)
     per_call = 10 * len(markets)          # bookmakers param = one region
 
     d0 = _date.fromisoformat(start)
     d1 = _date.fromisoformat(end)
     spent = 0
     stats = {"sport": sport, "start": start, "end": end, "hours_utc": hours,
-             "bookmakers": books, "credit_cap": credit_cap,
+             "bookmakers": books, "markets": markets, "credit_cap": credit_cap,
              "calls": 0, "skipped_cached": 0, "credits_spent": 0,
              "marked_in_play": 0,
              "games": 0, "odds_rows": 0, "errors": 0,
@@ -1326,6 +1345,8 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     time.sleep(REQUEST_SLEEP)
                     game_rows, odds_rows = _process_events(
                         events, sport, "open", snapshot_at)
+                    for r in odds_rows:
+                        r["source"] = HISTORICAL_ODDS_SOURCE
                     flipped = _mark_in_play(game_rows, odds_rows)
                     stats["marked_in_play"] += flipped
                     if game_rows:

@@ -273,5 +273,80 @@
     "args": {
       "sport": "WNBA"
     }
+  },
+  {
+    "key": "ncaaf-history-2023",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "2023 CFB regular season through conference championships, one 14:00Z snapshot a day, spreads + totals only (20 credits a call). 108 days = 108 calls = 2,160 credits against a 2,500 cap. Funded by Matt 2026-09-07 (session 252) for a sharp-vs-soft current-line rule; the 2024-10-19 probe returned DK+Bovada and DK+Pinnacle on 47 of 72 events. Rows are stamped odds_api_historical so the pruner keeps them -- the MLB backfill was not, and was thinned to one row per proposition. h2h deliberately not funded (+1,080 per season).",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2023-08-24",
+      "end": "2023-12-09",
+      "hours_utc": [
+        14
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "bovada",
+        "pinnacle"
+      ],
+      "markets": [
+        "spreads",
+        "totals"
+      ],
+      "credit_cap": 2500
+    }
+  },
+  {
+    "key": "ncaaf-history-2024",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "2024 CFB regular season through conference championships, one 14:00Z snapshot a day, spreads + totals only (20 credits a call). 108 days = 108 calls = 2,160 credits against a 2,500 cap. Funded by Matt 2026-09-07 (session 252) for a sharp-vs-soft current-line rule; the 2024-10-19 probe returned DK+Bovada and DK+Pinnacle on 47 of 72 events. Rows are stamped odds_api_historical so the pruner keeps them -- the MLB backfill was not, and was thinned to one row per proposition. h2h deliberately not funded (+1,080 per season).",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2024-08-22",
+      "end": "2024-12-07",
+      "hours_utc": [
+        14
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "bovada",
+        "pinnacle"
+      ],
+      "markets": [
+        "spreads",
+        "totals"
+      ],
+      "credit_cap": 2500
+    }
+  },
+  {
+    "key": "ncaaf-history-2025",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "2025 CFB regular season through conference championships, one 14:00Z snapshot a day, spreads + totals only (20 credits a call). 108 days = 108 calls = 2,160 credits against a 2,500 cap. Funded by Matt 2026-09-07 (session 252) for a sharp-vs-soft current-line rule; the 2024-10-19 probe returned DK+Bovada and DK+Pinnacle on 47 of 72 events. Rows are stamped odds_api_historical so the pruner keeps them -- the MLB backfill was not, and was thinned to one row per proposition. h2h deliberately not funded (+1,080 per season).",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2025-08-21",
+      "end": "2025-12-06",
+      "hours_utc": [
+        14
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "bovada",
+        "pinnacle"
+      ],
+      "markets": [
+        "spreads",
+        "totals"
+      ],
+      "credit_cap": 2500
+    }
   }
 ]

@@ -1454,3 +1454,35 @@ def test_the_nfl_pregame_cutoff_casts_both_arms_of_the_coalesce():
     # And specifically: first_pitch_at must never be returned raw.
     assert not re.search(r"THEN\s+\S*first_pitch_at\s+END", expr), \
         "g.first_pitch_at is returned without ::timestamptz"
+
+
+def test_the_count_objective_has_its_own_fold_count():
+    """3 folds for counts, 5 for the time-ordered game CV, and they are separate
+    constants on purpose.
+
+    They were the same number by accident: the gamma path (_squared_objective)
+    has always used 3 and nothing documented why the count path used 5.
+    Measured 2026-09-07 -- same seed, same 40 trials, same data, only the fold
+    count varying -- 3 folds ran 47%, 55% and 14% faster on pass_attempts,
+    receptions and sacks, for MAE differences of 0.001-0.002 on targets of 7.2,
+    1.7 and 0.39. Noise on accuracy; 14-55% on time, averaging ~39%. sacks is
+    the 62k-row dataset and gains least, so the first two models alone would
+    have overstated this as a flat halving.
+
+    The separation is the load-bearing part. CV_FOLDS also sizes
+    _time_ordered_cv's TimeSeriesSplit, which every GAME model tunes through and
+    which was NOT measured. Collapsing them back into one number would silently
+    re-tune models nobody looked at, which is exactly what this pins.
+    """
+    import inspect
+
+    import models.trainer as trainer
+
+    assert trainer.COUNT_CV_FOLDS == 3
+    assert trainer.CV_FOLDS == 5, "the game-model CV was not part of the measurement"
+
+    count_src = inspect.getsource(trainer._poisson_objective)
+    assert "n_splits=COUNT_CV_FOLDS" in count_src, count_src
+
+    time_src = inspect.getsource(trainer._time_ordered_cv)
+    assert "n_splits=CV_FOLDS" in time_src, time_src

@@ -563,3 +563,17 @@ def test_the_queue_runs_on_a_session_mode_connection():
     assert "pg_try_advisory_lock" in qsrc, (
         "if the queue ever stops using a session-scoped lock, the session-mode "
         "pin above is dead weight and should go with it")
+
+
+def test_historical_markets_default_to_all_and_reject_unknown():
+    """A declared job may fund a subset of markets; the cost model is per
+    market, so the validator must pass the list through and refuse a key the
+    bulk endpoint would 422 on."""
+    import pytest
+    base = {"sport": "NCAAF", "start": "2023-08-24", "end": "2023-12-09",
+            "credit_cap": 2500}
+    assert q._validate_historical_odds(base)["markets"] == ["h2h", "spreads", "totals"]
+    assert q._validate_historical_odds(
+        {**base, "markets": ["spreads", "totals"]})["markets"] == ["spreads", "totals"]
+    with pytest.raises(ValueError):
+        q._validate_historical_odds({**base, "markets": ["player_pass_tds"]})
