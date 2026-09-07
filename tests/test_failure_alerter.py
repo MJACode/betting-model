@@ -26,17 +26,36 @@ NOW = datetime(2026, 9, 6, 23, 0, tzinfo=timezone.utc)
 
 
 class FakeConn:
-    """Answers the two queries the alerter makes, by shape."""
+    """Answers the three queries the alerter makes, by shape.
 
-    def __init__(self, health=(), runs=()):
+    Heartbeats default to FRESH for every watched job, so a test about health
+    checks or the clean rate is not also silently a test about job silence.
+    """
+
+    def __init__(self, health=(), runs=(), beats=None):
         self._health, self._runs, self._last = health, runs, None
+        if beats is None:
+            from datetime import timedelta as _td
+
+            from tracking.job_heartbeat import MAX_SILENCE
+            # Stamped ahead of every clock these tests use, so no test about
+            # health checks or the clean rate is ALSO a test about job silence.
+            fresh = (NOW + _td(days=1)).isoformat()
+            beats = [(j, fresh) for j in MAX_SILENCE]
+        self._beats = beats
 
     def execute(self, sql, params=()):
-        self._last = "health" if "system_health_checks" in sql else "runs"
+        if "system_health_checks" in sql:
+            self._last = "health"
+        elif "job_heartbeats" in sql:
+            self._last = "beats"
+        else:
+            self._last = "runs"
         return self
 
     def fetchall(self):
-        return list(self._health if self._last == "health" else self._runs)
+        return list({"health": self._health, "beats": self._beats}.get(
+            self._last, self._runs))
 
 
 def _state_dir(monkeypatch, tmp_path):
@@ -73,7 +92,7 @@ class TestWhatCountsAsAFailure:
         # and alerting on it would bury the channel out of season.
         conn = FakeConn(health=[("a", "OK", "CRIT", ""), ("b", "SKIPPED", "WARN", "")],
                         runs=_clean_runs())
-        assert fa._conditions(conn) == {}
+        assert fa._conditions(conn, NOW) == {}
 
     def test_severity_carries_through(self):
         conn = FakeConn(health=[("x", "STALE", "WARN", "flaky upstream")],
@@ -94,7 +113,7 @@ class TestWhatCountsAsAFailure:
 
     def test_a_healthy_board_is_silent(self):
         conn = FakeConn(health=[("a", "OK", "CRIT", "")], runs=_clean_runs())
-        assert fa._conditions(conn) == {}
+        assert fa._conditions(conn, NOW) == {}
 
     def test_the_floor_sits_below_a_normal_day(self):
         # Measured 2026-09-04 and 09-05: 0.64 and 0.69 clean. A threshold that
@@ -219,3 +238,60 @@ class TestItCannotBreakTheWorker:
         block = src[src.index("def run_failure_alerter() -> None:"):]
         block = block[:block.index("\ndef ", 10)]
         assert "except Exception" in block
+
+
+class TestSilentJobs:
+    """A job whose correct output is often NOTHING cannot be watched by
+    watching its output. The NFL polls write a pick only when one qualifies,
+    so before this a dead poll and a quiet market were identical.
+    """
+
+    def test_a_silent_job_is_a_critical_condition(self):
+        from datetime import timedelta as _td
+        old = (NOW - _td(hours=6)).isoformat()
+        conn = FakeConn(health=[], runs=_clean_runs(),
+                        beats=[("nfl_opener_poll", old)])
+        c = fa._conditions(conn, NOW)
+        assert "job:nfl_opener_poll" in c
+        sev, title, detail = c["job:nfl_opener_poll"]
+        assert sev == "CRIT"
+        assert "silent" in title
+        assert "360" in detail or "minutes ago" in detail
+
+    def test_a_job_with_no_row_is_NOT_reported(self):
+        """Two very different things produce no row: a job DISABLED on this
+        deployment (RUN_NFL_LIVE=0 never registers) and a fresh deploy where
+        nothing has ticked yet. Alerting on either means a burst of false
+        alarms every deploy plus a permanent alarm per switched-off job.
+
+        The scheduler seeds a row at REGISTRATION, so "has a row and has gone
+        quiet" means "was registered and has stopped" — which is the condition
+        worth waking someone for."""
+        conn = FakeConn(health=[], runs=_clean_runs(), beats=[])
+        assert [k for k in fa._conditions(conn, NOW) if k.startswith("job:")] == []
+
+    def test_a_seeded_job_that_never_ticks_still_goes_stale(self):
+        """Seeding must not become a permanent excuse: a job registered and
+        then never run is exactly the silent failure this exists for."""
+        from datetime import timedelta as _td
+        seeded_long_ago = (NOW - _td(hours=3)).isoformat()
+        conn = FakeConn(health=[], runs=_clean_runs(),
+                        beats=[("nfl_opener_poll", seeded_long_ago)])
+        assert "job:nfl_opener_poll" in fa._conditions(conn, NOW)
+
+    def test_fresh_jobs_are_silent(self):
+        conn = FakeConn(health=[], runs=_clean_runs())
+        assert [k for k in fa._conditions(conn, NOW) if k.startswith("job:")] == []
+
+    def test_the_jobs_with_no_output_check_are_watched(self):
+        # The three the 2026-09-06 audit found uncovered, plus the watcher.
+        from tracking.job_heartbeat import MAX_SILENCE
+        for j in ("nfl_opener_poll", "nfl_poll_hourly", "nfl_live_worker",
+                  "failure_alerter"):
+            assert j in MAX_SILENCE, j
+
+    def test_the_overnight_gap_does_not_trip_the_in_play_worker(self):
+        # nfl_live_worker runs 9am-midnight ET, so ~9h of silence is correct
+        # behaviour and must not alert.
+        from tracking.job_heartbeat import MAX_SILENCE
+        assert MAX_SILENCE["nfl_live_worker"] > 9 * 60

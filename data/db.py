@@ -246,20 +246,92 @@ class DBConnection:
 
 # ── Factory ───────────────────────────────────────────────────────────────────
 
-def get_connection() -> DBConnection:
+def get_connection(session_mode: bool = False) -> DBConnection:
     """
     Open and return a wrapped Postgres connection.
 
     Reads DATABASE_URL from the environment (loaded via .env by config.py).
     Raises ValueError if DATABASE_URL is not set.
+
+    `session_mode=True` asks for DATABASE_URL_SESSION instead, and there is
+    exactly one caller: tracking/job_queue.py.
+
+    WHY THE SPLIT EXISTS. Supavisor's pool size is SHARED between the session
+    port (5432) and the transaction port (6543), and in SESSION mode every
+    client holds a server connection one-to-one -- so the pool size is also the
+    maximum number of concurrent clients. At pool_size 15 that ceiling was
+    being hit constantly on 2026-09-06: `odds`, `prop-odds`, `lineups`,
+    `player-news-refresh` and others died with EMAXCONNSESSION, and `odds`
+    failing means the lines every model prices against were not fetched.
+
+    Transaction mode multiplexes -- a connection is held only for the duration
+    of a transaction -- so the same pool serves far more concurrent clients.
+    That is what this workload is: dozens of short, independent steps.
+
+    THE ONE THING THAT CANNOT MOVE is a SESSION-scoped advisory lock, because
+    consecutive statements in transaction mode may land on different backends.
+    `tracking/job_queue.py` holds `pg_advisory_lock` across claiming a job AND
+    running it, which is what stops two workers running the queue at once, so
+    it keeps a session-mode connection. Audited 2026-09-06: it is the only such
+    caller -- no LISTEN/NOTIFY, no session GUCs, no named cursors, no temp
+    tables, no prepared statements anywhere else in the repo.
+
+    Falls back to DATABASE_URL when DATABASE_URL_SESSION is unset, so a
+    deployment that has not set it yet behaves exactly as before.
     """
+    if session_mode:
+        url = (os.environ.get("DATABASE_URL_SESSION", "").strip()
+               or os.environ.get("DATABASE_URL", ""))
+        if not url:
+            raise ValueError("Neither DATABASE_URL_SESSION nor DATABASE_URL is set.")
+        return _connect(url)
+
     url = os.environ.get("DATABASE_URL", "")
+    if url:
+        url = _transaction_endpoint(url)
     if not url:
         raise ValueError(
             "DATABASE_URL is not set. "
             "Add it to your .env file or Railway environment variables.\n"
             "Format: postgresql://user:password@host:5432/dbname"
         )
+    return _connect(url)
+
+
+# Supabase's session pooler and transaction pooler are the SAME host with
+# different ports. 5432 hands each client its own server connection for the
+# life of the session, so the pool size doubles as the client ceiling; 6543
+# multiplexes, holding a server connection only for the duration of a
+# transaction. This workload -- a parallel group of eight steps, a 30-second
+# poller, three live loops and a minute-cadence NFL poll -- is dozens of short
+# independent units, which is what 6543 is for.
+_SESSION_POOLER_PORT = ":5432"
+_TXN_POOLER_PORT = ":6543"
+
+
+def _transaction_endpoint(url: str) -> str:
+    """Rewrite a Supabase SESSION pooler URL to the TRANSACTION pooler.
+
+    Derived rather than configured, on purpose. The alternative was a second
+    Railway variable holding the same credentials, which means copying a
+    database password around to express "the same database, different port".
+
+    NARROWLY GUARDED: it fires only for a Supabase pooler host on :5432. A
+    direct connection, a local Postgres, or any other host is returned
+    untouched, so this cannot silently redirect a database it does not
+    understand. Set DB_TRANSACTION_POOLER=0 to turn it off without a deploy --
+    the escape hatch matters more than the default here, because the failure
+    mode of the wrong port is total.
+    """
+    if os.environ.get("DB_TRANSACTION_POOLER", "1") == "0":
+        return url
+    if "pooler.supabase.com" not in url or _SESSION_POOLER_PORT not in url:
+        return url
+    return url.replace(_SESSION_POOLER_PORT, _TXN_POOLER_PORT, 1)
+
+
+def _connect(url: str) -> DBConnection:
+    """Open one wrapped connection to `url`. Shared by both modes."""
     # Per-session statement timeout, opt-in via DB_STATEMENT_TIMEOUT_MS.
     #
     # The database's own setting is 120000 (two minutes) and that is right for

@@ -493,18 +493,35 @@ def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
     the ledger can record where each one went and a later correction can delete
     or edit it; len(sum of chunks) is the old integer return.
     """
+    # GROUPED BY THE PICKS' OWN DATE, and `game_date` is only the fallback for
+    # a row that has none. Before the look-ahead every pick in a pass was for
+    # the day the pass ran, so one header date was always right; now a single
+    # pass can carry today's slate and tomorrow's, and stamping both with the
+    # run date announces tomorrow's pick under today's date. That is not a
+    # cosmetic error -- the reader uses the header to know when to place it.
+    #
+    # Groups are emitted in date order, so today's slate always precedes
+    # tomorrow's in the channel.
+    groups: dict = {}
+    for sig in signals:
+        groups.setdefault(sig.get("game_date") or game_date, []).append(sig)
+
     out: list[tuple[list[dict], str]] = []
-    for i in range(0, len(signals), _FIELDS_PER_EMBED):
-        chunk = signals[i:i + _FIELDS_PER_EMBED]
-        # The note belongs to the slate, and only on the first chunk — repeating
-        # it above every 25-pick page would be noise.
-        embed = _picks_embed(sport, chunk, game_date, live=live,
-                             note=note if i == 0 else None)
-        message_id = _post(url, {"embeds": [embed]})
-        if not message_id:
-            break                      # stop: later chunks would post out of order
-        out.append((chunk, message_id))
-        time.sleep(_INTER_POST_SLEEP)
+    first = True
+    for date_key in sorted(groups):
+        day = groups[date_key]
+        for i in range(0, len(day), _FIELDS_PER_EMBED):
+            chunk = day[i:i + _FIELDS_PER_EMBED]
+            # The note belongs to the slate, and only on the first chunk of the
+            # first day — repeating it above every 25-pick page would be noise.
+            embed = _picks_embed(sport, chunk, date_key, live=live,
+                                 note=note if first else None)
+            first = False
+            message_id = _post(url, {"embeds": [embed]})
+            if not message_id:
+                return out             # stop: later chunks would post out of order
+            out.append((chunk, message_id))
+            time.sleep(_INTER_POST_SLEEP)
     return out
 
 
@@ -601,7 +618,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
-                   t.min_edge, t.min_odds
+                   t.min_edge, t.min_odds, p.game_date
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -649,6 +666,13 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         # published range and the applied cut cannot drift apart. mike,
         # 2026-09-03: "for bonus, post a good to xx odds".
         "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
+        # THE PICK'S OWN DATE, not the run date. Since the look-ahead
+        # (2026-09-06) a pass can post picks for more than one day, and the
+        # embed header used to say whatever day the pass ran -- so tomorrow's
+        # pick was announced under today's date. mike caught it on the first
+        # one: "the game is earlier, if you mean tomorrow, need to say
+        # september 7th, the post to discord says september 6th".
+        "game_date": r[18],
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -696,7 +720,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
-                   t.min_edge, t.min_odds
+                   t.min_edge, t.min_odds, p.game_date
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -731,6 +755,13 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # published range and the applied cut cannot drift apart. mike,
         # 2026-09-03: "for bonus, post a good to xx odds".
         "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
+        # THE PICK'S OWN DATE, not the run date. Since the look-ahead
+        # (2026-09-06) a pass can post picks for more than one day, and the
+        # embed header used to say whatever day the pass ran -- so tomorrow's
+        # pick was announced under today's date. mike caught it on the first
+        # one: "the game is earlier, if you mean tomorrow, need to say
+        # september 7th, the post to discord says september 6th".
+        "game_date": r[18],
     } for r in rows]
 
 

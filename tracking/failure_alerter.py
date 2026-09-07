@@ -132,8 +132,15 @@ def _clean_rate(conn) -> tuple:
     return (clean, len(rows), ranked)
 
 
-def _conditions(conn) -> dict:
-    """Everything currently wrong, as {key: (severity, title, detail)}."""
+def _conditions(conn, now: datetime | None = None) -> dict:
+    """Everything currently wrong, as {key: (severity, title, detail)}.
+
+    `now` is threaded in rather than read here so the whole pass judges
+    staleness against ONE clock -- two calls to datetime.now() inside a single
+    verdict is a race nobody would ever see fail, and exactly the kind that
+    makes a test flaky at a month boundary.
+    """
+    now = now or datetime.now(timezone.utc)
     out: dict = {}
 
     for check_name, status, severity, detail in _latest_health_rows(conn):
@@ -148,6 +155,20 @@ def _conditions(conn) -> dict:
             f"{check_name} is {status}",
             f"**{severity}** · `{check_name}`\n{detail or '(no detail)'}",
         )
+
+    # A job whose correct output is often NOTHING cannot be watched by watching
+    # its output. See tracking/job_heartbeat.py — this covers the NFL polls,
+    # the in-play worker, the job queue, the watchdog, and this module itself.
+    from tracking.job_heartbeat import stale_jobs
+    for job_id, silent, allowed in stale_jobs(conn, now):
+        if silent is None:
+            detail = (f"`{job_id}` has never recorded a run. Expected at least "
+                      f"one every {allowed} minutes.")
+        else:
+            detail = (f"`{job_id}` last ran **{silent:.0f} minutes ago**, over "
+                      f"its {allowed}-minute allowance. It is scheduled but not "
+                      f"running.")
+        out[f"job:{job_id}"] = ("CRIT", f"{job_id} has gone silent", detail)
 
     clean, total, ranked = _clean_rate(conn)
     if total >= CLEAN_RATE_WINDOW:
@@ -178,7 +199,7 @@ def run_failure_alerter(conn=None, now: datetime | None = None) -> dict:
             from data.db import get_connection
             conn = get_connection()
         try:
-            active = _conditions(conn)
+            active = _conditions(conn, now)
         finally:
             if own_conn:
                 try:
