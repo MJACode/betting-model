@@ -167,16 +167,35 @@ def _ignored(rel_paths: list[str]) -> set[str]:
     `models/saved/_baseline/` is the real case: `--no-register` comparison runs
     land there and are meant to be thrown away. Asking git keeps this test from
     carrying its own stale copy of that rule.
+
+    NUL-SEPARATED, NOT NEWLINE-SEPARATED (2026-09-07). `--stdin` alone reads
+    linefeed-separated paths, and on Windows -- which is where this repo
+    actually runs -- Python's text-mode subprocess translates every newline it
+    WRITES into CRLF. git then sees a path with a trailing CR, still matches it
+    (the pattern is a directory), and echoes it back QUOTED with the CR escaped
+    inside, e.g. `"models/saved/_baseline/ufc_....pkl\r"` -- which equals
+    nothing in `on_disk`. So the ignore set came back empty and three
+    legitimately-ignored baseline artifacts were reported as untracked, on
+    master, for anyone holding a comparison artifact.
+
+    It fails LOUD rather than silently, which is the good direction, but a
+    tripwire that cries wolf whenever somebody keeps a `--no-register` baseline
+    is one people learn to skip past -- and that costs exactly what it was built
+    to prevent.
+
+    `-z` fixes both halves at once: it makes the INPUT NUL-separated, so no
+    newline translation can touch it, and it turns OFF git's path quoting on
+    output.
     """
     if not rel_paths:
         return set()
-    proc = subprocess.run(("git", "check-ignore", "--stdin"), cwd=ROOT,
-                          input="\n".join(rel_paths), capture_output=True,
+    proc = subprocess.run(("git", "check-ignore", "--stdin", "-z"), cwd=ROOT,
+                          input="\0".join(rel_paths) + "\0", capture_output=True,
                           text=True, encoding="utf-8")
     # exit 0 = some ignored, 1 = none ignored, 128 = real error
     if proc.returncode not in (0, 1):
         raise RuntimeError(f"git check-ignore failed: {proc.stderr}")
-    return {line.strip().replace("\\", "/") for line in proc.stdout.splitlines() if line.strip()}
+    return {p.replace("\\", "/") for p in proc.stdout.split("\0") if p}
 
 
 def test_every_model_artifact_on_disk_is_tracked_by_git():
@@ -232,6 +251,39 @@ def test_the_tripwire_can_actually_see_an_untracked_artifact():
         )
     finally:
         planted.unlink(missing_ok=True)
+
+
+def test_an_ignored_path_comes_back_byte_identical():
+    """THE REGRESSION. `_ignored` fed git newline-separated paths, and on Windows
+    text-mode subprocess writes CRLF -- so git matched the path, echoed it back
+    QUOTED with the CR escaped inside, and the result matched nothing. The
+    ignore set came back empty and three legitimately-ignored `_baseline`
+    artifacts were reported as untracked on master.
+
+    Asserting on the SHAPE of what comes back rather than on a platform: a
+    returned path that is quoted, or carries a control character, is the
+    fingerprint of that bug whatever the OS.
+    """
+    rel = "models/saved/_baseline/_probe_00000000_000000.pkl"
+    got = _ignored([rel])
+    assert got == {rel}, (
+        f"expected exactly {rel!r} back, got {got!r} — a quoted or "
+        f"CR-suffixed path means the input separator is being translated"
+    )
+
+
+def test_more_than_one_ignored_path_survives_the_round_trip():
+    """The single-path case hid it: git left the LAST path alone (no trailing
+    separator) and mangled every earlier one, so a one-element probe passed
+    while a real three-file slate failed."""
+    rels = [f"models/saved/_baseline/_probe_{i}.pkl" for i in range(3)]
+    assert _ignored(rels) == set(rels)
+
+
+def test_a_path_that_is_not_ignored_is_not_reported():
+    """The other direction: over-reporting ignores would make the tripwire
+    vacuous, which is the failure mode that actually matters."""
+    assert _ignored(["models/saved/definitely_tracked_00000000_000000.pkl"]) == set()
 
 
 def test_the_health_check_reports_what_it_opened_not_what_it_enumerated():
