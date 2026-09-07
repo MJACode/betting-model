@@ -132,3 +132,136 @@ def test_the_health_check_opens_the_artifact_not_just_the_registry_row():
     # CRIT, not WARN: a registered model that cannot load is silently betting
     # nothing on a slate someone is watching.
     assert '"model_artifacts_load", STALE, "CRIT"' in src, src
+
+
+# ---------------------------------------------------------------------------
+# THE OTHER HALF: the file has to be IN GIT, not merely on somebody's disk.
+#
+# Everything above opens bytes that are sitting in `models/saved/`. That answers
+# "is this a working model?" and cannot answer "will the worker have it?",
+# because the worker deploys from git and has never seen this machine's disk.
+#
+# 2026-09-07, two days before Week 1: five model_registry rows were is_active=1
+# and pointed at .pkl files that existed on one laptop and in no commit on any
+# branch. Five of the eleven models unpaused in #536 would have scored nothing
+# in production, silently, and every check we had said fine — the registry check
+# saw an active row, and the loader test above happily opened the local file.
+#
+# The bug is only ever visible as a DIFFERENCE between disk and git, so the test
+# for it has to ask git.
+# ---------------------------------------------------------------------------
+
+import subprocess
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _git(*args: str) -> str:
+    return subprocess.run(("git", *args), cwd=ROOT, capture_output=True,
+                          text=True, encoding="utf-8", check=True).stdout
+
+
+def _ignored(rel_paths: list[str]) -> set[str]:
+    """Paths git is deliberately ignoring — derived from .gitignore, not guessed.
+
+    `models/saved/_baseline/` is the real case: `--no-register` comparison runs
+    land there and are meant to be thrown away. Asking git keeps this test from
+    carrying its own stale copy of that rule.
+    """
+    if not rel_paths:
+        return set()
+    proc = subprocess.run(("git", "check-ignore", "--stdin"), cwd=ROOT,
+                          input="\n".join(rel_paths), capture_output=True,
+                          text=True, encoding="utf-8")
+    # exit 0 = some ignored, 1 = none ignored, 128 = real error
+    if proc.returncode not in (0, 1):
+        raise RuntimeError(f"git check-ignore failed: {proc.stderr}")
+    return {line.strip().replace("\\", "/") for line in proc.stdout.splitlines() if line.strip()}
+
+
+def test_every_model_artifact_on_disk_is_tracked_by_git():
+    """A retrain that is never committed is a model that only exists here.
+
+    This is the check that would have caught 2026-09-07 at the moment it
+    happened, on the machine that had the files, instead of two days later by
+    audit. It needs no database and no network: an untracked .pkl under
+    models/saved/ IS the bug, whatever the registry currently says.
+
+    If this fails, the fix is almost always `git add` the named file — see
+    .claude/rules/operations.md, "a retrained model must have its .pkl
+    COMMITTED". Deleting the file is also a valid fix if the retrain was a
+    throwaway; leaving it untracked is not.
+    """
+    saved = ROOT / "models" / "saved"
+    on_disk = sorted(p.relative_to(ROOT).as_posix() for p in saved.rglob("*.pkl"))
+    if not on_disk:
+        pytest.skip("no artifacts on disk")
+
+    tracked = {line.strip() for line in _git("ls-files", "models/saved").splitlines()}
+    ignored = _ignored(on_disk)
+
+    untracked = [p for p in on_disk if p not in tracked and p not in ignored]
+    assert not untracked, (
+        f"{len(untracked)} model artifact(s) exist on disk but are NOT in git:\n  "
+        + "\n  ".join(untracked)
+        + "\n\nThe Railway worker deploys from git, so it will not have these. "
+        "If a registry row points at one, that model is registered and DEAD in "
+        "production while every other check reports healthy. `git add` them, or "
+        "delete them if the retrain was a throwaway."
+    )
+
+
+def test_the_tripwire_can_actually_see_an_untracked_artifact():
+    """Proves the check above is capable of failing.
+
+    A guard that dead code can satisfy is not a guard (CLAUDE.md §1b). The real
+    test passes on a clean tree, which looks identical to a test that inspects
+    nothing — so this plants an untracked .pkl, asserts it is spotted, and
+    removes it.
+    """
+    saved = ROOT / "models" / "saved"
+    planted = saved / "_tripwire_probe_00000000_000000.pkl"
+    planted.write_bytes(b"not a real model")
+    try:
+        rel = planted.relative_to(ROOT).as_posix()
+        tracked = {ln.strip() for ln in _git("ls-files", "models/saved").splitlines()}
+        assert rel not in tracked, "the probe file was somehow already tracked"
+        assert rel not in _ignored([rel]), (
+            "models/saved/*.pkl is gitignored, which would make the tripwire "
+            "above silently vacuous for every real artifact too"
+        )
+    finally:
+        planted.unlink(missing_ok=True)
+
+
+def test_the_health_check_reports_what_it_opened_not_what_it_enumerated():
+    """The 2026-09-07 false OK, in one line of production log:
+
+        [CRIT] model_artifacts_load: OK — all 56 active artifacts deserialise
+
+    It had opened 51. Five active artifacts were absent from the worker, hit a
+    bare `continue`, and were counted as successes by `len(rows)` — a number
+    that was never the number of files opened. Nothing was actually dead that
+    day, because the artifact WAS restorable from Supabase and the restore ran
+    ("Restored models/saved/nfl_prop_sacks_...pkl from Supabase (1,168,861
+    bytes)"). But the check would have printed the identical OK with no blob to
+    restore from, which is the case where the model really is dead.
+
+    `.claude/rules/operations.md`: a health check must not gate on the thing
+    that breaks, and an empty result must not look like a healthy one.
+    """
+    import inspect
+
+    from tracking import system_health
+
+    src = inspect.getsource(system_health.run_system_health)
+    assert "opened" in src, "the check must track how many artifacts it OPENED"
+    assert "f\"all {len(rows)} active artifacts deserialise\"" not in src, (
+        "the summary still reports the ROW count rather than the opened count — "
+        "that is the false OK this test exists for"
+    )
+    assert "missing_files" in src, "a missing artifact must be reported, not skipped"
+    assert "NO BLOB" in src, (
+        "missing-with-no-restorable-blob is the DEAD case and must be "
+        "distinguished from missing-but-restorable"
+    )

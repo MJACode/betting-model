@@ -571,13 +571,40 @@ def run_system_health(run_date: str | None = None) -> dict:
         # locally. tests/test_model_artifacts_load.py covers the same property at
         # merge time; this one covers the machine the pipeline actually runs on,
         # where a file can go missing or be restored from model_artifacts.
+        #
+        # AND A COUNT IS NOT A RESULT. Until 2026-09-07 a MISSING file hit a bare
+        # `continue` here -- "restorable from model_artifacts; not this check's
+        # job" -- while the summary line still reported `len(rows)`. So on
+        # 2026-09-07, with five active artifacts absent from git and therefore
+        # absent from the worker, this check printed:
+        #
+        #     [CRIT] model_artifacts_load: OK - all 56 active artifacts deserialise
+        #
+        # It had opened 51. The five it skipped were counted as successes by a
+        # number that was never the number of files opened. The restore did work
+        # that day ("Restored models/saved/nfl_prop_sacks_...pkl from Supabase
+        # (1,168,861 bytes)"), so nothing was actually dead -- but this check
+        # would have said exactly the same thing if the blob had been missing
+        # too, which is the case where the model IS dead.
+        #
+        # So: count what was actually opened, and report a missing file rather
+        # than swallowing it. Missing-but-restorable is a WARN, not silence --
+        # it means the repo and the registry disagree, and the worker is one
+        # absent blob away from a dead model. Missing with no blob is CRIT.
         unloadable = []
+        missing_files = []          # (model_id, path) absent on this machine
+        opened = 0
         try:
             import pickle
             import warnings
             rows = conn.execute(
                 "SELECT model_id, model_path FROM model_registry WHERE is_active = 1"
             ).fetchall()
+            try:
+                restorable = {r[0] for r in conn.execute(
+                    "SELECT model_path FROM model_artifacts").fetchall()}
+            except Exception:
+                restorable = set()   # table absent: treat every miss as unrestorable
             root = Path(__file__).resolve().parent.parent
             for mid, mpath in rows:
                 if mid not in expected or not mpath:
@@ -586,25 +613,42 @@ def run_system_health(run_date: str | None = None) -> dict:
                 if not path.is_absolute():
                     path = root / path
                 if not path.exists():
-                    continue          # restorable from model_artifacts; not this check's job
+                    missing_files.append(
+                        f"{mid} ({'restorable' if mpath in restorable else 'NO BLOB'})")
+                    continue
                 try:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         with open(path, "rb") as fh:
                             pickle.load(fh)
+                    opened += 1
                 except Exception as exc:
                     unloadable.append(f"{mid} ({type(exc).__name__})")
         except Exception as exc:
             r.add("model_artifacts_load", SKIPPED, "WARN",
                   f"could not enumerate artifacts: {type(exc).__name__}")
         else:
-            if unloadable:
+            dead = [m for m in missing_files if "NO BLOB" in m]
+            if unloadable or dead:
+                detail = []
+                if unloadable:
+                    detail.append(f"{len(unloadable)} will not deserialise: "
+                                  f"{', '.join(sorted(unloadable))}")
+                if dead:
+                    detail.append(f"{len(dead)} absent with no restorable blob: "
+                                  f"{', '.join(sorted(dead))}")
                 r.add("model_artifacts_load", STALE, "CRIT",
-                      f"{len(unloadable)} active artifact(s) will not deserialise — "
-                      f"the model is registered and DEAD: {', '.join(sorted(unloadable))}")
+                      "registered and DEAD — " + "; ".join(detail))
+            elif missing_files:
+                # Not dead, but the repo and the registry disagree and the
+                # worker is relying on a Supabase round-trip to paper over it.
+                r.add("model_artifacts_load", STALE, "WARN",
+                      f"{opened} artifact(s) opened; {len(missing_files)} absent from "
+                      f"this machine and restored from Supabase instead — commit "
+                      f"them: {', '.join(sorted(missing_files))}")
             else:
                 r.add("model_artifacts_load", OK, "CRIT",
-                      f"all {len(rows)} active artifacts deserialise")
+                      f"all {opened} active artifacts deserialise")
 
         n_picks = _scalar(conn, "SELECT COUNT(*) FROM picks WHERE game_date = ?", (run_date,)) or 0
         if any_today == 0:
