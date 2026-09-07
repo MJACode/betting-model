@@ -142,10 +142,14 @@ def test_a_connection_that_cannot_lock_still_publishes():
 def _signal_row(lock_key="NCAAF_2026-09-06_louisville_ole-miss:ncaaf_over_under"):
     # _new_signals' SELECT list, in order. Dated forward so the started-game
     # guard keeps treating it as an upcoming game as the real clock moves on.
+    # The last field is the pick's OWN game_date, which _post_picks groups the
+    # embed header on since the look-ahead (#532) — a pass can carry more than
+    # one day's picks, so the run date is only a fallback.
     return (lock_key, "Ole Miss vs Louisville Under 55.5", "NCAAF",
             "ncaaf_over_under", 0.7176, 0.1827, -115.0, 0.02, "HIGH",
             "Ole Miss", "Louisville", "2099-09-06T23:30:00+00:00",
-            None, "2026-09-06T16:29:04+00:00", None, None, 0.0, -200.0)
+            None, "2026-09-06T16:29:04+00:00", None, None, 0.0, -200.0,
+            "2026-09-06")
 
 
 def test_two_overlapping_discord_runs_post_the_card_once(monkeypatch):
