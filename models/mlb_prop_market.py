@@ -52,6 +52,15 @@ So this runs forward and writes nothing that decides anything. The go-live gate
 in CLAUDE.md section 2 -- 50 settled picks, positive flat ROI, calibration error
 under 5%, per model -- is the bar, and it is forward-looking, which is what this
 situation needs.
+
+
+DO NOT WIRE THIS. Measured 2026-09-07 over 6,931 graded selections and
+158 dates: NEGATIVE at every threshold from 2pp to 6pp, negative in BOTH
+halves of a time split, and negative in five of six months. The one
+positive cell (7pp, +7.11%) sits on 76 bets between neighbours of -0.54%
+and -3.54% -- a peak, not a plateau, which is exactly what CLAUDE.md 7
+says to reject. Full write-up, including what it does NOT say about the
+NFL result, in docs/mlb_prop_market_eval.md.
 """
 
 from __future__ import annotations
