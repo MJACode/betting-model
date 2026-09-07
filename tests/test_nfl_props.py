@@ -1463,9 +1463,11 @@ def test_the_count_objective_has_its_own_fold_count():
     They were the same number by accident: the gamma path (_squared_objective)
     has always used 3 and nothing documented why the count path used 5.
     Measured 2026-09-07 -- same seed, same 40 trials, same data, only the fold
-    count varying -- 3 folds ran 47% and 55% faster on nfl_prop_pass_attempts
-    and nfl_prop_receptions, for MAE differences of 0.001 and 0.002 on targets
-    of 7.2 and 1.7. Noise.
+    count varying -- 3 folds ran 47%, 55% and 14% faster on pass_attempts,
+    receptions and sacks, for MAE differences of 0.001-0.002 on targets of 7.2,
+    1.7 and 0.39. Noise on accuracy; 14-55% on time, averaging ~39%. sacks is
+    the 62k-row dataset and gains least, so the first two models alone would
+    have overstated this as a flat halving.
 
     The separation is the load-bearing part. CV_FOLDS also sizes
     _time_ordered_cv's TimeSeriesSplit, which every GAME model tunes through and

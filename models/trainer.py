@@ -59,10 +59,16 @@ CV_FOLDS      = 5           # stratified k-fold for Optuna objective
 #     model                 5-fold    3-fold    time     MAE d    OU acc d
 #     nfl_prop_pass_attempts 1016s      534s    -47%    -0.001      -0.004
 #     nfl_prop_receptions    1403s      630s    -55%    -0.002      +0.001
+#     nfl_prop_sacks         1084s      933s    -14%    +0.001      +0.001
 #
-# Half the time, and the accuracy differences are noise -- 0.001-0.002 MAE on
-# targets of 7.2 and 1.7. A 4-hour retrain of the twelve NFL prop models is
-# what made this worth measuring rather than assuming.
+# 14-55% faster, averaging ~39% -- NOT the flat halving the first two models
+# suggested, which is why the third was run before shipping. sacks is the big
+# dataset (62k rows) and gains least, so the saving is largest exactly where
+# the search is cheapest already. The accuracy differences are noise
+# throughout: 0.001-0.002 MAE on targets of 7.2, 1.7 and 0.39.
+#
+# A 4-hour retrain of the twelve NFL prop models is what made this worth
+# measuring rather than assuming.
 #
 # SEPARATE FROM CV_FOLDS ON PURPOSE. CV_FOLDS also sizes _time_ordered_cv's
 # TimeSeriesSplit, which every GAME model tunes through and which was not part
