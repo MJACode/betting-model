@@ -1055,3 +1055,70 @@ dropped from that tick the twelve go dark without erroring.
 4. Wiring `nfl-prop-scoring` into the daily flow — deliberately CLI-only until a
    market has cleared §5. None has.
 4. Play-by-play features (red-zone share, routes, aDOT) as the next lever.
+
+## 6b. Thresholds tightened, look-ahead fixed (2026-09-07, matt)
+
+matt: *"need to tighten to only the very best probability to generate winning"*
+and *"we need to be betting as soon as lines are released."* Both applied.
+
+**The cuts are a VOLUME CONTROL and nothing more, and that is said here because
+§6 point 2 above is still the finding.** These models have ZERO settled bets, so
+no cut can be swept on a record; sweeping a thin sample is how a zero-edge model
+returns a "+8-19% best cut" (`docs/reviews/2026-08-30-repo-assessment.md` §1).
+The floors are instead the **top decile of each market's own edge distribution**
+on the 2026-09-13 board, per market because base rates differ (anytime TD ~27%,
+receptions ~50%), rounded DOWN so the published cut is never looser than the
+slice it came from.
+
+| market | was | now (prob / edge) |
+|---|---|---|
+| pass yards | 0.55 / 0.05 | 0.68 / 0.15 |
+| pass attempts | 0.55 / 0.05 | 0.73 / 0.19 |
+| pass completions | 0.55 / 0.05 | 0.68 / 0.16 |
+| pass TDs | 0.55 / 0.05 | 0.78 / 0.17 |
+| rush yards | 0.55 / 0.05 | 0.71 / 0.19 |
+| rush attempts | 0.55 / 0.05 | 0.76 / 0.20 |
+| receiving yards | 0.55 / 0.05 | 0.69 / 0.16 |
+| receptions | 0.55 / 0.05 | 0.63 / 0.16 |
+| rush + rec yards | 0.55 / 0.05 | 0.68 / 0.15 |
+| anytime TD | 0.30 / 0.05 | 0.37 / 0.16 |
+| sacks | 0.55 / 0.05 | 0.70 / 0.15 |
+| tackles + assists (paused) | 0.55 / 0.05 | 0.70 / 0.15 |
+
+**Measured on 2026-09-13, same board, same models: 112 BETs → 16.** What it does
+not do is make them winning — §5b walk-forwards all eleven against real DK
+prices and every one loses. Tightening reduces exposure to a measured negative.
+matt decided with that in hand. **Re-sweep on each model's own settled record at
+~50 bets** (§17); these are a starting position, not a finding.
+
+### The look-ahead
+
+`run_nfl_prop_scorer` scored ONE date — whatever `today` was — while the card in
+the same tick priced ten days. NFL plays 3-4 days a week, so on every other day
+all twelve models reported "no scoring rows" and could not produce a pick.
+`step_nfl_prop_scoring` now loops the window, off `config.NFL_PROP_WINDOW_HOURS`
+— the same constant the card fetches on, now declared once so the two cannot
+drift apart again. Same shape as the MLB fix in #532, and for the same stated
+reason: loop the scorer rather than widen a scorer keyed on one date in a dozen
+places.
+
+### Why sacks and tackles score zero rows, and it is not a fault
+
+Both reported `0 BETs / 0 non-BET` while evaluating 177 and 136 players. The
+cause is DraftKings coverage, measured 2026-09-07:
+
+| market | DK players priced, Week 1 |
+|---|---|
+| anytime TD | 423 |
+| receiving yards | 135 |
+| receptions | 132 |
+| **tackles + assists** | **8** |
+| **sacks** | **6** |
+
+and those 6 / 8 are priced for the **2026-09-09/10 opener only** — nothing for
+the Sunday slate yet. A player with no quoted price is skipped rather than
+priced at a synthetic number, so zero rows is the correct output of a market
+DK has barely posted. It is thin, not broken; the look-ahead above is what will
+pick them up as DK posts. Historical coverage (Jan-Feb 2026) ran 19-37 players,
+so this is a Week-1 posting lag rather than a permanent gap.
+

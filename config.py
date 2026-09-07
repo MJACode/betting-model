@@ -414,6 +414,43 @@ ACTION_THRESHOLDS: dict = {
     # went negative blind); not to be chased. PAPER-FIRST: kill if no positive
     # blind month at >= 50 flags.
     "wnba_prop_market":           {"min_prob": 0.0, "min_edge": 0.05},
+    # ── NFL props: VOLUME CONTROL, NOT A SWEPT CUT (2026-09-07, matt) ──────
+    # matt: "need to tighten to only the very best probability to generate
+    # winning." Applied — and what it does and does not do is recorded here so
+    # the next reader does not mistake these for tuned numbers.
+    #
+    # HOW THEY WERE DERIVED. Not by sweeping a record: these models have ZERO
+    # settled bets, so there is nothing to optimise against and any "best" cut
+    # would be fitted to noise (the trap docs/reviews/2026-08-30 measured: a
+    # zero-edge model returns a +8-19% "best cut" out of a 187-cell sweep).
+    # Instead, the top DECILE of each market's own edge distribution on the
+    # 2026-09-13 board, per market because base rates differ wildly (anytime TD
+    # hits ~27%, receptions ~50%, so they cannot share a floor). Floors are
+    # rounded DOWN to 2dp so the published cut is never looser than the slice
+    # it came from.
+    #
+    # WHAT IT DOES: 112 BETs on one Week-1 Sunday -> ~18. That is the whole of
+    # the claim.
+    #
+    # WHAT IT DOES NOT DO, and matt decided with this in hand: it does not make
+    # these models winning. docs/nfl_props_model.md §5b walk-forwards every one
+    # of these markets against real DraftKings prices and ALL ELEVEN LOSE
+    # (rush attempts -0.10%, sacks -1.22%, pass TDs -1.20%, receptions -2.40%,
+    # rushing yards -3.23%, rush+rec -4.46%, completions -4.52%, pass yards
+    # -4.92%, receiving yards -5.58%, pass attempts -6.19%, anytime TD -14.93%;
+    # the twelfth, tackles, was a definitional mismatch). That doc's own
+    # conclusion is "no cut of a threshold turns -5% into +5%" — the lever is
+    # features, not floors. Tightening reduces EXPOSURE to a measured negative,
+    # it does not create an edge.
+    #
+    # The lane that does have an edge is nfl_prop_market (+10.33% over 954
+    # bets, blind, positive in all three seasons) and it is already running and
+    # already wins any proposition both lanes want.
+    #
+    # RE-SWEEP on each model's OWN settled record at ~50 bets, per §17. These
+    # floors are a starting position, not a finding.
+    # Pinned by tests/test_nfl_prop_thresholds.py so a placeholder reset cannot
+    # silently loosen them again.
     "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
     # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
     # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
@@ -429,18 +466,18 @@ ACTION_THRESHOLDS: dict = {
     # written and never shown, which is exactly the app/Discord divergence this
     # release removes. Same reasoning as ncaaf_spread's 0.0 edge floor.
     "nfl_live_prop": {"min_prob": 0.0, "min_edge": 0.0},
-    "nfl_prop_pass_yards":         {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_pass_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_pass_completions":   {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_pass_tds":           {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_rush_yards":         {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_rush_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_rec_yards":          {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_receptions":         {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_rush_rec_yards":     {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_anytime_td":         {"min_prob": 0.3, "min_edge": 0.05},
-    "nfl_prop_tackles_assists":    {"min_prob": 0.55, "min_edge": 0.05},
-    "nfl_prop_sacks":              {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_pass_yards": {"min_prob": 0.68, "min_edge": 0.15},
+    "nfl_prop_pass_attempts": {"min_prob": 0.73, "min_edge": 0.19},
+    "nfl_prop_pass_completions": {"min_prob": 0.68, "min_edge": 0.16},
+    "nfl_prop_pass_tds": {"min_prob": 0.78, "min_edge": 0.17},
+    "nfl_prop_rush_yards": {"min_prob": 0.71, "min_edge": 0.19},
+    "nfl_prop_rush_attempts": {"min_prob": 0.76, "min_edge": 0.2},
+    "nfl_prop_rec_yards": {"min_prob": 0.69, "min_edge": 0.16},
+    "nfl_prop_receptions": {"min_prob": 0.63, "min_edge": 0.16},
+    "nfl_prop_rush_rec_yards": {"min_prob": 0.68, "min_edge": 0.15},
+    "nfl_prop_anytime_td": {"min_prob": 0.37, "min_edge": 0.16},
+    "nfl_prop_tackles_assists": {"min_prob": 0.7, "min_edge": 0.15},
+    "nfl_prop_sacks": {"min_prob": 0.7, "min_edge": 0.15},
 }
 
 # Models where BET signal is decided by model probability alone (edge ignored).
@@ -584,6 +621,56 @@ LIVE_MAX_BETS_PER_WEEK: dict = {
 # The mechanism stays because a cap is a guarantee and a threshold is only a
 # hope about volume. If a model ever needs one again, add it here.
 LIVE_MAX_SIGNALS_PER_DAY: dict = {
+}
+
+# ── One BET per player, across the models that price the same player ─────────
+# 2026-09-07 (mike). Three MLB pitcher-prop models price the SAME starter in the
+# SAME game — strikeouts, hits allowed, outs recorded — and on 31 of 104
+# pitcher-starts since 2026-08-31 two of them fired at once: 62 of 135
+# player-prop picks, ~3.9 a day, all correlated to one man's afternoon. Keeping
+# the highest-EV one is a volume cut that costs nothing measurable (the
+# two-market group netted -0.27u over the window) and removes the correlation.
+#
+# A POOL, NOT A GLOBAL RULE. Only models that genuinely price the same entity
+# belong together; a batter's hits and a pitcher's Ks are different bets even in
+# the same game. Keyed on (game_id, player_id): a pick with no player_id never
+# participates, which is the safe direction.
+#
+# ASSESSED FOR EVERY SPORT (CLAUDE.md 1b). NFL, NBA and WNBA prop scorers have
+# the same shape and the same overlap — pass yards / attempts / completions are
+# one quarterback's afternoon three times over. They are NOT enrolled here
+# because each is its own model update on its own record, and nobody has asked
+# for them yet. The mechanism is sport-agnostic on purpose; adding a pool is one
+# line. docs/mlb_volume_efficiency.md section 6.
+PROP_ONE_BET_PER_PLAYER: dict = {
+    "mlb_pitcher": frozenset({
+        "mlb_prop_pitcher_k",
+        "mlb_prop_pitcher_hits",
+        "mlb_prop_pitcher_outs",
+        "mlb_prop_pitcher_er",
+        "mlb_prop_pitcher_walks",
+    }),
+}
+
+# ── Pre-game prop signals per model per day ──────────────────────────────────
+# The pre-game twin of LIVE_MAX_SIGNALS_PER_DAY, and the same argument: a
+# threshold is a hope about volume, a cap is a guarantee.
+#
+# 2026-09-07 (mike), INTERIM AND DATED. These two models fire ~52/wk and ~39/wk
+# against cuts whose own sweeps projected ~5.4/wk and ~19.8/wk, because the cuts
+# were swept on calibrated probabilities and — until today — applied to raw
+# ones. The proper fix is the calibrated decision path plus a re-promoted map,
+# and neither model can have one yet: the weekly pass needs 150 graded picks
+# since their 2026-09-03/09-05 retrains and has 47 and 26.
+#
+# So this holds the volume down for the ~5-8 days until those maps land. It is
+# NOT a threshold and must not be read as one — no sweep supports a number here;
+# it is an operator ceiling. REMOVE IT once the maps are promoted and the
+# calibrated cuts bind on their own. Picks turned away are written as NONE, so
+# the next sweep still sees them. docs/mlb_volume_efficiency.md sections 2, 5.
+PROP_MAX_SIGNALS_PER_DAY: dict = {
+    "mlb_prop_pitcher_k":     3,
+    "mlb_prop_pitcher_hits":  3,
 }
 
 PAUSED_MODELS: set = {
@@ -1175,18 +1262,18 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # 27%, not 50%.
     "wnba_prop_market":            0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
-    "nfl_prop_pass_yards":         0.05,
-    "nfl_prop_pass_attempts":      0.05,
-    "nfl_prop_pass_completions":   0.05,
-    "nfl_prop_pass_tds":           0.05,
-    "nfl_prop_rush_yards":         0.05,
-    "nfl_prop_rush_attempts":      0.05,
-    "nfl_prop_rec_yards":          0.05,
-    "nfl_prop_receptions":         0.05,
-    "nfl_prop_rush_rec_yards":     0.05,
-    "nfl_prop_anytime_td":         0.05,
-    "nfl_prop_tackles_assists":    0.05,
-    "nfl_prop_sacks":              0.05,
+    "nfl_prop_pass_yards":           0.15,
+    "nfl_prop_pass_attempts":        0.19,
+    "nfl_prop_pass_completions":     0.16,
+    "nfl_prop_pass_tds":             0.17,
+    "nfl_prop_rush_yards":           0.19,
+    "nfl_prop_rush_attempts":        0.2,
+    "nfl_prop_rec_yards":            0.16,
+    "nfl_prop_receptions":           0.16,
+    "nfl_prop_rush_rec_yards":       0.15,
+    "nfl_prop_anytime_td":           0.16,
+    "nfl_prop_tackles_assists":      0.15,
+    "nfl_prop_sacks":                0.15,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -1273,18 +1360,18 @@ MODEL_PROB_THRESHOLDS: dict = {
     # 27%, not 50%.
     "wnba_prop_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
-    "nfl_prop_pass_yards":         0.55,
-    "nfl_prop_pass_attempts":      0.55,
-    "nfl_prop_pass_completions":   0.55,
-    "nfl_prop_pass_tds":           0.55,
-    "nfl_prop_rush_yards":         0.55,
-    "nfl_prop_rush_attempts":      0.55,
-    "nfl_prop_rec_yards":          0.55,
-    "nfl_prop_receptions":         0.55,
-    "nfl_prop_rush_rec_yards":     0.55,
-    "nfl_prop_anytime_td":         0.3,
-    "nfl_prop_tackles_assists":    0.55,
-    "nfl_prop_sacks":              0.55,
+    "nfl_prop_pass_yards":           0.68,
+    "nfl_prop_pass_attempts":        0.73,
+    "nfl_prop_pass_completions":     0.68,
+    "nfl_prop_pass_tds":             0.78,
+    "nfl_prop_rush_yards":           0.71,
+    "nfl_prop_rush_attempts":        0.76,
+    "nfl_prop_rec_yards":            0.69,
+    "nfl_prop_receptions":           0.63,
+    "nfl_prop_rush_rec_yards":       0.68,
+    "nfl_prop_anytime_td":           0.37,
+    "nfl_prop_tackles_assists":      0.7,
+    "nfl_prop_sacks":                0.7,
 }
 
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
@@ -1676,6 +1763,19 @@ ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchang
 #   curl ".../v4/sports/baseball_mlb/odds?apiKey=$ODDS_API_KEY&regions=us&markets=h2h" \
 #     | jq -r '.[0].bookmakers[].key' | sort -u
 # before changing this list.
+# ── NFL prop window ───────────────────────────────────────────────────────────
+# How far ahead the NFL prop lane looks, in hours. TWO consumers read this and
+# they must not disagree:
+#   * scheduler.run_nfl_prop_card  — how far out to FETCH and price the board
+#   * run_pipeline.step_nfl_prop_scoring — how many game-dates to SCORE
+# Until 2026-09-07 only the first existed here: the card looked ten days ahead
+# while the scorer read one exact date (today), so the eleven distributional
+# models could not see a slate until its own game day and produced 0 BETs on
+# every day without NFL games. Widened to 240h in #532 for the card; this is
+# the same number, now shared, so widening one cannot silently leave the other.
+NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "240"))
+
+
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()
     for b in (os.environ.get("LINE_SHOP_BOOKMAKERS")

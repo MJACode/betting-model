@@ -29,6 +29,7 @@ Windows Task Scheduler:
 """
 
 import argparse
+import math
 import sys
 import time
 from datetime import datetime, timedelta
@@ -713,15 +714,56 @@ def step_nfl_props_data(run_date: str) -> bool:
 
 
 def step_nfl_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
-    """Score NFL player props (12 markets) and write picks to DB."""
+    """Score NFL player props across the look-ahead window, one date at a time.
+
+    RUN PER DATE rather than widening the scorer's internals — the same shape
+    step_prop_scoring uses for MLB (#532), and for the same reason: the NFL
+    scorer and its feature builder are keyed on a single target_date in a dozen
+    places (`_nfl_kickoff_map` is `WHERE game_date = %s`), so looping the whole
+    scorer over the window is the same result with a fraction of the blast
+    radius, and each date keeps its own idempotent scoping.
+
+    WHY IT MATTERS HERE. Until 2026-09-07 this scored ONE date — whatever
+    `today` was — while the card it shares a tick with priced ten days of board.
+    NFL plays on 3-4 days a week, so on every other day all twelve models
+    reported "no scoring rows" and the eleven mike unpaused in #536 could not
+    produce a pick at all. Measured that day: scoring 2026-09-07 gave 0 BETs;
+    scoring 2026-09-13 gave 112. matt: "we need to be betting as soon as lines
+    are released."
+
+    The window is `config.NFL_PROP_WINDOW_HOURS`, the SAME constant the card
+    fetches on, so the two can never drift apart again.
+
+    A date with no NFL games is a cheap no-op — the kickoff map comes back
+    empty and the scorer returns immediately — so the extra passes cost
+    approximately nothing on the four days a week nobody plays.
+    """
+    from datetime import date as _date, timedelta as _td
+
     try:
-        from models.scorer import run_nfl_prop_scorer
-        result = run_nfl_prop_scorer(target_date=run_date, dry_run=dry_run)
-        logger.success(f"✓ NFL prop scoring: {result}")
-        return True
-    except Exception as exc:
-        logger.error(f"✗ NFL prop scoring failed: {exc}")
-        return False
+        from config import NFL_PROP_WINDOW_HOURS
+        ahead = max(2, math.ceil(NFL_PROP_WINDOW_HOURS / 24))
+    except Exception:                                         # noqa: BLE001
+        ahead = 2
+
+    from models.scorer import run_nfl_prop_scorer
+    ok = True
+    totals = {"picks": 0, "bets": 0, "skipped_dupes": 0}
+    for offset in range(0, ahead + 1):
+        d = (_date.fromisoformat(run_date) + _td(days=offset)).isoformat()
+        try:
+            result = run_nfl_prop_scorer(target_date=d, dry_run=dry_run)
+            for k in totals:
+                totals[k] += int(result.get(k, 0) or 0)
+            if result.get("picks"):
+                logger.success(f"✓ NFL prop scoring {d}: {result}")
+        except Exception as exc:
+            # One date failing must not cost the others — the near dates are
+            # the ones with games about to start.
+            logger.error(f"✗ NFL prop scoring failed for {d}: {exc}")
+            ok = False
+    logger.success(f"✓ NFL prop scoring {run_date} +{ahead}d: {totals}")
+    return ok
 
 
 def step_nba_stats(run_date: str) -> bool:

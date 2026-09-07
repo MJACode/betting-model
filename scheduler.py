@@ -168,7 +168,13 @@ RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "1") != "0"
 # publishing LOCKS insert-once: a pick taken where the edge is noise is a locked
 # bet, not a discarded one. created_at against game_time recovers the offset, so
 # the season measures which ones paid. Re-read this before widening further.
-NFL_PROP_WINDOW_HOURS = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "240"))
+# DECLARED IN config.py so the prop SCORER can read the same number. Two
+# consumers now: this job decides how far out to FETCH and price the board, and
+# run_pipeline.step_nfl_prop_scoring decides how many game-dates to SCORE. They
+# were allowed to disagree until 2026-09-07 — the card looked ten days ahead
+# while the scorer looked at today only — which is exactly the split §1b's
+# shared-constant rule exists to stop. One declaration, both read it.
+from config import NFL_PROP_WINDOW_HOURS  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
