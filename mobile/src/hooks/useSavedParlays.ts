@@ -36,6 +36,41 @@ export function setEditingParlayId(id: string | null): void {
   editingListeners.forEach((fn) => fn(id));
 }
 
+/**
+ * Hand-entered custom legs — a module store for the SAME reason editingId is
+ * one: the Betslip screen is popped out from under them.
+ *
+ * They were screen state, so "Find players to add" (which navigates to the
+ * tabs, popping this screen) already destroyed every manual leg and the
+ * half-typed one with it. A push deep-link to a board does the same thing, and
+ * a notification is not a gesture the user can predict — they tap "3 new BET
+ * signals" and their hand-built parlay is gone, with no warning and no undo
+ * (UX review, 2026-09-06). Session-scoped still: cleared with the slip, and
+ * never persisted.
+ */
+const customListeners = new Set<(legs: ParlayLeg[]) => void>();
+let manualCustomLegs: ParlayLeg[] = [];
+
+export function setManualCustomLegs(
+  update: ParlayLeg[] | ((prev: ParlayLeg[]) => ParlayLeg[]),
+): void {
+  manualCustomLegs = typeof update === 'function' ? update(manualCustomLegs) : update;
+  customListeners.forEach((fn) => fn(manualCustomLegs));
+}
+
+export function useManualCustomLegs(): ParlayLeg[] {
+  const [legs, setLegs] = useState<ParlayLeg[]>(manualCustomLegs);
+  useEffect(() => {
+    const listener = (v: ParlayLeg[]) => setLegs(v);
+    customListeners.add(listener);
+    setLegs(manualCustomLegs); // a mount after the setter ran still sees them
+    return () => {
+      customListeners.delete(listener);
+    };
+  }, []);
+  return legs;
+}
+
 export function useEditingParlayId(): string | null {
   const [id, setId] = useState<string | null>(editingId);
   useEffect(() => {

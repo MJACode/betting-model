@@ -34,6 +34,45 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _MAX_LABELS = 3          # labels listed in a summary body before "+N more"
 _EXPO_CHUNK = 100        # Expo accepts up to 100 messages per request
 
+# Payload contract version. The APP is the other half of this (mobile/src/lib/
+# pushRoute.ts, which pins the same number) and an old build can be installed
+# for months, so the router ignores a payload it does not understand rather than
+# guessing. Bump only for a BREAKING change; adding an optional key is not one.
+PUSH_ROUTE_VERSION = 1
+
+
+# ── Routing payloads ─────────────────────────────────────────────────────────
+#
+# Every message carries `data` saying where a tap should land. Before this
+# (2026-09-06) none did, so the app had nothing to route on: a tap opened
+# wherever the user had last been, which for a live pick — a number that is
+# ~45s stale by construction — is the whole value of the notification lost.
+#
+# Two shapes, because a push is usually a SUMMARY ("3 new BET signals"), not one
+# pick:
+#   - exactly one pick  -> `pickId`, and the tap opens that pick's detail.
+#   - more than one     -> no pickId, and the tap opens the board view that
+#                          holds them, on the right sport.
+# `sport` is only set when every pick in the batch shares one. A push spanning
+# MLB and NCAAF must NOT switch the user's sport, because the board shows one
+# sport at a time and either choice would hide the other half.
+
+def _shared_sport(signals: list[dict]) -> str | None:
+    """The one sport in this batch, or None when it spans several."""
+    sports = {s.get("sport") for s in signals if s.get("sport")}
+    return sports.pop() if len(sports) == 1 else None
+
+
+def _route(kind: str, signals: list[dict]) -> dict:
+    """The `data` payload for a summary push of `signals`."""
+    payload: dict = {"v": PUSH_ROUTE_VERSION, "type": kind}
+    sport = _shared_sport(signals)
+    if sport:
+        payload["sport"] = sport
+    if len(signals) == 1 and signals[0].get("pick_id") is not None:
+        payload["pickId"] = signals[0]["pick_id"]
+    return payload
+
 
 # ── Detection ────────────────────────────────────────────────────────────────
 
@@ -66,7 +105,7 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
             SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
                    p.game_id || ':' || p.model_id
                        || COALESCE(':' || p.player_id, '') AS lock_key,
-                   p.pick_label, p.sport, p.created_at
+                   p.pick_label, p.sport, p.created_at, p.pick_id
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -89,21 +128,23 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
             ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
                      p.created_at
         )
-        SELECT lock_key, pick_label, sport FROM bet
+        SELECT lock_key, pick_label, sport, pick_id FROM bet
         WHERE NOT EXISTS (
             SELECT 1 FROM push_sent s
             WHERE s.lock_key = bet.lock_key AND s.kind = 'new_bet'
         )
         ORDER BY created_at
     """, (target_date,)).fetchall()
-    return [{"lock_key": r[0], "label": r[1], "sport": r[2]} for r in rows]
+    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[3]}
+            for r in rows]
 
 
 def _dropped_signals(conn, target_date: str) -> list[dict]:
     """Signals we previously pushed as new_bet whose live pick is now AVOID
     (flipped against us), still pre-settlement, not yet pushed as dropped."""
     rows = conn.execute("""
-        SELECT DISTINCT os.lock_key, os.pick_label, os.sport, os.locked_at
+        SELECT DISTINCT os.lock_key, os.pick_label, os.sport, os.locked_at,
+               p.pick_id
         FROM opening_signals os
         JOIN push_sent prior
           ON prior.lock_key = os.lock_key AND prior.kind = 'new_bet'
@@ -123,7 +164,8 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
           )
         ORDER BY os.locked_at
     """, (target_date,)).fetchall()
-    return [{"lock_key": r[0], "label": r[1], "sport": r[2]} for r in rows]
+    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[4]}
+            for r in rows]
 
 
 # ── Message building ─────────────────────────────────────────────────────────
@@ -140,20 +182,33 @@ def _summary_body(labels: list[str]) -> str:
 def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]) -> list[dict]:
     """One message per (token × non-empty event type)."""
     messages: list[dict] = []
-    events: list[tuple[str, str]] = []
+    events: list[tuple[str, str, dict]] = []
     if new_bets:
         title = f"🟢 {len(new_bets)} new BET signal{'s' if len(new_bets) != 1 else ''}"
-        events.append((title, _summary_body([s["label"] for s in new_bets])))
+        events.append((title, _summary_body([s["label"] for s in new_bets]),
+                       _route("new_bets", new_bets)))
     if dropped:
-        title = f"⚠️ {len(dropped)} signal{'s' if len(dropped) != 1 else ''} flipped to AVOID"
-        events.append((title, _summary_body([s["label"] for s in dropped])))
+        # LINE MOVEMENT, not a retraction. "flipped to AVOID" told the reader
+        # their locked pick had been taken back, while the app's own tooltip
+        # says "a signal shown here won't flip to AVOID later" — two surfaces
+        # describing one pick differently, which CLAUDE.md §1b forbids. §1c
+        # settles which is true: the pick stands at the number it was given,
+        # and what changed is the market. The wording now says that.
+        title = (f"📉 {len(dropped)} pick{'s' if len(dropped) != 1 else ''} "
+                 "moved past the bet line")
+        # Lands on Today, not Signals: once the line has moved past the cut the
+        # pick is no longer a signal, so Signals is the one board it is
+        # guaranteed NOT to be on.
+        events.append((title, _summary_body([s["label"] for s in dropped]),
+                       _route("dropped", dropped)))
 
     for token in tokens:
-        for title, body in events:
+        for title, body, data in events:
             messages.append({
                 "to": token,
                 "title": title,
                 "body": body,
+                "data": data,
                 "sound": "default",
                 "priority": "high",
             })
@@ -287,6 +342,7 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
             continue
         alerts.append({
             "device_id": device_id, "lock_key": lock_key, "kind": kind,
+            "pick_id": pick_id,
             "label": label, "locked": int(locked_odds), "current": int(current),
             "against": shift > 0,
         })
@@ -330,8 +386,17 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
                 arrow = "moved against you" if a["against"] else "moved in your favor"
                 messages.append({
                     "to": token,
-                    "title": f"📈 Line {arrow}",
+                    # The GLYPH is read before the sentence on a lock screen, so
+                    # a rising green chart on "moved against you" says the
+                    # opposite of the alert, on the shortest reaction window we
+                    # have (UX review).
+                    "title": f"{'📉' if a['against'] else '📈'} Line {arrow}",
                     "body": f"{a['label']}: {a['locked']:+d} → {a['current']:+d}",
+                    # Always one pick, so this is the one push that can always
+                    # open the bet itself — which is the whole point when the
+                    # line the user locked has moved.
+                    "data": {"v": PUSH_ROUTE_VERSION, "type": "line_change",
+                             "pickId": a["pick_id"]},
                     "sound": "default",
                     "priority": "high",
                 })
@@ -360,7 +425,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     the same signal. A signal that disappears and returns isn't re-pushed (v1)."""
     rows = conn.execute("""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label,
-               p.inning_at_pick
+               p.inning_at_pick, p.sport, p.pick_id
         FROM picks p
         WHERE p.game_date = %s
           AND p.is_live = TRUE
@@ -377,6 +442,8 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "lock_key": f"live:{r[0]}:{r[1]}:{r[2]}",
         "label": r[3],
         "inning": r[4],
+        "sport": r[5],
+        "pick_id": r[6],
     } for r in rows]
 
 
@@ -406,10 +473,14 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
             return 0
 
         sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
-        title = f"🔴 {len(new)} live bet signal{'s' if len(new) != 1 else ''}"
+        # "live pick" is what the board calls these (PicksHomeScreen's
+        # itemNoun), and the tap now lands on that board — so the push should
+        # not invent a third noun for it.
+        title = f"🔴 {len(new)} live pick{'s' if len(new) != 1 else ''}"
         body = _summary_body([s["label"] for s in new])
+        data = _route("live_signals", new)
         messages = [{
-            "to": token, "title": title, "body": body,
+            "to": token, "title": title, "body": body, "data": data,
             "sound": "default", "priority": "high",
         } for token in tokens]
         sent = _expo_send(messages) if messages else 0
@@ -437,7 +508,7 @@ def _unpushed_feedback_replies(conn) -> list[dict]:
     whose device has an enabled push token are considered — there is nowhere else
     to deliver."""
     rows = conn.execute("""
-        SELECT m.id, t.device_id, d.token, t.subject, m.body
+        SELECT m.id, t.device_id, d.token, t.subject, m.body, t.id
         FROM feedback_messages m
         JOIN feedback_threads t ON t.id = m.thread_id
         JOIN device_push_tokens d ON d.device_id = t.device_id AND d.enabled = TRUE
@@ -454,6 +525,7 @@ def _unpushed_feedback_replies(conn) -> list[dict]:
         "token": r[2],
         "subject": r[3],
         "body": r[4],
+        "thread_id": r[5],
     } for r in rows]
 
 
@@ -481,6 +553,8 @@ def notify_feedback_replies(dry_run: bool = False) -> int:
             "to": r["token"],
             "title": "💬 We replied to your feedback",
             "body": (r["body"] or "")[:140],
+            "data": {"v": PUSH_ROUTE_VERSION, "type": "feedback_reply",
+                     "threadId": r["thread_id"]},
             "sound": "default",
             "priority": "high",
         } for r in replies]

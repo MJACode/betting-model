@@ -29,7 +29,13 @@ import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { isLineLeg } from '@/lib/lineLegs';
-import { setEditingParlayId, useEditingParlayId, useSavedParlays } from '@/hooks/useSavedParlays';
+import {
+  setEditingParlayId,
+  setManualCustomLegs,
+  useEditingParlayId,
+  useManualCustomLegs,
+  useSavedParlays,
+} from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
@@ -115,7 +121,10 @@ export function ParlayScreen() {
 
   // Session-only hand-entered legs (not persisted — they resolve against no
   // pick row, so there is nothing stable to key them on).
-  const [manualCustom, setManualCustom] = useState<ParlayLeg[]>([]);
+  // Module store, not screen state: this screen is popped out from under the
+  // user by "Find players to add" and now by a push deep-link, and these legs
+  // are hand-typed work with no other copy (see useSavedParlays).
+  const manualCustom = useManualCustomLegs();
   /**
    * The saved parlay this slip is an edit of, so the next save writes back over
    * it instead of inserting a second record. Set two ways: by "Edit in builder"
@@ -184,7 +193,7 @@ export function ParlayScreen() {
         return;
       }
       if (pickId < 0) {
-        setManualCustom((prev) => prev.filter((l) => l.pickId !== pickId));
+        setManualCustomLegs((prev) => prev.filter((l) => l.pickId !== pickId));
         return;
       }
       // Map the (session) pickId back to its stable slip key to remove it.
@@ -197,7 +206,7 @@ export function ParlayScreen() {
   const handleClear = useCallback(() => {
     slip.clear();
     lineLegs.clear();
-    setManualCustom([]);
+    setManualCustomLegs([]);
     // A cleared slip is no longer the saved parlay it was seeded from — the
     // next save is a new one, not a write over the old.
     setEditingParlayId(null);
@@ -233,7 +242,7 @@ export function ParlayScreen() {
     if (!restorePending) return;
     slip.clear();
     restorePending.slipKeys.forEach((key) => slip.add(key));
-    setManualCustom(restorePending.customLegs);
+    setManualCustomLegs(restorePending.customLegs);
     setEditingParlayId(restorePending.editingId ?? null);
     consumeRestore();
   }, [restorePending]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -254,7 +263,7 @@ export function ParlayScreen() {
   const handleSaveCustom = useCallback(() => {
     const odds = parseAmerican(customOddsText);
     if (customLabel.trim().length === 0 || odds == null) return;
-    setManualCustom((prev) => [...prev, makeCustomLeg(customLabel, odds)]);
+    setManualCustomLegs((prev) => [...prev, makeCustomLeg(customLabel, odds)]);
     setCustomLabel('');
     setCustomOddsText('');
     setCustomOpen(false);
