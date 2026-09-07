@@ -1,4 +1,11 @@
-# The 2025 re-grade: §5b's verdict was about artifacts that no longer exist
+# The 2025 re-grade and the walk-forward that settled it
+
+> **RESOLVED 2026-09-07: §5b was right.** The walk-forward at the bottom of
+> this file returns **−4.32% over 1,554 bets with a 90% CI of (−8.2, −0.4)** —
+> excluding zero, negative in all three seasons, on a method that FAVOURS the
+> models. The 2025-only section below was underpowered, and the sentence it
+> led to — "§5b does not describe these artifacts" — was wrong. Read this file
+> for how that was established; act on the walk-forward.
 
 Measured 2026-09-07. **Supersedes `docs/nfl_props_model.md` §5b for the current
 models.** §5b is still correct about what it measured; it measured the artifacts
@@ -94,3 +101,57 @@ That is ~3x the sample and would separate −1.18% from zero, or not.
 Until that runs, the honest statement is: **the current NFL prop models are
 indistinguishable from break-even, and the only confident number in the table
 is an artifact of a known measurement error.**
+
+---
+
+## The walk-forward, 2026-09-07 — this is the answer
+
+`scripts/nfl_prop_walkforward.py`. Weights refit per season on prior seasons
+only, so 2023 and 2024 become out-of-sample too. Same prices, same cuts, same
+grading as above. **Hyperparameters are reused from the shipped artifacts, which
+were tuned on 2015–2024 — so this FLATTERS the models and any positive number is
+an upper bound.**
+
+| model | bets | win% | ROI | 90% CI |
+|---|---|---|---|---|
+| sacks | 90 | 63.3% | +8.51% | (−6.2, +22.7) |
+| rush_attempts | 97 | 53.6% | +0.36% | (−15.2, +15.9) |
+| rush_yards | 114 | 51.8% | −1.94% | (−16.8, +12.9) |
+| pass_attempts | 60 | 51.7% | −2.20% | (−21.8, +18.0) |
+| rush_rec_yards | 228 | 51.8% | −2.93% | (−13.0, +7.1) |
+| receptions | 420 | 50.2% | −3.97% | (−11.6, +3.7) |
+| pass_completions | 124 | 50.8% | −5.10% | (−18.8, +8.7) |
+| **rec_yards** | **321** | 48.0% | **−9.54%** | **(−18.2, −0.8)** |
+| pass_yards | 93 | 47.3% | −11.24% | (−27.4, +4.8) |
+| **tackles_assists** | **755** | 64.9% | **+21.26%** | **(+15.9, +26.6)** |
+| **ALL excl tackles** | **1,554** | 51.0% | **−4.32%** | **(−8.2, −0.4)** |
+
+By season, excluding tackles: **2023 −1.99%, 2024 −8.95% (CI −15.3, −2.5),
+2025 −1.18%.** Negative in all three.
+
+### What it establishes
+
+**The pooled interval excludes zero.** With three seasons instead of one, and a
+method that helps them, the distributional models lose about 4.3 units per
+hundred bet. §5b's −0.10% to −6.19% was right; the 2025-only read was simply
+underpowered, and the wider intervals there were the honest signal that it could
+not decide.
+
+**tackles+assists is the control, and it works.** +21.26% with a CI of
+(+15.9, +26.6) on 755 bets — by far the most confident number, from the one
+model whose target we know is measured against the wrong ruler. Any future
+result in this family that looks like that should be treated as a measurement
+error until proven otherwise.
+
+**`rec_yards` is individually confirmed losing** (−9.54%, CI excluding zero) on
+the second-largest sample. It is also one of the highest-volume models live.
+
+**No individual model is confirmed winning.** `sacks` at +8.51% is the best and
+its interval spans (−6.2, +22.7).
+
+### What it does not close
+
+The hyperparameter leak. Closing it means 33 Optuna searches instead of 33
+fits — hours rather than minutes. It is worth doing only to sharpen a positive
+result, and there is no positive result to sharpen: the leak runs in the models'
+favour and they still lose.

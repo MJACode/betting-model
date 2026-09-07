@@ -140,6 +140,10 @@ table.tbl td{padding:2px 14px;color:var(--ink-2)}
 .pill.live{color:var(--good);border-color:rgba(12,163,12,.4)}
 .pill.paused{color:var(--muted)}
 .pill.untrained{color:var(--warn);border-color:rgba(250,178,25,.4)}
+/* A RULE IS NOT A WARNING. nfl_prop_market is the best NFL prop approach
+   we have (+10.33% blind) and rendered amber-on-red as NO ARTIFACT because
+   it has no .pkl -- it never will, the logic IS the model. Neutral. */
+.pill.rule{color:var(--muted);border-color:var(--hair)}
 .spark{display:block}
 .lchead,.lcrow{display:grid;grid-template-columns:minmax(0,1fr) 104px 92px 104px 92px;
   gap:10px;align-items:center}
@@ -701,18 +705,27 @@ function renderRoster(){
   const d=ops.models||[];
   const live=d.filter(m=>!m.paused && m.version).length;
   const paused=d.filter(m=>m.paused).length;
-  const untrained=d.filter(m=>!m.version).length;
+  // Count rules separately: folding them into "no artifact" is what made that
+  // number read as five outages when it was five rules and no outage.
+  const rules=d.filter(m=>!m.version && m.is_rule).length;
+  const untrained=d.filter(m=>!m.version && !m.is_rule).length;
   document.getElementById("rosternote").textContent =
-    `${live} live · ${paused} paused · ${untrained} no artifact`;
+    `${live} live · ${paused} paused · ${rules} rules · ${untrained} no artifact`;
   const box=document.getElementById("roster");
   if(!d.length){ box.innerHTML=`<div class="empty">no thresholds synced</div>`; return; }
   // Live first — the ones that can actually fire are what you scan for.
-  const order=m=> m.paused?2 : m.version?0 : 1;
+  // A rule sorts WITH the live models -- it is firing, it just has no
+  // artifact. Only a genuinely missing one belongs down with the problems.
+  const order=m=> m.paused?3 : m.version?0 : m.is_rule?1 : 2;
   box.innerHTML = `<div class="mhead"><span>Model</span><span>State</span><span>Cut</span>
       <span>Cal err</span><span>Trained</span></div>` +
     [...d].sort((a,b)=>order(a)-order(b) || (a.model_id<b.model_id?-1:1)).map(m=>{
+      // is_rule comes from the roster query: carries thresholds but is in no
+      // training registry, so there is nothing to train and never will be.
+      // Without it a rule and a genuinely missing artifact are the same row.
       const state = m.paused ? `<span class="pill paused">PAUSED</span>`
         : m.version ? `<span class="pill live">LIVE</span>`
+        : m.is_rule ? `<span class="pill rule">RULES MODEL</span>`
         : `<span class="pill untrained">NO ARTIFACT</span>`;
       const cut = m.prob_only ? `p≥${pct(m.min_prob)}`
         : `p≥${pct(m.min_prob)} e≥${pct(m.min_edge)}`;
