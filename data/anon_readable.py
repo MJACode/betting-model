@@ -83,6 +83,60 @@ AUTHENTICATED_ONLY: tuple[str, ...] = (
 )
 
 
+# ── what the app may WRITE ───────────────────────────────────────────────────
+# mike, 2026-09-04: "sure do the grant thing."
+#
+# A relation the app READS should hold SELECT and nothing else. Everything in
+# ANON_READABLE that is not named here has its write verbs revoked by
+# scripts/apply_anon_grants.py.
+#
+# WHY THIS IS A RULE AND NOT A ONE-OFF REVOKE ON `game_weather`. That table held
+# INSERT/UPDATE/DELETE for anon while its only anon policies were SELECT
+# (`allow anon read`, `anon read game_weather`), so the writes were already
+# denied -- an ACL that did not match intent, missed by the session-205 sweep
+# precisely because nothing was checking the read surface against the write
+# surface. Sixteen VIEWS carried the same surplus. Naming the write surface is
+# what makes the next one visible.
+#
+# THE VIEW GRANTS WERE MEASURED BEFORE BEING CALLED HARMLESS. A view can be
+# auto-updatable, and for a non-security_invoker view the base-table permission
+# AND RLS checks run as the VIEW OWNER -- which is `postgres` here, who bypasses
+# both. That would have been a genuine write path into base tables rather than an
+# inert grant. It is not: `pg_relation_is_updatable(oid, true)` returns 0 for all
+# sixteen (they aggregate, join or DISTINCT ON, so Postgres will not rewrite a
+# write through them), and every one carries `security_invoker=on`. Inert twice
+# over. Revoked anyway, because a view that is later simplified can silently
+# become updatable and nothing would flag it.
+ANON_WRITABLE: dict[str, tuple[str, ...]] = {
+    # device token registration, written before sign-in
+    "device_push_tokens": ("INSERT", "UPDATE", "DELETE"),
+    # in-app feedback submission
+    "feedback": ("INSERT", "UPDATE", "DELETE"),
+    # the user's own tracked bets
+    "tracked_bets": ("INSERT", "UPDATE", "DELETE"),
+}
+
+# NOT NARROWED, AND DELIBERATELY SO -- an open question, not an oversight. Each
+# of the three holds verbs no policy backs, so those are inert exactly the way
+# game_weather's were:
+#
+#     device_push_tokens   policies: INSERT, UPDATE      surplus: DELETE
+#     feedback             policies: INSERT              surplus: UPDATE, DELETE
+#     tracked_bets         policies: INSERT, DELETE      surplus: UPDATE
+#
+# Tightening these means deciding what the app is allowed to do, not just what it
+# currently does, so it needs a person. The verbs above are today's grants, so
+# applying this file changes nothing for them. Recorded in docs/followups.md.
+
+WRITE_VERBS: tuple[str, ...] = ("INSERT", "UPDATE", "DELETE", "TRUNCATE")
+
+
+def write_verbs_for(rel: str) -> tuple[str, ...]:
+    """Verbs to REVOKE from `rel` -- every write verb it is not declared to need."""
+    allowed = set(ANON_WRITABLE.get(rel, ()))
+    return tuple(v for v in WRITE_VERBS if v not in allowed)
+
+
 def all_readable() -> tuple[str, ...]:
     """Every relation the app may read, either role."""
     return ANON_READABLE + AUTHENTICATED_ONLY
