@@ -544,3 +544,46 @@ Explainer / Opening Comparison screens. Still correct — and deliberately kept 
 where it describes a NEW model that must be paper-traded first
 (`scripts/ncaaf_margin_eval.py`, `docs/ncaaf_search_findings.md`,
 `nfl/live_model/`).
+### Lesson: an absence is not the only delivery fault — a DUPLICATE is one too (2026-09-06)
+
+Every fault above was silence. This one was the opposite, and it hid in the same
+place, because `push_sent` says it did not happen.
+
+The `Ole Miss vs Louisville Under 55.5` card was posted to #ncaaf **twice** at
+12:29 PM, and the ledger holds exactly ONE row for it (`discord_signal`,
+12:29:11.358 ET, message `1546195572803772550`). `picks` holds one BET. So the
+ground-truth query above — the one that answers "did anything post" — cannot
+answer "did it post twice", and never will: the ledger is written AFTER the
+POST, deliberately, so nothing is consumed by a webhook that failed.
+
+**The cause is that there is more than one publisher now.**
+`signal_publisher.publish_new_signals` shipped 2026-09-05 so any writer can
+publish what it wrote, and it is called from the pre-game line poller (the
+`pollers` service, every 30 seconds) and from the scheduler's card polls, the
+refresh pass and the daily pipeline (the `worker` service). Two of them inside
+the same window each read "not yet posted", each POST, and the second INSERT is
+swallowed by `ON CONFLICT (lock_key, kind) DO NOTHING`. Measured window: the
+push row for the same pick is stamped 12:29:11.106, 252ms before the Discord
+row.
+
+**The fix is `tracking/publish_lock.py`** — a Postgres advisory lock, held by a
+session and therefore visible across `worker` and `pollers` alike, wrapping the
+whole read → post → ledger sequence. A run that cannot take it returns 0 and
+posts nothing, because whoever holds it is at that moment posting the very
+signals it would have posted; the batch is still un-ledgered, so if the holder
+dies the next pass takes it. Taken by `notify_discord_signals`,
+`notify_discord_live` and the push notifier's `notify_signal_changes` alike
+(CLAUDE.md §1b) — a duplicate push is the same bug with no channel to see it in.
+
+**How to check for it going forward.** The ledger cannot, so compare the ledger
+against the channel:
+
+```sql
+-- Rows whose message never went out, or went out more than once, can only be
+-- found by reading the channel. What the ledger CAN show is the window: two
+-- publishers active within a second of each other on the same date.
+SELECT lock_key, kind, sent_at FROM push_sent
+WHERE sent_at::timestamptz > NOW() - INTERVAL '1 day'
+ORDER BY sent_at;
+```
+

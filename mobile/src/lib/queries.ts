@@ -428,11 +428,17 @@ const LIVE_STATE_COLUMNS =
  * Drives the live score + inning on the pick cards. MLB only — that's the only
  * sport the live poller covers, so other sports return no rows.
  */
-export async function fetchLiveGameStates(date: string): Promise<LiveGameStateRow[]> {
+export async function fetchLiveGameStates(
+  dates: string | string[],
+): Promise<LiveGameStateRow[]> {
   const { data, error } = await supabase
     .from('v_live_game_state_latest')
     .select(LIVE_STATE_COLUMNS)
-    .eq('game_date', date);
+    // A LIST, because a late kickoff keeps yesterday's game_date after midnight
+    // ET and its score + clock would otherwise freeze exactly when the game is
+    // most live (liveSlateDatesET). Callers that mean one specific day — a
+    // single pick's detail screen — pass a bare string and are unaffected.
+    .in('game_date', Array.isArray(dates) ? dates : [dates]);
   if (error) throw error;
   return (data ?? []) as unknown as LiveGameStateRow[];
 }
@@ -1029,22 +1035,35 @@ export async function fetchUpcomingNcaafPicks(
   });
 }
 
-// Live (in-play) picks for today — Phase 5 scaffolding.
-// Returns only picks marked is_live=true for games that are still in progress
+// Live (in-play) picks: is_live=true rows for games that are still in progress
 // (commence_time has passed, no final score yet).
+//
+// `dates` IS A LIST, NOT A DAY, and that is the whole point. A game carries the
+// game_date of its KICKOFF, so a 10:37pm ET start is in the fourth quarter at
+// 00:30 ET the next day. Asking for a single todayET() dropped exactly those
+// games at the rollover — while the live scorers, the push notifier and the
+// Discord producers all kept going, because they resolve the window through
+// config.live_slate_dates(). Measured case: the UCLA @ California live
+// moneyline posted to #ncaaf at 1:07am ET on 2026-09-06 under game_date
+// 2026-09-05, and the app's live board was empty for the rest of the game.
+// Pass liveSlateDatesET(); see CLAUDE.md §1b on the surfaces agreeing.
+//
+// The games read still bounds to what is actually in progress — kicked off and
+// not yet settled — so yesterday's finished games drop out on their own and the
+// wider window costs nothing.
 //
 // DraftKings only (Matt, 2026-09-03): the in-play model reads DK's line and the
 // bet is placed there, so the Live board shows the stored DK number and one DK
 // hand-off. The per-book in-play view (v_latest_inplay_odds_all_books) that
 // used to feed a "your book" price and a line-shop chip here is no longer
 // read by the app — one fewer query every 30s poll. The view itself is kept.
-export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
+export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   const nowIso = new Date().toISOString();
   const [picksRes, gamesRes, weatherRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
-      .eq('game_date', date)
+      .in('game_date', dates)
       .eq('is_live', true)
       // Live tab shows only actionable, recommended bets — AVOID (fade) picks
       // are still written + settled for model tracking, just not surfaced here.
@@ -1054,10 +1073,10 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
     supabase
       .from('games')
       .select(GAME_COLUMNS)
-      .eq('game_date', date)
+      .in('game_date', dates)
       .lte('commence_time', nowIso)
       .is('home_score', null),
-    supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
+    supabase.from('game_weather').select(WEATHER_COLUMNS).in('game_date', dates),
   ]);
 
   if (picksRes.error) throw picksRes.error;
