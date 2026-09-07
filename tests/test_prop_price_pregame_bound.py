@@ -270,6 +270,13 @@ def test_the_nfl_cutoff_map_left_joins():
     assert "LEFT JOIN games g" in body, body
     # The clamp, spelled out because the two timestamps span two tables and
     # pregame_cutoff_sql takes one alias. Same rule, same constant.
-    assert "THEN g.first_pitch_at END" in body, body
+    #
+    # ::timestamptz on the RETURNED arm, not only on the comparison operands.
+    # Spanning two tables is exactly why: games.first_pitch_at is TEXT and
+    # nfl_team_game_stats.commence_time is TIMESTAMPTZ, so an uncast THEN made
+    # the COALESCE a type error that no run of the scorer could survive. Both
+    # this assertion and its twin in test_first_pitch.py pinned the broken form
+    # and passed, because they read the SQL rather than executing it.
+    assert "THEN g.first_pitch_at::timestamptz END" in body, body
     assert "SUSPICIOUS_EARLY_MINUTES" in body, body
     assert "s.commence_time) AS cutoff" in body, body

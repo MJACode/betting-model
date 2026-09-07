@@ -3868,7 +3868,7 @@ def _nfl_pregame_cutoff_map(conn: DBConnection, game_date: str) -> dict[str, str
                COALESCE(CASE WHEN g.first_pitch_at::timestamptz
                                   >= s.commence_time::timestamptz
                                      - interval '{SUSPICIOUS_EARLY_MINUTES} minutes'
-                             THEN g.first_pitch_at END,
+                             THEN g.first_pitch_at::timestamptz END,
                         s.commence_time) AS cutoff
         FROM nfl_team_game_stats s
         LEFT JOIN games g ON g.game_id = s.game_id
@@ -3905,7 +3905,35 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     # the odds feed and nflverse disagree on suffixes and accents.
     prop_odds_by_key = load_nfl_prop_odds(conn, list(kickoffs.keys()),
                                           list(PROP_MARKETS_NFL))
+    # NO DUPLICATE PROPOSITIONS (mike, 2026-09-06: "no dupes"). The twelve
+    # distributional models and nfl_prop_market trade the SAME board, so the
+    # same player/market can qualify under both and reach the app and Discord
+    # twice as two different picks on one bet.
+    #
+    # nfl_prop_market WINS, and not arbitrarily: it is the only NFL prop
+    # approach with a measured positive record (+10.33% over 954 bets, positive
+    # in all three seasons, docs/nfl_props_model.md §5c), while these twelve
+    # lost to the hold in eleven of twelve markets (§5b). Where both have an
+    # opinion on one proposition, the one with evidence is the one that ships.
+    #
+    # Claimed at the PROPOSITION level (game, player, market) rather than by
+    # side: two models taking opposite sides of the same line is the worst
+    # version of this, not an exception to it.
+    #
+    # This is a WRITE-TIME skip, not a delete — §1c: a pick that exists is never
+    # removed. The scheduler runs the card before this scorer in the same tick
+    # so the claim is already in place; on a tick where the card wrote nothing,
+    # nothing is skipped.
+    claimed = {(r[0], r[1], r[2]) for r in conn.execute("""
+        SELECT game_id, player_key, prop_market FROM picks
+        WHERE sport = 'NFL' AND model_id = 'nfl_prop_market'
+          AND game_date = %s AND player_key IS NOT NULL
+    """, (target_date,)).fetchall()}
+    if claimed:
+        logger.info(f"  nfl_prop_market holds {len(claimed)} proposition(s) "
+                    f"on {target_date} — the twelve will not re-price them")
     total_picks = total_bets = 0
+    skipped_dupes = 0
 
     try:
         locked = _locked_prop_keys(conn, target_date, _NFL_PROP_CONFIG.keys())
@@ -3958,6 +3986,12 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                              market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
+                # See `claimed` above. norm_player_name is the same key the
+                # card writes, so this compares like with like rather than the
+                # book's spelling against nflverse's.
+                if (game_id, norm_player_name(player_name), market) in claimed:
+                    skipped_dupes += 1
+                    continue
 
                 line = float(prop_odds["line"])
                 p_over, p_under, p_push = _nfl_prop_probs(artifact, float(preds[i]), line)
@@ -3995,8 +4029,11 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             total_picks += len(model_picks)
             total_bets  += len(bets)
 
-        logger.success(f"NFL props: {total_bets} BETs / {total_picks} picks")
-        return {"picks": total_picks, "bets": total_bets}
+        logger.success(f"NFL props: {total_bets} BETs / {total_picks} picks"
+                       + (f" ({skipped_dupes} skipped — nfl_prop_market holds them)"
+                          if skipped_dupes else ""))
+        return {"picks": total_picks, "bets": total_bets,
+                "skipped_dupes": skipped_dupes}
     finally:
         conn.close()
 

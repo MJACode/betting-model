@@ -1,0 +1,11 @@
+# Model artifacts are DATA, not text.
+#
+# Every .pkl here carries a binary xgboost booster buffer. autocrlf rewriting a
+# stray 0x0A on checkout corrupts it, and the corruption is SILENT until
+# something opens the file — which nothing does for a paused model. The root
+# .gitattributes already carries this rule for ncaaf_live/data/artifacts and
+# has since a rebase crashed the suite; models/saved was never covered.
+#
+# Patterns in a .gitattributes are relative to ITS OWN directory, so this is
+# `*`, not `models/saved/*`.
+* -text
