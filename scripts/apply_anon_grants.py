@@ -67,11 +67,13 @@ from data.anon_readable import (
     ANON_READABLE,
     API_ROLES,
     AUTHENTICATED_ONLY,
+    ANON_WRITABLE,
     RPC_ANON_CALLABLE,
     RPC_REVOKE,
     VIEW_BASE_TABLES,
     lock_down,
     closed_tables,
+    write_verbs_for,
 )
 from data.db import get_connection
 
@@ -230,6 +232,30 @@ def main() -> int:
             ran = lock_down(conn, rel)
             logger.info(f"{rel}: {len(ran)} lock-down statement(s)"
                         + (" (already closed)" if not ran else ""))
+        # A relation the app READS holds SELECT and nothing else, unless it is
+        # declared in ANON_WRITABLE. Built from what each relation ACTUALLY
+        # holds rather than issued blind, so the statement count and the log
+        # reflect the real change: every GRANT/REVOKE is DDL and fires
+        # Supabase's pgrst_ddl_watch, and this file already issues 34 of them.
+        revoked = 0
+        for rel in list(ANON_READABLE) + list(AUTHENTICATED_ONLY):
+            verbs = write_verbs_for(rel)
+            held = [
+                v for v in verbs
+                if conn.execute(
+                    "SELECT has_table_privilege('anon', %s, %s) "
+                    "OR has_table_privilege('authenticated', %s, %s)",
+                    (f'public."{rel}"', v, f'public."{rel}"', v)).fetchone()[0]
+            ]
+            if not held:
+                continue
+            conn.execute(
+                f'REVOKE {", ".join(held)} ON public."{rel}" FROM anon, authenticated')
+            logger.info(f"{rel}: revoked {', '.join(held)}")
+            revoked += 1
+        logger.info(f"write verbs revoked on {revoked} relation(s); "
+                    f"{len(ANON_WRITABLE)} declared writable and left alone")
+
         # Verify inside the transaction: the app's read surface must survive.
         missing = [
             rel for rel in ANON_READABLE
@@ -318,6 +344,23 @@ def main() -> int:
             conn.rollback()
             logger.error(f"FORCE RLS is on for {forced}, which would deny the "
                          f"table owner — rolled back.")
+            return 1
+        # And nothing in the read surface holds a write verb it was not declared
+        # to need. Read back for the same reason as every other revoke here: one
+        # that did not bite reports success.
+        surplus = [
+            f"{rel}:{v}"
+            for rel in list(ANON_READABLE) + list(AUTHENTICATED_ONLY)
+            for v in write_verbs_for(rel)
+            if conn.execute(
+                "SELECT has_table_privilege('anon', %s, %s) "
+                "OR has_table_privilege('authenticated', %s, %s)",
+                (f'public."{rel}"', v, f'public."{rel}"', v)).fetchone()[0]
+        ]
+        if surplus:
+            conn.rollback()
+            logger.error(f"undeclared write privileges survive: {surplus} — "
+                         f"rolled back.")
             return 1
         conn.commit()
     except Exception as exc:                                   # noqa: BLE001

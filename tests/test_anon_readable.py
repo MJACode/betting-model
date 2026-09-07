@@ -538,3 +538,71 @@ def test_the_apply_script_reads_back_that_rls_actually_landed():
     # and both must be able to roll the whole thing back
     for probe in ("RLS is still off", "FORCE RLS is on"):
         assert probe in src, probe
+
+
+# ── the write surface ────────────────────────────────────────────────────────
+# mike, 2026-09-04: "sure do the grant thing."
+
+
+def test_everything_declared_writable_is_also_readable_or_deliberately_not():
+    """ANON_WRITABLE names relations the app writes. Each must be a real part of
+    the declared surface, so a typo cannot silently exempt a table from the
+    write revoke — the exemption is the dangerous direction here."""
+    from data.anon_readable import ANON_WRITABLE, all_readable
+
+    known = set(all_readable()) | {"feedback"}
+    unknown = sorted(set(ANON_WRITABLE) - known)
+    assert unknown == [], (
+        f"{unknown} is declared writable but is in neither ANON_READABLE nor "
+        f"the known-writable set. A name here EXEMPTS a relation from the write "
+        f"revoke, so a typo quietly leaves surplus grants in place.")
+
+
+def test_write_verbs_for_revokes_everything_on_a_read_only_relation():
+    """The default must be deny. A relation absent from ANON_WRITABLE gives up
+    every write verb, including TRUNCATE."""
+    from data.anon_readable import WRITE_VERBS, write_verbs_for
+
+    assert set(write_verbs_for("game_weather")) == set(WRITE_VERBS)
+    assert set(write_verbs_for("picks")) == set(WRITE_VERBS)
+    assert set(write_verbs_for("odds")) == set(WRITE_VERBS)
+
+
+def test_write_verbs_for_keeps_exactly_what_a_writable_relation_declares():
+    """A declared relation gives up only the verbs it does NOT claim — and
+    TRUNCATE is claimed by nothing, so every relation gives that up."""
+    from data.anon_readable import ANON_WRITABLE, write_verbs_for
+
+    for rel, allowed in ANON_WRITABLE.items():
+        revoked = set(write_verbs_for(rel))
+        assert revoked & set(allowed) == set(), (
+            f"{rel} would have {revoked & set(allowed)} revoked despite "
+            f"declaring it")
+        assert "TRUNCATE" in revoked, (
+            f"{rel} keeps TRUNCATE. Nothing in this app truncates through "
+            f"PostgREST, and it is not recoverable.")
+
+
+def test_truncate_is_never_granted_to_anything():
+    """TRUNCATE deletes every row and takes no WHERE clause, so no RLS policy
+    can narrow it. Nothing in the app needs it."""
+    from data.anon_readable import ANON_WRITABLE
+
+    for rel, allowed in ANON_WRITABLE.items():
+        assert "TRUNCATE" not in allowed, rel
+
+
+def test_the_apply_script_revokes_writes_and_reads_the_result_back():
+    """A revoke that did not bite reports success — the lesson from the first
+    function-grant apply. The write revoke gets the same treatment as every
+    other one in this script: read back inside the transaction, roll back if a
+    surplus privilege survives."""
+    src = (Path(__file__).resolve().parents[1] / "scripts"
+           / "apply_anon_grants.py").read_text(encoding="utf-8")
+    assert "write_verbs_for" in src, "the apply script does not revoke writes"
+    assert "undeclared write privileges survive" in src, (
+        "the apply script does not read the write revoke back")
+    # the read-back must be able to roll the whole thing back
+    idx = src.index("undeclared write privileges survive")
+    assert "conn.rollback()" in src[max(0, idx - 400):idx], (
+        "the surplus-privilege check does not roll back")
