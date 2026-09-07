@@ -278,7 +278,7 @@
     "key": "ncaaf-history-2023",
     "job_type": "historical_odds",
     "requested_by": "matt",
-    "note": "2023 CFB regular season through conference championships, one 14:00Z snapshot a day, spreads + totals only (20 credits a call). 108 days = 108 calls = 2,160 credits against a 2,500 cap. Funded by Matt 2026-09-07 (session 252) for a sharp-vs-soft current-line rule; the 2024-10-19 probe returned DK+Bovada and DK+Pinnacle on 47 of 72 events. Rows are stamped odds_api_historical so the pruner keeps them -- the MLB backfill was not, and was thinned to one row per proposition. h2h deliberately not funded (+1,080 per season).",
+    "note": "SUPERSEDED by ncaaf-history-2023-wide the same day (Matt: 'think bigger'). Kept so the dedupe key stays declared: this shape was enqueued by #553's deploy at 21:04Z on 2026-09-07 and the 2023 run had started by 21:10Z. Narrow: one 14:00Z snapshot, spreads+totals, four books, 108 calls x 20 = 2,160 credits.",
     "args": {
       "sport": "NCAAF",
       "start": "2023-08-24",
@@ -303,7 +303,7 @@
     "key": "ncaaf-history-2024",
     "job_type": "historical_odds",
     "requested_by": "matt",
-    "note": "2024 CFB regular season through conference championships, one 14:00Z snapshot a day, spreads + totals only (20 credits a call). 108 days = 108 calls = 2,160 credits against a 2,500 cap. Funded by Matt 2026-09-07 (session 252) for a sharp-vs-soft current-line rule; the 2024-10-19 probe returned DK+Bovada and DK+Pinnacle on 47 of 72 events. Rows are stamped odds_api_historical so the pruner keeps them -- the MLB backfill was not, and was thinned to one row per proposition. h2h deliberately not funded (+1,080 per season).",
+    "note": "SUPERSEDED by ncaaf-history-2024-wide the same day (Matt: 'think bigger'). Kept so the dedupe key stays declared: this shape was enqueued by #553's deploy at 21:04Z on 2026-09-07 and the 2023 run had started by 21:10Z. Narrow: one 14:00Z snapshot, spreads+totals, four books, 108 calls x 20 = 2,160 credits.",
     "args": {
       "sport": "NCAAF",
       "start": "2024-08-22",
@@ -328,7 +328,7 @@
     "key": "ncaaf-history-2025",
     "job_type": "historical_odds",
     "requested_by": "matt",
-    "note": "2025 CFB regular season through conference championships, one 14:00Z snapshot a day, spreads + totals only (20 credits a call). 108 days = 108 calls = 2,160 credits against a 2,500 cap. Funded by Matt 2026-09-07 (session 252) for a sharp-vs-soft current-line rule; the 2024-10-19 probe returned DK+Bovada and DK+Pinnacle on 47 of 72 events. Rows are stamped odds_api_historical so the pruner keeps them -- the MLB backfill was not, and was thinned to one row per proposition. h2h deliberately not funded (+1,080 per season).",
+    "note": "SUPERSEDED by ncaaf-history-2025-wide the same day (Matt: 'think bigger'). Kept so the dedupe key stays declared: this shape was enqueued by #553's deploy at 21:04Z on 2026-09-07 and the 2023 run had started by 21:10Z. Narrow: one 14:00Z snapshot, spreads+totals, four books, 108 calls x 20 = 2,160 credits.",
     "args": {
       "sport": "NCAAF",
       "start": "2025-08-21",
@@ -347,6 +347,213 @@
         "totals"
       ],
       "credit_cap": 2500
+    }
+  },
+  {
+    "key": "mlb-history-2024-rebuy",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "RE-BUY of mlb-history-2024. The original ran 2026-09-01 and was thinned to one row per (game, market, book) by the next 6am prune, because nothing protected non-DK history in `odds` (session 252). Same shape as the original; ignore_ledger because the pull ledger still says these dates are stored. Rows now carry source='odds_api_historical' and survive. Matt, 2026-09-07: 'Yes on the re-buy'. Surviving rows from the first run are NOT deleted, so the opener and close of each proposition will exist twice with identical values; readers take earliest/latest. Widened from the original's 7 books to all 13 the feed carries, at no extra credits.",
+    "args": {
+      "sport": "MLB",
+      "start": "2024-03-28",
+      "end": "2024-09-30",
+      "hours_utc": [
+        12,
+        22
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "espnbet",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "ballybet",
+        "betparx",
+        "rebet"
+      ],
+      "credit_cap": 12000,
+      "ignore_ledger": true
+    }
+  },
+  {
+    "key": "mlb-history-2025-rebuy",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "RE-BUY of mlb-history-2025. The original ran 2026-09-01 and was thinned to one row per (game, market, book) by the next 6am prune, because nothing protected non-DK history in `odds` (session 252). Same shape as the original; ignore_ledger because the pull ledger still says these dates are stored. Rows now carry source='odds_api_historical' and survive. Matt, 2026-09-07: 'Yes on the re-buy'. Surviving rows from the first run are NOT deleted, so the opener and close of each proposition will exist twice with identical values; readers take earliest/latest. Widened from the original's 7 books to all 13 the feed carries, at no extra credits.",
+    "args": {
+      "sport": "MLB",
+      "start": "2025-03-27",
+      "end": "2025-09-28",
+      "hours_utc": [
+        12,
+        22
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "espnbet",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "ballybet",
+        "betparx",
+        "rebet"
+      ],
+      "credit_cap": 12000,
+      "ignore_ledger": true
+    }
+  },
+  {
+    "key": "mlb-history-2026-preaug-rebuy",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "RE-BUY of mlb-history-2026-preaug. The original ran 2026-09-01 and was thinned to one row per (game, market, book) by the next 6am prune, because nothing protected non-DK history in `odds` (session 252). Same shape as the original; ignore_ledger because the pull ledger still says these dates are stored. Rows now carry source='odds_api_historical' and survive. Matt, 2026-09-07: 'Yes on the re-buy'. Surviving rows from the first run are NOT deleted, so the opener and close of each proposition will exist twice with identical values; readers take earliest/latest. Widened from the original's 7 books to all 13 the feed carries, at no extra credits.",
+    "args": {
+      "sport": "MLB",
+      "start": "2026-04-01",
+      "end": "2026-08-26",
+      "hours_utc": [
+        12,
+        22
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "espnbet",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "ballybet",
+        "betparx",
+        "rebet"
+      ],
+      "credit_cap": 10000,
+      "ignore_ledger": true
+    }
+  },
+  {
+    "key": "ncaaf-history-2023-wide",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "2023 CFB regular season through conference championships, TWO snapshots a day (14:00Z, 23:00Z), all three markets, every book the feed carries -- the bookmakers param is one region, so 13 books cost what 2 cost. 108 days x 2 x 30 = 6,480 credits against a 7,000 cap. Matt 2026-09-07 (session 252): 'think bigger and find edge' -- the CFBD archive had openers from Bovada alone, which is the only reason the shipped rule is two-book. ignore_ledger because the superseded narrow job under ncaaf-history-2023 may already have marked 14:00Z dates as pulled; where it did, the narrow rows (4 books, 2 markets) stay and are duplicated by the wide pull with identical values. Rows are stamped odds_api_historical so the pruner keeps them.",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2023-08-24",
+      "end": "2023-12-09",
+      "hours_utc": [
+        14,
+        23
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "espnbet",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "ballybet",
+        "betparx",
+        "rebet"
+      ],
+      "markets": [
+        "h2h",
+        "spreads",
+        "totals"
+      ],
+      "credit_cap": 7000,
+      "ignore_ledger": true
+    }
+  },
+  {
+    "key": "ncaaf-history-2024-wide",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "2024 CFB regular season through conference championships, TWO snapshots a day (14:00Z, 23:00Z), all three markets, every book the feed carries -- the bookmakers param is one region, so 13 books cost what 2 cost. 108 days x 2 x 30 = 6,480 credits against a 7,000 cap. Matt 2026-09-07 (session 252): 'think bigger and find edge' -- the CFBD archive had openers from Bovada alone, which is the only reason the shipped rule is two-book. ignore_ledger because the superseded narrow job under ncaaf-history-2024 may already have marked 14:00Z dates as pulled; where it did, the narrow rows (4 books, 2 markets) stay and are duplicated by the wide pull with identical values. Rows are stamped odds_api_historical so the pruner keeps them.",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2024-08-22",
+      "end": "2024-12-07",
+      "hours_utc": [
+        14,
+        23
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "espnbet",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "ballybet",
+        "betparx",
+        "rebet"
+      ],
+      "markets": [
+        "h2h",
+        "spreads",
+        "totals"
+      ],
+      "credit_cap": 7000,
+      "ignore_ledger": true
+    }
+  },
+  {
+    "key": "ncaaf-history-2025-wide",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "2025 CFB regular season through conference championships, TWO snapshots a day (14:00Z, 23:00Z), all three markets, every book the feed carries -- the bookmakers param is one region, so 13 books cost what 2 cost. 108 days x 2 x 30 = 6,480 credits against a 7,000 cap. Matt 2026-09-07 (session 252): 'think bigger and find edge' -- the CFBD archive had openers from Bovada alone, which is the only reason the shipped rule is two-book. ignore_ledger because the superseded narrow job under ncaaf-history-2025 may already have marked 14:00Z dates as pulled; where it did, the narrow rows (4 books, 2 markets) stay and are duplicated by the wide pull with identical values. Rows are stamped odds_api_historical so the pruner keeps them.",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2025-08-21",
+      "end": "2025-12-06",
+      "hours_utc": [
+        14,
+        23
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "espnbet",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "ballybet",
+        "betparx",
+        "rebet"
+      ],
+      "markets": [
+        "h2h",
+        "spreads",
+        "totals"
+      ],
+      "credit_cap": 7000,
+      "ignore_ledger": true
     }
   }
 ]

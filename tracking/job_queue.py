@@ -249,7 +249,8 @@ def _job_historical_odds(**kw):
     return run_historical_odds_range(
         sport=kw["sport"], start=kw["start"], end=kw["end"],
         hours_utc=kw["hours_utc"], bookmakers=kw["bookmakers"],
-        credit_cap=kw["credit_cap"], markets=kw["markets"])
+        credit_cap=kw["credit_cap"], markets=kw["markets"],
+        ignore_ledger=kw["ignore_ledger"])
 
 
 def _job_ncaaf_prop_odds(**kw):
@@ -343,7 +344,8 @@ def _validate_historical_odds(args: dict) -> dict:
         raise ValueError(f"credit_cap out of range: {cap}")
     return {"sport": sport, "start": start, "end": end,
             "hours_utc": sorted(set(hours)), "bookmakers": list(books),
-            "credit_cap": cap, "markets": markets}
+            "credit_cap": cap, "markets": markets,
+            "ignore_ledger": bool(args.get("ignore_ledger", False))}
 
 
 def _job_relabel_in_play(**kw):

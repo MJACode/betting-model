@@ -577,3 +577,10 @@ def test_historical_markets_default_to_all_and_reject_unknown():
         {**base, "markets": ["spreads", "totals"]})["markets"] == ["spreads", "totals"]
     with pytest.raises(ValueError):
         q._validate_historical_odds({**base, "markets": ["player_pass_tds"]})
+
+
+def test_historical_ignore_ledger_is_off_unless_asked():
+    base = {"sport": "MLB", "start": "2024-03-28", "end": "2024-09-30",
+            "credit_cap": 12000}
+    assert q._validate_historical_odds(base)["ignore_ledger"] is False
+    assert q._validate_historical_odds({**base, "ignore_ledger": True})["ignore_ledger"] is True

@@ -1260,7 +1260,8 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                               hours_utc: list[int] | None = None,
                               bookmakers: list[str] | None = None,
                               credit_cap: int = 25_000,
-                              markets: list[str] | None = None) -> dict:
+                              markets: list[str] | None = None,
+                              ignore_ledger: bool = False) -> dict:
     """Backfill a DATE RANGE of historical odds, several snapshots per day.
 
     This is what makes market-movement features trainable on more than the 2026
@@ -1281,6 +1282,12 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     Cost model: 10 credits x n_markets x n_regions, and `bookmakers` counts as
     one region. Three markets => ~30 credits per (date, hour), whether one book
     is named or seven.
+
+    `ignore_ledger` re-spends on (date, hour)s the ledger says are stored. It
+    exists for exactly one reason: the 2026-09-01 MLB backfill was pruned to
+    one row per proposition before anything protected it, and the ledger --
+    which is what makes a RESTART free -- also made the deliberate re-buy
+    Matt funded on 2026-09-07 impossible without it. Off unless asked.
     """
     from datetime import date as _date, timedelta as _td
 
@@ -1298,6 +1305,7 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     spent = 0
     stats = {"sport": sport, "start": start, "end": end, "hours_utc": hours,
              "bookmakers": books, "markets": markets, "credit_cap": credit_cap,
+             "ignore_ledger": bool(ignore_ledger),
              "calls": 0, "skipped_cached": 0, "credits_spent": 0,
              "marked_in_play": 0,
              "games": 0, "odds_rows": 0, "errors": 0,
@@ -1326,7 +1334,7 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     SELECT 1 FROM odds_history_pulls
                      WHERE sport=%s AND snapshot_date=%s AND hour_utc=%s LIMIT 1
                 """, (sport, day.isoformat(), hour)).fetchone()
-                if already:
+                if already and not ignore_ledger:
                     stats["skipped_cached"] += 1
                     continue
                 if spent + per_call > credit_cap:
