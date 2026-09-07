@@ -543,7 +543,56 @@ def _validate_publish_x_results(args: dict) -> dict:
     return {"game_date": game_date}
 
 
+def _job_void_picks(**kw):
+    """Void picks that should never have been official, from the worker.
+
+    scripts/void_picks.py is the documented route (CLAUDE.md 1c: a pick the
+    model should never have PRODUCED is voided, never deleted, so the evidence
+    that it happened survives), and it needs the database -- which the session
+    that finds such a row cannot write to. First use, 2026-09-07: pick 661, a
+    BET on MLB_2026-04-16_NYM_LAD, a games row for a game the Stats API never
+    scheduled (the 04-15 game filed again under its UTC date).
+
+    Same rules as the script: a graded WIN/LOSS/PUSH is refused, an
+    already-void pick is a no-op, and every row keeps its created_at, its line
+    and its price. The reason is written to the row.
+    """
+    from data.db import get_connection
+    from scripts.void_picks import _select, plan_voids, void
+
+    conn = get_connection()
+    try:
+        rows = _select(conn, kw["pick_ids"], None, None, None)
+        to_void, refused = plan_voids(rows, kw["reason"])
+        void(conn, to_void, kw["reason"])
+        conn.commit()
+        found = {r["pick_id"] for r in rows}
+        return {"voided":  [r["pick_id"] for r in to_void],
+                "refused": [[r["pick_id"], r["why"]] for r in refused],
+                "missing": [p for p in kw["pick_ids"] if p not in found]}
+    finally:
+        conn.close()
+
+
+def _validate_void_picks(args: dict) -> dict:
+    raw = args.get("pick_ids")
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("pick_ids must be a non-empty list of pick ids")
+    try:
+        ids = sorted({int(p) for p in raw})
+    except (TypeError, ValueError):
+        raise ValueError("pick_ids must be integers")
+    if len(ids) > 50:
+        raise ValueError(f"{len(ids)} picks in one job; a void is surgical, split it")
+    reason = str(args.get("reason") or "").strip()
+    if len(reason) < 20:
+        raise ValueError("reason must say what was wrong with the pick "
+                         "(20+ characters); it is written to the row")
+    return {"pick_ids": ids, "reason": reason[:500]}
+
+
 JOBS = {
+    "void_picks":      (_job_void_picks,       _validate_void_picks),
     "publish_x_results": (_job_publish_x_results, _validate_publish_x_results),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),

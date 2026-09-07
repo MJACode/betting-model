@@ -584,3 +584,94 @@ def test_historical_ignore_ledger_is_off_unless_asked():
             "credit_cap": 12000}
     assert q._validate_historical_odds(base)["ignore_ledger"] is False
     assert q._validate_historical_odds({**base, "ignore_ledger": True})["ignore_ledger"] is True
+
+
+# ── void_picks: the documented void, runnable where the database is ──────────
+#
+# mike, 2026-09-07: "void 661". scripts/void_picks.py is the route CLAUDE.md 1c
+# names for a pick the model should never have produced, and it needs the
+# database, which the session that finds such a row cannot write to.
+
+def test_void_needs_a_list_of_pick_ids():
+    with pytest.raises(ValueError, match="pick_ids"):
+        q._validate_void_picks({"reason": "a perfectly good reason for a void"})
+    with pytest.raises(ValueError, match="pick_ids"):
+        q._validate_void_picks({"pick_ids": 661, "reason": "a perfectly good reason"})
+    with pytest.raises(ValueError, match="integers"):
+        q._validate_void_picks({"pick_ids": ["six"], "reason": "a perfectly good reason"})
+
+
+def test_void_needs_a_real_reason_because_it_is_written_to_the_row():
+    with pytest.raises(ValueError, match="reason"):
+        q._validate_void_picks({"pick_ids": [661], "reason": "bad"})
+
+
+def test_void_is_surgical():
+    with pytest.raises(ValueError, match="split"):
+        q._validate_void_picks({"pick_ids": list(range(51)),
+                                "reason": "fifty-one picks is not a void, it is a purge"})
+
+
+def test_void_dedupes_sorts_and_trims():
+    cleaned = q._validate_void_picks({"pick_ids": [661, "661", 12],
+                                      "reason": "  phantom games row, never scheduled  "})
+    assert cleaned == {"pick_ids": [12, 661],
+                       "reason": "phantom games row, never scheduled"}
+
+
+class _VoidConn:
+    """Serves the picks the select asks for; records the void writes."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.writes = []
+        self.committed = False
+
+    def execute(self, sql, params=None):
+        if sql.lstrip().startswith("UPDATE picks"):
+            self.writes.append(params)
+        self._sql = sql
+        return self
+
+    def fetchall(self):
+        return self.rows
+
+    def commit(self):
+        self.committed = True
+
+    def close(self):
+        pass
+
+
+def _run_void(monkeypatch, rows, pick_ids=(661,)):
+    conn = _VoidConn(rows)
+    import data.db
+    monkeypatch.setattr(data.db, "get_connection", lambda: conn)
+    out = q._job_void_picks(pick_ids=list(pick_ids),
+                            reason="phantom games row, never on the schedule")
+    return conn, out
+
+
+def test_an_ungraded_pick_is_voided_with_the_reason_on_the_row(monkeypatch):
+    row = (661, "MLB_2026-04-16_NYM_LAD", "mlb_over_under", "LAD vs NYM Under 7.5",
+           "BET", None, "2026-04-16 11:59:28+00")
+    conn, out = _run_void(monkeypatch, [row])
+    assert out == {"voided": [661], "refused": [], "missing": []}
+    assert conn.committed
+    (params,) = conn.writes
+    assert params[0] == "NO_ACTION" and params[2] == "VOID"
+    assert params[3] == "phantom games row, never on the schedule"
+    assert params[-1] == 661
+
+
+def test_a_graded_pick_is_refused_not_rewritten(monkeypatch):
+    row = (661, "g", "m", "label", "BET", "WIN", "2026-04-16 11:59:28+00")
+    conn, out = _run_void(monkeypatch, [row])
+    assert out["voided"] == [] and out["refused"] == [[661, "already graded WIN"]]
+    assert conn.writes == []
+
+
+def test_a_pick_that_does_not_exist_is_reported_as_missing(monkeypatch):
+    conn, out = _run_void(monkeypatch, [], pick_ids=(661, 999999))
+    assert out == {"voided": [], "refused": [], "missing": [661, 999999]}
+    assert conn.writes == []

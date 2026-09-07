@@ -740,7 +740,20 @@ def _process_events(events: list[dict], sport: str,
             game_dt = datetime.fromisoformat(commence_ts.replace("Z", "+00:00"))
             game_date = game_dt.astimezone(_ET).strftime("%Y-%m-%d")
         except Exception:
-            game_date = snapshot_at[:10]
+            # An event with no parseable start is not a game we can date, so
+            # it must not become a games row. Three MLB rows exist with no
+            # commence_time, all written 2026-04-15/16, each a West Coast
+            # night game filed a SECOND time under its UTC date beside the
+            # real ET-dated row; the scorer then priced the duplicate off a
+            # stale snapshot and wrote a BET (pick 661) on a game the Stats
+            # API never scheduled, which nothing could ever settle. The code
+            # that wrote them predates the surviving history, so the exact
+            # path is unknowable; what is certain is that a dateless row is
+            # unpublishable and unsettleable, so refusing it loses nothing.
+            logger.warning(f"{sport} event {event.get('id')!r} "
+                           f"{event.get('away_team')!r} @ {event.get('home_team')!r} "
+                           f"has no parseable commence_time ({commence_ts!r}); skipped")
+            continue
 
         home_name = event.get("home_team", "")
         away_name = event.get("away_team", "")
