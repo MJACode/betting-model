@@ -21,6 +21,117 @@
 
 ---
 
+## [x] The calibrated decision never reaches player props — FIXED 2026-09-07
+
+`DECIDE_ON_CALIBRATED_PROB` is on by default and is a **no-op in production**.
+The branch is in `classify_edge` (`models/scorer.py:1124`); every model that
+carries a promoted calibration map is a player prop, and props are decided in
+`_make_prop_pick` (`models/scorer.py:2950`) on the RAW probability. 46 of 95
+MLB prop BETs since 2026-09-01 (48%) fail their own cut on the calibrated
+probability the pick already stores. Measured 2026-09-07,
+`docs/mlb_volume_efficiency.md` §2.
+
+**Done 2026-09-07 (mike).** `_make_prop_pick` now carries the branch, scoped
+so a map bites only where the weekly pass endorses it (helps AND transfers) —
+`data/migrations/promotions_endorsed_only_2026_09_07.sql` re-froze four maps and
+demoted six. `pitcher_k` and `pitcher_hits` deliberately stay on identity until
+they have 150 graded picks since their retrains (47 and 26 today);
+`config.PROP_MAX_SIGNALS_PER_DAY` holds their volume down until then and comes
+off with the re-promotion, ~2026-09-12 to 09-15. That is the one thing still
+owed here.
+
+## [x] An unfitted weekly refit silently disables a PROMOTED calibration map — FIXED 2026-09-07
+
+`load_calibrations` (`models/probability_calibration.py:386`) reads
+`promoted_a, promoted_b` but filters on the **candidate** `method = 'platt'`.
+When the weekly pass cannot fit a model it writes `method = NULL`, and the
+promoted map disappears on the next read. Measured 2026-09-07:
+`mlb_prop_pitcher_k` and `mlb_prop_pitcher_hits` picks carried a distinct
+`model_probability_cal` on 166/166 rows from 08-31 to 09-03, 11/43 on 09-04 and
+**0/95 from 09-05 on**. `scorer.py:1120` states the intent as "only an endorsed
+map bites"; the observed behaviour is that an un-endorsed refit can un-bite an
+endorsed one. **Done 2026-09-07 (mike).** `load_calibrations` reads `promoted_method`,
+`promote()` freezes the method and both verdicts at promotion, and `demote()`
+exists. Detail: `docs/mlb_volume_efficiency.md` §2.
+
+## [ ] The inning-gate replay misses 13 games production actually bet
+
+`scripts/live_inning_gate_replay.py`'s own control prints it: over 2026-08-24 →
+09-07 the ungated replay bets 120 games, production bet 94, and **13 of
+production's are not in the replay's set**. The replay sees every snapshot we
+kept and production saw only the passes it ran, so the replay's set should be a
+strict superset; 13 the other way is a fault in the replay. Candidates not yet
+checked: games with no usable pre-game feature row, the 120s price-pairing
+bound, or `rest_line < 0` firing where production had an earlier price. It does
+not change the 2026-09-07 verdict (don't gate — the optimum moves with the
+sample and its neighbour is negative in both tables), but the tool cannot be
+trusted for a finer question until this is understood.
+
+## [ ] Take `PROP_MAX_SIGNALS_PER_DAY` off when the two maps can be re-promoted
+
+`config.PROP_MAX_SIGNALS_PER_DAY` caps `mlb_prop_pitcher_k` and
+`mlb_prop_pitcher_hits` at 3/day. It is an INTERIM operator ceiling, not a
+threshold — no sweep supports the number — and it exists only because the
+calibrated cut cannot bind until those models have a fitted map again. The
+signal that it is time:
+
+```sql
+SELECT model_id, count(*) FROM picks
+WHERE model_id IN ('mlb_prop_pitcher_k', 'mlb_prop_pitcher_hits')
+  AND result IS NOT NULL
+  AND game_date >= '2026-09-04'      -- pitcher_hits: '2026-09-05'
+GROUP BY 1;                          -- need >= 150 each
+```
+
+At 47 and 26 on 2026-09-07, and the cap itself slows the counter — roughly
+2026-09-12 to 09-15. Then `python -m models.probability_calibration --promote
+--models mlb_prop_pitcher_k mlb_prop_pitcher_hits`, confirm the maps bite, and
+delete the two entries. A model update: `Updated-By`.
+
+## [ ] [needs-decision] The live calibration map: 126 of 150, and it does not close
+
+Asked for 2026-09-07 and measured the same day. Two blocking defects are FIXED —
+the fit could not see live models at all (`fetch_graded` read a matview that
+excludes `is_live`; every lane reported 0 graded picks forever), and
+`classify_live_signal` decided on the raw probability. The map itself is still
+refused, on two independent counts:
+
+* **n = 126**, and `MIN_GRADED` is 150. At ~9 live bets a day that is ~3 days —
+  the pre-game cap and collation did not touch live volume, so the rate holds.
+* **`transfers` = FALSE.** Held-out 18.48pp raw -> 8.98pp calibrated, against a
+  6.0pp cap. It helps and does not close — the `mlb_prop_pitcher_er` verdict.
+
+And there may be a structural reason it never closes: live lanes write no
+dead-zone NONE rows and their AVOIDs are never settled (232 live AVOIDs, 0
+graded), so the fit sees one narrow band above the model's own 0.70 floor.
+
+**The decision, when n clears:** the measured map takes a claimed 0.74 to 0.598
+while the lane's cut (0.70 prob / 0.14 edge / 0.32 EV) was swept on RAW numbers,
+so promoting WITHOUT re-sweeping the cut on calibrated numbers takes the lane to
+near zero bets. Promotion and re-sweep are one decision. Do not lower
+`MIN_GRADED` or `MAX_TRANSFER_GAP_PP` to make it fit.
+
+Every live lane is 12-15pp hot on the same measurement (`mlb_live_total_runs`
++14.38, `ncaaf_live_total` +15.27, `ncaaf_live_win_prob` +11.97), so this is a
+live-betting question, not an MLB one. `docs/mlb_volume_efficiency.md` §10.
+
+## [ ] `LIVE_MAX_BETS_PER_WEEK` is advisory and the ceiling is being exceeded 2.1x
+
+`config.LIVE_MAX_BETS_PER_WEEK["mlb_live_total_runs"] = 30`, set 2026-08-30 on
+Matt's *"still too many live bets on MLB"*. `config.py:556` states plainly that
+nothing enforces it at score time. Actual: 31 BETs in the week of 08-24, **63
+in the week of 08-31**. Either enforce it in the live loop (the
+`LIVE_MAX_SIGNALS_PER_DAY` mechanism already exists and is empty) or delete the
+number so it stops reading as a guarantee. Assess for NCAAF's two live lanes at
+the same time — they carry the same advisory ceilings.
+
+## [ ] No live pick has ever had CLV captured
+
+`picks.clv_pct` is populated on 123 of 165 MLB pre-game BETs since 2026-08-31
+and on **0 of 63** live ones. CLV converges far faster than ROI, so
+the one MLB model with a usable settled sample is the one we cannot judge by
+the fast measure. Sport-agnostic: NFL and NCAAF live lanes have the same hole.
+
 ## [ ] One NCAAF game exists twice in `games`, under its ET id and its UTC id
 
 Found 2026-09-06 (session 247) while tracing why a live NCAAF pick never reached

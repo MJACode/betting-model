@@ -640,8 +640,13 @@ LIVE_MAX_SIGNALS_PER_DAY: dict = {
 # the same shape and the same overlap — pass yards / attempts / completions are
 # one quarterback's afternoon three times over. They are NOT enrolled here
 # because each is its own model update on its own record, and nobody has asked
-# for them yet. The mechanism is sport-agnostic on purpose; adding a pool is one
-# line. docs/mlb_volume_efficiency.md section 6.
+# for them yet.
+#
+# The HELPERS are sport-agnostic (models.scorer.dedupe_player_props), but adding
+# a pool is NOT one line: those three scorers still insert per model as they
+# loop, and a collation compares picks from different models, so each needs the
+# same accumulate-then-write restructure run_prop_scorer got. Say two hours per
+# sport, not five minutes. docs/mlb_volume_efficiency.md section 6.
 PROP_ONE_BET_PER_PLAYER: dict = {
     "mlb_pitcher": frozenset({
         "mlb_prop_pitcher_k",

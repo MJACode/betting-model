@@ -287,6 +287,11 @@ def test_the_inverse_map_round_trips():
 # needed them could not create them. An entry point must not assume another
 # entry point ran first.
 
+# promote() reads (model_id, a, b, method, payload) and promotes only a map the
+# fit endorsed on BOTH counts -- helps AND transfers (2026-09-07, mike).
+ENDORSED = '{"helps": true, "transfers": true}'
+
+
 class _SchemaRecordingConn:
     """Records SQL and fails the UPDATE unless the ALTERs came first.
 
@@ -322,7 +327,8 @@ class _SchemaRecordingConn:
 def test_promote_creates_the_columns_it_writes_to():
     from models.probability_calibration import promote
 
-    conn = _SchemaRecordingConn([("mlb_f5_moneyline", 0.758681, -0.1)])
+    conn = _SchemaRecordingConn(
+        [("mlb_f5_moneyline", 0.758681, -0.1, "platt", ENDORSED)])
     done = promote(conn)
 
     assert done == ["mlb_f5_moneyline"]
@@ -344,7 +350,7 @@ def test_the_alters_come_before_any_write_in_both_paths():
     """Order, not presence. An ALTER after the UPDATE is the same outage."""
     from models.probability_calibration import promote
 
-    conn = _SchemaRecordingConn([("m", 1.0, 0.0)])
+    conn = _SchemaRecordingConn([("m", 1.0, 0.0, "platt", ENDORSED)])
     promote(conn)
     alter = next(i for i, q in enumerate(conn.sql)
                  if "ADD COLUMN IF NOT EXISTS promoted " in q)

@@ -706,6 +706,7 @@ CREATE TABLE IF NOT EXISTS picks (
     condition_status   TEXT,               -- OK | DEGRADED | GONE (NFL locked picks)
     condition_note     TEXT,               -- why the conditions changed
     condition_checked_at TEXT,             -- last poll tick that evaluated it
+    downgrade_reason   TEXT,               -- why a qualifying BET was written as NONE (cap / one-per-player)
     prop_market        TEXT,               -- prop market key (one model id, many markets)
     player_key         TEXT,               -- normalised player name settlement joins on
     created_at         TEXT DEFAULT (datetime('now'))
@@ -1402,6 +1403,15 @@ _MIGRATIONS = [
     ("picks", "condition_status",     "TEXT"),
     ("picks", "condition_note",       "TEXT"),
     ("picks", "condition_checked_at", "TEXT"),
+    # WHY a row that cleared its model's cut is a NONE anyway (2026-09-07).
+    # A one-bet-per-player collation or a daily cap turns a qualifying BET into
+    # a NONE, and without this the row is indistinguishable from one the model
+    # simply did not like -- which would quietly corrupt the next threshold
+    # sweep, since CLAUDE.md 7's evaluation rule reads every NONE back. NULL on
+    # every row the model itself declined. Deliberately NOT condition_status:
+    # that field is the NFL locked-pick health signal (OK/DEGRADED/GONE) and the
+    # void marker, and it is read by publishers that know those three words.
+    ("picks", "downgrade_reason", "TEXT"),
     # The market-relative NFL prop rule (models/nfl_prop_market) is ONE model id
     # covering many markets, so the market has to travel on the row. player_key
     # is the normalised name settlement joins on — NFL is the sport whose odds

@@ -54,6 +54,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # NOTICE) until scripts/dedupe_picks.py has cleared the 63 rows a released
     # lock wrote, then creates the index on the next pass.
     "picks_one_row_per_pick.sql",
+    # 2026-09-07: the promoted calibration slot, corrected on the day the
+    # decision path reached player props. One-off; guards on "every promoted row
+    # carries its own method" and skips forever after.
+    "promotions_endorsed_only_2026_09_07.sql",
 ]
 
 

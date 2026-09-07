@@ -40,6 +40,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
+    DECIDE_ON_CALIBRATED_PROB,
     LIVE_MODELS,
     LIVE_ODDS_MAX_AGE_SEC,
     LIVE_SCORE_LAG_TOLERANCE_SEC,
@@ -57,6 +58,7 @@ from data.db import get_connection, DBConnection
 from data.live_quote_guard import quote_predates_score
 from features.live_game_features import build_live_state_row
 from models.scorer import (
+    _calibrated,
     _tag_live,
     _build_pick_label,
     _confidence_tier,
@@ -222,7 +224,34 @@ def classify_live_signal(model_id: str, model_prob: float,
         return None
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, 0.10)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, 0.65)
-    if edge >= bet_thresh and model_prob >= prob_thresh:
+
+    # THE DECISION IS MADE ON THE CALIBRATED PROBABILITY -- the third and last
+    # place that rule had to reach (2026-09-07, mike). classify_edge got it on
+    # 2026-08-31, _make_prop_pick today, and this lane was the remaining one.
+    #
+    # It is a NO-OP as it lands: no live model has a promoted calibration map,
+    # and a model without one calibrates to itself. It is here so the day one is
+    # promoted the decision reads it, rather than the map moving a display
+    # number for six days while the bets are made on the raw one -- which is
+    # exactly what happened to the props.
+    #
+    # EVERYTHING downstream reads decision_prob, the EV floor included. A prob
+    # floor on the calibrated number and an EV floor on the raw one would be two
+    # cuts pointing at different quantities, which is the one incoherent
+    # outcome. Note what that implies and do not discover it later: this lane's
+    # cut (prob 0.70 / edge 0.14 / EV 0.32 for mlb_live_total_runs) was swept on
+    # RAW probabilities, and the model's measured map maps a claimed 0.74 to
+    # 0.598 -- so promoting a map without re-sweeping the cut on calibrated
+    # numbers would take the lane to near zero bets. Promotion and re-sweep are
+    # one decision. docs/mlb_volume_efficiency.md section 9.
+    decision_prob, decision_edge = model_prob, edge
+    if DECIDE_ON_CALIBRATED_PROB:
+        cal = _calibrated(model_id, model_prob)
+        if cal is not None:
+            decision_prob = cal
+            decision_edge = cal - (model_prob - edge)   # implied is unchanged
+
+    if decision_edge >= bet_thresh and decision_prob >= prob_thresh:
         # A PAUSED live model still scores, it just never produces an
         # actionable bet. Written as NONE (the pre-game convention) rather than
         # dropped, so the forward record keeps accruing for the unpause
@@ -239,11 +268,11 @@ def classify_live_signal(model_id: str, model_prob: float,
         # thresholds alone.
         floor = MODEL_MIN_EV.get(model_id)
         if floor is not None:
-            ev = expected_value(model_prob, dk_odds)
+            ev = expected_value(decision_prob, dk_odds)
             if ev is not None and ev < floor:
                 return "NONE"
         return "BET"
-    if edge <= -bet_thresh:
+    if decision_edge <= -bet_thresh:
         return "AVOID"
     return None
 

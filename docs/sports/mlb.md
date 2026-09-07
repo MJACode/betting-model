@@ -48,6 +48,17 @@ converging on the same place from the other side.
   rows — a smoothed restatement of `era`.
 * **`mlb_f5_moneyline` retrained** on the rebuilt tables. See the F5 section.
 
+## 11b. PICK VOLUME — read `docs/mlb_volume_efficiency.md` before touching a cut
+
+Measured 2026-09-07: MLB writes ~30 BETs/day (20.6 pre-game + 9.0 live), up
+from ~6/day before 2026-08-31, and **48% of the prop BETs would not exist if
+the decision used the calibrated probability the pick already stores**. The
+calibrated-decision branch is in `classify_edge` only; `_make_prop_pick` decides
+on the raw number, so `DECIDE_ON_CALIBRATED_PROB` is a no-op for every model
+that has a promoted map. `mlb_live_total_runs` is 26-31 (-9.66u) in innings 1-3
+and 27-10 (+11.69u) from inning 4. Full workings, caveats and what the window
+cannot support: `docs/mlb_volume_efficiency.md`.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 

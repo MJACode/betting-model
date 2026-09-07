@@ -1,0 +1,534 @@
+# MLB pick volume — where it comes from, and what can be cut
+
+> Measured 2026-09-07 (session 249) at Matt's request: *"far too much volume to
+> keep up with on a daily basis, how can we become more efficient while still
+> being profitable."*
+>
+> **Window.** "The past 7-10 days" is read as **2026-08-31 → 2026-09-07** (8
+> slate days). That is not a round number chosen for convenience — it is the
+> first date on which the current MLB prop configuration existed (#366, the
+> market-relative prop rule + the twelve calibrated cuts, both merged
+> 2026-08-31). Every number below states its own window.
+>
+> **Read §1 before any per-model ROI in this file.** No MLB model has more than
+> four days of settled record on its current version.
+
+---
+
+## 0. The shape of the problem, in one table
+
+Written MLB BETs per day, `picks` where `signal_type='BET'`:
+
+| Window | pre-game / day | live / day | total |
+|---|---|---|---|
+| 2026-08-08 → 08-30 (23 days) | 3.4 (78) | 3.0 (69) | **~6** |
+| 2026-08-31 → 09-07 (8 days) | 20.6 (165) | 9.0 (63 over 7 nights) | **~30** |
+
+The step is on **2026-08-31**, not gradual. Composition of the 165 pre-game
+BETs in the second window:
+
+| model | BETs | share |
+|---|---|---|
+| `mlb_prop_pitcher_k` | 60 | 36% |
+| `mlb_prop_pitcher_hits` | 45 | 27% |
+| `mlb_prop_pitcher_outs` | 27 | 16% |
+| `mlb_over_under` | 26 | 16% (paused 09-03) |
+| everything else (f5, runline, batter_runs, batter_hr) | 7 | 4% |
+
+All 63 live BETs in the window are **`mlb_live_total_runs`**. So ~95% of the
+volume is **four models**: three pitcher props and one live total.
+
+---
+
+## 1. Why the 7-10 day record cannot rank these models
+
+Every pre-game MLB model changed version inside the window:
+
+| model | current version live from | settled BETs on it (to 09-07) |
+|---|---|---|
+| `mlb_moneyline` | 2026-09-04 (#451) | 0 |
+| `mlb_f5_moneyline` | 2026-09-04 (#436 retrain, #444 cut) | 0 |
+| `mlb_prop_pitcher_k` | 2026-09-04 (#451) | 30 |
+| `mlb_prop_pitcher_hits` | 2026-09-05 (#454) | 11 |
+| `mlb_prop_pitcher_outs` | 2026-09-05 (#454) | 12 |
+| `mlb_prop_batter_runs`, `mlb_prop_batter_walks` | 2026-09-05 (#454) | 0 |
+| `mlb_over_under` | paused 2026-09-03 (#436) | — |
+| `mlb_live_total_runs` | model 2026-06-14; **cut** 2026-08-30 | 63 |
+
+Per-bet ROI has SE ≈ 1/√n. On these samples that is ±25 to ±40 percentage
+points. **Nothing in this window separates one prop model from another on ROI,
+and this file never claims it does.** What the window CAN answer — and what the
+rest of this file is — is: how many picks are being written, whether the number
+that fires matches the number the cut was chosen to produce, and whether the
+probabilities the volume is derived from are true.
+
+The one exception is `mlb_live_total_runs`: 63 settled bets on an unchanged
+model, splittable in half.
+
+---
+
+## 2. THE PRIMARY FINDING — the calibrated cuts are applied to raw probabilities
+
+On 2026-08-31, twelve models were re-cut on **calibrated** probability sweeps
+(`config.py`, `scripts/calibrated_threshold_sweep.py`), and
+`DECIDE_ON_CALIBRATED_PROB` was added so the decision would be made on the
+calibrated number. `models/scorer.py:1117` says so explicitly.
+
+**That branch is in `classify_edge` only. Player props do not go through
+`classify_edge`.** `_make_prop_pick` (`models/scorer.py:2908`) decides on the
+RAW number and has no calibration branch:
+
+```
+models/scorer.py:2950   signal_type = "BET" if (edge >= bet_thresh and model_prob >= prob_thresh) else "NONE"
+```
+
+Ten models carry a promoted calibration map (`model_calibration WHERE
+promoted`, all promoted 2026-08-31 17:05 ET): seven `mlb_prop_*` and three
+`wnba_prop_*`. **All ten are player-prop models, and all ten are scored through
+`_make_prop_pick`** — `run_prop_scorer` (MLB), `run_wnba_prop_scorer`,
+`run_nba_prop_scorer`, `run_nfl_prop_scorer` all call it. No game-level model
+has a promoted map, and a model with no map calibrates to itself.
+
+**So `DECIDE_ON_CALIBRATED_PROB` has never changed a single production
+decision.** It is on by default and it is a no-op everywhere. The "never" is
+measured, not assumed: across every pick ever written, **no non-prop model has
+a single row where `model_probability_cal IS DISTINCT FROM model_probability`**
+— they have no map — and the prop path has no branch that could read one.
+
+Measured in the data, not inferred from the code — each pick stores the
+calibrated number it *would* have decided on, in `picks.model_probability_cal`
+(`scorer.py:1982`). Restricted to BETs whose stored calibrated number actually
+**differs** from the raw one (i.e. a map was live for that pick — see the
+second defect below), 2026-08-31 → 09-04, DK-priced:
+
+| model | BETs | fail own `min_prob` or `min_edge` on the calibrated number |
+|---|---|---|
+| `mlb_prop_pitcher_k` | 31 | **30** |
+| `mlb_prop_pitcher_hits` | 26 | **26** |
+| `mlb_prop_batter_runs` | 2 | 0 |
+
+**56 of 57 prop BETs — 98% — would not exist if the decision used the
+calibrated probability the pick already carries.** Note what that does and does
+not say: applying the *2026-08-31 map as promoted* would not halve these two
+models, it would very nearly switch them off. The size of the correction is
+itself evidence of how far the raw probabilities are from the priced reality.
+
+(Over the wider 09-01 → 09-07 window the same test reads 46 of 95, 48% — but
+38 of those 95 rows carry an inert map and pass trivially, so the map-live
+figure above is the honest one.)
+
+The gap is visible in the projections too. `config.py:249` records the
+`pitcher_k` cut as *"25 bets … ~5.4/wk"*; it is firing **~52/wk**.
+`config.py:251` records `pitcher_hits` as *"~19.8/wk"*; it is firing **~39/wk**.
+
+### The second defect — a promoted map can silently go inert
+
+`load_calibrations` (`models/probability_calibration.py:386`) selects
+`promoted_a, promoted_b` but keeps only rows whose **candidate** `method` is
+`'platt'`. When the weekly refit cannot fit a model it writes `method = NULL`,
+and the promoted map is dropped on the next read. That has already happened:
+
+| game_date | `pitcher_k` + `pitcher_hits` picks | with cal ≠ raw |
+|---|---|---|
+| 08-31 → 09-03 | 166 | 166 |
+| 09-04 | 43 | 11 |
+| 09-05 → 09-07 | 95 | **0** |
+
+Since 2026-09-05 these two models have had **no calibration at all**, not even
+in the stored number. `scorer.py:1120` states the design intent as *"only an
+endorsed map bites"*; the observed behaviour is that an un-endorsed refit can
+un-bite an endorsed one. Logged as a follow-up.
+
+### The sequencing caveat — do not just flip the switch
+
+The promoted maps were fitted **before** the 09-03/09-05 leak-repair retrains.
+Because of the defect above, the two models this file is mostly about are
+currently inert, so wiring the flag in today would apply stale maps to
+`batter_rbi/runs/tb/walks`, `pitcher_er` and the three WNBA props — *not* to
+`pitcher_k` and `pitcher_hits`. Those two need a refit first, and this
+morning's ModelCalibration pass says it cannot do one yet:
+
+* `mlb_prop_pitcher_k` — *"only 47 graded picks since 2026-09-03 (need 150) —
+  identity map, unfitted"*, raw gap **14.24pp**
+* `mlb_prop_pitcher_hits` — *"only 26 graded picks since 2026-09-04 (need 150)
+  — identity map, unfitted"*, raw gap **16.87pp**
+
+Both retrained models are still overclaiming by 14-17pp. The leak repair fixed
+the point estimate; it did not fix the probability.
+
+---
+
+## 3. The probabilities the volume is derived from are not true
+
+Settled BETs 2026-08-31 → 09-07, DK-priced, `z` = binomial z of wins against
+the model's own summed claimed probability:
+
+| model | n | claims | delivers | z | units |
+|---|---|---|---|---|---|
+| `mlb_live_total_runs` | 63 | 74.0% | 55.6% | **−3.35** | +0.14 |
+| `mlb_prop_pitcher_k` | 54 | 65.9% | 42.6% | **−3.64** | −11.51 |
+| `mlb_over_under` | 24 | 58.1% | 29.2% | **−2.88** | −10.78 |
+| `mlb_prop_pitcher_hits` | 42 | 62.9% | 59.5% | −0.46 | +7.25 |
+| `mlb_prop_pitcher_outs` | 24 | 63.9% | 54.2% | −1.00 | +2.69 |
+
+Three of five are miscalibrated at p < 0.005 — and they are the **three
+highest-volume models**. `mlb_over_under` is already paused, and this window
+independently confirms that call.
+
+**A model that overclaims produces more picks AND worse picks.** Edge is
+`model_prob − implied_prob`; inflate the first term and both the count above
+the cut and the false confidence of what clears it rise together. Volume is the
+symptom here, not the disease.
+
+### What is NOT wrong: line selection
+
+CLV over the same window, `picks.clv_pct`:
+
+| model | n with CLV | mean CLV | beat close |
+|---|---|---|---|
+| `mlb_prop_pitcher_k` | 43 | **+1.62%** | 34 / 43 |
+| `mlb_prop_pitcher_outs` | 21 | **+1.59%** | 14 / 21 |
+| `mlb_prop_pitcher_hits` | 37 | **+1.17%** | 22 / 37 |
+| `mlb_over_under` | 16 | −0.16% | 13 / 16 |
+
+All three pitcher props beat the closing price, `pitcher_k` included — the
+model that is losing money. **This argues against killing `pitcher_k` and for
+fixing its probability.** It is picking the right side of the right markets and
+then betting far too many of them at far too much implied conviction.
+
+**`mlb_live_total_runs` has CLV on 0 of 63 picks.** No live pick in this repo
+has ever had CLV captured, so the one model with enough settled bets to judge
+is also the one we cannot judge by the fast-converging measure. Logged as a
+follow-up.
+
+---
+
+## 4. THE LIVE MODEL — the cleanest cut on the board
+
+`mlb_live_total_runs`, settled BETs, DK-priced, split by the inning the bet was
+taken in. The cut changed on 2026-08-30 (prob ≥ 0.70 + EV ≥ 0.32), so the
+current regime starts 08-24 and is split in half:
+
+| inning | half | n | W-L | claims | delivers | units |
+|---|---|---|---|---|---|---|
+| 1-3 | 08-24 → 08-30 | 21 | 9-12 | 70.8% | 42.9% | **−4.28** |
+| 1-3 | 08-31 → 09-06 | 36 | 17-19 | 73.8% | 47.2% | **−5.38** |
+| 4+ | 08-24 → 08-30 | 10 | 9-1 | 72.6% | 90.0% | **+6.16** |
+| 4+ | 08-31 → 09-06 | 27 | 18-9 | 74.4% | 66.7% | **+5.53** |
+
+Pooled current regime: **innings 1-3 = 26-31, −9.66u**; **innings 4+ = 27-10,
++11.69u**. Both halves agree in sign, in both bands, so this is a plateau and
+not a single lucky cell. Innings 4+ is also well calibrated (claims 73.6%,
+delivers 73.0%); the entire −3.35 z-score in §3 lives in innings 1-3.
+
+The mechanism is plausible: remaining-runs uncertainty is at its widest before
+a starter has been seen, and a Poisson head fitted on full-game data is at its
+most overconfident exactly there.
+
+### What this is NOT: the P&L of an inning-4 gate
+
+`LOCK_LIVE_PICKS_AT_FIRST_SIGNAL` is on, and the data confirms it — **94 BETs
+across 94 distinct games** since 08-24, exactly one per game. So the "inning 4+"
+row is the record of *games whose first qualifying signal happened to arrive in
+inning 4 or later*. It is **not** the record a gate would have produced: under a
+gate, a game that fired in inning 2 does not disappear, it locks at its first
+qualifying signal from inning 4 on — a different line, a different price, and
+possibly still a bet.
+
+So both numbers below are upper bounds on the effect, in opposite directions:
+the volume saving is **less** than 36 of 63, and +11.69u is **not** the gate's
+P&L. What survives cleanly is the calibration split: early-inning signals claim
+~73% and deliver ~46% in both halves; late-inning signals are true.
+
+The gate CAN be simulated properly — the MLB live loop writes every in-play
+snapshot to `odds` (`snapshot_type='in_play'`; **642,582 totals rows across 188
+games since 08-24**), so the model can be replayed pass by pass with the gate
+applied and the first qualifying inning-4+ signal graded. That is a worker job,
+not a query, and it is the right next step before the gate ships.
+
+**Volume effect (upper bound):** 27 of the 63 live BETs since 08-31 were taken
+in inning 4 or later — **3.9/day against 9.0/day**, ≈28/week.
+
+That number matters because `config.LIVE_MAX_BETS_PER_WEEK` sets **30/week**
+for this model, added 2026-08-30 when Matt said *"still too many live bets on
+MLB"*. Actual: **31 in the week of 08-24, 63 in the week of 08-31.** The
+comment at `config.py:556` is candid that *"nothing enforces it at score
+time"* — it is an input to the recalibration recommender, not a gate. The
+ceiling Matt set is being exceeded 2.1x and no code can currently stop it.
+
+### Secondary, weaker: the Under side
+
+Overs 08-24 → 09-06: 34-25, **+9.97u**. Unders: 15-20, **−7.95u**. But the
+Under side was **+5.01u (12-5)** before 08-24, so it fails a time split across
+the cut change and is reported here as an observation, not a recommendation.
+The inning split does not fail it.
+
+---
+
+## 5. Pre-game — what a daily cap would have done
+
+The currently publishable pre-game set (excluding paused `mlb_over_under` and
+retired `mlb_prop_batter_hr`), 2026-08-31 → 09-07, ranked within each day by
+the model's own claimed EV (`p·b − (1−p)`):
+
+| kept | picks | units |
+|---|---|---|
+| everything (~15.6/day) | 125 | **−0.99** |
+| top 10 / day | 70 | **+13.03** |
+| top 8 / day | 56 | +11.23 |
+| top 6 / day | 42 | +10.30 |
+| *ranks 11+ only* | 55 | **−14.02** |
+
+The whole loss of the window sits in the low-EV tail. Two honest caveats:
+
+* **In-sample.** The ranking was chosen after seeing the outcomes; 8 days,
+  n=70 in the top-10 band. §7's rule applies — this regresses forward.
+* **Out-of-window check, 2026-08-09 → 08-30** (the previous regime, ~5
+  picks/day so the bands are thin): top-5/day **+3.40u over 63**, ranks 6-10
+  **−5.71u over 9**. Same direction, far too little of it to call confirmation.
+* **The rank is raw EV, so it structurally favours the most overconfident
+  model.** `p·b − (1−p)` reads the same `model_probability` §3 shows to be
+  14-17pp hot on two of these models, so a raw-EV cap is not a substitute for
+  fixing calibration — it is a bound on the work while that is fixed. A
+  calibrated re-rank is not computable across this window: the maps went inert
+  on 09-05 (§2), so half the rows have no calibrated number to rank by.
+
+A cap is also the one lever that is a *guarantee* rather than a hope — the same
+argument `config.py:585` makes for `LIVE_MAX_SIGNALS_PER_DAY`. It bounds the
+work whatever the models do next week, which a threshold cannot.
+
+---
+
+## 6. Redundancy and operator load
+
+**Same pitcher, two markets.** Of 104 (game, pitcher) pairs carrying a pre-game
+prop BET since 08-31, **31 carry two markets** — 62 of the 135 player-prop
+picks (the other 30 of the 165 are game-level). Collapsing
+to one bet per pitcher (highest EV) removes **~3.9 picks/day, 24% of pre-game
+volume**. Cost over the window: the two-market group netted −0.27u in total, so
+there is no measured cost, and correlated exposure to one start drops.
+
+**Pre-game is batchable; live is not.** 131 of 165 pre-game BETs (79%) were
+written **≥6 hours before first pitch**; mean lead 11.3 hours. One morning
+sitting captures four fifths of the card. Live BETs cluster 18:00-23:59 ET (47
+of 63, 75%) with a 14:00-15:00 afternoon cluster — that is an all-evening
+commitment, and it is where the "can't keep up" cost actually lands.
+
+**Hand-off friction is already solved.** `dk_bet_link` is populated on 165/165
+pre-game and 63/63 live BETs; `best_bet_link` on 141 and 49.
+
+---
+
+## 7. External — what was checked outside the repo
+
+* **Automating placement is out.** DraftKings' Terms of Use prohibit bots,
+  scripts and automated means for placing wagers, with account restriction and
+  stake forfeiture as the stated consequence, and there is no public
+  bet-placement API. FanDuel and BetMGM carry the same policy. So no route
+  exists to make 30 bets/day cheaper to *place* — the efficiency has to come
+  from making fewer, better picks.
+  ([ToS review](https://terms.law/ToS-Watchdog/sports-betting/draftkings/),
+  [DK Terms of Use](https://sportsbook.draftkings.com/legal/nj-terms-of-use))
+* Deep links (already at 100% coverage) are the legitimate version of that
+  hand-off and are as far as it goes.
+
+---
+
+## 8. What this file does NOT claim
+
+* That `mlb_prop_pitcher_k` should be paused. Its record is 30 settled bets on
+  its current version, its CLV is positive, and its measured defect is a
+  probability that is 14pp hot — which is a calibration fix, not a pause.
+* That any per-model ROI here is evidence of skill or its absence. See §1.
+* That the EV-rank cap in §5 will hold out of sample. It is in-sample.
+* Anything about the Under side of the live total. See §4.
+
+---
+
+## 9. What shipped, 2026-09-07 (mike)
+
+Matt picked options 1, 2 and 4, with the calibrated maps scoped to those the
+weekly pass endorses and the live gate held back for a replay.
+
+**1. The calibrated decision reaches player props.** `_make_prop_pick` gains the
+branch `classify_edge` has carried since 2026-08-31. Raw numbers are still what
+is stored; the decision edge is `model_probability_cal - dk_implied_prob`.
+`tests/test_prop_calibrated_decision.py`, watched to fail on the pre-fix body.
+
+**1b. The promoted slot carries its own method and its own endorsement.**
+`load_calibrations` reads `promoted_method` rather than the candidate's
+`method`, so a nightly refit can no longer disable a promoted map; `promote()`
+now requires **helps AND transfers** rather than `applied` (= helps alone), and
+freezes both verdicts at promotion. `demote()` is new — a lever with no off
+switch is one nobody pulls. `data/migrations/promotions_endorsed_only_2026_09_07.sql`
+re-freezes the four still-endorsed maps on today's fit and demotes six that are
+no longer endorsed, guarded on the property it establishes.
+
+Three models are endorsed today and NOT promoted — `mlb_prop_pitcher_walks`
+(paused), `wnba_prop_player_assists` and `wnba_prop_player_pra` (both active).
+Promoting them is a separate call and was deliberately not taken here.
+
+**4. One BET per pitcher, and an interim daily cap.** `PROP_ONE_BET_PER_PLAYER`
+collates the pitcher-prop pool to the highest claimed EV per (game, player);
+`PROP_MAX_SIGNALS_PER_DAY` holds `pitcher_k` and `pitcher_hits` to 3 each while
+their maps cannot be refit. Both run over the whole slate before anything is
+written, which is why the scorer now accumulates instead of inserting per model.
+A turned-away BET is written as a NONE carrying `picks.downgrade_reason`, a new
+column — an unexplained NONE would be read by the next sweep as the model
+declining, which is a number the model never said.
+
+Replayed over the eight days of this window, on the picks actually written:
+
+| stage | BETs | per day | units |
+|---|---|---|---|
+| as fired | 136 | 17.0 | −1.57 |
+| after one-bet-per-player | 102 | 12.8 | +3.65 |
+| after the 3+3 cap | 67 | **8.4** | +10.10 |
+
+The **volume** column is exact. The **units** column is in-sample — the ranking
+was chosen after seeing the outcomes — and is offered as "this did not cost
+anything measurable", not as a forecast.
+
+**2. The live inning gate is NOT shipped — AND THE REPLAY SAYS DO NOT SHIP IT.**
+
+`scripts/live_inning_gate_replay.py` replays the production decision
+(`classify_live_signal`, `expected_value`, `build_live_state_row`, the real EV
+floor and edge cap) over 169 games of kept state and in-play price since
+2026-08-24, taking the first qualifying signal at each candidate gate. Its
+grading rule was validated first and agrees with production settlement on 94 of
+94 settled BETs.
+
+| gate | bets | W-L | units | ROI | claims | delivers |
+|---|---|---|---|---|---|---|
+| 1 (ungated) | 120 | 64-56 | −2.89 | −2.4% | 73.5% | 53.3% |
+| 2 | 110 | 60-50 | −0.81 | −0.7% | 73.7% | 54.5% |
+| 3 | 102 | 58-44 | +3.68 | +3.6% | 73.9% | 56.9% |
+| **4** | 94 | 54-40 | **+4.19** | +4.5% | 74.1% | 57.4% |
+| 5 | 88 | 47-41 | **−2.70** | −3.1% | 74.2% | 53.4% |
+| 6 | 73 | 41-32 | +1.78 | +2.4% | 74.0% | 56.2% |
+
+**Gate 4 is a peak, not a plateau.** Its immediate neighbour one grid step away
+flips to −2.70u, which is exactly the shape CLAUDE.md §7 says to refuse: *"a
+cell whose eight neighbours flip negative one grid step away is noise."* And the
+gate does not fix what §4 said was broken — under gate 4 the model still claims
+74.1% and delivers 57.4%.
+
+So the +11.69u in §4's table was, in large part, **selection**: the games whose
+first signal happened to arrive after the 4th were a favourable draw, and a gate
+that forces the other games to wait does not inherit their record. That is the
+question the replay existed to answer, and the answer is no.
+
+### The control, and the second table
+
+The replay bets 120 games where production bet 94. Under the first-signal lock
+both write at most one bet per game, so the replay's set should be a SUPERSET of
+production's — it sees every snapshot we kept, production saw only the passes it
+managed to run. It is not quite:
+
+    +39 games the replay bet and production did not
+     13 games production bet and the replay does not   <- a defect in the replay
+
+Those 13 are a fault in here, not in production, and they are unexplained.
+Restricted to the 81 games both agree on:
+
+| gate | bets | W-L | units | ROI | delivers |
+|---|---|---|---|---|---|
+| 1 (ungated) | 81 | 46-35 | +3.11 | +3.8% | 56.8% |
+| 2 | 77 | 46-31 | +6.79 | +8.8% | 59.7% |
+| **3** | 72 | 45-27 | **+9.86** | +13.7% | 62.5% |
+| 4 | 66 | 40-26 | +6.89 | +10.4% | 60.6% |
+| 5 | 62 | 34-28 | **−0.36** | −0.6% | 54.8% |
+| 6 | 51 | 30-21 | +3.49 | +6.8% | 58.8% |
+
+The ungated row is the control that matters and it passes: +3.11u over 81 games
+against production's own +2.03u over 94 on the same window — the replay
+reproduces the record it is standing in for.
+
+**And the verdict hardens rather than softens.** The two tables pick DIFFERENT
+best gates — 4 unrestricted, 3 restricted — and in both, the cell one step away
+from the best is negative. A quantity whose optimum moves when you change the
+sample, and whose neighbour flips sign either way, is noise, not a boundary.
+Add the 13 unexplained games and this replay is not something to build a live
+gate on at all.
+
+**What this does NOT overturn:** the calibration split is unchanged and still
+significant — early signals claim ~73% and deliver ~46%, in both time halves.
+The model is genuinely broken early. The finding is that GATING is not the
+repair; the repair is the probability, the same conclusion §2 and §3 reach for
+the pitcher props. `mlb_live_total_runs` has never had a calibration map
+promoted, and it is now the most obvious candidate for one.
+
+**Still to come, and dated:** the cap comes off when `pitcher_k` and
+`pitcher_hits` have 150 graded picks since their retrains and their maps are
+re-promoted. At current volume that is roughly 2026-09-12 to 09-15.
+
+---
+
+## 10. The live calibration map — asked for, measured, NOT promotable yet
+
+Matt, 2026-09-07: *"do the calibration map"*. Three things were wrong before one
+could exist, two are now fixed, and the map itself is refused by the module's
+own bar rather than by an opinion.
+
+**Defect 3 of the same family: the fit could not SEE a live model.**
+`fetch_graded` read `mv_scored_pick_outcomes`, which excludes `is_live` by
+construction. So every live lane returned zero rows and the weekly pass printed
+*"only 0 graded picks (need 150) — identity map, unfitted"* on every run since
+it shipped. That reads as "not enough data yet" and means "this model is
+invisible to me". `mlb_live_total_runs` has **126** graded BETs and was
+reported as **0**. Fixed: live lanes read `picks` (BET rows, `dk_odds IS NOT
+NULL`), and `CLEAN_WINDOWS` is not applied to them — it marks where the
+dead-zone NONE rows were deleted, and a live lane never writes NONE, so its
+population is that shape in every window and excluding the gap would cost 18 of
+the 126 for no correction.
+
+**What the four live lanes actually claim, now that they can be measured:**
+
+| model | graded | overclaims by |
+|---|---|---|
+| `mlb_live_total_runs` | 126 | **+14.38pp** |
+| `ncaaf_live_total` | 48 | **+15.27pp** |
+| `ncaaf_live_win_prob` | 6 | +11.97pp |
+| `nfl_live_prop` | 0 | — (no settled record, as CLAUDE.md §2 says) |
+
+Every live lane in the repo is 12-15pp hot. None of it was visible yesterday.
+
+**Defect 4: `classify_live_signal` decided on the raw probability** — the third
+and last place `DECIDE_ON_CALIBRATED_PROB` had to reach. Fixed, and it is a
+**no-op the day it ships** because no live lane has a promoted map. Every floor
+now reads the same number, the EV floor included: a probability floor on the
+calibrated number beside an EV floor on the raw one would be two cuts aimed at
+different quantities.
+
+**And the map itself: NOT promotable, on two independent counts.** Fitted as a
+preview on all 126 graded bets:
+
+```
+n = 126                       (the module requires 150)
+raw gap                       +14.38pp
+held-out   18.48pp raw  ->  8.98pp calibrated
+helps = True   transfers = FALSE      (the cap is 6.0pp)
+```
+
+It **helps and does not close** — the same verdict `mlb_prop_pitcher_er`
+carries, whose own note reads *"publish it; do not build a threshold on it
+yet"*. Under the promotion bar shipped today (helps AND transfers) it would be
+refused even at n = 150.
+
+There is a structural reason to expect that, and it is worth knowing before
+waiting on it: a live lane writes BET and AVOID only, never dead-zone NONE rows,
+and **live AVOIDs are never settled** — measured, 232 live AVOID rows and 0
+graded against 213 graded BETs. So the fit sees one narrow band above the
+model's own 0.70 probability floor. A Platt map on a single band is close to a
+single offset, and its held-out transfer test may never clear 6pp however many
+bets accrue. That is a property of the evidence, not a bar to lower.
+
+**What promotion would do if it happened anyway.** The measured map takes a
+claimed 0.74 to **0.598**, and the lane's cut is prob ≥ 0.70 / edge ≥ 0.14 /
+EV ≥ 0.32, all swept on RAW numbers. A claim would need to be ~0.83 to reach a
+calibrated 0.70. So promoting without re-sweeping the cut on calibrated numbers
+takes the lane to approximately zero bets — the same trap the props were in,
+run the other way. **Promotion and re-sweep are one decision, not two.**
+
+**Left alone deliberately:** `MIN_GRADED` (150) and `MAX_TRANSFER_GAP_PP` (6.0).
+Lowering either to make this map fit would be moving the bar to clear the jump.
