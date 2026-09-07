@@ -29,7 +29,7 @@ Usage:
 
 import argparse
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import sys
@@ -158,11 +158,26 @@ def alt_markets_due(conn: DBConnection, sport: str, target_date: str,
 
 # ── API Helpers ───────────────────────────────────────────────────────────────
 
-def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
+def _get_events(target_date: str, sport_key: str = SPORT_KEY,
+                days_ahead: int = 0) -> list[dict]:
     """
     Fetch a sport's events from The Odds API for target_date.
-    Filters to events whose commence_time falls on target_date (ET).
-    Returns a list of {id, home_team, away_team, commence_time} dicts.
+    Filters to events whose commence_time falls on target_date (ET), or within
+    `days_ahead` days after it.
+
+    WHY days_ahead EXISTS. The scorer learned to price tomorrow's games on
+    2026-09-06, and that did nothing for the surface that actually produces
+    picks. Measured that evening: of 19 MLB BETs on the board, 19 were PROPS
+    and 0 were game-level -- and this ingestor was fetching only today, so
+    there were no prop odds for tomorrow to score. DraftKings HAD them: a probe
+    of ATL @ PHI (ET 2026-09-07) returned 40 outcomes across batter_hits and
+    pitcher_strikeouts while our table held zero rows for that date.
+
+    THE DATE COMPARISON IS IN ET, and it has to be. The first probe written for
+    this filtered on the UTC date and picked up a 02:11Z event -- which is
+    22:11 the PREVIOUS evening in ET, i.e. one of today's late games -- and
+    "yes, props exist" was very nearly reported off it. §7: use ET, never UTC,
+    for "today".
     """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
@@ -182,6 +197,8 @@ def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
         return []
 
     _ET = ZoneInfo("America/New_York")
+    _horizon = (date.fromisoformat(target_date)
+                + timedelta(days=max(0, days_ahead))).isoformat()
     events = []
     for event in resp.json():
         try:
@@ -191,7 +208,7 @@ def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
         except Exception:
             event_date = target_date
 
-        if event_date == target_date:
+        if target_date <= event_date <= _horizon:
             events.append({
                 "id":           event["id"],
                 "home_team":    event.get("home_team", ""),
@@ -200,7 +217,8 @@ def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
                 "game_date":    event_date,
             })
 
-    logger.info(f"Found {len(events)} events for {target_date} ({sport_key})")
+    _span = target_date if not days_ahead else f"{target_date}..{_horizon}"
+    logger.info(f"Found {len(events)} events for {_span} ({sport_key})")
     return events
 
 
@@ -448,7 +466,8 @@ def _log_pipeline(conn: DBConnection, run_date: str, status: str,
 
 def run_prop_odds_ingestor(target_date: str = None,
                            snapshot_type: str = "open",
-                           sport: str = "MLB") -> dict:
+                           sport: str = "MLB",
+                           days_ahead: int = None) -> dict:
     """
     Pull DK player prop lines for all of a sport's games on target_date.
 
@@ -463,6 +482,15 @@ def run_prop_odds_ingestor(target_date: str = None,
     _ET = ZoneInfo("America/New_York")
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
+    # Same look-ahead the game scorer uses, so the two surfaces cover the same
+    # board. Props are where the picks actually are: on 2026-09-06 all 19 MLB
+    # BETs were props and none were game-level.
+    if days_ahead is None:
+        try:
+            from config import GAME_SCORE_AHEAD_DAYS
+            days_ahead = GAME_SCORE_AHEAD_DAYS
+        except Exception:                                     # noqa: BLE001
+            days_ahead = 1
 
     sport_key = SPORT_KEYS[sport]
     markets   = list(PROP_MARKETS_BY_SPORT.get(sport, PROP_MARKETS_ALL))
@@ -486,7 +514,7 @@ def run_prop_odds_ingestor(target_date: str = None,
     total_events = 0
 
     try:
-        events = _get_events(target_date, sport_key)
+        events = _get_events(target_date, sport_key, days_ahead)
         if not events:
             logger.info(f"No {sport} events found for {target_date} — nothing to do")
             _log_pipeline(conn, target_date, "success", 0, 0,
