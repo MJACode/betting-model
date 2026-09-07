@@ -95,6 +95,12 @@ from datetime import timedelta
 from pathlib import Path
 
 
+# The embed colours for an ops message. Defined here rather than per-watch so
+# an alert looks the same whichever watch raised it.
+COLOR_ALERT = 0xE74C3C
+COLOR_RECOVERY = 0x2ECC71
+
+
 def alert_state_path(filename: str) -> Path:
     """Where a watch keeps its de-duplication state.
 
@@ -149,16 +155,25 @@ def should_notify(state: dict, key: str, now: datetime, minutes: int) -> bool:
     return now - last >= timedelta(minutes=minutes)
 
 
-def post_ops_alert(title: str, detail: str, *, recovery: bool = False) -> bool:
+def post_ops_alert(title: str, detail: str, *, recovery: bool = False,
+                   post=None) -> bool:
     """One message to the ops channel. True only on a CONFIRMED post.
 
     An unset webhook is logged at CRITICAL rather than swallowed: a watch that
     can see a problem and cannot say so is a DIFFERENT failure from a healthy
     system, and the two must not look alike in the logs (§7 — nothing is
     ledgered unless a POST confirmed).
+
+    `post` exists so a caller can hand in its OWN module-level `_post`. The
+    heartbeat watchdog's tests patch `heartbeat_watchdog._post` to capture what
+    would have been sent; resolving the poster only inside this function would
+    silently step around that seam and let a test suite make real HTTP calls.
+    A shared helper must not take away the caller's ability to be tested.
     """
     import config
-    from tracking.discord_notifier import _post
+
+    if post is None:
+        from tracking.discord_notifier import _post as post
 
     url = getattr(config, "DISCORD_WEBHOOK_OPS", "")
     if not url:
@@ -169,6 +184,6 @@ def post_ops_alert(title: str, detail: str, *, recovery: bool = False) -> bool:
     payload = {"embeds": [{
         "title": ("✅ " if recovery else "🚨 ") + title,
         "description": detail[:4000],
-        "color": 0x2ECC71 if recovery else 0xE74C3C,
+        "color": COLOR_RECOVERY if recovery else COLOR_ALERT,
     }]}
-    return bool(_post(url, payload))
+    return bool(post(url, payload))
