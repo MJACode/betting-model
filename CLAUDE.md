@@ -603,6 +603,22 @@ reliably present than a line in a long file: it arrives in context at the moment
 the file is opened, rather than 700 lines earlier. What stays here is what has
 to be known BEFORE deciding which file to open.
 
+- **A TEST WRITTEN FROM THE SAME UNDERSTANDING THAT PRODUCED THE CODE INHERITS
+  ITS BLIND SPOT.** Five guards in one day (2026-09-04) passed while the thing
+  they guarded was broken: `job_queue` and `threshold_review` gated on
+  `schema_is_current` without `rls=`, so the lock-down beneath them never ran;
+  the anon write sweep iterated a declared list and never visited `feedback`,
+  which kept TRUNCATE while the TRUNCATE test passed; and the `api_call_daily`
+  rollup silently decayed the partially-pruned boundary day while its
+  "never zeroes a pruned day" test passed on the fully-pruned case. Each test
+  checked the case its author had in mind, which is the case the code already
+  handled.
+  **So a guard is not evidence. Go and look at the running system** — the
+  catalog after an apply, the worker's own scheduled cycle rather than your
+  hand-run of it, the row counts a query returns rather than the exit code.
+  The test is what stops a fixed bug returning; it is not what finds one.
+  Evidence: `docs/rules_evidence.md`, sessions 220-222.
+
 ### Verification standards — what "verified" means here
 
 - **`git stash` is NOT a master baseline once the work is committed.** Use
