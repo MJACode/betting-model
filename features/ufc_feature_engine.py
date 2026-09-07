@@ -332,12 +332,82 @@ _LOG_COLS = [
 ]
 
 
+# ── Fighter name resolution ───────────────────────────────────────────────────
+# The odds feed and ufcstats spell the same fighter differently, and every
+# mismatch costs a whole fight: `_resolve_fighter_id` returning None skips the
+# bout entirely. Measured 2026-09-07 over the 916 distinct fighter names on
+# 2026 UFC cards, 315 did not match a `fighters` slug exactly. Classified:
+#
+#     genuinely absent (debutants, other promotions)   298
+#     edit-distance "near" matches                      12   <- NEVER accept
+#     token-order variants (Zhang Weili / Weili Zhang)   2
+#     suffix variants (Khalil Rountree / ... Jr.)        3
+#
+# So the two SAFE classes are handled here and the dangerous one is not.
+# Fuzzy matching is deliberately absent: at cutoff 0.84 it maps 'Usman
+# Nurmagomedov' to 'Umar Nurmagomedov' and 'Amru Magomedov' to 'Abus
+# Magomedov' -- different fighters, and a wrong history is worse than no
+# history, because it produces a confident pick from another man's record.
+#
+# Every fallback is UNIQUE-OR-NOTHING: more than one candidate returns None.
+_NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv"})
+
+
+def _slug_tokens(slug: str) -> frozenset:
+    """The slug's name tokens, order- and suffix-independent."""
+    return frozenset(t for t in slug.split("-") if t and t not in _NAME_SUFFIXES)
+
+
+def resolve_slug(slug: str, candidates) -> str | None:
+    """Match `slug` against known slugs: exact, else a UNIQUE token-set match.
+
+    `candidates` is any iterable of known slugs. Returns the matching known
+    slug, or None when there is no match or more than one -- an ambiguous name
+    must never silently pick a fighter.
+    """
+    if not slug:
+        return None
+    known = list(candidates)
+    if slug in known:
+        return slug
+    want = _slug_tokens(slug)
+    if not want:
+        return None
+    hits = [k for k in known if _slug_tokens(k) == want]
+    return hits[0] if len(hits) == 1 else None
+
+
 def _resolve_fighter_id(conn: DBConnection, display_name: str) -> str | None:
+    """Fighter id for a display name: exact slug, else a unique token-set match.
+
+    The fallback query is bounded by the rarest-looking token rather than
+    scanning `fighters`, and resolve_slug() then insists on a UNIQUE token-set
+    match, so a shared surname resolves to nothing rather than to the wrong
+    man. See the note above _NAME_SUFFIXES for what is deliberately not tried.
+    """
     slug = slugify_fighter(display_name)
     row = conn.execute(
         "SELECT fighter_id FROM fighters WHERE slug = ? ORDER BY updated_at DESC LIMIT 1",
         (slug,)).fetchone()
-    return row[0] if row else None
+    if row:
+        return row[0]
+
+    tokens = sorted(_slug_tokens(slug), key=len, reverse=True)
+    if not tokens:
+        return None
+    rows = conn.execute(
+        "SELECT slug, fighter_id FROM fighters WHERE slug LIKE ? ORDER BY updated_at DESC",
+        (f"%{tokens[0]}%",)).fetchall()
+    if not rows:
+        return None
+    by_slug = {}
+    for s, fid in rows:
+        by_slug.setdefault(s, fid)
+    hit = resolve_slug(slug, by_slug)
+    if hit is None:
+        return None
+    logger.info(f"  UFC name resolved by token match: '{display_name}' -> {hit}")
+    return by_slug[hit]
 
 
 def _load_prior_fights_live(conn: DBConnection, fighter_id: str,
@@ -490,12 +560,31 @@ def _blk_career_stats(bulk: dict, fighter_id: str, as_of_date: str) -> dict | No
                         bulk['profiles'].get(fighter_id))
 
 
+def _bulk_fighter_id(bulk: dict, display_name: str) -> str | None:
+    """slug_to_id lookup with the same exact-then-unique-token-set rule the live
+    path uses. The token index is built once per bulk load and cached on it."""
+    s2i = bulk['slug_to_id']
+    slug = slugify_fighter(display_name)
+    if slug in s2i:
+        return s2i[slug]
+    index = bulk.get('_token_index')
+    if index is None:
+        index = {}
+        for known in s2i:
+            index.setdefault(_slug_tokens(known), []).append(known)
+        bulk['_token_index'] = index
+    hits = index.get(_slug_tokens(slug), [])
+    return s2i[hits[0]] if len(hits) == 1 else None
+
+
 def build_ufc_features_from_bulk(bulk: dict, game_id: str, game_date: str,
                                  home_team: str, away_team: str, season: int,
                                  odds_row: dict | None) -> dict | None:
     """Build a UFC feature row from pre-loaded bulk data (training/backtest)."""
-    home_id = bulk['slug_to_id'].get(slugify_fighter(home_team))
-    away_id = bulk['slug_to_id'].get(slugify_fighter(away_team))
+    # Same resolution as the live path (_resolve_fighter_id), or training and
+    # scoring would disagree about which fights are modelable at all.
+    home_id = _bulk_fighter_id(bulk, home_team)
+    away_id = _bulk_fighter_id(bulk, away_team)
     if home_id is None or away_id is None:
         return None
 
