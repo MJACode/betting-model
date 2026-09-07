@@ -221,6 +221,51 @@ profitable. The remaining options are a genuinely different model (features,
 target, or recency weighting) or pausing `ufc_total_rounds` — and the second is
 a decision, not a fix. Nothing is paused here.
 
+### UFC total rounds — the rebuild, and the two limits that are not the model (2026-09-07)
+
+mike: "rebuild it properly", after the straight retrain came back worse (#539).
+Built, measured, **not registered**. `scripts/ufc_rounds_hazard.py`.
+
+**What was built.** A round-level hazard model: `h_r = P(ends in round r | it
+reached r)` and `q_r = P(ended before 2:30 | ended in round r)`, so
+`P(over N-0.5) = Π(1-h_r for r<N) × (1 - h_N·q_N)`. One model, coherent for
+every line DK posts, trained without needing a line at all — which also removes
+the synthetic-line labels (`synthetic_round_total` fills 2.5/4.5 when DK never
+posted one) that the binary model is partly fitted to. Recency weight
+`0.5 ** ((2026 - season)/4)`, fixed a priori, never tuned on the holdout.
+
+**All three models on the same 2026 holdout (193 fights, 56 of them priced):**
+
+| model | cal error | at the live cut 0.62/0.08 | n |
+|---|---|---|---|
+| live `20260619` | **0.0368** | −9.2% | 7 |
+| retrain `20260907` | 0.0548 | −40.0% | 6 |
+| hazard rebuild | 0.0420 | −38.3% | 21 |
+
+The hazard model runs long of overs (mean p 0.593 against a 0.539 base rate), so
+it fires three times as often and loses three times as much. Accuracy 0.596,
+AUC 0.572 — below the binary retrain on both.
+
+**The two limits, measured the same day, and neither is in the model:**
+
+1. **A third of every card cannot be modelled at all.** The hazard needs no
+   line, but the binding constraint was never the line — it is fighter history.
+   Both formulations train on the same **3,179** fights because a fight is
+   skipped when either fighter has fewer than three prior bouts in
+   `ufc_fight_log`. Of **916 distinct fighters on 2026 cards, 315 have no
+   history rows at all**, and only **12** of those are name-matching artifacts —
+   **303 are genuinely absent** from the log.
+2. **The money test cannot tell two models apart.** DraftKings UFC totals have
+   only been STORED since **2026-06-11**, so the evaluable population is 56
+   priced fights and a cut selects 3–21 bets. At n=7 the noise band is about
+   ±40 ROI points — wider than every difference in the table above.
+
+**So UFC round totals are limited by DATA, not model form.** Three formulations
+now land in the same place. The next move that could actually change the answer
+is fight-history coverage — the 303 absent fighters — not a fourth model.
+Pausing `ufc_total_rounds` is the standing recommendation; it is a decision and
+nothing here is paused.
+
 ### Review Cadence
 
 All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 72% / edge ≥ 12%; O/U prob ≥ 72% / edge ≥ 15%; RL prob ≥ 70% / edge ≥ 12% (re-optimized 2026-06-03 from settled-pick sweep — see threshold tables above).
