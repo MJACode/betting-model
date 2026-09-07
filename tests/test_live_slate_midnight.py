@@ -153,3 +153,59 @@ def test_the_scorer_announces_every_date_it_scored():
     assert "for _d in dates:" in body
     assert "notify_live_signals(target_date=_d" in body
     assert "notify_discord_live(target_date=_d" in body
+
+
+# -- the APP is a live surface too, and it was the one that went dark ---------
+#
+# 2026-09-06: UCLA @ California kicked off 10:37pm ET on 09-05, and its live
+# moneyline crossed at 1:07am ET on 09-06 under game_date 2026-09-05. The live
+# loop scored it (live_slate_dates), the Discord producer posted it, push
+# delivered it -- and the app's live board asked for a single todayET(),
+# '2026-09-06', and showed nothing for the rest of the game. CLAUDE.md 1b: the
+# app, Discord and push show the SAME picks, and a surface with its own window
+# is a surface that will disagree silently.
+#
+# Source-level, like the loops above, and for the same reason: there is no CI
+# for the app and an empty live board is indistinguishable from a missed one.
+# The behaviour is pinned off-device by mobile/scripts/verify_live_slate.ts.
+
+MOBILE = ROOT / "mobile"
+
+
+def test_the_app_has_its_own_copy_of_the_slate_window():
+    src = (MOBILE / "src/lib/format.ts").read_text(encoding="utf-8")
+    assert "export function liveSlateDatesET" in src, (
+        "the app needs config.live_slate_dates() in TypeScript -- without it "
+        "every live read is pinned to one date")
+    # Read config's value rather than hard-coding 6 on both sides, so moving the
+    # cut in config.py fails HERE rather than diverging silently on a phone.
+    # NOTE: config's value is env-overridable and the app's is a literal, so a
+    # Railway-only override still diverges. Flagged for Matt, not fixed here.
+    assert (f"LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET = "
+            f"{config.LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET}") in src, (
+        "the app's lookback must mirror config.LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET")
+
+
+def test_the_apps_live_reads_take_a_LIST_of_dates():
+    """`.eq('game_date', date)` is the bug. Both live reads must be `.in(...)`."""
+    src = (MOBILE / "src/lib/queries.ts").read_text(encoding="utf-8")
+    for fn in ("fetchLivePicks", "fetchLiveGameStates"):
+        body = src[src.index(f"export async function {fn}("):]
+        body = body[:body.index("\n}\n")]
+        assert ".eq('game_date'" not in body, (
+            f"{fn} pins live rows to ONE date, so a game that kicked off late "
+            f"disappears from the app at midnight ET while every other surface "
+            f"keeps publishing it")
+        assert ".in('game_date'" in body, f"{fn} must read the whole slate window"
+
+
+def test_the_apps_live_hook_resolves_the_window_per_fetch():
+    """Not captured at mount: an app left warm across midnight would keep asking
+    about yesterday for as long as it stayed in memory (#512 fixed that half for
+    a single date; this keeps it fixed for the window)."""
+    src = (MOBILE / "src/hooks/useLivePicks.ts").read_text(encoding="utf-8")
+    assert "liveSlateDatesET" in src and "todayET()" not in src, (
+        "useLivePicks must resolve the slate window, not a single ET date")
+    body = src[src.index("const refresh = useCallback"):]
+    assert "liveSlateDatesET()" in body[:body.index("}, [])")], (
+        "the window must be recomputed inside refresh, not frozen in useState")

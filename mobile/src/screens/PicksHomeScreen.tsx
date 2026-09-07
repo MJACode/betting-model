@@ -94,8 +94,6 @@ export function PicksHomeScreen() {
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
-  // In-play score + inning for games that have started (polls every 30s).
-  const { byGame: liveStates } = useLiveGameStates(date);
   const { settings: rg } = useResponsibleGambling();
 
   const [view, setView] = useState<PicksView>('today');
@@ -111,7 +109,14 @@ export function PicksHomeScreen() {
     loading: liveLoading,
     error: liveError,
     refresh: refreshLive,
+    dates: liveDates,
   } = useLivePicks({ pollMs: view === 'live' ? LIVE_POLL_MS : LIVE_IDLE_POLL_MS });
+
+  // In-play score + inning for games that have started (polls every 30s).
+  // Over the SAME window the live picks were read across, not just today, so a
+  // game that kicked off late keeps its score and clock after midnight ET
+  // instead of freezing at the rollover (liveSlateDatesET).
+  const { byGame: liveStates } = useLiveGameStates(liveDates);
 
   const todayData = useMemo(
     () => allData.filter((d) => d.pick.sport === sport),
@@ -260,8 +265,17 @@ export function PicksHomeScreen() {
   const subtitle =
     view === 'today'
       ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored`
+      // NO DATE on the live board, and that is not a tidy-up. The board can now
+      // hold a game that kicked off before midnight ET, which the whole system
+      // files under YESTERDAY -- Discord posted it under that date, the track
+      // record will file it under that date, and the pick's own timing card
+      // says so one tap away. Nothing on a live card carries a date, so the
+      // header was the only one a reader got, and it was the wrong one.
+      // Everything here is by definition happening now, so the date carries no
+      // information and carried wrong information (UX review, 2026-09-06;
+      // Apple Sports and FotMob both replace the date with the clock in play).
       : view === 'live'
-        ? `${date} · ${liveData.length} in play${stakedSuffix}`
+        ? `${liveData.length} in play${stakedSuffix}`
         // "signals", not "live": with a segment labelled Live on the same
         // control, "3 live" meant two different things one line apart.
         : `${date} · ${live.length} signals${stakedSuffix}`;
@@ -274,7 +288,7 @@ export function PicksHomeScreen() {
           <InfoTooltip
             title="Today, Signals & Live"
             body={
-              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still standing right now.\n\nLive = in-play picks, priced at DraftKings while a game is running. This one only appears when a game is actually in play, so no tab sits empty waiting for one.\n\nA red dot on a sport means a game there is in play now.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.'
+              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still standing right now.\n\nLive = in-play picks, priced at DraftKings while a game is running. This one only appears when a game is actually in play, so no tab sits empty waiting for one. A game that started before midnight stays here until it ends, so a late game keeps yesterday\'s date everywhere else in the app.\n\nA red dot on a sport means a game there is in play now.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.'
             }
             accessibilityLabel="About Today, Signals and Live"
           />

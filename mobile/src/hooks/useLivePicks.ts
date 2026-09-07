@@ -31,7 +31,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchLivePicks } from '@/lib/queries';
 import { errorText } from '@/lib/errors';
-import { todayET } from '@/lib/format';
+import { liveSlateDatesET } from '@/lib/format';
 import type { EnrichedPick } from '@/types';
 
 /** Looking at the live board: the book's own number moves faster than this. */
@@ -44,7 +44,10 @@ export type LivePicksState = {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  /** Today ET — dates[0]. What a header should say. */
   date: string;
+  /** The whole window the last fetch actually read (liveSlateDatesET). */
+  dates: string[];
 };
 
 /** State + the poll body. Mounted by exactly one of the two hooks below. */
@@ -52,16 +55,21 @@ function useLivePicksCore(pollMs: number) {
   const [data, setData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // The ET date is RECOMPUTED per fetch, never captured. It used to be held in
-  // useState, so an app left warm across midnight ET polled yesterday's slate
-  // for as long as it stayed in memory — the live board silently stopped being
-  // live. `date` here is only what the last fetch used, for display.
-  const [date, setDate] = useState<string>(todayET);
+  // The slate window is RECOMPUTED per fetch, never captured. It used to be a
+  // single ET date held in useState, which was wrong twice over: an app left
+  // warm across midnight polled yesterday's slate for as long as it stayed in
+  // memory, and even freshly computed, ONE date drops a game that kicked off
+  // late and is still being played after the rollover (liveSlateDatesET).
+  // `dates` here is only what the last fetch used, for display.
+  const [dates, setDates] = useState<string[]>(liveSlateDatesET);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
-    const target = todayET();
-    setDate(target);
+    const target = liveSlateDatesET();
+    // Same window, same array — don't hand consumers a new identity every poll.
+    setDates((prev) =>
+      prev.length === target.length && prev.every((d, i) => d === target[i]) ? prev : target,
+    );
     // Pull-to-refresh reads `loading` to decide whether to spin. Without this
     // the control snapped straight back and the board looked inert.
     setLoading(true);
@@ -97,7 +105,7 @@ function useLivePicksCore(pollMs: number) {
     [],
   );
 
-  return { data, loading, error, refresh, date, startPolling };
+  return { data, loading, error, refresh, date: dates[0]!, dates, startPolling };
 }
 
 /**

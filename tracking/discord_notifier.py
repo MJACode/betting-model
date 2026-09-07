@@ -45,6 +45,9 @@ from loguru import logger
 
 import config
 from data.db import get_connection
+from tracking.publish_lock import (
+    DISCORD_LIVE_LOCK, DISCORD_SIGNALS_LOCK, publish_lock,
+)
 
 ET = ZoneInfo("America/New_York")
 
@@ -1142,63 +1145,76 @@ def notify_discord_signals(target_date: str | None = None, dry_run: bool = False
 
     conn = get_connection()
     try:
-        signals = _new_signals(conn, target_date)
-        if not signals:
-            logger.info(f"Discord: no new signals for {target_date}")
-            return 0
-
-        by_sport: dict[str, list[dict]] = {}
-        for s in signals:
-            by_sport.setdefault(s["sport"], []).append(s)
-
-        posted_total = 0
-        sent_at = datetime.now(ET).isoformat()
-
-        for sport, group in sorted(by_sport.items()):
-            url = _webhook_for_sport(sport)
-            if not url:
-                # No channel for this sport yet. Skip WITHOUT ledgering so these
-                # still post if a webhook is added later today.
-                logger.info(f"Discord: no webhook for {sport}; skipped {len(group)} signal(s)")
-                continue
-
-            capped = group[:config.DISCORD_MAX_EMBEDS_PER_RUN]
-            held = len(group) - len(capped)
-            if held:
-                logger.info(f"Discord[{sport}]: capped at {len(capped)}; "
-                            f"{held} will post next pass")
-
-            if dry_run:
-                for s in capped:
-                    logger.info(f"[dry-run] discord[{sport}] → {s['label']}")
-                posted_total += len(capped)
-                continue
-
-            chunks = _post_picks(url, sport, capped, target_date)
-            delivered = sum(len(c) for c, _ in chunks)
-            if delivered < len(capped):
-                logger.error(f"Discord[{sport}]: delivered {delivered}/{len(capped)}; "
-                             f"undelivered signals retry next pass")
-
-            # Ledger ONLY what actually landed, WITH the message it went out in
-            # so a later correction can delete or edit that message.
-            for chunk, message_id in chunks:
-                for s in chunk:
-                    conn.execute(
-                        "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
-                        "VALUES (%s, 'discord_signal', %s, %s) "
-                        "ON CONFLICT (lock_key, kind) DO NOTHING",
-                        (s["lock_key"], sent_at, message_id),
-                    )
-            posted_total += delivered
-
-        if not dry_run:
-            conn.commit()
-            if posted_total:
-                logger.success(f"✓ Discord: posted {posted_total} signal(s)")
-        return posted_total
+        # Serialize the read -> post -> ledger sequence across every process
+        # that can publish. `pollers` and `worker` both call this now, and the
+        # ledger cannot stop a duplicate on its own -- it only learns about a
+        # post after it has happened. See tracking/publish_lock.py for the
+        # 2026-09-06 double-posted Ole Miss card.
+        with publish_lock(conn, DISCORD_SIGNALS_LOCK, "Discord") as owned:
+            if not owned:
+                return 0
+            return _post_new_signals(conn, target_date, dry_run)
     finally:
         conn.close()
+
+
+def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
+    """The body of notify_discord_signals, under the publisher lock."""
+    signals = _new_signals(conn, target_date)
+    if not signals:
+        logger.info(f"Discord: no new signals for {target_date}")
+        return 0
+
+    by_sport: dict[str, list[dict]] = {}
+    for s in signals:
+        by_sport.setdefault(s["sport"], []).append(s)
+
+    posted_total = 0
+    sent_at = datetime.now(ET).isoformat()
+
+    for sport, group in sorted(by_sport.items()):
+        url = _webhook_for_sport(sport)
+        if not url:
+            # No channel for this sport yet. Skip WITHOUT ledgering so these
+            # still post if a webhook is added later today.
+            logger.info(f"Discord: no webhook for {sport}; skipped {len(group)} signal(s)")
+            continue
+
+        capped = group[:config.DISCORD_MAX_EMBEDS_PER_RUN]
+        held = len(group) - len(capped)
+        if held:
+            logger.info(f"Discord[{sport}]: capped at {len(capped)}; "
+                        f"{held} will post next pass")
+
+        if dry_run:
+            for s in capped:
+                logger.info(f"[dry-run] discord[{sport}] → {s['label']}")
+            posted_total += len(capped)
+            continue
+
+        chunks = _post_picks(url, sport, capped, target_date)
+        delivered = sum(len(c) for c, _ in chunks)
+        if delivered < len(capped):
+            logger.error(f"Discord[{sport}]: delivered {delivered}/{len(capped)}; "
+                         f"undelivered signals retry next pass")
+
+        # Ledger ONLY what actually landed, WITH the message it went out in
+        # so a later correction can delete or edit that message.
+        for chunk, message_id in chunks:
+            for s in chunk:
+                conn.execute(
+                    "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+                    "VALUES (%s, 'discord_signal', %s, %s) "
+                    "ON CONFLICT (lock_key, kind) DO NOTHING",
+                    (s["lock_key"], sent_at, message_id),
+                )
+        posted_total += delivered
+
+    if not dry_run:
+        conn.commit()
+        if posted_total:
+            logger.success(f"✓ Discord: posted {posted_total} signal(s)")
+    return posted_total
 
 
 # ── Live (in-play) signals ───────────────────────────────────────────────────
@@ -1249,51 +1265,62 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
 
     conn = get_connection()
     try:
-        signals = _new_live_signals(conn, target_date)
-        if not signals:
-            return 0
-
-        by_url: dict[tuple[str, str], list[dict]] = {}
-        for s in signals:
-            url = config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(s["sport"])
-            if url:
-                by_url.setdefault((url, s["sport"]), []).append(s)
-        if not by_url:
-            logger.info(f"Discord(live): no webhook configured; skipped {len(signals)} signal(s)")
-            return 0
-
-        posted_total = 0
-        sent_at = datetime.now(ET).isoformat()
-
-        for (url, sport), group in by_url.items():
-            capped = group[:config.DISCORD_MAX_EMBEDS_PER_RUN]
-
-            if dry_run:
-                for s in capped:
-                    logger.info(f"[dry-run] discord(live) → {s['label']}")
-                posted_total += len(capped)
-                continue
-
-            chunks = _post_picks(url, sport, capped, target_date, live=True,
-                                 note=LIVE_STALENESS_NOTE)
-            delivered = sum(len(c) for c, _ in chunks)
-            for chunk, message_id in chunks:
-                for s in chunk:
-                    conn.execute(
-                        "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
-                        "VALUES (%s, 'discord_live', %s, %s) "
-                        "ON CONFLICT (lock_key, kind) DO NOTHING",
-                        (s["lock_key"], sent_at, message_id),
-                    )
-            posted_total += delivered
-
-        if not dry_run:
-            conn.commit()
-            if posted_total:
-                logger.success(f"✓ Discord(live): posted {posted_total} signal(s)")
-        return posted_total
+        # Same race, same fix as the pre-game producer: the NCAAF live loop and
+        # the MLB live scorer both end their passes here, and a pass that
+        # overlaps another would post the same in-play card twice.
+        with publish_lock(conn, DISCORD_LIVE_LOCK, "Discord(live)") as owned:
+            if not owned:
+                return 0
+            return _post_new_live_signals(conn, target_date, dry_run)
     finally:
         conn.close()
+
+
+def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
+    """The body of notify_discord_live, under the publisher lock."""
+    signals = _new_live_signals(conn, target_date)
+    if not signals:
+        return 0
+
+    by_url: dict[tuple[str, str], list[dict]] = {}
+    for s in signals:
+        url = config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(s["sport"])
+        if url:
+            by_url.setdefault((url, s["sport"]), []).append(s)
+    if not by_url:
+        logger.info(f"Discord(live): no webhook configured; skipped {len(signals)} signal(s)")
+        return 0
+
+    posted_total = 0
+    sent_at = datetime.now(ET).isoformat()
+
+    for (url, sport), group in by_url.items():
+        capped = group[:config.DISCORD_MAX_EMBEDS_PER_RUN]
+
+        if dry_run:
+            for s in capped:
+                logger.info(f"[dry-run] discord(live) → {s['label']}")
+            posted_total += len(capped)
+            continue
+
+        chunks = _post_picks(url, sport, capped, target_date, live=True,
+                             note=LIVE_STALENESS_NOTE)
+        delivered = sum(len(c) for c, _ in chunks)
+        for chunk, message_id in chunks:
+            for s in chunk:
+                conn.execute(
+                    "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+                    "VALUES (%s, 'discord_live', %s, %s) "
+                    "ON CONFLICT (lock_key, kind) DO NOTHING",
+                    (s["lock_key"], sent_at, message_id),
+                )
+        posted_total += delivered
+
+    if not dry_run:
+        conn.commit()
+        if posted_total:
+            logger.success(f"✓ Discord(live): posted {posted_total} signal(s)")
+    return posted_total
 
 
 # ── Daily results recap ──────────────────────────────────────────────────────

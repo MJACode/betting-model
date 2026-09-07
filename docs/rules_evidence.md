@@ -517,6 +517,66 @@ look-ahead pick in any sport could be pushed on the day it was written.
 backlog flood on the first run. Counted first: exactly 2 rows — the two NFL
 picks. No burst.
 
+## The same rule, twice more: the live window and the double post (2026-09-06)
+
+Both in CLAUDE.md §1b, under "the app, Discord and push show the same picks".
+Matt's report was one screenshot of #ncaaf: a `UCLA ML (live)` card at 1:07 AM,
+and the `Ole Miss vs Louisville Under 55.5` card twice at 12:29 PM.
+
+**A LIVE surface must resolve its window with `live_slate_dates()`.**
+
+`pick_id 1701189` — `ncaaf_live_win_prob`, UCLA ML -154, prob 0.7423, edge
+0.1360, `created_at 2026-09-06 05:07:06+00` (1:07:06 AM ET) — carries
+**`game_date = '2026-09-05'`**, because UCLA @ California kicked off at 10:37 PM
+ET on the 5th and a game keeps the game_date of its kickoff.
+
+`useLivePicks` asked `fetchLivePicks(todayET())`, and at 1:07 AM ET that is
+`2026-09-06`. `.eq('game_date', …)` matched nothing. The three backend surfaces
+all resolve the window through `config.live_slate_dates()` — today, plus
+yesterday while the ET hour is under `LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET` (6) —
+which is why the loop kept scoring the game, Discord kept posting and push kept
+delivering, and the app alone went dark at the rollover, in the fourth quarter.
+
+Note what does NOT fix this: #512 had, the same day, stopped `useLivePicks`
+freezing the date in `useState`. Recomputing ONE date per fetch is still one
+date, and this pick is genuinely on yesterday's.
+
+**The ledger cannot prevent a duplicate, only record one.**
+
+`push_sent` for `NCAAF_2026-09-06_louisville_ole-miss:ncaaf_over_under`:
+
+| kind | sent_at (ET) | message_id |
+|---|---|---|
+| `new_bet` | 12:29:11.106297 | — |
+| `discord_signal` | 12:29:11.358415 | 1546195572803772550 |
+
+One `discord_signal` row, one message id — and two identical cards in the
+channel. `picks` holds exactly ONE BET for that game+model (`pick_id 1712178`),
+so this is not a duplicate pick: it is read → post → ledger racing itself.
+
+That order is deliberate (§ "nothing is ledgered unless the POST succeeded"), so
+the window between the read and the INSERT is real and cannot be closed by the
+ledger, which only learns about a post afterwards. What made it reachable is
+that TWO services now run the sequence: `signal_publisher.publish_new_signals`
+shipped 2026-09-05, and it is called from the pre-game line poller on `pollers`
+every 30 seconds and from the scheduler's card polls, the refresh pass and the
+daily pipeline on `worker`. The 252ms between the two rows above is the width of
+the window that was hit.
+
+The fix is a Postgres advisory lock (`tracking/publish_lock.py`), taken by all
+three publishers. Applied to push as well as Discord on §1b's own test — *if
+this had been a problem in the other surface, would we have noticed?* No: a
+duplicate Discord card is visible in the channel, a duplicate push is a member
+getting the same alert twice and no record that it happened.
+
+**Checked and clean: the Ole Miss pick itself.** Every gate the app applies
+passes on it — BET, prob 0.7176 ≥ 0.65, edge 0.1827 ≥ 0.0, -115 ≥ the -200
+floor, `ncaaf_over_under` neither paused nor retired server-side or in the
+bundled fallback, RLS on `picks` open to anon and authenticated, 643 non-live
+rows on the date against a 5,000 cap with BET ordered ahead of NONE, and
+`fetchUpcomingNcaafPicks` bounded `.gt(game_date, today)` so it cannot shadow
+the day's board.
+
 ## `nfl_live_prop` went live without the §2 gate (2026-09-05)
 
 The rule and the override are in CLAUDE.md §2. The detail:

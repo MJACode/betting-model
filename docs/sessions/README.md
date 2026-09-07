@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 246 — a live pick reached Discord and never reached the app, and the pre-game card posted twice |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 245 — the go-live gate comes out of the app's copy entirely |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 244 — the Live tab was empty 81% of the time, so it became a segment |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 243 — the wind model was firing at 8 days out, and the gate that used to stop it was a side effect |

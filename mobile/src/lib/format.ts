@@ -68,13 +68,49 @@ export function weekdayET(date: string): string {
 }
 
 export function todayET(): string {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  return fmt.format(new Date());
+  return etDate(new Date());
+}
+
+const ET_HOUR = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * Mirror of config.LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET. Yesterday's slate is
+ * carried until 6am ET and no further: nothing is still being played at 6am,
+ * and carrying the date forever would put a whole extra slate in every query.
+ */
+export const LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET = 6;
+
+/**
+ * Every ET game_date whose games could still be IN PROGRESS right now, newest
+ * first — the app's copy of config.live_slate_dates(). Today is always first,
+ * so a caller that collapses to one date still gets today.
+ *
+ * A game carries the game_date of its KICKOFF, so a 10:37pm ET start on the
+ * west coast is in the fourth quarter at 00:30 ET the next day. Anything that
+ * asks for live rows by a single todayET() stops seeing that game the moment
+ * the calendar rolls — while the live loops, the push notifier and the Discord
+ * producers all keep going, because they already use live_slate_dates(). That
+ * asymmetry is exactly how the UCLA @ California live moneyline reached the
+ * #ncaaf channel at 1:07am ET on 2026-09-06 under game_date 2026-09-05 and was
+ * never on the app's live board (CLAUDE.md §1b: the app, Discord and push show
+ * the same picks).
+ *
+ * Use this ANYWHERE the app resolves which games could be live; todayET() is
+ * still right for the day's slate as a unit (the pre-game board).
+ *
+ * `now` is injectable ONLY so the boundary can be tested at the boundary: the
+ * failure is silent, because an empty slate and a missed slate render the same.
+ */
+export function liveSlateDatesET(now: Date = new Date()): string[] {
+  const dates = [etDate(now)];
+  if (Number(ET_HOUR.format(now)) < LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET) {
+    dates.push(etDate(new Date(now.getTime() - 24 * 3_600_000)));
+  }
+  return dates;
 }
 
 /**
@@ -188,7 +224,7 @@ export function weekdayShortET(iso: string | null | undefined): string | null {
 }
 
 /** A Date as its America/New_York calendar date, YYYY-MM-DD. */
-function etDate(d: Date): string {
+export function etDate(d: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
     year: 'numeric',
@@ -261,6 +297,18 @@ const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
   NHL: 5 * 3_600_000,
   NBA: 5 * 3_600_000,
   WNBA: 5 * 3_600_000,
+  // Football, and the reason these two are named rather than left on the
+  // default: they are the sports that play late and are NOT covered by the live
+  // poller, so the blind window is all they have. Once the app's live board
+  // carries the whole slate window (liveSlateDatesET), a 10:37pm ET kickoff is
+  // no longer dropped at midnight by a game_date filter — so the 6h default
+  // would have kept a finished NCAAF game reading LIVE until 4:37am, with a
+  // stale in-play price and a betslip hand-off (UX review, 2026-09-06). A
+  // college game runs ~3h25m and an NFL game ~3h10m; 4h leaves weather-delay
+  // margin. The durable fix is a real end-of-game signal for non-MLB sports,
+  // server-side — this is a display bound, not a substitute for one.
+  NCAAF: 4 * 3_600_000,
+  NFL: 4 * 3_600_000,
   // A UFC card runs from the first prelim through the main event.
   UFC: 8 * 3_600_000,
   // A golf "game" row is a whole tournament (commence_time = the earliest

@@ -8,11 +8,9 @@
 > pipelines, thresholds, the mobile prompt, Discord, the live loop. The map is
 > §9.
 >
-> **This file was 909 KB (~225k tokens) and was re-read in full every session.**
-> On 2026-08-30 the 192-entry session log moved to `docs/sessions/` and the
-> reference sections moved to `docs/`. Keep it that way: append your session
-> summary to `docs/sessions/<YYYY-MM>.md`, and only PROMOTE something into this
-> file when it becomes a rule that governs future work.
+> **Keep it that way** (this file was once 909 KB, re-read every session):
+> append your session summary to `docs/sessions/<YYYY-MM>.md`, and only PROMOTE
+> something into this file when it becomes a rule that governs future work.
 >
 > **Read Section 00 first — no guessing, factual answers only. Then Section 0,
 > the required format for every reply.**
@@ -262,33 +260,36 @@ applies the **same `model_action_thresholds` cut** the app's
 `passesActionFilter` applies. A surface that reads anything else is a surface
 that will disagree, and the disagreement is always silent.
 
-Discord and push used to read `opening_signals`, which put the **capture step**
-between a pick and its channel — a gate the app does not have, and one that can
-only ever LOSE rows. Measured: **6 of 125 eligible BETs never published, all 6
-uncaptured, zero captured-then-unposted** (`docs/rules_evidence.md`).
+A surface with an extra GATE can only lose rows, and does it silently —
+`opening_signals` did, at 6 of 125 eligible BETs (`docs/rules_evidence.md`).
 
 - **No publishing surface gets a date horizon.** A pick is publishable when its
-  game has **not started**, however far ahead it was written. The two Week 1
-  wind picks were written 9 days out against a 7-day capture window, so they
-  reached the app and nothing else. A horizon is a thing you can only fail at
-  quietly.
+  game has **not started**, however far ahead it was written. A horizon is a
+  thing you can only fail at quietly.
 - **`opening_signals` is the CLV / opening-signal shadow track, not a gate.**
   It keeps its own window (`docs/opening_signals.md`). Never publish from it.
 - **The one guard that SHOULD bound the set is the started-game check.** The
   pick is a legitimate bet of record; announcing it once the game is under way
   sends the reader to a bet they cannot take.
-- **A new surface is a line in the parity tests**, not a copied query —
-  `tests/test_nfl_lookahead_signals.py` asserts the property over all of them.
+- **A LIVE surface resolves its window with `config.live_slate_dates()`, never
+  today** — a game keeps its KICKOFF's game_date, so a late start outlives the
+  calendar day. Mirrored in the app by `liveSlateDatesET()`; the two are pinned
+  by `tests/test_live_slate_midnight.py`.
+- **ONE PUBLISHER AT A TIME — a ledger cannot PREVENT a duplicate, only record
+  one.** Read → send → ledger is in that order deliberately, so two processes in
+  one window both send and the second INSERT is swallowed: one row, two
+  messages. Take `tracking/publish_lock.py`'s advisory lock — `pollers` and
+  `worker` both publish, so this is live.
+- **A new surface is a line in the parity tests**, not a copied query:
+  `tests/test_{nfl_lookahead_signals,publisher_lock}.py`.
 
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
 `.claude/rules/frontend.md` when a file under `mobile/` is opened.
 
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
-(Repo-level rule, 2026-08-30.) The changelog convention that built this file was
-"update CLAUDE.md after every commit". Over 192 sessions that grew it to
-**909 KB — roughly 225k tokens re-read at the start of every session.** The
-split:
+(Repo-level rule, 2026-08-30.) "Update CLAUDE.md after every commit" grew this
+file to 909 KB — ~225k tokens re-read at the start of every session. The split:
 
 - Every session appends its summary to **`docs/sessions/<YYYY-MM>.md`**, newest
   first, and adds a row to `docs/sessions/README.md`. Same detail as before —
