@@ -202,6 +202,10 @@ WORKER_ONLY_TABLES: tuple[str, ...] = (
     # brand_assets joined on 2026-09-04: scripts/fetch_brand_avatar.py creates it
     # on demand and already carried its own hand-written REVOKE, so it has always
     # been this same shape -- a fixed name with a live create site.
+    # The api_call_log daily rollup. Created on demand by monitoring/store.py,
+    # which is the writer every HTTP call goes through, so it has the same
+    # recurrence shape as the rest of this list.
+    "api_call_daily",
     "brand_assets",
     "model_artifacts",
     # The 250-bet review's two tables. Created on demand by
