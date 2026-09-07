@@ -1021,7 +1021,40 @@ PAUSED_MODELS: set = {
     # gamebook source and this gap closes. It is the sport's best signal
     # (§2c: 16.5% MAE lift) measured against the wrong ruler.
     "nfl_prop_tackles_assists",
-    # ── RE-PAUSED 2026-09-07 (mike), hours after the unpause ──────────────
+    # ── The four re-paused on 2026-09-07 were UNPAUSED the same day ───────
+    #
+    # They were paused on the gap between our P(over) and DraftKings' de-vigged
+    # number (<= -6pp). Then the models were graded out-of-sample on 2025 at
+    # real DraftKings prices -- scripts/nfl_prop_regrade.py,
+    # docs/nfl_props_2025_regrade.md -- and THREE OF THE FOUR GRADE POSITIVE:
+    #
+    #     model             bets      ROI            90% CI
+    #     rush_rec_yards      67   +4.15%   (-15.5, +23.7)
+    #     rush_yards          42   +3.92%   (-18.9, +26.7)
+    #     sacks               46   +2.40%   (-18.5, +22.6)
+    #     rush_attempts       36  -15.61%   (-41.8, +10.7)
+    #
+    # DISTANCE FROM THE BOOK IS NOT EDGE, and that is the lesson worth keeping.
+    # Being far from DraftKings means either we are wrong or DraftKings is, and
+    # only outcomes separate those. The same run shows the book is frequently
+    # the wrong one: its de-vigged price sits 2.4 to 8.1pp ABOVE the realized
+    # over-rate on nearly every market, while receptions (+0.1pp), rec_yards
+    # (+1.0pp) and pass_attempts (+0.4pp) are near-perfectly calibrated against
+    # reality. A criterion that cannot tell those apart cannot pause on them.
+    #
+    # Every one of those intervals straddles zero, so this is not a claim that
+    # the four are winners -- it is that the reason given for pausing them did
+    # not survive contact with outcomes. Section 5b's verdict does not apply
+    # either: it graded the #215 artifacts, which were unloadable and no longer
+    # exist.
+    #
+    # tackles_assists stays paused and is NOT part of this reversal (mike:
+    # "keep nfl_prop_tackles_assists paused"). Its case is a measured defect in
+    # the TARGET, not a threshold judgement, and the 2025 re-grade confirms it
+    # from the other side: +22.43% with a CI of (+12.0, +32.6) is the only
+    # interval in the table excluding zero, and it is fake -- the backtest
+    # grades against our own undercount, so it reproduces the error instead of
+    # detecting it.
     # The same defect as tackles, at the same magnitude, in four more models.
     #
     # mike asked why so many bets were unders. Measured on the live Week 1
@@ -1076,10 +1109,6 @@ PAUSED_MODELS: set = {
     # raw number. The Platt path fits itself once Week 1 settles; until then
     # there is nothing to map with, which is the honest reason this is a pause
     # rather than a correction.
-    "nfl_prop_sacks",
-    "nfl_prop_rush_attempts",
-    "nfl_prop_rush_yards",
-    "nfl_prop_rush_rec_yards",
     #
     # 2026-09-07 (mike): PAUSED after three formulations measured the same way
     # and all three lost. mike: "there are NO UFC picks in the channel" -> the
