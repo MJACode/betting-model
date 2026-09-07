@@ -22,7 +22,10 @@ import data.ingestors.prop_odds_ingestor as ing
 def test_each_event_is_anchored_to_its_own_first_pitch():
     """A source guard on the property that makes the backfill honest: the
     snapshot is derived from the EVENT's commence_time, not from the date."""
-    src = inspect.getsource(ing.backfill_mlb_prop_odds)
+    # The per-event work moved into _backfill_one_date when the backfill was
+    # made fault-tolerant (a failing date must be scoped, not fatal). The
+    # property is unchanged; only its address is.
+    src = inspect.getsource(ing._backfill_one_date)
     assert "kick - timedelta(hours=hours_before)" in src, src
     # ...and never from a fixed hour, which is the NFL shape.
     assert "T17:00:00" not in src, src
@@ -45,7 +48,7 @@ def test_it_records_the_served_snapshot_not_the_requested_one():
     """The Odds API snaps to its nearest stored snapshot. Recording what we
     ASKED for would misstate when the price existed -- the same leak-discipline
     rule the NFL backfill follows."""
-    src = inspect.getsource(ing.backfill_mlb_prop_odds)
+    src = inspect.getsource(ing._backfill_one_date)
     assert "stamp = served or snap" in src, src
     assert "datetime.now" not in src, "a backfill must never stamp the run time"
 
@@ -55,7 +58,7 @@ def test_the_listing_instant_precedes_every_first_pitch():
     sees the whole scheduled slate and nothing has been removed for starting.
     Verified against the API 2026-09-06: 10:00Z and 16:00Z return the same 9
     events for 2026-08-20 and the same 15 for 2026-06-10."""
-    src = inspect.getsource(ing.backfill_mlb_prop_odds)
+    src = inspect.getsource(ing._backfill_one_date)
     assert 'T16:00:00Z' in src, src
     earliest_et_first_pitch = 13     # 1:05pm ET games exist; nothing earlier
     assert 16 - 4 < earliest_et_first_pitch

@@ -434,6 +434,56 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
 
 # ── DB Writer ─────────────────────────────────────────────────────────────────
 
+def _get_with_retry(url: str, params: dict, attempts: int = 4,
+                    timeout: int = 60):
+    """GET that survives a transient network hiccup. None when it does not.
+
+    A backfill is a LONG PAID JOB -- the 2026 MLB run is ~1,900 event calls over
+    roughly 40 minutes -- and the first version of this had no retry at all. A
+    single ReadTimeout nineteen dates in aborted the entire run. One dropped
+    connection must not cost the job.
+
+    Backs off 2s, 4s, 8s. ONLY the network layer is retried: a non-200 is
+    returned to the caller untouched, because an HTTP error is an ANSWER (rate
+    limit, no coverage for that snapshot) and retrying it spends credits to be
+    told the same thing again.
+    """
+    for i in range(attempts):
+        try:
+            return requests.get(url, params=params, timeout=timeout)
+        except requests.RequestException as exc:
+            if i == attempts - 1:
+                logger.warning(f"  giving up after {attempts} attempts: "
+                               f"{type(exc).__name__}")
+                return None
+            wait = 2 ** (i + 1)
+            logger.debug(f"  {type(exc).__name__} -- retrying in {wait}s")
+            time.sleep(wait)
+    return None
+
+
+def backfilled_dates(conn: DBConnection, dates: list[str],
+                     sharp_book: str = "pinnacle") -> set[str]:
+    """Which of `dates` already carry historical rows.
+
+    A paid append-only backfill MUST be resumable, and this was missing: after
+    the timeout above, re-running the range would have silently RE-BOUGHT every
+    date already fetched.
+
+    Detected on the snapshot_at SHAPE. The historical writer stamps the API's
+    served timestamp, which ends in 'Z'; the live ingestor stamps ET isoformat
+    with a numeric offset. That is a real distinction in this table today, and
+    it is also a constraint on future writers: anything that starts stamping 'Z'
+    on live rows makes a re-run skip dates it should buy.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT game_date FROM player_prop_odds "
+        "WHERE game_date = ANY(%s) AND bookmaker = %s "
+        "AND snapshot_at LIKE '%%Z'",
+        (list(dates), sharp_book)).fetchall()
+    return {r[0] for r in rows}
+
+
 def list_historical_mlb_events(snapshot_iso: str) -> tuple[list[dict], str | None]:
     """(events, the snapshot the API actually served) for a past instant.
 
@@ -444,10 +494,11 @@ def list_historical_mlb_events(snapshot_iso: str) -> tuple[list[dict], str | Non
     """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
-    resp = requests.get(
+    resp = _get_with_retry(
         f"{ODDS_API_BASE}/historical/sports/{SPORT_KEY}/events",
-        params={"apiKey": ODDS_API_KEY, "date": snapshot_iso, "dateFormat": "iso"},
-        timeout=30)
+        {"apiKey": ODDS_API_KEY, "date": snapshot_iso, "dateFormat": "iso"})
+    if resp is None:
+        return [], None
     record_quota_headers(resp)
     if resp.status_code != 200:
         logger.warning(f"MLB historical events {snapshot_iso}: HTTP {resp.status_code} "
@@ -460,12 +511,13 @@ def list_historical_mlb_events(snapshot_iso: str) -> tuple[list[dict], str | Non
 def _historical_event_props(event_id: str, snapshot_iso: str,
                             markets: list[str], books: str) -> tuple[list, str | None, int]:
     """One event's historical prop board. -> (bookmakers, served_ts, credits)."""
-    resp = requests.get(
+    resp = _get_with_retry(
         f"{ODDS_API_BASE}/historical/sports/{SPORT_KEY}/events/{event_id}/odds",
-        params={"apiKey": ODDS_API_KEY, "date": snapshot_iso,
-                "regions": "us,eu", "bookmakers": books,
-                "markets": ",".join(markets), "oddsFormat": "american"},
-        timeout=30)
+        {"apiKey": ODDS_API_KEY, "date": snapshot_iso,
+         "regions": "us,eu", "bookmakers": books,
+         "markets": ",".join(markets), "oddsFormat": "american"})
+    if resp is None:
+        return [], None, 0
     record_quota_headers(resp)
     credits = int(resp.headers.get("x-requests-last") or 0)
     if resp.status_code != 200:
@@ -477,11 +529,75 @@ def _historical_event_props(event_id: str, snapshot_iso: str,
     return data.get("bookmakers", []), body.get("timestamp"), credits
 
 
+def _backfill_one_date(conn: DBConnection, d: str, hours_before: int,
+                       markets: list[str], books: str,
+                       limit_events: int | None, snapshot_type: str,
+                       total: dict) -> int:
+    """One date's worth of history. Split out so a failure is scoped to a date.
+
+    Writes nothing until the caller commits, so an exception halfway through a
+    date leaves that date entirely un-backfilled rather than half-backfilled --
+    which is what makes `backfilled_dates` a truthful resume marker.
+    """
+    # ONE listing per date, at an instant when the whole slate is still
+    # scheduled. 16:00Z is 12:00 ET -- before the earliest first pitch, so no
+    # game has started and none has been removed from the board. Verified
+    # against the API: 10:00Z and 16:00Z return the same 9 events for
+    # 2026-08-20 and the same 15 for 2026-06-10.
+    evs, _served = list_historical_mlb_events(f"{d}T16:00:00Z")
+    total["credits"] += 1
+    if not evs:
+        logger.info(f"  {d}: no historical events")
+        return 0
+    if limit_events:
+        evs = evs[:limit_events]
+
+    date_rows = 0
+    for ev in evs:
+        commence = ev.get("commence_time", "")
+        try:
+            kick = datetime.fromisoformat(commence.replace("Z", "+00:00"))
+        except ValueError:
+            total["skipped"] += 1
+            continue
+        snap = (kick - timedelta(hours=hours_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        game_date = kick.astimezone(_ET_ZONE).strftime("%Y-%m-%d")
+        home = _normalize_team(ev.get("home_team", ""), "MLB")
+        away = _normalize_team(ev.get("away_team", ""), "MLB")
+        game_id = _build_game_id("MLB", game_date, away, home)
+
+        books_data, served, credits = _historical_event_props(
+            ev["id"], snap, markets, books)
+        total["credits"] += credits
+        time.sleep(REQUEST_SLEEP)
+        if not books_data:
+            total["skipped"] += 1
+            continue
+        # The SERVED timestamp, never `snap` and never now(): the API snaps to
+        # its nearest stored snapshot, and the row has to record when the price
+        # actually existed.
+        stamp = served or snap
+        rows: list[dict] = []
+        for bk in books_data:
+            rows += _parse_prop_markets(
+                bk.get("markets", []), game_id, game_date,
+                snapshot_type, stamp,
+                allowed_markets=set(markets), bookmaker=bk.get("key", ""))
+        if rows:
+            date_rows += _insert_prop_odds(conn, rows)
+        total["events"] += 1
+
+    logger.info(f"  {d}: {len(evs)} events, {date_rows} rows "
+                f"(running credits {total['credits']})")
+    return date_rows
+
+
 def backfill_mlb_prop_odds(dates: list[str], hours_before: int = 3,
                            markets: list[str] | None = None,
                            books: str = "draftkings,pinnacle",
                            limit_events: int | None = None,
-                           snapshot_type: str = "open") -> dict:
+                           snapshot_type: str = "open",
+                           skip_existing: bool = True) -> dict:
     """Historical MLB prop lines, snapshotted `hours_before` EACH GAME'S OWN start.
 
     WHY THIS EXISTS. models/mlb_prop_market is the MLB port of the only
@@ -499,11 +615,20 @@ def backfill_mlb_prop_odds(dates: list[str], hours_before: int = 3,
     (see load_quotes). Each event is fetched at its own commence_time minus
     `hours_before`, so every row is pre-game by construction.
 
+    RESUMABLE AND FAULT-TOLERANT, because the first version was neither and it
+    cost a run: a single ReadTimeout nineteen dates into the 2026 backfill
+    aborted everything, and re-running the range would have re-bought what was
+    already paid for. Now the network layer retries with backoff, a date that
+    still fails is logged and skipped rather than raising, and `skip_existing`
+    passes over dates that already carry historical rows. A failed date is
+    simply never marked done, so the next run picks it up.
+
     COST, measured 2026-09-06 rather than estimated: the events listing is 1
-    credit; a per-event call with `bookmakers` + 5 markets is 30. So a date is
-    ~1 + 30*games, and a full 2026 season (~2,430 games) is ~73k credits.
-    `bookmakers` counts as ONE region (CLAUDE.md section 6), which is why the
-    unfiltered 4-region probe cost 200 for the same board.
+    credit; a per-event call with `bookmakers` + 5 markets is 30 on a small
+    board and ~47 in practice across a full slate. So a full 2026 season
+    (~1,900 games) is ~90k credits against 4.5M remaining. `bookmakers` counts
+    as ONE region (CLAUDE.md section 6), which is why the unfiltered 4-region
+    probe cost 200 for the same board.
 
     Append-only, like every snapshot writer here: re-running a date adds rows
     rather than replacing them, and the reader takes the latest qualifying one.
@@ -514,63 +639,31 @@ def backfill_mlb_prop_odds(dates: list[str], hours_before: int = 3,
     conn = get_connection()
     total = {"rows": 0, "events": 0, "skipped": 0, "credits": 0, "dates": 0}
     try:
+        done = backfilled_dates(conn, dates) if skip_existing else set()
+        if done:
+            logger.info(f"  {len(done)} of {len(dates)} date(s) already "
+                        f"backfilled -- skipping, not re-buying")
         for d in dates:
-            # ONE listing per date, at an instant when the whole slate is still
-            # scheduled. 16:00Z is 12:00 ET -- before the earliest first pitch,
-            # so no game has started and none has been removed from the board.
-            evs, _served = list_historical_mlb_events(f"{d}T16:00:00Z")
-            total["credits"] += 1
-            if not evs:
-                logger.info(f"  {d}: no historical events")
+            if d in done:
                 continue
-            if limit_events:
-                evs = evs[:limit_events]
-            date_rows = 0
-            for ev in evs:
-                commence = ev.get("commence_time", "")
-                try:
-                    kick = datetime.fromisoformat(commence.replace("Z", "+00:00"))
-                except ValueError:
-                    total["skipped"] += 1
-                    continue
-                snap = (kick - timedelta(hours=hours_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                game_date = kick.astimezone(_ET_ZONE).strftime("%Y-%m-%d")
-                home = _normalize_team(ev.get("home_team", ""), "MLB")
-                away = _normalize_team(ev.get("away_team", ""), "MLB")
-                game_id = _build_game_id("MLB", game_date, away, home)
-
-                books_data, served, credits = _historical_event_props(
-                    ev["id"], snap, markets, books)
-                total["credits"] += credits
-                time.sleep(REQUEST_SLEEP)
-                if not books_data:
-                    total["skipped"] += 1
-                    continue
-                # The SERVED timestamp, never `snap` and never now(): the API
-                # snaps to its nearest stored snapshot and the row has to record
-                # when the price actually existed.
-                stamp = served or snap
-                rows: list[dict] = []
-                for bk in books_data:
-                    rows += _parse_prop_markets(
-                        bk.get("markets", []), game_id, game_date,
-                        snapshot_type, stamp,
-                        allowed_markets=set(markets), bookmaker=bk.get("key", ""))
-                if rows:
-                    date_rows += _insert_prop_odds(conn, rows)
-                total["events"] += 1
+            try:
+                rows = _backfill_one_date(conn, d, hours_before, markets, books,
+                                          limit_events, snapshot_type, total)
+            except Exception as exc:
+                # One bad date must not end a 40-minute paid run. It is left
+                # unmarked, so a re-run picks it up.
+                logger.warning(f"  {d}: aborted ({type(exc).__name__}: {exc})")
+                conn.rollback()
+                continue
             conn.commit()
-            total["rows"] += date_rows
+            total["rows"] += rows
             total["dates"] += 1
-            logger.info(f"  {d}: {len(evs)} events, {date_rows} rows "
-                        f"(running credits {total['credits']})")
         return total
     finally:
         try:
             persist_quota(conn)
         finally:
             conn.close()
-
 
 def _insert_prop_odds(conn: DBConnection, rows: list[dict]) -> int:
     """Insert prop odds rows. No dedup — always append snapshots."""
