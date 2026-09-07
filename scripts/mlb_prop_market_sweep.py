@@ -92,8 +92,17 @@ def profit(price: float, won: bool) -> float:
     return price / 100.0 if price > 0 else 100.0 / abs(price)
 
 
-def grade_day(conn, game_date: str, min_edge: float):
-    """-> (list of (market, side, price, edge, result), diagnostic)"""
+def grade_day(conn, game_date: str, min_edge: float = 0.02):
+    """-> (list of (market, side, price, edge, profit), diagnostic)
+
+    ONE PASS PER DATE, at the LOOSEST threshold, and the grid is built by
+    filtering that on edge afterwards. That is exact rather than an
+    approximation: MLB's SOFT_BOOKS is DraftKings alone, so find_bets does no
+    cross-book selection and a bet qualifying at 5pp is by construction one of
+    the bets qualifying at 2pp with edge >= 0.05. The first version re-ran the
+    card once per (date, threshold) -- ~1,700 round trips over a season, which
+    timed out at ten minutes.
+    """
     bets, diag = mk.card(conn, game_date, min_edge=min_edge)
     act = actuals(conn, game_date)
     graded, unmatched = [], 0
@@ -117,16 +126,24 @@ def grade_day(conn, game_date: str, min_edge: float):
     return graded, diag
 
 
+def _report(rows, label):
+    if not rows:
+        return f"{label:>18} {0:>6}      —         —        —"
+    u = sum(x[4] for x in rows)
+    w = sum(1 for x in rows if x[4] > 0)
+    return (f"{label:>18} {len(rows):>6} {100*w/len(rows):>6.1f}% "
+            f"{u:>+8.2f} {100*u/len(rows):>+7.2f}%")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--start", default="2026-08-27")
+    ap.add_argument("--start", default="2026-04-01")
     ap.add_argument("--end",   default="2026-09-05")
     a = ap.parse_args()
 
     conn = get_connection()
     days = []
-    d0 = date.fromisoformat(a.start)
-    d1 = date.fromisoformat(a.end)
+    d0, d1 = date.fromisoformat(a.start), date.fromisoformat(a.end)
     while d0 <= d1:
         days.append(d0.isoformat())
         d0 += timedelta(days=1)
@@ -135,48 +152,61 @@ def main() -> None:
           f"soft {list(mk.SOFT_BOOKS)}, {len(days)} dates {a.start}..{a.end}")
     print(f"markets: {', '.join(mk.SHARP_MARKETS)}\n")
 
+    per_day, unmatched = {}, 0
+    for gd in days:
+        g, diag = grade_day(conn, gd)
+        per_day[gd] = g
+        unmatched += diag.get("unmatched", 0)
+    allg = [x for g in per_day.values() for x in g]
+    print(f"graded {len(allg)} selections at the 2pp floor "
+          f"({unmatched} unmatched to a game log)\n")
+
     print(f"{'min_edge':>9} {'bets':>6} {'win%':>7} {'units':>9} {'ROI':>8}   per-market")
-    print("-" * 92)
-    grid = {}
+    print("-" * 96)
     for pp in (0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08):
-        allg, unmatched = [], 0
-        for gd in days:
-            g, diag = grade_day(conn, gd, pp)
-            allg += g
-            unmatched += diag.get("unmatched", 0)
-        grid[pp] = allg
-        if not allg:
+        rows = [x for x in allg if x[3] >= pp]
+        if not rows:
             print(f"{pp:>8.0%} {0:>6}      —         —        —   (no bets)")
             continue
-        u = sum(x[4] for x in allg)
-        w = sum(1 for x in allg if x[4] > 0)
+        u = sum(x[4] for x in rows)
+        w = sum(1 for x in rows if x[4] > 0)
         by = defaultdict(list)
-        for m, _s, _p, _e, r in allg:
+        for m, _s, _p, _e, r in rows:
             by[m].append(r)
         per = "  ".join(f"{m.replace('batter_','b_').replace('pitcher_','p_')}"
                         f" {len(v)}/{sum(v):+.1f}u" for m, v in sorted(by.items()))
-        print(f"{pp:>8.0%} {len(allg):>6} {100*w/len(allg):>6.1f}% "
-              f"{u:>+8.2f} {100*u/len(allg):>+7.2f}%   {per}")
-        if unmatched:
-            print(f"{'':>9} (unmatched to a game log: {unmatched})")
+        print(f"{pp:>8.0%} {len(rows):>6} {100*w/len(rows):>6.1f}% "
+              f"{u:>+8.2f} {100*u/len(rows):>+7.2f}%   {per}")
 
-    # Time split — §7: every situational edge that looked strong pooled
-    # collapsed when split early/late, so the split is part of the method.
+    # §7: a time split kills most false positives, so it is part of the method.
     mid = days[len(days) // 2]
     print(f"\ntime split at {mid}")
-    print(f"{'min_edge':>9} {'early bets':>11} {'early ROI':>10} "
-          f"{'late bets':>10} {'late ROI':>9}")
-    print("-" * 56)
-    for pp in (0.03, 0.04, 0.05, 0.06):
-        early, late = [], []
-        for gd in days:
-            g, _ = grade_day(conn, gd, pp)
-            (early if gd < mid else late).append(g)
-        e = [x for g in early for x in g]
-        l = [x for g in late for x in g]
+    print(f"{'min_edge':>9} {'early':>7} {'early ROI':>10} {'late':>7} {'late ROI':>9}")
+    print("-" * 48)
+    for pp in (0.02, 0.03, 0.04, 0.05, 0.06):
+        e = [x for gd, g in per_day.items() if gd < mid for x in g if x[3] >= pp]
+        l = [x for gd, g in per_day.items() if gd >= mid for x in g if x[3] >= pp]
         er = f"{100*sum(x[4] for x in e)/len(e):+.2f}%" if e else "—"
         lr = f"{100*sum(x[4] for x in l)/len(l):+.2f}%" if l else "—"
-        print(f"{pp:>8.0%} {len(e):>11} {er:>10} {len(l):>10} {lr:>9}")
+        print(f"{pp:>8.0%} {len(e):>7} {er:>10} {len(l):>7} {lr:>9}")
+
+    # §7 again: report the NEIGHBOURHOOD, not the best cell. A month split says
+    # whether any cut is a plateau or one good stretch.
+    print("\nby month, at 3pp / 5pp")
+    print(f"{'month':>9} {'3pp bets':>9} {'3pp ROI':>9} {'5pp bets':>9} {'5pp ROI':>9}")
+    print("-" * 50)
+    months = sorted({gd[:7] for gd in days})
+    for mo in months:
+        out = [f"{mo:>9}"]
+        for pp in (0.03, 0.05):
+            rows = [x for gd, g in per_day.items() if gd[:7] == mo
+                    for x in g if x[3] >= pp]
+            if rows:
+                out.append(f"{len(rows):>9}")
+                out.append(f"{100*sum(x[4] for x in rows)/len(rows):>+8.2f}%")
+            else:
+                out += [f"{0:>9}", f"{'—':>9}"]
+        print(" ".join(out))
 
     conn.close()
 
