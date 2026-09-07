@@ -477,6 +477,38 @@ Note it does NOT block the grant work: the migration already carries its own
 `GRANT EXECUTE ... TO authenticated`, so it stays correct now the default
 privilege is revoked.
 
+## [ ] CLAUDE.md is 26% over its own size limit
+
+Noticed 2026-09-04 in session 222, while promoting a rule into §7. The file
+states its own budget — *"Keep this file under ~30 KB"* — and it was **37,613
+bytes before that promotion and 38,674 after**. So it has been over for a while;
+this session added 1,061 bytes of it and is flagging rather than quietly
+continuing.
+
+The size matters for the reason the file itself gives: it is re-read at the start
+of every session, so every kilobyte is paid on every session forever. That is why
+the 909 KB version was split up in the first place.
+
+The file's own test for what to cut is already written down: *"something in it is
+a log entry wearing a rule's clothes"* — i.e. anything that records what happened
+once rather than governing what happens next. A trim should apply exactly that
+test and nothing looser, because the failure mode in the other direction is worse:
+a rule that governs future sessions gets deleted, nobody notices, and the trap it
+prevented comes back.
+
+Two candidate approaches, both needing a person to approve the cuts:
+
+- Move the EVIDENCE still embedded in rule text out to `docs/rules_evidence.md`,
+  which exists for exactly this and is already linked. Several §1b and §7 entries
+  still carry their measured story inline.
+- Check whether any §7 entry is now fully covered by a path-scoped rule in
+  `.claude/rules/`, which loads on demand and costs nothing on sessions that do
+  not touch those directories.
+
+Not attempted here: deleting from CLAUDE.md is not a side effect of a dashboard
+change, and picking which rules survive is a judgement about what future sessions
+need.
+
 ## [x] Default privileges still hand anon EXECUTE on every new function
 
 Found 2026-09-03 in session 206, alongside the table fix. `pg_default_acl`
