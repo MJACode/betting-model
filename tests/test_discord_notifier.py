@@ -622,7 +622,7 @@ class _FakeConn:
 
 def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00",
          best_book=None, best_odds=None, min_edge=0.10, min_odds=None,
-         commence="2099-08-23T18:36:00+00:00"):
+         commence="2099-08-23T18:36:00+00:00", game_date="2026-08-23"):
     # Column order must match _new_signals' SELECT list. The middle four come
     # from the picks LATERAL: the betslip link, WHEN the pick row was written,
     # and the best price across books with the book that offered it. The last
@@ -634,7 +634,11 @@ def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00",
     # signal for an upcoming game" as the real clock moves past 2026.
     return (lock_key, f"label {lock_key}", sport, "mlb_moneyline", 0.72, 0.11,
             -150.0, 0.02, "HIGH", "TEX", "LAA", commence,
-            None, created_at, best_book, best_odds, min_edge, min_odds)
+            None, created_at, best_book, best_odds, min_edge, min_odds,
+            # The pick's OWN date (2026-09-06). A pass can now carry more than
+            # one day's picks, and the embed header is grouped on this rather
+            # than on the run date.
+            game_date)
 
 
 def _setup(monkeypatch, conn, webhooks=None):
@@ -1461,3 +1465,48 @@ def test_the_restate_delete_resolves_messages_through_picks():
     assert "JOIN picks p" in conn.sql
     assert "opening_signals" not in conn.sql
     assert "p.game_date = %s" in conn.sql and "p.sport = %s" in conn.sql
+
+
+def test_a_pick_for_tomorrow_is_announced_under_TOMORROWS_date(monkeypatch):
+    """THE BUG mike caught on the first look-ahead pick, 2026-09-06.
+
+    A Dylan Cease prop for the Sunday Sept 7 TOR @ OAK game was posted under a
+    header reading Sept 6, because the embed took the RUN date. Before the
+    look-ahead every pick in a pass was for the day the pass ran, so one header
+    date was always right; now a pass can carry two days at once.
+
+    This is not cosmetic. The reader uses the header to know when to place it.
+    """
+    conn = _FakeConn([
+        _row("today1", "MLB", game_date="2026-09-06"),
+        _row("tmrw1", "MLB", game_date="2026-09-07"),
+    ])
+    _setup(monkeypatch, conn)
+    seen = []
+    monkeypatch.setattr(dn, "_post",
+                        lambda url, payload: seen.append(payload) or True)
+
+    dn.notify_discord_signals(target_date="2026-09-06")
+
+    titles = [p["embeds"][0]["title"] for p in seen]
+    assert any("Sep 06" in t or "Sep 6" in t for t in titles), titles
+    assert any("Sep 07" in t or "Sep 7" in t for t in titles), titles
+    # ...and never both days under one header.
+    assert len(seen) == 2, "one embed per game date"
+
+
+def test_todays_slate_is_posted_before_tomorrows(monkeypatch):
+    """Date order, not insertion order: the games about to start come first."""
+    conn = _FakeConn([
+        _row("tmrw1", "MLB", game_date="2026-09-07"),
+        _row("today1", "MLB", game_date="2026-09-06"),
+    ])
+    _setup(monkeypatch, conn)
+    seen = []
+    monkeypatch.setattr(dn, "_post",
+                        lambda url, payload: seen.append(payload) or True)
+
+    dn.notify_discord_signals(target_date="2026-09-06")
+
+    titles = [p["embeds"][0]["title"] for p in seen]
+    assert ("Sep 06" in titles[0] or "Sep 6" in titles[0]), titles
