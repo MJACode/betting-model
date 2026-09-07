@@ -1946,7 +1946,14 @@ LINE_SHOP_BOOKMAKERS = [
               # to revert.
               or ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
                   "fanatics,bovada,pinnacle,"
-                  "betrivers,hardrockbet,ballybet,betparx,rebet")).split(",")
+                  # fliff added 2026-09-07 for models/nfl_prop_market: the
+                  # largest marginal contribution of any book not already
+                  # fetched -- 93% game coverage, 596 bets as the sole soft
+                  # book, +6.80% -- and a book named in SOFT_BOOKS that the
+                  # pull never requests produces NO quotes rather than an
+                  # error. It is us2 like the rest, so it is inside the region
+                  # already paid for and costs nothing.
+                  "betrivers,hardrockbet,ballybet,betparx,rebet,fliff")).split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.

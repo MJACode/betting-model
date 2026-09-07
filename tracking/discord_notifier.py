@@ -788,6 +788,9 @@ _BOOK_NAMES = {
     # reads like a bug in a channel members pay for.
     "hardrockbet": "Hard Rock Bet", "ballybet": "Bally Bet",
     "betparx": "betPARX", "rebet": "ReBet",
+    # fliff joined the bettable set on 2026-09-07 with the nfl_prop_market
+    # widening. Its own brand is lower-case.
+    "fliff": "Fliff",
 }
 
 # "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
