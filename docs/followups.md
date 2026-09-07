@@ -54,6 +54,54 @@ endorsed one. **Done 2026-09-07 (mike).** `load_calibrations` reads `promoted_me
 `promote()` freezes the method and both verdicts at promotion, and `demote()`
 exists. Detail: `docs/mlb_volume_efficiency.md` §2.
 
+## [ ] 40 NCAAF `games` rows since 08-28 carry an FCS visitor's Odds API name with the mascot attached
+
+Measured 2026-09-07 (session 253). `ncaaf_teams` is `/teams/fbs` (139
+schools), so every FCS visitor is unresolved by the Odds API name resolver and
+its games row keeps the mascot: `NCAAF_2026-09-05_abilene-christian-wildcats_texas-tech`
+beside CFBD's `abilene-christian_texas-tech`. 48 live rows in 08-28..09-07
+name a different opponent than CFBD's row for the same home team and day; 8
+were the prefix bug fixed that session, the other 40 are this. The alias
+mirror now grades THROUGH them (one side exact, the other an extended slug),
+so picks on them settle - but five shapes it cannot bridge stay unscored:
+`albany`/`ualbany`, `liu-sharks`/`long-island-university`,
+`citadel-bulldogs`/`the-citadel`, `youngstown-st-penguins`/`youngstown-state`,
+`southeastern-louisiana-lions`/`se-louisiana`. None carried a pick.
+
+The real fix is to resolve the name in the first place: ingest CFBD `/teams`
+(all classifications) into a registry the resolver can see, or add the FCS
+schools that visit FBS stadiums to `ncaaf_teams` with `classification='fcs'`.
+Check first what else reads `ncaaf_teams` as "the FBS set" -
+`ncaaf_live/gameday.py` and `ncaaf_live/feeds/cfbd_scoreboard.py` use it as
+the mascot-strip vocabulary, which an FCS row would only improve.
+
+Query that found it:
+
+```sql
+WITH live AS (SELECT game_id, game_date, home_team, away_team FROM games
+              WHERE sport='NCAAF' AND data_source='live' AND game_date >= '2026-08-28'),
+     cfbd AS (SELECT game_id, game_date, home_team, away_team FROM games
+              WHERE sport='NCAAF' AND data_source='cfbd' AND game_date >= '2026-08-27')
+SELECT l.game_id, l.away_team, c.away_team, c.game_id
+FROM live l JOIN cfbd c ON c.home_team = l.home_team
+  AND abs(c.game_date::date - l.game_date::date) <= 1 AND c.away_team <> l.away_team;
+```
+
+## [x] Six live NCAAF picks are labelled with the wrong opponent - FIXED 2026-09-07
+
+Same session. `pick_label` read "Indiana @ Purdue Over 45.5 (live)"; the game
+was Indiana State @ Purdue, and the bet was on DK's live total for that game
+(the live loop prices from the pregame line and the live state, not from team
+identity). §1c protects the row as the bet of record; a DISPLAY label is not
+the line or the price.
+
+**Done 2026-09-07 (mike: "fix the labels").**
+`data/migrations/ncaaf_fcs_visitor_names_2026_09_07.sql`, applied from the
+worker's own pass, renames the visitor on the nine `games` rows, writes CFBD's
+final onto each, and replaces the wrong name in all 44 labels on those rows
+(the six BETs and the pre-game NONE rows) once, whole-word. The Discord and
+app posts that already went out under the wrong name are not rewritten.
+
 ## [ ] The inning-gate replay misses 13 games production actually bet
 
 `scripts/live_inning_gate_replay.py`'s own control prints it: over 2026-08-24 →

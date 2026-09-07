@@ -196,3 +196,114 @@ def test_writer_never_touches_the_db_when_there_is_nothing_to_mirror():
     conn = _FakeConn([])
     assert mirror_scores_to_alias_rows(conn, []) == 0
     assert conn.writes == [] and conn.commits == 0
+
+
+# ── the WRONG-OPPONENT duplicate row (2026-09-07) ─────────────────────────────
+#
+# Two ways the odds ingestor writes a row whose opponent name differs from
+# CFBD's for the same game: an FCS name that prefix-resolved to an FBS school
+# ("Indiana" for Indiana State - six live BETs on 2026-09-04/05 sat unsettled
+# this way), and an unresolved name that kept its mascot ("Abilene Christian
+# Wildcats"). Neither shares the slug pair, so the exact pass above never saw
+# them. Home team + a day identifies a college football game; the other side
+# must be an EXTENDED slug, not merely different.
+
+def test_the_purdue_game_mislabelled_as_indiana_gets_its_final():
+    updates = alias_score_updates(
+        [_cfbd("NCAAF_2026-09-04_indiana-state_purdue", "2026-09-04",
+               "Purdue", "Indiana State", 44, 19)],
+        [_row("NCAAF_2026-09-04_indiana_purdue", "2026-09-04", "Purdue", "Indiana")],
+    )
+    assert [(u["game_id"], u["home_score"], u["away_score"], u["home_win"])
+            for u in updates] == [("NCAAF_2026-09-04_indiana_purdue", 44, 19, 1)]
+
+
+def test_an_unresolved_name_that_kept_its_mascot_gets_its_final():
+    updates = alias_score_updates(
+        [_cfbd("NCAAF_2026-09-05_abilene-christian_texas-tech", "2026-09-05",
+               "Texas Tech", "Abilene Christian", 52, 7)],
+        [_row("NCAAF_2026-09-05_abilene-christian-wildcats_texas-tech",
+              "2026-09-05", "Texas Tech", "Abilene Christian Wildcats")],
+    )
+    assert [u["game_id"] for u in updates] == \
+        ["NCAAF_2026-09-05_abilene-christian-wildcats_texas-tech"]
+
+
+def test_the_byu_game_a_day_apart_and_both_of_its_rows():
+    """Utah Tech @ BYU kicked at 8:02pm ET 2026-09-05. The live loop wrote
+    'Utah' rows dated 09-05 AND 09-06; CFBD's final is on 09-06."""
+    updates = alias_score_updates(
+        [_cfbd("NCAAF_2026-09-06_utah-tech_byu", "2026-09-06", "BYU", "Utah Tech", 63, 7)],
+        [_row("NCAAF_2026-09-05_utah_byu", "2026-09-05", "BYU", "Utah"),
+         _row("NCAAF_2026-09-06_utah_byu", "2026-09-06", "BYU", "Utah")],
+    )
+    assert sorted(u["game_id"] for u in updates) == \
+        ["NCAAF_2026-09-05_utah_byu", "NCAAF_2026-09-06_utah_byu"]
+    assert all((u["home_score"], u["away_score"]) == (63, 7) for u in updates)
+
+
+def test_a_loose_match_swaps_scores_when_the_row_is_reversed():
+    updates = alias_score_updates(
+        [_cfbd("NCAAF_2026-09-04_indiana-state_purdue", "2026-09-04",
+               "Purdue", "Indiana State", 44, 19)],
+        [_row("X", "2026-09-04", "Indiana", "Purdue")],
+    )
+    assert (updates[0]["home_score"], updates[0]["away_score"]) == (19, 44)
+    assert updates[0]["home_win"] == 0
+
+
+def test_an_exact_match_beats_a_loose_one_for_the_same_row():
+    """If a row matches one final exactly it must not ALSO collect a loose
+    claim from another and be refused as conflicting."""
+    updates = alias_score_updates(
+        [_cfbd("NCAAF_2026-09-06_utah_byu", "2026-09-06", "BYU", "Utah", 20, 17),
+         _cfbd("NCAAF_2026-09-06_utah-tech_byu", "2026-09-06", "BYU", "Utah Tech", 63, 7)],
+        [_row("NCAAF_2026-09-05_utah_byu", "2026-09-05", "BYU", "Utah")],
+    )
+    assert [(u["home_score"], u["away_score"]) for u in updates] == [(20, 17)]
+
+
+def test_a_merely_different_opponent_is_not_the_same_game():
+    """Same home team and day, but 'Georgia' does not extend 'Alabama'."""
+    assert alias_score_updates(
+        [_cfbd("A", "2026-09-05", "Florida", "Alabama", 24, 21)],
+        [_row("B", "2026-09-05", "Florida", "Georgia")],
+    ) == []
+
+
+def test_a_bare_substring_is_not_an_extension():
+    """'utah' must not claim 'utahns' - extension is by whole hyphenated word."""
+    assert alias_score_updates(
+        [_cfbd("A", "2026-09-05", "BYU", "Utahns", 1, 0)],
+        [_row("B", "2026-09-05", "BYU", "Utah")],
+    ) == []
+
+
+def test_two_loose_finals_for_one_row_are_refused():
+    updates = alias_score_updates(
+        [_cfbd("A", "2026-09-05", "BYU", "Utah Tech", 63, 7),
+         _cfbd("B", "2026-09-06", "BYU", "Utah State", 30, 10)],
+        [_row("C", "2026-09-05", "BYU", "Utah")],
+    )
+    assert updates == []
+
+
+def test_stored_finals_are_mirrored_without_a_cfbd_pull():
+    """settle_picks runs hourly; the CFBD results pull runs once at 6am. The
+    stored-final mirror closes that gap from what the table already holds."""
+    from data.ingestors.cfbd_ingestor import mirror_stored_finals
+
+    class _Conn(_FakeConn):
+        def execute(self, sql, params=None):
+            if "home_score IS NOT NULL" in sql:          # the scored-rows read
+                return _FakeCursor([
+                    ("NCAAF_2026-09-04_indiana-state_purdue", "2026-09-04",
+                     "Purdue", "Indiana State", 44, 19)])
+            return super().execute(sql, params)
+
+    conn = _Conn([("NCAAF_2026-09-04_indiana_purdue", "2026-09-04",
+                   "Purdue", "Indiana", None)])
+    assert mirror_stored_finals(conn, "2026-09-07") == 1
+    _sql, params = conn.writes[0]
+    assert params["game_id"] == "NCAAF_2026-09-04_indiana_purdue"
+    assert (params["home_score"], params["away_score"]) == (44, 19)

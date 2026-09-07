@@ -58,6 +58,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # decision path reached player props. One-off; guards on "every promoted row
     # carries its own method" and skips forever after.
     "promotions_endorsed_only_2026_09_07.sql",
+    # 2026-09-07: nine NCAAF games rows named an FCS visitor as the FBS school
+    # its name starts with; 44 pick labels carried it. Renames the visitor,
+    # writes CFBD's final onto the row so the same pass settles the six live
+    # BETs, and corrects each label once. Every step guards on its own
+    # property and no-ops forever after.
+    "ncaaf_fcs_visitor_names_2026_09_07.sql",
 ]
 
 
