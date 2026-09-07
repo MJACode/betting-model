@@ -1416,3 +1416,41 @@ def test_settlement_covers_everything_the_rule_can_grade():
     from tracking.paper_tracker import _NFL_MARKET_STAT
     missing = [m for m in mkt.MARKET_STAT if m not in _NFL_MARKET_STAT]
     assert not missing, f"gradeable but unsettleable: {missing}"
+
+
+def test_the_nfl_pregame_cutoff_casts_both_arms_of_the_coalesce():
+    """A COALESCE cannot mix types, and this one spans two tables that disagree.
+
+    `games.first_pitch_at` is TEXT; `nfl_team_game_stats.commence_time` is
+    TIMESTAMPTZ. data/first_pitch.pregame_cutoff_sql leaves both arms uncast,
+    which is correct there because it takes ONE alias and both of that table's
+    columns are text. The NFL variant spells the CASE out across two tables, and
+    from #215 until 2026-09-06 it cast only the operands of the comparison —
+    so Postgres raised
+
+        COALESCE types text and timestamp with time zone cannot be matched
+
+    and run_nfl_prop_scorer could not complete a single run. Nothing noticed
+    because the twelve models it scores were paused on arrival.
+    """
+    import inspect
+    import re
+
+    from models import scorer
+
+    src = inspect.getsource(scorer._nfl_pregame_cutoff_map)
+    body = re.search(r"COALESCE\((.*?)\) AS cutoff", src, re.S)
+    assert body, "could not find the COALESCE in _nfl_pregame_cutoff_map"
+    expr = body.group(1)
+
+    # Every column reference that RETURNS a value from the COALESCE must carry
+    # an explicit cast. Operands of the >= comparison are not enough.
+    returned = re.findall(r"THEN\s+(\S+?)\s+END", expr) + \
+               re.findall(r"END,\s*([A-Za-z_.]+)\)?", expr)
+    assert returned, f"no return arms parsed from: {expr!r}"
+    for arm in returned:
+        assert "::timestamptz" in arm or arm.endswith("commence_time"), \
+            f"COALESCE arm {arm!r} is returned uncast — the text/timestamptz bug"
+    # And specifically: first_pitch_at must never be returned raw.
+    assert not re.search(r"THEN\s+\S*first_pitch_at\s+END", expr), \
+        "g.first_pitch_at is returned without ::timestamptz"
