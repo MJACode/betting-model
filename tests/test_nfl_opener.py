@@ -61,7 +61,16 @@ class TestModelCardSplit:
         # up the platform's models package and raises. If someone "tidies" the
         # card's path loader into a bare import, this is what breaks.
         import models as platform_models
-        assert "betting-model" in str(Path(platform_models.__file__).parent)
+        # Assert it resolved to THIS repo's top-level models/, derived from the
+        # test's own location. It used to assert the literal string
+        # "betting-model" was in the path, i.e. on the name of the directory the
+        # repo happens to be checked out into -- which is not a property of the
+        # code. That fails in any git worktree, and §7 of CLAUDE.md tells you to
+        # verify baselines with `git worktree add --detach origin/master`, so
+        # the check broke the workflow the repo recommends. Found 2026-09-07
+        # running the suite in exactly such a worktree.
+        repo_root = Path(__file__).resolve().parents[1]
+        assert Path(platform_models.__file__).resolve().parent == repo_root / "models"
         assert not hasattr(platform_models, "opener_spread")
         assert opener_model.model_prob_for_dev(2.0) == 0.5557
 
