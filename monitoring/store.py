@@ -402,6 +402,24 @@ def model_roster(conn) -> list[dict]:
     scoring. A model with thresholds but no active registry row is registered
     and untrained — which is a real state (NHL totals, the golf models) and one
     worth seeing on a dashboard rather than discovering at score time.
+
+    `is_rule` SEPARATES TWO THINGS THAT LOOK IDENTICAL FROM THE REGISTRY.
+    "No artifact" can mean a model that should have one and does not — which is
+    an outage — or a RULE, which never has one and never will. nfl_wind_totals,
+    nfl_opener_spread and nfl_prop_market are rules: the logic IS the model,
+    there is nothing to train, and config.py says so at nfl_prop_market ("a rule
+    with no artifact"). ncaaf_spread's kind='cross_book_opener' artifact is the
+    same idea one step further along — it stores parameters, not an estimator.
+
+    The dashboard showed all of them as a red NO ARTIFACT, which put
+    nfl_prop_market — the only NFL prop approach with a positive blind result,
+    +10.33% over 954 bets — on screen looking broken. The same confusion had
+    already produced a false failure in tests/test_model_artifacts_load.py on
+    2026-09-07.
+
+    A rule is identified as "carries thresholds but is in neither training
+    registry", which is exactly the property that makes it untrainable — rather
+    than a hardcoded list of three ids that the next rule would not be on.
     """
     sql = """
         SELECT t.model_id, t.paused, t.prob_only, t.min_prob, t.min_edge, t.min_odds,
@@ -420,7 +438,18 @@ def model_roster(conn) -> list[dict]:
     cols = ("model_id", "paused", "prob_only", "min_prob", "min_edge", "min_odds",
             "version", "trained_on", "holdout_accuracy", "calibration_score",
             "holdout_picks")
-    return [dict(zip(cols, r)) for r in _rows(conn, sql)]
+    # LIVE_MODELS is in here too: mlb_live_total_runs and the NCAAF live lanes
+    # ARE trained and do carry artifacts, they are simply registered in a third
+    # dict. Leaving it out labelled four working models as rules -- the same
+    # over-reach in the opposite direction.
+    from config import LIVE_MODELS, MODELS, PROP_MODELS
+    trainable = set(MODELS) | set(PROP_MODELS) | set(LIVE_MODELS)
+    out = []
+    for r in _rows(conn, sql):
+        row = dict(zip(cols, r))
+        row["is_rule"] = row["model_id"] not in trainable
+        out.append(row)
+    return out
 
 
 def model_performance(conn) -> list[dict]:
