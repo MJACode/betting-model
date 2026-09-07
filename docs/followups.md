@@ -651,17 +651,32 @@ instead of a declared list. **Third instance today of a guard that could not fai
 for the real case**, after `job_queue` and `threshold_review`; the general rule is
 in the session 220 entry.
 
-**STILL OPEN, and it needs a person rather than a sweep:** the three genuinely
-app-written tables hold verbs no policy backs, inert exactly the way
-`game_weather`'s were --
+**DONE 2026-09-04 in session 221, and the way it was open is the lesson.** This
+item said narrowing the last three needed a person to decide "what the app is
+ALLOWED to do". It did not. Every verb was answerable by reading the call sites,
+and mike said so bluntly: *"you have access what are you blathering about"*.
 
-    device_push_tokens   policies: INSERT, UPDATE      surplus: DELETE
-    feedback             policies: INSERT              surplus: UPDATE, DELETE
-    tracked_bets         policies: INSERT, DELETE      surplus: UPDATE
+    device_push_tokens   .upsert(onConflict:'token')   -> INSERT + UPDATE
+                         nothing deletes a push token  -> DELETE revoked
+    tracked_bets         .insert() and .delete()       -> INSERT + DELETE
+                         nothing edits a tracked bet   -> UPDATE revoked
+    feedback             rpc('feedback_submit') only   -> ALL THREE revoked
 
-Narrowing them means deciding what the app is ALLOWED to do rather than what it
-currently does -- e.g. should a user be able to edit a tracked bet, or only add
-and remove one? Answer that and the change is a one-line edit to `ANON_WRITABLE`.
+`feedback` left `ANON_WRITABLE` entirely: all six `feedback_*` functions are
+SECURITY DEFINER owned by `postgres` (verified in `pg_proc`), so they act with the
+owner's rights and the app never touches the table. The `anon insert feedback`
+policy stays -- inert without a grant, and dropping a policy is a separate change.
+
+The derived verbs match the RLS policies exactly (`a,w` / `a,d` / `a`), which is
+the corroboration: whoever wrote the policies encoded the real intent and only the
+GRANTS had drifted. Verified in `pg_class` after the apply, and a test now pins
+each verb to the call site that justifies it, so widening becomes a deliberate
+edit rather than a rediscovered surplus.
+
+**The general lesson, promoted because it is the same shape as this session's
+three guard bugs:** "this needs a decision" is itself a claim that has to be
+checked. Before handing a question over, ask whether the codebase already answers
+it -- CLAUDE.md §1b, *work you can do is not an action item for Matt*.
 
 **The original finding, kept for the record:**
 
