@@ -21,6 +21,26 @@
 
 ---
 
+## [ ] [needs-decision] The player detail screen speaks the fan idiom while the board may be speaking the book's
+
+Found 2026-09-06 (session 246) by the UX review of the ruler change, and NOT
+fixed there because the change did not touch that screen.
+
+The Stats board now speaks whichever idiom the mode chooses — `Over 0.5 Hits`
+in Over mode, `1+ Hits` in At Least (`lib/hitMode.ts`). `PlayerStatsScreen`
+still headlines its own chart threshold in the fan's idiom only — "Hits 1+ ·
+last 10", lines 295 and 348 — behind a `±` stepper rather than a ruler.
+
+So a member who sets the board to Over 0.5 and taps a player crosses an idiom
+boundary with nothing bridging it: the number is the same bet, named the other
+way, on the screen they drilled into to check it.
+
+**The decision is whether the mode should ride along in the navigation params**
+(the screen then opens in the idiom the user was reading), or whether the
+detail screen is a different question — the player's history rather than a bet
+— and is entitled to its own vocabulary. Matt's call; it is a consistency
+question, not a correctness one, and either answer is defensible.
+
 ## [ ] [needs-decision] Two merged mobile changes are undelivered until the 1.1.0 native build ships
 
 Found 2026-09-05 (session 239), checking whether the calibration removal had
