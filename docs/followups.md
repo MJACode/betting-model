@@ -54,7 +54,7 @@ endorsed one. **Done 2026-09-07 (mike).** `load_calibrations` reads `promoted_me
 `promote()` freezes the method and both verdicts at promotion, and `demote()`
 exists. Detail: `docs/mlb_volume_efficiency.md` §2.
 
-## [ ] 40 NCAAF `games` rows since 08-28 carry an FCS visitor's Odds API name with the mascot attached
+## [x] 40 NCAAF `games` rows since 08-28 carry an FCS visitor's Odds API name with the mascot attached - FIXED AT THE SOURCE 2026-09-07
 
 Measured 2026-09-07 (session 253). `ncaaf_teams` is `/teams/fbs` (139
 schools), so every FCS visitor is unresolved by the Odds API name resolver and
@@ -68,12 +68,11 @@ so picks on them settle - but five shapes it cannot bridge stay unscored:
 `citadel-bulldogs`/`the-citadel`, `youngstown-st-penguins`/`youngstown-state`,
 `southeastern-louisiana-lions`/`se-louisiana`. None carried a pick.
 
-The real fix is to resolve the name in the first place: ingest CFBD `/teams`
-(all classifications) into a registry the resolver can see, or add the FCS
-schools that visit FBS stadiums to `ncaaf_teams` with `classification='fcs'`.
-Check first what else reads `ncaaf_teams` as "the FBS set" -
-`ncaaf_live/gameday.py` and `ncaaf_live/feeds/cfbd_scoreboard.py` use it as
-the mascot-strip vocabulary, which an FCS row would only improve.
+**Done 2026-09-07 (mike).** `ingest_ncaaf_teams` pulls `/teams` for every
+classification after `/teams/fbs`; the worker job
+`ncaaf-teams-all-classifications-2026-09-07` loaded it and probed the
+resolver. The 40 existing rows keep their ids (picks point at them) and
+settle through the alias mirror; new rows resolve at the source.
 
 Query that found it:
 

@@ -567,5 +567,31 @@
       ],
       "reason": "phantom games row: MLB_2026-04-16_NYM_LAD is the 2026-04-15 game filed again under its UTC date; the MLB Stats API has no NYM@LAD game on 2026-04-16, so there was no event to bet (mike, 2026-09-07)"
     }
+  },
+  {
+    "key": "ncaaf-teams-all-classifications-2026-09-07",
+    "job_type": "ncaaf_teams_refresh",
+    "requested_by": "mike",
+    "note": "mike 2026-09-07: 'fix the FCS registry so this stops at the source'. ncaaf_teams held the 139 FBS schools only, so every FCS visitor was unresolvable and six of them prefix-resolved to the FBS school their name starts with (session 253). Pulls /teams for every classification; the probe returns what the resolver now makes of the seven names that broke.",
+    "args": {
+      "season": 2026,
+      "probe": [
+        "Indiana State Sycamores",
+        "North Carolina A&T Aggies",
+        "Tennessee State Tigers",
+        "Houston Christian Huskies",
+        "Northwestern State Demons",
+        "Utah Tech Trailblazers",
+        "Arkansas-Pine Bluff Golden Lions",
+        "Idaho State Bengals",
+        "Abilene Christian Wildcats",
+        "Indiana Hoosiers",
+        "Ohio State Buckeyes",
+        "Hawaii Rainbow Warriors",
+        "Miami Hurricanes",
+        "Miami (OH) RedHawks",
+        "Texas A&M Aggies"
+      ]
+    }
   }
 ]

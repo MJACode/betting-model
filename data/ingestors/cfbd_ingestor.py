@@ -5,7 +5,7 @@ lines and ASOF team-stat snapshots.
 CFBD (https://collegefootballdata.com) is the SOLE history source for college
 football. A free API key (email only, no card) unlocks everything we need:
 
-  /teams/fbs                 → ncaaf_teams (school registry + name resolution)
+  /teams/fbs + /teams        → ncaaf_teams (school registry, every classification, + name resolution)
   /games                     → games rows (scores, week, neutral site, conf game)
   /games/teams               → ncaaf_team_game_log (per-team per-game box score)
   /games/players             → ncaaf_qb_game (passers) + ncaaf_player_game_log
@@ -173,8 +173,16 @@ def shrink_to_prior(in_season, prior, games_played: int | None,
     return round(w * float(in_season) + (1.0 - w) * float(prior), 6)
 
 
-def parse_teams(payload: list) -> list[dict]:
-    """/teams/fbs → ncaaf_teams rows."""
+def parse_teams(payload: list, default_classification: str | None = "fbs") -> list[dict]:
+    """
+    /teams/fbs or /teams -> ncaaf_teams rows.
+
+    `default_classification` is what a record WITHOUT a classification field is
+    stored as. "fbs" is right for the /teams/fbs endpoint, whose every row is
+    FBS by definition. For the all-schools /teams pull pass None: a
+    lower-division school CFBD has not classified must be stored as unknown,
+    never promoted to FBS by a default.
+    """
     rows = []
     for t in payload or []:
         school = _pick(t, "school", "team")
@@ -183,13 +191,14 @@ def parse_teams(payload: list) -> list[dict]:
         alt = [a for a in (_pick(t, "alt_name1", "altName1"),
                            _pick(t, "alt_name2", "altName2"),
                            _pick(t, "alt_name3", "altName3")) if a]
+        classification = _pick(t, "classification", default=default_classification)
         rows.append({
             "school":         school,
             "abbreviation":   _pick(t, "abbreviation"),
             "mascot":         _pick(t, "mascot"),
             "conference":     _pick(t, "conference"),
             "division":       _pick(t, "division", "classification_division"),
-            "classification": _pick(t, "classification", default="fbs"),
+            "classification": (str(classification).lower() if classification else None),
             "alt_names":      "|".join(dict.fromkeys(alt)) or None,
         })
     return rows
@@ -980,15 +989,38 @@ _GAME_FIELDS = ["game_id", "sport", "season", "game_date", "commence_time",
 
 
 def ingest_ncaaf_teams(season: int, conn=None) -> int:
-    """/teams/fbs → ncaaf_teams. Re-run per season to track realignment."""
+    """
+    /teams/fbs plus /teams -> ncaaf_teams. Re-run per season to track realignment.
+
+    Two pulls. /teams/fbs?year= is the season's FBS membership and stays the
+    authority for those rows (conference, division, classification 'fbs').
+    /teams is EVERY school CFBD knows -- FCS, D-II, D-III, about 1,100 rows --
+    and is what lets the Odds API resolver name an FBS team's visitor. Until
+    2026-09-07 only the first pull ran, so "Indiana State Sycamores" had no row
+    to match and prefix-resolved to "Indiana": a games row for a matchup that
+    never happened, and six live BETs that could not settle (session 253).
+
+    Every consumer that means "the FBS set" filters classification = 'fbs'.
+    A school CFBD leaves unclassified is stored with NULL, never defaulted.
+    """
     own = conn is None
     conn = conn or get_connection()
     try:
-        rows = parse_teams(_get("/teams/fbs", year=season))
+        fbs = parse_teams(_get("/teams/fbs", year=season))
+        fbs_schools = {r["school"] for r in fbs}
+        everyone = parse_teams(_get("/teams", year=season), default_classification=None)
+        if not everyone:
+            everyone = parse_teams(_get("/teams"), default_classification=None)
+        others = [r for r in everyone if r["school"] not in fbs_schools]
+        rows = fbs + others
         if rows:
             conn.executemany(_TEAM_UPSERT, rows)
             conn.commit()
-        logger.info(f"NCAAF teams {season}: {len(rows)} school(s)")
+        by_class: dict[str, int] = {}
+        for r in rows:
+            by_class[r["classification"] or "unclassified"] = \
+                by_class.get(r["classification"] or "unclassified", 0) + 1
+        logger.info(f"NCAAF teams {season}: {len(rows)} school(s) {by_class}")
         return len(rows)
     finally:
         if own:
@@ -1852,9 +1884,12 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
         if s["mascot"] and _fold(f"{s['school']} {s['mascot']}") == lowered:
             return s["school"]
     # A school that PREFIXES the input is a match only when what follows it is
-    # that school's mascot. ncaaf_teams is /teams/fbs only, so an FCS opponent
-    # whose name extends an FBS school's finds no exact school and no
-    # "school mascot" -- and then the bare prefix rule handed it the FBS school:
+    # that school's mascot. ncaaf_teams was /teams/fbs only until 2026-09-07,
+    # so an FCS opponent whose name extends an FBS school's found no exact
+    # school and no "school mascot" -- and the bare prefix rule handed it the
+    # FBS school (the registry now carries every classification, so the exact
+    # rules catch these first; this check is the backstop for a school the
+    # registry still lacks):
     # "Indiana State Sycamores" -> "Indiana", "Utah Tech Trailblazers" ->
     # "Utah", "Houston Christian Huskies" -> "Houston". Each wrote a games row
     # for a matchup that never happened, which CFBD's real final could never
