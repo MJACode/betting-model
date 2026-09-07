@@ -104,6 +104,23 @@ other 16 of 43 name only the home team) once, whole-word. Verified on the
 worker's 22:30 UTC pass: 27 corrected, 0 still wrong. The Discord and
 app posts that already went out under the wrong name are not rewritten.
 
+## [ ] Three phantom MLB `games` rows from April, and one unscored real one
+
+Session 253 (2026-09-07). `MLB_2026-04-16_NYM_LAD`, `MLB_2026-04-17_SEA_SD`
+and `MLB_2026-04-17_COL_HOU` are the 04-15 and 04-16 night games filed a
+second time under their UTC date with no start time (the story is in the
+session entry). Pick 661 on the first is voided; the two AVOIDs on it and the
+two on SEA_SD are inert, since no final will ever land on those ids. The rows
+themselves are still there, and each is a duplicate of a scored row one day
+earlier. Merge or void the three rows the way the ET/UTC NCAAF duplicates
+above are handled; the picks point at them, so they are not deleted.
+
+Separately, `MLB_2026-04-13_NYM_LAD` was created by the 2026-09-01 historical
+backfill with no score: a real game (first pitch 02:11Z on the 14th) that the
+5-day score window never reached and that carries no pick, so the settle heal
+does not reach it either. A one-line extension of `_fetch_and_store_scores`
+over any unscored MLB row older than the window would close it.
+
 ## [ ] The inning-gate replay misses 13 games production actually bet
 
 `scripts/live_inning_gate_replay.py`'s own control prints it: over 2026-08-24 →

@@ -555,5 +555,17 @@
       "credit_cap": 7000,
       "ignore_ledger": true
     }
+  },
+  {
+    "key": "void-pick-661-phantom-nym-lad-2026-04-16",
+    "job_type": "void_picks",
+    "requested_by": "mike",
+    "note": "mike 2026-09-07: 'void 661'. The one BET left unsettled after #565. Its games row MLB_2026-04-16_NYM_LAD is the 04-15 game (first pitch 02:11Z on the 16th) filed a second time under its UTC date with no start time; the Stats API lists 10 finals for 04-16 and no NYM@LAD, so there was never an event to grade. Session 253, docs/sessions/2026-09.md.",
+    "args": {
+      "pick_ids": [
+        661
+      ],
+      "reason": "phantom games row: MLB_2026-04-16_NYM_LAD is the 2026-04-15 game filed again under its UTC date; the MLB Stats API has no NYM@LAD game on 2026-04-16, so there was no event to bet (mike, 2026-09-07)"
+    }
   }
 ]
