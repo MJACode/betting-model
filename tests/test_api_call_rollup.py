@@ -47,6 +47,31 @@ def test_the_rollup_upserts_and_never_zeroes_a_pruned_day():
     assert "LEFT JOIN" not in sql, store.ROLLUP_SQL
 
 
+def test_a_fold_can_never_lower_a_stored_total():
+    """THE BUG THIS PINS SHIPPED, and the test above did not catch it.
+
+    test_the_rollup_upserts_and_never_zeroes_a_pruned_day checks the day whose
+    rows are ALL gone: it produces no GROUP BY row, so ON CONFLICT never fires
+    and the stored total is safe. That was true and it was not enough.
+
+    The oldest day in the window is always PARTIALLY pruned, because the cutoff
+    is `ts < now() - N days` and lands in the middle of a day. It still produces
+    a group — from a shrinking subset — so the fold recomputed a complete total
+    as a partial one and the number decayed on every cycle. Measured in
+    production on 2026-09-07: 452,308 calls became 451,898 in one automatic fold,
+    and 2026-08-31 stood at 22,889 rolled against 22,811 still in the log.
+
+    The counters are monotonic, so a subset recompute is always <= the truth and
+    refusing to write a smaller number cannot lose a real increase.
+    """
+    sql = store.ROLLUP_SQL
+    assert "WHERE EXCLUDED.calls >= api_call_daily.calls" in sql, (
+        "the DO UPDATE has no guard against writing a smaller total, so the "
+        "boundary day's number will decay as its rows are pruned:\n" + sql)
+    # the guard must sit on the DO UPDATE, not on the SELECT
+    assert sql.index("DO UPDATE") < sql.index("WHERE EXCLUDED.calls"), sql
+
+
 def test_the_rollup_groups_by_eastern_day_not_utc():
     """Every other date in this project is an ET game_date. A chart that groups
     API calls by UTC day lines up wrong against them by a few hours at the

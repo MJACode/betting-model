@@ -160,6 +160,7 @@ ON CONFLICT (day, api, source) DO UPDATE SET
     resp_bytes = EXCLUDED.resp_bytes,
     avg_ms     = EXCLUDED.avg_ms,
     updated_at = EXCLUDED.updated_at
+WHERE EXCLUDED.calls >= api_call_daily.calls
 """
 
 
@@ -174,11 +175,26 @@ def roll_up(conn) -> int:
     real API credits to generate and the aggregate costs one row per
     (day, api, source) to keep forever.
 
-    IDEMPOTENT, AND SAFE AFTER THE PRUNE HAS RUN. The aggregate reads whatever
-    api_call_log still holds and upserts those days. A day whose rows have
-    already been pruned produces no group, so it is never touched -- the stored
-    total for it survives untouched rather than being recomputed as zero. That
-    property is what makes it safe to call this on every prune.
+    IDEMPOTENT, AND A FOLD CAN NEVER LOWER A STORED TOTAL. Two separate things
+    make that true, and the second was missing on the first version:
+
+      A day whose rows are ALL pruned produces no GROUP BY row, so ON CONFLICT
+      never fires and its stored total survives untouched.
+
+      A day that is PARTIALLY pruned -- which the oldest day in the window
+      always is, because the cutoff is `ts < now() - N days` and so falls in the
+      middle of a day -- DOES produce a group, from the shrinking set of rows
+      that survive. Recomputing from that subset overwrote a complete total with
+      a partial one, and the day's number decayed with every fold until its last
+      row aged out. Measured on 2026-09-07: 452,308 calls became 451,898 in a
+      single automatic cycle.
+
+    Hence `WHERE EXCLUDED.calls >= api_call_daily.calls`. The counters are
+    MONOTONIC -- a day's true total only ever grows as more calls are logged --
+    so a recompute from a subset is always less than or equal to the truth, and
+    refusing to write a smaller number cannot lose a real increase. A fold that
+    sees less than what is stored is a fold looking at a partially-pruned day,
+    and the right response is to leave the better number alone.
     """
     try:
         cur = conn.execute(ROLLUP_SQL)
