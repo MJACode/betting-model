@@ -19,10 +19,11 @@ Method, following CLAUDE.md section 7:
 """
 import sys
 import unicodedata
+from pathlib import Path
 import warnings
 from collections import defaultdict
 
-sys.path.insert(0, r"C:\Users\micha\documents\betting-model")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 warnings.filterwarnings("ignore")
 
 import numpy as np
