@@ -108,25 +108,34 @@ AUTHENTICATED_ONLY: tuple[str, ...] = (
 # over. Revoked anyway, because a view that is later simplified can silently
 # become updatable and nothing would flag it.
 ANON_WRITABLE: dict[str, tuple[str, ...]] = {
-    # device token registration, written before sign-in
-    "device_push_tokens": ("INSERT", "UPDATE", "DELETE"),
-    # in-app feedback submission
-    "feedback": ("INSERT", "UPDATE", "DELETE"),
-    # the user's own tracked bets
-    "tracked_bets": ("INSERT", "UPDATE", "DELETE"),
+    # `.upsert(..., { onConflict: 'token' })` in
+    # mobile/src/hooks/usePushNotifications.ts. An upsert is INSERT ... ON
+    # CONFLICT DO UPDATE, so it needs both verbs and only those. Nothing deletes
+    # a push token -- that hook is the only reference to the table in the app.
+    "device_push_tokens": ("INSERT", "UPDATE"),
+    # `.insert()` and `.delete()` in mobile/src/lib/queries.ts. A tracked bet is
+    # added and removed, never edited, so UPDATE is not needed.
+    "tracked_bets": ("INSERT", "DELETE"),
+    # `feedback` is DELIBERATELY ABSENT. The app never touches the table: it
+    # calls rpc('feedback_submit') (mobile/src/lib/feedback.ts), and all six
+    # feedback_* functions are SECURITY DEFINER owned by postgres, so they act
+    # with the OWNER's rights and need no anon grant on the table at all. The
+    # `anon insert feedback` policy stays -- inert without a grant, and dropping
+    # a policy is a separate change.
 }
 
-# NOT NARROWED, AND DELIBERATELY SO -- an open question, not an oversight. Each
-# of the three holds verbs no policy backs, so those are inert exactly the way
-# game_weather's were:
+# HOW THESE WERE DERIVED, because the difference is the whole point: each entry
+# is the set of verbs the APP DEMONSTRABLY USES, read off the call sites -- not
+# the set it happened to hold. The two agree with the RLS policies exactly:
 #
-#     device_push_tokens   policies: INSERT, UPDATE      surplus: DELETE
-#     feedback             policies: INSERT              surplus: UPDATE, DELETE
-#     tracked_bets         policies: INSERT, DELETE      surplus: UPDATE
+#     device_push_tokens   policies a,w   ->  INSERT, UPDATE
+#     tracked_bets         policies a,d   ->  INSERT, DELETE
+#     feedback             policy   a     ->  nothing; the RPC is SECURITY DEFINER
 #
-# Tightening these means deciding what the app is allowed to do, not just what it
-# currently does, so it needs a person. The verbs above are today's grants, so
-# applying this file changes nothing for them. Recorded in docs/followups.md.
+# which is the corroboration worth having: whoever wrote the policies encoded the
+# real intent, and only the GRANTS had drifted wider. Before this all three held
+# INSERT+UPDATE+DELETE, and the surplus was inert only because no policy backed
+# it -- one lock, exactly the state game_weather was in.
 
 WRITE_VERBS: tuple[str, ...] = ("INSERT", "UPDATE", "DELETE", "TRUNCATE")
 

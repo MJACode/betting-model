@@ -558,6 +558,46 @@ def test_everything_declared_writable_is_also_readable_or_deliberately_not():
         f"revoke, so a typo quietly leaves surplus grants in place.")
 
 
+def test_every_declared_write_verb_has_a_call_site_that_needs_it():
+    """A declared verb must be one the app DEMONSTRABLY USES, not one it happens
+    to hold. Each of these was read off the call site:
+
+        device_push_tokens   .upsert(onConflict) -> INSERT + UPDATE, no DELETE
+        tracked_bets         .insert() .delete() -> INSERT + DELETE, no UPDATE
+        feedback             rpc('feedback_submit'), SECURITY DEFINER -> nothing
+
+    This asserts the call sites still say that. If the app starts editing a
+    tracked bet, this test fails and the grant is widened deliberately rather
+    than discovered later as surplus.
+    """
+    root = Path(__file__).resolve().parents[1]
+    src = " ".join(
+        (root / "mobile" / "src" / rel).read_text(encoding="utf-8")
+        for rel in ("lib/queries.ts", "hooks/usePushNotifications.ts",
+                    "lib/feedback.ts")
+    )
+
+    from data.anon_readable import ANON_WRITABLE
+
+    # tracked_bets: added and removed, never edited
+    assert "from('tracked_bets').insert(" in src.replace("\n", "")
+    assert "UPDATE" not in ANON_WRITABLE["tracked_bets"], (
+        "tracked_bets declares UPDATE, but the app only inserts and deletes")
+
+    # device_push_tokens: upsert needs INSERT+UPDATE; nothing deletes a token
+    assert "device_push_tokens" in src and "upsert" in src
+    assert set(ANON_WRITABLE["device_push_tokens"]) == {"INSERT", "UPDATE"}, (
+        "an upsert needs exactly INSERT and UPDATE")
+    assert "DELETE" not in ANON_WRITABLE["device_push_tokens"], (
+        "nothing in the app deletes a push token")
+
+    # feedback: the RPC is SECURITY DEFINER, so the table needs no anon grant
+    assert "rpc('feedback_submit'" in src
+    assert "feedback" not in ANON_WRITABLE, (
+        "feedback is written only through feedback_submit, which is SECURITY "
+        "DEFINER and acts with the owner's rights — anon needs no table grant")
+
+
 def test_write_verbs_for_revokes_everything_on_a_read_only_relation():
     """The default must be deny. A relation absent from ANON_WRITABLE gives up
     every write verb, including TRUNCATE."""
