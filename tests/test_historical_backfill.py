@@ -179,3 +179,15 @@ def test_insert_tolerates_rows_without_a_source_key():
                       "snapshot_at": "2026-09-07T00:00:00Z"}])
     assert "source" in c.sql
     assert c.rows[0]["source"] is None
+
+
+def test_a_rerun_can_be_told_to_ignore_the_pull_ledger():
+    """The ledger makes a restart free, and it also makes a deliberate re-buy
+    impossible: every (sport, date, hour) the pruner-eaten MLB run touched is
+    marked pulled, so a rerun would skip all of it. `ignore_ledger` re-spends
+    on purpose, and only when asked."""
+    sig = inspect.signature(run_historical_odds_range)
+    assert "ignore_ledger" in sig.parameters
+    assert sig.parameters["ignore_ledger"].default is False
+    src = inspect.getsource(run_historical_odds_range)
+    assert "if already and not ignore_ledger" in src
