@@ -175,6 +175,52 @@ that the models fire ~3 times on a 13-fight card and the one that fires most
 loses money at every cut. The honest next step is a retrain of
 `ufc_total_rounds`, or pausing it, and neither is a threshold move.
 
+### UFC total rounds — the retrain did NOT fix it (2026-09-07)
+
+mike: "retrain ufc_total_rounds", after the every-pick evaluation (#514) found
+it negative in all 42 cells of its grid. **It was retrained, it was measured on
+the regime it loses in, it is worse at the cut it would actually run at, and it
+was NOT registered.** The live version is untouched.
+
+**The retrain.** `python -m models.trainer --model ufc_total_rounds --seasons
+2012..2025 --holdout 2026 --no-register`, i.e. the same recipe with 2025 folded
+into training and the LOSING season as the holdout rather than 2025. Version
+`20260907_095926`, 3,179 training rows, holdout 2026 = 193 fights:
+
+| | accuracy | AUC | Brier | cal error | holdout_roi |
+|---|---|---|---|---|---|
+| retrained, holdout 2026 | 0.611 | 0.613 | 0.2394 | **0.0548** | 0.000 |
+| live 20260619, holdout 2025 | 0.6386 | — | — | 0.0384 | 0.000 |
+
+Two things to read there. The calibration error is **0.0548, above the 5%
+go-live gate on its own**. And `holdout_roi` is 0.000 AGAIN — `_simulate_flat_roi`
+finds no odds to simulate against, so the trainer says nothing about money for
+this model, which is why the decision was never going to come from its metrics.
+
+**The acceptance test, stated before the result was seen:** register only if the
+2026 grid shows a positive PLATEAU around the live cut with calibration ≤5%.
+`scripts/ufc_model_compare.py` scores both artifacts over the same 2026 fights
+against the real pre-game DK total (56 of 193 fights carry one):
+
+| cut | live model | retrained |
+|---|---|---|
+| **0.62 / 0.08 (the live cut)** | **−9.2% over 7** | **−40.0% over 6** |
+| 0.60 / 0.08 | −36.5% over 10 | −29.4% over 9 |
+| 0.65 / 0.08 | −27.9% over 5 | +20.1% over 3 |
+| 0.58 / 0.10 | −7.7% over 10 | +16.0% over 8 |
+
+The retrained model is **worse at the cut it would run at**, and its only
+positive cells are at loose probability floors on 3–8 bets whose entire return
+lands in the early half — early +39% to +86%, late −14% to −63%, in every one.
+No plateau, no sample. That is the same shape §7 warns about and the same shape
+#514 found.
+
+**Conclusion: a retrain on this recipe reproduces the failure.** More seasons of
+the same 18 features do not make this model's disagreements with DraftKings
+profitable. The remaining options are a genuinely different model (features,
+target, or recency weighting) or pausing `ufc_total_rounds` — and the second is
+a decision, not a fix. Nothing is paused here.
+
 ### Review Cadence
 
 All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 72% / edge ≥ 12%; O/U prob ≥ 72% / edge ≥ 15%; RL prob ≥ 70% / edge ≥ 12% (re-optimized 2026-06-03 from settled-pick sweep — see threshold tables above).
