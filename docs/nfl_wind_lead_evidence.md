@@ -115,6 +115,40 @@ threshold, versus the deployed 11) and a season-by-season walk back through
 2016 on ERA5 rather than issued forecasts, which `validate_wind_forecast.py`
 can already produce.
 
+## What happened to the six picks (2026-09-07)
+
+mike: *"I deleted older wind picks from the discord and they should not be
+stored as official picks."*
+
+By the time the question was asked, **all six had lost their premise** — which
+is the persistence finding above playing out live, and worse than the 56.6%
+measured:
+
+| Pick | Locked at | Forecast on 09-07 | Status |
+|---|---|---|---|
+| CLE @ JAX U40.5 | 14.0 mph | **7.1** | GONE |
+| DAL @ NYG U48.5 | 12 mph | **6.5** | GONE |
+| NYJ @ TEN U39.5 | 11 mph | **2.9** | GONE |
+| TB @ CIN U51 | 11 mph | **3.8** | GONE |
+| BUF @ HOU U44.5 | 12 mph | — | never eligible (NRG, retractable) |
+| BAL @ IND U48.5 | 11 mph | — | never eligible (Lucas Oil, retractable) |
+
+Six for six. `TB @ CIN` is the one the old code locked on 2026-09-06 at 16:00,
+**after** the analysis that predicted a sixth pick and **before** #517 merged at
+17:21 — the prediction and its confirmation are an hour and twenty minutes
+apart.
+
+**They were VOIDED, not deleted** — `scripts/void_picks.py`, the rule now stated
+in CLAUDE.md §1c. `result='NO_ACTION'`, `condition_status='VOID'`, reason in
+`condition_note`; `created_at`, line and price untouched. `v_public_track_record`
+now shows `nfl_wind_totals` at **0 picks, 0 units**, and every settlement query
+in `paper_tracker` is bounded on `result IS NULL`, so nothing re-grades them
+when the games play on 09-13.
+
+The card was deliberately left running (mike's call). The gate, the roof fix and
+the monitor are all live, so a pick that fires inside 4 days on a known-open
+roof is a legitimately different pick from these six.
+
 ## Reproducing
 
 ```bash

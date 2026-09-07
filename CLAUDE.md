@@ -351,6 +351,16 @@ answer is "nothing".
   NONE rows for games that have not started, and the UFC/GOLF/NCAAF look-ahead
   window, where picks are explicitly not yet locked and re-score until game
   morning (`docs/sports/{ufc,golf,ncaaf}.md`). A BET is never in that set.
+- **A pick the model should never have PRODUCED is VOIDED, never deleted.**
+  (mike, 2026-09-07.) §1c protects a bet against LINE MOVEMENT — not a row
+  emitted while a model fired OUTSIDE its validated window, or on a game that
+  was never eligible. Deleting one destroys the evidence the bug happened, which
+  is usually how it was found. The row stays and stops counting:
+  **`scripts/void_picks.py`** (dry-run by default) sets `result='NO_ACTION'` and
+  `condition_status='VOID'` with a reason, never touches `created_at`, the line
+  or the price, and keeps the insert-once lock. It REFUSES an already-graded
+  pick — that is rewriting a settled result, not correcting a bug.
+  Evidence: `docs/rules_evidence.md`.
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
@@ -522,12 +532,10 @@ zero extra credits.
 - **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO DK PRICE.** (2026-09-03.)
   A win with `dk_odds IS NULL` is stored as +$90.91 on a $100 stake — exactly
   the payout of -110 — so `profit_flat` is NOT a safe units source on its own.
-  261 settled BETs across `mlb_prop_batter_hr`, `ufc_method_of_victory`,
-  `ufc_total_rounds`, `mlb_f5_over_under` and `mlb_f5_runline` carry invented
-  P&L this way. `mv_scored_pick_outcomes.profit_units` is correctly NULL for
-  them. **Any read of `profit_flat` must be gated on `dk_odds IS NOT NULL`** —
-  ungated it turned UFC's real -1.29u over 10 priced bets into +2.99u, which
-  flips the sign. This is §6's DK-only invariant in its P&L form.
+  **Any read of `profit_flat` must be gated on `dk_odds IS NOT NULL`.**
+  `mv_scored_pick_outcomes.profit_units` is correctly NULL for these. This is
+  §6's DK-only invariant in its P&L form. Evidence, and the 261 affected BETs:
+  `docs/rules_evidence.md`.
 
 - **ACCESS IS DECIDED IN ONE PLACE, AND IT IS NOT THE SUBSCRIPTIONS TABLE.**
   (2026-08-30, Matt.) A membership bought on Discord (Whop) entitles the app,

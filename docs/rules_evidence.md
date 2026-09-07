@@ -803,3 +803,61 @@ The NCAAF live loop pre-dated its lock and delete-and-replaced every ~45s:
 
 Only the first ever existed as a signal. Everything after it is the same lane
 re-priced, and publishing the last one is publishing a bet nobody was given.
+
+
+## `picks.profit_flat` fabricates -110 for any pick with no DK price
+
+Rule: CLAUDE.md §6. Moved here 2026-09-07 to keep CLAUDE.md under its cap; the
+rule statement there is unchanged.
+
+**261 settled BETs carry invented P&L**, across `mlb_prop_batter_hr`,
+`ufc_method_of_victory`, `ufc_total_rounds`, `mlb_f5_over_under` and
+`mlb_f5_runline`. A win with `dk_odds IS NULL` is stored as **+$90.91 on a $100
+stake** — exactly the payout of -110 — so the number looks entirely plausible.
+
+**It flips signs, not just magnitudes.** Read ungated, UFC's real **-1.29u over
+10 priced bets** becomes **+2.99u**. `mv_scored_pick_outcomes.profit_units` is
+correctly NULL for these rows, which is why it is the safe source and
+`profit_flat` is not.
+
+
+## A pick the model should never have produced is voided, never deleted
+
+Rule: CLAUDE.md §1c. First use 2026-09-07 (mike), and the measurements behind it.
+
+mike: *"I deleted older wind picks from the discord and they should not be
+stored as official picks."*
+
+**The six `nfl_wind_totals` Week 1 picks.** All fired at leads of 7.2-8.7 days,
+before PR #517 landed `MAX_FIRE_LEAD`; all carried `model_probability` 0.5489,
+which is the lead-7 clip value, so no published probability was a measurement.
+By the time they were voided **every one had lost its premise**:
+
+| Pick | Locked at | Forecast 09-07 |
+|---|---|---|
+| CLE @ JAX U40.5 | 14.0 mph | 7.1 |
+| DAL @ NYG U48.5 | 12 mph | 6.5 |
+| NYJ @ TEN U39.5 | 11 mph | 2.9 |
+| TB @ CIN U51 | 11 mph | 3.8 |
+| BUF @ HOU U44.5 | 12 mph | never eligible — NRG, retractable roof |
+| BAL @ IND U48.5 | 11 mph | never eligible — Lucas Oil, retractable roof |
+
+Six for six — the 56.6% flag-persistence figure in
+`docs/nfl_wind_lead_evidence.md` playing out worse on the live slate.
+
+**Why void rather than delete.** §1c protects a bet against LINE MOVEMENT and
+already carves out "rows that were never a pick". But the deleted row is also
+the evidence the bug happened, and here it was: the collapse from 14.0 to 7.1
+mph is the whole argument for the firing gate. `result='NO_ACTION'` is the
+repo's existing void (`paper_tracker` uses it for a player who did not play),
+already excluded from net, ROI and the record by
+`mobile/src/lib/trackedPerformance.ts`.
+
+**What made it stick.** Every settlement query in `paper_tracker` is bounded on
+`result IS NULL`, so a voided pick is never re-graded when the game plays.
+After applying, `v_public_track_record` showed `nfl_wind_totals` at **0 picks,
+0 wins, 0 losses, 0 profit_flat**.
+
+**The line the tool will not cross:** `scripts/void_picks.py` refuses a pick
+already graded WIN / LOSS / PUSH. Voiding one of those is rewriting a settled
+result, not correcting a bug, and nothing in §1c permits it.

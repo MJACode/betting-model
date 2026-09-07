@@ -43,7 +43,16 @@ CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
 # block (502 bytes of pure evidence, the rule statement untouched) moved to
 # docs/rules_evidence.md in the same commit. The remaining ~890 is this raise.
 # Still the right instinct next time: move evidence out first, raise second.
-MAX_BYTES = 37_000
+# 2026-09-07: 37,000 -> 38,000. §1c gained the VOID-don't-delete rule (mike),
+# which is a standing mechanism for every future session -- without it a session
+# either deletes picks, violating §1c, or does not know voiding exists. The file
+# had 3 bytes of headroom, so following this comment's own advice the evidence
+# was moved FIRST: §6's `profit_flat` block gave up its 261-BET model list and
+# the UFC -1.29u -> +2.99u sign flip to docs/rules_evidence.md (~450 bytes, rule
+# statement untouched), and the new rule was written as statement-plus-pointer
+# rather than statement-plus-story. That paid most of it; this raise is the
+# remainder. Same instinct next time: move evidence out first, raise second.
+MAX_BYTES = 38_000
 
 
 def _read(path: str) -> str:
