@@ -929,6 +929,38 @@ PAUSED_MODELS: set = {
     # gamebook source and this gap closes. It is the sport's best signal
     # (§2c: 16.5% MAE lift) measured against the wrong ruler.
     "nfl_prop_tackles_assists",
+    #
+    # 2026-09-07 (mike): PAUSED after three formulations measured the same way
+    # and all three lost. mike: "there are NO UFC picks in the channel" -> the
+    # delivery bug was real and is fixed (#505), and the channel is still quiet
+    # because this model produces ~3 bets on a 13-fight card and loses on them.
+    #
+    #     formulation                     cal error   at the live cut 0.62/0.08
+    #     live 20260619 (binary)             0.0368    -9.2% over 7
+    #     retrain 20260907 (binary, #539)    0.0548   -40.0% over 6
+    #     round-level hazard (#542)          0.0420   -38.3% over 21
+    #
+    # And #514's every-pick grid — the first one ever run for UFC, since
+    # mv_scored_pick_outcomes does not cover this sport — is negative in ALL 42
+    # cells, from -19% at the loosest cut to -100%. §7's rule for a grid with no
+    # positive cell is to say so rather than ship the least-bad one.
+    #
+    # THE DEFECT IS UPSTREAM OF THE MODEL, which is why the retrain and the
+    # rebuild could not fix it and a fourth attempt should not be started:
+    #   * Of 916 distinct fighters on 2026 cards, 315 have NO rows in
+    #     ufc_fight_log; only 12 of those are name-matching artifacts, 303 are
+    #     genuinely absent. A fight is skipped when either fighter has under
+    #     three prior bouts, so roughly a third of every card never reaches the
+    #     model at all — both formulations trained on the same 3,179 fights.
+    #   * DraftKings UFC totals have only been STORED since 2026-06-11, so the
+    #     evaluable population is 56 priced fights and a cut selects 3-21 bets.
+    #     At n=7 the noise band is about +/-40 ROI points, wider than every
+    #     difference in the table above.
+    #
+    # UNPAUSE when the history coverage is fixed and a fresh grid over a
+    # population that can actually discriminate comes back positive — not on a
+    # retrain of the same features, which has now been tried twice.
+    "ufc_total_rounds",
 }
 
 # Fallback for models not listed above.
