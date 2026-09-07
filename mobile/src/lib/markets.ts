@@ -236,7 +236,8 @@ export type BookKey =
   | 'hardrockbet'
   | 'ballybet'
   | 'betparx'
-  | 'rebet';
+  | 'rebet'
+  | 'fliff';
 
 export const LINE_SHOP_BOOKS: BookKey[] = [
   'draftkings',
@@ -252,6 +253,7 @@ export const LINE_SHOP_BOOKS: BookKey[] = [
   'ballybet',
   'betparx',
   'rebet',
+  'fliff',
 ];
 
 /** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS. */
@@ -296,6 +298,7 @@ const BOOK_NAMES: Record<string, string> = {
   betrivers: 'BetRivers',
   hardrockbet: 'Hard Rock Bet',
   ballybet: 'Bally Bet',
+  fliff: 'Fliff',
   betparx: 'betPARX',
   rebet: 'ReBet',
 };

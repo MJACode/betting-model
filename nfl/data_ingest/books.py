@@ -35,7 +35,12 @@ from __future__ import annotations
 import os
 
 BETTABLE_FALLBACK = ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
-                     "fanatics,betrivers,hardrockbet,ballybet,betparx,rebet")
+                     "fanatics,betrivers,hardrockbet,ballybet,betparx,rebet,"
+                     # fliff: added 2026-09-07 with the nfl_prop_market soft-book
+                     # widening. This list is a COPY of config.BETTABLE_BOOKS for
+                     # the standalone path, and a copy that drifts is a copy that
+                     # lies -- the test pins them equal.
+                     "fliff")
 
 
 def bettable_books() -> set[str]:

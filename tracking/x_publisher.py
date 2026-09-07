@@ -277,6 +277,10 @@ _BOOK_DISPLAY = {
     "espnbet": "ESPN BET", "fanatics": "Fanatics", "betrivers": "BetRivers",
     "hardrockbet": "Hard Rock Bet", "ballybet": "Bally Bet",
     "betparx": "betPARX", "rebet": "ReBet",
+    # fliff joined the bettable set on 2026-09-07 with the nfl_prop_market
+    # widening. Both surfaces are pinned together by
+    # test_every_offerable_book_has_a_human_name_on_both_surfaces.
+    "fliff": "Fliff",
 }
 
 

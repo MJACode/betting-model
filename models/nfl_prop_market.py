@@ -47,7 +47,35 @@ SHARP_MARKETS = (
 # book that adds volume and loses money is worse than one that adds nothing.
 SOFT_BOOKS = (
     "draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
+    # Added 2026-09-07 (mike: "add another 2-3 soft books"). These are exactly
+    # the three scripts/nfl_prop_book_sweep endorses -- each clears volume,
+    # sign, coverage and non-dilution on its own.
+    "betrivers", "fliff", "hardrockbet",
 )
+
+# WHAT THIS TRADE ACTUALLY IS, because §5c rejected the same change once and the
+# reversal should not look like an oversight. Measured on the same three seasons:
+#
+#     set                bets   win%      ROI    units             CI
+#     the original 5      954  57.5%  +10.33%   +98.6u  (+4.2, +16.3)
+#     all 13 books       1585  56.0%   +6.72%  +106.5u  (+1.9, +11.4)
+#
+# BOTH ARE POSITIVE AND BOTH EXCLUDE ZERO, so this was never "does breadth
+# work". It is total units against risk-adjusted return: the extra books add
+# roughly 8 units on 66% more bets, i.e. the MARGINAL bets return about +1.25%
+# -- real, but thin against a ~3% hold and thin enough that a small pricing
+# change could take it negative.
+#
+# §5c declined that trade on the reasoning that flat staking makes it strictly
+# worse risk-adjusted. mike took the other side with the numbers in front of
+# him, which is a preference about ROI versus volume rather than a correction.
+# Eight books rather than thirteen keeps most of the volume and drops the books
+# that fail the sweep's bar on their own.
+#
+# THE SWEEP'S CRITERIA STILL HAVE THE FLAW §5c NAMED: all four clauses judge a
+# book IN ISOLATION and none asks whether the enlarged SET earns more. The set
+# numbers above are the answer to that question and are the reason this is
+# defensible; re-run scripts/nfl_prop_book_sweep before changing it again.
 
 
 # The edge maths lives in models/market_relative.py, shared with MLB props

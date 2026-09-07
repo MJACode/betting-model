@@ -1486,3 +1486,42 @@ def test_the_count_objective_has_its_own_fold_count():
 
     time_src = inspect.getsource(trainer._time_ordered_cv)
     assert "n_splits=CV_FOLDS" in time_src, time_src
+
+
+def test_the_soft_book_set_is_the_one_the_sweep_endorses():
+    """Eight books, and the three added on 2026-09-07 are exactly the three
+    scripts/nfl_prop_book_sweep endorses on its own criteria.
+
+    Pinned because §5c REJECTED this same widening once, on measured grounds,
+    and a future reader who finds that section first should not conclude the
+    change was an oversight. The set-level numbers, same three seasons:
+
+        set              bets   win%      ROI    units            CI
+        the original 5    954  57.5%  +10.33%   +98.6u  (+4.2, +16.3)
+        all 13 books     1585  56.0%   +6.72%  +106.5u  (+1.9, +11.4)
+
+    Both positive, both excluding zero. The trade is total units against
+    risk-adjusted return, not whether breadth works, and mike took the volume
+    side with those numbers in front of him.
+    """
+    import models.nfl_prop_market as mkt
+
+    assert set(mkt.SOFT_BOOKS) == {
+        "draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
+        "betrivers", "fliff", "hardrockbet",
+    }, mkt.SOFT_BOOKS
+    assert mkt.SHARP_BOOK not in mkt.SOFT_BOOKS
+
+
+def test_fliff_is_fetched_or_it_contributes_nothing():
+    """fliff was the only one of the three NOT already in the pull. A book in
+    SOFT_BOOKS that is never requested produces no quotes and silently shrinks
+    the board rather than erroring -- it would have looked like the widening
+    simply did not help. Pinned separately from the generic coverage test
+    because this one names the failure that was actually possible here."""
+    import config
+    import models.nfl_prop_market as mkt
+
+    assert "fliff" in mkt.SOFT_BOOKS
+    assert "fliff" in config.LINE_SHOP_BOOKMAKERS
+    assert "fliff" in config.ODDS_API_BOOKMAKERS_PARAM
