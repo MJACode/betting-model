@@ -245,6 +245,28 @@ def run_pipeline_watch() -> None:
         log.exception("ERROR pipeline-watch crashed")
 
 
+def run_failure_alerter() -> None:
+    """Deliver what the health check already decided, to the ops channel.
+
+    In-process for the same reason as the watchdog and the watches: its output
+    is a Discord post, not an exit code.
+
+    Every 10 minutes rather than hourly, because the thing it reports is
+    produced every pass and a delivery lag longer than the detection interval
+    just moves the blind spot. It is cheap -- two indexed reads -- and its own
+    throttle (2h for CRIT, 12h for WARN) is what stops a standing failure
+    posting 144 times a day.
+    """
+    try:
+        from tracking.failure_alerter import run_failure_alerter as _run_alerter
+        result = _run_alerter()
+        log.info("FailureAlerter: %s condition(s), %s alerted",
+                 len(result.get("conditions") or []),
+                 len(result.get("alerted") or []))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR failure-alerter crashed")
+
+
 def run_model_calibration() -> None:
     # ModelCalibration — the weekly re-measure of every model. In-process for
     # the same reason as the watchdog and the review: its output is a Discord
@@ -412,6 +434,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "nfl_opener_poll",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
+                  "failure_alerter",
                   "calibration_watch"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
@@ -994,6 +1017,24 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Failure alerting — every 10 minutes, 24x7.
+    #
+    # The health check has run on every refresh pass for months and writes its
+    # verdict to a TABLE. On 2026-09-06 the refresh pass failed steps on 32 of
+    # 50 passes -- including `odds`, which fetches the lines every model prices
+    # against -- and it was found by a person querying pipeline_runs by hand.
+    # Detection was never the gap; delivery was.
+    #
+    # 24x7 for the same reason as the watchdog: the incident it exists for ran
+    # through the night.
+    sched.add_job(
+        run_failure_alerter,
+        CronTrigger(minute="*/10", timezone=TIMEZONE),
+        id="failure_alerter",
+        name="Failure alerter -> ops Discord (every 10 min, 24x7)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # Worker job queue — every 5 minutes.
