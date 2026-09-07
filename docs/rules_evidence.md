@@ -465,21 +465,6 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
   reachable from these sandboxes — a real suite run beats "run it on your
   machine". Equally, the sandbox egress limits are not the system limits (§1b).
 
-## 1c (evidence). How the pick rule was found
-
-The NCAAF live loop pre-dated its lock and delete-and-replaced every ~45s:
-
-```
-16:14:38  INSERT  Over 44.5  -115    <- the bet of record
-16:15:31  DELETE  Over 44.5
-16:15:31  INSERT  Over 45.5  -115
-   ...    (delete + insert, every pass)
-16:41:12  INSERT  Over 54.5  -120    <- what survived, ten points later
-```
-
-Only the first ever existed as a signal. Everything after it is the same lane
-re-priced, and publishing the last one is publishing a bet nobody was given.
-
 ## The app, Discord and push show the same picks (2026-09-05)
 
 The rule is in CLAUDE.md §1b. This is what was measured.
@@ -799,3 +784,22 @@ Fixed in session 243: `thinSampleCaption` returns one gate-free string,
 surfaces keep their sample-size honesty without the status claim. The gate
 itself is untouched server-side (`models/backtester.GO_LIVE_MIN_PICKS = 50`) —
 whether that business rule survives is a separate decision for Matt.
+
+
+## §1c — how the pick rule was found
+
+Moved out of CLAUDE.md 2026-09-06 to pay for §00. The RULE is stated there in
+full; this is the log that produced it.
+
+The NCAAF live loop pre-dated its lock and delete-and-replaced every ~45s:
+
+```
+16:14:38  INSERT  Over 44.5  -115    <- the bet of record
+16:15:31  DELETE  Over 44.5
+16:15:31  INSERT  Over 45.5  -115
+   ...    (delete + insert, every pass)
+16:41:12  INSERT  Over 54.5  -120    <- what survived, ten points later
+```
+
+Only the first ever existed as a signal. Everything after it is the same lane
+re-priced, and publishing the last one is publishing a bet nobody was given.

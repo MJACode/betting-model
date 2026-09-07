@@ -12,7 +12,39 @@
 > append your session summary to `docs/sessions/<YYYY-MM>.md`, and only PROMOTE
 > something into this file when it becomes a rule that governs future work.
 >
-> **Read Section 0 first — it is the required format for every reply.**
+> **Read Section 00 first — no guessing, factual answers only. Then Section 0,
+> the required format for every reply.**
+
+---
+
+## 00. CLAUDE IS NOT ALLOWED TO GUESS. FACTUAL ANSWERS ONLY.
+
+**This is above Section 0 because it outranks the format of a reply: it governs
+whether the reply is allowed to exist.** mike, 2026-09-06, after a session that
+did it twice: *"Claude is not allowed to guess, factual answers only. Claude
+will delete its own source code if it tries guess."*
+
+Say only what you have established. Not what is likely, not what the shape of
+the system suggests, not what was true last time someone looked.
+
+**Before any factual claim — a number, a time, a state, a cause — answer one
+question: how do I know this?** If the answer is not "I ran X and it returned
+Y", it is not sayable. Go and get it; every route is open (§1b).
+
+**"I don't know, and here is the query that would tell us" is a complete
+answer.** A confident number in its place is not — it is a wrong answer nobody
+has noticed yet.
+
+Three things that are guessing while not feeling like it: **reasoning from the
+code to the behaviour** (the source says what should happen, only the data says
+what did); **reusing a fact past its timestamp** (an hour-old value is a memory,
+not a measurement); and **narrating the check instead of doing it** — never
+write "checking rather than guessing", verification is the floor, not an
+achievement.
+
+This is the general rule. §1b's NEVER ESTIMATE WHAT YOU CAN MEASURE is its
+measurement-shaped case and §7's standards its testing-shaped case; when they
+seem to conflict, this one wins. Evidence: `docs/rules_evidence.md`.
 
 ---
 
@@ -94,7 +126,8 @@ quota (`odds_api_quota` in Supabase, or the `x-requests-remaining` header),
 never a code comment — a stale 20k comment once turned a real 5,000,000-credit
 plan into a wrongly scoped-down analysis.
 
-**NEVER ESTIMATE WHAT YOU CAN MEASURE.** (Added 2026-08-30 at mike's request.)
+**NEVER ESTIMATE WHAT YOU CAN MEASURE.** (Added 2026-08-30 at mike's request;
+the absolute form is **§00**, which outranks this and everything else.)
 Before stating *when*, *whether*, *how much*, or *how long*, ask one question:
 **do I have what I need to check this right now?** If yes, check. An estimate is
 not a faster version of the answer — it is a wrong answer you have not noticed
@@ -227,9 +260,8 @@ applies the **same `model_action_thresholds` cut** the app's
 `passesActionFilter` applies. A surface that reads anything else is a surface
 that will disagree, and the disagreement is always silent.
 
-A surface that adds a GATE the app does not have can only lose rows, and does it
-silently — that was `opening_signals` between a pick and its channel, measured
-at 6 of 125 eligible BETs never published (`docs/rules_evidence.md`).
+A surface with an extra GATE can only lose rows, and does it silently —
+`opening_signals` did, at 6 of 125 eligible BETs (`docs/rules_evidence.md`).
 
 - **No publishing surface gets a date horizon.** A pick is publishable when its
   game has **not started**, however far ahead it was written. A horizon is a
@@ -240,19 +272,16 @@ at 6 of 125 eligible BETs never published (`docs/rules_evidence.md`).
   pick is a legitimate bet of record; announcing it once the game is under way
   sends the reader to a bet they cannot take.
 - **A LIVE surface resolves its window with `config.live_slate_dates()`, never
-  with today** — a game keeps the game_date of its KICKOFF, so a 10:37pm ET start
-  is still being played after the calendar rolls. The app's mirror is
-  `liveSlateDatesET()` (`mobile/src/lib/format.ts`); the two are pinned together
+  today** — a game keeps its KICKOFF's game_date, so a late start outlives the
+  calendar day. Mirrored in the app by `liveSlateDatesET()`; the two are pinned
   by `tests/test_live_slate_midnight.py`.
 - **ONE PUBLISHER AT A TIME — a ledger cannot PREVENT a duplicate, only record
-  one.** Read → send → ledger is deliberately in that order, so two processes in
-  the same window both send and the second INSERT is swallowed: one ledger row,
-  two messages. `pollers` and `worker` both call `publish_new_signals`, so this
-  is live. Every publisher takes the advisory lock in
-  `tracking/publish_lock.py`.
-- **A new surface is a line in the parity tests**, not a copied query —
-  `tests/test_nfl_lookahead_signals.py` and `tests/test_publisher_lock.py`
-  assert those properties over all of them.
+  one.** Read → send → ledger is in that order deliberately, so two processes in
+  one window both send and the second INSERT is swallowed: one row, two
+  messages. Take `tracking/publish_lock.py`'s advisory lock — `pollers` and
+  `worker` both publish, so this is live.
+- **A new surface is a line in the parity tests**, not a copied query:
+  `tests/test_{nfl_lookahead_signals,publisher_lock}.py`.
 
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
@@ -328,14 +357,6 @@ answer is "nothing".
   every NCAAF live-loop start) reads the first BET back out and restores it as
   the standing row, preserving the original `created_at` and clearing the
   notification ledger so the corrected pick is re-announced. Idempotent.
-
-### How this was found
-
-The NCAAF live loop delete-and-replaced its own pick every ~45s, walking Over
-44.5 -115 to Over 54.5 -120 in 27 minutes. Only the first ever existed as a
-signal. The transcript is in `docs/rules_evidence.md`.
-
----
 
 ## 2. Project Purpose
 Building a **personal sports betting model** targeting **DraftKings** as the
