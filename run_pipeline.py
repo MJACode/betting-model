@@ -951,15 +951,44 @@ def step_public_betting(run_date: str) -> bool:
 
 
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
-    """Score pitcher K props + batter props (hits, TB, HR) and write picks to DB."""
+    """Score pitcher + batter props across the look-ahead window.
+
+    RUN PER DATE, rather than by widening every prop scorer's internals. The
+    prop scorers and their feature builders are keyed on a single target_date
+    in a dozen places; looping the whole scorer over the window is the same
+    result with a fraction of the blast radius, and each date's run keeps its
+    own idempotent delete/insert scoping.
+
+    WHY THE WINDOW MATTERS HERE MORE THAN ANYWHERE ELSE. #519 taught the GAME
+    scorer to price tomorrow and that produced nothing visible, because
+    game-level MLB is almost entirely paused: measured 2026-09-06, all 19 MLB
+    BETs on the board were PROPS and none were game-level. Props are the
+    surface, so a look-ahead that skips them is a look-ahead nobody can see.
+
+    A date with no prop odds is a cheap no-op, so the extra passes cost
+    approximately nothing on days DraftKings has not posted yet.
+    """
+    from datetime import date as _date, timedelta as _td
+
     try:
-        from models.scorer import run_prop_scorer
-        result = run_prop_scorer(target_date=run_date, dry_run=dry_run)
-        logger.success(f"✓ Prop scoring: {result}")
-        return True
-    except Exception as exc:
-        logger.error(f"✗ Prop scoring failed: {exc}")
-        return False
+        from config import GAME_SCORE_AHEAD_DAYS
+        ahead = GAME_SCORE_AHEAD_DAYS
+    except Exception:                                         # noqa: BLE001
+        ahead = 1
+
+    from models.scorer import run_prop_scorer
+    ok = True
+    for offset in range(0, max(0, ahead) + 1):
+        d = (_date.fromisoformat(run_date) + _td(days=offset)).isoformat()
+        try:
+            result = run_prop_scorer(target_date=d, dry_run=dry_run)
+            logger.success(f"✓ Prop scoring {d}: {result}")
+        except Exception as exc:
+            # One date failing must not cost the others -- today's board is the
+            # one with games about to start.
+            logger.error(f"✗ Prop scoring failed for {d}: {exc}")
+            ok = False
+    return ok
 
 
 def step_wnba_prop_market(run_date: str, dry_run: bool = False) -> bool:
