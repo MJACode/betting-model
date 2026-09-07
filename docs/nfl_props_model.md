@@ -1,8 +1,22 @@
 # NFL player props — architecture decision, market shortlist, and validation plan
 
-Status: **models built and assessed on outcomes; NOT yet validated against prices.**
-Written 2026-08-23, before any betting result exists, so the bar below cannot be
-moved after the fact.
+Status: **LIVE since 2026-09-06 (mike), on placeholder thresholds.**
+Written 2026-08-23, before any betting result existed, so the bar below cannot be
+moved after the fact — and it has NOT been met. What changed is the decision to
+start betting, not the evidence. Read §5 and §6 as they stand; the go-live note
+is at the end of §6.
+
+Two things stated at the top because they change how the rest reads:
+
+* **The twelve artifacts §2-§5b describes are gone.** Those committed in #215
+  could not be deserialised (`XGBoostError: input stream corrupted`) on the
+  machine that runs the pipeline, so they never scored anything. §6 below had
+  already said they should be retrained where `model_registry` lives rather
+  than committed from the replica; that step was skipped and this is what it
+  cost. They were retrained 2026-09-06 on the same seasons and feature lists.
+  **The holdout tables in §2-§5b describe the OLD artifacts.**
+* **`nfl_prop_market` (§5c) is unaffected.** It is a rule with no artifact, and
+  its measured record stands as written.
 
 This answers `docs/nfl_props_build_prompt.md`. Everything here is derived from
 NFL data, not carried over from the MLB/NBA/WNBA prop models. Where those models
@@ -959,6 +973,17 @@ Supabase is the migration and the backfill; those need a Supabase-reachable
 machine. The trained artifacts are deliberately not committed: they must be
 retrained where `model_registry` lives, which is one command per model.
 
+> **That last sentence was not followed, and it cost the models.** #215 committed
+> the replica's artifacts and registered rows pointing at them. All twelve failed
+> `pickle.load` on the pipeline machine — same error, same place, while 31 other
+> xgboost artifacts loaded on the same interpreter, five of them declaring the
+> same xgboost 3.4.1. `model_artifacts` held no copy to restore from, so the
+> committed bytes were the only ones. Nobody found out for two weeks because the
+> family was paused (so nothing opened them) and because the `model_registry`
+> health check asks whether an active ROW exists, not whether the file behind it
+> deserialises. Retrained on the pipeline machine 2026-09-06;
+> `tests/test_model_artifacts_load.py` now opens every artifact.
+
 Open, in order:
 1. **Fix the tackles target.** It is the sport's best signal and the only market
    whose failure is ours rather than the market's. Reconcile our per-game
@@ -970,6 +995,63 @@ Open, in order:
 3. Thresholds. Every NFL threshold in `config.py` today is a **placeholder** and
    is marked as such. They are not tuned and must not be treated as tuned.
    Nothing here has earned tuning yet.
+
+## 6a. Go-live, 2026-09-06 (mike)
+
+**Eleven of twelve unpaused.** The premise of the 2026-08-23 pause — "no NFL prop odds
+exist in `player_prop_odds`" — stopped being true that day: the Week 1 board was
+fetched at T-70h and DraftKings quotes the standard line for every one of the
+twelve markets (anytime_td 453 rows, reception_yds 135, receptions 134,
+rush_yds 69, rush_attempts 53, pass_tds 32, pass_yds 32, pass_attempts 31,
+pass_completions 31, rush_reception_yds 23, tackles_assists 16, sacks 13).
+
+**The six gates in §5 are NOT met.** The pause was written to lift one model at
+a time as each cleared them; this lifted all twelve at once, on mike's
+instruction, with the placeholder thresholds unchanged. That is a decision about
+when to start betting and it is recorded here as such. Same shape as
+`nfl_live_prop` going live with the §2 gate unmet.
+
+What that means in practice:
+
+* Every one of the twelve is **paper-grade evidence at best** until it has a
+  settled record. Re-sweep each cut on its own record at ~50 settled bets, per
+  model — never copy a cut between them.
+* §5b's conclusion still stands: eleven of twelve markets lost to the hold on
+  the OLD artifacts. Retraining did not set out to fix that and there is no
+  reason to think it did. Expect these to be worse than `nfl_prop_market`.
+* The eleven and `nfl_prop_market` would write picks on the SAME propositions
+  under different `model_id`s, so `run_nfl_prop_scorer` skips any proposition
+  `nfl_prop_market` already holds (#533). The rule with a measured record wins.
+
+### tackles+assists stays paused, on a re-measurement
+
+Not a judgement about its record — a defect in the target, still present.
+Measured 2026-09-07 across every DraftKings quote we hold with a two-way price
+and a graded actual:
+
+| market | n | our over% | DK implies | gap |
+|---|---|---|---|---|
+| player_reception_yds | 13,286 | 49.3% | 50.1% | −0.8pp |
+| player_receptions | 12,585 | 47.6% | 49.5% | −2.0pp |
+| player_rush_yds | 6,473 | 47.5% | 49.9% | −2.4pp |
+| **player_tackles_assists** | **7,228** | **42.2%** | **50.0%** | **−7.7pp** |
+
+§5b measured −9.1pp and diagnosed it: nflverse derives defensive columns from
+play-by-play tackle attribution, books grade off the official gamebook. This is
+the same gap on a fresh cut of the data, which settles a question §5b left open
+— **the retrain did not fix it, and no retrain can.** The fix is reconciling our
+per-game tackle counts against a gamebook source.
+
+Until then the model bets the under on everything and looks brilliant doing it.
+`tests/test_nfl_prop_tick.py::test_the_eleven_are_live_and_tackles_is_not` is
+what stops someone lifting the last name out of `PAUSED_MODELS` because its
+eleven neighbours went.
+
+Cadence: they score inside the hourly NFL prop tick (`scheduler.run_nfl_prop_card`),
+off the board that tick's `--fetch` just bought. That fetch is the only NFL prop
+odds producer — there is no separate ingest job — so if the scoring step is ever
+dropped from that tick the twelve go dark without erroring.
+`tests/test_nfl_prop_tick.py` pins it.
 4. Wiring `nfl-prop-scoring` into the daily flow — deliberately CLI-only until a
    market has cleared §5. None has.
 4. Play-by-play features (red-zone share, routes, aDOT) as the next lever.

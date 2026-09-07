@@ -86,3 +86,46 @@ def test_the_twelve_distributional_models_score_off_the_ticks_own_fetch(monkeypa
     # Order matters: the scorer reads what the fetch just wrote.
     assert labels.index("nfl-prop-card") < labels.index("nfl-prop-scoring")
 
+
+def test_the_eleven_are_live_and_tackles_is_not():
+    """mike, 2026-09-06: unpause the twelve. Eleven shipped.
+
+    nfl_prop_tackles_assists is held back on a MEASURED DEFECT, not on its
+    record. Across 7,228 DraftKings tackles quotes with a two-way price and a
+    graded actual, our over-rate is 42.2% against DraftKings' own de-vigged
+    50.0% -- a -7.7pp gap, where the other three markets measured the same way
+    sit at -0.8, -2.0 and -2.4pp. We count a smaller number than the book
+    grades. docs/nfl_props_model.md §5b measured -9.1pp and diagnosed it as
+    play-by-play tackle attribution versus the official gamebook; this is the
+    same gap on a fresh cut, so the 2026-09-07 retrain did not fix it and could
+    not have.
+
+    A model whose actual runs 7.7pp under the book's price bets the under on
+    everything and looks brilliant doing it (+13.47% over 1,639 bets in
+    backtest, 1,532 of them unders). This test is what stops someone lifting
+    the last name out of PAUSED_MODELS because eleven of its neighbours went.
+    """
+    import config
+
+    paused = {m for m in config.PAUSED_MODELS if m.startswith("nfl_prop")}
+    assert paused == {"nfl_prop_tackles_assists"}, (
+        f"expected only tackles paused, got {sorted(paused)}")
+
+    live = {m for m in config.ACTION_THRESHOLDS
+            if m.startswith("nfl_prop_")
+            and m not in config.PAUSED_MODELS
+            and m != "nfl_prop_market"}
+    assert len(live) == 11, sorted(live)
+
+
+def test_every_live_nfl_prop_model_still_carries_its_own_cut():
+    """Unpausing must not smuggle a model past the per-model threshold rule --
+    a live model reaching the module-level fallback is betting a cut nobody
+    chose for it."""
+    import config
+
+    for m in config.ACTION_THRESHOLDS:
+        if not m.startswith("nfl_prop_") or m in config.PAUSED_MODELS:
+            continue
+        assert m in config.MODEL_EDGE_THRESHOLDS, f"{m} has no edge cut"
+        assert m in config.MODEL_PROB_THRESHOLDS, f"{m} has no prob cut"
