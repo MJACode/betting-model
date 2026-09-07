@@ -19,6 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-07 | [2026-09](./2026-09.md) | 2026-09-07, session 251 — NFL prop cuts tightened to the top decile (112 BETs -> 16 on one slate), and the scorer stops reading one date while its card reads ten |
+| 2026-09-07 | [2026-09](./2026-09.md) | 2026-09-07, session 250 — NFL props: the rule fired for the first time ever, and the eleven models unpaused yesterday score only today's date while the card looks ten days ahead ([deep dive](../reviews/2026-09-07-nfl-props-deep-dive.md)) |
+| 2026-09-07 | [2026-09](./2026-09.md) | 2026-09-07, session 249 — MLB volume: half the picks come from a calibration switch that never reached the props |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 248 — a live pick reached Discord and never reached the app, and the pre-game card posted twice |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 247 — the line ruler is drawn in the mode's own idiom, so Over is the book's line |
 | 2026-09-06 | [2026-09](./2026-09.md) | 2026-09-06, session 246 — why the prop rule never fired, in any sport |
