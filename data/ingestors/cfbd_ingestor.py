@@ -1482,6 +1482,38 @@ def _date_or_none(value) -> datetime | None:
         return None
 
 
+def _slug_extends(a: str, b: str) -> bool:
+    """
+    Two slugs name the same school when one is the other plus more hyphenated
+    words: "indiana" / "indiana-state" (the FBS-prefix mis-resolution) and
+    "abilene-christian-wildcats" / "abilene-christian" (an unresolved Odds API
+    name that kept its mascot). Equality counts; a bare substring does not.
+    """
+    if not a or not b:
+        return False
+    return a == b or a.startswith(b + "-") or b.startswith(a + "-")
+
+
+def _loose_orientation(cand: dict, src_home: str, src_away: str) -> bool | None:
+    """
+    Does `cand` (an unscored games row) describe the same game as a final for
+    src_away @ src_home, allowing ONE side to be an extended/shortened slug?
+    One side must match exactly -- the anchor -- and the other must extend.
+    Returns False for the same orientation, True for swapped, None for no match.
+    """
+    ch = ncaaf_slug(cand.get("home_team") or "")
+    ca = ncaaf_slug(cand.get("away_team") or "")
+    if not ch or not ca:
+        return None
+    if (ch == src_home and _slug_extends(ca, src_away)) or \
+       (ca == src_away and _slug_extends(ch, src_home)):
+        return False
+    if (ch == src_away and _slug_extends(ca, src_home)) or \
+       (ca == src_home and _slug_extends(ch, src_away)):
+        return True
+    return None
+
+
 def alias_score_updates(scored_rows: list[dict],
                         existing_rows: list[dict]) -> list[dict]:
     """
@@ -1493,10 +1525,22 @@ def alias_score_updates(scored_rows: list[dict],
     home_score). A row is a duplicate when it shares the matchup and starts
     within _ALIAS_MAX_DAY_SKEW days.
 
+    Two passes. The first matches the exact slug pair (the ET/UTC duplicate).
+    The second, for rows the first left unscored, anchors on one side matching
+    exactly and lets the other side be an EXTENDED slug - the two ways the
+    odds ingestor writes a wrong opponent for the same game: an FCS name that
+    prefix-resolved to an FBS school ("indiana" for "indiana-state"), and an
+    unresolved name that kept its mascot ("abilene-christian-wildcats"). A
+    team plays once a week, so home team + date within a day identifies the
+    game; the extension check is the belt to that suspender. An exact match
+    always wins over a loose one, and a row claimed by two DIFFERENT finals
+    under either pass is left alone.
+
     Only rows with NO score are filled. An existing final is never overwritten:
     a mirrored score is an inference, and it must not be able to clobber a real
     result if the pair match is ever wrong.
     """
+    unscored: list[dict] = []
     by_pair: dict[frozenset, list[dict]] = {}
     for row in existing_rows:
         if row.get("home_score") is not None:
@@ -1505,12 +1549,11 @@ def alias_score_updates(scored_rows: list[dict],
         day = _date_or_none(row.get("game_date"))
         if pair is None or day is None:
             continue
-        by_pair.setdefault(pair, []).append({**row, "_day": day})
+        cand = {**row, "_day": day}
+        unscored.append(cand)
+        by_pair.setdefault(pair, []).append(cand)
 
-    # A candidate claimed by two different finals is ambiguous — in college
-    # football a matchup cannot happen twice inside two days, so this only
-    # fires on corrupt data and must never guess.
-    claims: dict[str, list[dict]] = {}
+    finals = []
     for src in scored_rows:
         if src.get("home_score") is None or src.get("away_score") is None:
             continue
@@ -1518,33 +1561,67 @@ def alias_score_updates(scored_rows: list[dict],
         day = _date_or_none(src.get("game_date"))
         if pair is None or day is None:
             continue
-        src_home = ncaaf_slug(src.get("home_team") or "")
+        finals.append((src, pair, day,
+                       ncaaf_slug(src.get("home_team") or ""),
+                       ncaaf_slug(src.get("away_team") or "")))
+
+    def _claim(claims, cand, src, swapped):
+        hs, as_ = src["home_score"], src["away_score"]
+        if swapped:
+            hs, as_ = as_, hs
+        claims.setdefault(cand["game_id"], []).append({
+            "game_id":    cand["game_id"],
+            "home_score": hs,
+            "away_score": as_,
+            "home_win":   None if hs == as_ else int(hs > as_),
+            "_from":      src.get("game_id"),
+        })
+
+    # A candidate claimed by two different finals is ambiguous - in college
+    # football a matchup cannot happen twice inside two days, so this only
+    # fires on corrupt data and must never guess.
+    def _resolve(claims):
+        updates = []
+        for game_id, hits in claims.items():
+            if len({(h["home_score"], h["away_score"]) for h in hits}) > 1:
+                logger.warning(
+                    f"NCAAF alias: {game_id} matched conflicting finals "
+                    f"({[h['_from'] for h in hits]}) - left unscored."
+                )
+                continue
+            updates.append(hits[0])
+        return updates
+
+    # Pass 1 - exact pair (the ET/UTC duplicate row).
+    exact: dict[str, list[dict]] = {}
+    for src, pair, day, src_home, _src_away in finals:
         for cand in by_pair.get(pair, []):
             if cand["game_id"] == src.get("game_id"):
                 continue
             if abs((cand["_day"] - day).days) > _ALIAS_MAX_DAY_SKEW:
                 continue
             swapped = ncaaf_slug(cand.get("home_team") or "") != src_home
-            hs, as_ = src["home_score"], src["away_score"]
-            if swapped:
-                hs, as_ = as_, hs
-            claims.setdefault(cand["game_id"], []).append({
-                "game_id":    cand["game_id"],
-                "home_score": hs,
-                "away_score": as_,
-                "home_win":   None if hs == as_ else int(hs > as_),
-                "_from":      src.get("game_id"),
-            })
+            _claim(exact, cand, src, swapped)
+    updates = _resolve(exact)
+    taken = set(exact)                      # claimed at all, even if conflicting
 
-    updates = []
-    for game_id, hits in claims.items():
-        if len({(h["home_score"], h["away_score"]) for h in hits}) > 1:
-            logger.warning(
-                f"NCAAF alias: {game_id} matched conflicting finals "
-                f"({[h['_from'] for h in hits]}) — left unscored."
-            )
-            continue
-        updates.append(hits[0])
+    # Pass 2 - one side exact, the other an extended slug (a wrong opponent).
+    loose: dict[str, list[dict]] = {}
+    for src, _pair, day, src_home, src_away in finals:
+        for cand in unscored:
+            if cand["game_id"] in taken or cand["game_id"] == src.get("game_id"):
+                continue
+            if abs((cand["_day"] - day).days) > _ALIAS_MAX_DAY_SKEW:
+                continue
+            swapped = _loose_orientation(cand, src_home, src_away)
+            if swapped is None:
+                continue
+            _claim(loose, cand, src, swapped)
+    for upd in _resolve(loose):
+        logger.info(f"NCAAF alias: {upd['game_id']} names a different opponent "
+                    f"than {upd['_from']} for the same home team and day - "
+                    f"treating it as the same game")
+        updates.append(upd)
     return updates
 
 
@@ -1592,8 +1669,41 @@ def mirror_scores_to_alias_rows(conn, scored_rows: list[dict]) -> int:
     conn.commit()
     for upd in updates:
         logger.info(f"NCAAF alias: mirrored {upd['_from']} final onto "
-                    f"{upd['game_id']} (ET/UTC duplicate row)")
+                    f"{upd['game_id']} (duplicate row for the same game)")
     return len(updates)
+
+
+def mirror_stored_finals(conn, run_date: str | None = None,
+                         heal_days: int = 14) -> int:
+    """
+    The same mirroring, fed from finals ALREADY IN the games table rather than
+    from a fresh CFBD pull. No network.
+
+    Why it exists separately: `ingest_ncaaf_results_for_date` only runs in the
+    6am daily pipeline, but settlement runs every hourly pass. A CFBD final
+    that landed at 6am on its own row, while the pick sits on a duplicate row
+    the matcher only learned to recognise later, would otherwise wait for the
+    NEXT morning's pull to be mirrored. Called from settle_picks, so the fix
+    for a stranded row takes effect on the pass after it ships.
+    """
+    run_date = run_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    lo = (datetime.strptime(run_date, "%Y-%m-%d")
+          - timedelta(days=heal_days)).strftime("%Y-%m-%d")
+    hi = (datetime.strptime(run_date, "%Y-%m-%d")
+          + timedelta(days=_ALIAS_MAX_DAY_SKEW)).strftime("%Y-%m-%d")
+    scored = [
+        {"game_id": r[0], "game_date": str(r[1])[:10], "home_team": r[2],
+         "away_team": r[3], "home_score": r[4], "away_score": r[5]}
+        for r in conn.execute("""
+            SELECT game_id, game_date, home_team, away_team, home_score, away_score
+            FROM games
+            WHERE sport = %(s)s AND game_date BETWEEN %(lo)s AND %(hi)s
+              AND home_score IS NOT NULL AND away_score IS NOT NULL
+        """, {"s": SPORT, "lo": lo, "hi": hi}).fetchall()
+    ]
+    if not scored:
+        return 0
+    return mirror_scores_to_alias_rows(conn, scored)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1684,6 +1794,25 @@ def _fold(v: str) -> str:
     return "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
 
 
+def _rest_is_mascot(rest: str, mascot: str | None) -> bool:
+    """
+    Is the folded text left after a school's name that school's mascot?
+
+    Exact ("buckeyes" == "buckeyes") or same final word ("warriors" for
+    "rainbow warriors"), so a book that shortens a two-word mascot still
+    resolves. Anything else -- "state sycamores", "tech trailblazers",
+    "christian huskies", "a t aggies" -- is a DIFFERENT school that happens to
+    start with this one's name. A registry row with no mascot cannot vouch for
+    any remainder at all.
+    """
+    m = _fold(mascot or "")
+    if not m or not rest:
+        return False
+    if rest == m:
+        return True
+    return rest.split()[-1] == m.split()[-1]
+
+
 def resolve_odds_api_school(name: str, conn=None) -> str:
     """
     The Odds API team name → CFBD canonical school name.
@@ -1722,12 +1851,29 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     for s in schools:
         if s["mascot"] and _fold(f"{s['school']} {s['mascot']}") == lowered:
             return s["school"]
+    # A school that PREFIXES the input is a match only when what follows it is
+    # that school's mascot. ncaaf_teams is /teams/fbs only, so an FCS opponent
+    # whose name extends an FBS school's finds no exact school and no
+    # "school mascot" -- and then the bare prefix rule handed it the FBS school:
+    # "Indiana State Sycamores" -> "Indiana", "Utah Tech Trailblazers" ->
+    # "Utah", "Houston Christian Huskies" -> "Houston". Each wrote a games row
+    # for a matchup that never happened, which CFBD's real final could never
+    # match, and six live BETs sat unsettled on them (2026-09-04/05,
+    # docs/sessions/2026-09.md). The mascot is the evidence that the prefix is
+    # the whole name: "state sycamores" is not "hoosiers".
     best = None
     best_len = -1
     for s in schools:
         sl = _fold(s["school"])
-        if lowered.startswith(sl) and len(sl) > best_len:
-            best, best_len = s["school"], len(sl)
+        if not lowered.startswith(sl) or len(sl) <= best_len:
+            continue
+        rest = lowered[len(sl):]
+        if rest and not rest.startswith(" "):
+            continue                       # "indianapolis" is not "indiana ..."
+        rest = rest.strip()
+        if rest and not _rest_is_mascot(rest, s.get("mascot")):
+            continue
+        best, best_len = s["school"], len(sl)
     if best:
         return best
     for s in schools:

@@ -1723,6 +1723,244 @@ def _market_for_pick(model_id: str) -> str:
 # _PROP_SETTLE_WINDOW_DAYS.
 _GAME_SETTLE_WINDOW_DAYS = 14
 
+# Cap on how far back the self-healing probes below may reach, and on how many
+# dates one pass will fetch scores / box scores for. The reach bound stops one
+# unsettleable row dragging every pass to the start of the season; the per-pass
+# bound keeps a long-broken backlog from turning the hourly settle into a
+# StatsAPI crawl. A backlog wider than the cap heals over several passes.
+_GAME_SETTLE_MAX_HEAL_DAYS = 365
+_HEAL_MAX_DATES_PER_PASS = 20
+
+# The trailing window over which settle_picks pulls MLB finals from the Stats
+# API on every pass. Anything older is reached only by the heal probe below.
+_SCORE_FETCH_WINDOW_DAYS = 5
+
+# A game the Stats API reports in one of these states on a date that is now at
+# least this many days old was not played that day. DraftKings voids a wager
+# on a postponed or cancelled MLB game (a make-up is a new event, and here a
+# new game_id), so its BET picks settle NO_ACTION rather than never.
+_POSTPONED_STATUSES = ("Postponed", "Cancelled")
+_POSTPONED_MIN_AGE_DAYS = 2
+
+_GAME_LEVEL_MODEL_FILTER = """
+          AND p.model_id NOT LIKE 'mlb_prop_%%'
+          AND p.model_id NOT LIKE 'wnba_prop_%%'
+          AND p.model_id NOT LIKE 'nba_prop_%%'
+          AND p.model_id NOT LIKE 'nfl_prop_%%'
+          AND p.model_id NOT LIKE 'ufc_%%'
+          AND p.model_id NOT LIKE 'golf_%%'
+"""
+
+
+def _game_settle_window_days(conn: DBConnection, game_date: str) -> int:
+    """
+    How many days back to settle game-level picks. Normally
+    _GAME_SETTLE_WINDOW_DAYS, but EXTENDED to reach any game-level BET that is
+    still unsettled on a game that already has a final -- the same self-healing
+    shape as _prop_settle_window_days, which the game path never got.
+
+    It mattered: ATL ML F5 on 2026-06-16 (pick 304636) sat unsettled for
+    twelve weeks. Its game's final landed on 2026-09-01, after the fixed
+    14-day window had already closed over June, so no pass could ever reach
+    it although both F5 scores were in the row (docs/sessions/2026-09.md).
+    """
+    try:
+        row = conn.execute(f"""
+            SELECT MIN(p.game_date)
+              FROM picks p
+              JOIN games g ON g.game_id = p.game_id
+             WHERE p.signal_type = 'BET'
+               AND p.result IS NULL
+               AND g.home_score IS NOT NULL
+               {_GAME_LEVEL_MODEL_FILTER}
+        """).fetchone()
+    except Exception as exc:
+        logger.warning(f"Game settle window: heal probe failed ({exc}) - "
+                       f"using the fixed {_GAME_SETTLE_WINDOW_DAYS}-day window")
+        return _GAME_SETTLE_WINDOW_DAYS
+
+    oldest = row[0] if row else None
+    if not oldest:
+        return _GAME_SETTLE_WINDOW_DAYS
+    try:
+        span = (datetime.strptime(game_date, "%Y-%m-%d")
+                - datetime.strptime(str(oldest), "%Y-%m-%d")).days + 1
+    except ValueError:
+        return _GAME_SETTLE_WINDOW_DAYS
+
+    days = max(_GAME_SETTLE_WINDOW_DAYS, min(span, _GAME_SETTLE_MAX_HEAL_DAYS))
+    if days > _GAME_SETTLE_WINDOW_DAYS:
+        logger.info(f"Game settle: extending window to {days} days - oldest "
+                    f"unsettled game-level BET on a scored game is {oldest}")
+    return days
+
+
+def _unscored_mlb_dates_with_pending_bets(conn: DBConnection,
+                                          game_date: str) -> list[str]:
+    """
+    Dates OLDER than the per-pass score window that still carry an unsettled
+    MLB BET on a games row with no final. These are the picks no pass can
+    reach: `_fetch_and_store_scores` only looks back _SCORE_FETCH_WINDOW_DAYS,
+    so a day the fetch missed (2026-07-12 -- all 15 games, no score, no box
+    score) or a game that was postponed simply ages out and stays PENDING
+    forever. Oldest first, capped per pass.
+    """
+    end = datetime.strptime(game_date, "%Y-%m-%d")
+    hi = (end - timedelta(days=_SCORE_FETCH_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    lo = (end - timedelta(days=_GAME_SETTLE_MAX_HEAL_DAYS)).strftime("%Y-%m-%d")
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT p.game_date
+              FROM picks p
+              JOIN games g ON g.game_id = p.game_id
+             WHERE p.signal_type = 'BET'
+               AND p.result IS NULL
+               AND p.sport = 'MLB'
+               AND g.home_score IS NULL
+               AND p.game_date >= %s
+               AND p.game_date < %s
+             ORDER BY p.game_date
+             LIMIT %s
+        """, (lo, hi, _HEAL_MAX_DATES_PER_PASS)).fetchall()
+    except Exception as exc:
+        logger.warning(f"Score heal probe failed ({exc}) - skipping this pass")
+        return []
+    return [str(r[0]) for r in rows]
+
+
+def _scored_mlb_dates_missing_game_log(conn: DBConnection,
+                                       game_date: str) -> list[str]:
+    """
+    Dates with an unsettled MLB prop BET whose game HAS a final but NO
+    player_game_log rows at all. The prop settler deliberately leaves those
+    alone ("the ingest hasn't landed yet"), and the daily game-log step only
+    ever ingests yesterday, so a game whose box score was missed once is
+    missed forever: SF@ATL 2026-06-16 was scored on 2026-09-01 and its two prop
+    BETs still could not grade, because nothing would ever fetch the box score.
+    """
+    end = datetime.strptime(game_date, "%Y-%m-%d")
+    lo = (end - timedelta(days=_GAME_SETTLE_MAX_HEAL_DAYS)).strftime("%Y-%m-%d")
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT p.game_date
+              FROM picks p
+              JOIN games g ON g.game_id = p.game_id
+             WHERE p.signal_type = 'BET'
+               AND p.result IS NULL
+               AND p.model_id LIKE 'mlb_prop_%%'
+               AND g.home_score IS NOT NULL
+               AND p.game_date >= %s
+               AND p.game_date <= %s
+               AND NOT EXISTS (SELECT 1 FROM player_game_log l
+                                WHERE l.game_id = p.game_id)
+             ORDER BY p.game_date
+             LIMIT %s
+        """, (lo, game_date, _HEAL_MAX_DATES_PER_PASS)).fetchall()
+    except Exception as exc:
+        logger.warning(f"Game-log heal probe failed ({exc}) - skipping this pass")
+        return []
+    return [str(r[0]) for r in rows]
+
+
+def _postponed_mlb_games(game_date: str) -> list[tuple[str, str]]:
+    """(home_abbr, away_abbr) for every game the Stats API lists as postponed
+    or cancelled on game_date. Empty when the API is unavailable."""
+    if not STATSAPI_AVAILABLE:
+        return []
+    try:
+        schedule = statsapi.schedule(date=game_date, sportId=1)
+    except Exception as exc:
+        logger.error(f"statsapi.schedule({game_date}) failed: {exc}")
+        return []
+    out = []
+    for game in schedule:
+        if game.get("status", "") not in _POSTPONED_STATUSES:
+            continue
+        home_abbr = _STATSAPI_TEAM_IDS.get(game.get("home_id"))
+        away_abbr = _STATSAPI_TEAM_IDS.get(game.get("away_id"))
+        if home_abbr and away_abbr:
+            out.append((home_abbr, away_abbr))
+    return out
+
+
+def _void_postponed_mlb_picks(conn: DBConnection, game_date: str,
+                              settled_at: str, today: str | None = None) -> int:
+    """
+    Settle NO_ACTION every unsettled BET on an MLB game the Stats API says was
+    postponed or cancelled on game_date, once the date is old enough that a
+    same-day resumption is off the table. Only rows with no final are touched:
+    a doubleheader shares one game_id, and game 1's score must keep game 1's
+    picks grading normally. Returns the number of picks voided.
+    """
+    today = today or datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    age = (datetime.strptime(today, "%Y-%m-%d")
+           - datetime.strptime(game_date, "%Y-%m-%d")).days
+    if age < _POSTPONED_MIN_AGE_DAYS:
+        return 0
+    voided = 0
+    for home_abbr, away_abbr in _postponed_mlb_games(game_date):
+        game_id = f"MLB_{game_date}_{away_abbr}_{home_abbr}"
+        rows = conn.execute("""
+            SELECT p.pick_id
+              FROM picks p
+              JOIN games g ON g.game_id = p.game_id
+             WHERE p.game_id = %s
+               AND p.signal_type = 'BET'
+               AND p.result IS NULL
+               AND g.home_score IS NULL
+        """, (game_id,)).fetchall()
+        for (pick_id,) in rows:
+            conn.execute("""
+                UPDATE picks
+                SET result         = 'NO_ACTION',
+                    profit_flat    = 0,
+                    profit_kelly   = 0,
+                    settled_at     = %s,
+                    condition_note = COALESCE(condition_note || ' | ', '')
+                                     || 'postponed per MLB Stats API - DK voids'
+                WHERE pick_id = %s
+            """, (settled_at, pick_id))
+            voided += 1
+        if rows:
+            logger.info(f"  {game_id}: postponed → {len(rows)} BET(s) NO_ACTION")
+    return voided
+
+
+def _heal_stranded_mlb(conn: DBConnection, game_date: str,
+                       settled_at: str) -> dict:
+    """
+    Reach the picks the fixed windows cannot: fetch finals for old unscored
+    dates that still carry BETs (voiding the postponed ones), and fetch box
+    scores for scored games whose prop BETs have nothing to grade against.
+    Every step is idempotent and bounded; a pass with nothing stranded costs
+    two cheap queries.
+    """
+    summary = {"score_dates": 0, "voided": 0, "log_dates": 0}
+
+    for d in _unscored_mlb_dates_with_pending_bets(conn, game_date):
+        summary["score_dates"] += 1
+        try:
+            _fetch_and_store_scores(conn, d)
+        except Exception as exc:
+            logger.warning(f"score heal {d} failed: {exc}")
+        try:
+            summary["voided"] += _void_postponed_mlb_picks(conn, d, settled_at)
+        except Exception as exc:
+            logger.warning(f"postponed check {d} failed: {exc}")
+    conn.commit()
+
+    for d in _scored_mlb_dates_missing_game_log(conn, game_date):
+        summary["log_dates"] += 1
+        try:
+            from data.ingestors.mlb_stats_ingestor import ingest_game_log_for_date
+            ingest_game_log_for_date(d)      # own connection; per-game idempotent
+        except Exception as exc:
+            logger.warning(f"game-log heal {d} failed: {exc}")
+
+    if any(summary.values()):
+        logger.info(f"Stranded-pick heal: {summary}")
+    return summary
+
 
 def _settle_game_picks(
     conn: DBConnection,
@@ -1760,10 +1998,16 @@ def _settle_game_picks(
           AND p.model_id NOT LIKE 'mlb_prop_%%'
           AND p.model_id NOT LIKE 'wnba_prop_%%'
           AND p.model_id NOT LIKE 'nba_prop_%%'
+          AND p.model_id NOT LIKE 'nfl_prop_%%'
           AND p.model_id NOT LIKE 'ufc_%%'
           AND p.model_id NOT LIKE 'golf_%%'
           AND g.home_score IS NOT NULL
     """, (game_date,)).fetchall()
+    # nfl_prop_% joined the prop settler (nfl_player) without joining this
+    # exclusion list. Found 2026-09-07 with 18 NFL prop BETs written for the
+    # 09-13 slate and none yet graded: on the first Sunday with finals this
+    # path would have run first, mapped every one to 'h2h', stamped NO_ACTION,
+    # and the prop settler (result IS NULL only) would never have seen them.
 
     if not picks:
         return 0, 0, 0, 0, 0.0, 0.0
@@ -1845,7 +2089,7 @@ def _settle_game_picks_window(
     """
     totals = [0, 0, 0, 0, 0.0, 0.0]
     end = datetime.strptime(game_date, "%Y-%m-%d")
-    for offset in range(_GAME_SETTLE_WINDOW_DAYS):
+    for offset in range(_game_settle_window_days(conn, game_date)):
         d = (end - timedelta(days=offset)).strftime("%Y-%m-%d")
         day_results = _settle_game_picks(conn, d, settled_at)
         for i, v in enumerate(day_results):
@@ -1873,13 +2117,37 @@ def settle_picks(game_date: str = None) -> dict:
         # and self-heals — otherwise its picks / opening signals / parlays stay
         # pending forever for lack of a score.
         _base = datetime.strptime(game_date, "%Y-%m-%d")
-        for _i in range(5):
+        settled_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+        for _i in range(_SCORE_FETCH_WINDOW_DAYS):
             _d = (_base - timedelta(days=_i)).strftime("%Y-%m-%d")
             try:
                 _fetch_and_store_scores(conn, _d)
             except Exception as _exc:
                 logger.warning(f"score fetch {_d} failed: {_exc}")
+            try:
+                _void_postponed_mlb_picks(conn, _d, settled_at)
+            except Exception as _exc:
+                logger.warning(f"postponed check {_d} failed: {_exc}")
         conn.commit()
+
+        # Reach past the fixed windows: old unscored dates that still carry a
+        # BET, and scored games whose prop BETs have no box score to grade on.
+        try:
+            _heal_stranded_mlb(conn, game_date, settled_at)
+        except Exception as _exc:
+            logger.warning(f"stranded-pick heal failed: {_exc}")
+            conn.rollback()
+
+        # NCAAF finals sit on CFBD's own row; a pick can sit on a duplicate row
+        # for the same game (ET-dated, or a mis-resolved opponent). Mirror from
+        # what is already stored so an hourly pass grades it, not only the 6am
+        # results pull.
+        try:
+            from data.ingestors.cfbd_ingestor import mirror_stored_finals
+            mirror_stored_finals(conn, game_date)
+        except Exception as _exc:
+            logger.warning(f"NCAAF stored-final mirror failed: {_exc}")
+            conn.rollback()
 
         # Record closing line value now that all pre-game odds snapshots have
         # accumulated. Independent of settlement — runs even for picks whose
@@ -1892,7 +2160,8 @@ def settle_picks(game_date: str = None) -> dict:
         wins = losses = pushes = no_actions = 0
         total_profit_flat  = 0.0
         total_profit_kelly = 0.0
-        settled_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+        # settled_at was stamped above, before the score fetch, so a postponed
+        # game voided there and a final graded here carry the same pass time.
 
         # ── Game-level picks (moneyline, O/U, runline, F5 ML, 3-way) ──────
         # Trailing window so finals that land after a morning settle (WNBA/NBA

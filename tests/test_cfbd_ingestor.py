@@ -638,3 +638,75 @@ def test_refresh_stats_isolates_a_failing_season(monkeypatch):
         cf.refresh_ncaaf_stats(2018, 2020)
     assert seen == [2018, 2019, 2020]
     assert "2019" in str(exc.value)
+
+
+# ── FCS opponents must not resolve to the FBS school they start with ─────────
+#
+# ncaaf_teams is /teams/fbs only. Before 2026-09-07 the "longest school that
+# prefixes the input" rule handed every FCS opponent whose name extends an FBS
+# school's to that FBS school: "Indiana State Sycamores" -> "Indiana". The odds
+# ingestor then wrote NCAAF_2026-09-04_indiana_purdue, CFBD's final landed on
+# NCAAF_2026-09-04_indiana-state_purdue, and the live BET on the odds row sat
+# unsettled. Six BETs across 2026-09-04/05, all this shape.
+
+@pytest.fixture
+def fbs_registry(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "Indiana",        "mascot": "Hoosiers",         "alt": []},
+        {"school": "Utah",           "mascot": "Utes",             "alt": []},
+        {"school": "Houston",        "mascot": "Cougars",          "alt": []},
+        {"school": "North Carolina", "mascot": "Tar Heels",        "alt": []},
+        {"school": "Tennessee",      "mascot": "Volunteers",       "alt": []},
+        {"school": "Northwestern",   "mascot": "Wildcats",         "alt": []},
+        {"school": "Arkansas",       "mascot": "Razorbacks",       "alt": []},
+        {"school": "Hawai'i",        "mascot": "Rainbow Warriors", "alt": []},
+        {"school": "Ohio",           "mascot": "Bobcats",          "alt": []},
+        {"school": "Ohio State",     "mascot": "Buckeyes",         "alt": []},
+        {"school": "Nameless",       "mascot": "",                 "alt": []},
+    ])
+    return cf
+
+
+@pytest.mark.parametrize("fcs_name", [
+    "Indiana State Sycamores",          # the 2026-09-04 Purdue game
+    "North Carolina A&T Aggies",        # Georgia State
+    "Tennessee State Tigers",           # Georgia
+    "Houston Christian Huskies",        # Rice
+    "Northwestern State Demons",        # Louisiana Tech
+    "Utah Tech Trailblazers",           # BYU
+    "Arkansas-Pine Bluff Golden Lions", # Missouri, 2026-09-03
+])
+def test_an_fcs_name_that_extends_an_fbs_school_passes_through_unresolved(
+        fbs_registry, fcs_name):
+    """The safe outcome (see test_resolver_falls_back_to_the_input_unchanged):
+    an unresolved name builds a game_id nothing else matches, which is
+    recoverable - a WRONG school builds a matchup that never happened."""
+    assert fbs_registry.resolve_odds_api_school(fcs_name) == fcs_name
+
+
+def test_a_prefix_match_still_resolves_when_the_remainder_is_the_mascot(
+        fbs_registry):
+    assert fbs_registry.resolve_odds_api_school("Indiana Hoosiers") == "Indiana"
+
+
+def test_a_shortened_two_word_mascot_still_resolves(fbs_registry):
+    """A book that writes 'Hawaii Warriors' for the Rainbow Warriors."""
+    assert fbs_registry.resolve_odds_api_school("Hawaii Warriors") == "Hawai'i"
+
+
+def test_ohio_and_ohio_state_do_not_collide_either_way(fbs_registry):
+    assert fbs_registry.resolve_odds_api_school("Ohio Bobcats") == "Ohio"
+    assert fbs_registry.resolve_odds_api_school("Ohio State Buckeyes") == "Ohio State"
+
+
+def test_a_prefix_needs_a_word_boundary(fbs_registry):
+    assert fbs_registry.resolve_odds_api_school("Indianapolis Hoosiers") == \
+        "Indianapolis Hoosiers"
+
+
+def test_a_registry_row_without_a_mascot_cannot_vouch_for_a_remainder(
+        fbs_registry):
+    assert fbs_registry.resolve_odds_api_school("Nameless") == "Nameless"
+    assert fbs_registry.resolve_odds_api_school("Nameless State Tigers") == \
+        "Nameless State Tigers"
