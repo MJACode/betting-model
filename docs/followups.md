@@ -103,7 +103,7 @@ other 16 of 43 name only the home team) once, whole-word. Verified on the
 worker's 22:30 UTC pass: 27 corrected, 0 still wrong. The Discord and
 app posts that already went out under the wrong name are not rewritten.
 
-## [ ] Three phantom MLB `games` rows from April, and one unscored real one
+## [ ] Three phantom MLB `games` rows from April (RELABELLED 2026-09-07), and one unscored real one
 
 Session 253 (2026-09-07). `MLB_2026-04-16_NYM_LAD`, `MLB_2026-04-17_SEA_SD`
 and `MLB_2026-04-17_COL_HOU` are the 04-15 and 04-16 night games filed a
@@ -111,8 +111,12 @@ second time under their UTC date with no start time (the story is in the
 session entry). Pick 661 on the first is voided; the two AVOIDs on it and the
 two on SEA_SD are inert, since no final will ever land on those ids. The rows
 themselves are still there, and each is a duplicate of a scored row one day
-earlier. Merge or void the three rows the way the ET/UTC NCAAF duplicates
-above are handled; the picks point at them, so they are not deleted.
+earlier. **Done 2026-09-07 (mike: "clean up the three phantom rows"):** the
+four AVOIDs are voided (declared job `void-phantom-utc-avoids-2026-04-16-17`)
+and the rows carry `data_source = 'duplicate_utc'`
+(`data/migrations/mlb_phantom_utc_rows_2026_09_07.sql`). Not deleted, the
+picks point at them; not scored, the picks post-date their games. What is
+left open in this item is the 04-13 row below.
 
 Separately, `MLB_2026-04-13_NYM_LAD` was created by the 2026-09-01 historical
 backfill with no score: a real game (first pitch 02:11Z on the 14th) that the

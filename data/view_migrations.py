@@ -64,6 +64,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # BETs, and corrects each label once. Every step guards on its own
     # property and no-ops forever after.
     "ncaaf_fcs_visitor_names_2026_09_07.sql",
+    # 2026-09-07: three MLB games rows that are the previous night's game filed
+    # again under its UTC date. Relabelled data_source='duplicate_utc', never
+    # deleted or scored (five voided picks point at them). No-ops after once.
+    "mlb_phantom_utc_rows_2026_09_07.sql",
 ]
 
 
