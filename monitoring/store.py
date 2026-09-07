@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 
+from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 
 RETENTION_DAYS = int(os.environ.get("API_LOG_RETENTION_DAYS", "7"))
@@ -89,12 +90,18 @@ def ensure_table(conn) -> None:
     ~3,600 forced PostgREST schema-cache reloads, during which the API answered
     503 to the mobile app. Measured 2026-09-01.
     """
-    if schema_is_current(
-        conn, "api_call_log",
-        indexes=INDEX_NAMES, rls=True, revoked_from=("anon", "authenticated"),
-    ):
+    # BOTH tables are probed, because the guard short-circuits on the FIRST one
+    # and api_call_daily arrived later: asking only about api_call_log would
+    # return True on a database that has never had the rollup table, and the
+    # rollup would then fail forever on a missing relation. Same class of bug as
+    # the job_queue guard that skipped its own lock-down.
+    if (schema_is_current(
+            conn, "api_call_log",
+            indexes=INDEX_NAMES, rls=True, revoked_from=API_ROLES)
+            and schema_is_current(
+                conn, "api_call_daily", rls=True, revoked_from=API_ROLES)):
         return
-    for stmt in (DDL, *INDEXES, *LOCKDOWN):
+    for stmt in (DDL, *INDEXES, *LOCKDOWN, DAILY_DDL):
         try:
             conn.execute(stmt)
             conn.commit()
@@ -103,10 +110,98 @@ def ensure_table(conn) -> None:
                 conn.rollback()
             except Exception:
                 pass
+    # Worker-only, so it arrives closed rather than inheriting the default anon
+    # grant. lock_down carries its own ddl_guard gate (#546).
+    try:
+        lock_down(conn, "api_call_daily")
+        conn.commit()
+    except Exception:                                          # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+DAILY_DDL = """
+CREATE TABLE IF NOT EXISTS api_call_daily (
+    day        DATE   NOT NULL,
+    api        TEXT   NOT NULL,
+    source     TEXT   NOT NULL,
+    calls      BIGINT NOT NULL,
+    errors     BIGINT NOT NULL,
+    credits    NUMERIC,
+    resp_bytes BIGINT,
+    avg_ms     INTEGER,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (day, api, source)
+)
+"""
+
+# The aggregate itself. Grouped by the day in America/New_York, because every
+# other date in this project is an ET game_date and a chart that mixes UTC days
+# with ET dates lines up wrong by a few hours at the boundary.
+ROLLUP_SQL = """
+INSERT INTO api_call_daily (day, api, source, calls, errors, credits,
+                            resp_bytes, avg_ms, updated_at)
+SELECT (ts AT TIME ZONE 'America/New_York')::date AS day,
+       api, source,
+       count(*)                              AS calls,
+       count(*) FILTER (WHERE NOT ok)        AS errors,
+       NULLIF(sum(COALESCE(credits, 0)), 0)  AS credits,
+       sum(COALESCE(resp_bytes, 0))          AS resp_bytes,
+       avg(duration_ms)::int                 AS avg_ms,
+       NOW()
+FROM api_call_log
+GROUP BY 1, 2, 3
+ON CONFLICT (day, api, source) DO UPDATE SET
+    calls      = EXCLUDED.calls,
+    errors     = EXCLUDED.errors,
+    credits    = EXCLUDED.credits,
+    resp_bytes = EXCLUDED.resp_bytes,
+    avg_ms     = EXCLUDED.avg_ms,
+    updated_at = EXCLUDED.updated_at
+"""
+
+
+def roll_up(conn) -> int:
+    """Fold api_call_log into api_call_daily. Returns rows written (0 on failure).
+
+    WHY THIS EXISTS. api_call_log is pruned to API_LOG_RETENTION_DAYS (7), so
+    "calls per month" is not merely unavailable, it is UNOBTAINABLE from that
+    table -- the rows are gone before a month exists. Everything older than a
+    week was being deleted with no summary kept, which is CLAUDE.md §1b's
+    "extracted data belongs in Supabase" in its cheapest form: the rows cost
+    real API credits to generate and the aggregate costs one row per
+    (day, api, source) to keep forever.
+
+    IDEMPOTENT, AND SAFE AFTER THE PRUNE HAS RUN. The aggregate reads whatever
+    api_call_log still holds and upserts those days. A day whose rows have
+    already been pruned produces no group, so it is never touched -- the stored
+    total for it survives untouched rather than being recomputed as zero. That
+    property is what makes it safe to call this on every prune.
+    """
+    try:
+        cur = conn.execute(ROLLUP_SQL)
+        n = getattr(cur, "rowcount", 0) or 0
+        conn.commit()
+        return n
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return 0
 
 
 def prune(conn, days: int = RETENTION_DAYS) -> int:
-    """Drop rows older than `days`. Returns rows deleted (0 on any failure)."""
+    """Drop rows older than `days`. Returns rows deleted (0 on any failure).
+
+    ROLLS UP FIRST, ALWAYS. The rollup is what keeps the long history; deleting
+    before folding would throw away the only copy. roll_up() swallows its own
+    failures and returns 0, so a broken rollup cannot block the prune -- but the
+    ORDER is not optional, and tests/test_api_call_rollup.py pins it.
+    """
+    roll_up(conn)
     try:
         row = conn.execute(
             "DELETE FROM api_call_log WHERE ts < NOW() - (? || ' days')::interval "
