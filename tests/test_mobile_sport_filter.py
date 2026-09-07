@@ -91,6 +91,45 @@ def test_the_persisted_value_is_validated_against_sports():
     )
 
 
+def test_a_writer_landing_during_the_hydrate_is_not_overwritten():
+    """load() must re-check `cached` AFTER its await, not only before it.
+
+    setSportForVisit writes the module store from outside React when a push
+    deep-links to a sport-scoped board. PicksHomeScreen and SportToggle mount as
+    children of NavigationContainer, so their load() AsyncStorage read is always
+    still in flight when the push router runs -- making an unconditional
+    assignment after the await the NORMAL ordering, not a rare race. The user
+    taps an NCAAF live push, the stale read resolves, and they land on MLB.
+    Worse, save() already reached storage, so the switch appears on the NEXT
+    launch instead and reads as the app changing sport by itself.
+    (UX review, 2026-09-06.)
+    """
+    body = _load_body()
+    assert "await AsyncStorage.getItem" in body, "load() no longer awaits — re-read this"
+    assert re.search(r"cached = cached \?\? ", body), (
+        "load() assigns `cached` unconditionally after its await, so a writer "
+        "that landed during the read is silently reverted. Use `cached = cached "
+        "?? stored`."
+    )
+
+
+def test_a_visit_scoped_sport_change_does_not_persist():
+    """A notification is a visit, not a preference.
+
+    One NCAAF push must not leave an MLB regular on NCAAF for good, on a screen
+    they next open with no memory of the tap. The user's own SportToggle taps
+    still persist — those ARE the preference.
+    """
+    src = _src()
+    m = re.search(r"export function setSportForVisit\(.*?\n\}", src, re.S)
+    assert m, "setSportForVisit not found"
+    assert "setItem" not in m.group(0) and "save(" not in m.group(0), (
+        "setSportForVisit writes to storage, so a notification permanently "
+        "rewrites the user's default sport"
+    )
+    assert "listeners.forEach" in m.group(0), "mounted screens would not re-render"
+
+
 def test_no_second_hand_written_sport_list_in_the_hook():
     """SPORTS is the only place the sport set is enumerated in this file."""
     src = _src()

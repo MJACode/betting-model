@@ -34,6 +34,57 @@ This file is the precise enablement guide.
 - **Pipeline**: runs last as Step 11; `python run_pipeline.py --step push-notifications`
   (supports `--dry-run`). No-op when there are no devices or no new/dropped signals.
 
+## Status, measured — NO PUSH HAS EVER REACHED A PHONE (2026-09-06)
+
+`push_sent` looks like a working notifier and is not one. Counts on 2026-09-06:
+**1,158 `new_bet`, 578 `live_signal`**, running right up to that morning — and
+**`device_push_tokens` held ZERO rows**.
+
+The producers ledger *regardless of token count* (the comment in
+`notify_signal_changes` says so explicitly: "so a signal with zero devices
+online isn't re-detected forever"). So with no tokens, `messages` is `[]`,
+`_expo_send` is never called, and every lock_key is still written. **A row in
+`push_sent` means "this signal was considered", not "a phone was notified."**
+This is the `.claude/rules/operations.md` rule — *check `push_sent` before
+believing a notifier ever worked* — landing one step further along than it
+reads: the kinds are not empty, and the notifier still never delivered.
+
+What is missing is only the REGISTRATION half below: a native build carrying
+`expo-notifications`, APNs/FCM credentials, and a user who opts in
+(`usePushOptIn`). Until one token exists, every producer is a no-op and the
+routing added on 2026-09-06 (`mobile/src/lib/pushRoute.ts`,
+`usePushDeepLink`) cannot be exercised end to end.
+
+**Re-check with one query before believing otherwise:**
+
+```sql
+select (select count(*) from device_push_tokens where enabled) as devices,
+       kind, count(*) from push_sent group by kind order by count desc;
+```
+
+Zero devices means the ledger is bookkeeping, whatever its counts say.
+
+## Where a tap LANDS (added 2026-09-06)
+
+Every message now carries a versioned `data` payload and the app routes on it —
+before this a tap opened whatever screen the user last had open, which for a
+live pick (~45s stale by construction) discarded the point of the notification.
+
+| push | lands on |
+|---|---|
+| one pick in the batch | that pick's detail screen |
+| `live_signals` (several) | Picks → Live segment |
+| `new_bets` (several) | Picks → Signals |
+| `dropped` | Picks → Today (a flipped pick is no longer a signal) |
+| `line_change` | the tracked bet's detail (always exactly one) |
+| `feedback_reply` | that support thread |
+
+`sport` is only sent when the whole batch shares one; a push spanning sports
+must not switch the board, which shows one sport at a time. `PUSH_ROUTE_VERSION`
+is pinned in both halves — the worker deploys on merge, the app arrives by OTA,
+and an unreadable payload deliberately routes nowhere (the tap just opens the
+app) rather than guessing.
+
 Test it now without any mobile work:
 
 ```bash
