@@ -166,7 +166,8 @@ SITES = [
      (True, [], ["idx_pipeline_runs_started", "idx_pipeline_runs_kind"], 0)),
     ("tracking.live_calibration", _live_calibration, (True, [], [], 0)),
     ("models.probability_calibration", _probability_calibration,
-     (True, ["applied", "promoted", "promoted_a", "promoted_b", "promoted_at"], [], 0)),
+     (True, ["applied", "promoted", "promoted_a", "promoted_b", "promoted_at",
+             "promoted_method", "promoted_helps", "promoted_transfers"], [], 0)),
     # relrowsecurity is True from 2026-09-04: worker_jobs is one of the three
     # worker-only tables that carry RLS as a second lock behind the revoke, so
     # ensure_schema's guard now asks for it and an "already current" schema has
