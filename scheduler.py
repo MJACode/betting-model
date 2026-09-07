@@ -315,10 +315,18 @@ def run_job_queue() -> None:
     # A retrain runs for an hour. That is fine: APScheduler's default pool is ten
     # threads, so a long job occupies one while every other schedule keeps
     # firing, and max_instances=1 makes the ticks during it no-ops.
+    #
+    # SESSION MODE, deliberately. run_one holds a pg_advisory_lock across
+    # claiming a job AND executing it -- which is what stops two workers
+    # running the queue at once -- and a session-scoped lock cannot survive
+    # transaction pooling, where consecutive statements may land on different
+    # backends. Everything else moved to the transaction pooler on 2026-09-06
+    # to escape the session pool's 15-client ceiling; this is the one caller
+    # that must not.
     try:
         from data.db import get_connection
         from tracking.job_queue import run_one
-        conn = get_connection()
+        conn = get_connection(session_mode=True)
         try:
             result = run_one(conn)
         finally:
