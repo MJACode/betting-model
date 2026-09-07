@@ -514,6 +514,36 @@ rather than an archive; the other seven have no create site and are swept by the
 admin script only. They are locked rather than dropped because a repair is
 reversible only while its backup exists -- retention is a separate decision.
 
+**CLOSED 2026-09-04 in session 220** (mike: *"sure do the grant thing"*), as a
+rule rather than a single revoke: a relation the app READS now holds SELECT and
+nothing else unless it is named in `ANON_WRITABLE` (`data/anon_readable.py`),
+enforced and read back by `scripts/apply_anon_grants.py`. Stating it that way
+found **sixteen `v_*` views** carrying the same surplus that the one-table fix
+would have left. `TRUNCATE` is revoked from everything, the writable tables
+included -- it takes no `WHERE` clause, so no RLS policy can narrow it.
+
+The view grants were measured before being called harmless, because an
+auto-updatable non-`security_invoker` view would run its base-table permission
+AND RLS checks as the view OWNER (`postgres`, who bypasses both) -- a real write
+path, invisible to any check that looks only at base-table ACLs. All sixteen
+return 0 from `pg_relation_is_updatable(oid, true)` and carry
+`security_invoker=on`. Revoked anyway: a view that is later simplified can
+silently become updatable.
+
+**STILL OPEN, and it needs a person rather than a sweep:** the three genuinely
+app-written tables hold verbs no policy backs, inert exactly the way
+`game_weather`'s were --
+
+    device_push_tokens   policies: INSERT, UPDATE      surplus: DELETE
+    feedback             policies: INSERT              surplus: UPDATE, DELETE
+    tracked_bets         policies: INSERT, DELETE      surplus: UPDATE
+
+Narrowing them means deciding what the app is ALLOWED to do rather than what it
+currently does -- e.g. should a user be able to edit a tracked bet, or only add
+and remove one? Answer that and the change is a one-line edit to `ANON_WRITABLE`.
+
+**The original finding, kept for the record:**
+
 **A NEW OPEN DOOR OF THE SAME SHAPE, FOUND WHILE VERIFYING THIS ONE:**
 `game_weather` grants anon INSERT/UPDATE/DELETE while its only anon policies are
 SELECT (`allow anon read`, `anon read game_weather`, plus `service_role_all`). So
