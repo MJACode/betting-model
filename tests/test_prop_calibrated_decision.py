@@ -242,8 +242,29 @@ def test_no_caps_configured_is_a_no_op(_identity_cal):
     assert scorer.apply_prop_daily_cap(picks, {}, {}) == picks
 
 
-def test_the_interim_cap_covers_the_two_models_that_overshot():
-    """config.py's own projections vs what fired: ~5.4/wk against ~52/wk, and
-    ~19.8/wk against ~39/wk. The cap comes off when their maps are promoted."""
-    assert set(config.PROP_MAX_SIGNALS_PER_DAY) == {
-        "mlb_prop_pitcher_k", "mlb_prop_pitcher_hits"}
+def test_the_cap_covers_EVERY_UNPAUSED_model_in_the_pitcher_pool():
+    """A CAP THAT NAMES MODELS GOES STALE THE DAY ONE IS UNPAUSED.
+
+    The first version of this test listed the two models that had overshot, so
+    it asserted the config matched itself and could never notice a third. It
+    already missed `mlb_prop_pitcher_outs`, which fired uncapped at up to 6/day
+    while the list said the cap was complete.
+
+    The invariant that actually holds: every model in the one-bet-per-player
+    pool that is not paused competes for the same daily board, so every one of
+    them carries a ceiling. `er` and `walks` are paused today and are the reason
+    this is derived rather than written out — unpause one and this fails, which
+    is the point."""
+    pool = set(config.PROP_ONE_BET_PER_PLAYER["mlb_pitcher"])
+    active = pool - set(config.PAUSED_MODELS)
+    assert active, "the pool is entirely paused — this test has stopped testing"
+    assert active <= set(config.PROP_MAX_SIGNALS_PER_DAY), (
+        f"uncapped and unpaused: {sorted(active - set(config.PROP_MAX_SIGNALS_PER_DAY))}")
+
+
+def test_the_swept_depth_is_two():
+    """2026-09-07 (mike): swept post-dedupe, top-N by claimed EV per model per
+    day, 08-24 -> 09-06 pooled across k/hits/outs. top 2 is +6.96u at +16.2%
+    ROI, the maximum on BOTH units and ROI (top 1 +2.12u/+9.6%, top 3
+    +4.00u/+6.5%). Pinned so a later edit has to restate the sweep."""
+    assert set(config.PROP_MAX_SIGNALS_PER_DAY.values()) == {2}

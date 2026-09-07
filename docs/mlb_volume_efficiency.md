@@ -713,3 +713,95 @@ Whichever, it is a threshold change and needs an `Updated-By:` trailer.
 - Not that cutting to 5/day buys better bets. **Below roughly 8 pre-game and 9
   live, every further reduction is a volume guarantee and nothing more** — no
   measured ranking separates what remains.
+
+---
+
+## 12. The EV sweep, and the depth mike chose
+
+mike, 2026-09-07, after reading §11: *"I just want the strongest ev picks for
+highest overall profitability."* Reaffirmed after the caveat, so it is his call.
+This section is what the sweep actually said.
+
+**Read "EV" here as a RANK, not a price.** It is `p·b − (1−p)` on probabilities
+running ~15pp hot (§11.2), so no number below is a forecast of return. It
+orders picks, which is all the cap asks of it.
+
+### 12.1 An EV FLOOR is not supported — the sweep has no plateau
+
+Post-dedupe pitcher props, 08-24 → 09-06, cumulative min-EV floor. Every bet
+already clears 0.14, so the sweep only bites above that:
+
+| min EV | n | /day | ROI | units |
+|---|---|---|---|---|
+| 0.14 | 99 | 7.1 | +0.3% | +0.33 |
+| 0.18 | 80 | 5.7 | +6.0% | +4.83 |
+| 0.22 | 70 | 5.0 | +5.1% | +3.54 |
+| 0.24 | 61 | 4.4 | +0.8% | +0.49 |
+| 0.26 | 53 | 3.8 | +12.7% | +6.73 |
+| 0.28 | 49 | 3.5 | +5.9% | +2.90 |
+| 0.30 | 39 | 2.8 | +12.6% | +4.91 |
+| 0.34 | 27 | 1.9 | −3.9% | −1.04 |
+
+The adjacent cells look similar only because a cumulative sweep shares most of
+its rows between neighbours. **Differencing them gives the marginal bucket,
+and the marginals alternate sign**: [0.16,0.18) −4.53u, [0.22,0.24) +3.05u,
+[0.24,0.26) **−6.24u**, [0.26,0.28) +3.83u, [0.28,0.30) −2.01u, [0.30,0.32)
++3.73u. EV is not monotone with profit anywhere in this window, so the +12.7%
+at 0.26 is a peak between two troughs — exactly what §7 says not to ship. **No
+`MODEL_MIN_EV` entry was added for the pre-game props.**
+
+### 12.2 A DEPTH is supported, and it is the mechanism already shipped
+
+"Strongest EV picks" is top-N by claimed EV per day — which is precisely what
+`apply_prop_daily_cap` already does. The only question is N:
+
+| Depth | n | /day | ROI | units |
+|---|---|---|---|---|
+| top 1 per model | 22 | 1.6 | +9.6% | +2.12 |
+| **top 2 per model** | 43 | **3.1** | **+16.2%** | **+6.96** |
+| top 3 per model | 62 | 4.4 | +6.5% | +4.00 |
+| top 4 per model | 75 | 5.4 | +5.9% | +4.44 |
+
+Top 2 is the maximum on **both** total units and ROI, which is unusual enough to
+be worth stating: tightening past it costs profit as well as volume.
+
+A pooled board-wide cap was measured too and is worse at every depth (top 2 =
++2.95u/20, top 3 = +1.31u/28) — the per-model version keeps a diversification
+the pooled one throws away.
+
+### 12.3 The models disagree about depth, and the uniform 2 is a deliberate choice
+
+| Model | top 1 | top 2 | top 3 | uncapped |
+|---|---|---|---|---|
+| `mlb_prop_pitcher_hits` | +4.80 (7) | **+9.89 (14)** | +9.13 (21) | +5.43 (32) |
+| `mlb_prop_pitcher_outs` | +0.30 (6) | +1.74 (11) | +0.90 (16) | **+3.69 (23)** |
+| `mlb_prop_pitcher_k` | −2.98 (9) | −4.67 (18) | −6.04 (25) | −8.79 (44) |
+
+`hits` wants 2. **`outs` is BETTER uncapped** — capping it costs ~2u on this
+window. `k` is negative at every depth, so the cap reduces a loss rather than
+finding an edge; taking only its strongest-EV picks does not rescue it.
+
+Fitting each model its own depth scores +13.58u on this window and was offered
+and declined: three parameters fitted to n=14/23/44 in a single window is the
+overfit §7 exists to prevent. **The uniform 2 gives up ~2u of in-sample profit
+to avoid it.** If `k` is still negative when its calibration map lands, that is a
+pause decision on its own evidence, not a depth decision.
+
+### 12.4 Live is closed to this approach — stated once, with the number
+
+`mlb_live_total_runs` on its current 0.70/0.14 cut (game_date ≥ 08-31, n=69):
+claimed EV spans **0.321 to 0.385**. The whole board sits inside a **6.4pp
+band**, because the prob and edge floors plus the ~15pp inflation put it there.
+
+Split that band at its median (0.341):
+
+| | n | units |
+|---|---|---|
+| top half by EV | 35 | **−4.99** |
+| bottom half by EV | 34 | **+4.72** |
+
+A floor cannot bite (everything clears it), and a top-N would select the losing
+half — the same inversion §11.3 found by daily rank and by price, now on the
+current-cut population. **mike's call: keep the lane running unfiltered** at
+~9/day, −0.26u over 69, and re-open the question when the map is fittable
+(~09-10). Any cut here would be a guess dressed as a filter.
