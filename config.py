@@ -1021,6 +1021,65 @@ PAUSED_MODELS: set = {
     # gamebook source and this gap closes. It is the sport's best signal
     # (§2c: 16.5% MAE lift) measured against the wrong ruler.
     "nfl_prop_tackles_assists",
+    # ── RE-PAUSED 2026-09-07 (mike), hours after the unpause ──────────────
+    # The same defect as tackles, at the same magnitude, in four more models.
+    #
+    # mike asked why so many bets were unders. Measured on the live Week 1
+    # board: 14 of 16 BETs were unders, while the underlying picks were ~50/50
+    # over/under. It is the BET CUT that is one-sided, not the models. The
+    # cause, de-vigged against DraftKings' own two-sided price per proposition:
+    #
+    #     model                props   our P(over)   DK de-vig      gap
+    #     sacks                    2        0.303       0.380    -7.7pp
+    #     rush_attempts           13        0.418       0.492    -7.4pp
+    #     tackles_assists          4        0.441       0.503    -6.2pp  (paused)
+    #     rush_yards              16        0.437       0.499    -6.2pp
+    #     rush_rec_yards          15        0.438       0.500    -6.1pp
+    #     ----------------------------------------- still live -------------
+    #     pass_yards              20        0.456       0.500    -4.4pp
+    #     pass_tds                14        0.413       0.455    -4.2pp
+    #     rec_yards               67        0.472       0.500    -2.8pp
+    #     pass_completions        16        0.488       0.504    -1.6pp
+    #     pass_attempts           23        0.484       0.499    -1.5pp
+    #     receptions              39        0.478       0.491    -1.4pp
+    #
+    # ALL ELEVEN ARE NEGATIVE AND THAT IS THE POINT. Eleven models across
+    # eleven markets do not independently arrive at the same sign; it is one
+    # systematic downward bias. P(under) = 1 - P(over) carries it entirely, so
+    # an edge threshold converts that bias straight into under bets.
+    #
+    # The market is NOT under-leaning enough to justify it. Measured on real
+    # outcomes over every DK quote we hold: reception_yds -0.8pp, receptions
+    # -2.0pp, rush_yds -2.4pp against DK's implied. Reality leans under by
+    # ~1-2pp; these models lean under by 1.4 to 7.7pp. We are not finding
+    # under value, we are manufacturing it.
+    #
+    # These four are cut at the TACKLES LINE (<= -6pp) -- the standard already
+    # accepted for tackles, not a new number invented here. Section 5b
+    # independently measured all four negative at real DraftKings prices.
+    #
+    # THE REMAINING SEVEN ARE BIASED TOO, just less, and pausing these four
+    # does NOT fix the skew: rec_yards and receptions sit under the -6pp line
+    # yet produce 8 of the 14 under BETs between them. After this change the
+    # live board is still 11 unders to 1 over. The line drawn here is on the
+    # measured DEFECT, not on the symptom.
+    #
+    # AND THE CUTS ARE NOT THE PROBLEM EITHER. f4bd516f tightened all eleven to
+    # the top decile (prob 0.63-0.78, edge 0.15-0.19) hours before this, and
+    # every BET counted above was written AFTER that landed. A tighter cut on a
+    # biased probability selects the same side, just less often.
+    #
+    # The real fix is calibration, and for these models it CANNOT BE FITTED
+    # YET. #548 wired the calibrated decision into props the same day, but
+    # model_calibration holds n=0 graded picks for every nfl_prop_* model --
+    # none has settled a single bet, so apply_calibration falls through to the
+    # raw number. The Platt path fits itself once Week 1 settles; until then
+    # there is nothing to map with, which is the honest reason this is a pause
+    # rather than a correction.
+    "nfl_prop_sacks",
+    "nfl_prop_rush_attempts",
+    "nfl_prop_rush_yards",
+    "nfl_prop_rush_rec_yards",
     #
     # 2026-09-07 (mike): PAUSED after three formulations measured the same way
     # and all three lost. mike: "there are NO UFC picks in the channel" -> the
