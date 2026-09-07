@@ -49,6 +49,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 229 — college football player props, built and measured before they are scheduled |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 228 — alternates on every pass, and for WNBA, NBA and NFL |
 | 2026-09-05 | [2026-09](./2026-09.md) | 2026-09-05, session 227 — "Yes to alternate lines", team line legs, the Picks screen says when its lines fail, and Mobbin is one route |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 221 — the last three write grants were measurable from the call sites, not a decision; feedback needed no grant at all |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 220 — the read surface was never checked against the write surface; game_weather plus sixteen views gave up writes no policy backed |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 226 — three complaints after the betslip flow shipped: dashes at game time, BetMGM not opening, and "take me to the App Store" |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 225 — "I gave you bad info": the line pill asks to add to the betslip, and the betslip opens at any book |
