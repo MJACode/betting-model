@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import logging
 import functools
+import math
 import os
 import subprocess
 import sys
@@ -145,16 +146,29 @@ RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
 # to a JSONL audit log and alerts nobody, so a bad tick costs a poll.
 RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "1") != "0"
 
-# Hours before kickoff inside which the prop card polls. 30 brackets BOTH
-# measured offsets (T-24h and T-3h) without extrapolating far past them.
+# Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
+# matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards
+# do rather than three days later.
 #
-# The window matters because publishing LOCKS insert-once: a pick taken at an
-# offset where the edge is noise is a locked bet, not a discarded one. T-24h and
-# T-3h are measured (+4.05% / +0.73%, indistinguishable), and the pair is worth
-# polling because only 13% of edges are the same proposition at both — a second
-# look roughly doubles distinct bets rather than re-confirming the first.
-# Everything beyond that is unmeasured, so the window stops just past T-24h.
-NFL_PROP_WINDOW_HOURS = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "30"))
+# WAS 30, and why that was wrong to keep. 30 bracketed the two MEASURED offsets
+# (T-24h and T-3h) and stopped just past the earlier one. But the finding that
+# justifies polling at all argues the other way: of the edges found at T-24h and
+# T-3h, only 13% are the same proposition — 124 exist only at T-24h, 126 only at
+# T-3h. Each poll finds NEW bets rather than re-confirming the last, so more
+# polling is more bets, and the only thing that ever argued for stopping at 30
+# was the ~1.26M-credit estimate for hourly-from-T-10-days.
+#
+# mike, 2026-09-06: "I dont care about credit costs." Measured that day, a full
+# 16-event Week 1 pass is 484 credits, so hourly across a 126-day season is
+# ~1.46M against 4.53M remaining. His call, with the number in front of him.
+#
+# Pinnacle DOES quote this far out — the T-70h fetch on 2026-09-06 returned all
+# eight sharp markets — so the wider window is buying real board, not empty
+# calls. What is still true is that no offset beyond T-24h has been GRADED, and
+# publishing LOCKS insert-once: a pick taken where the edge is noise is a locked
+# bet, not a discarded one. created_at against game_time recovers the offset, so
+# the season measures which ones paid. Re-read this before widening further.
+NFL_PROP_WINDOW_HOURS = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "240"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -732,15 +746,28 @@ def run_nfl_prop_card() -> None:
     lead = _nfl_lead_hours()
     if lead is None or lead > NFL_PROP_WINDOW_HOURS:
         return
-    log.info("NFL prop card: next kickoff in %.1fh", lead)
-    # --days 2, not the card's 8-day default: --fetch prices every event in the
-    # window at ~61 credits each, and the card only acts inside T-30h anyway, so
-    # a wider window would re-buy Thursday's board on every Sunday tick.
+    log.info("NFL prop tick: next kickoff in %.1fh", lead)
+    # --days DERIVED FROM THE WINDOW, not a constant. It was pinned at 2 to suit
+    # the old 30h window; leaving it there while the window widened would have
+    # run this job hourly for ten days and still only priced the next 48 hours,
+    # which is the quiet half-change §1b's shared-constant rule exists to stop.
+    # Ceil, and at least 2, so the Thursday-to-Monday spread of one NFL week is
+    # never split across the boundary.
+    days = max(2, math.ceil(NFL_PROP_WINDOW_HOURS / 24))
     _run([sys.executable, "-m", "scripts.nfl_prop_market_card",
-          "--days", "2", "--fetch", "--publish"], "nfl-prop-card")
-    # As above: the card's `--publish` writes the PICK. Getting that pick onto
-    # the app and into Discord is this call, and waiting for the next refresh
-    # pass to do it is what lost a UFC bet on 2026-09-05.
+          "--days", str(days), "--fetch", "--publish"], "nfl-prop-card")
+    # THE FETCH ABOVE IS THE ONLY NFL PROP ODDS PRODUCER, and it writes every
+    # market and book — not just the eight Pinnacle sharp markets the card
+    # itself reads. So the twelve distributional models (unpaused 2026-09-06)
+    # score off the board that was just bought, in the same tick, rather than
+    # getting their own fetch on their own cadence. One producer, one cadence,
+    # one publish: adding this to refresh_pass.sh instead would have re-bought
+    # the board ~50 times a day for the same picks.
+    _run([sys.executable, "run_pipeline.py", "--step", "nfl-prop-scoring"],
+         "nfl-prop-scoring")
+    # As above: the card's `--publish` and the scorer both write the PICK.
+    # Getting that pick onto the app and into Discord is this call, and waiting
+    # for the next refresh pass to do it is what lost a UFC bet on 2026-09-05.
     _publish_new_signals("nfl-prop-card")
 
 
