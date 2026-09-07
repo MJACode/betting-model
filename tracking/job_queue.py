@@ -591,8 +591,31 @@ def _validate_void_picks(args: dict) -> dict:
     return {"pick_ids": ids, "reason": reason[:500]}
 
 
+def _job_ncaaf_teams_refresh(**kw):
+    """Re-pull the school registry, every classification, and PROBE the
+    resolver on the worker with the names that broke. The probe is the
+    verification: it runs against the registry the worker actually holds."""
+    from data.ingestors.cfbd_ingestor import (ingest_ncaaf_teams, reset_school_cache,
+                                              resolve_odds_api_school)
+    n = ingest_ncaaf_teams(kw["season"])
+    reset_school_cache()
+    probe = {name: resolve_odds_api_school(name) for name in kw["probe"]}
+    return {"season": kw["season"], "rows": n, "probe": probe}
+
+
+def _validate_ncaaf_teams_refresh(args: dict) -> dict:
+    season = int(args.get("season") or datetime.now().year)
+    if not (2000 <= season <= datetime.now().year + 1):
+        raise ValueError(f"season {season} out of range")
+    probe = args.get("probe") or []
+    if not isinstance(probe, list) or len(probe) > 50:
+        raise ValueError("probe must be a list of at most 50 Odds API names")
+    return {"season": season, "probe": [str(p) for p in probe]}
+
+
 JOBS = {
     "void_picks":      (_job_void_picks,       _validate_void_picks),
+    "ncaaf_teams_refresh": (_job_ncaaf_teams_refresh, _validate_ncaaf_teams_refresh),
     "publish_x_results": (_job_publish_x_results, _validate_publish_x_results),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),

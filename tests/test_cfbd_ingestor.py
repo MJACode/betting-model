@@ -710,3 +710,110 @@ def test_a_registry_row_without_a_mascot_cannot_vouch_for_a_remainder(
     assert fbs_registry.resolve_odds_api_school("Nameless") == "Nameless"
     assert fbs_registry.resolve_odds_api_school("Nameless State Tigers") == \
         "Nameless State Tigers"
+
+
+# ── the registry carries every classification (2026-09-07) ───────────────────
+#
+# mike: "fix the FCS registry so this stops at the source". The resolver can
+# only name a school it has a row for, and ncaaf_teams was /teams/fbs alone.
+
+def test_parse_teams_keeps_cfbd_classification_and_lowercases_it():
+    rows = parse_teams([{"school": "Indiana State", "mascot": "Sycamores",
+                         "classification": "FCS"}])
+    assert rows[0]["classification"] == "fcs"
+
+
+def test_parse_teams_all_schools_pull_never_defaults_to_fbs():
+    """A lower-division school CFBD has not classified is unknown, not FBS."""
+    rows = parse_teams([{"school": "Somewhere", "mascot": "Things"}],
+                       default_classification=None)
+    assert rows[0]["classification"] is None
+
+
+class _TeamsConn:
+    def __init__(self):
+        self.rows = []
+        self.commits = 0
+
+    def executemany(self, sql, rows):
+        self.rows.extend(rows)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_ingest_pulls_fbs_then_everyone_and_fbs_rows_win(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    calls = []
+
+    def fake_get(path, **params):
+        calls.append((path, params))
+        if path == "/teams/fbs":
+            return [{"school": "Indiana", "mascot": "Hoosiers", "conference": "Big Ten"}]
+        if path == "/teams":
+            return [{"school": "Indiana", "mascot": "Hoosiers", "conference": "B1G",
+                     "classification": "fbs"},
+                    {"school": "Indiana State", "mascot": "Sycamores",
+                     "conference": "MVFC", "classification": "fcs"},
+                    {"school": "Mercyhurst", "mascot": "Lakers"}]
+        raise AssertionError(path)
+
+    monkeypatch.setattr(cf, "_get", fake_get)
+    conn = _TeamsConn()
+    assert cf.ingest_ncaaf_teams(2026, conn) == 3
+    by_school = {r["school"]: r for r in conn.rows}
+    assert by_school["Indiana"]["conference"] == "Big Ten"      # the FBS pull's row
+    assert by_school["Indiana"]["classification"] == "fbs"
+    assert by_school["Indiana State"]["classification"] == "fcs"
+    assert by_school["Mercyhurst"]["classification"] is None    # unknown, not fbs
+    assert conn.commits == 1
+    assert [c[0] for c in calls] == ["/teams/fbs", "/teams"]
+    assert calls[1][1] == {"year": 2026}
+
+
+def test_ingest_retries_everyone_without_a_year_if_the_season_filter_is_empty(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    calls = []
+
+    def fake_get(path, **params):
+        calls.append((path, params))
+        if path == "/teams/fbs":
+            return []
+        return [] if params else [{"school": "Furman", "mascot": "Paladins",
+                                   "classification": "fcs"}]
+
+    monkeypatch.setattr(cf, "_get", fake_get)
+    conn = _TeamsConn()
+    assert cf.ingest_ncaaf_teams(2026, conn) == 1
+    assert calls == [("/teams/fbs", {"year": 2026}), ("/teams", {"year": 2026}),
+                     ("/teams", {})]
+
+
+@pytest.fixture
+def full_registry(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "Indiana",        "mascot": "Hoosiers",     "alt": []},
+        {"school": "Indiana State",  "mascot": "Sycamores",    "alt": []},
+        {"school": "Utah",           "mascot": "Utes",         "alt": []},
+        {"school": "Utah Tech",      "mascot": "Trailblazers", "alt": []},
+        {"school": "Utah State",     "mascot": "Aggies",       "alt": []},
+        {"school": "North Carolina", "mascot": "Tar Heels",    "alt": []},
+        {"school": "North Carolina A&T", "mascot": "Aggies",   "alt": []},
+        {"school": "Abilene Christian", "mascot": "Wildcats",  "alt": []},
+    ])
+    return cf
+
+
+@pytest.mark.parametrize("name, school", [
+    ("Indiana State Sycamores", "Indiana State"),
+    ("Indiana Hoosiers", "Indiana"),
+    ("Utah Tech Trailblazers", "Utah Tech"),
+    ("Utah State Aggies", "Utah State"),
+    ("Utah Utes", "Utah"),
+    ("North Carolina A&T Aggies", "North Carolina A&T"),
+    ("North Carolina Tar Heels", "North Carolina"),
+    ("Abilene Christian Wildcats", "Abilene Christian"),
+])
+def test_with_the_visitor_in_the_registry_it_resolves_to_itself(full_registry, name, school):
+    assert full_registry.resolve_odds_api_school(name) == school

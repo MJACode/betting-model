@@ -675,3 +675,32 @@ def test_a_pick_that_does_not_exist_is_reported_as_missing(monkeypatch):
     conn, out = _run_void(monkeypatch, [], pick_ids=(661, 999999))
     assert out == {"voided": [], "refused": [], "missing": [661, 999999]}
     assert conn.writes == []
+
+
+# ── ncaaf_teams_refresh ──────────────────────────────────────────────────────
+
+def test_teams_refresh_defaults_to_this_season_and_an_empty_probe():
+    cleaned = q._validate_ncaaf_teams_refresh({})
+    assert cleaned["season"] == datetime.now().year and cleaned["probe"] == []
+
+
+def test_teams_refresh_bounds_the_season_and_the_probe():
+    with pytest.raises(ValueError, match="season"):
+        q._validate_ncaaf_teams_refresh({"season": 1999})
+    with pytest.raises(ValueError, match="probe"):
+        q._validate_ncaaf_teams_refresh({"probe": "Indiana State Sycamores"})
+    with pytest.raises(ValueError, match="probe"):
+        q._validate_ncaaf_teams_refresh({"probe": ["x"] * 51})
+
+
+def test_teams_refresh_reingests_then_probes_the_resolver(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    order = []
+    monkeypatch.setattr(cf, "ingest_ncaaf_teams", lambda season, conn=None: order.append("ingest") or 7)
+    monkeypatch.setattr(cf, "reset_school_cache", lambda: order.append("reset"))
+    monkeypatch.setattr(cf, "resolve_odds_api_school",
+                        lambda name, conn=None: order.append("probe") or name.rsplit(" ", 1)[0])
+    out = q._job_ncaaf_teams_refresh(season=2026, probe=["Indiana State Sycamores"])
+    assert out == {"season": 2026, "rows": 7,
+                   "probe": {"Indiana State Sycamores": "Indiana State"}}
+    assert order == ["ingest", "reset", "probe"]
