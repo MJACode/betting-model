@@ -237,8 +237,30 @@ def main() -> int:
         # holds rather than issued blind, so the statement count and the log
         # reflect the real change: every GRANT/REVOKE is DDL and fires
         # Supabase's pgrst_ddl_watch, and this file already issues 34 of them.
+        # THE SWEEP IS DRIVEN BY THE CATALOG, NOT BY ANON_READABLE. Iterating the
+        # declared READ surface misses a relation that is writable without being
+        # readable, and that is not hypothetical: the first run of this code left
+        # `feedback` holding TRUNCATE, because feedback is in ANON_WRITABLE and
+        # NOT in ANON_READABLE, so the loop never visited it. The test asserting
+        # TRUNCATE is never granted passed the whole time -- it checks the
+        # declaration, and the declaration was right; the sweep was reading the
+        # wrong list. Five views and `confirmed_picks` were skipped the same way.
+        #
+        # Asking the catalog "who holds a write verb?" cannot have that hole, and
+        # it also covers anything created later without being declared anywhere.
+        holders = [
+            r[0] for r in conn.execute(
+                "SELECT c.relname FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'public' AND c.relkind IN ('r','v') "
+                "AND (has_table_privilege('anon', c.oid, "
+                "     'INSERT,UPDATE,DELETE,TRUNCATE') "
+                "  OR has_table_privilege('authenticated', c.oid, "
+                "     'INSERT,UPDATE,DELETE,TRUNCATE')) "
+                "ORDER BY c.relname").fetchall()
+        ]
         revoked = 0
-        for rel in list(ANON_READABLE) + list(AUTHENTICATED_ONLY):
+        for rel in holders:
             verbs = write_verbs_for(rel)
             held = [
                 v for v in verbs
@@ -253,8 +275,9 @@ def main() -> int:
                 f'REVOKE {", ".join(held)} ON public."{rel}" FROM anon, authenticated')
             logger.info(f"{rel}: revoked {', '.join(held)}")
             revoked += 1
-        logger.info(f"write verbs revoked on {revoked} relation(s); "
-                    f"{len(ANON_WRITABLE)} declared writable and left alone")
+        logger.info(f"write verbs revoked on {revoked} of {len(holders)} "
+                    f"relation(s) holding one; {len(ANON_WRITABLE)} declared "
+                    f"writable keep their declared verbs")
 
         # Verify inside the transaction: the app's read surface must survive.
         missing = [
@@ -350,7 +373,7 @@ def main() -> int:
         # that did not bite reports success.
         surplus = [
             f"{rel}:{v}"
-            for rel in list(ANON_READABLE) + list(AUTHENTICATED_ONLY)
+            for rel in holders
             for v in write_verbs_for(rel)
             if conn.execute(
                 "SELECT has_table_privilege('anon', %s, %s) "

@@ -592,6 +592,35 @@ def test_truncate_is_never_granted_to_anything():
         assert "TRUNCATE" not in allowed, rel
 
 
+def test_a_writable_relation_that_is_not_readable_is_still_swept():
+    """THE BUG THIS PINS ACTUALLY SHIPPED, and the test above did not catch it.
+
+    The first version of the write revoke iterated ANON_READABLE. `feedback` is
+    declared in ANON_WRITABLE and is NOT in ANON_READABLE, so the loop never
+    visited it and it kept TRUNCATE through a full apply — while
+    test_truncate_is_never_granted_to_anything went on passing, because that test
+    checks the DECLARATION and the declaration was correct. The sweep was reading
+    the wrong list.
+
+    So the sweep must be driven by the catalog — "which relations actually hold a
+    write verb" — rather than by any declared list, which by construction cannot
+    name a relation nobody remembered to declare.
+    """
+    src = (Path(__file__).resolve().parents[1] / "scripts"
+           / "apply_anon_grants.py").read_text(encoding="utf-8")
+    sweep = src[src.index("write verbs revoked on") - 3000:
+                src.index("write verbs revoked on")]
+    assert "has_table_privilege" in sweep and "pg_class" in sweep, (
+        "the write sweep does not ask the catalog which relations hold a write "
+        "verb; a declared-list loop cannot see an undeclared relation")
+    assert "for rel in holders:" in src, (
+        "the write sweep must iterate the catalog result, not a declared list")
+    # and the read-back must check the same set it swept
+    assert "for rel in holders\n" in src or "for rel in holders" in src[
+        src.index("surplus = ["):src.index("surplus = [") + 200], (
+        "the surplus read-back checks a different set than the sweep")
+
+
 def test_the_apply_script_revokes_writes_and_reads_the_result_back():
     """A revoke that did not bite reports success — the lesson from the first
     function-grant apply. The write revoke gets the same treatment as every
