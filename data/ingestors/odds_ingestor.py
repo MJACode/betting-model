@@ -66,6 +66,33 @@ MARKETS = ["h2h", "spreads", "totals"]
 # -- and did not, on the 2026-09-01 MLB backfill (see prune_odds.PROTECTED_SOURCES).
 HISTORICAL_ODDS_SOURCE = "odds_api_historical"
 
+# The moment the stamp above first ran in production (#553 deployed, worker
+# up at 2026-09-07T21:04Z). A ledger entry pulled AFTER this was written by
+# code that stamps and protects its rows, so it is really stored and a run
+# can resume past it. An entry from BEFORE it was thinned by the pruner and
+# is the thing `ignore_ledger` exists to re-buy. Without the split, a re-buy
+# ignored its own progress: four worker redeploys in twenty minutes restarted
+# mlb-history-2024-rebuy three times and each restart re-pulled from
+# 2024-03-28 -- 2,901 rows for 967 propositions on that date, exactly 3x.
+HISTORICAL_STAMP_SINCE = "2026-09-07T21:04:00+00:00"
+
+
+def _ledger_entry_is_resumable(pulled_at) -> bool:
+    """True when the ledger row was written by stamping code (see above)."""
+    from datetime import datetime, timezone
+    if pulled_at is None:
+        return False
+    if isinstance(pulled_at, datetime):
+        dt = pulled_at
+    else:
+        try:
+            dt = datetime.fromisoformat(str(pulled_at).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt >= datetime.fromisoformat(HISTORICAL_STAMP_SINCE)
+
 # MLB first-5-innings markets (pulled only for MLB)
 MLB_F5_MARKETS = ["h2h_1st_5_innings", "spreads_1st_5_innings", "totals_1st_5_innings"]
 
@@ -1283,11 +1310,14 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     one region. Three markets => ~30 credits per (date, hour), whether one book
     is named or seven.
 
-    `ignore_ledger` re-spends on (date, hour)s the ledger says are stored. It
-    exists for exactly one reason: the 2026-09-01 MLB backfill was pruned to
-    one row per proposition before anything protected it, and the ledger --
-    which is what makes a RESTART free -- also made the deliberate re-buy
-    Matt funded on 2026-09-07 impossible without it. Off unless asked.
+    `ignore_ledger` re-spends on (date, hour)s the ledger says are stored --
+    but only those stored BEFORE HISTORICAL_STAMP_SINCE. It exists for exactly
+    one reason: the 2026-09-01 MLB backfill was pruned to one row per
+    proposition before anything protected it, and the ledger -- which is what
+    makes a RESTART free -- also made the deliberate re-buy Matt funded on
+    2026-09-07 impossible without it. Entries this run (or a previous attempt
+    of it) wrote are stamped and protected, so they still resume. Off unless
+    asked.
     """
     from datetime import date as _date, timedelta as _td
 
@@ -1331,10 +1361,14 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                 # never matches and every re-run re-spends the whole range at
                 # 10x rates. Found by reading the rows the pilot wrote.
                 already = conn.execute("""
-                    SELECT 1 FROM odds_history_pulls
+                    SELECT pulled_at FROM odds_history_pulls
                      WHERE sport=%s AND snapshot_date=%s AND hour_utc=%s LIMIT 1
                 """, (sport, day.isoformat(), hour)).fetchone()
-                if already and not ignore_ledger:
+                # Stored, unless we were told to re-buy AND this entry predates
+                # the stamp -- an entry from a stamped pull is this job's own
+                # progress (or a sibling's) and a restart must not re-spend it.
+                if already and not (ignore_ledger and
+                                    not _ledger_entry_is_resumable(already[0])):
                     stats["skipped_cached"] += 1
                     continue
                 if spent + per_call > credit_cap:
