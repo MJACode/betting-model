@@ -1907,7 +1907,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             game_time, player_id, pitcher_throw_hand,
             public_bet_pct, public_money_pct, dk_bet_link, model_probability_cal,
             best_book, best_odds, best_implied_prob, best_edge, best_bet_link,
-            is_live, inning_at_pick, score_diff_at_pick
+            is_live, inning_at_pick, score_diff_at_pick, downgrade_reason
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
@@ -1918,7 +1918,8 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             %(model_probability_cal)s,
             %(best_book)s, %(best_odds)s, %(best_implied_prob)s, %(best_edge)s,
             %(best_bet_link)s,
-            %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s
+            %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s,
+            %(downgrade_reason)s
         )
         -- One row per pick (uq_picks_one_row_per_pick, migration
         -- picks_one_row_per_pick.sql). A second copy of a pick that already
@@ -1972,12 +1973,14 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             # models are 6-16pp overconfident at the probabilities actually bet
             # (models/probability_calibration.py), so the published number and
             # the number the decision ran on are no longer the same thing.
-            # DISPLAY ONLY for now: `edge`, the BET/AVOID call, Kelly and every
-            # threshold still run on the raw probability, because every cut in
-            # config.py was swept on raw probabilities and applying the map to
-            # the decision without re-cutting would starve the models. Same
-            # phasing as best_line. Stamped at score time rather than mapped at
-            # read time so a pick carries the calibration as of when it was made
+            # THE DECISION NOW READS THIS on every path that has a promoted
+            # map -- classify_edge since 2026-08-31, _make_prop_pick since
+            # 2026-09-07 (mike). `edge` and `model_probability` are still the
+            # RAW numbers so every past sweep stays readable; the decision edge
+            # is this column minus dk_implied_prob. A model with no promoted map
+            # calibrates to itself, so for those this is display only and the
+            # cut is unchanged. Stamped at score time rather than mapped at read
+            # time so a pick carries the calibration as of when it was made
             # (section 1c: timing is data).
             "model_probability_cal": _calibrated(p.get("model_id"),
                                                  p.get("model_probability")),
@@ -1991,6 +1994,9 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "is_live":            p.get("is_live", False),
             "inning_at_pick":     p.get("inning_at_pick"),
             "score_diff_at_pick": p.get("score_diff_at_pick"),
+            # Why a row that cleared its cut is a NONE anyway. NULL on every
+            # row the model itself declined; see _downgrade().
+            "downgrade_reason":   p.get("downgrade_reason"),
         }
         for p in picks
     ]
@@ -2905,6 +2911,143 @@ def _get_probable_pitchers(target_date: str, conn: DBConnection) -> list[dict]:
     return pitchers
 
 
+def _claimed_ev(pick: dict) -> float:
+    """EV per unit staked, on the number the DECISION was made on.
+
+    Calibrated, not raw, and deliberately so: this ranks picks from DIFFERENT
+    models against each other, and raw EV structurally favours whichever model
+    is most overconfident. A model with no promoted map calibrates to itself, so
+    for those this is the raw number and nothing changes.
+    """
+    odds = pick.get("dk_odds")
+    if odds in (None, 0):
+        return float("-inf")          # unpriced never outranks priced
+    payout = odds / 100.0 if odds > 0 else 100.0 / abs(odds)
+    p = _calibrated(pick.get("model_id"), pick.get("model_probability"))
+    if p is None:
+        p = pick.get("model_probability") or 0.0
+    return float(p) * payout - (1.0 - float(p))
+
+
+def _downgrade(pick: dict, note: str) -> dict:
+    """BET -> NONE, with the reason attached. Never mutates the input.
+
+    The reason matters, and it is PERSISTED rather than logged. A silent NONE is
+    a display state CLAUDE.md 1c allows, but these rows are read back by every
+    future threshold sweep (CLAUDE.md 7 grades the whole universe), and a
+    capped-away BET that looks like a model declining is a sweep reading a
+    number the model never said.
+
+    Its own column, not `condition_status`: that one is the NFL locked-pick
+    health signal (OK / DEGRADED / GONE) and the void marker, read by publishers
+    that know exactly those words.
+    """
+    return {**pick, "signal_type": "NONE", "kelly_fraction": 0.0,
+            "recommended_bet": 0.0, "downgrade_reason": note}
+
+
+def dedupe_player_props(picks: list[dict], already_bet: set | None = None,
+                        pools: dict | None = None) -> list[dict]:
+    """One BET per (game_id, player_id) across the models that share a pool.
+
+    Keeps the highest claimed EV and downgrades the rest to NONE. Picks outside
+    every pool, and picks with no player_id, pass through untouched.
+
+    `already_bet` is the set of (game_id, player_id) that ALREADY carry a
+    standing BET from an earlier pass today. They block new BETs for that
+    player and are never themselves re-examined — CLAUDE.md 1c: a pick that
+    exists is the bet of record, and a later, better-looking pick on the same
+    player does not retract it.
+    """
+    pools = config.PROP_ONE_BET_PER_PLAYER if pools is None else pools
+    if not pools:
+        return picks
+    member = {m: name for name, ms in pools.items() for m in ms}
+    taken = set(already_bet or ())
+
+    order = sorted(
+        (i for i, p in enumerate(picks)
+         if p.get("signal_type") == "BET"
+         and p.get("model_id") in member
+         and p.get("player_id") is not None),
+        key=lambda i: _claimed_ev(picks[i]), reverse=True)
+
+    out = list(picks)
+    for i in order:
+        p = picks[i]
+        key = (member[p["model_id"]], p["game_id"], p["player_id"])
+        if key in taken:
+            out[i] = _downgrade(
+                p, f"one bet per player: {p['player_id']} already has a "
+                   f"standing bet in {p['game_id']}")
+        else:
+            taken.add(key)
+    return out
+
+
+def _prop_bets_today(conn: DBConnection, game_date: str) -> tuple[dict, set]:
+    """What today already holds: BETs per model, and (pool, game, player) keys.
+
+    Both counters read standing BETs whatever their result — a bet placed this
+    morning is still one of the day's signals tonight, and is still the bet of
+    record for that player.
+    """
+    counts, taken = {}, set()
+    member = {m: name for name, ms in config.PROP_ONE_BET_PER_PLAYER.items()
+              for m in ms}
+    for mid, gid, pid in conn.execute("""
+        SELECT model_id, game_id, player_id
+        FROM picks
+        WHERE game_date = %s AND signal_type = 'BET'
+          AND (is_live IS NOT TRUE)
+    """, (game_date,)).fetchall():
+        counts[mid] = counts.get(mid, 0) + 1
+        if pid is not None and mid in member:
+            taken.add((member[mid], gid, pid))
+    return counts, taken
+
+
+def apply_prop_daily_cap(picks: list[dict], counts: dict,
+                         caps: dict | None = None) -> list[dict]:
+    """Downgrade a BET to NONE once its model has spent the day's allowance.
+
+    The pre-game twin of live_scorer.apply_daily_cap, with one difference that
+    matters: a live cap takes signals in the order they cross, because that is
+    the only order a live lane has. A pre-game slate arrives all at once, so the
+    order here is DESCENDING CLAIMED EV — the cap keeps the model's best N of
+    the day rather than the first N the loop happened to build.
+
+    Counts already-standing BETs against the allowance, so a cap can never
+    retract a pick that is already the bet of record (CLAUDE.md 1c). The counter
+    reads BET rows only, so a pick this cap turned away earlier TODAY does not
+    hold capacity against a later pass -- which is right (it was never a bet)
+    and is also the one case where the day's total can exceed the cap: a game
+    re-scored under the same game_id after its earlier BET settled. The
+    first-signal lock makes that vanishingly rare and it fails toward MORE
+    picks, so it is stated rather than defended against.
+    """
+    caps = config.PROP_MAX_SIGNALS_PER_DAY if caps is None else caps
+    if not caps:
+        return picks
+    used = dict(counts)
+    order = sorted(
+        (i for i, p in enumerate(picks)
+         if p.get("signal_type") == "BET" and p.get("model_id") in caps),
+        key=lambda i: _claimed_ev(picks[i]), reverse=True)
+
+    out = list(picks)
+    for i in order:
+        p = picks[i]
+        mid = p["model_id"]
+        cap = caps[mid]
+        if used.get(mid, 0) >= cap:
+            out[i] = _downgrade(
+                p, f"daily cap: {mid} has used its {cap} signals for the day")
+        else:
+            used[mid] = used.get(mid, 0) + 1
+    return out
+
+
 def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     player_name: str, pick_side: str,
                     model_prob: float,
@@ -2935,6 +3078,31 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
 
+    # THE DECISION IS MADE ON THE CALIBRATED PROBABILITY -- the same rule
+    # classify_edge has carried since 2026-08-31, arriving here on 2026-09-07
+    # (mike). It was missing for six days, and props were the models it was
+    # written for: every model with a promoted calibration map is a prop, and
+    # every prop is built here rather than in classify_edge, so the flag was on
+    # by default and could not bite anything. Meanwhile the cuts shipped on
+    # 2026-08-31 -- including this file's own pitcher_k 0.58/0.08 and
+    # pitcher_hits 0.54/0.08 -- were swept on CALIBRATED probabilities and were
+    # being applied to raw ones. 56 of 57 MLB prop BETs written while a map was
+    # live fail their own cut on the calibrated number the pick already stores.
+    # docs/mlb_volume_efficiency.md section 2.
+    #
+    # The RAW numbers are still what gets STORED, exactly as in classify_edge:
+    # picks.edge and picks.model_probability keep their meaning and the
+    # calibrated number travels beside them in picks.model_probability_cal.
+    decision_prob, decision_edge = model_prob, edge
+    if DECIDE_ON_CALIBRATED_PROB:
+        cal = _calibrated(model_id, model_prob)
+        if cal is not None:
+            decision_prob = cal
+            # A prob-only model with no DK price has no edge to recompute; its
+            # decision is the probability alone, so leave `edge` as it was.
+            if not no_dk_price:
+                decision_edge = cal - dk_implied_prob
+
     if model_id in PROB_ONLY_MODELS and no_dk_price:
         # No real DK price. Historically these still fired on model_prob alone;
         # under config.REQUIRE_DK_PRICE they no longer can — an unplaceable bet
@@ -2942,15 +3110,16 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         # accruing a tracked record. AVOID is meaningless for these over-only
         # markets, so we never emit AVOID.
         signal_type = ("NONE" if REQUIRE_DK_PRICE
-                       else ("BET" if model_prob >= prob_thresh else "NONE"))
+                       else ("BET" if decision_prob >= prob_thresh else "NONE"))
     elif model_id in PROB_ONLY_MODELS:
         # A real DK price IS available — apply the +EV edge filter to maximize
         # ROI (e.g. HR overs at +250..+500: only bet when the model beats DK's
         # implied price). Over-only, so never AVOID.
-        signal_type = "BET" if (edge >= bet_thresh and model_prob >= prob_thresh) else "NONE"
-    elif edge >= bet_thresh and model_prob >= prob_thresh:
+        signal_type = ("BET" if (decision_edge >= bet_thresh
+                                 and decision_prob >= prob_thresh) else "NONE")
+    elif decision_edge >= bet_thresh and decision_prob >= prob_thresh:
         signal_type = "BET"
-    elif edge <= -bet_thresh:
+    elif decision_edge <= -bet_thresh:
         signal_type = "AVOID"
     else:
         signal_type = "NONE"
@@ -4352,6 +4521,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
     total_pitcher_picks = 0
     total_pitcher_bets  = 0
+    slate_picks: list[dict] = []
 
     try:
         # ── 1. Probable starters (shared across all pitcher prop models) ──────
@@ -4479,18 +4649,41 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         if pick:
                             model_picks.append(_tag_prop(pick, _best_ctx))
 
-            bets = [p for p in model_picks if p["signal_type"] == "BET"]
+            slate_picks.extend(model_picks)
+
+        # ── 3b. Collate the whole slate BEFORE writing any of it ─────────────
+        # These two steps compare picks from DIFFERENT models, so they cannot
+        # run inside the per-model loop -- which is why the loop now accumulates
+        # instead of inserting as it goes. Order is deliberate: drop the
+        # duplicate player first, then spend the day's allowance on what is
+        # left, so a cap is never used up by a pick the collation was about to
+        # remove anyway.
+        prior_counts, prior_taken = _prop_bets_today(conn, target_date)
+        before = sum(1 for p in slate_picks if p["signal_type"] == "BET")
+        slate_picks = dedupe_player_props(slate_picks, prior_taken)
+        after_dedupe = sum(1 for p in slate_picks if p["signal_type"] == "BET")
+        slate_picks = apply_prop_daily_cap(slate_picks, prior_counts)
+        after_cap = sum(1 for p in slate_picks if p["signal_type"] == "BET")
+        if before != after_cap:
             logger.info(
-                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
+                f"  collation: {before} BETs -> {after_dedupe} after "
+                f"one-bet-per-player -> {after_cap} after the daily cap")
+
+        for model_id in _PITCHER_PROP_CONFIG:
+            mp = [p for p in slate_picks if p["model_id"] == model_id]
+            if not mp:
+                continue
+            bets = [p for p in mp if p["signal_type"] == "BET"]
+            logger.info(
+                f"  {model_id}: {len(bets)} BETs / {len(mp) - len(bets)} non-BET "
                 f"({len(pitchers)} starters evaluated)"
             )
-
-            if model_picks and not dry_run:
-                _insert_picks(conn, model_picks)
-                conn.commit()
-
-            total_pitcher_picks += len(model_picks)
+            total_pitcher_picks += len(mp)
             total_pitcher_bets  += len(bets)
+
+        if slate_picks and not dry_run:
+            _insert_picks(conn, slate_picks)
+            conn.commit()
 
         logger.success(
             f"Pitcher prop scoring complete: {total_pitcher_bets} BETs / "

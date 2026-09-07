@@ -38,6 +38,16 @@ deliberately re-cuts against it.
 PHASE 2 (not this module): re-sweep thresholds on calibrated probabilities and
 flip the decision path. A model update under section 1b — needs a person's call
 and an `Updated-By` trailer.
+
+PHASE 2 LANDED FOR GAME MODELS ON 2026-08-31 and for PLAYER PROPS ONLY ON
+2026-09-07 (mike), which is six days in which the props were the models that
+most needed it and the only ones not getting it. `DECIDE_ON_CALIBRATED_PROB`
+was added to `classify_edge`; props are built in `_make_prop_pick`, which never
+called it. Every model carrying a promoted map is a prop, so the flag was on by
+default and changed nothing anywhere, while the twelve cuts shipped the same day
+were chosen on CALIBRATED sweeps and applied to RAW numbers. Measured: 56 of 57
+MLB prop BETs written while a map was live would not have fired on the
+calibrated number the pick already stored. `docs/mlb_volume_efficiency.md`.
 """
 from __future__ import annotations
 
@@ -154,8 +164,60 @@ def _era_start(model_id: str, active_since: str | None) -> str:
                HONEST_ERA_FROM.get(model_id, PAPER_START))
 
 
+def _is_live_lane(model_id: str) -> bool:
+    """A model whose picks are written with is_live, so the matview cannot see it.
+
+    `config.LIVE_MODELS` alone is not enough: it registers the three lanes THIS
+    scorer prices, and `nfl_live_prop` is written by nfl/live_model/pick_writer
+    and is absent from it. The name test is the same one
+    live_record_start_2026_09_01.sql uses for the published record, and it is
+    what makes this cover a lane added by a subsystem that never registers here.
+    """
+    return (model_id in getattr(config, "LIVE_MODELS", {})
+            or "_live_" in model_id)
+
+
 def fetch_graded(conn, model_id: str, since: str) -> list[tuple[float, int]]:
-    """(claimed probability, won) for the preferred side, current era, clean windows."""
+    """(claimed probability, won) for the preferred side, current era, clean windows.
+
+    TWO SOURCES, because the matview cannot see half the models (2026-09-07,
+    mike). `mv_scored_pick_outcomes` excludes `is_live` by construction
+    (materialize_scored_pick_outcomes.sql: pre-game and in-play prices never
+    mix), so every live lane read back ZERO graded picks and the weekly pass
+    reported "only 0 graded picks (need 150) - identity map, unfitted" for
+    mlb_live_total_runs, ncaaf_live_total, ncaaf_live_win_prob and
+    nfl_live_prop, on every run since it shipped. That reads as "not enough data
+    yet" and means "this model is invisible to me" - the empty-board-versus-
+    broken-pipeline failure in .claude/rules/operations.md, arriving in the one
+    place that decides whether a model's probabilities get corrected.
+    mlb_live_total_runs has 126 graded BETs and was reported as 0.
+
+    A LIVE LANE'S EVIDENCE IS THINNER PER BET, and the caller should know it:
+    live lanes write BET and AVOID only, never the dead-zone NONE rows
+    (classify_live_signal), and live AVOIDs are never settled - measured
+    2026-09-07, 232 live AVOID rows and 0 graded, against 213 graded BETs. So a
+    live map is fitted on the BET band alone, which is one narrow slice above
+    the model's own probability floor. A Platt fit on one band is close to a
+    single offset, and its held-out `transfers` test may never clear
+    MAX_TRANSFER_GAP_PP however many bets accrue. That is a property of the
+    evidence, not a bar to lower.
+    """
+    if _is_live_lane(model_id):
+        # CLEAN_WINDOWS is deliberately NOT applied. It exists because the
+        # dead-zone NONE rows were deleted 2026-06-26..08-08, leaving that
+        # window holding only the high-|edge| BET+AVOID tail -- a CHANGE in the
+        # population's shape. A live lane's population is that shape in every
+        # window, by construction, so excluding the gap corrects nothing and
+        # costs real bets (18 of mlb_live_total_runs' 126).
+        rows = conn.execute("""
+            SELECT model_probability::float8, result
+            FROM picks
+            WHERE model_id = %(m)s AND is_live AND result IN ('WIN','LOSS')
+              AND model_probability >= %(minp)s AND game_date >= %(since)s
+              AND dk_odds IS NOT NULL
+        """, {"m": model_id, "minp": MIN_PROB, "since": since}).fetchall()
+        return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
+
     clauses = " OR ".join(
         f"(game_date BETWEEN '{lo}' AND '{hi}')" for lo, hi in CLEAN_WINDOWS)
     rows = conn.execute(f"""
@@ -248,6 +310,9 @@ CREATE TABLE IF NOT EXISTS model_calibration (
     promoted_a  NUMERIC,
     promoted_b  NUMERIC,
     promoted_at TEXT,
+    promoted_method     TEXT,
+    promoted_helps      BOOLEAN,
+    promoted_transfers  BOOLEAN,
     payload     TEXT NOT NULL
 )
 """
@@ -268,6 +333,12 @@ _LATE_COLUMNS = (
     ("promoted_a", "NUMERIC"),
     ("promoted_b", "NUMERIC"),
     ("promoted_at", "TEXT"),
+    # The promoted map's OWN method and endorsement, frozen at promotion time
+    # (2026-09-07, mike). Everything the decision path needs must live in a
+    # column the nightly fit does not touch; see load_calibrations().
+    ("promoted_method", "TEXT"),
+    ("promoted_helps", "BOOLEAN"),
+    ("promoted_transfers", "BOOLEAN"),
 )
 _COLUMNS = tuple(c for c, _ in _LATE_COLUMNS)
 
@@ -364,13 +435,26 @@ def load_calibrations(conn, promoted_only: bool = True) -> dict[str, dict]:
 
     `promoted_only` is the default because this is what the scorer calls. Pass
     False to see today's candidates (the dashboard's drift view).
+
+    THE PROMOTED MAP IS READ ENTIRELY OUT OF THE `promoted_*` COLUMNS
+    (2026-09-07, mike). It used to read `promoted_a`/`promoted_b` while
+    filtering on `method` -- the CANDIDATE's method, rewritten by the nightly
+    fit. So a refit that could not fit a model wrote `method = NULL` and the
+    PROMOTED map vanished on the next read, with nothing said and nothing
+    logged. Measured: `mlb_prop_pitcher_k` and `mlb_prop_pitcher_hits` carried a
+    distinct `model_probability_cal` on 166 of 166 picks from 2026-08-31 to
+    09-03, on 11 of 43 on 09-04, and on 0 of 95 from 09-05 -- three days with no
+    calibration at all, from a cron. That is the exact failure mode the
+    candidate/promoted split exists to prevent, arriving through the one column
+    the split forgot to duplicate. `docs/mlb_volume_efficiency.md` section 2.
     """
-    col_a, col_b, where = ("promoted_a", "promoted_b", "promoted")
+    col_a, col_b, col_m, where = ("promoted_a", "promoted_b",
+                                  "promoted_method", "promoted")
     if not promoted_only:
-        col_a, col_b, where = ("a", "b", "applied")
+        col_a, col_b, col_m, where = ("a", "b", "method", "applied")
     try:
         rows = conn.execute(
-            f"SELECT model_id, method, {col_a}, {col_b} FROM model_calibration "
+            f"SELECT model_id, {col_m}, {col_a}, {col_b} FROM model_calibration "
             f"WHERE {where}").fetchall()
     except Exception:
         # ROLL BACK. A failed statement poisons a Postgres connection, so
@@ -390,23 +474,71 @@ def load_calibrations(conn, promoted_only: bool = True) -> dict[str, dict]:
 def promote(conn, model_ids: list[str] | None = None) -> list[str]:
     """Copy today's candidate map into the promoted slot. A model update.
 
-    Only promotes maps the fit itself endorsed (`applied`), so a map that made
-    the held-out half worse can never reach the decision path by hand.
+    TWO BARS, NOT ONE (2026-09-07, mike). This used to promote on `applied`,
+    which is `helps` alone -- the map beats leaving the number raw on the
+    held-out half. That is the right bar for PUBLISHING a number and the wrong
+    one for DECIDING on it: `mlb_prop_pitcher_er` helps (11.9pp -> 6.8pp) and
+    still does not close, and its own fit says so in the note -- "publish it; do
+    not build a threshold on it yet". A cut built on a map that does not close
+    is a cut aimed at a number that is still wrong, only less so.
+
+    So promotion now requires `helps AND transfers`, and it writes the map's
+    method and both verdicts into the `promoted_*` columns, so the decision path
+    reads an endorsement frozen at promotion rather than one a nightly fit can
+    rewrite underneath it (see load_calibrations).
     """
     ensure_schema(conn)
     rows = conn.execute(
-        "SELECT model_id, a, b FROM model_calibration WHERE applied").fetchall()
+        "SELECT model_id, a, b, method, payload FROM model_calibration "
+        "WHERE applied").fetchall()
     done = []
-    for model_id, a, b in rows:
+    for model_id, a, b, method, payload in rows:
         if model_ids and model_id not in model_ids:
+            continue
+        if a is None or b is None or method != "platt":
+            logger.warning("promote: {} has no fitted map — skipped", model_id)
+            continue
+        try:
+            verdict = json.loads(payload) if payload else {}
+        except (TypeError, ValueError):
+            verdict = {}
+        helps = bool(verdict.get("helps"))
+        transfers = bool(verdict.get("transfers"))
+        if not (helps and transfers):
+            logger.warning(
+                "promote: {} not endorsed (helps={}, transfers={}) — skipped",
+                model_id, helps, transfers)
             continue
         conn.execute("""
             UPDATE model_calibration
             SET promoted = TRUE, promoted_a = %(a)s, promoted_b = %(b)s,
-                promoted_at = %(at)s
+                promoted_at = %(at)s, promoted_method = %(method)s,
+                promoted_helps = %(helps)s, promoted_transfers = %(transfers)s
             WHERE model_id = %(m)s
-        """, {"m": model_id, "a": a, "b": b,
+        """, {"m": model_id, "a": a, "b": b, "method": method,
+              "helps": helps, "transfers": transfers,
               "at": datetime.now().astimezone().isoformat()})
+        done.append(model_id)
+    return done
+
+
+def demote(conn, model_ids: list[str]) -> list[str]:
+    """Take a map back out of the decision path. The inverse of promote().
+
+    Exists because there was no way to undo a promotion except by hand-editing
+    the table, and a lever with no off switch is one nobody dares pull. Clears
+    every `promoted_*` column, so a demoted row cannot be read as half-promoted.
+    """
+    ensure_schema(conn)
+    done = []
+    for model_id in model_ids:
+        conn.execute("""
+            UPDATE model_calibration
+            SET promoted = FALSE, promoted_a = NULL, promoted_b = NULL,
+                promoted_method = NULL, promoted_helps = NULL,
+                promoted_transfers = NULL, promoted_at = %(at)s
+            WHERE model_id = %(m)s
+        """, {"m": model_id, "at": datetime.now().astimezone().isoformat()})
         done.append(model_id)
     return done
 
@@ -441,13 +573,27 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true", help="print, write nothing")
     ap.add_argument("--promote", action="store_true",
-                    help="copy every ENDORSED candidate into the promoted slot "
-                         "the scorer reads. A model update (CLAUDE.md 1b).")
+                    help="copy every ENDORSED candidate (helps AND transfers) "
+                         "into the promoted slot the scorer reads. A model "
+                         "update (CLAUDE.md 1b).")
+    ap.add_argument("--demote", metavar="MODEL_ID", nargs="+",
+                    help="take these maps back out of the decision path. Also "
+                         "a model update.")
+    ap.add_argument("--models", metavar="MODEL_ID", nargs="+",
+                    help="restrict --promote to these model_ids")
     args = ap.parse_args()
     conn = get_connection()
+    if args.demote:
+        try:
+            done = demote(conn, list(args.demote))
+            conn.commit()
+            print(f"DEMOTED {len(done)}: {', '.join(sorted(done))}")
+        finally:
+            conn.close()
+        return
     if args.promote:
         try:
-            done = promote(conn)
+            done = promote(conn, args.models)
             conn.commit()
             print(f"PROMOTED {len(done)}: {', '.join(sorted(done)) or '(none)'}")
         finally:
