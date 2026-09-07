@@ -142,3 +142,40 @@ def test_the_naive_branch_assumes_utc_explicitly():
     from data.ingestors.odds_ingestor import relabel_in_play
 
     assert "|| 'Z')::timestamptz" in inspect.getsource(relabel_in_play)
+
+
+# ── the rows must say where they came from, or the pruner eats them ──────────
+
+def test_backfill_rows_are_stamped_with_the_historical_source():
+    """See tests/test_prune_preserves_openers.py::test_historical_backfill_rows_
+    are_protected_in_odds for the loss this prevents."""
+    from data.ingestors.odds_ingestor import HISTORICAL_ODDS_SOURCE  # noqa: F401
+    src = inspect.getsource(run_historical_odds_range)
+    assert "HISTORICAL_ODDS_SOURCE" in src
+
+
+def test_markets_are_a_parameter_and_drive_the_cost():
+    """Two markets cost 20 a call, three cost 30. A caller who funded two must
+    not be billed for three because the function hard-codes MARKETS."""
+    sig = inspect.signature(run_historical_odds_range)
+    assert "markets" in sig.parameters
+    src = inspect.getsource(run_historical_odds_range)
+    assert "per_call = 10 * len(markets)" in src
+
+
+def test_insert_tolerates_rows_without_a_source_key():
+    """_insert_odds has callers outside this module (live_price_log,
+    pregame_line_poller) whose rows predate the column. They must keep
+    working, writing NULL."""
+    from data.ingestors.odds_ingestor import _insert_odds
+
+    class _Conn:
+        def executemany(self, sql, rows):
+            self.sql, self.rows = sql, list(rows)
+
+    c = _Conn()
+    _insert_odds(c, [{"game_id": "G", "sport": "MLB", "market": "h2h",
+                      "bookmaker": "fanduel", "snapshot_type": "open",
+                      "snapshot_at": "2026-09-07T00:00:00Z"}])
+    assert "source" in c.sql
+    assert c.rows[0]["source"] is None

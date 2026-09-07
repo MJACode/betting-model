@@ -249,7 +249,7 @@ def _job_historical_odds(**kw):
     return run_historical_odds_range(
         sport=kw["sport"], start=kw["start"], end=kw["end"],
         hours_utc=kw["hours_utc"], bookmakers=kw["bookmakers"],
-        credit_cap=kw["credit_cap"])
+        credit_cap=kw["credit_cap"], markets=kw["markets"])
 
 
 def _job_ncaaf_prop_odds(**kw):
@@ -314,11 +314,18 @@ def _validate_ncaaf_prop_odds(args: dict) -> dict:
 
 
 def _validate_historical_odds(args: dict) -> dict:
-    from data.ingestors.odds_ingestor import SPORT_KEYS
+    from data.ingestors.odds_ingestor import MARKETS, SPORT_KEYS
 
     sport = str(args.get("sport") or "").upper()
     if sport not in SPORT_KEYS:
         raise ValueError(f"unknown sport {sport!r}")
+    # Markets are what the endpoint bills by, so a job names what it funds.
+    # Restricted to the bulk-endpoint set: anything else 422s the whole call.
+    markets = [str(m) for m in (args.get("markets") or MARKETS)]
+    bad = sorted(set(markets) - set(MARKETS))
+    if bad:
+        raise ValueError(f"markets not on the bulk endpoint: {bad}")
+    markets = [m for m in MARKETS if m in markets]
     start, end = str(args.get("start") or ""), str(args.get("end") or "")
     for d in (start, end):
         datetime.strptime(d, "%Y-%m-%d")      # raises ValueError if malformed
@@ -336,7 +343,7 @@ def _validate_historical_odds(args: dict) -> dict:
         raise ValueError(f"credit_cap out of range: {cap}")
     return {"sport": sport, "start": start, "end": end,
             "hours_utc": sorted(set(hours)), "bookmakers": list(books),
-            "credit_cap": cap}
+            "credit_cap": cap, "markets": markets}
 
 
 def _job_relabel_in_play(**kw):

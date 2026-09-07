@@ -124,3 +124,31 @@ def test_line_shop_books_are_not_protected_wholesale():
     for book in ("bovada", "pinnacle", "fanduel", "betmgm"):
         assert book not in PROTECTED_BOOKMAKERS
         assert not any(book.startswith(p) for p in PROTECTED_BOOKMAKER_PREFIXES)
+
+
+# ── paid history must survive the pruner ─────────────────────────────────────
+
+def test_historical_backfill_rows_are_protected_in_odds():
+    """
+    The MLB backfill of 2026-09-01 (three declared jobs, ~31k credits, two
+    snapshots a day) was thinned to ONE row per proposition per non-DK book by
+    the next morning's prune: measured 2026-09-07, pinnacle/bovada/fanduel at
+    exactly 1.00 rows per (game, market) for May 2024 games. The pruner
+    protects DK by name and the CFBD archive by prefix, and nothing else. Rows
+    the historical endpoint wrote are stamped with a source, and that source
+    is protected -- in `odds`, the table that has the column.
+    """
+    from data.ingestors.odds_ingestor import HISTORICAL_ODDS_SOURCE
+    params = {}
+    pred = _unprotected(params, table="odds")
+    assert "source IS NULL" in pred, "live rows (NULL source) must stay prunable"
+    assert "protected_sources" in pred
+    assert HISTORICAL_ODDS_SOURCE in params["protected_sources"]
+
+
+def test_prop_table_has_no_source_column_so_no_source_clause():
+    """player_prop_odds carries no `source` column (checked against the live
+    schema 2026-09-07); a clause referencing it would abort every prop prune."""
+    params = {}
+    pred = _unprotected(params, table="player_prop_odds")
+    assert "source" not in pred

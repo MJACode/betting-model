@@ -63,6 +63,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import ODDS_API_BOOKMAKER, PRUNE_NON_DK_KEEP_DAYS, SHARP_BOOKMAKERS
 from data.db import get_connection, DBConnection
+from data.ingestors.odds_ingestor import HISTORICAL_ODDS_SOURCE
 
 # Books whose snapshots must never be pruned. draftkings = the scoring book;
 # sbr_consensus = synthetic historical lines used by the feature engines;
@@ -107,6 +108,17 @@ def protected_for(table: str) -> tuple[str, ...]:
 # Any future sport's read-only archive lines should use a prefix listed here.
 PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 
+# Row SOURCES that must survive pruning in `odds` (the one table with the
+# column). The historical-endpoint backfill stamps its rows with
+# HISTORICAL_ODDS_SOURCE, and those rows are paid movement data on games that
+# are by definition older than the retention window -- exactly the shape
+# Tier 1 deletes. The 2026-09-01 MLB backfill (three declared jobs, ~31k
+# credits, two snapshots a day) was reduced to ONE row per proposition per
+# non-DK book by the next 6am prune; measured 2026-09-07, session 252:
+# pinnacle / bovada / fanduel at 1.00 rows per (game, market) for May 2024.
+# Nothing protected them because nothing named them. Now something does.
+PROTECTED_SOURCES = (HISTORICAL_ODDS_SOURCE,)
+
 
 def _unprotected(params: dict, table: str | None = None) -> str:
     """
@@ -126,6 +138,12 @@ def _unprotected(params: dict, table: str | None = None) -> str:
         key = f"protected_pfx_{i}"
         params[key] = pfx + "%"
         clauses.append(f"bookmaker NOT LIKE %({key})s")
+    # Only `odds` has a `source` column (player_prop_odds does not, checked
+    # against the live schema 2026-09-07); referencing it there would abort
+    # the prop prune. Live rows carry NULL and stay prunable.
+    if table == "odds":
+        params["protected_sources"] = PROTECTED_SOURCES
+        clauses.append("(source IS NULL OR source NOT IN %(protected_sources)s)")
     return "(" + " AND ".join(clauses) + ")"
 
 # (table, identity columns that define one "proposition", how to date a row)
