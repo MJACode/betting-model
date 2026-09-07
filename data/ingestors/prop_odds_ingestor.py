@@ -62,6 +62,8 @@ from data.ingestors.odds_ingestor import (
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
+_ET_ZONE = ZoneInfo("America/New_York")
+
 SPORT_KEY = "baseball_mlb"   # default (MLB) — overridden per sport at runtime
 REQUEST_SLEEP = 0.5   # seconds between event-level calls — be polite
 
@@ -431,6 +433,144 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
 
 
 # ── DB Writer ─────────────────────────────────────────────────────────────────
+
+def list_historical_mlb_events(snapshot_iso: str) -> tuple[list[dict], str | None]:
+    """(events, the snapshot the API actually served) for a past instant.
+
+    The Odds API snaps to its nearest stored snapshot, and the SERVED timestamp
+    is the one that matters for leak discipline -- it is threaded onto the rows
+    rather than replaced by the run time. Mirrors
+    nfl_prop_odds_ingestor.list_historical_events.
+    """
+    if not ODDS_API_KEY:
+        raise ValueError("ODDS_API_KEY not set in .env")
+    resp = requests.get(
+        f"{ODDS_API_BASE}/historical/sports/{SPORT_KEY}/events",
+        params={"apiKey": ODDS_API_KEY, "date": snapshot_iso, "dateFormat": "iso"},
+        timeout=30)
+    record_quota_headers(resp)
+    if resp.status_code != 200:
+        logger.warning(f"MLB historical events {snapshot_iso}: HTTP {resp.status_code} "
+                       f"{resp.text[:160]}")
+        return [], None
+    body = resp.json()
+    return body.get("data", []), body.get("timestamp")
+
+
+def _historical_event_props(event_id: str, snapshot_iso: str,
+                            markets: list[str], books: str) -> tuple[list, str | None, int]:
+    """One event's historical prop board. -> (bookmakers, served_ts, credits)."""
+    resp = requests.get(
+        f"{ODDS_API_BASE}/historical/sports/{SPORT_KEY}/events/{event_id}/odds",
+        params={"apiKey": ODDS_API_KEY, "date": snapshot_iso,
+                "regions": "us,eu", "bookmakers": books,
+                "markets": ",".join(markets), "oddsFormat": "american"},
+        timeout=30)
+    record_quota_headers(resp)
+    credits = int(resp.headers.get("x-requests-last") or 0)
+    if resp.status_code != 200:
+        logger.debug(f"  historical odds {event_id} @ {snapshot_iso}: "
+                     f"HTTP {resp.status_code}")
+        return [], None, credits
+    body = resp.json()
+    data = body.get("data", {}) or {}
+    return data.get("bookmakers", []), body.get("timestamp"), credits
+
+
+def backfill_mlb_prop_odds(dates: list[str], hours_before: int = 3,
+                           markets: list[str] | None = None,
+                           books: str = "draftkings,pinnacle",
+                           limit_events: int | None = None,
+                           snapshot_type: str = "open") -> dict:
+    """Historical MLB prop lines, snapshotted `hours_before` EACH GAME'S OWN start.
+
+    WHY THIS EXISTS. models/mlb_prop_market is the MLB port of the only
+    construction in this repo with a blind-tested positive result, and it could
+    not be evaluated: Pinnacle MLB prop coverage in player_prop_odds begins
+    2026-08-27, which is ten dates. The NFL result rests on 954 bets over three
+    seasons. Ten dates cannot separate a real edge from noise in either
+    direction, and shipping a threshold off them would be the in-sample trap.
+
+    PER-EVENT ANCHORING, not one instant per date, and this is the difference
+    from backfill_nfl_prop_odds. An NFL slate is a handful of kickoff times; an
+    MLB slate runs from 13:05 to 22:10 ET, so a single snapshot per date is
+    three hours early for some games and INSIDE others. Rows from a game already
+    under way are exactly the leak that made the first MLB grading meaningless
+    (see load_quotes). Each event is fetched at its own commence_time minus
+    `hours_before`, so every row is pre-game by construction.
+
+    COST, measured 2026-09-06 rather than estimated: the events listing is 1
+    credit; a per-event call with `bookmakers` + 5 markets is 30. So a date is
+    ~1 + 30*games, and a full 2026 season (~2,430 games) is ~73k credits.
+    `bookmakers` counts as ONE region (CLAUDE.md section 6), which is why the
+    unfiltered 4-region probe cost 200 for the same board.
+
+    Append-only, like every snapshot writer here: re-running a date adds rows
+    rather than replacing them, and the reader takes the latest qualifying one.
+    """
+    if not ODDS_API_KEY:
+        raise ValueError("ODDS_API_KEY not set in .env")
+    markets = list(markets or PROP_MARKETS_BY_SPORT["MLB"])
+    conn = get_connection()
+    total = {"rows": 0, "events": 0, "skipped": 0, "credits": 0, "dates": 0}
+    try:
+        for d in dates:
+            # ONE listing per date, at an instant when the whole slate is still
+            # scheduled. 16:00Z is 12:00 ET -- before the earliest first pitch,
+            # so no game has started and none has been removed from the board.
+            evs, _served = list_historical_mlb_events(f"{d}T16:00:00Z")
+            total["credits"] += 1
+            if not evs:
+                logger.info(f"  {d}: no historical events")
+                continue
+            if limit_events:
+                evs = evs[:limit_events]
+            date_rows = 0
+            for ev in evs:
+                commence = ev.get("commence_time", "")
+                try:
+                    kick = datetime.fromisoformat(commence.replace("Z", "+00:00"))
+                except ValueError:
+                    total["skipped"] += 1
+                    continue
+                snap = (kick - timedelta(hours=hours_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                game_date = kick.astimezone(_ET_ZONE).strftime("%Y-%m-%d")
+                home = _normalize_team(ev.get("home_team", ""), "MLB")
+                away = _normalize_team(ev.get("away_team", ""), "MLB")
+                game_id = _build_game_id("MLB", game_date, away, home)
+
+                books_data, served, credits = _historical_event_props(
+                    ev["id"], snap, markets, books)
+                total["credits"] += credits
+                time.sleep(REQUEST_SLEEP)
+                if not books_data:
+                    total["skipped"] += 1
+                    continue
+                # The SERVED timestamp, never `snap` and never now(): the API
+                # snaps to its nearest stored snapshot and the row has to record
+                # when the price actually existed.
+                stamp = served or snap
+                rows: list[dict] = []
+                for bk in books_data:
+                    rows += _parse_prop_markets(
+                        bk.get("markets", []), game_id, game_date,
+                        snapshot_type, stamp,
+                        allowed_markets=set(markets), bookmaker=bk.get("key", ""))
+                if rows:
+                    date_rows += _insert_prop_odds(conn, rows)
+                total["events"] += 1
+            conn.commit()
+            total["rows"] += date_rows
+            total["dates"] += 1
+            logger.info(f"  {d}: {len(evs)} events, {date_rows} rows "
+                        f"(running credits {total['credits']})")
+        return total
+    finally:
+        try:
+            persist_quota(conn)
+        finally:
+            conn.close()
+
 
 def _insert_prop_odds(conn: DBConnection, rows: list[dict]) -> int:
     """Insert prop odds rows. No dedup — always append snapshots."""
