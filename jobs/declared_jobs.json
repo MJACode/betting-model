@@ -608,5 +608,40 @@
       ],
       "reason": "written after the game it prices had already been played: the games row is the previous night's game filed a second time under its UTC date with no start time (see MLB_2026-04-15_NYM_LAD / MLB_2026-04-16_SEA_SD); not a pre-game signal (mike, 2026-09-07)"
     }
+  },
+  {
+    "key": "ncaaf-history-2023-wide-14z",
+    "job_type": "historical_odds",
+    "requested_by": "matt",
+    "note": "2023 14:00Z re-pull at the wide scope (13 books, 3 markets). The narrow job wrote these 108 pulls AFTER the stamp went live (21:10Z), so #561's resume rule counted them stored and ncaaf-history-2023-wide skipped all 108. Their ledger rows were deleted 2026-09-07 22:50Z and the job was enqueued directly as worker_jobs 29200 (Matt: 'do both decisions'); this entry is the record, and the dedupe key keeps it from enqueuing twice. The narrow 14:00Z rows stay. 108 x 30 = 3,240 credits.",
+    "args": {
+      "sport": "NCAAF",
+      "start": "2023-08-24",
+      "end": "2023-12-09",
+      "hours_utc": [
+        14
+      ],
+      "bookmakers": [
+        "draftkings",
+        "fanduel",
+        "betmgm",
+        "williamhill_us",
+        "espnbet",
+        "fanatics",
+        "bovada",
+        "pinnacle",
+        "betrivers",
+        "hardrockbet",
+        "ballybet",
+        "betparx",
+        "rebet"
+      ],
+      "markets": [
+        "h2h",
+        "spreads",
+        "totals"
+      ],
+      "credit_cap": 3500
+    }
   }
 ]
