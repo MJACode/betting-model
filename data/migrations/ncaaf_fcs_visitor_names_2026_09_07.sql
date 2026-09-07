@@ -3,10 +3,10 @@
 -- ONE-OFF. Nine NCAAF games rows written 2026-09-03..06 name the wrong
 -- visitor. The Odds API name resolver handed each FCS visitor to the FBS school
 -- its name starts with ("Indiana State Sycamores" -> Indiana), because
--- ncaaf_teams is /teams/fbs only. Every pick on those rows (44 of them: six
--- live-total BETs and the pre-game NONE rows) carries the wrong name in
--- pick_label, and the six BETs were published to Discord and the app under
--- it. mike, 2026-09-07: "fix the labels ... settle the picks".
+-- ncaaf_teams is /teams/fbs only. 27 of the 43 picks on those rows (six
+-- live-total BETs and the pre-game NONE rows that name the visitor) carry the
+-- wrong name in pick_label, and the six BETs were published to Discord and the
+-- app under it. mike, 2026-09-07: "fix the labels ... settle the picks".
 --
 -- Per row, each step guarded so a second pass is a no-op:
 --   1. games.away_team  -> the school CFBD names      (guard: still the wrong name)

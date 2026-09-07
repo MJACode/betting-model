@@ -1,6 +1,6 @@
 """
 The one-off that renames nine NCAAF visitors, writes their finals, and fixes
-44 pick labels -- pinned the way the other worker-applied migrations are.
+27 pick labels -- pinned the way the other worker-applied migrations are.
 
 Nine games rows written 2026-09-03..06 name an FCS visitor as the FBS school
 its name starts with (the resolver bug fixed in the same PR). Six live-total
