@@ -245,6 +245,28 @@ def run_pipeline_watch() -> None:
         log.exception("ERROR pipeline-watch crashed")
 
 
+def run_failure_alerter() -> None:
+    """Deliver what the health check already decided, to the ops channel.
+
+    In-process for the same reason as the watchdog and the watches: its output
+    is a Discord post, not an exit code.
+
+    Every 10 minutes rather than hourly, because the thing it reports is
+    produced every pass and a delivery lag longer than the detection interval
+    just moves the blind spot. It is cheap -- two indexed reads -- and its own
+    throttle (2h for CRIT, 12h for WARN) is what stops a standing failure
+    posting 144 times a day.
+    """
+    try:
+        from tracking.failure_alerter import run_failure_alerter as _run_alerter
+        result = _run_alerter()
+        log.info("FailureAlerter: %s condition(s), %s alerted",
+                 len(result.get("conditions") or []),
+                 len(result.get("alerted") or []))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR failure-alerter crashed")
+
+
 def run_model_calibration() -> None:
     # ModelCalibration — the weekly re-measure of every model. In-process for
     # the same reason as the watchdog and the review: its output is a Discord
@@ -293,10 +315,18 @@ def run_job_queue() -> None:
     # A retrain runs for an hour. That is fine: APScheduler's default pool is ten
     # threads, so a long job occupies one while every other schedule keeps
     # firing, and max_instances=1 makes the ticks during it no-ops.
+    #
+    # SESSION MODE, deliberately. run_one holds a pg_advisory_lock across
+    # claiming a job AND executing it -- which is what stops two workers
+    # running the queue at once -- and a session-scoped lock cannot survive
+    # transaction pooling, where consecutive statements may land on different
+    # backends. Everything else moved to the transaction pooler on 2026-09-06
+    # to escape the session pool's 15-client ceiling; this is the one caller
+    # that must not.
     try:
         from data.db import get_connection
         from tracking.job_queue import run_one
-        conn = get_connection()
+        conn = get_connection(session_mode=True)
         try:
             result = run_one(conn)
         finally:
@@ -412,6 +442,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "nfl_opener_poll",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
+                  "failure_alerter",
                   "calibration_watch"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
@@ -577,11 +608,16 @@ NFL_FAST_WINDOW_HOURS = float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))
 # measured feed age (7s for Pinnacle) means sub-minute polling would mostly
 # re-read a number we already hold.
 NFL_OPENER_POLL_MINUTES = max(1, int(os.environ.get("NFL_OPENER_POLL_MINUTES", "1")))
-# Runaway guard, not a budget. 2 credits x 1440 ticks = 2,880/day in season, so
-# the default sits ~2x above a normal day and only trips on a loop that has
-# stopped standing down. 0 disables the cap entirely.
-NFL_OPENER_POLL_DAILY_CREDIT_CAP = float(
-    os.environ.get("NFL_OPENER_POLL_DAILY_CREDIT_CAP", "6000"))
+# NO CREDIT CAP HERE, DELIBERATELY, and it is a DATABASE decision rather than a
+# spend one. The cap I shipped on 2026-09-06 read api_call_log to total the
+# day's burn, which opened a database connection EVERY MINUTE purely to decide
+# whether to spend money -- against a Supabase session pool of 15 that was
+# already dropping `odds` with EMAXCONNSESSION. A guard that costs a connection
+# a minute to protect a budget nobody asked for is a bad trade twice over.
+#
+# mike has said repeatedly, most recently 2026-09-06: "I dont care about credit
+# usage. I have said this countless times". The Odds API's own quota is the
+# real backstop, and RUN_NFL_WIND_CARD=0 stops the job without a deploy.
 
 
 def _nfl_lead_hours() -> float | None:
@@ -733,7 +769,7 @@ def run_nfl_opener_card() -> None:
     2 credits/run (us,eu spreads) = 2,880/day while a game is inside the
     10-day horizon, ~432k over a season against 4.59M remaining. Zero
     off-season: the caller returns before spending anything when the board is
-    empty. Bounded by NFL_OPENER_POLL_DAILY_CREDIT_CAP as a backstop.
+    empty.
     """
     env = dict(BASE_ENV)
     key = env.get("THE_ODDS_API_KEY") or env.get("ODDS_API_KEY")
@@ -751,32 +787,6 @@ def run_nfl_opener_card() -> None:
         _publish_new_signals("nfl-opener-poll")
 
 
-def _opener_credits_used_today() -> float:
-    """This job's own Odds API burn today, from the telemetry probe.
-
-    Unknown burn is treated as ZERO rather than as over-cap: an unreadable
-    probe must not silently switch the model off. The Odds API's own quota is
-    the real backstop, and the cap here is a guard against a runaway loop, not
-    a billing control.
-    """
-    try:
-        from data.db import get_connection
-        conn = get_connection()
-        try:
-            row = conn.execute("""
-                SELECT COALESCE(SUM(credits), 0) FROM api_call_log
-                WHERE host = 'api.the-odds-api.com'
-                  AND source = 'nfl-opener-card'
-                  AND ts >= date_trunc('day', now() AT TIME ZONE 'America/New_York')
-            """).fetchone()
-            return float(row[0]) if row else 0.0
-        finally:
-            conn.close()
-    except Exception as exc:                                  # noqa: BLE001
-        log.warning("opener poll: credit read failed (%s) — treating as 0", exc)
-        return 0.0
-
-
 def run_nfl_opener_poll() -> None:
     """The minute-cadence opener watch. Free when no game is on the board.
 
@@ -788,14 +798,6 @@ def run_nfl_opener_poll() -> None:
     lead = _nfl_lead_hours()
     if lead is None or lead > NFL_POLL_HORIZON_DAYS * 24:
         return                                  # nothing on the board: free
-
-    cap = NFL_OPENER_POLL_DAILY_CREDIT_CAP
-    if cap:
-        used = _opener_credits_used_today()
-        if used >= cap:
-            log.warning("opener poll: daily credit cap reached (%.0f >= %s) — skipping",
-                        used, cap)
-            return
     run_nfl_opener_card()
 
 
@@ -1023,6 +1025,24 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Failure alerting — every 10 minutes, 24x7.
+    #
+    # The health check has run on every refresh pass for months and writes its
+    # verdict to a TABLE. On 2026-09-06 the refresh pass failed steps on 32 of
+    # 50 passes -- including `odds`, which fetches the lines every model prices
+    # against -- and it was found by a person querying pipeline_runs by hand.
+    # Detection was never the gap; delivery was.
+    #
+    # 24x7 for the same reason as the watchdog: the incident it exists for ran
+    # through the night.
+    sched.add_job(
+        run_failure_alerter,
+        CronTrigger(minute="*/10", timezone=TIMEZONE),
+        id="failure_alerter",
+        name="Failure alerter -> ops Discord (every 10 min, 24x7)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # Worker job queue — every 5 minutes.

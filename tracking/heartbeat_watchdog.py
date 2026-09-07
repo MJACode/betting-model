@@ -57,8 +57,7 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -70,50 +69,29 @@ import config
 # the module is safe on a dead database: it imports get_connection as a name
 # and opens nothing at import time.
 from tracking.discord_notifier import _post
+from tracking.watch_util import (
+    COLOR_ALERT as _COLOR_ALERT,
+    COLOR_RECOVERY as _COLOR_RECOVERY,
+    alert_state_path,
+    post_ops_alert,
+    read_alert_state,
+    should_notify,
+    write_alert_state,
+)
 
 _STATE_FILENAME = "heartbeat_watchdog_state.json"
 
-_COLOR_ALERT = 0xE74C3C
-_COLOR_RECOVERY = 0x2ECC71
-
-
 def _state_path() -> Path:
-    """Where the de-duplication state lives.
-
-    Prefers the Railway volume, because a state file on ephemeral container
-    disk is reset by every deploy and a redeploy during an outage would then
-    re-alert. Falls back to the system temp dir so the watchdog still runs
-    (noisier, but running) on a service with no volume attached.
-    """
-    for env_var in ("WATCHDOG_STATE_DIR", "RAILWAY_VOLUME_MOUNT_PATH"):
-        raw = os.environ.get(env_var, "").strip()
-        if raw:
-            try:
-                d = Path(raw)
-                d.mkdir(parents=True, exist_ok=True)
-                return d / _STATE_FILENAME
-            except OSError:
-                # An unwritable volume must not stop the check — degrade to
-                # temp rather than raise, since a watchdog that dies on its
-                # own bookkeeping is worse than one that repeats itself.
-                continue
-    return Path(tempfile.gettempdir()) / _STATE_FILENAME
+    """Where this watchdog's de-duplication state lives."""
+    return alert_state_path(_STATE_FILENAME)
 
 
 def _read_state() -> dict:
-    try:
-        return json.loads(_state_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        # No state = "nothing has alerted yet", which is the correct starting
-        # assumption and also the safe one: it errs toward alerting.
-        return {}
+    return read_alert_state(_STATE_FILENAME)
 
 
 def _write_state(state: dict) -> None:
-    try:
-        _state_path().write_text(json.dumps(state), encoding="utf-8")
-    except OSError as exc:  # noqa: BLE001 — bookkeeping must never break the check
-        logger.warning(f"Watchdog could not persist state: {exc}")
+    write_alert_state(_STATE_FILENAME, state)
 
 
 def _should_notify(state: dict, key: str, now: datetime) -> bool:
@@ -123,40 +101,16 @@ def _should_notify(state: dict, key: str, now: datetime) -> bool:
     channel: at the 15-minute cadence an un-throttled 9-hour break posts about
     36 identical messages.
     """
-    last_raw = state.get(key)
-    if not last_raw:
-        return True
-    try:
-        last = datetime.fromisoformat(last_raw)
-    except ValueError:
-        return True
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    return now - last >= timedelta(minutes=config.WATCHDOG_RENOTIFY_MINUTES)
+    return should_notify(state, key, now, config.WATCHDOG_RENOTIFY_MINUTES)
 
 
 def _alert(title: str, detail: str, *, recovery: bool = False) -> bool:
     """Post one watchdog message. Returns True only on a CONFIRMED post.
 
-    An unset DISCORD_WEBHOOK_OPS is logged at CRITICAL rather than swallowed:
-    a watchdog that can see a problem and cannot say so is a distinct failure
-    from a healthy system, and the two must not look alike in the logs.
+    `_post` is passed EXPLICITLY rather than resolved inside the helper, so
+    this module's name stays the seam the tests patch.
     """
-    url = config.DISCORD_WEBHOOK_OPS
-    if not url:
-        logger.critical(
-            f"WATCHDOG {'RECOVERY' if recovery else 'ALERT'} — {title}: {detail} "
-            "(DISCORD_WEBHOOK_OPS is not set, so this alert reached nobody)"
-        )
-        return False
-    payload = {
-        "embeds": [{
-            "title": ("✅ " if recovery else "🚨 ") + title,
-            "description": detail,
-            "color": _COLOR_RECOVERY if recovery else _COLOR_ALERT,
-        }]
-    }
-    return bool(_post(url, payload))
+    return post_ops_alert(title, detail, recovery=recovery, post=_post)
 
 
 def _newest_run_age_minutes(conn, now: datetime) -> float | None:
