@@ -530,6 +530,16 @@ return 0 from `pg_relation_is_updatable(oid, true)` and carry
 `security_invoker=on`. Revoked anyway: a view that is later simplified can
 silently become updatable.
 
+**The first apply of that rule was incomplete, and the miss is worth keeping.**
+The sweep iterated `ANON_READABLE`; `feedback` is writable-but-not-readable, so
+it was never visited and kept **TRUNCATE** through a successful-looking run --
+the one verb no RLS policy can narrow. `test_truncate_is_never_granted_to_anything`
+passed the whole time, because it checks the DECLARATION and the declaration was
+correct. Fixed by driving the sweep from `pg_class` + `has_table_privilege`
+instead of a declared list. **Third instance today of a guard that could not fail
+for the real case**, after `job_queue` and `threshold_review`; the general rule is
+in the session 220 entry.
+
 **STILL OPEN, and it needs a person rather than a sweep:** the three genuinely
 app-written tables hold verbs no policy backs, inert exactly the way
 `game_weather`'s were --
