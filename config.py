@@ -376,12 +376,14 @@ ACTION_THRESHOLDS: dict = {
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
     "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
-    # ── NFL player props (2026-08-23) ──────────────────────────────────────
-    # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
-    # exist to grade against — the whole NFL prop family is in
-    # PAUSED_MODELS for exactly that reason. Do not read these as a
-    # calibrated cut. anytime_td's prob floor is lower because its base
-    # rate is 27%, not 50%.
+    # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
+    # STILL PLACEHOLDERS. These were set before any NFL prop price existed
+    # and have never been swept; the family went live on 2026-09-06 (mike)
+    # with them unchanged, which is a decision about when to start betting,
+    # not evidence that 0.55/0.05 is the right cut. Do not read these as a
+    # calibrated number, and re-sweep each model on its own settled record
+    # at ~50 bets. anytime_td's prob floor is lower because its base rate is
+    # 27%, not 50%.
     # The market-relative rule (models/nfl_prop_market). ONE id across every
     # market it trades, because the validated result is a POOLED number over 954
     # bets — per-market splits were reported but never validated at volume, and
@@ -883,24 +885,50 @@ PAUSED_MODELS: set = {
     # pause was a settlement artifact), then RETIRED 2026-09-02 (matt) -- gone
     # from PROP_MODELS entirely, so there is nothing left to pause. Same for
     # mlb_prop_batter_rbi. See the RETIRED block above PROP_MODELS.
-    # ── NFL player props — paused on arrival (2026-08-23) ─────────────────
-    # Built and assessed on OUTCOMES, never validated against a PRICE:
-    # no NFL prop odds exist in player_prop_odds yet. Their thresholds
-    # are placeholders, so leaving them live would surface picks off an
-    # untuned cut. Each unpauses individually once it clears the six
-    # gates in docs/nfl_props_model.md §5 — not as a family.
-    "nfl_prop_pass_yards",
-    "nfl_prop_pass_attempts",
-    "nfl_prop_pass_completions",
-    "nfl_prop_pass_tds",
-    "nfl_prop_rush_yards",
-    "nfl_prop_rush_attempts",
-    "nfl_prop_rec_yards",
-    "nfl_prop_receptions",
-    "nfl_prop_rush_rec_yards",
-    "nfl_prop_anytime_td",
+    # ── NFL player props — UNPAUSED 2026-09-06 (mike) ────────────────────
+    # All twelve were paused on arrival (2026-08-23) because they had been
+    # assessed on OUTCOMES and never against a PRICE — player_prop_odds held
+    # no NFL rows at all. That premise is now false: the Week 1 board was
+    # fetched on 2026-09-06 and DraftKings quotes the standard line for every
+    # one of the twelve markets (anytime_td 453 rows, reception_yds 135,
+    # receptions 134, rush_yds 69 ... sacks 13, tackles_assists 16), so each
+    # model has a real DK number to price against.
+    #
+    # THEIR THRESHOLDS ARE STILL THE 2026-08-23 PLACEHOLDERS (0.55/0.05, and
+    # 0.30/0.05 for anytime_td). Raised with mike and taken anyway, on his
+    # call — the same shape as nfl_live_prop going live with the §2 gate
+    # unmet. Re-sweep each model's cut on its own settled record at ~50 bets;
+    # do NOT copy a cut between them (§1b: cuts are per model).
+    #
+    # These are also NOT the artifacts docs/nfl_props_model.md §5 assessed.
+    # All twelve committed in #215 were unloadable — see the retrain note in
+    # docs/sessions/2026-09.md — so they were retrained 2026-09-07 on the
+    # same seasons and feature lists. Holdout numbers moved; §5's tables
+    # describe the old artifacts, not these.
+    #
+    # ELEVEN, NOT TWELVE. nfl_prop_tackles_assists STAYS PAUSED, and this is
+    # not a judgement about its record — it is a measured defect in the target.
+    # Re-measured 2026-09-07 across every DraftKings tackles quote we hold
+    # (7,228 rows with a two-way price and a graded actual):
+    #
+    #     market                   n     our over%   DK implies      gap
+    #     player_reception_yds  13286        49.3%        50.1%    -0.8pp
+    #     player_receptions     12585        47.6%        49.5%    -2.0pp
+    #     player_rush_yds        6473        47.5%        49.9%    -2.4pp
+    #     player_tackles_assists 7228        42.2%        50.0%    -7.7pp
+    #
+    # We count a SMALLER NUMBER than the book grades — nflverse derives its
+    # defensive columns from play-by-play tackle attribution while books grade
+    # off the official gamebook. §5b measured -9.1pp and diagnosed it; this is
+    # the same gap on a fresh cut of the data, so RETRAINING DID NOT AND COULD
+    # NOT FIX IT. A model whose actual runs 7.7pp under the book's own price
+    # bets the under on everything and looks brilliant in backtest (+13.47% on
+    # 1,639 bets, 1,532 of them unders — the number §5b exists to reject).
+    #
+    # Unpause only after our per-game tackle counts are reconciled against a
+    # gamebook source and this gap closes. It is the sport's best signal
+    # (§2c: 16.5% MAE lift) measured against the wrong ruler.
     "nfl_prop_tackles_assists",
-    "nfl_prop_sacks",
 }
 
 # Fallback for models not listed above.
@@ -1137,12 +1165,14 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
-    # ── NFL player props (2026-08-23) ──────────────────────────────────────
-    # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
-    # exist to grade against — the whole NFL prop family is in
-    # PAUSED_MODELS for exactly that reason. Do not read these as a
-    # calibrated cut. anytime_td's prob floor is lower because its base
-    # rate is 27%, not 50%.
+    # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
+    # STILL PLACEHOLDERS. These were set before any NFL prop price existed
+    # and have never been swept; the family went live on 2026-09-06 (mike)
+    # with them unchanged, which is a decision about when to start betting,
+    # not evidence that 0.55/0.05 is the right cut. Do not read these as a
+    # calibrated number, and re-sweep each model on its own settled record
+    # at ~50 bets. anytime_td's prob floor is lower because its base rate is
+    # 27%, not 50%.
     "wnba_prop_market":            0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":         0.05,
@@ -1233,12 +1263,14 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaaf_live_total":    0.66,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
-    # ── NFL player props (2026-08-23) ──────────────────────────────────────
-    # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
-    # exist to grade against — the whole NFL prop family is in
-    # PAUSED_MODELS for exactly that reason. Do not read these as a
-    # calibrated cut. anytime_td's prob floor is lower because its base
-    # rate is 27%, not 50%.
+    # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
+    # STILL PLACEHOLDERS. These were set before any NFL prop price existed
+    # and have never been swept; the family went live on 2026-09-06 (mike)
+    # with them unchanged, which is a decision about when to start betting,
+    # not evidence that 0.55/0.05 is the right cut. Do not read these as a
+    # calibrated number, and re-sweep each model on its own settled record
+    # at ~50 bets. anytime_td's prob floor is lower because its base rate is
+    # 27%, not 50%.
     "wnba_prop_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":         0.55,
