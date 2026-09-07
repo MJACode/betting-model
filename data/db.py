@@ -287,6 +287,8 @@ def get_connection(session_mode: bool = False) -> DBConnection:
         return _connect(url)
 
     url = os.environ.get("DATABASE_URL", "")
+    if url:
+        url = _transaction_endpoint(url)
     if not url:
         raise ValueError(
             "DATABASE_URL is not set. "
@@ -294,6 +296,38 @@ def get_connection(session_mode: bool = False) -> DBConnection:
             "Format: postgresql://user:password@host:5432/dbname"
         )
     return _connect(url)
+
+
+# Supabase's session pooler and transaction pooler are the SAME host with
+# different ports. 5432 hands each client its own server connection for the
+# life of the session, so the pool size doubles as the client ceiling; 6543
+# multiplexes, holding a server connection only for the duration of a
+# transaction. This workload -- a parallel group of eight steps, a 30-second
+# poller, three live loops and a minute-cadence NFL poll -- is dozens of short
+# independent units, which is what 6543 is for.
+_SESSION_POOLER_PORT = ":5432"
+_TXN_POOLER_PORT = ":6543"
+
+
+def _transaction_endpoint(url: str) -> str:
+    """Rewrite a Supabase SESSION pooler URL to the TRANSACTION pooler.
+
+    Derived rather than configured, on purpose. The alternative was a second
+    Railway variable holding the same credentials, which means copying a
+    database password around to express "the same database, different port".
+
+    NARROWLY GUARDED: it fires only for a Supabase pooler host on :5432. A
+    direct connection, a local Postgres, or any other host is returned
+    untouched, so this cannot silently redirect a database it does not
+    understand. Set DB_TRANSACTION_POOLER=0 to turn it off without a deploy --
+    the escape hatch matters more than the default here, because the failure
+    mode of the wrong port is total.
+    """
+    if os.environ.get("DB_TRANSACTION_POOLER", "1") == "0":
+        return url
+    if "pooler.supabase.com" not in url or _SESSION_POOLER_PORT not in url:
+        return url
+    return url.replace(_SESSION_POOLER_PORT, _TXN_POOLER_PORT, 1)
 
 
 def _connect(url: str) -> DBConnection:
