@@ -190,4 +190,24 @@ def test_a_rerun_can_be_told_to_ignore_the_pull_ledger():
     assert "ignore_ledger" in sig.parameters
     assert sig.parameters["ignore_ledger"].default is False
     src = inspect.getsource(run_historical_odds_range)
-    assert "if already and not ignore_ledger" in src
+    assert "_ledger_entry_is_resumable" in src
+
+
+def test_ignore_ledger_still_resumes_its_own_pulls():
+    """The first version of ignore_ledger ignored EVERY ledger row -- including
+    the ones the re-buy itself had just written. Four worker redeploys in
+    twenty minutes (other sessions merging) restarted mlb-history-2024-rebuy
+    three times, and each restart re-pulled from 2024-03-28: measured 2,901
+    rows for 967 distinct propositions on that date, exactly 3x, at 30
+    credits a call. A pull recorded by code that stamps and protects its
+    rows (deployed 2026-09-07T21:04Z) is done and must be skipped; only a
+    pull from before that -- the ones the pruner thinned -- is re-bought."""
+    from data.ingestors.odds_ingestor import (HISTORICAL_STAMP_SINCE,
+                                              _ledger_entry_is_resumable)
+    assert HISTORICAL_STAMP_SINCE == "2026-09-07T21:04:00+00:00"
+    assert _ledger_entry_is_resumable("2026-09-07 21:25:02.80+00") is True
+    assert _ledger_entry_is_resumable("2026-09-01 02:15:15.91+00") is False
+    from datetime import datetime, timezone
+    assert _ledger_entry_is_resumable(datetime(2026, 9, 8, tzinfo=timezone.utc)) is True
+    # Unparseable -> not resumable -> re-pull. One extra call beats a hole.
+    assert _ledger_entry_is_resumable(None) is False
