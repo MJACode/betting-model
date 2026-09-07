@@ -448,9 +448,16 @@ def test_the_connection_only_sets_a_timeout_when_asked(monkeypatch):
 
     import data.db
 
-    src = inspect.getsource(data.db.get_connection)
+    # The timeout logic moved into data.db._connect on 2026-09-06 when
+    # get_connection gained a session_mode branch; both modes route through it,
+    # so the property is unchanged and this reads the function that now owns it.
+    src = inspect.getsource(data.db._connect)
     assert 'os.environ.get("DB_STATEMENT_TIMEOUT_MS"' in src
     assert "isdigit()" in src, "a non-numeric value must not reach the DSN"
+    # ...and both modes must actually go through it, or one of them silently
+    # loses the timeout opt-in.
+    outer = inspect.getsource(data.db.get_connection)
+    assert outer.count("_connect(") >= 2
 
 
 def test_a_reclaim_gives_the_attempt_back():
@@ -533,3 +540,26 @@ def test_the_discord_publish_job_never_restates(monkeypatch):
                    for c in q._job_publish_discord_signals.__code__.co_consts
                    if not isinstance(c, str) or "\n" not in c), \
         "clearing the ledger would turn this into an unlabelled restatement"
+
+
+def test_the_queue_runs_on_a_session_mode_connection():
+    """run_one holds a SESSION-scoped advisory lock across claiming a job and
+    executing it — an hour, for a retrain — and that is the only thing stopping
+    two workers running the queue at once.
+
+    Transaction pooling may put consecutive statements on different backends,
+    so that lock cannot survive it. Everything else moved to the transaction
+    pooler on 2026-09-06 to escape the session pool's 15-client ceiling; this
+    caller must keep asking for session mode explicitly.
+    """
+    from pathlib import Path
+    src = (Path(__file__).parent.parent / "scheduler.py").read_text(encoding="utf-8")
+    block = src[src.index("def run_job_queue() -> None:"):]
+    block = block[:block.index("\ndef ", 10)]
+    assert "get_connection(session_mode=True)" in block
+
+    qsrc = (Path(__file__).parent.parent / "tracking" / "job_queue.py").read_text(
+        encoding="utf-8")
+    assert "pg_try_advisory_lock" in qsrc, (
+        "if the queue ever stops using a session-scoped lock, the session-mode "
+        "pin above is dead weight and should go with it")
