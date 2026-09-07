@@ -593,5 +593,20 @@
         "Texas A&M Aggies"
       ]
     }
+  },
+  {
+    "key": "void-phantom-utc-avoids-2026-04-16-17",
+    "job_type": "void_picks",
+    "requested_by": "mike",
+    "note": "mike 2026-09-07: 'clean up the three phantom rows'. The four AVOID signals on the two phantom rows that carry picks. Each was written the morning AFTER the game it prices had been played: 660/662 at 11:59Z on 04-16 for the 04-15 LAD game (first pitch 02:11Z on the 16th), 704/705 at 12:13Z on 04-17 for the 04-16 SD game (first pitch 00:41Z on the 17th). Same reason 661 was voided, session 253.",
+    "args": {
+      "pick_ids": [
+        660,
+        662,
+        704,
+        705
+      ],
+      "reason": "written after the game it prices had already been played: the games row is the previous night's game filed a second time under its UTC date with no start time (see MLB_2026-04-15_NYM_LAD / MLB_2026-04-16_SEA_SD); not a pre-game signal (mike, 2026-09-07)"
+    }
   }
 ]
