@@ -56,6 +56,8 @@ situation needs.
 
 from __future__ import annotations
 
+from data.first_pitch import pregame_cutoff_sql
+from features.feature_engine import _parse_iso_ts
 from models.market_relative import MarketBet, devig, find_bets, implied  # noqa: F401
 
 SHARP_BOOK = "pinnacle"
@@ -89,32 +91,74 @@ SOFT_BOOKS = ("draftkings",)
 
 
 def load_quotes(conn, game_date: str, markets=SHARP_MARKETS) -> dict:
-    """Newest pre-game quote per (game, player, market, book) for one date.
+    """Newest PRE-GAME quote per (game, player, market, book) for one date.
 
     Newest rather than opening: this is the price a bet would actually be
     placed at. in_play rows are excluded -- CLAUDE.md section 6, pre-game and
     in-play prices never mix.
+
+    EXCLUDING snapshot_type='in_play' IS NOT ENOUGH, and this function shipped
+    for six days believing it was. The prop ingestor keeps snapshotting after
+    first pitch and labels those rows 'open': measured 2026-09-06, 5,583 of
+    24,034 DraftKings batter_total_bases rows (23%) carry a snapshot_at after
+    their game started. Ordering by snapshot_at DESC then preferentially picks
+    exactly those, because they are the newest.
+
+    What that did to the numbers, on 10 dates of Pinnacle coverage:
+
+        unbounded    n=1585   actual over 24.7%   DK de-vigged 34.9%   -10.1pp
+        pre-game     n=1116   actual over 41.6%   DK de-vigged 41.7%    -0.2pp
+
+    A ten-point disagreement with the book's own price, gone. The first grading
+    of this rule on MLB came back negative at every threshold and it was this,
+    not the rule. Same bug as pick 107657 (tests/test_prop_price_pregame_bound),
+    fixed there for the prop scorer in 2026-09-03 and never applied here --
+    section 1b's "a bug fixed in one copy of an edge calculation and not the
+    other is the same failure with money attached", which is the reason
+    market_relative.py is shared in the first place.
+
+    models/wnba_prop_market.load_wnba_prop_quotes already did this correctly.
+    The bound is pregame_cutoff_sql (actual first pitch, clamped), and post-cut
+    snapshots are dropped on PARSED timestamps in Python -- snapshot_at and
+    commence_time are TEXT in mixed 'Z'/offset shapes and string order is not
+    chronological order.
     """
-    rows = conn.execute("""
-        SELECT DISTINCT ON (game_id, player_name, market, bookmaker)
-               game_id, player_name, market, bookmaker, line, over_price, under_price
-        FROM player_prop_odds
-        WHERE game_date = %(d)s
-          AND market = ANY(%(m)s)
-          AND bookmaker = ANY(%(b)s)
-          AND (snapshot_type IS NULL OR snapshot_type <> 'in_play')
-        ORDER BY game_id, player_name, market, bookmaker, snapshot_at DESC
+    rows = conn.execute(f"""
+        SELECT o.game_id, o.player_name, o.market, o.bookmaker,
+               o.line, o.over_price, o.under_price,
+               o.snapshot_at, {pregame_cutoff_sql("g")}
+        FROM player_prop_odds o
+        JOIN games g ON g.game_id = o.game_id
+        WHERE o.game_date = %(d)s
+          AND o.market = ANY(%(m)s)
+          AND o.bookmaker = ANY(%(b)s)
+          AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+        ORDER BY o.snapshot_at
     """, {"d": game_date, "m": list(markets),
           "b": [SHARP_BOOK, *SOFT_BOOKS]}).fetchall()
 
-    return {
-        (gid, player, market, book): {
-            "line": None if line is None else float(line),
+    quotes: dict = {}
+    best: dict = {}
+    for gid, player, market, book, line, op, up, snap, cutoff in rows:
+        if line is None:
+            continue
+        cut_dt = _parse_iso_ts(cutoff)
+        snap_dt = _parse_iso_ts(snap)
+        if cut_dt is not None and snap_dt is not None and snap_dt >= cut_dt:
+            continue                                   # post-first-pitch quote
+        key = (gid, player, market, book)
+        # Latest QUALIFYING snapshot wins. An unparseable timestamp loses to any
+        # parsed one rather than winning by string order, which is how the
+        # session-106 WNBA leak got in.
+        if key in best and snap_dt is not None and best[key] is not None                 and snap_dt < best[key]:
+            continue
+        best[key] = snap_dt
+        quotes[key] = {
+            "line": float(line),
             "over_price": None if op is None else float(op),
             "under_price": None if up is None else float(up),
         }
-        for gid, player, market, book, line, op, up in rows
-    }
+    return quotes
 
 
 def card(conn, game_date: str, min_edge: float,

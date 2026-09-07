@@ -559,6 +559,53 @@ def run_system_health(run_date: str | None = None) -> dict:
         else:
             r.add("model_registry", OK, "WARN", f"{len(expected)} expected models all active")
 
+        # A REGISTRY ROW IS NOT AN ARTIFACT. The check above asks only whether a
+        # row exists; a row pointing at a file that cannot be deserialised passes
+        # it. That is not hypothetical -- all twelve nfl_prop_* artifacts
+        # committed in #215 raised XGBoostError on load and sat in master for two
+        # weeks reporting healthy here, because a PAUSED model is never opened by
+        # anything else either.
+        #
+        # Bounded on purpose: newest artifact per model id, opened once. The cost
+        # is the read, not the count of versions, and the whole set took ~11s
+        # locally. tests/test_model_artifacts_load.py covers the same property at
+        # merge time; this one covers the machine the pipeline actually runs on,
+        # where a file can go missing or be restored from model_artifacts.
+        unloadable = []
+        try:
+            import pickle
+            import warnings
+            rows = conn.execute(
+                "SELECT model_id, model_path FROM model_registry WHERE is_active = 1"
+            ).fetchall()
+            root = Path(__file__).resolve().parent.parent
+            for mid, mpath in rows:
+                if mid not in expected or not mpath:
+                    continue
+                path = Path(mpath)
+                if not path.is_absolute():
+                    path = root / path
+                if not path.exists():
+                    continue          # restorable from model_artifacts; not this check's job
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        with open(path, "rb") as fh:
+                            pickle.load(fh)
+                except Exception as exc:
+                    unloadable.append(f"{mid} ({type(exc).__name__})")
+        except Exception as exc:
+            r.add("model_artifacts_load", SKIPPED, "WARN",
+                  f"could not enumerate artifacts: {type(exc).__name__}")
+        else:
+            if unloadable:
+                r.add("model_artifacts_load", STALE, "CRIT",
+                      f"{len(unloadable)} active artifact(s) will not deserialise — "
+                      f"the model is registered and DEAD: {', '.join(sorted(unloadable))}")
+            else:
+                r.add("model_artifacts_load", OK, "CRIT",
+                      f"all {len(rows)} active artifacts deserialise")
+
         n_picks = _scalar(conn, "SELECT COUNT(*) FROM picks WHERE game_date = ?", (run_date,)) or 0
         if any_today == 0:
             r.add("picks_scored_today", SKIPPED, "CRIT", "no games today")
