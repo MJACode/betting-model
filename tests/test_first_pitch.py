@@ -151,12 +151,19 @@ def test_the_prop_scorer_uses_the_better_bound():
 def test_the_nfl_prop_scorer_uses_the_better_bound():
     """NFL reads its slate from nfl_team_game_stats, not `games`, so it needs
     its own join to reach first_pitch_at. A no-op today -- live_game_state is
-    MLB-only -- and wired so it stops being one without another change here."""
+    MLB-only -- and wired so it stops being one without another change here.
+
+    The cast on the THEN arm is not cosmetic and this assertion used to omit it.
+    `games.first_pitch_at` is TEXT and `nfl_team_game_stats.commence_time` is
+    TIMESTAMPTZ, so returning the first uncast made the whole COALESCE a type
+    error and `run_nfl_prop_scorer` could not complete a single run (fixed
+    2026-09-06). This test passed throughout, because it reads the SQL as a
+    string and never executes it -- so it now pins the form that RUNS."""
     from models import scorer
 
     src = inspect.getsource(scorer._nfl_pregame_cutoff_map)
     assert "LEFT JOIN games g" in src, src
-    assert "THEN g.first_pitch_at END" in src, src
+    assert "THEN g.first_pitch_at::timestamptz END" in src, src
     assert "SUSPICIOUS_EARLY_MINUTES" in src, src
 
 

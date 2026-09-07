@@ -103,13 +103,6 @@ par lineups
 # mean fetching 42 times: ESPN has IP-blocked this worker twice.
 par injuries-refresh
 par weather-refresh
-# MLB probable starters for today AND the look-ahead window. The scorer
-# can now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB
-# game models fail CLOSED without a starter -- so without this the widened
-# window would select tomorrow's games and skip every one of them.
-# Self-limiting like the two above (REFRESH_PROBABLES_MAX_AGE_MIN), so
-# running it on all ~42 passes does not mean 42 fetches.
-par probables-refresh
 # The news behind the number, for the prop screens' Recent News sheet.
 # Same self-limiting max-age guard as the two above
 # (config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN), so sharing a group with the
@@ -118,6 +111,24 @@ par probables-refresh
 par player-news-refresh
 par public-betting
 par_wait
+
+# MLB probable starters for today AND the look-ahead window. The scorer can
+# now price tomorrow's games (config.GAME_SCORE_AHEAD_DAYS), and MLB game
+# models fail CLOSED without a starter -- so without this the widened window
+# would select tomorrow's games and skip every one of them.
+#
+# SEQUENTIAL, NOT IN GROUP 1, and that is the whole point of this line. It ran
+# as `par` for four hours on 2026-09-06 and was the ninth concurrent connection
+# against a Supabase session pool of FIFTEEN. It failed at 20:17Z and 22:40Z
+# with EMAXCONNSESSION, and the second time it took `odds`, `prop-odds` and
+# `health-check` down with it -- a step added to widen the board instead
+# stopped the board being priced at all. A step that opens its own connection
+# does not belong in a group sized by how many sockets are already open.
+#
+# It costs nothing to run here: self-limiting on
+# REFRESH_PROBABLES_MAX_AGE_MIN, so most passes are a single cheap query, and
+# it must precede scoring either way.
+step probables-refresh
 
 # GROUP 2 — scoring. Reads everything above, so it MUST come after the wait.
 # The four scorers touch different model families and different pick rows, but

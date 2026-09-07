@@ -35,7 +35,15 @@ CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
 # flat as the project grows -- a new rule for one area now costs nothing on a
 # session that never touches it -- so this cap matters less than it did and is
 # a backstop rather than the plan. Lowered 41,000 -> 36,000 to hold the gain.
-MAX_BYTES = 36_000
+# 2026-09-06: 36,000 -> 37,000. §00 (CLAUDE IS NOT ALLOWED TO GUESS) was
+# promoted at mike's instruction after a session that guessed twice, and it is
+# exactly what this headroom exists for -- a rule that governs every future
+# session, not a log entry. It cost 1,530 bytes and the file had 141 spare, so
+# most of it was PAID FOR rather than borrowed: §1c's "How this was found"
+# block (502 bytes of pure evidence, the rule statement untouched) moved to
+# docs/rules_evidence.md in the same commit. The remaining ~890 is this raise.
+# Still the right instinct next time: move evidence out first, raise second.
+MAX_BYTES = 37_000
 
 
 def _read(path: str) -> str:
