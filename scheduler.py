@@ -61,6 +61,7 @@ Optional:
 from __future__ import annotations
 
 import logging
+import functools
 import os
 import subprocess
 import sys
@@ -993,12 +994,51 @@ def build_scheduler() -> BlockingScheduler:
     # silently stops existing. Neither announces itself.
     _add = sched.add_job
 
+    # EVERY job records that it ran, in ONE place for the same reason the role
+    # filter is here: a per-job call site is a chance to forget, and the job
+    # that gets forgotten is the one whose silence nobody notices.
+    #
+    # This watches jobs whose correct output is often NOTHING -- the NFL polls
+    # write a pick only when one qualifies, so a dead poll and a quiet market
+    # were previously identical -- and the failure alerter itself, which
+    # reported on everything except whether it was still running.
+    def _with_heartbeat(jid, func):
+        if not jid:
+            return func
+
+        @functools.wraps(func)
+        def _wrapped(*a, **kw):
+            status, detail = "ok", ""
+            try:
+                return func(*a, **kw)
+            except Exception as exc:                          # noqa: BLE001
+                # Beat anyway, marked failed. A job that raises every tick is
+                # RUNNING, and calling that silence would point at the wrong
+                # problem -- the failure alerter reports the status separately.
+                status, detail = "error", repr(exc)
+                raise
+            finally:
+                from tracking.job_heartbeat import beat
+                beat(jid, status, detail)
+        return _wrapped
+
+
     def _add_job(func, trigger=None, *args, **kwargs):
         jid = kwargs.get("id")
         if jid and not owns(jid):
             log.info(f"SERVICE_ROLE={SERVICE_ROLE} — skipping job {jid}")
             return None
-        return _add(func, trigger, *args, **kwargs)
+        # Seed at REGISTRATION so a fresh deploy does not report every watched
+        # job as silent until its first tick -- an hour for the hourly NFL
+        # poll, most of a night for the in-play worker.
+        if jid:
+            try:
+                from tracking.job_heartbeat import MAX_SILENCE, seed
+                if jid in MAX_SILENCE:
+                    seed(jid)
+            except Exception:                                 # noqa: BLE001
+                log.warning("could not seed heartbeat for %s", jid)
+        return _add(_with_heartbeat(jid, func), trigger, *args, **kwargs)
 
     sched.add_job = _add_job
 
