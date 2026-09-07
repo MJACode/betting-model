@@ -87,71 +87,56 @@ def test_the_twelve_distributional_models_score_off_the_ticks_own_fetch(monkeypa
     assert labels.index("nfl-prop-card") < labels.index("nfl-prop-scoring")
 
 
-def test_only_the_low_bias_nfl_prop_models_are_live():
-    """Which of the twelve are live, and the measured reason for the line.
+def test_eleven_are_live_and_only_tackles_is_paused():
+    """The pause set, and why it is one model rather than five.
 
-    mike unpaused eleven on 2026-09-06 and re-paused four of them hours later,
-    after asking why so many bets were unders. On the live Week 1 board 14 of 16
-    BETs were unders while the underlying picks ran ~50/50, so the BET CUT was
-    one-sided, not the models. De-vigged against DraftKings' own two-sided price
-    per proposition, EVERY model sat below the book:
+    Four were re-paused on 2026-09-07 on the gap between our P(over) and
+    DraftKings' de-vigged number (<= -6pp), then unpaused the same day when the
+    models were graded out-of-sample on 2025 at real prices
+    (scripts/nfl_prop_regrade.py). Three of the four graded POSITIVE:
+    rush_rec_yards +4.15%, rush_yards +3.92%, sacks +2.40%, rush_attempts
+    -15.61% -- all straddling zero.
 
-        sacks            -7.7pp     pass_yards        -4.4pp
-        rush_attempts    -7.4pp     pass_tds          -4.2pp
-        tackles_assists  -6.2pp     rec_yards         -2.8pp
-        rush_yards       -6.2pp     pass_completions  -1.6pp
-        rush_rec_yards   -6.1pp     pass_attempts     -1.5pp
-                                    receptions        -1.4pp
+    DISTANCE FROM THE BOOK IS NOT EDGE. Being far from DraftKings means either
+    we are wrong or it is, and only outcomes separate those. The same run shows
+    DK's de-vigged price sitting 2.4-8.1pp above the realized over-rate on
+    nearly every market while three of our models are calibrated to within 1pp
+    of reality -- so a criterion that cannot tell those apart cannot pause on
+    them.
 
-    Eleven markets do not independently agree on a sign; that is one systematic
-    downward bias, and P(under) = 1 - P(over) carries all of it. Real outcomes
-    lean under by only ~1-2pp (reception_yds -0.8, receptions -2.0, rush_yds
-    -2.4 against DK's implied), so the models overshoot reality rather than
-    finding value in it.
-
-    The cut is <= -6pp: the tackles standard, already accepted, not a new number.
-    This test is the tripwire against quietly restoring any of the five.
+    tackles_assists is not part of that reversal. Its case is a measured defect
+    in the TARGET (we count 7.7pp fewer tackles than the book grades), and the
+    re-grade confirms it from the other side: +22.43%, CI (+12.0, +32.6), the
+    only interval in the table excluding zero -- and fake, because the backtest
+    grades against our own undercount.
     """
     import config
 
     paused = {m for m in config.PAUSED_MODELS if m.startswith("nfl_prop")}
-    assert paused == {
-        "nfl_prop_tackles_assists",
-        "nfl_prop_sacks",
-        "nfl_prop_rush_attempts",
-        "nfl_prop_rush_yards",
-        "nfl_prop_rush_rec_yards",
-    }, f"pause set changed: {sorted(paused)}"
+    assert paused == {"nfl_prop_tackles_assists"}, f"pause set changed: {sorted(paused)}"
 
     live = {m for m in config.ACTION_THRESHOLDS
             if m.startswith("nfl_prop_")
             and m not in config.PAUSED_MODELS
             and m != "nfl_prop_market"}
-    assert live == {
-        "nfl_prop_anytime_td", "nfl_prop_pass_attempts",
-        "nfl_prop_pass_completions", "nfl_prop_pass_tds",
-        "nfl_prop_pass_yards", "nfl_prop_rec_yards", "nfl_prop_receptions",
-    }, f"live set changed: {sorted(live)}"
+    assert len(live) == 11, sorted(live)
 
 
-def test_the_seven_that_stayed_live_are_not_a_clean_bill_of_health():
-    """Stated so nobody reads the pause list as "the rest are fine". All seven
-    are biased the same way, by 1.4 to 4.4pp; they are under the -6pp line, not
-    unbiased. The real fix is calibration, and it CANNOT be fitted yet --
-    model_calibration holds n=0 graded picks for every nfl_prop_* model because
-    none has settled a bet. The existing Platt path fits itself once outcomes
-    exist, which is why this is a note rather than a code path."""
+def test_the_live_eleven_are_not_a_clean_bill_of_health():
+    """Stated so the empty pause list does not read as "these all work". On the
+    2025 re-grade every interval straddles zero: the pooled number excluding
+    tackles is -1.18% over 564 bets, CI (-7.7, +5.3). They are unpaused because
+    the REASON for pausing them failed, not because they were shown to win.
+
+    The cuts are the top decile of each market's edge distribution (f4bd516f),
+    which is a volume control, not a swept edge. This pins that they are tight,
+    so nobody reads "unpaused" as "loosened".
+    """
     import config
 
     live = {m for m in config.ACTION_THRESHOLDS
             if m.startswith("nfl_prop_") and m not in config.PAUSED_MODELS
             and m != "nfl_prop_market"}
-
-    # A TIGHTER CUT IS NOT A FIX FOR A BIASED PROBABILITY. f4bd516f moved these
-    # to the top decile hours before the pause, and every under BET measured
-    # above was written after it landed -- the cut changes how OFTEN the bias
-    # fires, not which side it picks. This asserts the cuts really are tight, so
-    # nobody reads "still biased" as "still on the 0.55/0.05 placeholders".
     for m in live - {"nfl_prop_anytime_td"}:
         assert config.MODEL_PROB_THRESHOLDS[m] >= 0.60, (m, config.MODEL_PROB_THRESHOLDS[m])
         assert config.MODEL_EDGE_THRESHOLDS[m] >= 0.10, (m, config.MODEL_EDGE_THRESHOLDS[m])
