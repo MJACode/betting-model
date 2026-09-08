@@ -68,6 +68,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # again under its UTC date. Relabelled data_source='duplicate_utc', never
     # deleted or scored (five voided picks point at them). No-ops after once.
     "mlb_phantom_utc_rows_2026_09_07.sql",
+    # 2026-09-08: partial index for the scorer's housekeeping sweep, which
+    # seq-scanned 137k open non-BET rows every pass. Created on production
+    # CONCURRENTLY the same night; this is the recoverable copy (IF NOT EXISTS).
+    "picks_open_nonbet_index_2026_09_08.sql",
 ]
 
 
