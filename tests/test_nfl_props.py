@@ -1525,3 +1525,48 @@ def test_fliff_is_fetched_or_it_contributes_nothing():
     assert "fliff" in mkt.SOFT_BOOKS
     assert "fliff" in config.LINE_SHOP_BOOKMAKERS
     assert "fliff" in config.ODDS_API_BOOKMAKERS_PARAM
+
+
+def test_both_sharp_references_are_fetched():
+    """A reference the live pull never requests returns no quotes and silently
+    shrinks the board -- it does not error, so the two-reference change would
+    have looked like it simply did not help.
+
+    Neither sharp book is in LINE_SHOP_BOOKMAKERS, because that list is books we
+    BET at and these two are read-only estimates of truth, so both are appended
+    to MARKET_BOOKS by hand and this is what keeps them there.
+    """
+    import models.nfl_prop_market as mkt
+    from data.ingestors.nfl_prop_odds_ingestor import MARKET_BOOKS
+
+    fetched = set(MARKET_BOOKS.split(","))
+    missing = [b for b in mkt.SHARP_BOOKS if b not in fetched]
+    assert not missing, f"sharp reference never fetched: {missing}"
+
+
+def test_a_sharp_reference_is_never_a_book_we_bet():
+    """The reference is the estimate of truth; betting into it is betting into
+    our own number. §5c's placebo depends on the two sets being disjoint."""
+    import models.nfl_prop_market as mkt
+
+    overlap = set(mkt.SHARP_BOOKS) & set(mkt.SOFT_BOOKS)
+    assert not overlap, f"reference book also in SOFT_BOOKS: {sorted(overlap)}"
+
+
+def test_two_references_are_an_OR_not_an_AND():
+    """The measured result, pinned because the intuitive change is the opposite.
+
+    Requiring BOTH references to disagree returns -6.87% on 60 bets; taking
+    EITHER returns +8.91% on 832 and carries 18% more units than Pinnacle alone.
+    A future reader who reasons "two sharps agreeing is stronger evidence" will
+    be right about the reasoning and wrong about the data.
+    """
+    import inspect
+
+    import models.nfl_prop_market as mkt
+
+    src = inspect.getsource(mkt.find_bets)
+    assert "for ref in SHARP_BOOKS" in src, src
+    # best-edge-wins across references is the OR; an intersection would be a set
+    # operation over the two bet lists instead.
+    assert "b.edge > prev.edge" in src, src
