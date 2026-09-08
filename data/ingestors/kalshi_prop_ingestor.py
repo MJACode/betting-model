@@ -158,3 +158,86 @@ def ladders(status: str = "open",
     logger.info(f"  kalshi: {len(out)} usable ladders "
                 f"({dict(skipped)} skipped)")
     return out
+
+
+def record_ladders(conn=None, status: str = "open",
+                   series_map: dict[str, str] | None = None) -> dict:
+    """Snapshot every open NFL prop rung into `kalshi_prop_ladders`.
+
+    ONE `snapshot_at` FOR THE WHOLE RUN, taken before the first request rather
+    than per row. A ladder is only meaningful as a set of prices that existed
+    together: stamping each rung with its own arrival time would make the
+    174.5 and 349.5 strikes of one player look like different observations, and
+    any later reconstruction would have to guess which belonged together.
+
+    RAW RUNGS, NOT LADDERS. The Ladder object is derived -- rebuild it with
+    models.prop_ladder from the rungs at a snapshot. Storing interpolated output
+    would freeze today's choices (logit space, PAVA, the spread gate) into the
+    history, and those are exactly what a later analysis may want to vary. So no
+    spread filtering happens here either: a one-sided rung is still a fact about
+    the market at that instant, and the reader decides whether to use it.
+
+    Idempotent within a snapshot via the (market_ticker, snapshot_at) unique
+    index, so a retry costs nothing and cannot double a ladder.
+    """
+    from datetime import datetime, timezone
+
+    from data.db import get_connection
+    from data.ingestors.nfl_props_data_ingestor import norm_player_name
+
+    series_map = series_map or SERIES_MARKET
+    snapshot_at = datetime.now(timezone.utc)
+    owns = conn is None
+    conn = conn or get_connection()
+
+    rows: list[tuple] = []
+    skipped: dict[str, int] = defaultdict(int)
+    try:
+        for series, market in series_map.items():
+            for m in fetch_series(series, status=status):
+                date = _event_date(m.get("event_ticker", ""))
+                name = _player(m.get("title", ""))
+                strike = m.get("floor_strike")
+                ticker = m.get("ticker")
+                if date is None or name is None or strike is None or not ticker:
+                    skipped["unparsed"] += 1
+                    continue
+
+                def _num(v):
+                    if v in (None, ""):
+                        return None
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return None
+
+                rows.append((
+                    snapshot_at, date, norm_player_name(name), name, market,
+                    float(strike),
+                    _num(m.get("yes_bid_dollars")), _num(m.get("yes_ask_dollars")),
+                    _num(m.get("volume_fp")), _num(m.get("open_interest_fp")),
+                    m.get("event_ticker"), ticker,
+                ))
+
+        written = 0
+        cols = ("snapshot_at, game_date, player_key, player_display, market, "
+                "strike, yes_bid, yes_ask, volume, open_interest, "
+                "event_ticker, market_ticker")
+        ph = "(" + ", ".join(["%s"] * 12) + ")"
+        for i in range(0, len(rows), 500):
+            chunk = rows[i:i + 500]
+            sql = (f"INSERT INTO kalshi_prop_ladders ({cols}) VALUES "
+                   + ", ".join([ph] * len(chunk))
+                   + " ON CONFLICT (market_ticker, snapshot_at) DO NOTHING")
+            conn.execute(sql, tuple(v for r in chunk for v in r))
+            written += len(chunk)
+        conn.commit()
+
+        props = len({(r[1], r[2], r[4]) for r in rows})
+        out = {"rungs": written, "propositions": props,
+               "snapshot_at": snapshot_at.isoformat(), "skipped": dict(skipped)}
+        logger.info(f"kalshi ladders recorded: {out}")
+        return out
+    finally:
+        if owns:
+            conn.close()

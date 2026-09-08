@@ -42,6 +42,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     "add_message_id_to_push_sent.sql",
     "add_results_snapshots.sql",
     "add_player_news.sql",
+    # 2026-09-08: Kalshi prop ladders. Recording only -- nothing scores off it.
+    # A reference cannot be graded until a record exists, and Kalshi NFL prop
+    # settled history reaches back only to 2026 preseason, so every week without
+    # this is a week of evidence that cannot be recovered afterwards.
+    "add_kalshi_prop_ladders.sql",
     # 2026-09-02: the record views read the graded matview instead of
     # re-grading 126k picks per read (the Record tab was timing out at 8s).
     # Its daily-view branch was removed on 2026-09-04 -- see below.

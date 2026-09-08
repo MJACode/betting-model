@@ -464,7 +464,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "savant_refresh", "threshold_review",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
-                  "calibration_watch"}
+                  "calibration_watch",
+                  "kalshi_ladders"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -732,6 +733,39 @@ def run_ncaaf_prop_odds() -> None:
     """
     _run([sys.executable, "-m", "data.ingestors.ncaaf_prop_odds_ingestor"],
          "ncaaf-prop-odds")
+
+
+def run_kalshi_ladder_record() -> None:
+    """Snapshot Kalshi's NFL prop ladders. RECORDING ONLY -- nothing scores off it.
+
+    A reference cannot be graded until a record exists. Pinnacle earned its role
+    by clearing a placebo on three seasons; Kalshi's NFL prop settled history
+    reaches back only to 2026 preseason, so there is nothing to grade against yet
+    and every hour not recorded is evidence that cannot be recovered afterwards.
+    This repo has paid for that lesson twice -- 100,116 credits of prop snapshots
+    that lived only on a container disk, and 117,048 sharp quotes that survived
+    only in a tracked parquet.
+
+    HOURLY, and unbounded by the prop window on purpose. The window governs what
+    we BET; this governs what we KNOW, and the whole open question is which
+    offset a Kalshi price is worth reading at. Recording only inside the betting
+    window would answer that question with the answer already assumed -- the same
+    mistake as grading an offset on a board collected at one offset.
+
+    Free: Kalshi's market data needs no key and costs no Odds API credits.
+    ~2,000 rungs a run, ~32k rows a day, an order of magnitude under what `odds`
+    already takes.
+    """
+    from data.ingestors.kalshi_prop_ingestor import record_ladders
+
+    try:
+        got = record_ladders()
+        log.info("kalshi ladders: %s rungs, %s propositions",
+                 got.get("rungs"), got.get("propositions"))
+    except Exception as exc:                                   # noqa: BLE001
+        # Never let a research recorder break a scheduler pass.
+        log.warning("kalshi ladder record failed: %s: %s",
+                    type(exc).__name__, exc)
 
 
 def run_nfl_prop_card() -> None:
@@ -1403,6 +1437,15 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_PROP_CARD=0 — NFL prop card NOT scheduled.")
+
+    # Minute 40, away from the prop card at :25 and the hourly refresh, so a slow
+    # Kalshi response cannot delay anything that places a bet.
+    sched.add_job(
+        run_kalshi_ladder_record,
+        CronTrigger(minute=40, timezone=TIMEZONE),
+        id="kalshi_ladders",
+        name="Kalshi NFL prop ladders (record only)",
+    )
 
     if RUN_NCAAF_PROP_ODDS:
         # 9am / 1pm / 6pm ET: one fresh number before each of the day's kick
