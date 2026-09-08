@@ -23,10 +23,13 @@ import pytest
 import tracking.system_health as sh
 
 
-def _conn():
+def _conn(fbs=("Miami", "Troy", "Ole Miss", "TCU", "Georgia", "UTEP")):
     c = sqlite3.connect(":memory:")
     c.execute("""CREATE TABLE games (game_id TEXT PRIMARY KEY, sport TEXT,
                  game_date TEXT, home_team TEXT, away_team TEXT)""")
+    c.execute("CREATE TABLE ncaaf_teams (school TEXT, classification TEXT)")
+    for s in fbs:
+        c.execute("INSERT INTO ncaaf_teams VALUES (?, 'fbs')", (s,))
     return c
 
 
@@ -34,16 +37,31 @@ def _add(c, gid, date, home, away):
     c.execute("INSERT INTO games VALUES (?,'NCAAF',?,?,?)", (gid, date, home, away))
 
 
+def _identity_sql() -> str:
+    """The check's ACTUAL query, lifted from the module.
+
+    Reimplementing it here would be the §7 trap in its purest form: the test
+    would pass while the code it guards was mutated out from under it. Both
+    mutations (dropping the FBS bound, unbounding the window) went UNCAUGHT
+    against a hand-copied query before this was changed to read the real one.
+
+    The query uses `?` placeholders throughout, which is what makes it runnable
+    against a sqlite fixture unaltered.
+    """
+    import io as _io
+    text = _io.open(sh.__file__, encoding="utf-8").read()
+    start = text.index("# ── One games row per NCAAF matchup")
+    body = text[start:]
+    sql = body[body.index('conn.execute("""') + len('conn.execute("""'):]
+    return sql[:sql.index('""",')]
+
+
 def _run(c, run_date="2026-09-10"):
-    """Just the identity block, against a sqlite fixture."""
+    """Run the real query against the fixture."""
     from datetime import datetime, timedelta
     d = datetime.strptime(run_date, "%Y-%m-%d")
-    rows = c.execute(
-        "SELECT game_date, home_team, COUNT(*) FROM games "
-        "WHERE sport='NCAAF' AND game_date >= ? AND game_date <= ? "
-        "GROUP BY game_date, home_team HAVING COUNT(*) > 1",
-        (run_date, (d + timedelta(days=9)).strftime("%Y-%m-%d"))).fetchall()
-    return rows
+    end = (d + timedelta(days=9)).strftime("%Y-%m-%d")
+    return c.execute(_identity_sql(), (run_date, end)).fetchall()
 
 
 def test_a_split_matchup_is_detected():
@@ -112,3 +130,24 @@ def test_it_is_registered_under_a_skip_budget_or_never_skips():
     block = text[text.index("# ── One games row per NCAAF matchup"):]
     block = block[:block.index("\n        # ") if "\n        # " in block[10:] else len(block)]
     assert "SKIPPED" not in block
+
+
+def test_a_non_fbs_fixture_is_not_reported():
+    """The registry carries 683 schools across every classification, and the
+    models score FBS. Bluffton's "Madonna" vs "Madonna University (Mich.)"
+    survived the 2026-09-08 cleanup precisely because NEITHER name is in the
+    registry -- there is no canonical id to merge onto, and nothing prices the
+    game. Reporting it forever is the noise this exercise was about.
+    """
+    c = _conn()                                   # Bluffton is not in the fbs set
+    _add(c, "NCAAF_2026-09-12_madonna_bluffton", "2026-09-12", "Bluffton", "Madonna")
+    _add(c, "NCAAF_2026-09-12_madonna-u_bluffton", "2026-09-12", "Bluffton", "Madonna University (Mich.)")
+    assert _run(c, "2026-09-08") == []
+
+
+def test_an_fbs_split_is_still_reported_after_the_bound():
+    """The bound must not swallow the cases it exists for."""
+    c = _conn()
+    _add(c, "NCAAF_2026-09-10_florida-a-m_miami", "2026-09-10", "Miami", "Florida A&M")
+    _add(c, "NCAAF_2026-09-10_florida_miami", "2026-09-10", "Miami", "Florida")
+    assert _run(c, "2026-09-08") == [("2026-09-10", "Miami", 2)]
