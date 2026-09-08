@@ -30,9 +30,12 @@ from typing import Any
 
 import decimal
 
+import time
+
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
+from loguru import logger
 
 # Convert Postgres NUMERIC/DECIMAL → float (same behaviour as SQLite)
 # SQLite always returns Python float for real columns; psycopg2 returns
@@ -164,6 +167,70 @@ class _CursorResult:
         return iter(self._cur)
 
 
+# ── Connection loss ───────────────────────────────────────────────────────────
+
+class ConnectionLost(psycopg2.OperationalError):
+    """
+    The server connection was lost while this transaction held UNCOMMITTED
+    writes. The wrapper has already reconnected, so the connection object is
+    usable again — but the work of the transaction is gone and the caller has
+    to re-run its unit of work. Raised instead of silently retrying, because a
+    retried statement on a fresh connection would land WITHOUT the statements
+    that preceded it in the lost transaction.
+    """
+
+
+# SQLSTATE classes that mean "the connection is gone", as opposed to "the
+# statement failed": 08xxx (connection exception), 57P01 admin_shutdown,
+# 57P02 crash_shutdown, 57P03 cannot_connect_now. NOT 57014 (query_canceled —
+# the statement_timeout) and not the base OperationalError class: a timed-out
+# DELETE re-issued on a fresh connection is exactly the wrong reflex.
+_LOST_SQLSTATES = ("57P01", "57P02", "57P03")
+_LOST_PHRASES = (
+    "server closed the connection", "connection already closed",
+    "terminating connection", "connection not open", "could not connect",
+    "connection is closed", "ssl syscall error", "eof detected",
+)
+
+
+_LOST_CLASSES = tuple(c for c in (
+    getattr(psycopg2.errors, n, None) for n in (
+        "ConnectionException", "ConnectionDoesNotExist", "ConnectionFailure",
+        "SqlclientUnableToEstablishSqlconnection",
+        "SqlserverRejectedEstablishmentOfSqlconnection", "ProtocolViolation",
+        "AdminShutdown", "CrashShutdown", "CannotConnectNow")) if c)
+
+
+def connection_lost(exc: BaseException, conn=None) -> bool:
+    """True when `exc` means the server connection is gone (see above)."""
+    if conn is not None and getattr(conn, "closed", 0):
+        return True
+    if isinstance(exc, psycopg2.InterfaceError):
+        return True
+    if isinstance(exc, _LOST_CLASSES):
+        return True
+    if not isinstance(exc, psycopg2.OperationalError):
+        return False
+    code = getattr(exc, "pgcode", None)
+    if code:
+        return code.startswith("08") or code in _LOST_SQLSTATES
+    msg = str(exc).lower()
+    return any(ph in msg for ph in _LOST_PHRASES)
+
+
+_READ_PREFIXES = ("select", "show", "explain", "values", "table")
+
+
+def _is_write(sql: str) -> bool:
+    """Conservative: anything that is not plainly a read counts as a write."""
+    head = sql.lstrip().lower()
+    if head.startswith(_READ_PREFIXES):
+        return False
+    if head.startswith("with"):
+        return any(w in head for w in ("insert", "update", "delete"))
+    return True
+
+
 # ── Connection wrapper ────────────────────────────────────────────────────────
 
 class DBConnection:
@@ -178,27 +245,95 @@ class DBConnection:
     - ? and :name param styles are auto-converted to %s / %(name)s
     """
 
-    def __init__(self, pg_conn: psycopg2.extensions.connection):
+    def __init__(self, pg_conn: psycopg2.extensions.connection,
+                 url: str | None = None):
         self._conn = pg_conn
+        self._url = url          # what a reconnect dials; None = cannot reconnect
+        self._dirty = False      # uncommitted writes on this connection
+
+    # ── reconnect ───────────────────────────────────────────────────────
+    #
+    # WHY. On 2026-09-08 at 01:30:57Z the pooler dropped every client at
+    # once: the worker's scoring pass (started 01:16:41Z) and a local dry
+    # run both died with "server closed the connection unexpectedly", every
+    # later statement on the same object failed with "connection already
+    # closed", and the pass's own failure row was never written because the
+    # handler that writes it used the dead connection. mike: "why do you
+    # just stop work when database drops connection, globally we need to
+    # add auto retry to pick up where we left off."
+    #
+    # THE RULE. A lost connection with NO uncommitted writes is invisible:
+    # reconnect and re-run the one statement. A lost connection WITH
+    # uncommitted writes cannot be papered over — the transaction is gone —
+    # so the wrapper reconnects (the object stays usable) and raises
+    # ConnectionLost, and the caller re-runs its unit of work. Keeping units
+    # of work small (commit per game, per batch) is what makes that cheap.
+
+    def _reconnect(self, why: BaseException) -> None:
+        if not self._url:
+            raise why
+        attempts = int(os.environ.get("DB_RECONNECT_ATTEMPTS", "3") or 3)
+        last: BaseException = why
+        for attempt in range(1, attempts + 1):
+            try:
+                self._conn.close()
+            except Exception:                                  # noqa: BLE001
+                pass
+            try:
+                self._conn = _open(self._url)
+                self._dirty = False
+                logger.warning(f"db: connection lost ({str(why)[:80]}); "
+                               f"reconnected on attempt {attempt}")
+                return
+            except psycopg2.OperationalError as exc:
+                last = exc
+                time.sleep(min(2 ** (attempt - 1), 8))
+        raise last
+
+    def _run(self, fn, *, write: bool):
+        """Run fn() once; on a lost connection reconnect and re-run it once
+        if the transaction was clean, else raise ConnectionLost."""
+        try:
+            result = fn()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            if not connection_lost(exc, self._conn):
+                raise
+            had_writes = self._dirty
+            self._reconnect(exc)
+            if had_writes:
+                raise ConnectionLost(
+                    "connection lost with uncommitted writes; reconnected, "
+                    "transaction discarded — re-run the unit of work "
+                    f"({str(exc)[:120]})") from exc
+            result = fn()
+        if write:
+            self._dirty = True
+        return result
 
     def execute(self, sql: str, params=None) -> _CursorResult:
         adapted = _adapt_sql(sql)
-        cur = self._conn.cursor()
         if adapted is None:
-            return _CursorResult(cur)  # PRAGMA — return empty cursor
-        if params is not None:
-            cur.execute(adapted, params)
-        else:
-            cur.execute(adapted)
-        return _CursorResult(cur)
+            return _CursorResult(self._conn.cursor())  # PRAGMA — empty cursor
+
+        def _go():
+            cur = self._conn.cursor()
+            if params is not None:
+                cur.execute(adapted, params)
+            else:
+                cur.execute(adapted)
+            return _CursorResult(cur)
+        return self._run(_go, write=_is_write(adapted))
 
     def executemany(self, sql: str, params_list) -> None:
         adapted = _adapt_sql(sql)
         if adapted is None or not params_list:
             return
-        cur = self._conn.cursor()
-        psycopg2.extras.execute_batch(cur, adapted, params_list)
-        cur.close()
+
+        def _go():
+            cur = self._conn.cursor()
+            psycopg2.extras.execute_batch(cur, adapted, params_list)
+            cur.close()
+        self._run(_go, write=True)
 
     def executescript(self, sql: str) -> None:
         """
@@ -226,13 +361,37 @@ class DBConnection:
         cur.close()
 
     def commit(self) -> None:
-        self._conn.commit()
+        try:
+            self._conn.commit()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            if not connection_lost(exc, self._conn):
+                raise
+            had_writes = self._dirty
+            self._reconnect(exc)
+            if had_writes:
+                raise ConnectionLost(
+                    "connection lost at commit; the transaction did not land "
+                    f"— re-run the unit of work ({str(exc)[:120]})") from exc
+            return
+        self._dirty = False
 
     def rollback(self) -> None:
-        self._conn.rollback()
+        # A rollback on a dead connection has nothing to undo — the server
+        # already discarded the transaction — so reconnect and carry on. This
+        # is what lets an error handler write its failure record.
+        try:
+            self._conn.rollback()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            if not connection_lost(exc, self._conn):
+                raise
+            self._reconnect(exc)
+        self._dirty = False
 
     def close(self) -> None:
-        self._conn.close()
+        try:
+            self._conn.close()
+        except Exception:                                      # noqa: BLE001
+            pass
 
     def __enter__(self):
         return self
@@ -350,6 +509,19 @@ def _connect(url: str) -> DBConnection:
     if timeout_ms.isdigit():
         options = f"-c statement_timeout={int(timeout_ms)}"
 
+    # Autocommit off — callers manage transactions with conn.commit() / conn.rollback()
+    pg_conn = _open(url, options)
+    return DBConnection(pg_conn, url=url)
+
+
+def _open(url: str, options: str | None = None) -> psycopg2.extensions.connection:
+    """One raw psycopg2 connection to `url`; the reconnect path dials this too.
+    A reconnect re-derives `options` from the same env var the first connect
+    read, so a retrain's raised statement timeout survives its reconnect."""
+    if options is None:
+        timeout_ms = os.environ.get("DB_STATEMENT_TIMEOUT_MS", "").strip()
+        if timeout_ms.isdigit():
+            options = f"-c statement_timeout={int(timeout_ms)}"
     pg_conn = psycopg2.connect(
         url,
         keepalives=1,
@@ -358,6 +530,5 @@ def _connect(url: str) -> DBConnection:
         keepalives_count=5,       # drop after 5 failed probes
         **({"options": options} if options else {}),
     )
-    # Autocommit off — callers manage transactions with conn.commit() / conn.rollback()
     pg_conn.autocommit = False
-    return DBConnection(pg_conn)
+    return pg_conn
