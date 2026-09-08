@@ -1626,14 +1626,61 @@ def _tag_prop(pick: dict, ctx: tuple) -> dict:
     return pick
 
 
+def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
+    """The 19-char UTC prefix of this game's first pitch, or None.
+
+    None means "do not bound" — a game with no commence_time keeps the old
+    behaviour rather than losing every price, which is the fail-open direction
+    the WNBA leak taught us (.claude/rules/data-integrity.md).
+    """
+    row = conn.execute(
+        "SELECT commence_time FROM games WHERE game_id = ?", (game_id,)
+    ).fetchone()
+    ct = row[0] if row else None
+    return str(ct)[:19] if ct else None
+
+
 def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     """
-    Get most recent odds snapshot for a game+market.
+    Get most recent PRE-GAME odds snapshot for a game+market.
     Tries DraftKings first; falls back to sbr_consensus for historical games.
+
+    BOUNDED AT FIRST PITCH (2026-09-08). `snapshot_type != 'in_play'` is not
+    enough on its own, and CLAUDE.md 6 says so in as many words: the evening
+    refresh keeps writing `open` rows AFTER first pitch. Measured on
+    MLB_2026-09-07_LAA_BOS — rows stamped `open` at 19:41Z against a 17:36Z
+    first pitch, carrying home -10000 / away +1380, i.e. a decided game read
+    back as its pre-game moneyline.
+
+    This is the DECISION path (CLAUDE.md 6), so the blast radius was measured
+    before the bound went in, over every BET since 2026-08-24:
+
+        pre-game   265 bets, 0 stamped after first pitch, 0 affected
+        live       175 bets, 174 after first pitch, 121 were reading a
+                   post-first-pitch row
+
+    So it is a no-op for pre-game scoring and a leak fix for the live path,
+    which calls this through `live_scorer._pregame_features` to build the
+    "pre-game" half of every live feature row. 9 of 164 live-bet games have no
+    genuine pre-game DK/sbr price at all and now produce no live pick — that is
+    the intended answer, not a regression: a pre-game line we never captured is
+    not something to substitute a mid-game one for.
+
+    THE COMPARISON IS A 19-CHARACTER PREFIX, and it is safe because the shapes
+    were checked rather than assumed: across 4,564,568 non-in_play `odds` rows
+    and 39,607 `games`, every timestamp is ISO with a `T` separator and UTC
+    (`Z` or `+00:00`); no other offset and no space separator exists. Prefixing
+    at 19 chars drops the offset, so the two are directly comparable. The only
+    other shape is date-only (`2021-09-11`, historical cfbd_bovada `close`
+    rows), which prefixes shorter and sorts BEFORE any same-day timestamp —
+    included, which is the fail-open direction.
     """
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price",
             "home_link", "away_link", "draw_link", "over_link", "under_link"]
+
+    cutoff = _pregame_cutoff(conn, game_id)
+    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
 
     # For MLB runline / NHL puckline, filter to the standard ±1.5 to avoid
     # alternate spread lines returned by the Odds API. Basketball spreads
@@ -1654,9 +1701,11 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
               AND bookmaker = ?
               AND snapshot_type != 'in_play'
               {spread_filter}
+              {pregame_filter}
             ORDER BY snapshot_at DESC
             LIMIT 1
-        """, (game_id, market, bookmaker)).fetchone()
+        """, (game_id, market, bookmaker) + ((cutoff,) if cutoff else ())
+        ).fetchone()
 
         if row:
             return dict(zip(cols, row))
@@ -1681,9 +1730,10 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
               AND bookmaker = 'draftkings'
               AND snapshot_type != 'in_play'
               {spread_filter}
+              {pregame_filter}
             ORDER BY snapshot_at DESC
             LIMIT 1
-        """, (sibling, market)).fetchone()
+        """, (sibling, market) + ((cutoff,) if cutoff else ())).fetchone()
         if row:
             odds = dict(zip(cols, row))
             # totals are orientation-independent (over/under/line); h2h is NOT,

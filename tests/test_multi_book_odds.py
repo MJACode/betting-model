@@ -341,3 +341,80 @@ def test_the_fallback_does_not_recurse_forever(monkeypatch):
     with pytest.raises(AssertionError):
         oi._get_event_odds("baseball_mlb", "e1", ["totals_1st_5_innings"])
     assert len(calls) == 2
+
+
+# ── the pre-game read is bounded at first pitch ──────────────────────────────
+#
+# `snapshot_type != 'in_play'` is NOT sufficient and CLAUDE.md §6 says so: the
+# evening refresh keeps writing `open` rows after first pitch. Measured on
+# MLB_2026-09-07_LAA_BOS — rows stamped `open` at 19:41Z against a 17:36Z first
+# pitch, home -10000 / away +1380, a decided game read back as its pre-game
+# moneyline. `live_scorer._pregame_features` calls this for the "pre-game" half
+# of every live feature row, and 121 of 175 live BETs since 2026-08-24 were
+# reading such a row.
+
+from models.scorer import _get_dk_odds, _pregame_cutoff
+
+
+class _OddsConn:
+    """Answers the commence_time lookup, records the odds query."""
+
+    def __init__(self, commence_time):
+        self.commence_time = commence_time
+        self.queries: list[tuple[str, tuple]] = []
+        self._last = ""
+
+    def execute(self, sql, params=()):
+        self._last = " ".join(sql.split())
+        self.queries.append((self._last, tuple(params)))
+        return self
+
+    def fetchone(self):
+        if "FROM games" in self._last:
+            return (self.commence_time,)
+        return None          # no odds row; we are testing the QUERY, not the row
+
+    def close(self):
+        pass
+
+
+def _odds_query(conn) -> tuple[str, tuple]:
+    return next(q for q in conn.queries if "FROM odds" in q[0])
+
+
+def test_the_pregame_read_is_bounded_at_first_pitch():
+    conn = _OddsConn("2026-09-07T17:36:00+00:00")
+    _get_dk_odds(conn, "MLB_2026-09-07_LAA_BOS", "h2h")
+    sql, params = _odds_query(conn)
+    assert "substr(snapshot_at, 1, 19) <=" in sql
+    assert "2026-09-07T17:36:00" in params
+
+
+def test_a_game_with_no_commence_time_keeps_every_row():
+    """FAIL OPEN. A missing timestamp must not delete the price — that is the
+    WNBA leak run backwards (.claude/rules/data-integrity.md)."""
+    conn = _OddsConn(None)
+    _get_dk_odds(conn, "MLB_2009-04-05_ATL_PHI", "h2h")
+    sql, params = _odds_query(conn)
+    assert "substr(snapshot_at" not in sql
+    assert params == ("MLB_2009-04-05_ATL_PHI", "h2h", "draftkings")
+
+
+def test_the_cutoff_is_the_19_char_utc_prefix():
+    """Both columns are ISO/T-separated/UTC across all 4.5M rows, so prefixing
+    past the offset makes `Z` and `+00:00` directly comparable."""
+    conn = _OddsConn("2026-09-07T17:36:00+00:00")
+    assert _pregame_cutoff(conn, "g") == "2026-09-07T17:36:00"
+    assert len(_pregame_cutoff(conn, "g")) == 19
+
+
+def test_the_ufc_sibling_lookup_is_bounded_too():
+    """The sibling is the same fight at the other orientation; an unbounded
+    fallback would reintroduce the leak by the back door."""
+    conn = _OddsConn("2026-08-29T02:00:00Z")
+    _get_dk_odds(conn, "UFC_2026-08-29_fighter-a_fighter-b", "totals")
+    sibling = [q for q in conn.queries
+               if "FROM odds" in q[0]
+               and any("fighter-b_fighter-a" in str(x) for x in q[1])]
+    assert sibling, "the sibling fallback query never ran"
+    assert "substr(snapshot_at, 1, 19) <=" in sibling[0][0]

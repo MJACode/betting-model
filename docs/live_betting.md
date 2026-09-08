@@ -316,3 +316,57 @@ for no reason connected to price.
 settled results and needs volume and time. The review checkpoint and the one
 live-specific split that survived a time split (price bucket) are in
 `docs/thresholds.md` under "Dated review criteria".
+
+---
+
+## The "pre-game" line the live loop reads was a mid-game price (2026-09-08)
+
+Found while diagnosing the inning-gate replay, and it is a PRODUCTION defect,
+not a replay one. `live_scorer._pregame_features` builds the pre-game half of
+every live feature row by calling `scorer._get_dk_odds(conn, game_id, "h2h")`.
+That function filtered `snapshot_type != 'in_play'` and nothing else.
+
+**That filter is not sufficient, and CLAUDE.md §6 already said so**: the evening
+refresh keeps writing `open` rows AFTER first pitch. Measured on
+`MLB_2026-09-07_LAA_BOS` — rows stamped `open` at **19:41Z against a 17:36Z
+first pitch**, carrying home **−10000** / away **+1380**. A decided game, read
+back as its pre-game moneyline.
+
+### The blast radius, measured before the fix
+
+Every BET since 2026-08-24:
+
+| lane | bets | stamped after first pitch | would read a post-first-pitch row |
+|---|---|---|---|
+| pre-game | 265 | 0 | **0** |
+| live | 175 | 174 | **121** |
+
+So it is a **no-op for pre-game scoring** — those picks are written before their
+games start, so the newest `open` row is genuinely pre-game — and a leak fix for
+the live path, where 69% of bets were affected. There is no §1c problem: no
+locked pre-game pick was priced off a post-first-pitch line.
+
+### What the fix costs
+
+`_get_dk_odds` now bounds on the game's `commence_time`. **9 of 164 live-bet
+games have no genuine pre-game DK or sbr price at all** and therefore now
+produce no live pick. That is the intended answer rather than a regression: a
+pre-game line we never captured is not something to substitute a mid-game one
+for. Expect roughly 5% fewer live picks.
+
+### Why a string prefix is safe here
+
+The comparison is `substr(snapshot_at, 1, 19) <= substr(commence_time, 1, 19)`,
+and the shapes were checked rather than assumed. Across **4,564,568** non-in_play
+`odds` rows and **39,607** `games`: every timestamp is ISO, `T`-separated and
+UTC (`Z` or `+00:00`); there is no other offset and no space separator. Cutting
+at 19 characters drops the offset, so the two are directly comparable. The only
+other shape is date-only (`2021-09-11`, historical `cfbd_bovada` `close` rows),
+which prefixes shorter and sorts BEFORE any same-day timestamp — included,
+which is the fail-open direction.
+
+A game with no `commence_time` is **not bounded at all**, deliberately. A guard
+that deletes every price on a missing timestamp is the WNBA leak run backwards.
+
+Tripwire: `tests/test_multi_book_odds.py`, four tests, watched failing against
+the unbounded version.
