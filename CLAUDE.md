@@ -445,6 +445,14 @@ Regulation market often has better value since casual bettors underweight it.
 ## 4. Conventions
 - Dates: always ISO format `YYYY-MM-DD`
 - Profit: positive = win, negative = loss
+- **RESULTS ARE ALWAYS IN UNITS. NEVER DOLLARS.** (mike, 2026-09-08: *"why are
+  you expressing results in dollars, I have hard coded units everywhere, I want
+  that a global rule."*) One unit = one flat bet. A record is "-206.7 units over
+  3,201 bets", never "-$20,670 at $100 flat" — the dollar figure invents a stake
+  size nobody chose, changes meaning the moment the bankroll does, and cannot be
+  compared against any other number in this repo. This governs EVERY surface:
+  replies, docs, commit messages, the dashboard, Discord, the app. `profit_flat`
+  is stored as dollars-per-$100 stake, so divide by 100 to report it.
 - Edge: always expressed as decimal (0.05 = 5%), not percentage
 - `home_win = 1` means home team won the full game
 - `home_win_reg = 1` means home team won in regulation (NHL only)
