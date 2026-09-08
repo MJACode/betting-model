@@ -192,9 +192,13 @@ def test_every_housekeeping_delete_in_run_scorer_is_scoped_to_the_subset():
     # cleanly — the variable was still built, just never used. A guard that
     # can be satisfied by dead code is not a guard.
     applied = body.count('""" + _sc')
-    # The postponed-game delete is keyed on a single game_id and needs no scope.
-    assert deletes == 5, f"run_scorer gained a DELETE ({deletes}) — scope it too"
-    assert applied == deletes - 1, (
+    # Two deletes are keyed on a single game_id and need no scope: the
+    # postponed-game delete, and (since 2026-09-08) the per-game clear that
+    # opens each game's own transaction -- the loop it sits in is already
+    # narrowed to the subset before the first game is scored.
+    assert deletes == 6, f"run_scorer gained a DELETE ({deletes}) — scope it too"
+    assert body.count("WHERE game_id = %s") == 2, "the two single-game deletes"
+    assert applied == deletes - 2, (
         f"{deletes} DELETEs but only {applied} carry the subset predicate in "
         f"their SQL — an unscoped one will empty the board on a partial "
         f"re-score")
