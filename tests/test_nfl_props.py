@@ -1633,3 +1633,28 @@ def test_the_card_names_every_sharp_reference_it_used():
     assert "SHARP_BOOKS" in src, src
     assert "mk.SHARP_BOOK}" not in src, "still prints only the first reference"
     assert len(mkt.SHARP_BOOKS) >= 2
+
+
+def test_the_backfill_buys_the_board_the_rule_can_actually_read():
+    """A historical backfill exists to study the rule, so it must fetch the
+    books the rule reads -- both sharp references included.
+
+    It used to fall through to ODDS_API_BOOKMAKERS_PARAM, which contains
+    NEITHER reference by design (that list is books we BET at; pinnacle only
+    appeared because MARKET_BOOKS appends it). Caught 12,000 credits into a
+    T-48h series that had pinnacle but no betonlineag -- data for a
+    single-reference rule that had already been replaced. The failure is silent
+    and expensive: the fetch succeeds, the rows land, and the analysis measures
+    a configuration nobody runs.
+    """
+    import inspect
+
+    import models.nfl_prop_market as mkt
+    from data.ingestors.nfl_prop_odds_ingestor import (
+        MARKET_BOOKS, backfill_nfl_prop_odds,
+    )
+
+    default = inspect.signature(backfill_nfl_prop_odds).parameters["books"].default
+    assert default == MARKET_BOOKS, "backfill must default to the live pull's books"
+    for ref in mkt.SHARP_BOOKS:
+        assert ref in default, f"{ref} would not be bought by a backfill"
