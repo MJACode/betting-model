@@ -2994,28 +2994,36 @@ GAME_SCORE_AHEAD_DAYS: int = int(os.environ.get("GAME_SCORE_AHEAD_DAYS", "7"))
 # it); this is the set that was same-day-only.
 GAME_SCORE_AHEAD_SPORTS: tuple = ("MLB", "NBA", "NHL", "WNBA")
 
-# NCAAF plays one slate a week and DK prices it days ahead, so same-day-only
-# scoring left the board empty for six days out of seven — and, worse, made the
-# cross-book opener rule structurally dormant: it only fires while DK is STILL
-# on its opening number, which is rarely true by kickoff. Score the whole week.
+# NCAAF is scored as far ahead as a line exists. Matt, 2026-09-07: "it should
+# be whenever lines are released. speed speed speed is what matters to get a
+# good line." This is the OUTER edge of the scorer's game query; what actually
+# admits a look-ahead game is a DraftKings price (run_scorer's ncaaf_unpriced
+# prefilter), so a wide window costs nothing on games nobody has priced.
+# Measured on the live feed 2026-09-07: DK had totals up on 107 NCAAF games,
+# 44 of them more than 14 days out (marquee games listed to 12-12); the old
+# 7-day window was clipping every one of those. 150 days covers a season from
+# its first week through the bowls.
 #
 # The look-ahead interacts with the pick lock deliberately (see run_scorer): an
-# NCAAF row carrying an actual signal locks at first cross — that IS the opener
-# rule's thesis — while a "no signal" row is refreshed every pass, so a model
-# that forms a view mid-week can still fire.
-NCAAF_SCORE_AHEAD_DAYS: int = int(os.environ.get("NCAAF_SCORE_AHEAD_DAYS", "7"))
+# NCAAF row carrying an actual signal locks at first cross while a "no signal"
+# row is refreshed every pass, so a model that forms a view later can still
+# fire, and one that fired keeps the line it fired at (Section 1c).
+NCAAF_SCORE_AHEAD_DAYS: int = int(os.environ.get("NCAAF_SCORE_AHEAD_DAYS", "150"))
 
-# ...and the totals rule may fire up to this many days before kickoff. It
-# shipped at 1 (game day) because it had been walked forward against the
-# archive's close and no earlier lead was measured. Measured 2026-09-07 on the
-# 2023-2025 DraftKings backfill (scripts/ncaaf_search/totals_lead.py): graded at
-# DK's line 0-5 days out the +/-8 rule is 53.8-56.4% at every lead vs 56.4% at
-# the close, every interval overlapping, and the line does not drift toward the
-# model (close-minus-lead within 0.12 points of zero) -- so the limit is a
-# timing choice, not an edge choice. Raised to 5 at Matt's call ("Friday is too
-# late"); the pick locks at the first pass that clears the gate (Section 1c).
+# ...and the totals rule has NO lead limit: it fires at the first scoring pass
+# where DK's total sits the gate's distance from the model, whenever that is.
+# History, so nobody re-adds one: it shipped at 1 (game day) because the rule
+# had only been walked forward against the archive's close; 2026-09-07's
+# measurement (scripts/ncaaf_search/totals_lead.py) found the +/-8 rule
+# 53.8-56.4% at every lead 0-5 days out vs 56.4% at the close, every interval
+# overlapping, and no drift of the line toward the model -- the limit was a
+# timing choice, not an edge choice. It went to 5 that evening and then, at
+# Matt's call the same night, to none: "it should not be an arbitrary 5 days
+# ... it should be whenever lines are released." Leads beyond ~7 days are
+# unmeasured (DK listed 84 of 2,651 backfill games that early), which is a
+# statement about the sample, not the rule. Env-overridable for an experiment.
 NCAAF_TOTALS_MAX_LEAD_DAYS: float = float(
-    os.environ.get("NCAAF_TOTALS_MAX_LEAD_DAYS", "5")
+    os.environ.get("NCAAF_TOTALS_MAX_LEAD_DAYS", "inf")
 )
 
 # ── GOLF / DataGolf ───────────────────────────────────────────────────────────

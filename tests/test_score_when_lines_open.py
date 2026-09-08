@@ -54,10 +54,13 @@ class TestTheWindow:
         assert "game_date = ?" in q, "today must still be selected unconditionally"
         assert "_ahead_marks" in q, "the look-ahead sports clause is missing"
 
-    def test_ncaaf_and_ufc_horizons_are_untouched(self):
-        # They had look-ahead already and their models were validated with it.
-        # Widening them would be a different change riding along inside this one.
-        assert config.NCAAF_SCORE_AHEAD_DAYS == 7
+    def test_ncaaf_and_ufc_horizons_are_pinned(self):
+        # UFC had look-ahead already and its models were validated with it.
+        # NCAAF was 7 until 2026-09-07, when Matt asked for scoring "whenever
+        # lines are released": DK lists marquee games months out, and the
+        # DK-price prefilter is what admits a game, so the window is the
+        # season. A change to either is its own model update, not a rider.
+        assert config.NCAAF_SCORE_AHEAD_DAYS == 150
         assert config.UFC_SCORE_AHEAD_DAYS == 7
 
     def test_the_housekeeping_delete_covers_the_new_horizon(self):

@@ -68,8 +68,13 @@ row at all. The result was a sport that looked like it was not running. It also
 made the opener rule structurally DORMANT: it only fires while DK is still on
 its opening number, which is rarely true by kickoff.
 
-- **Look-ahead**: `NCAAF_SCORE_AHEAD_DAYS` (7) puts the whole week in the
-  scorer's game query and in the app (`fetchUpcomingNcaafPicks`).
+- **Look-ahead**: `NCAAF_SCORE_AHEAD_DAYS` (150) puts every game DraftKings
+  has priced in the scorer's game query and in the app
+  (`fetchUpcomingNcaafPicks`). It was 7 until 2026-09-07 (Matt: *"it should
+  be whenever lines are released. speed speed speed is what matters to get a
+  good line"*); the DK-price prefilter is what admits a game, so the window
+  is the season and the extra rows are the marquee games DK lists months out
+  (44 beyond 14 days on the day it changed).
 - **A decline writes a row.** Every precondition failure now yields a NONE row
   carrying DK's live number and a reason, instead of nothing. An empty board
   and a broken pipeline are indistinguishable to a user — which is exactly how
@@ -80,23 +85,28 @@ its opening number, which is rarely true by kickoff.
   Monday NONE row would freeze the game for the week and the totals rule —
   game-day by design — could never fire at all. The NONE rows are delete +
   rescored each pass, scoped to unstarted games.
-- **`NCAAF_TOTALS_MAX_LEAD_DAYS`** bounds how far before kickoff the totals
-  rule may fire. It shipped at 1 (game day) because the rule was walked
-  forward against the archive's stored line per game and no earlier lead had
-  been measured. **Measured 2026-09-07** on the 2023-2025 DraftKings backfill
+- **The totals rule has NO lead limit** (`NCAAF_TOTALS_MAX_LEAD_DAYS` = inf):
+  it fires at the first scoring pass where DK's total sits 8+ points from the
+  model, whenever that is, and locks there. It shipped at 1 (game day) because
+  it had only been walked forward against the archive's close. **Measured
+  2026-09-07** on the 2023-2025 DraftKings backfill
   (`scripts/ncaaf_search/totals_lead.py`, row in the search table below):
   graded at DK's 14:00Z line 0-5 days out, the ±8 rule runs 53.8-56.4% at
-  every lead against 56.4% at DK's close (its last 14:00Z/23:00Z pull before kickoff), every interval overlapping every
-  other, and the close-minus-lead movement is ~0 points in the pick's
-  direction at every lead — the market does not drift toward the model, so
-  waiting buys nothing and going early costs nothing detectable at ~5pp.
-  Simulating the first-signal lock (bet the first daily pass that clears ±8,
-  from 5 days out): 384 bets at 55.7% [0.507, 0.606] vs 321 at 57.0%
-  [0.515, 0.623] for game day — 20% more bets, 1.3pp lower, inside noise.
-  Nothing at any lead, game day included, clears 0.5238 at 95% on these three
-  out-of-sample seasons. **Set to 5 on 2026-09-07 at Matt's call (PR #577);**
-  the pick locks at the first pass that clears the gate. The opener rule has
-  no limit: its own preconditions are its window.
+  every lead against 56.4% at DK's close (its last 14:00Z/23:00Z pull before
+  kickoff), every interval overlapping every other, and the close-minus-lead
+  movement is ~0 points in the pick's direction at every lead — the market
+  does not drift toward the model, so waiting buys nothing and going early
+  costs nothing detectable at ~5pp. Under the first-signal lock from 5 days
+  out: 384 bets at 55.7% [0.507, 0.606] vs 321 at 57.0% [0.515, 0.623] on
+  game day. Nothing at any lead, game day included, clears 0.5238 at 95% on
+  three out-of-sample seasons. It went to 5 that evening (PR #577) and to
+  none the same night at Matt's call. Unmeasured: leads beyond ~7 days (DK
+  listed 84 of 2,651 backfill games that early) — a statement about the
+  sample, not the rule. **"All books" buys no speed on totals, measured:**
+  every book's first NCAAF total lands a median 5.4-5.9 days before kickoff;
+  the gap between the earliest book and DK is a median 0.0 days, 90th
+  percentile 0.62, and only 205 of 2,651 games had any book a full day ahead.
+  The opener rule has no limit either: its own preconditions are its window.
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
   ~52 DK-priced — so the board is tens of games, not hundreds.
 
