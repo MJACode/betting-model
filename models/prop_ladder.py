@@ -46,6 +46,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from models.market_relative import implied
+
 # A rung wider than this is treated as unpriced. Set from the real board rather
 # than from taste, and the first value chosen (0.10) was wrong: receiving-yards
 # ladders quote 1-2c, but Dak Prescott's passing-yards ladder on 2026-09-08 -- the
@@ -214,6 +216,59 @@ class Ladder:
         return None
 
 
+    @classmethod
+    def from_mids(cls, strikes: list[float], mids: list[float],
+                  min_rungs: int = MIN_RUNGS) -> "Ladder":
+        """A ladder built from probabilities directly, bypassing the quote gates.
+
+        For ladders that are DERIVED rather than quoted -- the anchored one
+        below. The gates (spread, one-sided) are properties of a raw quote and
+        have already been applied by the time we get here; re-applying them to a
+        computed probability would silently drop rungs for having no spread.
+        """
+        lad = cls.__new__(cls)
+        order = sorted(range(len(strikes)), key=lambda i: strikes[i])
+        lad.strikes = [float(strikes[i]) for i in order]
+        lad.raw_mids = [float(mids[i]) for i in order]
+        lad.mids = _monotone(lad.raw_mids) if lad.raw_mids else []
+        lad.rungs = []
+        lad.min_rungs = min_rungs
+        return lad
+
+    def anchored(self, anchor_line: float, anchor_p: float) -> "Ladder | None":
+        """This ladder shifted to pass through a KNOWN-honest point.
+
+        WHY THIS IS NEEDED AT ALL. A sportsbook's alternate lines are ONE-SIDED:
+        every one of the 98,036 `player_reception_yds_alternate` rows we store
+        carries an over price and no under. So `devig()` cannot touch them, and
+        the implied probabilities they give are inflated by the book's margin.
+        Reading such a ladder as truth would bias every comparison toward overs
+        -- precisely the failure docs/prop_market_research.md records
+        professionals correcting for.
+
+        The fix uses the one honest number the same book does give: its STANDARD
+        market IS two-way, so de-vigging it yields a real fair probability at one
+        line. The alternates supply SHAPE and that point supplies LEVEL.
+
+        SHIFTED IN LOGIT SPACE, not scaled in probability. A multiplicative
+        correction can push a rung above 1.0 and is not monotone-safe near the
+        top of the ladder; a constant logit shift is bounded in (0, 1) by
+        construction, preserves the ordering, and leaves the shape untouched.
+
+        THIS IS AN ASSUMPTION, and it is the only one in this module: that the
+        book's margin is roughly constant in logit space across its own ladder.
+        Stated here rather than buried, because nothing has yet graded it.
+        """
+        if not self.usable or not (0.0 < anchor_p < 1.0):
+            return None
+        q0 = self.p_over(anchor_line)
+        if q0 is None:
+            return None
+        delta = _logit(anchor_p) - _logit(q0)
+        shifted = [_expit(_logit(m) + delta) for m in self.mids]
+        return Ladder.from_mids(self.strikes, shifted, self.min_rungs)
+
+
 def from_kalshi(markets: list[dict]) -> Ladder:
     """Build a ladder from Kalshi market objects.
 
@@ -234,3 +289,21 @@ def from_kalshi(markets: list[dict]) -> Ladder:
         except (TypeError, ValueError):
             continue
     return Ladder(rungs)
+
+
+def from_one_sided_overs(quotes: list[tuple]) -> Ladder:
+    """Build a VIGGED ladder from (strike, american_over_price) pairs.
+
+    The output is deliberately NOT a fair value -- see Ladder.anchored. It is
+    the shape of the book's own distribution, margin included, and must be
+    levelled against a de-vigged two-way quote before being compared to
+    anything.
+    """
+    strikes, mids = [], []
+    for strike, price in quotes:
+        p = implied(price)
+        if strike is None or p is None or not (0.0 < p < 1.0):
+            continue
+        strikes.append(float(strike))
+        mids.append(p)
+    return Ladder.from_mids(strikes, mids)
