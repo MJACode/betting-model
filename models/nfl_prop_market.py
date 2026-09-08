@@ -28,6 +28,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 SHARP_BOOK = "pinnacle"
+# The second reference. §5c found betonlineag clears the same bar Pinnacle did
+# -- 840 bets, +7.68%, positive in all three seasons, reproduced by no retail
+# book -- and used it only to ask whether it opens the markets Pinnacle
+# declines (it does not). Used here as an OR alongside Pinnacle; see find_bets
+# for the measurement. Verified served by the live endpoint before wiring:
+# 48 outcomes against Pinnacle's 42 on the same event, 2026-09-08.
+SHARP_BOOKS = ("pinnacle", "betonlineag")
 
 # Markets Pinnacle was measured to quote. Kept explicit rather than discovered
 # at runtime so a silent coverage change shows up as a missing market instead of
@@ -95,8 +102,82 @@ from models.market_relative import (  # noqa: E402
 def find_bets(quotes: dict, min_edge: float = 0.02,
               soft_books: tuple[str, ...] | None = None
               ) -> tuple[list[MarketBet], dict]:
-    """NFL binding of the shared selector: Pinnacle is the sharp reference."""
-    return _find_bets_generic(quotes, SHARP_BOOK, min_edge, soft_books)
+    """NFL binding: a bet if EITHER sharp reference disagrees by min_edge.
+
+    TWO REFERENCES, TAKEN AS AN OR AND NOT AN AND. Measured 2026-09-08 over
+    2023-2025 with the shipped guards (equal lines, pre-game, one bet per
+    proposition, real prices), at the pre-committed 5pp:
+
+        selection      bets   win%      ROI            90% CI     by season
+        pinnacle        643  57.4%   +9.80%    (+3.5, +16.0)  +12.7 +8.9  +7.4
+        betonlineag     253  52.6%   +4.12%    (-6.6, +14.6)  -12.5 +8.0 +22.5
+        EITHER          832  56.4%   +8.91%    (+3.4, +14.5)   +7.6 +8.6 +10.9
+        both agreeing    60  48.3%   -6.87%   (-27.5, +14.0)          --
+
+    EITHER adds 29% more bets and 18% more UNITS (+74.1 against +63.0) for
+    0.9pp of ROI, and its season spread is 3.3pp against Pinnacle's 5.3pp --
+    Pinnacle alone is DECLINING (+12.7 -> +8.9 -> +7.4) while the pair holds
+    (+7.6 -> +8.6 -> +10.9), which is what §5c predicted as books tighten.
+
+    THE CONSENSUS VERSION WAS THE HYPOTHESIS AND IT LOST. Requiring BOTH books
+    to disagree looks like stronger evidence and returns -6.87% on 60 bets. Two
+    market makers rarely disagree with the same soft price at 5pp, and when they
+    do it is the soft book being right about something they both missed. Written
+    down because it is the intuitive thing to try next.
+
+    NOT A THRESHOLD CHANGE. 5pp is pre-committed (§5c) and both configurations
+    plateau at 5-6pp rather than peaking: EITHER runs +1.96 / +5.06 / +8.91 /
+    +10.04 at 3/4/5/6pp. The cut is untouched; only the reference set moves.
+
+    betonlineag is a REFERENCE, never a book we bet -- SOFT_BOOKS is unchanged.
+    """
+    best: dict = {}
+    diag_out: dict = {}
+    for ref in SHARP_BOOKS:
+        bets, diag = _find_bets_generic(quotes, ref, min_edge, soft_books)
+        for k, v in diag.items():
+            diag_out[f"{ref}_{k}"] = v
+        for b in bets:
+            key = (b.game_id, b.player, b.market, b.side, b.book)
+            prev = best.get(key)
+            if prev is None or b.edge > prev.edge:
+                best[key] = b
+    out = list(best.values())
+
+    # THE FLAT KEYS ARE A CONTRACT, not decoration. The card logs them, the
+    # replay harness reads them, and tests assert on them -- namespacing them
+    # per reference and stopping there broke two tests that had every right to
+    # expect `no_sharp` and `one_way` to exist. Per-reference keys are kept
+    # alongside, because "Pinnacle had no quote but betonlineag did" is exactly
+    # what a two-reference diagnostic should be able to say.
+    # HOW EACH ONE AGGREGATES IS NOT UNIFORM, and blanket-summing got it wrong:
+    # it reported no_sharp=2 for a single proposition that neither reference
+    # quoted, because each reference counted the same absence once.
+    #
+    #   compared / line_mismatch  SUM -- these count COMPARISONS, and two
+    #                             references genuinely make twice as many.
+    #   one_way / no_sharp        MAX -- "at least one reference found this
+    #                             proposition unusable for this reason". MIN was
+    #                             tried first and is wrong: the two references
+    #                             can fail on the SAME proposition for DIFFERENT
+    #                             reasons -- a one-way Pinnacle quote with no
+    #                             betonlineag quote at all is one_way=1/no_sharp=0
+    #                             under one and 0/1 under the other, and min
+    #                             reports zero of both. Max is exact for a single
+    #                             reference and truthful for two.
+    #   sharp_quotes              MAX -- the same propositions seen twice.
+    for name in ("compared", "line_mismatch"):
+        diag_out[name] = sum(diag_out.get(f"{ref}_{name}", 0)
+                             for ref in SHARP_BOOKS)
+    for name in ("one_way", "no_sharp"):
+        diag_out[name] = max(
+            (diag_out.get(f"{ref}_{name}", 0) for ref in SHARP_BOOKS),
+            default=0)
+    diag_out["sharp_quotes"] = max(
+        (diag_out.get(f"{ref}_sharp_quotes", 0) for ref in SHARP_BOOKS),
+        default=0)
+    diag_out["bets"] = len(out)
+    return out, diag_out
 
 
 # ── Grading ──────────────────────────────────────────────────────────────────

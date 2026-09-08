@@ -98,7 +98,13 @@ ANY_BOOK = "*"          # census sentinel: send no bookmakers param
 # of the card's selections.
 PREGAME_SNAPSHOT_TYPES = ("open",)
 MARKET_REGIONS = "us,eu"
-MARKET_BOOKS = f"{ODDS_API_BOOKMAKERS_PARAM},pinnacle"
+# Both sharp references are appended explicitly: neither is in
+# LINE_SHOP_BOOKMAKERS, because that list is books we BET at and these two are
+# read-only estimates of truth. betonlineag joined on 2026-09-08 when
+# nfl_prop_market moved to two references -- and a reference the pull never
+# requests returns no quotes and silently shrinks the board rather than
+# erroring, which is the same trap fliff nearly walked into the day before.
+MARKET_BOOKS = f"{ODDS_API_BOOKMAKERS_PARAM},pinnacle,betonlineag"
 
 
 def _load_nfl_games(conn: DBConnection, start: str, end: str) -> dict:

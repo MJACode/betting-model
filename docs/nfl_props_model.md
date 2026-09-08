@@ -632,6 +632,61 @@ and this is precisely the kind of after-the-fact slice that manufactured the
 tackles result in §5b. **It is a hypothesis to measure forward, not a filter to
 apply.** Do not restrict the card by window.
 
+## 5e. Two sharp references — the change that actually paid (2026-09-08)
+
+§5c proved Pinnacle with a placebo and the extended sweep found a second book
+clearing the same bar — betonlineag, 840 bets, +7.68%, positive in all three
+seasons, reproduced by no retail book. That finding was recorded and then used
+only to ask whether it opens the markets Pinnacle declines. It does not (−4.97%).
+
+**Nobody asked whether it helps on the markets Pinnacle already covers.** It
+does, and it is the largest improvement to this rule since it was written.
+
+Measured in the SHIPPED path (`scripts/nfl_prop_replay`, T-3h per game across
+144 slates), so this is what the card actually does, not a standalone script:
+
+| reference set | bets | win% | ROI | 90% CI | units |
+|---|---|---|---|---|---|
+| pinnacle only | 1,449 | 56.2% | +6.79% | (+2.0, +11.8) | +98.4 |
+| **pinnacle OR betonlineag** | **1,972** | 55.6% | **+6.89%** | **(+2.5, +11.2)** | **+135.9** |
+
+**+36% more bets, +38% more units, ROI unchanged, and the interval's lower bound
+rises.** The threshold is untouched — 5pp remains pre-committed per §5c, and both
+configurations plateau at 5–6pp rather than peaking (EITHER runs +1.96 / +5.06 /
++8.91 / +10.04 at 3/4/5/6pp on the standalone grader).
+
+### The intuitive version is the one that loses
+
+An OR, not an AND. Requiring **both** references to disagree looks like stronger
+evidence — two independent market makers against one soft price — and returns
+**−6.87% on 60 bets**. Two market makers rarely disagree with the same soft price
+at 5pp, and when they do it is usually the soft book being right about something
+they both missed. This is written down because it is exactly what the next
+person will try.
+
+| selection | bets | ROI | by season |
+|---|---|---|---|
+| pinnacle | 643 | +9.80% | +12.7 / +8.9 / **+7.4** |
+| betonlineag | 253 | +4.12% | −12.5 / +8.0 / +22.5 |
+| **either** | 832 | +8.91% | **+7.6 / +8.6 / +10.9** |
+| both agreeing | 60 | −6.87% | — |
+
+Note the season shape as well as the totals: Pinnacle alone is **declining**
+(+12.7 → +8.9 → +7.4) exactly as §5c predicted while books tighten, and the pair
+is not (+7.6 → +8.6 → +10.9). That is the more durable argument for the change.
+
+### One implementation detail that would have made it silently do nothing
+
+betonlineag was in the local backfill cache but **not in the live pull** —
+neither sharp book is in `LINE_SHOP_BOOKMAKERS`, because that list is books we
+BET at. A reference the pull never requests returns no quotes and shrinks the
+board without erroring. It is appended to `MARKET_BOOKS` explicitly, verified
+against the live endpoint first (48 outcomes against Pinnacle's 42 on the same
+event), and `test_both_sharp_references_are_fetched` keeps it there.
+
+betonlineag is a REFERENCE and never a book we bet; `SOFT_BOOKS` is unchanged
+and a test asserts the two sets stay disjoint.
+
 ## 5d. Anytime TD: tested, and closed
 
 The largest single bucket in the diagnostics is not line mismatch — it is
