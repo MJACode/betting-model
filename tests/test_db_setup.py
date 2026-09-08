@@ -43,6 +43,7 @@ EXPECTED_TABLES = {
     "umpires", "lineup_slots",
     # Live (in-play) betting (Phase 1 poller + Phase 3 credit telemetry)
     "live_game_state", "live_trigger_events", "live_credit_telemetry",
+    "live_pick_features",
     # PBP training corpus (Phase 2a)
     "plays",
     # Public betting splits (Action Network) — BAB-58

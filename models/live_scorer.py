@@ -30,6 +30,7 @@ snapshot is older than LIVE_ODDS_MAX_AGE_SEC (line has moved since).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -410,6 +411,12 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
                 prob, price, line, bankroll, state,
                 game.get("commence_time"), _link_for_side(odds, side))
             if pick:
+                # Carried for live_pick_features, not for `picks`.
+                # `_insert_picks` binds named parameters, so extra keys are
+                # ignored by the insert rather than breaking it.
+                pick["_lam"] = lam
+                pick["_features"] = dict(row)
+                pick["_state_at"] = state.get("snapshot_at")
                 picks.append(pick)
 
     # Tag with (game_id, market) so _insert_picks can look up the best IN-PLAY
@@ -525,6 +532,57 @@ def apply_daily_cap(picks: list[dict], counts: dict[str, int],
     return out
 
 
+def _record_live_features(conn: DBConnection, picks: list[dict]) -> int:
+    """Record the feature row and lambda behind each live BET, once per lane.
+
+    WHY THIS EXISTS. `_pregame_features` memoises per (game_date, game_id) in
+    process, so a running loop freezes one pre-game row per game at a moment
+    nothing records. Without it a live decision cannot be reproduced: measured
+    2026-09-08, the same state, DK line and price give p_over 0.5263 on that
+    day's stats and 0.7199 on the snapshot two days older, against production's
+    recorded 0.7268, and 14 games could not be reproduced at all
+    (docs/mlb_volume_efficiency.md section 13).
+
+    ONE ROW PER LANE, THE FIRST ONE. `ON CONFLICT DO NOTHING` mirrors
+    LOCK_LIVE_PICKS_AT_FIRST_SIGNAL: the bet of record is the first BET, so the
+    row that explains it is the first row, and a later pass must not overwrite
+    the evidence for a pick it did not make (CLAUDE.md 1c).
+
+    EACH WRITE IS ITS OWN SAVEPOINT. The connection is not autocommit, so a
+    failure here would poison the transaction and roll back the picks that were
+    just inserted -- a recorder that can destroy the thing it documents. The
+    savepoint keeps a failure local, and the pick always wins.
+    """
+    written = 0
+    for i, p in enumerate(picks):
+        if p.get("signal_type") != "BET" or not p.get("_features"):
+            continue
+        sp = f"lpf_{i}"
+        try:
+            conn.execute(f"SAVEPOINT {sp}")
+            conn.execute("""
+                INSERT INTO live_pick_features
+                    (game_id, model_id, recorded_at, state_at, lam,
+                     model_probability, features)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (game_id, model_id) DO NOTHING
+            """, (p["game_id"], p["model_id"],
+                  datetime.now(timezone.utc).isoformat(),
+                  p.get("_state_at"), p.get("_lam"),
+                  p.get("model_probability"),
+                  json.dumps(p["_features"], default=str)))
+            conn.execute(f"RELEASE SAVEPOINT {sp}")
+            written += 1
+        except Exception as exc:
+            try:
+                conn.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+            except Exception:
+                pass
+            logger.warning(f"  live_pick_features: {p['game_id']}/"
+                           f"{p['model_id']} not recorded — {exc}")
+    return written
+
+
 def _write_live_picks(conn: DBConnection, game_id: str,
                       game_picks: list[dict]) -> list[dict]:
     """Write one game's fresh live picks under the first-signal lock
@@ -578,6 +636,7 @@ def _write_live_picks(conn: DBConnection, game_id: str,
         """, (game_id, model_id))
     if kept:
         _insert_picks(conn, kept)
+        _record_live_features(conn, kept)
     if len(kept) < len(game_picks):
         logger.info(f"  {game_id}: {len(game_picks) - len(kept)} live pick(s) "
                     f"skipped — lane locked at first BET signal "
