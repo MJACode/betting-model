@@ -668,14 +668,36 @@ PROP_ONE_BET_PER_PLAYER: dict = {
 # and neither model can have one yet: the weekly pass needs 150 graded picks
 # since their 2026-09-03/09-05 retrains and has 47 and 26.
 #
-# So this holds the volume down for the ~5-8 days until those maps land. It is
-# NOT a threshold and must not be read as one — no sweep supports a number here;
-# it is an operator ceiling. REMOVE IT once the maps are promoted and the
-# calibrated cuts bind on their own. Picks turned away are written as NONE, so
-# the next sweep still sees them. docs/mlb_volume_efficiency.md sections 2, 5.
+# So this holds the volume down for the ~5-8 days until those maps land.
+#
+# 2026-09-07 (mike), SECOND PASS — 3 -> 2, and pitcher_outs added. mike: "I just
+# want the strongest ev picks for highest overall profitability." The depth is
+# now SWEPT rather than picked: post-dedupe, top-N by claimed EV per model per
+# day over 08-24 -> 09-06, pooled across k / hits / outs —
+#
+#     top 1   22 bets, 1.6/day, +9.6% ROI, +2.12u
+#     top 2   43 bets, 3.1/day, +16.2% ROI, +6.96u   <- max on BOTH units and ROI
+#     top 3   62 bets, 4.4/day, +6.5% ROI, +4.00u
+#     top 4   75 bets, 5.4/day, +5.9% ROI, +4.44u
+#
+# READ THE CAVEATS BEFORE MOVING THIS NUMBER. (1) It is ONE window: half A holds
+# 7 bets, so no time split exists and CLAUDE.md §7's "in-sample is in-sample"
+# applies at full strength. (2) The EV is computed on probabilities running
+# ~15pp hot, so it ranks picks, it does not price them — +16.2% is not a
+# forecast. (3) The models disagree about depth and a uniform 2 is mike's call
+# against that: hits is +9.89u at top 2 (n=14), outs is BETTER uncapped
+# (+3.69u/23 against +1.74u/11), and k loses at every depth (-4.67u at top 2,
+# -8.79u uncapped) — capping k reduces a loss, it does not create an edge.
+#
+# Still an operator ceiling, not a threshold: it bounds COUNT, and the per-model
+# prob/edge cuts remain the thing that decides a bet. REMOVE IT once the maps
+# are promoted and the calibrated cuts bind on their own. Picks turned away are
+# written as NONE, so the next sweep still sees them.
+# docs/mlb_volume_efficiency.md sections 2, 5, 11.
 PROP_MAX_SIGNALS_PER_DAY: dict = {
-    "mlb_prop_pitcher_k":     3,
-    "mlb_prop_pitcher_hits":  3,
+    "mlb_prop_pitcher_k":     2,
+    "mlb_prop_pitcher_hits":  2,
+    "mlb_prop_pitcher_outs":  2,
 }
 
 PAUSED_MODELS: set = {

@@ -532,3 +532,276 @@ run the other way. **Promotion and re-sweep are one decision, not two.**
 
 **Left alone deliberately:** `MIN_GRADED` (150) and `MAX_TRANSFER_GAP_PP` (6.0).
 Lowering either to make this map fit would be moving the bar to clear the jump.
+
+---
+
+## 11. "Highest conviction plays only" — the filter does not exist, and on the live lane it is inverted
+
+mike, 2026-09-07: *"20 per day still seems way too high, run the analysis, want
+the highest conviction plays only."*
+
+The request assumes the board can be sorted by conviction. **It cannot — and the
+one lane where a conviction sort is measurable sorts the wrong way round.** This
+section is the measurement, so the next session does not re-derive it.
+
+### 11.1 What the board actually is
+
+Ground truth, MLB `signal_type='BET'`, 2026-08-29 → 09-07, per day:
+
+| Lane | Model | Avg/day | 09-05 | 09-06 | 09-07 |
+|---|---|---|---|---|---|
+| live | `mlb_live_total_runs` | 9.1 | 9 | 11 | 6 |
+| pre-game | `mlb_prop_pitcher_k` | 6.7 | 11 | 9 | 7 |
+| pre-game | `mlb_prop_pitcher_hits` | 4.6 | 7 | 4 | 4 |
+| pre-game | `mlb_prop_pitcher_outs` | 2.8 | 6 | 6 | 3 |
+| pre-game | `mlb_f5_moneyline` | 0.9 | 0 | 0 | 2 |
+
+**The dedupe and the interim cap are deployed but have not governed a board
+yet.** Railway shows the worker on master at **2026-09-07T21:58Z**; every
+pitcher-prop BET on the 09-07 board was written between 01:54 and 15:20 UTC,
+before it. **09-08 is the first slate the cap applies to.** Replaying the merged
+logic (dedupe on `player_id`, then top-3-by-claimed-EV within `k` and `hits`)
+over 09-01 → 09-07:
+
+| | 09-01 | 09-02 | 09-03 | 09-04 | 09-05 | 09-06 | 09-07 |
+|---|---|---|---|---|---|---|---|
+| pitcher-prop BETs today | 16 | 15 | 13 | 22 | 24 | 19 | 14 |
+| after dedupe | 12 | 12 | 10 | 17 | 15 | 15 | 9 |
+| after the cap | 9 | 8 | 5 | 7 | 12 | 11 | 5 |
+
+Mean **17.6 → 8.1/day**. With live unchanged the board lands near **18/day**, not
+20 — and pre-game stops being the larger half.
+
+### 11.2 The model's own conviction, graded (08-24 → 09-06, priced BETs)
+
+Claimed-probability bands. **The top band is not the best band in either lane**,
+and the overclaim GROWS as the claim rises:
+
+| Lane | Band | n | claims | delivers | gap | units |
+|---|---|---|---|---|---|---|
+| pre-game | <0.60 | 27 | .567 | .407 | −16.0pp | −2.99 |
+| pre-game | 0.60-0.65 | 38 | .628 | .474 | −15.4pp | −2.60 |
+| pre-game | **0.65-0.70** | 42 | .673 | .619 | **−5.4pp** | **+6.52** |
+| pre-game | 0.70-0.75 | 28 | .723 | .536 | −18.7pp | −1.35 |
+| pre-game | 0.75+ | 9 | .765 | .556 | −20.9pp | −0.58 |
+| live | 0.65-0.70 † | 17 | .676 | .294 | −38.2pp | −7.33 |
+| live | 0.70-0.75 | 54 | .724 | .593 | −13.1pp | +4.58 |
+| live | 0.75+ | 34 | .770 | .618 | −15.2pp | +1.89 |
+
+† **Already excluded.** `mlb_live_total_runs` has carried `min_prob: 0.70` since
+2026-08-30 (mike), so all 17 of those rows predate the cut and none can recur.
+They are here to show the shape, not as a floor to add.
+
+Every unit of pre-game profit sits in the **middle** band. Sorting by the
+model's confidence and taking the top selects the most overclaimed bets on the
+board — which is what the calibration work already said, now visible in P&L.
+
+**This does not contradict §11.4.** "The top of the confidence sort is bad" and
+"top-3 by EV within a model is good" only look opposed: the pre-game 0.70+ band
+is about 2 bets a day across every model, so a within-day top-3 draws almost
+entirely from the middle band anyway.
+
+### 11.3 The live lane: EV rank is inverted in BOTH halves
+
+Ranking each day's `mlb_live_total_runs` BETs by claimed EV:
+
+| Bucket | half A (08-24..30) | half B (08-31..09-06) | total |
+|---|---|---|---|
+| top 2 EV/day | −4.34u (n=12, 33.3%) | −0.91u (n=14, 50.0%) | **−5.25u / 26, −20.2%** |
+| rank 3-4 | +0.65u (n=5) | −3.16u (n=14) | −2.51u / 19 |
+| rank 5+ | +5.58u (n=14, 78.6%) | +4.21u (n=35, 62.9%) | **+9.79u / 49, +20.0%** |
+
+Negative in both halves at the top, positive in both halves at the bottom. **A
+live cap that keeps the highest-EV picks would keep precisely the losing ones.**
+
+The interpretable form is price, not rank — the model bets only two price
+populations and they diverge cleanly:
+
+| DK price | half A | half B | total |
+|---|---|---|---|
+| −110 or longer | −1.04u (n=7, 42.9%) | −1.22u (n=7, 42.9%) | **−2.26u / 14, −16.1%** |
+| −111 … −160 | +2.93u (n=24, 62.5%) | +1.36u (n=56, 57.1%) | **+4.29u / 80, +5.4%** |
+
+Identical 42.9% win rate in both halves at the cheap price. High EV came from
+the longer prices; the longer prices are the losers. **`mlb_live_total_runs` has
+no `MODEL_MIN_ODDS` entry** — the props all carry −140.
+
+**Weigh it as a hint.** Only **7** of those 14 sit under the current 0.70 cut
+(−1.22u, 42.9%); the other 7 are pre-cut. A price floor and a raised `min_prob`
+are also close to the same filter by construction — `LIVE_MAX_EDGE_CAP` 0.20
+with `min_edge` 0.14 confines a −110 bet to p ∈ [0.70, 0.724]. Either lever
+works, and either is a threshold change.
+
+### 11.4 The pre-game cap does look selective, but it is one window
+
+Replaying dedupe-then-cap over settled results:
+
+| Bucket | n | win rate | units |
+|---|---|---|---|
+| dropped by dedupe | 28 | .536 | +0.60 |
+| kept (top 3 by EV) | 60 | .533 | +3.78 |
+| dropped by the cap (rank 4+) | 39 | .410 | −9.27 |
+
+Split by half, **kept top-3** is −3.32u (n=7) then +7.10u (n=53), and the
+dropped bucket has **no half-A rows at all** — the cap only binds on high-volume
+days, which began 08-31. So this is a single window and fails §7's time split by
+absence of data, not by contradiction. **Claim it as a volume control that may
+also be selecting; do not claim it selects.**
+
+### 11.5 CLV is the only positive per-model statement available
+
+Current artifacts only, `clv_pct` on BETs:
+
+| Model | n | mean CLV | t |
+|---|---|---|---|
+| `mlb_prop_pitcher_hits` | 10 | +2.41% | 2.99 |
+| `mlb_prop_pitcher_outs` | 11 | +2.38% | 2.91 |
+| `mlb_prop_pitcher_k` | 27 | +1.57% | 1.75 |
+
+The props beat the closing line while losing money. That is a model picking the
+right side and pricing its confidence wrong — a calibration problem, not a
+selection problem, and an argument against pausing them.
+
+`mlb_live_total_runs` has **zero** CLV rows, so the lane carrying half the board
+is the one the fast measure cannot see.
+
+### 11.6 A live threshold defect, found here and NOT fixed
+
+`mlb_prop_pitcher_k` (0.58/0.08) and `mlb_prop_pitcher_hits` (0.54/0.08) carry
+cuts their own config comments describe as swept on CALIBRATED probabilities
+("floor-corrected calibrated sweep"; "on calibrated numbers at 0.54/0.08").
+`model_calibration` today has `method IS NULL` for both — no candidate map, and
+nothing in the promoted slot. **So both decide on raw numbers against a bar
+tuned for calibrated ones.**
+
+**This is a consequence of the endorsed-only migration run earlier today, and it
+should not be discovered later.** Both models WERE promoted — `cal_applied` ran
+11-13/day through 09-04 — went inert on 09-05 through the §2 defect, and
+`promotions_endorsed_only_2026_09_07.sql` then demoted them. The recorded reason
+is **`unfitted, 26/150` and `unfitted, 47/150`**: too few graded picks since the
+retrain to fit a map at all, not a failed `transfers` verdict. The migration was
+right — an unknown map must not decide a bet — but it leaves the mis-scaled cut
+standing, and that is why the re-sweep below is a required decision rather than
+housekeeping.
+
+The scale is not small. Over 08-31 → 09-04, while the map was still being
+applied, `mlb_prop_pitcher_hits` spanned raw **0.3214-0.7757** and calibrated
+**0.4226-0.5774** — against a 0.54 cut, the calibrated number admits a narrow
+sliver at the top of the range and the raw number admits everything above 0.54.
+
+**This is not the inert-map defect fixed in §2**, which protected the promoted
+slot; these models were never promoted (they fail `transfers`). Do NOT read it
+as the cause of the volume rise — `k` went 6 → 7 → 11/day across 08-31 → 09-04
+while calibration was still being applied, so the rise predates the map loss.
+
+The fix is a decision, not a cleanup: **re-sweep the two cuts on raw
+probabilities**, or refit maps that clear helps AND transfers and promote them.
+Whichever, it is a threshold change and needs an `Updated-By:` trailer.
+
+### 11.7 What this section does NOT claim
+
+- Not that any MLB model is profitable. On current artifacts every one is
+  indistinguishable from zero: `k` −12.9% ± 18.3pp (n=30), `outs` −22.3% ±
+  28.9pp (n=12), `hits` +9.9% ± 30.2pp (n=11). **`mlb_live_total_runs` measured
+  on its CURRENT cut** (game_date ≥ 08-31, so 0.70 applies to every row) is
+  **−0.26u over 69 bets, −0.4% ROI**, claiming .739 and delivering .551 — flat,
+  not the +1.88u/n=96 that an 08-24 window reports by including pre-cut bets.
+- Not that the middle probability band should become the cut. It is one window,
+  it is in-sample, and §7 requires a plateau.
+- Not that the live price floor is established. n=14 on the losing side is a
+  sign-consistent hint across two halves, not a swept threshold.
+- Not that cutting to 5/day buys better bets. **Below roughly 8 pre-game and 9
+  live, every further reduction is a volume guarantee and nothing more** — no
+  measured ranking separates what remains.
+
+---
+
+## 12. The EV sweep, and the depth mike chose
+
+mike, 2026-09-07, after reading §11: *"I just want the strongest ev picks for
+highest overall profitability."* Reaffirmed after the caveat, so it is his call.
+This section is what the sweep actually said.
+
+**Read "EV" here as a RANK, not a price.** It is `p·b − (1−p)` on probabilities
+running ~15pp hot (§11.2), so no number below is a forecast of return. It
+orders picks, which is all the cap asks of it.
+
+### 12.1 An EV FLOOR is not supported — the sweep has no plateau
+
+Post-dedupe pitcher props, 08-24 → 09-06, cumulative min-EV floor. Every bet
+already clears 0.14, so the sweep only bites above that:
+
+| min EV | n | /day | ROI | units |
+|---|---|---|---|---|
+| 0.14 | 99 | 7.1 | +0.3% | +0.33 |
+| 0.18 | 80 | 5.7 | +6.0% | +4.83 |
+| 0.22 | 70 | 5.0 | +5.1% | +3.54 |
+| 0.24 | 61 | 4.4 | +0.8% | +0.49 |
+| 0.26 | 53 | 3.8 | +12.7% | +6.73 |
+| 0.28 | 49 | 3.5 | +5.9% | +2.90 |
+| 0.30 | 39 | 2.8 | +12.6% | +4.91 |
+| 0.34 | 27 | 1.9 | −3.9% | −1.04 |
+
+The adjacent cells look similar only because a cumulative sweep shares most of
+its rows between neighbours. **Differencing them gives the marginal bucket,
+and the marginals alternate sign**: [0.16,0.18) −4.53u, [0.22,0.24) +3.05u,
+[0.24,0.26) **−6.24u**, [0.26,0.28) +3.83u, [0.28,0.30) −2.01u, [0.30,0.32)
++3.73u. EV is not monotone with profit anywhere in this window, so the +12.7%
+at 0.26 is a peak between two troughs — exactly what §7 says not to ship. **No
+`MODEL_MIN_EV` entry was added for the pre-game props.**
+
+### 12.2 A DEPTH is supported, and it is the mechanism already shipped
+
+"Strongest EV picks" is top-N by claimed EV per day — which is precisely what
+`apply_prop_daily_cap` already does. The only question is N:
+
+| Depth | n | /day | ROI | units |
+|---|---|---|---|---|
+| top 1 per model | 22 | 1.6 | +9.6% | +2.12 |
+| **top 2 per model** | 43 | **3.1** | **+16.2%** | **+6.96** |
+| top 3 per model | 62 | 4.4 | +6.5% | +4.00 |
+| top 4 per model | 75 | 5.4 | +5.9% | +4.44 |
+
+Top 2 is the maximum on **both** total units and ROI, which is unusual enough to
+be worth stating: tightening past it costs profit as well as volume.
+
+A pooled board-wide cap was measured too and is worse at every depth (top 2 =
++2.95u/20, top 3 = +1.31u/28) — the per-model version keeps a diversification
+the pooled one throws away.
+
+### 12.3 The models disagree about depth, and the uniform 2 is a deliberate choice
+
+| Model | top 1 | top 2 | top 3 | uncapped |
+|---|---|---|---|---|
+| `mlb_prop_pitcher_hits` | +4.80 (7) | **+9.89 (14)** | +9.13 (21) | +5.43 (32) |
+| `mlb_prop_pitcher_outs` | +0.30 (6) | +1.74 (11) | +0.90 (16) | **+3.69 (23)** |
+| `mlb_prop_pitcher_k` | −2.98 (9) | −4.67 (18) | −6.04 (25) | −8.79 (44) |
+
+`hits` wants 2. **`outs` is BETTER uncapped** — capping it costs ~2u on this
+window. `k` is negative at every depth, so the cap reduces a loss rather than
+finding an edge; taking only its strongest-EV picks does not rescue it.
+
+Fitting each model its own depth scores +13.58u on this window and was offered
+and declined: three parameters fitted to n=14/23/44 in a single window is the
+overfit §7 exists to prevent. **The uniform 2 gives up ~2u of in-sample profit
+to avoid it.** If `k` is still negative when its calibration map lands, that is a
+pause decision on its own evidence, not a depth decision.
+
+### 12.4 Live is closed to this approach — stated once, with the number
+
+`mlb_live_total_runs` on its current 0.70/0.14 cut (game_date ≥ 08-31, n=69):
+claimed EV spans **0.321 to 0.385**. The whole board sits inside a **6.4pp
+band**, because the prob and edge floors plus the ~15pp inflation put it there.
+
+Split that band at its median (0.341):
+
+| | n | units |
+|---|---|---|
+| top half by EV | 35 | **−4.99** |
+| bottom half by EV | 34 | **+4.72** |
+
+A floor cannot bite (everything clears it), and a top-N would select the losing
+half — the same inversion §11.3 found by daily rank and by price, now on the
+current-cut population. **mike's call: keep the lane running unfiltered** at
+~9/day, −0.26u over 69, and re-open the question when the map is fittable
+(~09-10). Any cut here would be a guess dressed as a filter.
