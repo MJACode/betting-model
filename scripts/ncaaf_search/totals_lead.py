@@ -22,8 +22,8 @@ DEFINITIONS (fixed before any number was looked at)
   instant are absent at that lead.
 - Close: DK's last pre-kick snapshot in the backfill — same book as the
   leads. The backfill holds 14:00Z and 23:00Z pulls only, so "close" is
-  the last of those before kickoff, up to ~10 hours early for a noon game. `archive` = the frame's `_total_line` (CFBD archive, Bovada
-  priority), the number the published 55.9% was measured on; reported so
+  the last of those before kickoff, up to ~10 hours early for a noon game.
+  `archive` = the frame's `_total_line` (CFBD archive, Bovada priority), the number the published 55.9% was measured on; reported so
   the new table is anchored to the old one.
 - Grading: at the lead's line — the number you would have bet. d =
   pred − line, |d| ≥ gate, sign picks over/under; pushes excluded.
