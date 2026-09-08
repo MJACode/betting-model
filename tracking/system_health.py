@@ -85,6 +85,43 @@ SKIP_BUDGET_DAYS: dict = {
 DEFAULT_SKIP_BUDGET_DAYS: int = 14
 
 
+def _ensure_reason_columns(conn) -> None:
+    """Add `reason` and `cadence` the first time this runs, and never again.
+
+    `detail` is a sentence, and every table that renders it clamps it -- so the
+    answer to "why is this one skipped?" sat three lines down inside a truncated
+    cell. `reason` is that answer as a word, and `cadence` is how fresh the
+    check expects its data to be, which is what makes a STALE readable without
+    opening the source.
+
+    The guard is not decoration: ALTER TABLE fires Supabase's pgrst_ddl_watch
+    and 503s the whole app while PostgREST rebuilds its schema cache, and this
+    runs on every health pass (.claude/rules/operations.md). One indexed catalog
+    SELECT, then nothing.
+    """
+    from data.ddl_guard import schema_is_current
+    if schema_is_current(conn, "system_health_checks",
+                         columns=("reason", "cadence")):
+        return
+    # Both connection shapes this module runs against: Postgres in production,
+    # and the sqlite fixtures the tests build. SQLite has ADD COLUMN but not
+    # IF NOT EXISTS, so try the guarded form and fall back to the plain one --
+    # a "duplicate column" from the fallback means it is already there, which
+    # is the outcome we wanted.
+    for col in ("reason", "cadence"):
+        for stmt in (
+            f"ALTER TABLE system_health_checks ADD COLUMN IF NOT EXISTS {col} TEXT",
+            f"ALTER TABLE system_health_checks ADD COLUMN {col} TEXT",
+        ):
+            try:
+                conn.execute(stmt)
+                break
+            except Exception:                               # noqa: BLE001
+                # Fail open: an un-migrated column costs two blank cells in a
+                # dashboard, never a lost run.
+                getattr(conn, "rollback", lambda: None)()
+
+
 def _skip_run_days(conn, run_date: str) -> dict:
     """Per check, the CALENDAR days its current SKIPPED streak spans, today included.
 
@@ -149,6 +186,9 @@ def _apply_skip_budgets(results: list, run_days: dict) -> None:
         budget = SKIP_BUDGET_DAYS.get(res["check_name"], DEFAULT_SKIP_BUDGET_DAYS)
         if days > budget:
             res["status"] = STALE
+            # NOT "data behind": nothing was read, so the data is not the
+            # subject. The gate is.
+            res["reason"] = REASON_GATE_STUCK
             res["detail"] = (
                 f"gate shut {days} days running, past this check's {budget}-day "
                 f"budget -- suspect the GATE, not the feed. Gate said: "
@@ -217,14 +257,64 @@ def _games_count(conn, sport, start, end, finals_only=False):
     return _scalar(conn, sql, (sport, start, end)) or 0
 
 
-class HealthReport:
-    def __init__(self):
-        self.results = []
+# ── Why a check is in the state it is, in one word ──────────────────────────
+# `detail` is a sentence and gets clamped in every table that renders it, so the
+# ANSWER to "why is this one skipped?" was three lines down inside a truncated
+# cell. These are the categories, short enough to be a column:
+REASON_GATE_SHUT   = "gate shut"        # the check declined to run -- see detail
+REASON_STALE_DATA  = "data behind"      # ran, and the freshness bar was missed
+REASON_NO_ROWS     = "table empty"      # ran, and the table had nothing at all
+REASON_QUERY_ERROR = "query failed"     # the check itself could not execute
+REASON_FRESH       = "fresh"            # passing
+REASON_GATE_STUCK  = "gate stuck"       # shut so long the GATE is the suspect
 
-    def add(self, check, status, severity, detail="", latest=None):
+
+def _cadence_from_dates(min_date: str, run_date: str) -> str:
+    """The freshness bar a date_check applies, phrased as a refresh frequency.
+
+    Derived from the check's OWN argument rather than declared in a side table,
+    so it cannot drift from the bar actually enforced -- the failure mode a
+    hand-maintained list has every time.
+    """
+    if not min_date or not run_date:
+        return "each run"
+    # PARSE BEFORE COMPARING. The first version tested `min_date >= run_date`
+    # first, which is a STRING compare -- "not-a-date" sorts after any ISO date,
+    # so an unparseable value reported "same day" with total confidence. Same
+    # trap as .claude/rules/data-integrity.md's "parse timestamps before
+    # comparing them", in the one place a wrong answer looks most plausible.
+    try:
+        start = datetime.strptime(min_date[:10], "%Y-%m-%d")
+        today = datetime.strptime(run_date[:10], "%Y-%m-%d")
+    except Exception:                                       # noqa: BLE001
+        return "each run"
+    gap = (today - start).days
+    if gap <= 0:
+        return "same day"
+    return "daily" if gap == 1 else f"every {gap} days"
+
+
+class HealthReport:
+    def __init__(self, run_date: str = ""):
+        self.results = []
+        self.run_date = run_date
+
+    def add(self, check, status, severity, detail="", latest=None,
+            reason=None, cadence=None):
+        """Record one check result.
+
+        `reason` is the one-word category above; `cadence` is how fresh this
+        check expects its data to be. Both default to something honest rather
+        than to None: a check that reports neither still renders a full row.
+        """
+        if reason is None:
+            reason = {OK: REASON_FRESH, SKIPPED: REASON_GATE_SHUT,
+                      STALE: REASON_STALE_DATA, EMPTY: REASON_NO_ROWS,
+                      ERROR: REASON_QUERY_ERROR}.get(status, "")
         self.results.append({
             "check_name": check, "status": status, "severity": severity,
             "detail": detail, "latest_seen": str(latest) if latest is not None else None,
+            "reason": reason, "cadence": cadence or "each run",
         })
 
     def date_check(self, conn, check, severity, table, date_col, min_date,
@@ -234,8 +324,10 @@ class HealthReport:
         `where`, if given, is spliced in raw after the table name and must
         include its own WHERE keyword (e.g. `where="WHERE season = 2026"`).
         """
+        cadence = _cadence_from_dates(min_date, self.run_date)
         if not gate_ok:
-            self.add(check, SKIPPED, severity, gate_note)
+            self.add(check, SKIPPED, severity, gate_note,
+                     reason=REASON_GATE_SHUT, cadence=cadence)
             return
         try:
             latest = _scalar(conn, f"SELECT MAX({date_col}) FROM {table} {where}")
@@ -247,38 +339,50 @@ class HealthReport:
             # system_health_checks). Roll back so the rest of the run survives
             # one broken check.
             getattr(conn, "rollback", lambda: None)()
-            self.add(check, ERROR, severity, f"query failed: {exc}")
+            self.add(check, ERROR, severity, f"query failed: {exc}",
+                     reason=REASON_QUERY_ERROR, cadence=cadence)
             return
         if latest is None:
-            self.add(check, EMPTY, severity, f"{table} has no rows")
+            self.add(check, EMPTY, severity, f"{table} has no rows",
+                     reason=REASON_NO_ROWS, cadence=cadence)
         elif str(latest) >= min_date:
-            self.add(check, OK, severity, f"latest {date_col} = {latest}", latest)
+            self.add(check, OK, severity, f"latest {date_col} = {latest}", latest,
+                     reason=REASON_FRESH, cadence=cadence)
         else:
             self.add(check, STALE, severity,
-                     f"latest {date_col} = {latest}, expected >= {min_date}", latest)
+                     f"latest {date_col} = {latest}, expected >= {min_date}", latest,
+                     reason=REASON_STALE_DATA, cadence=cadence)
 
     def ts_check(self, conn, check, severity, table, ts_col, max_age_hours,
                  gate_ok=True, gate_note="no games in window"):
         """Generic 'MAX(ts_col) within max_age_hours of now' freshness check."""
+        cadence = (f"every {max_age_hours}h" if max_age_hours < 24
+                   else "daily" if max_age_hours == 24
+                   else f"every {max_age_hours // 24} days")
         if not gate_ok:
-            self.add(check, SKIPPED, severity, gate_note)
+            self.add(check, SKIPPED, severity, gate_note,
+                     reason=REASON_GATE_SHUT, cadence=cadence)
             return
         try:
             latest = _scalar(conn, f"SELECT MAX({ts_col}) FROM {table}")
         except Exception as exc:
             getattr(conn, "rollback", lambda: None)()
-            self.add(check, ERROR, severity, f"query failed: {exc}")
+            self.add(check, ERROR, severity, f"query failed: {exc}",
+                     reason=REASON_QUERY_ERROR, cadence=cadence)
             return
         ts = _parse_ts(latest)
         if ts is None:
-            self.add(check, EMPTY, severity, f"{table} has no parseable {ts_col}")
+            self.add(check, EMPTY, severity, f"{table} has no parseable {ts_col}",
+                     reason=REASON_NO_ROWS, cadence=cadence)
             return
         age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
         if age_h <= max_age_hours:
-            self.add(check, OK, severity, f"last snapshot {age_h:.1f}h ago", latest)
+            self.add(check, OK, severity, f"last snapshot {age_h:.1f}h ago", latest,
+                     reason=REASON_FRESH, cadence=cadence)
         else:
             self.add(check, STALE, severity,
-                     f"last snapshot {age_h:.1f}h ago (max {max_age_hours}h)", latest)
+                     f"last snapshot {age_h:.1f}h ago (max {max_age_hours}h)", latest,
+                     reason=REASON_STALE_DATA, cadence=cadence)
 
 
 def _published_record_problems(rec: dict, daily: dict, live_start: str) -> list[str]:
@@ -335,7 +439,7 @@ def run_system_health(run_date: str | None = None) -> dict:
     d3 = (d - timedelta(days=3)).strftime("%Y-%m-%d")
 
     conn = get_connection()
-    r = HealthReport()
+    r = HealthReport(run_date)
     try:
         mlb_today = _games_count(conn, "MLB", run_date, run_date) > 0
         mlb_yday_finals = _games_count(conn, "MLB", yday, yday, finals_only=True) > 0
@@ -1212,18 +1316,22 @@ def run_system_health(run_date: str | None = None) -> dict:
         # thing that reads the table -- Claude mobile, the ops dashboard -- was
         # told nothing. A check whose result is never stored is not a check.
         _apply_skip_budgets(r.results, _skip_run_days(conn, run_date))
+        _ensure_reason_columns(conn)
         checked_at = datetime.now(timezone.utc).isoformat()
         for res in r.results:
             conn.execute("""
                 INSERT INTO system_health_checks
-                    (run_date, check_name, status, severity, detail, latest_seen, checked_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (run_date, check_name, status, severity, detail, latest_seen,
+                     reason, cadence, checked_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (run_date, check_name) DO UPDATE SET
                     status = EXCLUDED.status, severity = EXCLUDED.severity,
                     detail = EXCLUDED.detail, latest_seen = EXCLUDED.latest_seen,
+                    reason = EXCLUDED.reason, cadence = EXCLUDED.cadence,
                     checked_at = EXCLUDED.checked_at
             """, (run_date, res["check_name"], res["status"], res["severity"],
-                  res["detail"], res["latest_seen"], checked_at))
+                  res["detail"], res["latest_seen"],
+                  res.get("reason", ""), res.get("cadence", "each run"), checked_at))
         conn.commit()
 
     finally:
