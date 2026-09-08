@@ -2359,8 +2359,22 @@ CREATE TABLE IF NOT EXISTS system_health_checks (
     check_name  TEXT NOT NULL,
     status      TEXT NOT NULL,          -- OK | STALE | EMPTY | SKIPPED | ERROR
     severity    TEXT NOT NULL,          -- CRIT | WARN
-    detail      TEXT,
+    detail      TEXT,                  -- the long form: a sentence
     latest_seen TEXT,
+    reason      TEXT,                  -- 2026-09-08: the SHORT form, one word.
+                                       -- gate shut | gate stuck | data behind |
+                                       -- table empty | query failed | fresh.
+                                       -- `detail` is clamped in every table that
+                                       -- renders it, so the answer to "why is
+                                       -- this skipped?" was inside a truncated
+                                       -- cell. Added and written by
+                                       -- tracking/system_health.py, which gates
+                                       -- the ALTER on ddl_guard.schema_is_current.
+    cadence     TEXT,                  -- 2026-09-08: the freshness bar this check
+                                       -- applies ("daily", "every 6h", "every 3
+                                       -- days", "same day", "each run"), DERIVED
+                                       -- from the check's own threshold so it
+                                       -- cannot drift from what is enforced.
     checked_at  TEXT NOT NULL,
     UNIQUE(run_date, check_name)
 );
