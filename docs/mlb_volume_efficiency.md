@@ -805,3 +805,86 @@ half — the same inversion §11.3 found by daily rank and by price, now on the
 current-cut population. **mike's call: keep the lane running unfiltered** at
 ~9/day, −0.26u over 69, and re-open the question when the map is fittable
 (~09-10). Any cut here would be a guess dressed as a filter.
+
+---
+
+## 13. The inning gate is still unanswerable — and the reason is a finding of its own (2026-09-08)
+
+mike: *"fix the replay defect and re-run."* The defect is diagnosed and the
+replay now refuses to print a gate table while it stands. It is **not fixed**,
+because the information needed to fix it was never recorded.
+
+### 13.1 What the 13 missed games actually were
+
+Not a coverage problem. Every game production bet has state rows, in-play DK
+prices and a final score, and the missed games pair ~900 snapshots each. The
+replay and production disagree about the **model probability**.
+
+Measured on `MLB_2026-09-07_LAA_BOS`, holding the state, the DK line (7.5) and
+the price (−118) fixed and varying only the pre-game stats snapshot:
+
+| stats as of | lam | p_over(7.5) | decision |
+|---|---|---|---|
+| 2026-09-07 (what the replay reads) | 7.853 | 0.5263 | no bet |
+| 2026-09-05 | 9.391 | 0.7199 | BET |
+| **production recorded** | — | **0.7268** | BET |
+
+### 13.2 The finding that matters more than the gate
+
+Only **six** features differ between those two rows:
+
+| feature | as of 09-07 | as of 09-05 |
+|---|---|---|
+| `home_team_era` / `home_bullpen_era` | 3.60 | 3.65 |
+| `away_team_era` / `away_bullpen_era` | 4.21 | 4.25 |
+| `home_runs_last_10` | 4.0 | 3.9 |
+| `away_runs_last_10` | 3.2 | 3.4 |
+
+State, weather and line are byte-identical. **A 0.05 change in team ERA and 0.1
+to 0.2 in runs-per-last-10 moves expected remaining runs by 1.5 and the over
+probability by 19 percentage points** — the difference between no bet and a bet
+the model claims at 73%.
+
+That is not a replay artifact. It is `mlb_live_total_runs` being pathologically
+sensitive to inputs that drift daily by noise, and it is the most plausible
+mechanical account yet of why the model claims ~73% and delivers ~54%: two runs
+of the same model on the same game, a day apart, are close to different models.
+
+### 13.3 Why bounding the replay on the pick timestamp does not fix it
+
+`models.live_scorer._pregame_features` memoises on `(game_date, game_id)` in
+process, evicting only other dates. A running live loop therefore freezes ONE
+feature row per game, computed whenever it first saw that game — a moment
+recorded nowhere. `DECISION_LOG_DIR` is NFL-only; no MLB live pick stores its
+feature vector or its lambda.
+
+And the obvious bound does not reproduce production either: the newest stats
+snapshot available at the 17:55 UTC pick (as-of 09-07, written 10:05 UTC) gives
+0.5263 against production's 0.7268. **The information is not in the database.**
+
+**The prerequisite is therefore to record lambda and the feature row on every
+live pick.** Until then the gate question cannot be answered by replay, and
+§11's inning split stays an observation about a self-selected set.
+
+### 13.4 A second defect, in PRODUCTION, not just the replay
+
+`_pregame_features` passes `_get_dk_odds(conn, game_id, "h2h")` into
+`build_mlb_game_features`. For `MLB_2026-09-07_LAA_BOS` that returns
+`snapshot_type='in_play'`, home −10000 / away +1380, stamped **19:44 UTC — two
+hours after the pick**, read as a pre-game price.
+
+It does not feed the 18 features this model uses, so it is not the bug in §13.1.
+But it is CLAUDE.md §6's pre-game/in-play separation broken **in the live
+scoring path**, it affects every live model that does use odds-derived features,
+and combined with the cache it means whichever in-play moneyline happened to be
+current on the first pass is frozen in as "the pre-game line" for the game.
+Found, not fixed.
+
+### 13.5 What changed in the script
+
+- Every drop is now named — `no live_game_state rows`, `no DK in_play totals`,
+  `pre-game features unavailable`, `no state paired within 120s`, `no signal
+  cleared the cut` — so a miss is a diagnosis rather than a silent absence.
+- **The control now gates the tables.** It used to print beside them, and on
+  2026-09-07 the tables were read and acted on with 13 games missing. The run
+  exits 2 and prints nothing unless `--force`.

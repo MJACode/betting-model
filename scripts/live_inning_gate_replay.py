@@ -38,6 +38,49 @@ pick's own `scored_line`, over/under, whole numbers push — was recomputed
 against production settlement for every settled `mlb_live_total_runs` BET since
 2026-08-24 and agrees on **94 of 94**.
 
+WHY THIS CANNOT CURRENTLY BE 0 (2026-09-08)
+-------------------------------------------
+The 2026-09-07 run reported **13 games production bet that the replay does not**
+and its gate verdict was acted on anyway. Diagnosed here, and it is not a
+pairing or coverage problem: the missed games have ~900 paired snapshots each.
+
+The replay and production disagree about the MODEL PROBABILITY, because they
+disagree about the pre-game feature row. Measured on
+`MLB_2026-09-07_LAA_BOS` — same state, same DK line 7.5, same price -118,
+holding everything fixed and varying only the stats snapshot:
+
+    stats as of 2026-09-07   lam 7.853   p_over 0.5263   -> no bet
+    stats as of 2026-09-05   lam 9.391   p_over 0.7199   -> BET
+    production recorded                  p_over 0.7268   -> BET
+
+Only six features move between those two rows — team ERA 3.60 vs 3.65, 4.21 vs
+4.25, and runs_last_10 by 0.1-0.2. **That is enough to move expected remaining
+runs by 1.5 and the over probability by 19 points**, which is a finding about
+the model, not about the replay, and it is recorded in
+`docs/mlb_volume_efficiency.md`.
+
+Production's row cannot be reconstructed. `models.live_scorer._pregame_features`
+memoises on `(game_date, game_id)` in process, so a running loop freezes one
+feature row per game at whatever the stats tables held when it first saw the
+game — a moment that is not recorded anywhere. The decision log
+(`DECISION_LOG_DIR`) is NFL-only; no MLB live pick stores its feature vector or
+its lambda.
+
+So the replay cannot be made faithful by bounding its inputs on the pick's
+timestamp: the newest snapshot available at 17:55 UTC (as of 09-07, created
+10:05 UTC) gives 0.5263, and production got 0.7268. **The information needed is
+not in the database.** Recording lambda and the feature row on every live pick
+is the prerequisite, and until then the control fails and the tables are
+refused.
+
+A SECOND DEFECT, FOUND HERE AND SHARED WITH PRODUCTION. `_pregame_features`
+passes `_get_dk_odds(conn, game_id, "h2h")` into `build_mlb_game_features`. For
+this game that returns `snapshot_type='in_play'`, home -10000 / away +1380,
+stamped 19:44 UTC — an in-play price from two hours AFTER the pick, read as a
+pre-game one. It does not feed these 18 features, so it is not the bug above,
+but it is CLAUDE.md 6's pre-game/in-play separation broken in the live path and
+it will be the next wrong number.
+
 WHAT IT DOES NOT MODEL
   * The 5s cadence and the staleness guards that make a pass happen at all. A
     price that existed in `odds` is assumed askable, which flatters every gate
@@ -228,23 +271,37 @@ def replay(since: str, gates: list[int]) -> dict:
     from models.scorer import _get_dk_odds
 
     per_gate = defaultdict(list)
+    dropped: dict[str, str] = {}
     scanned = 0
     try:
         for game in _games(conn, since):
-            states = _states(conn, game["game_id"])
+            gid = game["game_id"]
+            states = _states(conn, gid)
             if not states:
+                dropped[gid] = "no live_game_state rows"
                 continue
-            prices = _prices(conn, game["game_id"])
+            prices = _prices(conn, gid)
             if not prices:
+                dropped[gid] = "no DK in_play totals rows"
                 continue
             pregame = build_mlb_game_features(
-                conn, game["game_id"], game["game_date"], game["home_team"],
+                conn, gid, game["game_date"], game["home_team"],
                 game["away_team"], game["season"],
-                odds_row=_get_dk_odds(conn, game["game_id"], "h2h"))
+                odds_row=_get_dk_odds(conn, gid, "h2h"))
             if not pregame:
+                dropped[gid] = "pre-game features unavailable"
                 continue
             scanned += 1
-            sigs = _signals(artifact, game, pregame, _pair(states, prices))
+            paired = _pair(states, prices)
+            if not paired:
+                dropped[gid] = (f"no state paired with a price inside "
+                                f"{MAX_PRICE_AGE_S}s ({len(states)} states, "
+                                f"{len(prices)} prices)")
+                continue
+            sigs = _signals(artifact, game, pregame, paired)
+            if not sigs:
+                dropped[gid] = (f"{len(paired)} paired snapshots, no signal "
+                                f"cleared the cut")
             for g in gates:
                 first = next((s for s in sigs if (s["inning"] or 0) >= g), None)
                 if first is not None:
@@ -257,7 +314,7 @@ def replay(since: str, gates: list[int]) -> dict:
     finally:
         conn.close()
 
-    return {"scanned": scanned, "per_gate": dict(per_gate)}
+    return {"scanned": scanned, "per_gate": dict(per_gate), "dropped": dropped}
 
 
 def _bet_games(conn, since: str) -> set:
@@ -287,6 +344,17 @@ def _table(out: dict, keep, title: str) -> None:
               f"{u / max(len(rows), 1):>+8.1%}{claims:>8.1%}{delivers:>10.1%}")
 
 
+def _refuse_tables(missed, force: bool) -> bool:
+    """Whether the control has failed and the gate tables must not be printed.
+
+    A separate function because it is the whole point of the control: on
+    2026-09-07 the check printed BESIDE the tables, 13 games were missing, and
+    the verdict was acted on anyway. `force` is for debugging the replay, never
+    for a gate decision.
+    """
+    return bool(missed) and not force
+
+
 def _report(out: dict, conn) -> None:
     print()
     print(f"Games replayed: {out['scanned']}")
@@ -312,6 +380,29 @@ def _report(out: dict, conn) -> None:
     if missed:
         print("         a game production bet that the replay does not is a "
               "REPLAY DEFECT - read it before the tables.")
+        why = defaultdict(list)
+        for gid in sorted(missed):
+            why[out["dropped"].get(gid, "reached _signals but no BET first "
+                                        "at/after gate")].append(gid)
+        for reason, gids in sorted(why.items(), key=lambda kv: -len(kv[1])):
+            print(f"           {len(gids):>3}  {reason}")
+            for gid in gids[:4]:
+                print(f"                  {gid}")
+
+    # THE CONTROL GATES THE TABLES. It used to print beside them, and the tables
+    # were read anyway -- the 2026-09-07 run reported 13 missed games and its
+    # gate verdict was acted on. A number that is allowed to be read while the
+    # check under it is failing is not a check.
+    if _refuse_tables(missed, ARGS.force):
+        print()
+        print("REFUSING TO PRINT THE GATE TABLES.")
+        print(f"  {len(missed)} game(s) production bet that this replay does "
+              f"not reproduce. Until that is 0, the ungated control is not the")
+        print("  production record and no gate comparison drawn from it means "
+              "anything. See the docstring, 'WHY THIS CANNOT CURRENTLY BE 0'.")
+        print("  --force prints them anyway, for debugging only.")
+        print()
+        raise SystemExit(2)
 
     # BOTH TABLES, because they answer different questions and the second is the
     # one a gate decision should read. The unrestricted table includes games
@@ -334,6 +425,9 @@ def main() -> None:
                     help="first game_date to replay (default: the 08-30 cut's era)")
     ap.add_argument("--gates", type=int, nargs="+", default=[1, 3, 4, 5, 6],
                     help="inning gates to compare; 1 is the ungated control")
+    ap.add_argument("--force", action="store_true",
+                    help="print the gate tables even when the control fails. "
+                         "For debugging the replay, never for a gate decision.")
     ARGS = ap.parse_args()
     out = replay(ARGS.since, ARGS.gates)
     conn = get_connection()

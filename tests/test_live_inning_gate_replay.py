@@ -93,3 +93,28 @@ def test_implied_probability_handles_both_signs_and_refuses_nonsense():
     assert _implied(+100) == 0.5
     assert _implied(0) is None
     assert _implied(None) is None
+
+
+# ── the control gates the tables ─────────────────────────────────────────────
+#
+# The 2026-09-07 run printed "13 the other way" immediately above two gate
+# tables, and the tables were read and the verdict acted on. A check that is
+# allowed to fail beside the number it guards is not a check.
+
+from scripts.live_inning_gate_replay import _refuse_tables
+
+
+def test_one_missed_game_is_enough_to_refuse():
+    assert _refuse_tables({"MLB_2026-09-07_LAA_BOS"}, False) is True
+
+
+def test_a_clean_control_prints_the_tables():
+    assert _refuse_tables(set(), False) is False
+
+
+def test_force_is_the_only_way_past_a_failing_control():
+    assert _refuse_tables({"g1", "g2"}, True) is False
+
+
+def test_force_does_not_invent_a_failure_when_the_control_passed():
+    assert _refuse_tables(set(), True) is False
