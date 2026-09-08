@@ -702,6 +702,7 @@ to be known BEFORE deciding which file to open.
 | **The historical team-stats leak** | `docs/team_stats_leak.md` |
 | Rebuilding the team-stats tables (scope) | `docs/team_stats_rebuild_scope.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
+| **Who has beaten player props, how, and with what data** | `docs/prop_market_research.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —
