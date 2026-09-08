@@ -78,6 +78,11 @@ SKIP_BUDGET_DAYS: dict = {
     # well inside this budget and correctly stays quiet.
     "wnba_game_log": 245,
     "espn_wnba_api": 245,
+    # A regime change (a retrain, or a newly promoted calibration map) resets
+    # this check's sample to zero, and 150 graded picks take a few weeks to
+    # accrue. 45 days covers that plus an off-week; longer than that means the
+    # nightly fits have stopped, which is worth saying.
+    "model_calibration": 45,
 }
 
 # Everything else: a fortnight. Long enough for a normal off-week in any sport
@@ -1283,23 +1288,64 @@ def run_system_health(run_date: str | None = None) -> dict:
         # gate only ever sees the holdout, and for a Poisson model it was not
         # even measuring the probability that gets bet — `mlb_live_total_runs`
         # shipped 9-10pp overconfident on its OWN 2025 holdout and nothing
-        # noticed for eleven weeks. This is the forward half: graded outcomes,
-        # at the probabilities actually bet, on the model's current version.
+        # noticed for eleven weeks. This is the forward half.
+        #
+        # IT MUST MEASURE THE NUMBER THAT DECIDED THE BET, OVER THE REGIME THAT
+        # PRODUCED IT. Until 2026-09-08 it did neither, and the two faults
+        # compounded into a verdict that could never come good:
+        #
+        #   * It averaged `o.model_probability`, the RAW number. But
+        #     `DECIDE_ON_CALIBRATED_PROB` has been on since Phase 2 (mike,
+        #     2026-08-31): the BET/AVOID call runs on the CALIBRATED
+        #     probability, and `docs/probability_calibration.md` says the raw
+        #     column stays raw ON PURPOSE so old sweeps remain readable. So the
+        #     check was grading a number the decision path no longer uses, and
+        #     no amount of calibration work could ever move it.
+        #   * Its window opened at the model VERSION's date, which predates
+        #     every promoted map. Measured 2026-09-08: all seven promoted maps
+        #     landed on 09-07 and `graded_since_promotion` was **0 for every
+        #     model** -- 100% of the sample was written under the old regime.
+        #
+        # Live consequence: four models read 8-14pp overconfident, two of them
+        # WNBA, whose last graded pick was 2026-08-30. The season is over until
+        # May, so that population is FROZEN -- the check would have reported
+        # CRIT every morning for eight months about picks nobody can change,
+        # which is the permanently-red-and-unactionable failure the skip-budget
+        # work was about.
+        #
+        # So: the decision probability is `model_probability_cal` where a map is
+        # PROMOTED (the scorer stamps that column from the promoted map, and it
+        # equals the raw number when there is none), and the window opens at the
+        # LATER of the version date and the promotion date. A pick from the
+        # previous regime says nothing about whether the current one is honest.
         #
         # WARN at 5pp (the documented go-live criterion), CRIT at 8pp. Gated on
         # 150 graded picks so a new or thin model is SKIPPED rather than accused.
         try:
             rows = conn.execute("""
+                WITH regime AS (
+                    SELECT r.model_id,
+                           CASE WHEN c.promoted IS TRUE
+                                     AND SUBSTRING(c.promoted_at, 1, 10)
+                                         > SUBSTRING(r.created_at, 1, 10)
+                                THEN SUBSTRING(c.promoted_at, 1, 10)
+                                ELSE SUBSTRING(r.created_at, 1, 10) END AS since
+                    FROM model_registry r
+                    LEFT JOIN model_calibration c ON c.model_id = r.model_id
+                    WHERE r.is_active = 1
+                )
                 SELECT o.model_id,
                        COUNT(*) AS n,
-                       AVG(o.model_probability) * 100 AS claimed,
-                       100.0 * COUNT(*) FILTER (WHERE o.result = 'WIN') / COUNT(*) AS realised
+                       AVG(COALESCE(p.model_probability_cal, o.model_probability))
+                           * 100 AS claimed,
+                       100.0 * COUNT(*) FILTER (WHERE o.result = 'WIN') / COUNT(*) AS realised,
+                       MIN(g.since) AS since
                 FROM mv_scored_pick_outcomes o
-                JOIN model_registry r
-                  ON r.model_id = o.model_id AND r.is_active = 1
+                JOIN regime g ON g.model_id = o.model_id
+                LEFT JOIN picks p ON p.pick_id = o.pick_id
                 WHERE o.result IN ('WIN','LOSS')
-                  AND o.model_probability >= 0.60
-                  AND o.game_date >= SUBSTRING(r.created_at, 1, 10)
+                  AND COALESCE(p.model_probability_cal, o.model_probability) >= 0.60
+                  AND o.game_date > g.since
                 GROUP BY o.model_id
                 HAVING COUNT(*) >= 150
             """).fetchall()
@@ -1313,24 +1359,31 @@ def run_system_health(run_date: str | None = None) -> dict:
             rows = []
         if rows:
             gaps = sorted(((float(c) - float(rl), m, int(n))
-                           for m, n, c, rl in rows), reverse=True)
+                           for m, n, c, rl, _since in rows), reverse=True)
             crit = [g for g in gaps if g[0] >= 8.0]
             warn = [g for g in gaps if 5.0 <= g[0] < 8.0]
             worst = ", ".join(f"{m} +{g:.1f}pp/{n}" for g, m, n in gaps[:4] if g >= 5.0)
             if crit:
                 r.add("model_calibration", STALE, "WARN",
-                      f"{len(crit)} model(s) 8pp+ overconfident on the live record: "
-                      f"{worst}. A threshold cannot fix a calibration error.")
+                      f"{len(crit)} model(s) 8pp+ overconfident at the probability "
+                      f"actually bet: {worst}. A threshold cannot fix a "
+                      f"calibration error.",
+                      reason=f"{crit[0][0]:.0f}pp overconfident")
             elif warn:
                 r.add("model_calibration", STALE, "WARN",
-                      f"{len(warn)} model(s) 5-8pp overconfident: {worst}")
+                      f"{len(warn)} model(s) 5-8pp overconfident: {worst}",
+                      reason=f"{warn[0][0]:.0f}pp overconfident")
             else:
                 r.add("model_calibration", OK, "WARN",
                       f"{len(gaps)} model(s) measured, worst gap "
                       f"{gaps[0][0]:+.1f}pp ({gaps[0][1]})")
         else:
+            # Honest, and it un-skips on its own as picks accrue under the
+            # current regime -- it does not mean "calibrated".
             r.add("model_calibration", SKIPPED, "WARN",
-                  "no model has 150+ graded picks on its current version yet")
+                  "no model has 150+ graded picks yet under its current "
+                  "version and promoted calibration map",
+                  reason="Nothing to check")
 
         # ── Persist + summarize ──────────────────────────────────────────────
         # This runs AFTER every check, model_calibration included. It used to
