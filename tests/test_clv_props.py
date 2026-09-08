@@ -24,10 +24,31 @@ def test_props_are_no_longer_excluded_from_clv():
         assert excluded not in src, f"props still excluded from CLV: {excluded}"
 
 
-def test_live_picks_stay_excluded_forever():
-    """An in-play price has no meaningful close to compare against."""
-    src = _fn("_capture_clv")
-    assert "p.is_live IS NOT TRUE" in src
+def test_live_picks_stay_excluded_from_BOTH_clv_paths():
+    """An in-play price has no meaningful close to compare against — and the
+    measurement, not just the argument, is now on the record.
+
+    THIS GUARD PROTECTS AGAINST AN ATTRACTIVE MISTAKE. Live is ~40% of MLB
+    volume, carries ZERO CLV rows against 118 settled bets while pre-game covers
+    73%, and pointing the existing machinery at the live rows looks like a
+    two-line fix. It was proposed and withdrawn in session 254 on this evidence
+    (n=100, each bet against the first in-play snapshot 10 minutes later):
+
+        OVER  + line rose   n=25   84.0% win
+        UNDER + line rose   n= 5    0.0% win
+
+    A live full-game total moves because RUNS ARE SCORED, so post-bet movement
+    is a partial readout of the result — perfectly confounded with the thing CLV
+    is supposed to predict. A column filled this way would read strongly
+    positive on a winning stretch for no reason connected to price.
+
+    BOTH paths are asserted. The previous version checked `_capture_clv` alone,
+    which is the "test scoped to the symptom already found" pattern from
+    CLAUDE.md §7 — `_backfill_clv` runs the same exclusion for older dates and
+    could have lost it silently. docs/live_betting.md carries the full table."""
+    for fn in ("_capture_clv", "_backfill_clv"):
+        assert "p.is_live IS NOT TRUE" in _fn(fn), (
+            f"{fn} no longer excludes live picks from CLV")
 
 
 def test_golf_stays_excluded():

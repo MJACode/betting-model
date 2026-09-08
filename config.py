@@ -694,6 +694,11 @@ PROP_ONE_BET_PER_PLAYER: dict = {
 # are promoted and the calibrated cuts bind on their own. Picks turned away are
 # written as NONE, so the next sweep still sees them.
 # docs/mlb_volume_efficiency.md sections 2, 5, 11.
+# DATED REVIEW (2026-09-08, mike): k and outs each carry an n=75 pause
+# criterion, and mlb_live_total_runs an n=150 re-sweep, agreed BEFORE the data
+# arrived. The population, the breakeven definition and the query are in
+# docs/thresholds.md, "Dated review criteria" — not enforced here on purpose, a
+# dict nothing reads is a guard dead code satisfies (CLAUDE.md §1b).
 PROP_MAX_SIGNALS_PER_DAY: dict = {
     "mlb_prop_pitcher_k":     2,
     "mlb_prop_pitcher_hits":  2,
@@ -1539,7 +1544,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "golf_matchup":   0.55,
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
     # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
-    "mlb_live_total_runs": 0.7,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "mlb_live_total_runs": 0.7,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md. Re-sweep at n=150 settled since 2026-08-31 (70 at 2026-09-08): docs/thresholds.md "Dated review criteria". There is NO live CLV — docs/live_betting.md has the measurement.
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
