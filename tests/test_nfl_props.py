@@ -1570,3 +1570,51 @@ def test_two_references_are_an_OR_not_an_AND():
     # best-edge-wins across references is the OR; an intersection would be a set
     # operation over the two bet lists instead.
     assert "b.edge > prev.edge" in src, src
+
+
+class TestNaNIsAbsent:
+    """A missing price is None from psycopg2 and NaN from the pandas cache.
+
+    Only the first was guarded. NaN then flowed through arithmetic silently:
+    implied(nan) was nan, devig returned (nan, nan) rather than (None, None),
+    the market was never counted one-way, and `nan >= min_edge` is False so the
+    proposition disappeared from the board without appearing in any diagnostic.
+
+    It never manufactured a bet -- every NaN comparison is False -- so no
+    published number was wrong. It made every cache-based backtest quieter and
+    smaller than the thing it was measuring, which is its own kind of lie.
+    Measured 2026-09-08: 49% of betrivers' cached NFL prop rows carry a NaN
+    under price, and 38% of DraftKings'.
+    """
+
+    def test_nan_is_treated_as_a_missing_price(self):
+        from models.market_relative import implied
+        assert implied(float("nan")) is None
+        assert implied(None) is None
+        assert implied(-110) is not None
+
+    def test_a_nan_side_makes_the_market_one_way(self):
+        from models.market_relative import devig
+        assert devig(-110, float("nan")) == (None, None)
+        assert devig(float("nan"), -110) == (None, None)
+
+    def test_a_real_two_way_price_still_devigs(self):
+        from models.market_relative import devig
+        o, u = devig(-110, 100)
+        assert o is not None and abs(o + u - 1.0) < 1e-9
+
+    def test_a_nan_quote_is_COUNTED_one_way_not_silently_dropped(self):
+        """The diagnostic is the point: an absent price must show up as
+        `one_way`, because a board that shrinks without saying so is how a
+        coverage problem gets read as a lack of edge."""
+        import models.nfl_prop_market as mkt
+
+        q = {
+            ("g", "p", "player_receptions", "pinnacle"):
+                {"line": 4.5, "over_price": -110, "under_price": float("nan")},
+            ("g", "p", "player_receptions", "draftkings"):
+                {"line": 4.5, "over_price": 120, "under_price": -140},
+        }
+        bets, diag = mkt.find_bets(q, min_edge=0.02)
+        assert bets == []
+        assert diag["one_way"] == 1, diag

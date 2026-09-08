@@ -48,19 +48,13 @@ from data.ingestors.nfl_props_data_ingestor import norm_player_name
 REF_A, REF_B = "pinnacle", "betonlineag"
 
 
-def implied(a) -> float:
-    a = float(a)
-    return 100.0 / (a + 100.0) if a > 0 else abs(a) / (abs(a) + 100.0)
-
-
-def devig(o, u):
-    if o is None or u is None:
-        return None, None
-    io_, iu = implied(o), implied(u)
-    t = io_ + iu
-    if t <= 0:
-        return None, None
-    return io_ / t, iu / t
+# The SHARED implementations, not local copies. The local ones drifted exactly
+# as §1b predicts: they guarded `is None` and not NaN, so a one-way quote from
+# the pandas cache produced nan probabilities, and because `nan < min_edge` is
+# False this script's filter let those through as bets while the production
+# path's `nan >= min_edge` correctly dropped them. Same maths, opposite
+# behaviour, from two copies of four lines.
+from models.market_relative import devig, implied  # noqa: E402
 
 
 def profit(price, won) -> float:
