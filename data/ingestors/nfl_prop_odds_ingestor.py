@@ -369,7 +369,9 @@ def run_nfl_prop_odds_ingestor(days_ahead: int = 8) -> dict:
 def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
                            limit_events: int | None = None,
                            markets: list[str] | None = None,
-                           snapshot_type: str = "open") -> dict:
+                           snapshot_type: str = "open",
+                           books: str | None = MARKET_BOOKS,
+                           regions: str | None = MARKET_REGIONS) -> dict:
     """
     Historical prop lines for each game date, snapshotted `hours_before` kickoff.
 
@@ -400,7 +402,15 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
                                            - timedelta(days=1)).isoformat(),
                                    (datetime.fromisoformat(d).date()
                                     + timedelta(days=1)).isoformat())
-            got = _ingest_events(conn, events, games, served or snap, snapshot_type, markets)
+            # BOOKS AND REGIONS DEFAULT TO THE LIVE PULL'S, not to the module
+            # defaults. They used to fall through to ODDS_API_BOOKMAKERS_PARAM,
+            # which contains neither sharp reference -- so a backfill run to
+            # study the rule bought a board the rule cannot read. Caught on
+            # 2026-09-08 twelve thousand credits into a T-48h series that had
+            # pinnacle (appended by the param's own suffix) but no betonlineag,
+            # i.e. data for a single-reference rule we had already replaced.
+            got = _ingest_events(conn, events, games, served or snap, snapshot_type,
+                                 markets, regions=regions, books=books)
             for k in ("rows", "events", "skipped", "credits"):
                 total[k] += got[k]
             total["dates"] += 1
