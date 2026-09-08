@@ -24,8 +24,30 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS,
-                    min_odds_for)
+                    min_odds_for, scoring_method)
 from data.db import get_connection, DBConnection
+from data.ddl_guard import schema_is_current
+
+
+def _ensure_scoring_method(conn: DBConnection) -> None:
+    """Add the scoring_method column the first time this runs, and never again.
+
+    `scoring_method` tells a reader whether a missing model_registry row is a
+    FAULT or the design (config.SCORING_METHODS). The ops roster consumes it;
+    without it every rule-based model reads as broken.
+
+    The guard is not decoration: `ALTER TABLE` fires Supabase's pgrst_ddl_watch
+    and 503s the whole app while PostgREST rebuilds its schema cache, and this
+    runs on every daily pipeline pass (.claude/rules/operations.md). One indexed
+    catalog SELECT, then nothing.
+    """
+    if schema_is_current(conn, "model_action_thresholds",
+                         columns=("scoring_method",)):
+        return
+    conn.execute(
+        "ALTER TABLE model_action_thresholds "
+        "ADD COLUMN IF NOT EXISTS scoring_method TEXT NOT NULL DEFAULT 'artifact'"
+    )
 
 
 def sync_action_thresholds(conn: DBConnection = None) -> int:
@@ -37,6 +59,7 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
     if own:
         conn = get_connection()
     try:
+        _ensure_scoring_method(conn)
         rows = [
             {
                 "model_id":  mid,
@@ -49,19 +72,26 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
                 "min_odds":  min_odds_for(mid),
                 "prob_only": mid in PROB_ONLY_MODELS,
                 "paused":    mid in PAUSED_MODELS,
+                # "artifact" | "rule" | "engine" — see config.SCORING_METHODS.
+                # A reader that judges a model by its registry row alone calls
+                # every rule-based model broken; this is how it knows better.
+                "scoring_method": scoring_method(mid),
             }
             for mid, t in ACTION_THRESHOLDS.items()
         ]
         conn.executemany("""
             INSERT INTO model_action_thresholds
-                (model_id, min_prob, min_edge, min_odds, prob_only, paused, updated_at)
-            VALUES (%(model_id)s, %(min_prob)s, %(min_edge)s, %(min_odds)s, %(prob_only)s, %(paused)s, NOW())
+                (model_id, min_prob, min_edge, min_odds, prob_only, paused,
+                 scoring_method, updated_at)
+            VALUES (%(model_id)s, %(min_prob)s, %(min_edge)s, %(min_odds)s, %(prob_only)s, %(paused)s,
+                    %(scoring_method)s, NOW())
             ON CONFLICT (model_id) DO UPDATE SET
                 min_prob   = EXCLUDED.min_prob,
                 min_edge   = EXCLUDED.min_edge,
                 min_odds   = EXCLUDED.min_odds,
                 prob_only  = EXCLUDED.prob_only,
                 paused     = EXCLUDED.paused,
+                scoring_method = EXCLUDED.scoring_method,
                 updated_at = NOW()
         """, rows)
 
@@ -76,7 +106,8 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
         logger.success(
             f"Synced {len(rows)} model thresholds → model_action_thresholds "
             f"({sum(r['paused'] for r in rows)} paused, "
-            f"{sum(r['prob_only'] for r in rows)} prob-only)"
+            f"{sum(r['prob_only'] for r in rows)} prob-only, "
+            f"{sum(r['scoring_method'] != 'artifact' for r in rows)} non-artifact)"
         )
         return len(rows)
     except Exception as exc:

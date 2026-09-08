@@ -1325,6 +1325,59 @@ def min_odds_for(model_id: str) -> float:
     """
     return MODEL_MIN_ODDS.get(model_id, DEFAULT_MIN_ODDS)
 
+
+# ── How each model produces its number ────────────────────────────────────────
+# Most models score from a trained artifact recorded in `model_registry`, so a
+# missing registry row means that model is BROKEN. A handful score some other
+# way by design, and anything that judges a model by its registry row alone
+# reads those as broken — which is exactly what the ops roster did until
+# 2026-09-07 ("some models still say no artifact when I want them to say rules
+# based", mike).
+#
+# This map covers, exactly, the models that do NOT go through the generic
+# artifact scorer — i.e. `set(ACTION_THRESHOLDS) - (set(MODELS) | set(PROP_MODELS))`.
+# `tests/test_scoring_methods.py` pins that equality in BOTH directions, so a
+# new lane added to ACTION_THRESHOLDS fails the suite until it is classified
+# here rather than silently inheriting "artifact".
+#
+#   "rule"      a frozen, measured rule. No ML artifact exists ANYWHERE: the
+#               number comes from a calibrated table or from a de-vigged sharp
+#               price. Nothing to train, nothing to register.
+#   "engine"    a TRAINED model whose artifact deliberately lives OUTSIDE
+#               `model_registry` — ncaaf_live/data/artifacts/, loaded by
+#               ncaaf_live/serve.py, because that package runs on Matt's machine
+#               on gamedays.
+#   "artifact"  the default for everything absent from this map: a registry
+#               artifact is expected, and its absence is a fault.
+SCORING_ARTIFACT: str = "artifact"
+
+SCORING_METHODS: dict = {
+    # Frozen rules — see each module's header for the measurement behind it.
+    "nfl_wind_totals":     "rule",    # nfl/models/wind_totals.py — CALIBRATED_UNDER_RATE lookup
+    "nfl_opener_spread":   "rule",    # nfl/models/opener_spread.py — soft-vs-Pinnacle deviation
+    "nfl_live_prop":       "rule",    # nfl/live_model/models/pass_attempt_bias.py — frozen bias
+    "nfl_prop_market":     "rule",    # models/nfl_prop_market.py — de-vig Pinnacle, bet the outlier
+    "wnba_prop_market":    "rule",    # models/wnba_prop_market.py — the same rule, pointed at WNBA
+    # Trained, off-registry.
+    "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
+    "ncaaf_live_total":    "engine",
+    # Trained AND registered, but scored by models/live_scorer.py rather than
+    # the generic path, so it falls out of MODELS/PROP_MODELS. It DOES carry a
+    # registry artifact (models/saved/mlb_live_total_runs_*.pkl) and a missing
+    # one would be a real fault — hence "artifact", not "rule".
+    "mlb_live_total_runs": SCORING_ARTIFACT,
+}
+
+
+def scoring_method(model_id: str) -> str:
+    """How `model_id` produces its number: "artifact", "rule" or "engine".
+
+    ONE accessor, because the answer has to mean the same thing everywhere it
+    is consulted -- the model_action_thresholds mirror the ops roster reads,
+    and any health check that treats a missing registry row as a fault.
+    """
+    return SCORING_METHODS.get(model_id, SCORING_ARTIFACT)
+
 # Per-model BET edge thresholds (override the global default above).
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
