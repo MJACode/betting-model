@@ -1,7 +1,21 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "NIXPACKS",
+    "watchPatterns": [
+      "**/*.py",
+      "models/**",
+      "data/**",
+      "jobs/**",
+      "scripts/**",
+      "nfl/**",
+      "features/**",
+      "tracking/**",
+      "monitoring/**",
+      "requirements*.txt",
+      "railway.json",
+      "Procfile"
+    ]
   },
   "deploy": {
     "startCommand": "python scheduler.py",
