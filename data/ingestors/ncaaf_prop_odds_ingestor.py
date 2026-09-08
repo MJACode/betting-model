@@ -64,7 +64,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -409,3 +409,184 @@ if __name__ == "__main__":
     else:
         run_ncaaf_prop_odds_ingestor(args.date,
                                      with_alternates=not args.no_alternates)
+
+
+def list_historical_ncaaf_events(snapshot_iso: str) -> tuple[list[dict], str | None]:
+    """(events, the snapshot the API actually served) for a past instant.
+
+    The SERVED timestamp is what goes on the rows: the API snaps to its nearest
+    stored snapshot, and the row must record when the price existed rather than
+    when we asked.
+    """
+    if not ODDS_API_KEY:
+        raise ValueError("ODDS_API_KEY not set in .env")
+    resp = requests.get(
+        f"{ODDS_API_BASE}/historical/sports/{SPORT_KEY}/events",
+        params={"apiKey": ODDS_API_KEY, "date": snapshot_iso, "dateFormat": "iso"},
+        timeout=60)
+    record_quota_headers(resp)
+    if resp.status_code != 200:
+        logger.warning(f"NCAAF historical events {snapshot_iso}: "
+                       f"HTTP {resp.status_code} {resp.text[:160]}")
+        return [], None
+    body = resp.json()
+    return body.get("data", []), body.get("timestamp")
+
+
+def _historical_event_props(event_id: str, snapshot_iso: str,
+                            markets: list[str],
+                            books: str) -> tuple[list, str | None, int]:
+    """One event's historical prop board -> (bookmakers, served_ts, credits)."""
+    resp = requests.get(
+        f"{ODDS_API_BASE}/historical/sports/{SPORT_KEY}/events/{event_id}/odds",
+        params={"apiKey": ODDS_API_KEY, "date": snapshot_iso,
+                "regions": "us,eu", "bookmakers": books,
+                "markets": ",".join(markets), "oddsFormat": "american"},
+        timeout=60)
+    record_quota_headers(resp)
+    credits = int(resp.headers.get("x-requests-last") or 0)
+    if resp.status_code != 200:
+        logger.debug(f"  historical odds {event_id} @ {snapshot_iso}: "
+                     f"HTTP {resp.status_code}")
+        return [], None, credits
+    body = resp.json()
+    data = body.get("data", {}) or {}
+    return data.get("bookmakers", []), body.get("timestamp"), credits
+
+
+def backfill_ncaaf_prop_odds(dates: list[str], hours_before: int = 24,
+                             markets: list[str] | None = None,
+                             books: str | None = None,
+                             limit_events: int | None = None,
+                             snapshot_type: str = "t24",
+                             skip_existing: bool = True) -> dict:
+    """Historical college prop lines, snapshotted `hours_before` EACH kickoff.
+
+    WHY IT EXISTS. models/nfl_prop_market is the only construction in this repo
+    with a blind-tested positive record, and college football is the obvious
+    place to look for it next: the same books, far more games, and softer
+    pricing than the NFL board. It could not be tested at all until
+    2026-09-08, because ncaaf_player_game_log held 2026 ONLY -- historical prop
+    prices with no outcomes to grade against are an expensive way to learn
+    nothing. That backfill has now landed (2,817 games over 2023-2025), so the
+    prices are worth buying.
+
+    PER-EVENT ANCHORING, like the MLB version and unlike the NFL one. A college
+    Saturday runs from noon to past midnight ET, and Thursday and Friday games
+    exist, so a single instant per date is hours early for some games and INSIDE
+    others. Each event is fetched at its own commence_time minus `hours_before`.
+
+    hours_before DEFAULTS TO 24, not the NFL rule's 3. Measured 2026-09-08
+    against the live endpoint: at T-3h neither sharp reference was reliably
+    present on a college board, while T-24h returned a full one.
+
+    BOOKS DEFAULT TO THE SHARP REFERENCES PLUS THE BETTABLE SET, for the reason
+    #571 records: a backfill that does not fetch what the rule reads buys a board
+    the rule cannot use, and fails by returning nothing rather than by erroring.
+
+    COVERAGE IS THE OPEN QUESTION, and it is why the first run should be one
+    season rather than three. Sampled 8 events on 2025-10-11: Pinnacle offered
+    17 two-way propositions (~2 per game) against betonlineag's 58 (~7), and
+    DraftKings was absent from the historical feed entirely. With two references
+    the workhorse here is betonlineag, not Pinnacle -- the opposite of the NFL
+    board -- and whether that is enough is exactly what a pilot season answers.
+    """
+    if not ODDS_API_KEY:
+        raise ValueError("ODDS_API_KEY not set in .env")
+    markets = list(markets or PROP_MARKETS_NCAAF)
+    if books is None:
+        import models.nfl_prop_market as _mk
+        books = ",".join(dict.fromkeys(
+            [*_mk.SHARP_BOOKS, *_mk.SOFT_BOOKS]))
+
+    conn = get_connection()
+    total = {"rows": 0, "events": 0, "skipped": 0, "credits": 0, "dates": 0}
+    try:
+        done: set[str] = set()
+        if skip_existing:
+            rows = conn.execute(
+                "SELECT DISTINCT game_date FROM player_prop_odds "
+                "WHERE game_date = ANY(%s) AND snapshot_type = %s "
+                "AND game_id LIKE 'NCAAF%%'",
+                (list(dates), snapshot_type)).fetchall()
+            done = {str(r[0]) for r in rows}
+            if done:
+                logger.info(f"  {len(done)} of {len(dates)} dates already "
+                            f"backfilled at {snapshot_type} -- skipping")
+
+        for d in dates:
+            if d in done:
+                continue
+            try:
+                got = _backfill_ncaaf_one_date(
+                    conn, d, hours_before, markets, books, limit_events,
+                    snapshot_type, total)
+            except Exception as exc:                       # noqa: BLE001
+                logger.warning(f"  {d}: aborted ({type(exc).__name__}: {exc})")
+                conn.rollback()
+                continue
+            conn.commit()
+            total["rows"] += got
+            total["dates"] += 1
+        return total
+    finally:
+        try:
+            persist_quota(conn)
+        finally:
+            conn.close()
+
+
+def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
+                             limit_events, snapshot_type, total) -> int:
+    """One college date. Scoped so a failure costs that date and no other."""
+    # 14:00Z is 10am ET -- before the earliest college kickoff, so the listing
+    # sees the whole scheduled slate and nothing has been dropped for starting.
+    evs, _served = list_historical_ncaaf_events(f"{d}T14:00:00Z")
+    total["credits"] += 1
+    if not evs:
+        logger.info(f"  {d}: no historical events")
+        return 0
+
+    known = _known_game_ids(conn, d)
+    date_rows = 0
+    seen = 0
+    for ev in evs:
+        if limit_events and seen >= limit_events:
+            break
+        commence = ev.get("commence_time", "")
+        try:
+            kick = datetime.fromisoformat(commence.replace("Z", "+00:00"))
+        except ValueError:
+            total["skipped"] += 1
+            continue
+        game_date = kick.astimezone(_ET).strftime("%Y-%m-%d")
+        home = resolve_odds_api_school(ev.get("home_team", ""), conn)
+        away = resolve_odds_api_school(ev.get("away_team", ""), conn)
+        game_id = build_ncaaf_game_id(game_date, away, home)
+        if game_id not in known:
+            total["skipped"] += 1        # orphan rows join to nothing
+            continue
+
+        snap = (kick - timedelta(hours=hours_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        per_book, served, credits = _historical_event_props(
+            ev["id"], snap, markets, books)
+        total["credits"] += credits
+        seen += 1
+        time.sleep(0.2)
+        if not per_book:
+            total["skipped"] += 1
+            continue
+        stamp = served or snap
+        rows: list[dict] = []
+        for bk in per_book:
+            rows += _parse_prop_markets(
+                bk.get("markets", []), game_id, game_date, snapshot_type,
+                stamp, allowed_markets=set(markets),
+                bookmaker=bk.get("key", ""))
+        if rows:
+            date_rows += _insert_prop_odds(conn, rows)
+        total["events"] += 1
+
+    logger.info(f"  {d}: {seen} events priced, {date_rows} rows "
+                f"(running credits {total['credits']})")
+    return date_rows
