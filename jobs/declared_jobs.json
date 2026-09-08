@@ -643,5 +643,12 @@
       ],
       "credit_cap": 3500
     }
+  },
+  {
+    "key": "health-check-populate-reason-cadence-20260908",
+    "job_type": "health_check",
+    "requested_by": "mike",
+    "note": "Populate the new system_health_checks.reason / .cadence columns. They went live with #589 but the last health run predates the code that fills them, so every value is NULL and the dashboard's two new columns render em dashes. Runs on the WORKER, which has TZ and every DISCORD_WEBHOOK_* -- borrowing prop-probe for this on 2026-09-08 is what put a wrong-dated day-set on the board in the first place.",
+    "args": {}
   }
 ]
