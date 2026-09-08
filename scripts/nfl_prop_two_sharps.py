@@ -71,7 +71,8 @@ def _actuals(df):
 
 def build(min_edge: float, snapshot: str | None = None,
           refs: tuple[str, str] = (REF_A, REF_B),
-          only_games_with: str | None = None):
+          only_games_with: str | None = None,
+          soft: tuple[str, ...] | None = None):
     """-> {selection: [(season, profit)]} plus a diagnostic count.
 
     `snapshot` pins the board to ONE offset. Without it the grader takes the
@@ -154,7 +155,7 @@ def build(min_edge: float, snapshot: str | None = None,
             # A reference is never also a bettable book: betting into it is
             # betting into our own number, and the placebo below depends on the
             # two sets staying disjoint even when a retail book stands in.
-            if book not in mk.SOFT_BOOKS or book in refs:
+            if book not in (soft or mk.SOFT_BOOKS) or book in refs:
                 continue
             so, su = devig(q.over_price, q.under_price)
             if so is None:
@@ -195,12 +196,15 @@ def main() -> None:
     ap.add_argument("--only-games-with", default=None,
                     help="keep only games carrying this snapshot series "
                          "(pairs two offsets on one game set)")
+    ap.add_argument("--soft", default=None,
+                    help="override the bettable set (comma separated)")
     ap.add_argument("--refs", default=f"{REF_A},{REF_B}",
                     help="the two reference books (the placebo swaps in retail)")
     a = ap.parse_args()
     rng = np.random.default_rng(42)
     refs = tuple(x.strip() for x in a.refs.split(","))
-    sel, diag = build(a.min_edge, a.snapshot, refs, a.only_games_with)
+    soft = tuple(x.strip() for x in a.soft.split(',')) if a.soft else None
+    sel, diag = build(a.min_edge, a.snapshot, refs, a.only_games_with, soft)
 
     print(f"\nNFL props — two sharp references, min edge {a.min_edge:.0%}")
     print(f"soft books: {len(mk.SOFT_BOOKS)}   markets: {len(mk.SHARP_MARKETS)}\n")
