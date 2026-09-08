@@ -1094,6 +1094,51 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("one_row_per_pick", ERROR, "CRIT", f"query failed: {exc}")
 
+        # ── One games row per NCAAF matchup ──────────────────────────────────
+        # NCAAF game_ids are built from RESOLVED school names, and two feeds
+        # build them: CFBD writes its canonical school, the odds ingestor writes
+        # whatever `resolve_odds_api_school` makes of The Odds API's
+        # mascot-appended string. When those disagree the same real game gets
+        # TWO rows -- and they do not split evenly: the odds-side row collects
+        # every odds snapshot and every pick, the CFBD-side row collects the
+        # FINAL. That is why six live BETs sat unsettled on 2026-09-04/05
+        # (docs/sessions/2026-09.md, session 253): nothing was lost, the halves
+        # were just on different ids.
+        #
+        # Worse, the resolver's longest-prefix rule could substitute a DIFFERENT
+        # school -- "Florida A&M" -> "Florida", "Alabama State" -> "Alabama",
+        # "Texas Southern" -> "Texas" -- writing a row for a matchup that never
+        # happens, which then gets SCORED. Both faults have the same signature,
+        # and it is one query: more than one games row for a (date, home team).
+        #
+        # CRIT and bounded to the FORWARD slate, because that is where it is
+        # still actionable -- a duplicate on a played game is history, a
+        # duplicate on Saturday's card splits this week's odds. Nothing here
+        # gates on the feed being healthy, so a dead feed cannot silence it
+        # (.claude/rules/operations.md).
+        try:
+            slots = conn.execute("""
+                SELECT game_date, home_team, COUNT(*) AS n
+                FROM games
+                WHERE sport = 'NCAAF' AND game_date >= ? AND game_date <= ?
+                GROUP BY game_date, home_team
+                HAVING COUNT(*) > 1
+                ORDER BY COUNT(*) DESC, game_date
+            """, (run_date, (d + timedelta(days=9)).strftime("%Y-%m-%d"))).fetchall()
+            if slots:
+                worst = "; ".join(f"{row[0]} {row[1]} x{row[2]}" for row in slots[:4])
+                more = f" (+{len(slots) - 4} more)" if len(slots) > 4 else ""
+                r.add("ncaaf_game_identity", STALE, "CRIT",
+                      f"{len(slots)} NCAAF matchup(s) on the forward slate have "
+                      f"more than one games row — odds, picks and the final can "
+                      f"land on different ids: {worst}{more}")
+            else:
+                r.add("ncaaf_game_identity", OK, "CRIT",
+                      "one games row per NCAAF matchup on the forward slate")
+        except Exception as exc:                            # noqa: BLE001
+            getattr(conn, "rollback", lambda: None)()
+            r.add("ncaaf_game_identity", ERROR, "CRIT", f"query failed: {exc}")
+
         # ── Model calibration on the LIVE record ─────────────────────────────
         # Does a published probability still mean what it says? The training
         # gate only ever sees the holdout, and for a Poisson model it was not

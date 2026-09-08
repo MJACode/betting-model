@@ -194,7 +194,9 @@ const REPAIRED_PROP_MODELS = [
 const PREGAME_MODELS = [
   'mlb_moneyline', 'mlb_over_under', 'mlb_runline', 'mlb_f5_moneyline',
   'wnba_moneyline', 'ncaaf_spread', 'ncaaf_over_under', 'nfl_wind_totals',
-  'nfl_opener_spread', 'ufc_moneyline', 'golf_top10', 'nba_moneyline',
+  // golf_top10 stood here until 2026-09-08; golf is retired, and a retired id
+  // is the wrong fixture for "a live pre-game model".
+  'nfl_opener_spread', 'ufc_moneyline', 'nhl_moneyline', 'nba_moneyline',
 ];
 
 check('every live model is recognised as one',

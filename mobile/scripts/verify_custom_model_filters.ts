@@ -536,10 +536,10 @@ check(
       isOutcomeGraded('wnba_prop_player_points'),
   );
   check(
-    'UFC / NHL / golf are not (settled fallback)',
-    !isOutcomeGraded('ufc_moneyline') &&
-      !isOutcomeGraded('nhl_moneyline') &&
-      !isOutcomeGraded('golf_top10'),
+    // golf_top10 was the third id here until 2026-09-08; golf is retired, and a
+    // retired id proves nothing about the settled fallback.
+    'UFC / NHL are not (settled fallback)',
+    !isOutcomeGraded('ufc_moneyline') && !isOutcomeGraded('nhl_moneyline'),
   );
 
   const rules = [
