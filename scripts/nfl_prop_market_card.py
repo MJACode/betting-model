@@ -137,7 +137,11 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
 
 def render(bets, diag, games, names=None) -> str:
     lines = [
-        f"NFL prop card — sharp {mk.SHARP_BOOK} | min edge {MIN_EDGE:.0%}",
+        # Both references, because the card claimed "sharp pinnacle" for the
+        # first hours after nfl_prop_market moved to two (#568) and a card is
+        # read by a person deciding whether to trust the slate.
+        f"NFL prop card — sharp {', '.join(mk.SHARP_BOOKS)} "
+        f"| min edge {MIN_EDGE:.0%}",
         f"{diag.get('games', 0)} open games | {diag.get('sharp_quotes', 0)} sharp quotes | "
         f"{diag.get('compared', 0)} compared | {len(bets)} bets",
     ]
