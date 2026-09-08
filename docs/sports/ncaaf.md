@@ -50,6 +50,7 @@ must hold in both halves — that split is what killed every false positive.
 | Weather spot rules (12 seasons, reanalysis) | `weather_totals.py` | NULL — unlike the NFL, the CFB market MOVES its total with wind (55.7 calm → 53.4 at 18+); wind≥12 = 54.0% pooled but late-half 51.2% and the ~2.5pp forecast haircut kills it; the 61% wind+rain cell is a time-split mirage (70% early / 34% late) |
 | Line-movement follow/fade at the close (4,311 Bovada open+close pairs) | `line_move_spots.py` | NULL — follow = 50.0–52.4% at every threshold, no fade signal either; the close subsumes its own movement |
 | Look-ahead / let-down schedule spots | `situational_spots.py` | NULL |
+| **Totals rule at earlier leads** (0-5 days out, DK 14:00Z line, 2023-2025 backfill, 2,194 matched games) | `totals_lead.py` | FLAT — at the shipped ±8 gate: 0d 56.4% (307), 1d 55.2%, 2d 53.8%, 3d 54.0%, 4d 55.3%, 5d 55.6% (232), DK close 56.4% (314), archive close 57.3% (309); every Wilson interval overlaps every other and none clears 0.5238 at 95% (lower bounds 0.482-0.517). Close-minus-lead movement in the pick's direction is -0.12..+0.07 points at every lead: no CLV, the market does not converge on the model. First-signal lock from 5 days out: 384 bets 55.7% [0.507, 0.606] vs 321 at 57.0% [0.515, 0.623] on game day. Per season 2023 52-56%, 2024 57-62%, 2025 50-57%; time halves 52-58% / 52-60%, no sign flip. Verdict: earlier is not measurably worse and not measurably better; the lead limit is a timing choice, not an edge choice |
 | Moneyline (margin regression -> P(win) vs real Bovada prices, 2,877 games) | `outcome_edge_scan.py` | NULL — calibration is superb (0.999 decile correlation) but EVERY edge cell loses at real prices (-2.8%..-8.9%): the book's implied probs are sharper than the model's and the 4.4% overround eats the rest. `ncaaf_moneyline` stays paused |
 | Outcome x edge conditional surface (all 3 markets, 36 cells, 4-season walk-forward) | `outcome_edge_scan.py` | The one POSITIVE finding of the search — but it CONFIRMS the live totals rule rather than adding a new one: at the shipped ±8 gate, 9/9 cells are above breakeven (~55.6% over 464 bets, +6.4% at -110), the effect is DIRECTION-SYMMETRIC (over-side 56.1%, under-side 54.5%, both halves both sides), monotone turn-on lands exactly at 8 (the 6-8 band is 47-52%), and it holds in every line band and week band. Spread margin regression stays dead across 4 seasons (50.1-50.8% pooled; its 53.6% was a one-season artifact; the dog>fav asymmetry never reaches breakeven) |
 | Margin regression (spread) | `ncaaf_margin_eval.py` | Passed its 2025 kill line (53.6% @ ±5.5) but ~50% across the 4-season walk-forward — 2025 was its one good year. Superseded by the opener rule |
@@ -79,11 +80,22 @@ its opening number, which is rarely true by kickoff.
   Monday NONE row would freeze the game for the week and the totals rule —
   game-day by design — could never fire at all. The NONE rows are delete +
   rescored each pass, scoped to unstarted games.
-- **`NCAAF_TOTALS_MAX_LEAD_DAYS` (1)** keeps the totals rule firing on game day.
-  It was walked forward against the archive's stored line per game, not against
-  an opener a week out; the look-ahead exposes leads it was never measured at.
-  Earlier may well be better (the usual CLV story) — it is simply not measured.
-  The opener rule has no such limit: its own preconditions are its window.
+- **`NCAAF_TOTALS_MAX_LEAD_DAYS`** bounds how far before kickoff the totals
+  rule may fire. It shipped at 1 (game day) because the rule was walked
+  forward against the archive's stored line per game and no earlier lead had
+  been measured. **Measured 2026-09-07** on the 2023-2025 DraftKings backfill
+  (`scripts/ncaaf_search/totals_lead.py`, row in the search table below):
+  graded at DK's 14:00Z line 0-5 days out, the ±8 rule runs 53.8-56.4% at
+  every lead against 56.4% at DK's close, every interval overlapping every
+  other, and the close-minus-lead movement is ~0 points in the pick's
+  direction at every lead — the market does not drift toward the model, so
+  waiting buys nothing and going early costs nothing detectable at ~5pp.
+  Simulating the first-signal lock (bet the first daily pass that clears ±8,
+  from 5 days out): 384 bets at 55.7% [0.507, 0.606] vs 321 at 57.0%
+  [0.515, 0.623] for game day — 20% more bets, 1.3pp lower, inside noise.
+  Nothing at any lead, game day included, clears 0.5238 at 95% on these three
+  out-of-sample seasons. The opener rule has no limit: its own preconditions
+  are its window.
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
   ~52 DK-priced — so the board is tens of games, not hundreds.
 
