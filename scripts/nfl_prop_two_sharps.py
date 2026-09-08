@@ -69,8 +69,18 @@ def _actuals(df):
     return out
 
 
-def build(min_edge: float):
-    """-> {selection: [(season, profit)]} plus a diagnostic count."""
+def build(min_edge: float, snapshot: str | None = None,
+          refs: tuple[str, str] = (REF_A, REF_B),
+          only_games_with: str | None = None):
+    """-> {selection: [(season, profit)]} plus a diagnostic count.
+
+    `snapshot` pins the board to ONE offset. Without it the grader takes the
+    newest pre-game quote of any type, and which type that is varies by season:
+    2023 sharp quotes were `open` until the T-48h backfill landed, after which
+    they became `t48`. That silently confounds the season split with the offset,
+    so a season row answers "which year" and "measured how far out" at once.
+    Pinning the offset is what makes the seasons comparable.
+    """
     local_store.activate()
     odds = local_store.read_table("nfl_prop_odds")
     act = _actuals(local_store.read_table("nfl_player_game_log"))
@@ -80,9 +90,19 @@ def build(min_edge: float):
           .dropna(subset=["commence_time"]).itertuples(index=False)}
 
     # newest PRE-GAME quote per (game, player, market, book, line)
+    # PAIRING. Comparing two offsets across all games compares two different
+    # GAME SETS as well: the production `open` series covers 868 games, the
+    # T-48h backfill 433. Restricting both arms to the games that carry the
+    # named series makes the offset the only thing that differs.
+    if only_games_with:
+        keep = set(odds.loc[odds.snapshot_type == only_games_with, "game_id"])
+        odds = odds[odds.game_id.isin(keep)]
+
     latest = {}
     for r in odds.itertuples(index=False):
         if r.market not in mk.SHARP_MARKETS or r.line is None:
+            continue
+        if snapshot is not None and r.snapshot_type != snapshot:
             continue
         k_off = ko.get(r.game_id)
         if k_off is not None and str(r.snapshot_at) > str(k_off):
@@ -119,7 +139,7 @@ def build(min_edge: float):
         season = str(gid).split("_")[1] if "_" in str(gid) else "?"
 
         fair = {}
-        for ref in (REF_A, REF_B):
+        for ref in refs:
             q = books.get(ref)
             if q is None:
                 continue
@@ -131,7 +151,10 @@ def build(min_edge: float):
             continue
 
         for book, q in books.items():
-            if book not in mk.SOFT_BOOKS:
+            # A reference is never also a bettable book: betting into it is
+            # betting into our own number, and the placebo below depends on the
+            # two sets staying disjoint even when a retail book stands in.
+            if book not in mk.SOFT_BOOKS or book in refs:
                 continue
             so, su = devig(q.over_price, q.under_price)
             if so is None:
@@ -147,8 +170,8 @@ def build(min_edge: float):
                 hits = {r for r, e in edges.items() if e >= min_edge}
                 prop = (gid, player, market, side)
                 best_edge = max(edges.values())
-                for name, qualifies in (("pinnacle", REF_A in hits),
-                                        ("betonlineag", REF_B in hits),
+                for name, qualifies in ((refs[0], refs[0] in hits),
+                                        (refs[1], refs[1] in hits),
                                         ("either", bool(hits)),
                                         ("BOTH", len(hits) == 2)):
                     if not qualifies:
@@ -167,16 +190,24 @@ def build(min_edge: float):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--min-edge", type=float, default=0.05)
+    ap.add_argument("--snapshot", default=None,
+                    help="pin the board to one offset: open, t48, t24, t1")
+    ap.add_argument("--only-games-with", default=None,
+                    help="keep only games carrying this snapshot series "
+                         "(pairs two offsets on one game set)")
+    ap.add_argument("--refs", default=f"{REF_A},{REF_B}",
+                    help="the two reference books (the placebo swaps in retail)")
     a = ap.parse_args()
     rng = np.random.default_rng(42)
-    sel, diag = build(a.min_edge)
+    refs = tuple(x.strip() for x in a.refs.split(","))
+    sel, diag = build(a.min_edge, a.snapshot, refs, a.only_games_with)
 
     print(f"\nNFL props — two sharp references, min edge {a.min_edge:.0%}")
     print(f"soft books: {len(mk.SOFT_BOOKS)}   markets: {len(mk.SHARP_MARKETS)}\n")
     print(f"{'selection':16s} {'bets':>6} {'win%':>6} {'units':>9} {'ROI':>8} "
           f"{'90% CI':>18}  by season")
     print("-" * 96)
-    for name in ("pinnacle", "betonlineag", "either", "BOTH"):
+    for name in (refs[0], refs[1], "either", "BOTH"):
         rows = sel.get(name) or []
         if len(rows) < 40:
             print(f"{name:16s} {len(rows):>6}   (thin)")
