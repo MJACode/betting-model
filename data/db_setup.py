@@ -927,6 +927,30 @@ CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snaps
 -- 2026-08-30 Disk-IO fix: latest-state reads filter snapshot_at >= cutoff.
 CREATE INDEX IF NOT EXISTS idx_live_state_snapshot ON live_game_state(snapshot_at);
 
+-- ── WHAT THE LIVE MODEL ACTUALLY SAW (2026-09-08) ────────────────────────────
+-- One row per (game, model) at the moment its FIRST live BET was written, so a
+-- live decision can be reproduced later. Keyed like the first-signal lock
+-- itself: one row per lane, the first one, never overwritten.
+--
+-- WHY. `live_scorer._pregame_features` memoises the pre-game half of the
+-- feature row per (game_date, game_id) in process, so a running loop freezes
+-- one row per game at whatever the stats tables held when it first saw the
+-- game -- a moment recorded nowhere. Without that row a replay cannot
+-- reproduce production: measured 2026-09-08, the same state, DK line and price
+-- give p_over 0.5263 on today's stats and 0.7199 on the snapshot two days
+-- older, against a production record of 0.7268. 14 games could not be
+-- reproduced at all. docs/mlb_volume_efficiency.md section 13.
+CREATE TABLE IF NOT EXISTS live_pick_features (
+    game_id           TEXT NOT NULL REFERENCES games(game_id),
+    model_id          TEXT NOT NULL,
+    recorded_at       TEXT NOT NULL,
+    state_at          TEXT,          -- the live_game_state snapshot it was built from
+    lam               REAL,          -- poisson branch: expected remaining runs
+    model_probability REAL,
+    features          TEXT NOT NULL, -- JSON of the exact feature row fed to the model
+    PRIMARY KEY (game_id, model_id)
+);
+
 -- One row per detected state-change trigger. Consumed by the trigger
 -- orchestrator (Phase 3) to decide when to fire Odds API calls.
 CREATE TABLE IF NOT EXISTS live_trigger_events (

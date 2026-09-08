@@ -370,3 +370,43 @@ that deletes every price on a missing timestamp is the WNBA leak run backwards.
 
 Tripwire: `tests/test_multi_book_odds.py`, four tests, watched failing against
 the unbounded version.
+
+---
+
+## Recording what the live model saw (2026-09-08)
+
+`live_pick_features` — one row per **(game_id, model_id)**, written when that
+lane's FIRST live BET is written, holding the exact feature row fed to the
+model, its lambda, the state snapshot it was built from, and the resulting
+probability.
+
+**Why it had to exist.** A live decision could not be reproduced.
+`_pregame_features` memoises the pre-game half of the feature row per
+`(game_date, game_id)` in process, so a running loop freezes one row per game at
+whatever the stats tables held when it first saw the game — a moment recorded
+nowhere. Measured on `MLB_2026-09-07_LAA_BOS`: the same live state, the same DK
+line (7.5) and the same price (−118) give p_over **0.5263** on that day's stats
+and **0.7199** on the snapshot two days older, against a production record of
+**0.7268**. Fourteen games could not be reproduced at all, which is what left
+the inning-gate question unanswerable (`docs/mlb_volume_efficiency.md` §13).
+
+**One row per lane, the first one.** `ON CONFLICT (game_id, model_id) DO
+NOTHING` mirrors `LOCK_LIVE_PICKS_AT_FIRST_SIGNAL`: the bet of record is the
+first BET, so the row explaining it is the first row. A later pass must not
+overwrite the evidence for a pick it did not make — §1c applied to the audit
+trail.
+
+**A recorder may never cost a pick.** The connection is not autocommit, so an
+unguarded failure would poison the transaction and roll back the picks inserted
+moments earlier — a recorder that destroys the thing it documents. Each write
+takes its own SAVEPOINT, releases it on success and rolls back to it on failure;
+the pick always wins. `tests/test_live_pick_features.py` pins both properties
+and was watched failing with the savepoint removed.
+
+**Volume is small by construction** — one row per lane per game, so ~9/day at
+current MLB live volume, not one per 5-second pass.
+
+**It only covers the poisson branch today** (`mlb_live_total_runs`, the only
+lane with a lambda). The binary branch carries no feature row and is skipped
+rather than written with a NULL, because a NULL row would read as a recorded
+decision and be worse than an absent one.
