@@ -171,6 +171,33 @@ def _job_game_log_backfill(**kw):
     return backfill_player_game_log(kw["start_season"], kw["end_season"])
 
 
+def _job_ncaaf_player_backfill(**kw):
+    """Refill `ncaaf_player_game_log` for past seasons from CFBD /games/players.
+
+    Runs HERE and not locally for one reason: CFBD_API_KEY is set in the Railway
+    variables and is not in the local .env, so the same command fails on the dev
+    machine with "CFBD_API_KEY is not set" (§1b -- the sandbox's limits are not
+    the system's).
+
+    WHY IT IS NEEDED. ncaaf_player_game_log holds 2026 only. Without prior
+    seasons there is nothing to grade an NCAAF player prop against, so buying
+    historical NCAAF prop odds (~50k credits) would purchase prices with no
+    outcomes to check them against. Stats first, odds second.
+    """
+    from data.ingestors.cfbd_ingestor import backfill_ncaaf_players
+    return backfill_ncaaf_players(kw["start_season"], kw["end_season"])
+
+
+def _validate_ncaaf_player_backfill(args: dict) -> dict:
+    start = int(args.get("start_season") or 2023)
+    end = int(args.get("end_season") or 2025)
+    if not (2014 <= start <= end <= datetime.now().year):
+        raise ValueError(f"season range out of order or out of range: {start}-{end}")
+    if end - start > 5:
+        raise ValueError(f"range too wide ({start}-{end}); split it")
+    return {"start_season": start, "end_season": end}
+
+
 def _validate_game_log_backfill(args: dict) -> dict:
     start = int(args.get("start_season") or 2019)
     end = int(args.get("end_season") or datetime.now().year)
@@ -627,6 +654,8 @@ JOBS = {
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
     "game_log_backfill": (_job_game_log_backfill, _validate_game_log_backfill),
+    "ncaaf_player_backfill": (_job_ncaaf_player_backfill,
+                              _validate_ncaaf_player_backfill),
     "ncaaf_prop_odds": (_job_ncaaf_prop_odds,  _validate_ncaaf_prop_odds),
     "market_coverage": (_job_market_coverage,  _validate_market_coverage),
 }
