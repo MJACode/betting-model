@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 263 - the betslip's five-line negative-EV note becomes one line plus a Details tooltip, the green "Bet on DraftKings" button is replaced by the book tiles themselves (which now open the hand-off sheet at the tapped book), and Save joins a two-up grid below the card |
 | 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 259 - the model_calibration check was grading the RAW probability over a window that predated every promoted map, so three of the four models it accused were artefacts; four becomes one, and that one is real |
 | 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 258 - the "tons of skipped and stale" was my own wrong-dated verification run; the NCAAF residue cleared (36 split slots -> 0, 1,211 paid odds rows repointed rather than deleted); and a health row now carries a one-word reason and a derived refresh frequency |
 | 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 257 - golf retired (the DataGolf key was never set, so the sport produced nothing ever) and its dead chips removed; the health clock was the container's UTC, not ET; and NCAAF is writing games nobody will play - 76 duplicated matchup slots, two mechanisms, one CRIT check |
