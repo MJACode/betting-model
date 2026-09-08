@@ -1618,3 +1618,18 @@ class TestNaNIsAbsent:
         bets, diag = mkt.find_bets(q, min_edge=0.02)
         assert bets == []
         assert diag["one_way"] == 1, diag
+
+
+def test_the_card_names_every_sharp_reference_it_used():
+    """The header said "sharp pinnacle" for the first hours after the rule moved
+    to two references. A card is read by a person deciding whether to trust the
+    slate, and naming one of two references misstates what produced it."""
+    import inspect
+
+    import models.nfl_prop_market as mkt
+    from scripts import nfl_prop_market_card as card
+
+    src = inspect.getsource(card.render)
+    assert "SHARP_BOOKS" in src, src
+    assert "mk.SHARP_BOOK}" not in src, "still prints only the first reference"
+    assert len(mkt.SHARP_BOOKS) >= 2
