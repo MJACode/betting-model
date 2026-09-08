@@ -292,3 +292,77 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 *(Paper trading evaluation starts 2026-04-14 (v8 models). First review after 10 settled filtered picks from that date.)*
 
 ---
+
+---
+
+## Dated review criteria (2026-09-08, mike)
+
+mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the
+entire point — a criterion agreed after the fact is a re-argument, and §1b
+already complains about threshold sweeps being re-litigated.
+
+**These are not enforced by code, deliberately.** Nothing reads them; a dict in
+`config.py` that no code path consults is exactly the guard-dead-code-satisfies
+pattern §1b warns about. They are a commitment recorded where the evidence
+lives, and `config.py` carries a comment pointing here.
+
+**The population is the same for all three, and it is not "rows in `picks`":**
+
+```sql
+-- substitute the model_id and its artifact date
+SELECT count(*) n,
+       count(*) FILTER (WHERE result='WIN') wins,
+       round(avg(CASE WHEN dk_odds>0 THEN 100.0/(dk_odds+100)
+                      ELSE abs(dk_odds)/(abs(dk_odds)+100.0) END)::numeric,3) breakeven,
+       round(sum(CASE WHEN result='WIN'
+                      THEN (CASE WHEN dk_odds>0 THEN dk_odds/100.0
+                                 ELSE 100.0/abs(dk_odds) END) ELSE -1 END)::numeric,2) units
+FROM picks
+WHERE model_id = :model AND signal_type='BET'
+  AND result IN ('WIN','LOSS') AND dk_odds IS NOT NULL
+  AND game_date >= :since;
+```
+
+**Breakeven is the mean DK implied probability of the bets actually taken** — not
+a fixed 52.4%. These models bet at −140 floors, so their breakeven is well above
+even money and a fixed number would mis-call every one of them.
+
+| Model | Since | Trigger | Count at 2026-09-08 | Then |
+|---|---|---|---|---|
+| `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | 35 (16W, bx .530, −4.81u, z −0.86) | pause if still below breakeven |
+| `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | 15 (6W, bx .503, −3.92u, z −0.80) | pause if still below breakeven |
+| `mlb_live_total_runs` | 2026-08-31 | n ≥ 150 | 70 (38W, bx .550, −1.26u, z −0.12) | full re-sweep, see below |
+
+**Why `k` is not paused today**, given it is the largest single loss in the
+30-day table at −18.30u/72: **that record spans two artifacts.** Split at the
+09-04 retrain, the pre-retrain version is 13/37 (35.1%) at z = −2.36 and the
+current one is 16/35 (45.7%) at z = −0.86. The significant loss belongs to a
+model that no longer exists. Across ~12 models tested you expect ~0.6 hits at
+p<0.05 by chance, so one pre-retrain z of −2.36 is roughly one lucky draw.
+
+**Why `outs` is on the list at all**, having been treated as the healthy one:
+the top-2 cap shipped in #572 was swept on the pooled 08-24 → 09-06 window,
+where `outs` graded +3.69u uncapped. On its **current artifact** it is −3.92u
+over 15. That does not invalidate the cap — different, smaller population — but
+it earns the same checkpoint.
+
+**Live carries an addendum.** It has no fast feedback measure at all (there is no
+live CLV — `docs/live_betting.md` has the measurement), so the settled count is
+the only clock. Report alongside the re-sweep the one live split that survived a
+time split, **price bucket**: on the current cut, −110-or-longer is 3/7 (42.9%)
+and −111..−160 is 35/62 (56.5%). n=7 is a hint, not a cut; it is listed so the
+re-sweep starts from the one place worth looking rather than from nothing.
+
+### The `k` / `hits` mis-scaled cut resolves to the refit, not a re-sweep
+
+`mlb_prop_pitcher_k` (0.58/0.08) and `mlb_prop_pitcher_hits` (0.54/0.08) carry
+cuts their config comments describe as swept on CALIBRATED probabilities while
+`model_calibration.method` is NULL for both, so they decide on raw numbers
+against a calibrated bar (`docs/mlb_volume_efficiency.md` §11.6).
+
+A re-sweep on raw numbers was considered and rejected: it would replace a number
+swept on 95 calibrated bets with one swept on 35 and 13 raw ones — **worse
+evidence, not better**. The #572 cap already bounds the volume damage to 2/day
+each. So the fix is the refit at n ≥ 150 graded since their retrains (47 and 26
+at the last weekly pass), expected ~09-12 to 09-15; promotion and a cut re-sweep
+are ONE decision, never two.

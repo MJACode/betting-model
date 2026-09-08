@@ -272,3 +272,47 @@ Already flat: `conviction_for()` returns 1u for every pick (2026-08-29), so the
 published stake is 1u to win, grossed up by price into units laid (1.2u risk at
 −120) and capped at 3u. `kelly_fraction` is still stored and still carries the
 model's own conviction, but nothing sizes off it.
+
+---
+
+## THERE IS NO LIVE CLV, AND THE EXCLUSION IN `paper_tracker.py` IS CORRECT (2026-09-08)
+
+`_capture_clv` and `_backfill_clv` both carry `AND p.is_live IS NOT TRUE`, with
+the comment *"an in-play price has no meaningful close to compare against."*
+This section is the measurement that confirms it, written down because the
+opposite is an inviting idea: live is ~40% of MLB volume, it has **zero** CLV
+rows against 118 settled bets, pre-game CLV covers 73%, and "just point the same
+machinery at the live rows" looks like a two-line fix. It was proposed in this
+session and withdrawn on the evidence below.
+
+**The data is there.** Of 101 settled `mlb_live_total_runs` BETs since 08-24,
+**101** have a later in-play DK totals snapshot, 100 at +10 minutes, 97 at +30.
+Feasibility was never the problem.
+
+**The problem is that the number means something else.** Taking each bet's line
+against the first in-play snapshot 10 minutes later (n=100):
+
+| Side | Line moved | n | Win rate |
+|---|---|---|---|
+| OVER | rose | 25 | **84.0%** |
+| OVER | fell | 17 | 64.7% |
+| OVER | held | 20 | 35.0% |
+| UNDER | rose | 5 | **0.0%** |
+| UNDER | fell | 24 | 58.3% |
+| UNDER | held | 9 | 22.2% |
+
+A live full-game total moves because **runs are scored**. Over-plus-line-rose
+wins 84%; Under-plus-line-rose wins 0%. The movement is not the market
+disagreeing with our price — it is a partial readout of the result itself,
+available before settlement and perfectly confounded with it.
+
+**So the rule:** *in-play line movement is a partial readout of the outcome, not
+a market signal. There is no live CLV, and anything built on post-bet in-play
+movement is measuring the scoreboard.* A "CLV" column filled this way would look
+strongly positive on a winning stretch and strongly negative on a losing one,
+for no reason connected to price.
+
+**What live gets instead.** It has no fast feedback measure, so it is judged on
+settled results and needs volume and time. The review checkpoint and the one
+live-specific split that survived a time split (price bucket) are in
+`docs/thresholds.md` under "Dated review criteria".
