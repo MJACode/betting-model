@@ -987,7 +987,12 @@ class TestMarketCard:
         import scripts.nfl_prop_market_card as card_mod
         import models.nfl_prop_market as mkt
 
-        future = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        # INSIDE the lead ceiling (config.NFL_PROP_MAX_LEAD_HOURS, 24h).
+        # This was two days out and stopped being priced at all when the
+        # ceiling shipped on 2026-09-08 -- the fixture encoded the old
+        # "price anything in the window" behaviour, not this test's subject,
+        # which is one-bet-per-proposition.
+        future = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
         rows = [("NFL_2025_01_KC_BUF", future, "BUF", "KC", True, "2025-09-07"),
                 ("NFL_2025_01_KC_BUF", future, "KC", "BUF", False, "2025-09-07")]
 
@@ -1269,21 +1274,36 @@ class TestCardReplay:
                             lambda conn, gids, markets=None, before=None, **k:
                             (seen.update(before=before) or {}))
 
-        future = datetime.now(timezone.utc) + timedelta(days=2)
+        # EACH ARM NEEDS ITS OWN SLATE, because a game is only priced when its
+        # kickoff sits between now and the lead ceiling (24h) -- and the two
+        # arms have different "now"s. One shared slate cannot be inside both:
+        # pinned to the replay clock it is 30 days stale for the live arm, and
+        # pinned to the wall clock it is a month early for the replay arm.
+        # Either way the quote loader is never called and `seen` keeps the
+        # PREVIOUS arm's value, so the assertion reads a stale fact rather than
+        # failing honestly.
         past_now = datetime.now(timezone.utc) - timedelta(days=30)
-        rows = [("G", future.isoformat(), "BUF", "KC", True, "2025-09-07"),
-                ("G", future.isoformat(), "KC", "BUF", False, "2025-09-07")]
+
+        def _slate(anchor):
+            ko = (anchor + timedelta(hours=6)).isoformat()
+            return [("G", ko, "BUF", "KC", True, "2025-09-07"),
+                    ("G", ko, "KC", "BUF", False, "2025-09-07")]
 
         class Conn:
+            def __init__(self, rows): self.rows = rows
             def execute(self, sql, params=None):
+                rows = self.rows
                 class R:
                     def fetchall(s_): return rows
                 return R()
 
-        c.card(Conn(), "2025-09-07", "2025-09-15", now=past_now)
-        assert seen["before"] is not None, "a replay must not read later quotes"
+        seen.clear()
+        c.card(Conn(_slate(past_now)), "2025-09-07", "2025-09-15", now=past_now)
+        assert seen.get("before") is not None, "a replay must not read later quotes"
 
-        c.card(Conn(), "2025-09-07", "2025-09-15")
+        seen.clear()
+        c.card(Conn(_slate(datetime.now(timezone.utc))), "2025-09-07", "2025-09-15")
+        assert "before" in seen, "the live arm never reached the quote loader"
         assert seen["before"] is None, "a live run takes the newest quote"
 
     def test_replay_refuses_to_publish(self):

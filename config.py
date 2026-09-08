@@ -1963,6 +1963,39 @@ ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchang
 # the same number, now shared, so widening one cannot silently leave the other.
 NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "240"))
 
+# THE CEILING ON HOW EARLY A PROP PICK MAY BE TAKEN, in hours before kickoff.
+# Distinct from the window above, and the distinction is the whole point:
+# NFL_PROP_WINDOW_HOURS says how far ahead we BUY the board, this says how close
+# to kickoff a pick may be WRITTEN. Buying early is free information; betting
+# early is not.
+#
+# WHY IT EXISTS (2026-09-08, mike). models/nfl_prop_market is the one construction
+# in this repo with a placebo-validated positive record -- +9.83%, 648 bets, CI
+# (+3.6, +16.0), positive in all three seasons. That record was measured on the
+# `open` backfill series, which is a SINGLE snapshot per game at 13:55 UTC on
+# game day: min 0.6h before kickoff, p10 3.1h, median ~7h, p90 31.2h, max 36.1h.
+#
+# Production was not there. With the window at 240h and no ceiling, every NFL
+# prop BET written in the 21 days to 2026-09-08 was taken past 48h, and
+# nfl_prop_market's three at 137.6-179.8h -- five to seven days out, against a
+# measured envelope that ends at 36. Under the §1c first-signal lock those picks
+# are permanent, so the lane was locking its bets at a lead time where nothing
+# has ever been measured positive. The graded numbers at the offsets we DO have:
+# ~7h +10.75%, 24h +5.01%, 48h +0.65%, 72h +4.54% (paired, 5pp cut).
+#
+# 24 rather than 36: 36 is the measured MAXIMUM, and gating there would let the
+# lock happen in the tail of the distribution rather than near its mass. 24 sits
+# inside the envelope, is a natural "game day" boundary, and is a tenth of what
+# the lane was doing. A tighter value (12) is closer to the measured median and
+# costs volume; that trade wants its own measurement, not a guess.
+#
+# NOT MONOTONE, so do not read this as "earlier is always worse": T-72h beats
+# T-48h. What is established is that the ~7h board is the only offset positive
+# in all three seasons with an interval excluding zero, and this keeps the lane
+# near it. Evidence: docs/nfl_prop_offset_evidence.md.
+NFL_PROP_MAX_LEAD_HOURS: float = float(
+    os.environ.get("NFL_PROP_MAX_LEAD_HOURS", "24"))
+
 
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()

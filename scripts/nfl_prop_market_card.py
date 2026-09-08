@@ -32,6 +32,7 @@ from loguru import logger
 
 import models.nfl_prop_market as mk
 from data import local_store
+from config import NFL_PROP_MAX_LEAD_HOURS
 from data.db import get_connection
 from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_quotes
 from models.nfl_prop_backtest import _as_dt
@@ -111,9 +112,27 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     now = now or datetime.now(timezone.utc)
     live = {g for g, d in games.items()
             if (_as_dt(d["kickoff"]) or now) <= now}
-    open_games = [g for g in games if g not in live]
+
+    # THE CEILING, the other half of the started-game floor. The floor stops a
+    # pick being written after kickoff; without a ceiling nothing stopped one
+    # being written ten days before it, and that is what the lane was doing --
+    # nfl_prop_market's three BETs in the 21 days to 2026-09-08 were taken
+    # 137.6-179.8h out, against a record measured entirely inside 36h. Under
+    # §1c those picks lock permanently, so an early bet is not a first draft.
+    #
+    # A game beyond the ceiling is SKIPPED, never dropped: it comes back into
+    # range on a later tick, and the hourly cadence means nothing is missed. No
+    # pick is deleted or re-priced, so the lock is untouched.
+    too_early = {g for g, d in games.items()
+                 if g not in live
+                 and (ko := _as_dt(d["kickoff"])) is not None
+                 and (ko - now).total_seconds() / 3600.0 > NFL_PROP_MAX_LEAD_HOURS}
+    open_games = [g for g in games if g not in live and g not in too_early]
     if not open_games:
-        return [], {"reason": "every game in window has kicked off"}, {}
+        reason = ("every game in window has kicked off" if not too_early else
+                  f"every game in window is further than "
+                  f"{NFL_PROP_MAX_LEAD_HOURS:.0f}h out ({len(too_early)} waiting)")
+        return [], {"reason": reason, "too_early": len(too_early)}, {}
 
     # In a replay, only quotes that existed by `now` are visible — otherwise the
     # card would price a past slate off numbers posted after the fact.
@@ -129,6 +148,7 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     bets, diag = mk.find_bets(quotes, min_edge=min_edge, soft_books=SOFT_BOOKS)
     diag["games"] = len(open_games)
     diag["started_skipped"] = len(live)
+    diag["too_early"] = len(too_early)
     # Bets key on the NORMALISED name (that is the join to nflverse); the card
     # is read by a person, so carry the book's own spelling back for display.
     names = {k[1]: v.get("player_name") or k[1] for k, v in quotes.items()}
@@ -145,6 +165,11 @@ def render(bets, diag, games, names=None) -> str:
         f"{diag.get('games', 0)} open games | {diag.get('sharp_quotes', 0)} sharp quotes | "
         f"{diag.get('compared', 0)} compared | {len(bets)} bets",
     ]
+    if diag.get("too_early"):
+        # A person reading a thin card needs to know the difference between
+        # "the market is quiet" and "we are not allowed to bet these yet".
+        lines.append(f"({diag['too_early']} game(s) further than "
+                     f"{NFL_PROP_MAX_LEAD_HOURS:.0f}h out — not yet bettable)")
     if diag.get("line_mismatch"):
         # Not decoration: if most soft quotes sit on a different number than the
         # sharp book, a thin card is about coverage, not about a quiet market.
