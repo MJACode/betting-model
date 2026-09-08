@@ -3022,14 +3022,17 @@ GAME_SCORE_AHEAD_SPORTS: tuple = ("MLB", "NBA", "NHL", "WNBA")
 # that forms a view mid-week can still fire.
 NCAAF_SCORE_AHEAD_DAYS: int = int(os.environ.get("NCAAF_SCORE_AHEAD_DAYS", "7"))
 
-# ...but only the OPENER rule was validated at a long lead. The totals
-# regression was walked forward against the archive's stored line per game, not
-# against an opener a week out, so firing it at any lead the look-ahead happens
-# to expose would ship an untested rule. It may well be better early (that is
-# the usual CLV story) — it is simply not measured, so the default keeps the
-# behaviour that was: fire on game day, watch (no signal) before it.
+# ...and the totals rule may fire up to this many days before kickoff. It
+# shipped at 1 (game day) because it had been walked forward against the
+# archive's close and no earlier lead was measured. Measured 2026-09-07 on the
+# 2023-2025 DraftKings backfill (scripts/ncaaf_search/totals_lead.py): graded at
+# DK's line 0-5 days out the +/-8 rule is 53.8-56.4% at every lead vs 56.4% at
+# the close, every interval overlapping, and the line does not drift toward the
+# model (close-minus-lead within 0.12 points of zero) -- so the limit is a
+# timing choice, not an edge choice. Raised to 5 at Matt's call ("Friday is too
+# late"); the pick locks at the first pass that clears the gate (Section 1c).
 NCAAF_TOTALS_MAX_LEAD_DAYS: float = float(
-    os.environ.get("NCAAF_TOTALS_MAX_LEAD_DAYS", "1")
+    os.environ.get("NCAAF_TOTALS_MAX_LEAD_DAYS", "5")
 )
 
 # ── GOLF / DataGolf ───────────────────────────────────────────────────────────
