@@ -399,13 +399,13 @@ def score_game(conn: DBConnection,
         home_prob = total_over_prob(artifact.get("residuals"), disagreement)
         away_prob = 1.0 - home_prob
 
-        # Lead guard — see config.NCAAF_TOTALS_MAX_LEAD_DAYS. The look-ahead
-        # window exists so the BOARD is populated all week; the rule fires
-        # inside the measured lead and merely watches before it.
+        # Lead guard — see config.NCAAF_TOTALS_MAX_LEAD_DAYS. Unbounded in
+        # production (the rule fires whenever a line is released); the guard
+        # stays so an env override can run a bounded experiment.
         lead = _days_until(commence_time)
         if lead is not None and lead > NCAAF_TOTALS_MAX_LEAD_DAYS:
             no_signal = (f"watching — totals fire within "
-                         f"{NCAAF_TOTALS_MAX_LEAD_DAYS:.0f}d of kickoff ({lead:.0f}d out)")
+                         f"{NCAAF_TOTALS_MAX_LEAD_DAYS:g}d of kickoff ({lead:.0f}d out)")
 
         # Enforce the VALIDATED SYMMETRIC gate here rather than relying on a
         # single probability floor to imply it.

@@ -22,12 +22,13 @@ const UFC_AHEAD_DAYS = 7;
  */
 const NFL_AHEAD_DAYS = 8;
 /**
- * Mirrors config.NCAAF_SCORE_AHEAD_DAYS. College football plays one slate a
- * week, so without this the NCAAF board is empty six days out of seven — and
- * the cross-book opener rule, which fires days ahead on purpose, would never
- * be visible at all.
+ * Mirrors config.NCAAF_SCORE_AHEAD_DAYS. NCAAF is scored as far ahead as
+ * DraftKings has a line (Matt, 2026-09-07: "whenever lines are released"),
+ * and a pick locks the moment it fires, so the card has to reach every game
+ * the scorer can write a BET for — marquee games are listed months out. The
+ * server admits only DK-priced games, so a wide window is a handful of rows.
  */
-const NCAAF_AHEAD_DAYS = 7;
+const NCAAF_AHEAD_DAYS = 150;
 
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();
