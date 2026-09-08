@@ -26,7 +26,8 @@ const NFL_AHEAD_DAYS = 8;
  * DraftKings has a line (Matt, 2026-09-07: "whenever lines are released"),
  * and a pick locks the moment it fires, so the card has to reach every game
  * the scorer can write a BET for — marquee games are listed months out. The
- * server admits only DK-priced games, so a wide window is a handful of rows.
+ * server admits only DK-priced games; measured 2026-09-07 the season window is
+ * 107 games (924 `games` rows, 2,309 all-books rows), so every read is paged.
  */
 const NCAAF_AHEAD_DAYS = 150;
 
@@ -66,7 +67,7 @@ export function useTodayPicks(date?: string) {
         fetchPicksForDate(target, (what, e) => note(what)(e)),
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
-        fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('this week’s NCAAF card')),
+        fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
       // linger on the board for the rest of the day. A retired model's picks

@@ -970,19 +970,31 @@ export async function fetchUpcomingNcaafPicks(
       .order('signal_type', { ascending: true })
       .order('created_at', { ascending: false })
       .limit(5000),
-    supabase
-      .from('games')
-      .select(GAME_COLUMNS)
-      .eq('sport', 'NCAAF')
-      .gt('game_date', afterDate)
-      .lte('game_date', throughDate),
+    // Paged: the window is the season (config.NCAAF_SCORE_AHEAD_DAYS = 150),
+    // 924 games rows on 2026-09-07 against the 1,000-row response cap, and
+    // every bowl added to `games` lands inside it. Past the cap PostgREST
+    // returns an arbitrary 1,000 and every pick whose game was dropped
+    // renders with no matchup and no time pill.
+    fetchAllPages<GameRow>((from, to) =>
+      supabase
+        .from('games')
+        .select(GAME_COLUMNS)
+        .eq('sport', 'NCAAF')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
+    // Scoped by the game_id prefix: the view has no sport column and a
+    // season-long window spans every other sport's future slate too.
     supabase
       .from('v_latest_dk_odds')
       .select(LATEST_ODDS_COLUMNS)
+      .like('game_id', 'NCAAF_%')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
     // Scoped by the game_id prefix: the all-books view has no sport column and
-    // a week-long window spans every other sport's future slate.
+    // the window spans every other sport's future slate.
     // Paged (see fetchAllPages): a week of NCAAF is ~2,300 rows, over the
     // 1,000-row response cap; wrapped so a failure stays an {error}.
     fetchAllPages<OddsByBookRow>((from, to) =>
