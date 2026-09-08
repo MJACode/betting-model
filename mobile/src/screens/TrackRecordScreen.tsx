@@ -16,6 +16,7 @@ import {
   fetchPublicTrackRecord,
   fetchTrackRecordDaily,
 } from '@/lib/queries';
+import { SPORTS } from '@/hooks/useSportFilter';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import { SettingsButton } from '@/components/SettingsButton';
@@ -78,7 +79,10 @@ export function TrackRecordScreen() {
   // in a stable preferred order.
   const availableSports: string[] = useMemo(() => {
     const present = new Set(rows.map((r) => r.sport));
-    const order = ['MLB', 'WNBA', 'NBA', 'UFC', 'NHL', 'GOLF'];
+    // Derived from SPORTS so this cannot drift again: it had kept GOLF (retired)
+    // and never gained NFL or NCAAF, so those two fell into `extra` and sorted
+    // alphabetically after every other chip during their own season.
+    const order: string[] = SPORTS;
     const known = order.filter((s) => present.has(s));
     const extra = [...present].filter((s) => !order.includes(s)).sort();
     return ['All', ...known, ...extra];

@@ -41,7 +41,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import MODELS, PROP_MODELS, PAPER_TRADING_START
+from config import MODELS, PROP_MODELS, PAPER_TRADING_START, today_et
 from data.db import get_connection
 
 # Models registered in config that intentionally have no trained artifact yet
@@ -52,8 +52,7 @@ KNOWN_UNTRAINED = {
     "nhl_over_under", "nhl_puckline",            # need historical NHL lines
     "wnba_over_under", "wnba_spread",            # need historical DK WNBA lines
     "nba_over_under", "nba_spread",              # need historical DK NBA lines
-    "golf_outright", "golf_top10", "golf_top20", # pending DataGolf backfill/training
-    "golf_make_cut", "golf_matchup",
+    # golf_* RETIRED 2026-09-08 -- gone from config.MODELS, so never expected.
 }
 
 OK, STALE, EMPTY, SKIPPED, ERROR = "OK", "STALE", "EMPTY", "SKIPPED", "ERROR"
@@ -79,9 +78,6 @@ SKIP_BUDGET_DAYS: dict = {
     # well inside this budget and correctly stays quiet.
     "wnba_game_log": 245,
     "espn_wnba_api": 245,
-    # Golf runs most weeks of the year and the longest tour gap is about three
-    # weeks, so a month dark means the gate is stuck, not the calendar.
-    "golf_odds":      30,
 }
 
 # Everything else: a fortnight. Long enough for a normal off-week in any sport
@@ -325,7 +321,15 @@ def run_system_health(run_date: str | None = None) -> dict:
     ok=False (→ red Actions run) only when a CRIT check is STALE/EMPTY/ERROR.
     """
     if run_date is None:
-        run_date = datetime.now().strftime("%Y-%m-%d")
+        # ET, never the container's local clock. `datetime.now()` is UTC on any
+        # container without TZ set, and after 8pm ET that is TOMORROW -- so the
+        # whole run lands under the wrong run_date AND every "yesterday" gate
+        # shifts a day forward, demanding data for a day still in progress.
+        # Found by tripping it: a verification run on prop-probe (which has no
+        # TZ variable, unlike `worker`) wrote a 2026-09-08 row set at 20:29 ET
+        # on 09-07 and reported `umpires` STALE for a day that had not finished.
+        # (.claude/rules/data-integrity.md -- "Use ET, never UTC, for today".)
+        run_date = today_et()
     d = datetime.strptime(run_date, "%Y-%m-%d")
     yday = (d - timedelta(days=1)).strftime("%Y-%m-%d")
     d3 = (d - timedelta(days=3)).strftime("%Y-%m-%d")
@@ -610,21 +614,11 @@ def run_system_health(run_date: str | None = None) -> dict:
                 r.add("espn_wnba_api", ERROR, "WARN",
                       f"probe failed: {type(exc).__name__}: {str(exc)[:200]}")
 
-        # ── Golf odds (DataGolf) — only during an active/upcoming tournament ─
-        golf_active = _scalar(conn, """SELECT COUNT(*) FROM games WHERE sport = 'GOLF'
-                                       AND game_date >= ? AND game_date <= ?""",
-                              (d3, (d + timedelta(days=7)).strftime("%Y-%m-%d"))) or 0
-        # "No tournament this week" and "this sport has never ingested anything"
-        # are different states and were reported with the same sentence. GOLF
-        # held zero `games` rows on 2026-09-08, so the second one is what 59
-        # consecutive SKIPPED runs actually meant.
-        golf_ever = _scalar(conn, "SELECT COUNT(*) FROM games WHERE sport = 'GOLF'") or 0
-        r.ts_check(conn, "golf_odds", "WARN", "golf_odds", "snapshot_at", 24,
-                   gate_ok=golf_active > 0,
-                   gate_note=("no golf tournament in window" if golf_ever
-                              else "games holds no GOLF row at all -- the golf "
-                                   "ingest has never run, so this gate can "
-                                   "never open on its own"))
+        # GOLF RETIRED 2026-09-08 (mike): "retire golf for now, drop the check."
+        # The golf_odds check is gone with the sport -- it had produced ZERO
+        # verdicts in 59 runs because DATAGOLF_API_KEY was never set on the
+        # worker, so every golf pipeline step no-opped and `games` never held a
+        # GOLF row. See config.RETIRED_MODELS. Reviving golf restores this check.
 
         # ── Schema drift ─────────────────────────────────────────────────────
         # Merging a migration does NOT apply it: setup_database() is only

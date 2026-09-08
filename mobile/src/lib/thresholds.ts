@@ -148,13 +148,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // training and returns -0.46% blind). See docs/nfl_props_model.md §5c.
   nfl_prop_market: { min_prob: 0.0, min_edge: 0.05 },
 
-  // GOLF — placeholder thresholds on a market-relative prob scale (win ~3%,
-  // top-N ~15-25%, make-cut ~65%). Tune after 50+ settled picks per model.
-  golf_outright: { min_prob: 0.03, min_edge: 0.015 },
-  golf_top10: { min_prob: 0.15, min_edge: 0.05 },
-  golf_top20: { min_prob: 0.25, min_edge: 0.05 },
-  golf_make_cut: { min_prob: 0.65, min_edge: 0.05 },
-  golf_matchup: { min_prob: 0.55, min_edge: 0.05 },
+  // GOLF RETIRED 2026-09-08 — see RETIRED_MODELS below.
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
@@ -282,6 +276,14 @@ export const RETIRED_MODELS = new Set<string>([
   'mlb_live_runline',
   'mlb_prop_batter_hr',
   'mlb_prop_batter_rbi',
+  // 2026-09-08 (mike): golf retired outright. DATAGOLF_API_KEY was never set on
+  // the worker, so every golf pipeline step no-opped and the sport produced no
+  // games, no odds and no picks, ever.
+  'golf_outright',
+  'golf_top10',
+  'golf_top20',
+  'golf_make_cut',
+  'golf_matchup',
 ]);
 
 export function isModelRetired(modelId: string): boolean {

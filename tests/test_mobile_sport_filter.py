@@ -49,7 +49,14 @@ def _load_body() -> str:
     return m.group(0)
 
 
-def test_sports_holds_all_eight():
+def test_sports_holds_the_seven_live_sports():
+    """GOLF was retired 2026-09-08 (mike) and must NOT be a chip.
+
+    The `Sport` union still carries it so existing signatures compile and old
+    rows render; SPORTS is the tappable roster, and a filter for a retired sport
+    is a control that leads nowhere -- an empty board promising an hourly
+    refresh, "no golf stats yet", and a models list claiming golf is paused.
+    """
     assert set(_sports()) == {
         "MLB",
         "WNBA",
@@ -57,9 +64,24 @@ def test_sports_holds_all_eight():
         "NFL",
         "NCAAF",
         "UFC",
-        "GOLF",
         "NHL",
     }
+
+
+def test_no_retired_sport_is_a_selectable_chip():
+    """Derived from the retirement set, not from a second hand-written list.
+
+    The docstring above says the rule is that the roster is DERIVED rather than
+    transcribed; that applies to retirement too, or the next retired sport
+    leaves its chip behind exactly as golf did.
+    """
+    import config
+    retired_sports = {m.split("_")[0].upper() for m in config.RETIRED_MODELS}
+    still_selectable = sorted(retired_sports & set(_sports()))
+    # Only whole-sport retirements count: MLB has retired MODELS but is live.
+    live_prefixes = {m.split("_")[0].upper() for m in config.ACTION_THRESHOLDS}
+    gone = sorted(s for s in still_selectable if s not in live_prefixes)
+    assert not gone, f"{gone} are fully retired but still a sport chip"
 
 
 def test_every_sport_survives_a_cold_start():

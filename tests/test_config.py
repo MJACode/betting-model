@@ -28,7 +28,6 @@ def test_models_include_expected_ids():
         # UFC
         "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
         # GOLF
-        "golf_outright", "golf_top10", "golf_top20", "golf_make_cut", "golf_matchup",
         # NCAAF (spread + spread_premium are DISJOINT bands of one opener rule)
         "ncaaf_moneyline", "ncaaf_over_under", "ncaaf_spread",
         "ncaaf_spread_premium",
