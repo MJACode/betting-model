@@ -2906,6 +2906,14 @@ NCAAF_ODDS_API_MAP: dict = {
     "Appalachian State": "App State",
     "UMass Minutemen": "Massachusetts",
     "UMass": "Massachusetts",
+    # 2026-09-08: caught by ncaaf_game_identity on its FIRST live run, which is
+    # what it is for. CFBD abbreviates the school to "Southern Miss"; The Odds
+    # API spells it out, so no fold, no "school mascot" match and no prefix
+    # bridges the two -- the resolver fell through to identity and wrote a
+    # SECOND games row for Auburn's 09-12 game, splitting its odds from the id
+    # that will receive the final. The same shape as App State and UMass above.
+    "Southern Mississippi Golden Eagles": "Southern Miss",
+    "Southern Mississippi": "Southern Miss",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.

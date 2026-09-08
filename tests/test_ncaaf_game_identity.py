@@ -151,3 +151,32 @@ def test_an_fbs_split_is_still_reported_after_the_bound():
     _add(c, "NCAAF_2026-09-10_florida-a-m_miami", "2026-09-10", "Miami", "Florida A&M")
     _add(c, "NCAAF_2026-09-10_florida_miami", "2026-09-10", "Miami", "Florida")
     assert _run(c, "2026-09-08") == [("2026-09-10", "Miami", 2)]
+
+
+# ── the resolver overrides that keep a matchup on one id ─────────────────────
+
+def test_the_odds_api_map_bridges_names_no_rule_can():
+    """Every entry here exists because a fold, a "school mascot" match and a
+    longest-prefix all fail — the two sources use genuinely different names.
+
+    "Southern Mississippi Golden Eagles" vs CFBD's "Southern Miss" was caught by
+    ncaaf_game_identity on its first live run (2026-09-08): the resolver fell
+    through to identity and wrote a second games row for Auburn's 09-12 game,
+    splitting its odds from the id that will receive the final.
+    """
+    import config
+    m = config.NCAAF_ODDS_API_MAP
+    assert m.get("Southern Mississippi Golden Eagles") == "Southern Miss"
+    assert m.get("Appalachian State Mountaineers") == "App State"
+    assert m.get("UMass Minutemen") == "Massachusetts"
+
+
+def test_every_override_target_is_a_canonical_school_shape():
+    """A target that is itself a mascot-appended string would just move the
+    split rather than close it."""
+    import config
+    for src, dst in config.NCAAF_ODDS_API_MAP.items():
+        assert dst, f"{src!r} maps to an empty name"
+        assert dst != src, f"{src!r} maps to itself"
+        assert len(dst.split()) <= 4, (
+            f"{src!r} -> {dst!r} looks like it still carries a mascot")
