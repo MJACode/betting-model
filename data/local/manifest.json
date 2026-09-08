@@ -56,7 +56,7 @@
   ]
  },
  "nfl_prop_odds": {
-  "bytes": 7882733,
+  "bytes": 12549173,
   "columns": [
    "game_id",
    "game_date",
@@ -71,8 +71,8 @@
    "season"
   ],
   "format": "parquet",
-  "pulled_at": "2026-09-08T03:43:51+00:00",
-  "rows": 2181832,
+  "pulled_at": "2026-09-08T05:52:56+00:00",
+  "rows": 3453848,
   "seasons": [
    2023,
    2024,

@@ -1,55 +1,89 @@
-# When to read the board: the market-relative rule decays with lead time
+# When to read the board: near kickoff is the only well-evidenced regime
 
 *Measured 2026-09-08. The rule is `models/nfl_prop_market`; the grader is
 `scripts/nfl_prop_two_sharps.py`.*
 
 ## The finding
 
-The market-relative rule's edge is **near kickoff**. It is gone 48 hours out.
+The market-relative rule's edge is **near kickoff**, and the near-kickoff board
+is the only offset that is positive in all three seasons with a confidence
+interval excluding zero.
 
-Paired on the 433 games that carry both boards, same seasons, same 5pp cut, one
-bet per proposition — the offset is the only thing that differs:
+Paired on the 649 games carrying a T-72h board — same seasons, same 5pp cut, one
+bet per proposition, both references at every offset, the offset the only thing
+that differs:
 
-| board | median lead | bets | win% | units | ROI | 90% CI |
-|---|---|---|---|---|---|---|
-| `open` (production poll) | **7.5 h** | 379 | 57.3% | +35.69 | **+9.42%** | **(+1.3, +17.4)** |
-| `t48` (backfill) | 48.1 h | 996 | 50.6% | −28.76 | −2.89% | (−7.9, +2.1) |
+| board | median lead | bets | ROI (`either`) | 90% CI | pinnacle only |
+|---|---|---|---|---|---|
+| **`open`** | **~7 h** | 586 | **+10.75%** | **(+4.2, +17.3)** | +11.07% |
+| `t24` | 24 h | 191 | +5.01% | (−6.9, +16.7) | +5.01% |
+| `t48` | 48 h | 1741 | +0.65% | (−3.2, +4.6) | −0.77% |
+| `t72` | 72 h | 1083 | +4.54% | (−0.4, +9.5) | **+6.35% (+1.0, +11.7)** |
 
-Unpaired, across every game each board covers, the same split holds — `open`
-+9.83% over 648 bets, CI (+3.6, +16.0), positive in all three seasons
-(2023 +7.6%, 2024 +11.6%, 2025 +12.1%); `t48` −2.89%. The T-24h board sits
-between them at +3.92% over 193 bets, CI (−7.6, +15.7) — too thin to place.
+**THE DECAY IS NOT MONOTONE, and that is the honest shape of it.** T-72h beats
+T-48h on both the pooled number and the pinnacle-only arm, where its interval
+also excludes zero. An earlier version of this document read the first three
+rows as a smooth gradient and argued from it that a 10-day-out board must be
+worse still. It cannot: 48 h is a trough, not a floor, and nothing here licenses
+extrapolating past 72 h. What the table supports is narrower and still useful —
+**`open` is the best-evidenced regime by a clear margin**, and it is the only
+row that clears the bar on every test below.
 
-**`open` is not the opening line.** It is the routine production polling series,
-and its distribution against kickoff is the whole point:
+**`open` is not the opening line.** For 2023-2025 it is not polling either:
+those rows come from `backfill_nfl_prop_odds`, which anchors at a FIXED
+`17:00 UTC` minus `hours_before=3`. Every graded sharp quote in those seasons
+sits at **one clock time — 13:55 UTC, 9:55 a.m. ET**, one distinct value per
+season. The measured edge has a time of day attached to it, not just a lead
+time. The 2026 rows in the same series are live production polling at 51
+distinct times, 46-190 h out — a different animal that shares a label.
 
 | snapshot_type | rows | min | p10 | median | p90 | max |
 |---|---|---|---|---|---|---|
-| `open` | 122,046 | −0.4 h | 3.1 h | **7.5 h** | 134.8 h | 190.1 h |
+| `open` (2023-25) | 101,573 | −0.4 h | 3.1 h | **~7 h** | 31.2 h | 36.1 h |
+| `open` (2026) | 20,473 | 45.9 h | 70.2 h | 138.0 h | 157.0 h | 190.1 h |
 | `t24` | 11,539 | 1.1 h | 21.6 h | 24.1 h | 25.1 h | 56.1 h |
 | `t48` | 61,150 | 20.6 h | 24.1 h | 48.1 h | 56.1 h | 80.4 h |
 
-The grader takes the newest pre-game quote, so on the `open` series it is
-reading a price a few hours before kickoff. `PREGAME_SNAPSHOT_TYPES = ("open",)`
-— this is exactly what production reads.
+`PREGAME_SNAPSHOT_TYPES = ("open",)` — the production scorer reads this series.
 
-### Why this is the expected direction, not a surprise
+### The mechanism, and where it stops explaining things
 
-Near kickoff the sharp number has settled. A soft book still disagreeing with it
-at that point is holding a genuinely stale price, and the disagreement is the
-edge. Two days out both books are still moving, so a gap between them is mostly
-noise that resolves on its own before anyone could have collected.
+Near kickoff the sharp number has settled, so a soft book still disagreeing with
+it is holding a genuinely stale price and the disagreement is the edge. That
+accounts for `open` being the strongest row, and it accounts for T-48h being
+weak: two days out both books are still moving, so a gap between them is mostly
+noise that resolves before anyone could collect.
+
+**It does not account for T-72h beating T-48h**, and this document should not
+pretend otherwise. Three readings are consistent with the table and are not
+separated by the data in hand:
+
+  * T-72h is genuinely different — an early board with thin two-way coverage,
+    where a soft book that has bothered to post at all is posting a number it
+    has not thought hard about.
+  * T-48h has a composition problem: it carries the most bets of any offset
+    (1,741 paired) and the weakest 2023 (−4.7% over 761), so a single bad season
+    on a board that is disproportionately 2023 could be most of the trough.
+  * It is noise. At these interval widths T-48h (−3.2, +4.6) and T-72h
+    (−0.4, +9.5) overlap heavily, and neither excludes the other's point
+    estimate.
+
+The honest summary is that ONE offset clears every bar — `open` — and the shape
+between 24 h and 72 h is not resolved. Anyone tempted to build a lead-time curve
+out of these four rows should get more offsets first, not interpolate these.
 
 ## What it does NOT say
 
-- **It does not say fire earlier.** It says the opposite, and that bears
-  directly on `NFL_PROP_WINDOW_HOURS`, widened 30 → 240 on 2026-09-07. There is
-  no measurement at 240 h; the measured gradient runs 48 h negative → 24 h
-  ambiguous → ~7 h strongly positive, and extrapolating it puts a 10-day-out
-  board worse than the 48-hour one. Under the §1c first-signal lock a pick taken
-  at 240 h is permanent, so a wide window locks picks at the lead time with the
-  least evidence behind it. **This is a decision for mike, not a change to make
-  quietly** — he set 240 deliberately.
+- **It does not support a smooth decay argument about the 240-hour window.**
+  `NFL_PROP_WINDOW_HOURS` was widened 30 → 240 on 2026-09-07. There is no
+  measurement at 240 h, and because T-72h beats T-48h the curve cannot be
+  extrapolated there. What IS measured: `open` (~7 h) is the best regime by a
+  clear margin, and every NFL prop BET written in the 21 days to 2026-09-08 was
+  taken past 48 h — `nfl_prop_market`'s three at 137.6-179.8 h — which under the
+  §1c first-signal lock makes them permanent at a lead time carrying no positive
+  evidence either way. That is an argument for scoring nearer kickoff, not an
+  argument that 240 h is worse than 48 h. **mike's call; he set 240
+  deliberately.**
 - **It does not re-open the credit question.** The window governs which games
   get a card fetched, not what a bet costs.
 
