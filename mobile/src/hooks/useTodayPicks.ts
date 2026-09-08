@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   fetchPicksForDate,
   fetchUpcomingUfcPicks,
-  fetchUpcomingGolfPicks,
   fetchUpcomingNflPicks,
   fetchUpcomingNcaafPicks,
 } from '@/lib/queries';
@@ -13,8 +12,6 @@ import type { EnrichedPick } from '@/types';
 
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
 const UFC_AHEAD_DAYS = 7;
-/** Mirrors config.GOLF_SCORE_AHEAD_DAYS — how far ahead tournaments are scored. */
-const GOLF_AHEAD_DAYS = 7;
 /**
  * How far ahead the NFL board looks. Must cover the OPENER's lock window, not
  * just the wind card's: the opener card takes bets from T-7 (daily_opener_card
@@ -64,10 +61,9 @@ export function useTodayPicks(date?: string) {
       // weekly, so the UFC tab shows the next card's picks ahead of fight day.
       // The look-ahead fetches are enrichment — don't fail the whole feed on
       // them, but record each failure in `partial`.
-      const [rows, ufcRows, golfRows, nflRows, ncaafRows] = await Promise.all([
+      const [rows, ufcRows, nflRows, ncaafRows] = await Promise.all([
         fetchPicksForDate(target, (what, e) => note(what)(e)),
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
-        fetchUpcomingGolfPicks(target, addDays(target, GOLF_AHEAD_DAYS)).catch(swallow('the upcoming golf field')),
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
         fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('this week’s NCAAF card')),
       ]);
@@ -80,7 +76,7 @@ export function useTodayPicks(date?: string) {
       // agreement — before this, the board drew a retired BET as a green,
       // stakeable card while the header count excluded it. The rows stay in
       // the DB as the record of what was published (§1c).
-      const all = [...rows, ...ufcRows, ...golfRows, ...nflRows, ...ncaafRows].filter(
+      const all = [...rows, ...ufcRows, ...nflRows, ...ncaafRows].filter(
         (d) => !isGameOver(d.game, d.pick.sport) && !isModelRetired(d.pick.model_id),
       );
       setData(all);

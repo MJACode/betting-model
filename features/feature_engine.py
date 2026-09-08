@@ -358,14 +358,8 @@ FEATURE_MAP = {
     "ufc_moneyline":            UFC_H2H_FEATURES,
     "ufc_total_rounds":         UFC_TOTALS_FEATURES,
     "ufc_method_of_victory":    UFC_METHOD_FEATURES,
-    # GOLF — per-player rolling strokes-gained + form + course history. The four
-    # per-player markets share one feature list; matchups use pairwise diffs.
-    # Lists live in features/golf_feature_engine.py to avoid a heavy import here.
-    "golf_outright":            GOLF_PLAYER_FEATURES,
-    "golf_top10":               GOLF_PLAYER_FEATURES,
-    "golf_top20":               GOLF_PLAYER_FEATURES,
-    "golf_make_cut":            GOLF_PLAYER_FEATURES,
-    "golf_matchup":             GOLF_MATCHUP_FEATURES,
+    # GOLF RETIRED 2026-09-08 (mike) -- see config.RETIRED_MODELS. The feature
+    # lists stay in features/golf_feature_engine.py for a revival.
 }
 
 

@@ -1,3 +1,25 @@
+# GOLF — RETIRED 2026-09-08. Kept as the revival runbook.
+
+> **This sport is retired.** mike, 2026-09-08: *"retire golf for now, drop the
+> check."* All five models are in `config.RETIRED_MODELS` and gone from
+> `config.MODELS`, every threshold dict, `features.feature_engine.FEATURE_MAP`,
+> the mobile mirror and the health checks. `data.threshold_sync` prunes their
+> `model_action_thresholds` rows on the next daily pass, which drops them from
+> every track-record view.
+>
+> **Why, measured.** `DATAGOLF_API_KEY` was never set on the Railway worker, and
+> `run_pipeline._golf_enabled()` no-ops every golf step without it. So
+> `step_golf_field` / `_odds` / `_results` / `_scoring` returned early on every
+> pass, and GOLF held **zero** rows in `games`, `golf_odds` and `picks` — not a
+> thin record, no record at all, ever. The 2026-09-03 pause asked why golf never
+> fires and left the question open; this is the answer.
+>
+> **Nothing was deleted.** The ingestors (`data/ingestors/datagolf_ingestor.py`),
+> the feature engine (`features/golf_feature_engine.py`) and the pipeline steps
+> are all still here. Reviving golf starts with provisioning the DataGolf key,
+> then a backfill, a retrain and the go-live gate (CLAUDE.md §2) — **not** with
+> re-adding the config keys. Everything below is that runbook, unchanged.
+
 # GOLF — pipeline operations
 
 > Moved out of CLAUDE.md on 2026-08-30 (that file had reached 909 KB and was

@@ -1098,9 +1098,12 @@ export function StatsScreen() {
     );
   }
 
-  // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
+  // Sports with no per-player leaderboard (NHL: team+goalie only).
+  // The golf branch went with the sport on 2026-09-08: its copy promised
+  // leaderboards that are not coming and pointed at Picks/Signals for golf picks
+  // that no longer render, and GOLF is no longer a chip, so it was unreachable
+  // copy that could only ever mislead.
   if (!stat) {
-    const isGolf = sport === 'GOLF';
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
@@ -1114,12 +1117,8 @@ export function StatsScreen() {
           <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
         ) : null}
         <EmptyState
-          title={isGolf ? 'No golf stats yet' : 'No player leaderboard'}
-          subtitle={
-            isGolf
-              ? 'Player strokes-gained leaderboards are on the way. Golf picks live on the Picks and Signals tabs.'
-              : `Player stat leaderboards aren't available for ${sport} yet.`
-          }
+          title="No player leaderboard"
+          subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
         />
       </SafeAreaView>
     );

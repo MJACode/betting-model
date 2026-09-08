@@ -11,6 +11,10 @@ rather than the views consults config.RETIRED_MODELS.
 pins their live-specific half).
 2026-09-02 (matt): mlb_prop_batter_hr, mlb_prop_batter_rbi -- the first
 PRE-GAME retirements, and the first time "out of every total" was the ask.
+2026-09-08 (mike): the five golf models, and with them the sport -- the first
+retirement of a WHOLE sport, and the first for a reason outside the models:
+DATAGOLF_API_KEY was never set on the worker, so every golf pipeline step
+no-opped and GOLF produced no games, no odds and no picks, ever.
 """
 
 from __future__ import annotations
@@ -26,10 +30,12 @@ ROOT = Path(__file__).resolve().parents[1]
 RETIRED_PROPS = ("mlb_prop_batter_hr", "mlb_prop_batter_rbi")
 
 
-def test_the_set_holds_all_four():
+def test_the_set_holds_exactly_the_nine_retirements():
     assert set(config.RETIRED_MODELS) == {
         "mlb_live_win_prob", "mlb_live_runline",
         "mlb_prop_batter_hr", "mlb_prop_batter_rbi",
+        "golf_outright", "golf_top10", "golf_top20",
+        "golf_make_cut", "golf_matchup",
     }
 
 
@@ -51,6 +57,42 @@ def test_retired_is_disjoint_from_paused_and_from_every_registry():
     live = set(config.MODELS) | set(config.PROP_MODELS) | set(config.LIVE_MODELS)
     assert not (config.RETIRED_MODELS & live)
     assert not (config.RETIRED_MODELS & config.PAUSED_MODELS)
+
+
+# ── the game-model half ──────────────────────────────────────────────────────
+
+def test_a_retired_game_model_is_in_no_feature_map():
+    """The prop half of this contract checked PROP_FEATURE_MAP only.
+
+    Golf is a GAME model, so it lived in features.feature_engine.FEATURE_MAP,
+    which nothing here covered -- and a model left in FEATURE_MAP still has a
+    feature list, a training path and a scorer entry waiting for it. Sweeping
+    every map rather than the one that happened to matter last time.
+    """
+    import importlib
+    maps = []
+    for mod_name, attr in (("features.feature_engine",     "FEATURE_MAP"),
+                           ("features.live_game_features", "LIVE_FEATURE_MAP"),
+                           ("features.prop_feature_engine", "PROP_FEATURE_MAP")):
+        try:
+            m = getattr(importlib.import_module(mod_name), attr, None)
+        except Exception:                                   # noqa: BLE001
+            continue
+        if isinstance(m, dict):
+            maps.append((f"{mod_name}.{attr}", set(m)))
+    assert maps, "no feature map could be imported -- this guard checked nothing"
+    for name, keys in maps:
+        left = sorted(config.RETIRED_MODELS & keys)
+        assert not left, f"{left} are retired but still carry a {name} entry"
+
+
+def test_a_retired_sport_is_not_still_health_checked():
+    """A check for a sport that can no longer produce data can only ever SKIP,
+    and a permanently-skipping check is what this whole exercise was about."""
+    import tracking.system_health as sh
+    src = (ROOT / "tracking" / "system_health.py").read_text(encoding="utf-8")
+    assert '"golf_odds"' not in src, "golf is retired but golf_odds is still checked"
+    assert not any(m.startswith("golf") for m in sh.KNOWN_UNTRAINED)
 
 
 # ── the prop-specific half ───────────────────────────────────────────────────

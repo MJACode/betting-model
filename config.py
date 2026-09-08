@@ -332,15 +332,7 @@ ACTION_THRESHOLDS: dict = {
     "ufc_moneyline":         {"min_prob": 0.65, "min_edge": 0.08},
     "ufc_total_rounds":      {"min_prob": 0.62, "min_edge": 0.08},
     "ufc_method_of_victory": {"min_prob": 0.65, "min_edge": 0.0},
-    # GOLF — placeholder thresholds; tune after 50+ settled picks per model.
-    # NOTE: golf probabilities live on a MARKET-relative scale, NOT the 0.6+ scale
-    # of two-sided sports. A win prob is ~3–15%, a top-10 prob ~10–30%. The min_prob
-    # floors below reflect that — do not "fix" them up to 0.6+.
-    "golf_outright":  {"min_prob": 0.03, "min_edge": 0.015},
-    "golf_top10":     {"min_prob": 0.15, "min_edge": 0.05},
-    "golf_top20":     {"min_prob": 0.25, "min_edge": 0.05},
-    "golf_make_cut":  {"min_prob": 0.65, "min_edge": 0.05},
-    "golf_matchup":   {"min_prob": 0.55, "min_edge": 0.05},
+    # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
@@ -514,6 +506,26 @@ RETIRED_MODELS: frozenset = frozenset({
     # 2026-09-02 (matt): batter home runs + batter RBIs. See PROP_MODELS.
     "mlb_prop_batter_hr",
     "mlb_prop_batter_rbi",
+    # 2026-09-08 (mike): "retire golf for now, drop the check." All five golf
+    # models, and with them the sport.
+    #
+    # WHY, measured rather than assumed. The 09-03 pause asked why golf never
+    # fires and left the question open. The answer is that the feed was never
+    # switched on: **DATAGOLF_API_KEY is not set on the Railway worker**, and
+    # run_pipeline._golf_enabled() no-ops every golf step without it. So
+    # step_golf_field / _odds / _results / _scoring have been returning early
+    # on every pass, and GOLF holds ZERO rows in `games`, `golf_odds` and
+    # `picks` -- not a thin record, no record at all, ever.
+    #
+    # Nothing here is a judgement on the models. Reviving golf means
+    # provisioning the DataGolf key, backfilling, retraining and clearing the
+    # go-live gate -- not re-adding these keys. The ingestors, the feature
+    # engine and the pipeline steps are all left in place for that.
+    "golf_outright",
+    "golf_top10",
+    "golf_top20",
+    "golf_make_cut",
+    "golf_matchup",
 })
 # Models temporarily PAUSED — never emit a BET signal. They are still scored and
 # written as NONE rows (so the website can still show the game), but with no
@@ -747,23 +759,10 @@ PAUSED_MODELS: set = {
     # classifier that does not rank -- moving a bar on a 0.50 AUC only changes
     # how many coin flips get bet.
     "mlb_over_under",
-    # 2026-09-03 (mike): "Golf should not be firing." All five golf models
-    # PAUSED. They have produced ZERO picks in the entire history of the picks
-    # table while sitting unpaused in config, model_action_thresholds and the
-    # mobile action filter -- which is precisely the state mlb_runline was in
-    # for six weeks, and the reason that pause exists: "publishes nothing" and
-    # "is switched off" must not look identical.
-    #
-    # This pause makes the true state legible. It is NOT a judgement on the
-    # models' quality -- there is no record to judge, which is the point. If
-    # golf is meant to trade, the unpause path starts by finding out WHY
-    # nothing fires (unreachable thresholds like mlb_runline's, a dead feed, or
-    # a scorer that never reaches the sport), not by moving a cut.
-    "golf_outright",
-    "golf_top10",
-    "golf_top20",
-    "golf_make_cut",
-    "golf_matchup",
+    # The five golf models were paused here on 2026-09-03 (mike) and RETIRED on
+    # 2026-09-08 -- they are gone from MODELS entirely, so there is nothing left
+    # to pause. See the RETIRED block above. The 09-03 pause asked WHY nothing
+    # fires; the answer is in that block.
     # mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 (mike) and
     # RETIRED 2026-08-30 -- they are gone from LIVE_MODELS entirely, so there is
     # nothing left to pause. See the RETIRED block above LIVE_MODELS.
@@ -1437,12 +1436,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ufc_moneyline":         0.08,
     "ufc_total_rounds":      0.08,
     "ufc_method_of_victory": 0.0,   # prob-only — edge ignored at runtime
-    # GOLF — placeholder; tune after 50+ settled picks (market-relative scale).
-    "golf_outright":  0.015,
-    "golf_top10":     0.05,
-    "golf_top20":     0.05,
-    "golf_make_cut":  0.05,
-    "golf_matchup":   0.05,
+    # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # Live (in-play) — placeholder; in-play markets carry heavier vig, so the
     # edge floor starts higher than the pre-game equivalents.
     # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
@@ -1536,12 +1530,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ufc_moneyline":         0.65,
     "ufc_total_rounds":      0.62,
     "ufc_method_of_victory": 0.65,
-    # GOLF — placeholder; tune after 50+ settled picks (market-relative scale).
-    "golf_outright":  0.03,
-    "golf_top10":     0.15,
-    "golf_top20":     0.25,
-    "golf_make_cut":  0.65,
-    "golf_matchup":   0.55,
+    # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
     # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
     "mlb_live_total_runs": 0.7,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md. Re-sweep at n=150 settled since 2026-08-31 (70 at 2026-09-08): docs/thresholds.md "Dated review criteria". There is NO live CLV — docs/live_betting.md has the measurement.
@@ -1923,13 +1912,7 @@ MODELS = {
     "ufc_moneyline":            ("UFC", "h2h",    "Home-slot fighter wins the fight"),
     "ufc_total_rounds":         ("UFC", "totals", "Fight duration over/under the round line"),
     "ufc_method_of_victory":    ("UFC", "method", "Fight ends by Decision / KO-TKO / Submission (3-class)"),
-    # GOLF — per-player markets on one tournament games row (picks carry player_id).
-    # All four markets price against real DK odds via DataGolf's betting-tools feed.
-    "golf_outright":            ("GOLF", "win",                "Player wins the tournament"),
-    "golf_top10":               ("GOLF", "top_10",             "Player finishes in the top 10"),
-    "golf_top20":               ("GOLF", "top_20",             "Player finishes in the top 20"),
-    "golf_make_cut":            ("GOLF", "make_cut",           "Player makes the cut"),
-    "golf_matchup":             ("GOLF", "matchup_tournament", "Player A beats Player B over the tournament"),
+    # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # NCAAF (FBS) — all three game markets score against real DK lines AND
     # backtest against real historical lines (CFBD /lines). The first new sport
     # where totals/spreads are not blocked on missing line history.

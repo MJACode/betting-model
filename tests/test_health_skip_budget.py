@@ -164,3 +164,23 @@ def test_the_persist_applies_the_skip_budgets_first():
     apply_at = text.index("_apply_skip_budgets(r.results")
     insert_at = text.index("INSERT INTO system_health_checks")
     assert apply_at < insert_at
+
+
+# ── the run_date clock ───────────────────────────────────────────────────────
+
+def test_the_run_date_is_ET_not_the_container_clock():
+    """`datetime.now()` is UTC on any container without TZ set, and after 8pm ET
+    that is TOMORROW -- so the whole run lands under the wrong run_date AND every
+    "yesterday" gate shifts a day forward, demanding data for a day still in
+    progress. Found by tripping it: a run on prop-probe (no TZ variable, unlike
+    `worker`) wrote a 2026-09-08 row set at 20:29 ET on 09-07 and called
+    `umpires` STALE for a day that had not finished.
+    """
+    import io as _io, re
+    text = _io.open(sh.__file__, encoding="utf-8").read()
+    body = text[text.index("def run_system_health("):]
+    body = body[:body.index("\n    conn = get_connection()")]
+    assert "today_et()" in body, "run_date must come from config.today_et()"
+    assert not re.search(r"datetime\.now\(\)\.strftime", body), (
+        "datetime.now() is the container clock, which is UTC without TZ"
+    )

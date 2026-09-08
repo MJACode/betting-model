@@ -348,9 +348,9 @@ answer is "nothing".
   removes the game. Live lanes keep the locked BET standing after the lane
   closes.
 - **Deletes that remain are scoped to rows that were never a pick**: dead-zone
-  NONE rows for games that have not started, and the UFC/GOLF/NCAAF look-ahead
+  NONE rows for games that have not started, and the UFC/NCAAF look-ahead
   window, where picks are explicitly not yet locked and re-score until game
-  morning (`docs/sports/{ufc,golf,ncaaf}.md`). A BET is never in that set.
+  morning (`docs/sports/{ufc,ncaaf}.md`). A BET is never in that set.
 - **A pick the model should never have PRODUCED is VOIDED, never deleted.**
   (mike, 2026-09-07.) §1c protects a bet against LINE MOVEMENT — not a row
   emitted while a model fired OUTSIDE its validated window, or on a game that
@@ -371,8 +371,8 @@ answer is "nothing".
 ## 2. Project Purpose
 Building a **personal sports betting model** targeting **DraftKings** as the
 primary sportsbook. The long-term goal is all major US sports with all player
-props. Eight sports are live today — MLB, WNBA, NBA, NHL, UFC, GOLF, NFL and
-NCAAF (§8).
+props. Seven sports are live today — MLB, WNBA, NBA, NHL, UFC, NFL and NCAAF
+(§8). **GOLF was retired 2026-09-08** (mike) — `config.RETIRED_MODELS`.
 
 **The platform is LIVE — this is not a paper-trading system.** Do not describe
 it as paper trading in any user-facing surface (Discord, the app, email, the
@@ -453,8 +453,7 @@ Regulation market often has better value since casual bettors underweight it.
   two calendar years, so the season is threaded explicitly, never derived from a
   game's date.
 - **Team ids are 3-letter abbrevs except NCAAF**, which uses the CFBD school name
-  (136 FBS programs collide badly in 3 letters). UFC uses fighter slugs; golf
-  uses one `games` row per tournament with `away_team = 'FIELD'`.
+  (136 FBS programs collide badly in 3 letters). UFC uses fighter slugs.
 - **`scored_line` is always the HOME number** for spreads. An away cover is
   `(away − home) − scored_line > 0`. Getting this sign wrong has produced a wrong
   threshold twice (sessions 74 and 87) — it flips every one-run game.
@@ -641,8 +640,12 @@ to be known BEFORE deciding which file to open.
 
 ## 8. Current state — the 30-second version
 
-- **Live sports:** MLB, WNBA, NBA, NHL, UFC, GOLF, NFL, NCAAF. ~70 models carry
-  their own prob/edge cut in `config.ACTION_THRESHOLDS`; 26 are paused.
+- **Live sports:** MLB, WNBA, NBA, NHL, UFC, NFL, NCAAF. 65 models carry their
+  own prob/edge cut in `config.ACTION_THRESHOLDS`; 14 are paused.
+- **GOLF was RETIRED 2026-09-08** (mike). `DATAGOLF_API_KEY` was never set on
+  the worker, so every golf pipeline step no-opped and the sport produced no
+  games, no odds and no picks, ever. The ingestors, feature engine and pipeline
+  steps are left in place; reviving it starts with the key, not with config.
 - **The platform is LIVE, not paper trading.** The go-live gate (≥50 settled
   picks, positive flat ROI, calibration ≤5%) is per MODEL — a new or retrained
   model is paper-only until it clears, and that is stated in its own doc.
@@ -691,7 +694,8 @@ to be known BEFORE deciding which file to open.
 | Rebuilding the team-stats tables (scope) | `docs/team_stats_rebuild_scope.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
 
-**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,golf,nfl,ncaaf}.md` — each
+**Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
+(`golf.md` is kept as the revival runbook for the retired sport) —
 carries that sport's models, data sources, load-bearing conventions, pipeline
 steps and first-time setup.
 

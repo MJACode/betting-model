@@ -314,7 +314,6 @@ class TestFeatureMap:
             "ncaaf_spread", "ncaaf_spread_premium", "ncaaf_over_under",
             "ncaaf_moneyline",
             # GOLF
-            "golf_outright", "golf_top10", "golf_top20", "golf_make_cut", "golf_matchup",
         }
         assert set(FEATURE_MAP.keys()) == expected
 
