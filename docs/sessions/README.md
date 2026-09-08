@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 256 - why health checks are routinely SKIPPED: three of four were honest (NBA offseason, the WNBA's FIBA World Cup break), golf_odds had never once produced a verdict in 59 runs, and model_calibration was computed and then thrown away before the persist |
 | 2026-09-07 | [2026-09](./2026-09.md) | 2026-09-07, session 255 - the ops roster called seven working models broken: five score from a frozen rule and two from an off-registry LightGBM engine, config.SCORING_METHODS declares which, and PAUSED moving to the front of the CASE makes the red banner true for the first time |
 | 2026-09-07 | [2026-09](./2026-09.md) | 2026-09-07, session 254 - "highest conviction plays only": the conviction sort does not exist pre-game and is inverted on the live lane, so the cut was made on price instead |
 | 2026-09-07 | [2026-09](./2026-09.md) | 2026-09-07, session 253 - sixteen unsettled BETs: an FCS visitor resolved to the FBS school it starts with (six NCAAF live totals), three MLB windows that could not self-heal, and an NFL prop path that would have voided week 1 |
