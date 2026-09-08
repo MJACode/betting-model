@@ -1282,6 +1282,14 @@ def _timed_step(name: str, fn, run_date: str) -> bool:
     started = _time.perf_counter()
     ok = False
     err = None
+    # The step's own logger has the reason; capture the LAST error line it
+    # emits so the ops log carries it. Until 2026-09-08 pipeline_log said
+    # "see the step's own log", and the step's own log is a container that
+    # has usually been redeployed by the time anyone reads the table.
+    last_error: dict = {"msg": None}
+    sink_id = logger.add(
+        lambda m: last_error.__setitem__("msg", m.record["message"]),
+        level="ERROR", format="{message}")
     try:
         ok = fn()
         if not ok:
@@ -1296,7 +1304,9 @@ def _timed_step(name: str, fn, run_date: str) -> bool:
             # The step's own logger has the detail; what can be captured HERE
             # is that the failure was returned rather than raised, so the two
             # are never confused when reading the table back.
-            err = "step returned False (see the step's own log for the reason)"
+            err = "step returned False"
+            if last_error["msg"]:
+                err += f" — {str(last_error['msg'])[:360]}"
         return ok
     except BaseException as exc:                              # noqa: BLE001
         # Record the duration of a step that BLEW UP too -- a step that dies
@@ -1305,6 +1315,10 @@ def _timed_step(name: str, fn, run_date: str) -> bool:
         err = f"{type(exc).__name__}: {exc}"[:400]
         raise
     finally:
+        try:
+            logger.remove(sink_id)
+        except Exception:                                     # noqa: BLE001
+            pass
         try:
             from data.db import get_connection
             conn = get_connection()

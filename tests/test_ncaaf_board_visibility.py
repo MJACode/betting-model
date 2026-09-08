@@ -212,8 +212,11 @@ def test_a_no_signal_row_does_not_lock_an_ncaaf_game_for_the_week():
 
 
 def test_one_model_cannot_take_down_every_sport():
-    i = _SRC.index("                try:\n                    picks = score_game(")
-    block = _SRC[i:i + 700]
+    # Indentation-agnostic: since 2026-09-08 the model loop sits inside the
+    # per-game transaction unit, one level deeper.
+    j = _SRC.index("picks = score_game(")
+    i = _SRC.rindex("try:", 0, j)
+    block = _SRC[i:i + 900]
     assert "model_failures.append" in block
     assert "continue" in block
     # ...but the step must still fail, or the outage goes silent.

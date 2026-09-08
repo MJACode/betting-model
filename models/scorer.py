@@ -73,7 +73,7 @@ from config import (
     today_et,
     DECIDE_ON_CALIBRATED_PROB,
 )
-from data.db import get_connection, DBConnection
+from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
 from data.name_match import resolve_feed_name
 
@@ -2466,47 +2466,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                             AND game_date > %s AND game_date <= %s
                             AND (commence_time IS NULL OR commence_time > %s)
                       )""" + _sc, (target_date, ufc_horizon, now_utc) + _sp)
-            # Housekeeping for the pairs the lock deliberately leaves open.
-            # A non-BET row is not in locked_pairs, so without this it would be
-            # re-inserted on every pass. Delete + rescore keeps exactly one
-            # current row per side while a pair has no bet; the moment a model
-            # fires, that pair joins locked_pairs and is never touched again.
-            #
-            # Scoped to games that have NOT started, so nothing settleable is
-            # hit, and to the full window every look-ahead sport is scored over
-            # (NCAAF and UFC both reach a week out) — a delete that stopped at
-            # today would leave duplicate no-signal rows on exactly the boards
-            # that are scored furthest ahead. Golf has its own scorer and its
-            # own delete, so it is not in this window.
-            #
-            # Known consequence, worth stating: a non-BET row's pick_id changes
-            # each pass. That is the pre-lock behaviour for these rows, and an
-            # AVOID is explicitly never settled and never bettable (§17), so
-            # nothing that resolves money depends on its identity.
-            _sc, _sp = _scope()
-            conn.execute("""
-                DELETE FROM picks
-                WHERE result IS NULL
-                  AND signal_type != 'BET'
-                  AND is_live IS NOT TRUE
-                  AND game_id IN (
-                      SELECT game_id FROM games
-                      WHERE game_date >= %s AND game_date <= %s
-                        AND (commence_time IS NULL OR commence_time > %s)
-                  )""" + _sc,
-                (target_date,
-                 # EVERY look-ahead horizon, not just the two that existed when
-                 # this was written. The bound has to cover the whole window
-                 # the loop below re-inserts over, or the newly-scored future
-                 # games accumulate a fresh NONE row every pass with nothing
-                 # ever clearing the last one — duplicates on exactly the games
-                 # this change just started scoring.
-                 max(ncaaf_horizon, ufc_horizon, game_horizon),
-                 now_utc) + _sp)
-
-            logger.info(f"Cleared unsettled picks for games not yet started")
 
         all_picks = []
+        rescored: set[str] = set()
         model_failures: list[str] = []
         skipped_started = 0
         skipped_postponed = 0
@@ -2584,55 +2546,152 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             relevant_models = [mid for mid, (sp, _, _) in MODELS.items()
                                if sp == sport]
 
-            for model_id in relevant_models:
-                # Pick lock: this pair has already produced a BET, so it is
-                # frozen — the number given is the bet of record and nothing
-                # later re-prices or withdraws it (config.LOCK_GAME_PICKS_AT_
-                # FIRST_RUN, §1c). A pair with no bet yet is NOT here, and keeps
-                # being scored every pass until it either crosses or the game
-                # starts. Other models for this game are independent. Spans
-                # game_date >= target_date, so the UFC/NCAAF look-ahead freezes
-                # on the same rule.
-                if (game_id, model_id) in locked_pairs:
-                    skipped_locked += 1
-                    continue
-                # One model must never be able to take down the scoring
-                # step for every sport. On 2026-08-29 a missing FEATURE_MAP
-                # entry for ncaaf_spread_premium raised KeyError out of here,
-                # and MLB, WNBA, NHL and UFC game picks stopped for the whole
-                # day — while the only visible symptom was an empty NCAAF
-                # board. Contain the blast radius, but stay LOUD: the failure
-                # is re-raised after the surviving picks are committed, so the
-                # step is still marked failed and refresh_pass_steps still
-                # CRITs. Swallowing it here would be worse than the crash.
+            # -- ONE GAME = ONE TRANSACTION (2026-09-08) ------------------
+            # Clear this game's non-BET rows, score every model, commit. A
+            # connection lost mid-game costs that game once (the wrapper has
+            # reconnected; the unit is re-run), never the pass. mike: "add
+            # auto retry to pick up where we left off."
+            game_picks: list[dict] = []
+            for attempt in (1, 2):
+                game_picks = []
                 try:
-                    picks = score_game(conn, game_id, model_id, features,
-                                        bankroll, dry_run=dry_run,
-                                        commence_time=commence_time)
-                except Exception as exc:
-                    model_failures.append(f"{model_id}: {exc!r}")
-                    logger.error(f"  {game_id}/{model_id} FAILED: {exc!r}")
-                    continue
-                all_picks.extend(picks)
+                    if not dry_run:
+                        conn.execute("""
+                            DELETE FROM picks
+                            WHERE game_id = %s
+                              AND result IS NULL
+                              AND signal_type != 'BET'
+                              AND is_live IS NOT TRUE
+                        """, (game_id,))
+                    for model_id in relevant_models:
+                        # Pick lock: this pair has already produced a BET, so it is
+                        # frozen — the number given is the bet of record and nothing
+                        # later re-prices or withdraws it (config.LOCK_GAME_PICKS_AT_
+                        # FIRST_RUN, §1c). A pair with no bet yet is NOT here, and keeps
+                        # being scored every pass until it either crosses or the game
+                        # starts. Other models for this game are independent. Spans
+                        # game_date >= target_date, so the UFC/NCAAF look-ahead freezes
+                        # on the same rule.
+                        if (game_id, model_id) in locked_pairs:
+                            skipped_locked += 1
+                            continue
+                        # One model must never be able to take down the scoring
+                        # step for every sport. On 2026-08-29 a missing FEATURE_MAP
+                        # entry for ncaaf_spread_premium raised KeyError out of here,
+                        # and MLB, WNBA, NHL and UFC game picks stopped for the whole
+                        # day — while the only visible symptom was an empty NCAAF
+                        # board. Contain the blast radius, but stay LOUD: the failure
+                        # is re-raised after the surviving picks are committed, so the
+                        # step is still marked failed and refresh_pass_steps still
+                        # CRITs. Swallowing it here would be worse than the crash.
+                        try:
+                            picks = score_game(conn, game_id, model_id, features,
+                                                bankroll, dry_run=dry_run,
+                                                commence_time=commence_time)
+                        except ConnectionLost:
+                            raise                      # the game's unit, not the model's
+                        except Exception as exc:
+                            model_failures.append(f"{model_id}: {exc!r}")
+                            logger.error(f"  {game_id}/{model_id} FAILED: {exc!r}")
+                            continue
+                        game_picks.extend(picks)
 
-                for p in picks:
-                    signal = p["signal_type"]
-                    tier   = p["confidence_tier"]
-                    edge_pct = p["edge"] * 100
-                    if p['dk_odds'] is None:
-                        dk_odds_str = "N/A"
-                    elif p['dk_odds'] > 0:
-                        dk_odds_str = f"+{int(p['dk_odds'])}"
-                    else:
-                        dk_odds_str = str(int(p['dk_odds']))
-                    logger.info(
-                        f"  [{signal}] {p['pick_label']} | "
-                        f"DK={dk_odds_str} | "
-                        f"model={p['model_probability']:.3f} | "
-                        f"edge={edge_pct:+.1f}% | "
-                        f"bet=${p['recommended_bet']:.0f} | "
-                        f"[{tier}]"
-                    )
+                        for p in picks:
+                            signal = p["signal_type"]
+                            tier   = p["confidence_tier"]
+                            edge_pct = p["edge"] * 100
+                            if p['dk_odds'] is None:
+                                dk_odds_str = "N/A"
+                            elif p['dk_odds'] > 0:
+                                dk_odds_str = f"+{int(p['dk_odds'])}"
+                            else:
+                                dk_odds_str = str(int(p['dk_odds']))
+                            logger.info(
+                                f"  [{signal}] {p['pick_label']} | "
+                                f"DK={dk_odds_str} | "
+                                f"model={p['model_probability']:.3f} | "
+                                f"edge={edge_pct:+.1f}% | "
+                                f"bet=${p['recommended_bet']:.0f} | "
+                                f"[{tier}]"
+                            )
+                    if not dry_run:
+                        conn.commit()
+                    rescored.add(game_id)
+                    all_picks.extend(game_picks)
+                    break
+                except ConnectionLost as exc:
+                    logger.warning(f"  {game_id}: connection lost mid-game "
+                                   f"(attempt {attempt}) -- reconnected, re-running the game")
+                    if attempt == 2:
+                        model_failures.append(f"{game_id}: {exc!r}")
+                        logger.error(f"  {game_id} FAILED twice on a lost connection: {exc!r}")
+
+        # Housekeeping for the pairs the lock deliberately leaves open.
+        #
+        # SWEEP, not pre-clear (2026-09-08). This DELETE used to run BEFORE
+        # the loop, in the same transaction as every insert of the pass, so
+        # the whole pass was one all-or-nothing unit: a dropped connection
+        # or a redeploy at game 60 of 70 rolled back sixty games' work, and
+        # a second scorer starting on the :20 waited on this transaction's
+        # row locks until statement_timeout (35 "while deleting tuple in
+        # relation picks" failures in the week to 09-08). Each game is now
+        # its own committed unit -- its own non-BET rows cleared, its rows
+        # inserted, commit -- and this sweep runs AFTER the loop for the
+        # games the loop did not re-score (started, unpriced, postponed, out
+        # of the caller's subset), in a short transaction of its own with a
+        # lock_timeout, so it can never hold the board hostage.
+        # A non-BET row is not in locked_pairs, so without this it would be
+        # re-inserted on every pass. Delete + rescore keeps exactly one
+        # current row per side while a pair has no bet; the moment a model
+        # fires, that pair joins locked_pairs and is never touched again.
+        #
+        # Scoped to games that have NOT started, so nothing settleable is
+        # hit, and to the full window every look-ahead sport is scored over
+        # (NCAAF and UFC both reach a week out) — a delete that stopped at
+        # today would leave duplicate no-signal rows on exactly the boards
+        # that are scored furthest ahead. Golf has its own scorer and its
+        # own delete, so it is not in this window.
+        #
+        # Known consequence, worth stating: a non-BET row's pick_id changes
+        # each pass. That is the pre-lock behaviour for these rows, and an
+        # AVOID is explicitly never settled and never bettable (§17), so
+        # nothing that resolves money depends on its identity.
+        if not dry_run:
+            _sc, _sp = _scope()
+            _keep = ""
+            _keep_p: tuple = ()
+            if rescored:
+                _keep = f" AND game_id NOT IN ({','.join(['%s'] * len(rescored))})"
+                _keep_p = tuple(sorted(rescored))
+            try:
+                conn.execute("SET LOCAL lock_timeout = '10s'")
+                conn.execute("""
+            DELETE FROM picks
+            WHERE result IS NULL
+              AND signal_type != 'BET'
+              AND is_live IS NOT TRUE
+              AND game_id IN (
+                  SELECT game_id FROM games
+                  WHERE game_date >= %s AND game_date <= %s
+                    AND (commence_time IS NULL OR commence_time > %s)
+              )""" + _sc + _keep,
+            (target_date,
+             # EVERY look-ahead horizon, not just the two that existed when
+             # this was written. The bound has to cover the whole window
+             # the loop below re-inserts over, or the newly-scored future
+             # games accumulate a fresh NONE row every pass with nothing
+             # ever clearing the last one — duplicates on exactly the games
+             # this change just started scoring.
+             max(ncaaf_horizon, ufc_horizon, game_horizon),
+             now_utc) + _sp + _keep_p)
+                conn.commit()
+            except Exception as exc:                          # noqa: BLE001
+                # A sweep that cannot get its locks in 10s yields; the
+                # next pass sweeps. Housekeeping never fails the picks.
+                conn.rollback()
+                logger.warning(f"Housekeeping sweep skipped this pass: {exc!s:.160}")
+
+        logger.info(f"Cleared unsettled picks for games not yet started")
 
         if skipped_postponed:
             logger.info(f"Skipped {skipped_postponed} postponed game(s)")
