@@ -58,6 +58,109 @@ KNOWN_UNTRAINED = {
 
 OK, STALE, EMPTY, SKIPPED, ERROR = "OK", "STALE", "EMPTY", "SKIPPED", "ERROR"
 
+# ── How long a gate may stay shut before the GATE is the suspect ─────────────
+# A SKIPPED check is not a passing check -- it is a check that did not run. The
+# rule that a check must never gate on the thing it detects (.claude/rules/
+# operations.md) fixed the circular gates; it does not cover a gate that is
+# simply STUCK, and nothing in the report told the two apart. One SKIPPED line
+# looks exactly like the next, so `golf_odds` sat SKIPPED on 59 consecutive
+# runs -- every run it has ever had, zero verdicts since 2026-07-04 -- and read
+# as normal.
+#
+# Budgets are each sport's real dark window, measured from `games` rather than
+# recalled, plus slack. Past the budget the check reports STALE and says to
+# suspect the gate.
+SKIP_BUDGET_DAYS: dict = {
+    # NBA: last game mid-June, next scheduled row 2026-10-20 -> ~130 days of
+    # legitimate offseason. 165 leaves room for a late schedule load.
+    "nba_game_log":  165,
+    # WNBA: mid-September to early May is ~230 days off. The 2026 season also
+    # carries a FIBA World Cup break (Sept 4-13, resuming Sept 17), which is
+    # well inside this budget and correctly stays quiet.
+    "wnba_game_log": 245,
+    "espn_wnba_api": 245,
+    # Golf runs most weeks of the year and the longest tour gap is about three
+    # weeks, so a month dark means the gate is stuck, not the calendar.
+    "golf_odds":      30,
+}
+
+# Everything else: a fortnight. Long enough for a normal off-week in any sport
+# that plays weekly, short enough that a stuck gate surfaces inside a month.
+DEFAULT_SKIP_BUDGET_DAYS: int = 14
+
+
+def _skip_run_days(conn, run_date: str) -> dict:
+    """Per check, the CALENDAR days its current SKIPPED streak spans, today included.
+
+    Calendar days, not rows: a day the pipeline never ran leaves no row at all,
+    and counting rows would under-report exactly the outage that stopped it.
+
+    Reads `system_health_checks`, which this module writes itself -- deliberately
+    the one table independent of every feed being checked, so this cannot be
+    silenced by the outage it exists to describe.
+
+    Fails OPEN: any problem returns {} and nothing is annotated or escalated, so
+    a broken streak query can only lose the annotation, never invent a failure.
+    """
+    try:
+        rows = conn.execute("""
+            SELECT check_name,
+                   MAX(CASE WHEN status <> 'SKIPPED' THEN run_date END),
+                   MIN(run_date)
+            FROM system_health_checks
+            WHERE run_date < ?
+            GROUP BY check_name
+        """, (run_date,)).fetchall()
+    except Exception:                                       # noqa: BLE001
+        getattr(conn, "rollback", lambda: None)()
+        return {}
+
+    try:
+        today = datetime.strptime(run_date, "%Y-%m-%d").date()
+    except Exception:                                       # noqa: BLE001
+        return {}
+
+    out: dict = {}
+    for check, last_seen, first_row in rows:
+        # last_seen -> the streak began the day after it. Never seen non-SKIPPED
+        # -> the streak is the whole history, so count from the first row.
+        anchor_day, inclusive = (last_seen, 0) if last_seen else (first_row, 1)
+        if not anchor_day:
+            continue
+        try:
+            start = datetime.strptime(str(anchor_day)[:10], "%Y-%m-%d").date()
+        except Exception:                                   # noqa: BLE001
+            continue
+        days = (today - start).days + inclusive
+        if days > 0:
+            out[check] = days
+    return out
+
+
+def _apply_skip_budgets(results: list, run_days: dict) -> None:
+    """Annotate every SKIPPED result with its streak, and escalate a stuck gate.
+
+    Mutates `results` in place. Idempotent -- a result already carrying its
+    streak is left alone, so this is safe to call before more than one persist.
+    """
+    for res in results:
+        if res["status"] != SKIPPED or res.get("skip_days") is not None:
+            continue
+        days = run_days.get(res["check_name"])
+        if not days:
+            continue
+        res["skip_days"] = days
+        budget = SKIP_BUDGET_DAYS.get(res["check_name"], DEFAULT_SKIP_BUDGET_DAYS)
+        if days > budget:
+            res["status"] = STALE
+            res["detail"] = (
+                f"gate shut {days} days running, past this check's {budget}-day "
+                f"budget -- suspect the GATE, not the feed. Gate said: "
+                f"{res['detail']}")
+        else:
+            res["detail"] = f"{res['detail']} (skipped {days} days running)"
+
+
 
 def _parse_ts(val):
     """Parse a stored timestamp (mixed formats: '...Z', '...-04:00', naive) to aware UTC."""
@@ -511,8 +614,17 @@ def run_system_health(run_date: str | None = None) -> dict:
         golf_active = _scalar(conn, """SELECT COUNT(*) FROM games WHERE sport = 'GOLF'
                                        AND game_date >= ? AND game_date <= ?""",
                               (d3, (d + timedelta(days=7)).strftime("%Y-%m-%d"))) or 0
+        # "No tournament this week" and "this sport has never ingested anything"
+        # are different states and were reported with the same sentence. GOLF
+        # held zero `games` rows on 2026-09-08, so the second one is what 59
+        # consecutive SKIPPED runs actually meant.
+        golf_ever = _scalar(conn, "SELECT COUNT(*) FROM games WHERE sport = 'GOLF'") or 0
         r.ts_check(conn, "golf_odds", "WARN", "golf_odds", "snapshot_at", 24,
-                   gate_ok=golf_active > 0, gate_note="no golf tournament in window")
+                   gate_ok=golf_active > 0,
+                   gate_note=("no golf tournament in window" if golf_ever
+                              else "games holds no GOLF row at all -- the golf "
+                                   "ingest has never run, so this gate can "
+                                   "never open on its own"))
 
         # ── Schema drift ─────────────────────────────────────────────────────
         # Merging a migration does NOT apply it: setup_database() is only
@@ -988,20 +1100,6 @@ def run_system_health(run_date: str | None = None) -> dict:
         except Exception as exc:
             r.add("one_row_per_pick", ERROR, "CRIT", f"query failed: {exc}")
 
-        # ── Persist + summarize ──────────────────────────────────────────────
-        checked_at = datetime.now(timezone.utc).isoformat()
-        for res in r.results:
-            conn.execute("""
-                INSERT INTO system_health_checks
-                    (run_date, check_name, status, severity, detail, latest_seen, checked_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (run_date, check_name) DO UPDATE SET
-                    status = EXCLUDED.status, severity = EXCLUDED.severity,
-                    detail = EXCLUDED.detail, latest_seen = EXCLUDED.latest_seen,
-                    checked_at = EXCLUDED.checked_at
-            """, (run_date, res["check_name"], res["status"], res["severity"],
-                  res["detail"], res["latest_seen"], checked_at))
-        conn.commit()
         # ── Model calibration on the LIVE record ─────────────────────────────
         # Does a published probability still mean what it says? The training
         # gate only ever sees the holdout, and for a Poisson model it was not
@@ -1028,6 +1126,11 @@ def run_system_health(run_date: str | None = None) -> dict:
                 HAVING COUNT(*) >= 150
             """).fetchall()
         except Exception as exc:
+            # Roll back before anything else touches this connection: a failed
+            # statement aborts the Postgres transaction, and the persist below
+            # now runs AFTER this block, so without the rollback one broken
+            # calibration query would discard every result in the run.
+            getattr(conn, "rollback", lambda: None)()
             r.add("model_calibration", ERROR, "WARN", f"query failed: {exc}")
             rows = []
         if rows:
@@ -1050,6 +1153,27 @@ def run_system_health(run_date: str | None = None) -> dict:
         else:
             r.add("model_calibration", SKIPPED, "WARN",
                   "no model has 150+ graded picks on its current version yet")
+
+        # ── Persist + summarize ──────────────────────────────────────────────
+        # This runs AFTER every check, model_calibration included. It used to
+        # sit above that block, so model_calibration was computed, logged, and
+        # then dropped: zero rows in system_health_checks, ever, while the one
+        # thing that reads the table -- Claude mobile, the ops dashboard -- was
+        # told nothing. A check whose result is never stored is not a check.
+        _apply_skip_budgets(r.results, _skip_run_days(conn, run_date))
+        checked_at = datetime.now(timezone.utc).isoformat()
+        for res in r.results:
+            conn.execute("""
+                INSERT INTO system_health_checks
+                    (run_date, check_name, status, severity, detail, latest_seen, checked_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (run_date, check_name) DO UPDATE SET
+                    status = EXCLUDED.status, severity = EXCLUDED.severity,
+                    detail = EXCLUDED.detail, latest_seen = EXCLUDED.latest_seen,
+                    checked_at = EXCLUDED.checked_at
+            """, (run_date, res["check_name"], res["status"], res["severity"],
+                  res["detail"], res["latest_seen"], checked_at))
+        conn.commit()
 
     finally:
         conn.close()
