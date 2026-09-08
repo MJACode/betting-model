@@ -129,3 +129,36 @@ def test_prune_table_does_NOT_carve_out_sharp_books_for_the_odds_table():
     for _, p in conn.calls:
         if "protected" in p:
             assert "pinnacle" not in tuple(p["protected"])
+
+
+def test_every_prop_reference_book_is_protected():
+    """DERIVED from the models, so a THIRD reference is protected on the day it
+    is added rather than on the day someone notices it was not.
+
+    2026-09-08: betonlineag became a second de-vig reference in
+    models/nfl_prop_market, and nothing added it here. config.SHARP_BOOKMAKERS
+    still read "pinnacle" alone, the two tests above both passed, and the
+    pruner kept deleting it. The measured damage is in _prop_reference_books'
+    docstring; the short version is that `player_prop_odds` now holds no NFL
+    sharp prop snapshot older than 2026-04-01, and the 2023-2025 history the
+    rule's whole record rests on survives only in a tracked parquet.
+    """
+    import models.nfl_prop_market as nfl
+
+    protected = prune_odds.protected_for("player_prop_odds")
+    missing = [b for b in nfl.SHARP_BOOKS if b not in protected]
+    assert not missing, (
+        f"{missing} are de-vig references the rule READS but the pruner does "
+        f"not protect. Their history IS the model's evidence.")
+
+
+def test_the_narrow_carve_out_stays_narrow():
+    """The prop-table protection must not leak into `odds`, where the retention
+    rationale still holds in full and a blanket carve-out would put back most of
+    the storage the policy exists to save."""
+    import models.nfl_prop_market as nfl
+
+    in_odds = prune_odds.protected_for("odds")
+    for book in nfl.SHARP_BOOKS:
+        assert book not in in_odds, (
+            f"{book} is protected in `odds`; the carve-out is prop-only")

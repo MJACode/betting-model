@@ -96,9 +96,40 @@ PROTECTED_BY_TABLE: dict[str, tuple[str, ...]] = {
 }
 
 
+def _prop_reference_books() -> tuple[str, ...]:
+    """Every book a prop model uses as its DE-VIG REFERENCE, from the models.
+
+    DERIVED, NOT RETYPED, and that is the whole point. config.SHARP_BOOKMAKERS
+    defaults to "pinnacle" alone, so when betonlineag was added as a second
+    reference on 2026-09-08 the protection did not follow it -- the list that
+    decides what a model READS and the list that decides what SURVIVES were two
+    separate declarations, and only one of them was updated.
+
+    What that cost, measured 2026-09-08: `player_prop_odds` holds pinnacle NFL
+    prop rows only from 2026-04-01, and betonlineag NFL `open` rows only from
+    2026-09-09. Every earlier sharp snapshot -- the 2023-2025 history the
+    market-relative rule's entire record is measured on -- survives ONLY in the
+    tracked parquet at data/local/nfl_prop_odds.parquet. Refreshing that cache
+    from the database overwrote it with a board that had no 2025 sharp quotes at
+    all, and the rule promptly graded negative. The finding was an artefact of
+    the deletion, not a result.
+
+    Still live at the time of writing: the NCAAF season backfill's 13,821
+    betonlineag t24 rows (38,979 credits) sat unprotected in the same way.
+    """
+    try:
+        import models.nfl_prop_market as _nfl
+    except Exception:                                   # noqa: BLE001
+        return ()
+    return tuple(getattr(_nfl, "SHARP_BOOKS", ()) or ())
+
+
 def protected_for(table: str) -> tuple[str, ...]:
     """Every book that must survive pruning IN THIS TABLE."""
-    return PROTECTED_BOOKMAKERS + PROTECTED_BY_TABLE.get(table, ())
+    extra = PROTECTED_BY_TABLE.get(table, ())
+    if table == "player_prop_odds":
+        extra = extra + _prop_reference_books()
+    return PROTECTED_BOOKMAKERS + tuple(dict.fromkeys(extra))
 
 # Bookmaker PREFIXES that must also survive pruning. CFBD archive lines
 # (cfbd_draftkings, cfbd_bovada, cfbd_consensus, …) are historical TRAINING
