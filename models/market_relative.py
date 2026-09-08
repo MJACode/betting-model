@@ -49,10 +49,27 @@ class MarketBet:
 
 
 def implied(american) -> float | None:
-    """American price -> implied probability, vig included."""
+    """American price -> implied probability, vig included. None if absent.
+
+    NaN COUNTS AS ABSENT, and the `is None` check alone does not catch it.
+    A missing price arrives as None from psycopg2 but as float('nan') from the
+    pandas cache in data/local_store, which every backtest and sweep reads. NaN
+    then flows through arithmetic silently: implied(nan) is nan, devig returns
+    (nan, nan) instead of (None, None), the market is never counted as one-way,
+    and `nan >= min_edge` is False so the proposition vanishes from the board
+    without appearing in any diagnostic.
+
+    It does NOT manufacture bets -- every NaN comparison is False, so nothing
+    fake was ever selected -- but it made cache-based analysis quieter and
+    smaller than the thing it was measuring. Measured 2026-09-08: 49% of
+    betrivers' cached NFL prop rows and 38% of DraftKings' carry a NaN under
+    price, all of them legitimately one-way quotes.
+    """
     if american is None:
         return None
     x = float(american)
+    if x != x:                                    # NaN
+        return None
     return (100.0 / (x + 100.0)) if x > 0 else (abs(x) / (abs(x) + 100.0))
 
 
