@@ -52,7 +52,42 @@ CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
 # statement untouched), and the new rule was written as statement-plus-pointer
 # rather than statement-plus-story. That paid most of it; this raise is the
 # remainder. Same instinct next time: move evidence out first, raise second.
-MAX_BYTES = 38_000
+# 2026-09-07 (second raise the same day): 38,000 -> 46,000, and mike asked for
+# it as a number that stops firing rather than one that buys a day. "just
+# increase the claude limit, tired of this warning, just figure it out."
+#
+# THE WARNING WAS NOISE AND THE GROWTH WAS REAL, which is why the answer is a
+# bigger step and not another 1,000. Measured over one day:
+#
+#     35,739  the wind gate fix
+#     36,887  §00 promoted (guessing)
+#     36,998
+#     37,526  wind picks void-don't-delete
+#     37,613  artifact health check
+#     38,674  rollup verification
+#
+# Six commits, five of them promoting a genuine standing rule, ~500-1,000 bytes
+# each. At that rate every previous raise bought about a day, so the test fired
+# most days and started reading as a chore rather than a signal -- which is how
+# a tripwire stops being one.
+#
+# WHY A BIG STEP IS DEFENSIBLE HERE AND WAS NOT BEFORE. The mechanism that
+# actually bounds growth is no longer this number: the 21 area-specific rules
+# live in .claude/rules/ and load only when Claude opens a matching file, so a
+# new rule for one subsystem now costs a session that never touches it nothing.
+# This cap became a BACKSTOP against the 909 KB failure mode, not the daily
+# budget -- the comment below already said so on 2026-09-03 and the cap kept
+# being tuned as though it were the plan.
+#
+# 46,000 is ~11.5k tokens, about 5% of the 225k that caused the original split,
+# and leaves ~7 KB of headroom -- roughly ten rule promotions, i.e. weeks rather
+# than a day. It is also the level the file sat at before the 2026-09-03 trim,
+# so it is a return to a known-workable size rather than a new invention.
+#
+# THE ADVICE BELOW STILL STANDS and is not weakened by this: move evidence to
+# docs/rules_evidence.md first, raise second. What changed is that the raise is
+# no longer expected to be needed next week.
+MAX_BYTES = 46_000
 
 
 def _read(path: str) -> str:
