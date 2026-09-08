@@ -21,7 +21,8 @@ DEFINITIONS (fixed before any number was looked at)
   commence_time). One row per (game, d); games not yet listed at that
   instant are absent at that lead.
 - Close: DK's last pre-kick snapshot in the backfill — same book as the
-  leads. `archive` = the frame's `_total_line` (CFBD archive, Bovada
+  leads. The backfill holds 14:00Z and 23:00Z pulls only, so "close" is
+  the last of those before kickoff, up to ~10 hours early for a noon game. `archive` = the frame's `_total_line` (CFBD archive, Bovada
   priority), the number the published 55.9% was measured on; reported so
   the new table is anchored to the old one.
 - Grading: at the lead's line — the number you would have bet. d =
@@ -29,6 +30,8 @@ DEFINITIONS (fixed before any number was looked at)
 - Gate: the shipped 8.0, plus 6/7/9/10 so a plateau is visible.
 - Move toward model: (close − lead line) × sign(pick), in points. Positive
   = the market moved the way the model leaned by kickoff (CLV in points).
+- First cross: scans the 14:00Z snapshots only, then the close. Production
+  passes run more often, so this is a proxy for the §1c first-signal lock.
 - Join: odds game ids are the ingestor's (ET-dated) ids; night games carry a
   second CFBD (UTC-dated) row that holds the score. Odds rows are matched to
   frame rows on (season, home_team, away_team) with game_date within ±1 day.

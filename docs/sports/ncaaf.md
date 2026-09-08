@@ -86,7 +86,7 @@ its opening number, which is rarely true by kickoff.
   been measured. **Measured 2026-09-07** on the 2023-2025 DraftKings backfill
   (`scripts/ncaaf_search/totals_lead.py`, row in the search table below):
   graded at DK's 14:00Z line 0-5 days out, the ±8 rule runs 53.8-56.4% at
-  every lead against 56.4% at DK's close, every interval overlapping every
+  every lead against 56.4% at DK's close (its last 14:00Z/23:00Z pull before kickoff), every interval overlapping every
   other, and the close-minus-lead movement is ~0 points in the pick's
   direction at every lead — the market does not drift toward the model, so
   waiting buys nothing and going early costs nothing detectable at ~5pp.
