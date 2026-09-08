@@ -33,7 +33,7 @@ def _one(r):
 # ── cadence is derived, not declared ─────────────────────────────────────────
 
 def test_cadence_reads_a_daily_bar_off_the_dates():
-    assert sh._cadence_from_dates("2026-09-07", "2026-09-08") == "daily"
+    assert sh._cadence_from_dates("2026-09-07", "2026-09-08") == "once a day"
 
 
 def test_cadence_reads_a_same_day_bar():
@@ -56,7 +56,7 @@ def test_a_ts_check_reports_its_own_max_age():
     r = Report()
     r.ts_check(c, "odds_dk_lines", "CRIT", "odds", "snapshot_at", 6,
                gate_ok=False, gate_note="no games")
-    assert _one(r)["cadence"] == "every 6h"
+    assert _one(r)["cadence"] == "every 6 hours"
 
 
 def test_a_24h_ts_check_reads_as_daily():
@@ -64,7 +64,7 @@ def test_a_24h_ts_check_reads_as_daily():
     c.execute("CREATE TABLE odds (snapshot_at TEXT)")
     r = Report()
     r.ts_check(c, "x", "WARN", "odds", "snapshot_at", 24, gate_ok=False)
-    assert _one(r)["cadence"] == "daily"
+    assert _one(r)["cadence"] == "once a day"
 
 
 # ── reason is the one-word answer ────────────────────────────────────────────
@@ -91,7 +91,8 @@ def test_stale_data_and_an_empty_table_are_different_reasons():
     c.execute("INSERT INTO t VALUES ('2026-09-01')")
     r2 = Report()
     r2.date_check(c, "stale", "WARN", "t", "d", "2026-09-07")
-    assert _one(r2)["reason"] == sh.REASON_STALE_DATA
+    # The NUMBER, not the category: "6 days late" tells you whether to care.
+    assert _one(r2)["reason"] == "6 days late"
 
 
 def test_a_broken_query_is_its_own_reason():
@@ -123,7 +124,7 @@ def test_a_stuck_gate_is_not_reported_as_stale_data():
                 "reason": sh.REASON_GATE_SHUT, "cadence": "daily"}]
     sh._apply_skip_budgets(results, {"golf_odds": 400})
     assert results[0]["status"] == sh.STALE
-    assert results[0]["reason"] == sh.REASON_GATE_STUCK
+    assert results[0]["reason"] == "Never runs (400d)"
 
 
 # ── every row carries both, always ───────────────────────────────────────────
@@ -166,3 +167,39 @@ def test_the_column_ddl_is_gated():
     assert body.index("schema_is_current(conn") < body.index("ALTER TABLE"), (
         "the guard must be consulted before any ALTER runs"
     )
+
+
+# ── the wording rule ─────────────────────────────────────────────────────────
+
+def test_no_reason_is_jargon():
+    """mike, 2026-09-08: "the reason and status are meaningless, I dont know
+    what they mean." The first cut was my vocabulary -- "gate shut", "data
+    behind", "fresh". A column that needs a glossary is a column nobody reads,
+    which is the failure it was meant to fix.
+
+    The rule: a reason reads as plain English to someone who has never opened
+    this file. Pinned as sentence case and no internal nouns, because the drift
+    back to shorthand is what needs catching.
+    """
+    reasons = [v for k, v in vars(sh).items()
+               if k.startswith("REASON_") and isinstance(v, str)]
+    assert reasons
+    banned = {"gate", "stale", "skipped", "empty", "query", "null", "fresh"}
+    for r in reasons:
+        assert r[0].isupper(), f"{r!r} is not sentence case"
+        words = {w.strip(".,-()").lower() for w in r.split()}
+        # "Never runs" is the one survivor that names the mechanism, and only
+        # because the alternative ("stuck") says even less to a reader.
+        leaked = words & banned
+        assert not leaked, f"{r!r} still uses internal vocabulary: {sorted(leaked)}"
+
+
+def test_a_late_check_says_how_late():
+    assert sh._days_late("2026-09-04", "2026-09-07") == "3 days late"
+    assert sh._days_late("2026-09-06", "2026-09-07") == "1 day late"
+
+
+def test_days_late_falls_back_rather_than_lying():
+    """An unparseable date must not become "0 days late"."""
+    assert sh._days_late("not-a-date", "2026-09-07") == sh.REASON_STALE_DATA
+    assert sh._days_late("2026-09-08", "2026-09-07") == sh.REASON_STALE_DATA

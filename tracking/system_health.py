@@ -188,7 +188,7 @@ def _apply_skip_budgets(results: list, run_days: dict) -> None:
             res["status"] = STALE
             # NOT "data behind": nothing was read, so the data is not the
             # subject. The gate is.
-            res["reason"] = REASON_GATE_STUCK
+            res["reason"] = f"Never runs ({days}d)"
             res["detail"] = (
                 f"gate shut {days} days running, past this check's {budget}-day "
                 f"budget -- suspect the GATE, not the feed. Gate said: "
@@ -261,12 +261,33 @@ def _games_count(conn, sport, start, end, finals_only=False):
 # `detail` is a sentence and gets clamped in every table that renders it, so the
 # ANSWER to "why is this one skipped?" was three lines down inside a truncated
 # cell. These are the categories, short enough to be a column:
-REASON_GATE_SHUT   = "gate shut"        # the check declined to run -- see detail
-REASON_STALE_DATA  = "data behind"      # ran, and the freshness bar was missed
-REASON_NO_ROWS     = "table empty"      # ran, and the table had nothing at all
-REASON_QUERY_ERROR = "query failed"     # the check itself could not execute
-REASON_FRESH       = "fresh"            # passing
-REASON_GATE_STUCK  = "gate stuck"       # shut so long the GATE is the suspect
+# mike, 2026-09-08: "the reason and status are meaningless, I dont know what
+# they mean". He was right -- the first cut was my vocabulary, not a reader's:
+# "gate shut", "data behind", "fresh". A column that needs a glossary is a
+# column nobody reads, which is the whole failure this was supposed to fix.
+#
+# These are the replacements, and the rule is that each must be understandable
+# by someone who has never opened this file. Where a NUMBER is available it
+# goes in -- "3 days late" tells you whether to care; "data behind" does not.
+REASON_GATE_SHUT   = "Nothing to check"     # no games / no tournament in window
+REASON_NO_ROWS     = "No data at all"       # the table is empty
+REASON_QUERY_ERROR = "Check crashed"        # the check itself could not execute
+REASON_FRESH       = "Up to date"           # passing
+REASON_GATE_STUCK  = "Never runs"           # shut so long the GATE is the suspect
+REASON_STALE_DATA  = "Data is late"         # fallback when no number is available
+
+
+def _days_late(latest: str, expected: str) -> str:
+    """"3 days late", not "data behind" -- the number is what decides whether to care."""
+    from datetime import datetime as _dt
+    try:
+        gap = (_dt.strptime(expected[:10], "%Y-%m-%d")
+               - _dt.strptime(str(latest)[:10], "%Y-%m-%d")).days
+    except Exception:                                       # noqa: BLE001
+        return REASON_STALE_DATA
+    if gap <= 0:
+        return REASON_STALE_DATA
+    return "1 day late" if gap == 1 else f"{gap} days late"
 
 
 def _cadence_from_dates(min_date: str, run_date: str) -> str:
@@ -291,7 +312,7 @@ def _cadence_from_dates(min_date: str, run_date: str) -> str:
     gap = (today - start).days
     if gap <= 0:
         return "same day"
-    return "daily" if gap == 1 else f"every {gap} days"
+    return "once a day" if gap == 1 else f"every {gap} days"
 
 
 class HealthReport:
@@ -351,13 +372,13 @@ class HealthReport:
         else:
             self.add(check, STALE, severity,
                      f"latest {date_col} = {latest}, expected >= {min_date}", latest,
-                     reason=REASON_STALE_DATA, cadence=cadence)
+                     reason=_days_late(str(latest), min_date), cadence=cadence)
 
     def ts_check(self, conn, check, severity, table, ts_col, max_age_hours,
                  gate_ok=True, gate_note="no games in window"):
         """Generic 'MAX(ts_col) within max_age_hours of now' freshness check."""
-        cadence = (f"every {max_age_hours}h" if max_age_hours < 24
-                   else "daily" if max_age_hours == 24
+        cadence = (f"every {max_age_hours} hours" if max_age_hours < 24
+                   else "once a day" if max_age_hours == 24
                    else f"every {max_age_hours // 24} days")
         if not gate_ok:
             self.add(check, SKIPPED, severity, gate_note,
@@ -382,7 +403,9 @@ class HealthReport:
         else:
             self.add(check, STALE, severity,
                      f"last snapshot {age_h:.1f}h ago (max {max_age_hours}h)", latest,
-                     reason=REASON_STALE_DATA, cadence=cadence)
+                     reason=f"{age_h - max_age_hours:.0f} hours late"
+                            if age_h - max_age_hours >= 1 else "Just late",
+                     cadence=cadence)
 
 
 def _published_record_problems(rec: dict, daily: dict, live_start: str) -> list[str]:
