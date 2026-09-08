@@ -155,3 +155,48 @@ The hyperparameter leak. Closing it means 33 Optuna searches instead of 33
 fits — hours rather than minutes. It is worth doing only to sharpen a positive
 result, and there is no positive result to sharpen: the leak runs in the models'
 favour and they still lose.
+
+---
+
+## anytime_td, graded at last — the twelfth model
+
+Both backtests above silently omitted it. They require a two-way DraftKings
+quote so the price can be de-vigged, and anytime TD is **one-sided**: §5d
+measured 141,116 rows, 88.7% with no under price. So it sat live and unmeasured,
+the only one of the twelve never graded either way.
+`scripts/nfl_anytime_td_grade.py` closes that.
+
+Same walk-forward: weights refit per season on prior seasons only, 2023–2025,
+real pre-game DraftKings prices. **7,931 quoted player-games.**
+
+| | |
+|---|---|
+| actual TD rate | **28.6%** |
+| our mean P | 26.9% |
+| DK implied (vig included) | 31.9% |
+
+The model is close to reality — 1.7pp under, better calibrated than most of the
+family. **The book's margin is the +3.2pp gap between its price and the truth**,
+and on a 28.6% base rate that margin is 11% of the probability itself. This is
+the most heavily juiced market on the board.
+
+| min edge | bets | win% | ROI | 90% CI |
+|---|---|---|---|---|
+| 2pp | 127 | 33.1% | −9.01% | (−28.1, +10.7) |
+| 5pp | 57 | 29.8% | −10.70% | (−40.5, +20.4) |
+| 8pp | 24 | 20.8% | −25.62% | (−72.9, +27.7) |
+| **16pp (current cut)** | **5** | — | — | — |
+
+### The verdict is "inert", not "losing"
+
+At its live cut — p ≥ 0.37 and edge ≥ 0.16 — it fired **five times in three
+seasons**: 0 in 2023, 2 in 2024, 3 in 2025. The cut demands a 16pp edge on a
+market whose base rate is 28.6%, i.e. the model must believe 44%+ where the book
+prices 28%. That essentially never happens honestly.
+
+So it is not costing anything, and it is not contributing anything. Loosening it
+is what would cost: every cut with a usable sample is negative, which is what a
+3.2pp margin on a 28.6% event does to a well-calibrated model.
+
+**All twelve NFL prop models are now measured.** Ten lose, one (`tackles_assists`)
+is a measurement error, and this one does nothing.
