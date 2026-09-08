@@ -94,8 +94,9 @@ its opening number, which is rarely true by kickoff.
   from 5 days out): 384 bets at 55.7% [0.507, 0.606] vs 321 at 57.0%
   [0.515, 0.623] for game day — 20% more bets, 1.3pp lower, inside noise.
   Nothing at any lead, game day included, clears 0.5238 at 95% on these three
-  out-of-sample seasons. The opener rule has no limit: its own preconditions
-  are its window.
+  out-of-sample seasons. **Set to 5 on 2026-09-07 at Matt's call (PR #577);**
+  the pick locks at the first pass that clears the gate. The opener rule has
+  no limit: its own preconditions are its window.
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
   ~52 DK-priced — so the board is tens of games, not hundreds.
 
