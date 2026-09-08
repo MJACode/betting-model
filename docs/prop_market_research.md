@@ -186,6 +186,41 @@ this document and Circa is last.
 
 ---
 
+## 6b. BUILT: the ladder interpolator, and what it actually recovers
+
+Recommendations 1 and 2 are implemented (`models/prop_ladder.py`,
+`data/ingestors/kalshi_prop_ingestor.py`, `scripts/kalshi_ladder_probe.py`).
+**Measured against the live NFL board, 2026-09-08:**
+
+| | quotes | share |
+|---|---|---|
+| soft-book quotes | 2,707 | |
+| priced now (a sharp reference on the SAME line) | 1,825 | 67.4% |
+| a Kalshi ladder can price | 791 | 29.2% |
+| **RECOVERED - priceable only via the ladder** | **301** | **11.1%** |
+
+That is **+16.5% more priceable propositions**, and it is concentrated:
+
+| market | soft | priced now | via ladder | recovered |
+|---|---|---|---|---|
+| `player_reception_yds` | 779 | 483 | 366 | **+123** |
+| `player_rush_yds` | 362 | 223 | 227 | **+87** |
+| `player_pass_yds` | 159 | 64 | 144 | **+87** |
+| `player_rush_reception_yds` | 139 | 0 | 4 | +4 |
+| `player_receptions` | 641 | 558 | **0** | 0 |
+| `player_rush_attempts` | 175 | 120 | **0** | 0 |
+| `player_pass_completions` | 96 | 91 | **0** | 0 |
+
+`player_pass_yds` more than doubles (64 to 151 priceable). But **Kalshi runs no
+receptions, attempts or completions market at all**, and those are ~40% of our
+soft board, so this is a real and bounded gain rather than a transformation.
+
+**It is deliberately NOT wired into scoring.** Kalshi's NFL prop settled history
+reaches back only to 2026 preseason, so there is no record to validate a
+reference against, and Pinnacle only became one after a placebo on three
+seasons. The immediate next step is a recording job so that history starts
+accumulating; grading follows it, and production wiring follows the grade.
+
 ## 7. Ranked recommendations
 
 | # | Action | Cost | Why |
