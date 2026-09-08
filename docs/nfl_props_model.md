@@ -655,6 +655,35 @@ rises.** The threshold is untouched — 5pp remains pre-committed per §5c, and 
 configurations plateau at 5–6pp rather than peaking (EITHER runs +1.96 / +5.06 /
 +8.91 / +10.04 at 3/4/5/6pp on the standalone grader).
 
+### Two more shapes tried and closed, so nobody re-runs them
+
+**A hold-scaled cut instead of the flat 5pp.** The idea was that markets with
+different vig should demand different edges. They do not differ: measured across
+the full sample on the soft books we actually bet, every market's hold sits
+between **7.07% and 7.76%** — a range of 0.7pp, i.e. flat.
+
+That corrects a figure quoted on 2026-09-07 as "hold runs 5.7% to 24.3% by
+market". It was measured on ~250 propositions from one live board where `sacks`
+had **two** samples and `pass_tds` fourteen. On the real sample there is nothing
+to scale, and scaling confirms it:
+
+| rule | bets | ROI | 90% CI |
+|---|---|---|---|
+| **flat 5pp (shipped)** | **832** | **+8.91%** | (+3.3, +14.4) |
+| hold-scaled k=1.0 (≈3.6pp) | 2,772 | +3.50% | (+0.4, +6.5) |
+| hold-scaled k=1.5 (≈5.3pp) | 570 | +7.14% | (+0.4, +13.8) |
+| hold-scaled k=2.0 (≈7.1pp) | 49 | — | thin |
+
+k=1.5 lands within 0.3pp of the flat cut and does slightly worse. **5pp is
+already the right number**, which is what a pre-committed threshold surviving a
+principled challenge looks like.
+
+**Trimming the soft books by contribution.** Under the two-reference rule every
+one of the eight is positive, so there is nothing to cut: DraftKings +25.7%
+(70 bets) and ESPN BET +27.7% (57) lead, `fliff` contributes +0.09 units on 119
+bets, and every CI overlaps heavily. Picking the top two would be exactly the
+peak-chasing §7 forbids.
+
 ### The intuitive version is the one that loses
 
 An OR, not an AND. Requiring **both** references to disagree looks like stronger
