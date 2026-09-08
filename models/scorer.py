@@ -400,12 +400,12 @@ def score_game(conn: DBConnection,
         away_prob = 1.0 - home_prob
 
         # Lead guard — see config.NCAAF_TOTALS_MAX_LEAD_DAYS. The look-ahead
-        # window exists so the BOARD is populated all week; this rule was only
-        # ever validated against the archive's stored line, so it still fires
-        # on game day and merely watches before it.
+        # window exists so the BOARD is populated all week; the rule fires
+        # inside the measured lead and merely watches before it.
         lead = _days_until(commence_time)
         if lead is not None and lead > NCAAF_TOTALS_MAX_LEAD_DAYS:
-            no_signal = f"watching — prices on game day ({lead:.0f}d out)"
+            no_signal = (f"watching — totals fire within "
+                         f"{NCAAF_TOTALS_MAX_LEAD_DAYS:.0f}d of kickoff ({lead:.0f}d out)")
 
         # Enforce the VALIDATED SYMMETRIC gate here rather than relying on a
         # single probability floor to imply it.
