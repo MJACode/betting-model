@@ -1116,14 +1116,26 @@ def run_system_health(run_date: str | None = None) -> dict:
         # duplicate on Saturday's card splits this week's odds. Nothing here
         # gates on the feed being healthy, so a dead feed cannot silence it
         # (.claude/rules/operations.md).
+        #
+        # Bounded to an FBS home team as well, because that is the set the
+        # models score and therefore the set where a split costs something.
+        # `ncaaf_teams` carries 683 schools across every classification, so
+        # without this the check reports Division III fixtures forever: on
+        # 2026-09-08 the only survivor of the cleanup was Bluffton, "Madonna"
+        # vs "Madonna University (Mich.)", where NEITHER name is in the registry
+        # so there is no canonical id to merge onto and nothing prices the game.
+        # A check nobody can action is the noise this whole exercise was about.
         try:
             slots = conn.execute("""
-                SELECT game_date, home_team, COUNT(*) AS n
-                FROM games
-                WHERE sport = 'NCAAF' AND game_date >= ? AND game_date <= ?
-                GROUP BY game_date, home_team
+                SELECT g.game_date, g.home_team, COUNT(*) AS n
+                FROM games g
+                WHERE g.sport = 'NCAAF' AND g.game_date >= ? AND g.game_date <= ?
+                  AND EXISTS (SELECT 1 FROM ncaaf_teams t
+                               WHERE t.school = g.home_team
+                                 AND t.classification = 'fbs')
+                GROUP BY g.game_date, g.home_team
                 HAVING COUNT(*) > 1
-                ORDER BY COUNT(*) DESC, game_date
+                ORDER BY COUNT(*) DESC, g.game_date
             """, (run_date, (d + timedelta(days=9)).strftime("%Y-%m-%d"))).fetchall()
             if slots:
                 worst = "; ".join(f"{row[0]} {row[1]} x{row[2]}" for row in slots[:4])
