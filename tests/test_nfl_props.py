@@ -1503,14 +1503,27 @@ def test_the_soft_book_set_is_the_one_the_sweep_endorses():
     Both positive, both excluding zero. The trade is total units against
     risk-adjusted return, not whether breadth works, and mike took the volume
     side with those numbers in front of him.
+
+    espnbet LEFT the set on 2026-09-08, and that is not a reversal of the above.
+    mike removed it from the bettable list on 2026-09-03 ("remove william hill
+    and espn bet (shut down last year)"); it was dropped from
+    BEST_LINE_BOOKMAKERS and left here, so the rule kept naming it as the book
+    to bet at. Honouring the instruction cost -0.24 units over three seasons and
+    IMPROVED ROI +9.83% -> +10.19%. The statistical criteria never rejected it;
+    bettability did, which is clause zero of the sweep.
     """
+    import config
     import models.nfl_prop_market as mkt
 
     assert set(mkt.SOFT_BOOKS) == {
-        "draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
+        "draftkings", "fanduel", "betmgm", "williamhill_us",
         "betrivers", "fliff", "hardrockbet",
     }, mkt.SOFT_BOOKS
     assert mkt.SHARP_BOOK not in mkt.SOFT_BOOKS
+    assert "espnbet" not in mkt.SOFT_BOOKS, (
+        "espnbet is excluded from BEST_LINE_BOOKMAKERS on mike's instruction; a "
+        "soft book IS the side we take, so it cannot be named here")
+    assert all(b in config.BEST_LINE_BOOKMAKERS for b in mkt.SOFT_BOOKS)
 
 
 def test_fliff_is_fetched_or_it_contributes_nothing():

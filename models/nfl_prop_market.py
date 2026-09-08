@@ -53,12 +53,31 @@ SHARP_MARKETS = (
 # MARKET_BOOKS. Do it only after scripts/nfl_prop_book_sweep has graded it: a
 # book that adds volume and loses money is worse than one that adds nothing.
 SOFT_BOOKS = (
-    "draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
+    "draftkings", "fanduel", "betmgm", "williamhill_us",
     # Added 2026-09-07 (mike: "add another 2-3 soft books"). These are exactly
     # the three scripts/nfl_prop_book_sweep endorses -- each clears volume,
     # sign, coverage and non-dilution on its own.
     "betrivers", "fliff", "hardrockbet",
 )
+
+# espnbet was HERE until 2026-09-08 and should not have been. mike, 2026-09-03:
+# "remove william hill and espn bet (shut down last year)". That was applied to
+# BEST_LINE_BOOKMAKERS -- the list answering "where should the bettor place
+# this?" -- and never to this one, so for five days the rule went on naming
+# espnbet as the book to bet at while every other surface treated it as
+# unbettable. A soft book IS the side we take; being absent from the bettable
+# list is disqualifying here in a way it is not for a reference.
+#
+# It cost nothing to honour: measured on the `open` board at the 5pp cut,
+# dropping it takes 648 bets -> 623 and +63.72u -> +63.48u, i.e. -0.24 units
+# across three seasons, while ROI IMPROVES +9.83% -> +10.19% and the interval
+# tightens (+3.6, +16.0) -> (+3.7, +16.5). Twenty-five bets that were barely
+# break-even, at a book the reader was not going to use.
+#
+# The guard is scripts/nfl_prop_book_sweep's clause zero plus
+# tests/test_book_sweep_bettability.py, which asserts every SOFT_BOOKS entry is
+# in BEST_LINE_BOOKMAKERS. That test FAILED on the live config when written --
+# this drift was already shipped.
 
 # WHAT THIS TRADE ACTUALLY IS, because §5c rejected the same change once and the
 # reversal should not look like an oversight. Measured on the same three seasons:
