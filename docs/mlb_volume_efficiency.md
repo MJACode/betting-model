@@ -888,3 +888,78 @@ Found, not fixed.
 - **The control now gates the tables.** It used to print beside them, and on
   2026-09-07 the tables were read and acted on with 13 games missing. The run
   exits 2 and prints nothing unless `--force`.
+
+---
+
+## 14. `mlb_live_total_runs` moves 12.8 points on a rounding error (2026-09-08)
+
+§13.2 reported a 19-point probability swing from one game. mike: *"yes do all
+4."* This is the distribution behind that anecdote, measured across every live
+BET with `scripts/live_feature_sensitivity.py`.
+
+### 14.1 The measurement
+
+For each settled live BET: take the live state at the moment production picked,
+keep the pick's **own** line and price, and recompute the model's probability
+with the team-stats snapshot from the game date, one day earlier, and two days
+earlier. State, weather, line and price are byte-identical across the three
+runs — only the six season-to-date stats features move.
+
+**60 games:**
+
+| | swing in `p_over` |
+|---|---|
+| median | **0.1281** |
+| mean | 0.1714 |
+| p90 | 0.3375 |
+| max | 0.4864 |
+
+| threshold | games |
+|---|---|
+| swing > 2% | 59 / 60 (98%) |
+| swing > 5% | 55 / 60 (92%) |
+| swing > 10% | 41 / 60 (68%) |
+| swing > 20% | 22 / 60 (37%) |
+
+### 14.2 What the inputs actually did
+
+Across **720 team-days** since 2026-08-15, a team's season-to-date ERA moves by
+a mean of **0.0164 per day** (max 0.12), and `runs_last_10` by **0.295** (max
+1.8). These are rounding-level movements in season aggregates — 140-odd games
+in, one more game barely shifts them.
+
+**So the model's over probability moves a median of 12.8 points in response to
+inputs that move by hundredths.** The swing is not information arriving; it is
+the model amplifying noise.
+
+### 14.3 Why this outranks the inning gate
+
+`mlb_live_total_runs` decides on `min_prob 0.70` and `min_edge 0.14`. **A 12.8pp
+median swing is comparable to the entire decision margin.** Whether a given game
+becomes a BET is substantially determined by which day's stats snapshot the
+loop's in-process cache happened to freeze — which is why 14 games could not be
+reproduced at all, and why the same pick reads 0.53 or 0.72 depending on nothing
+that concerns the game.
+
+This is the most plausible mechanical account of **claims ~73%, delivers ~54%**
+(§11.2), and it makes several earlier results conditional:
+
+- **A threshold sweep on this model is measuring the cache as much as the
+  model.** The n=150 re-sweep in `docs/thresholds.md` should be read with that
+  in mind.
+- **The inning gate was never the fix.** A gate reorders which unstable
+  probability fires first; it does not make it stable.
+
+### 14.4 What this does NOT establish
+
+- **Not that the other MLB models share it.** They use the same season-to-date
+  features, so the same probe should be pointed at them, but that has not been
+  done — CLAUDE.md §1b says assess a change against all of them, and this is the
+  measurement half of that, not the conclusion.
+- **Not a cause.** Whether it is the features (season aggregates that carry
+  little signal at this point in a season), the target (remaining runs from a
+  full-game-trained head), or the fit, is not established here.
+- **Not a recommendation to pause.** The model's settled record on its current
+  cut is −1.26u over 70 (z −0.12) — indistinguishable from zero, which is
+  exactly what a model driven by input noise would look like, but it is not on
+  its own grounds to stop it. That is mike's call.
