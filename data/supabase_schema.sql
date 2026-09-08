@@ -2435,6 +2435,16 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --                        -- floor on the acceptable DK price (American). NULL = no
 --                        -- floor. Mirrors config.MODEL_MIN_ODDS (-140 on
 --                        -- pitcher_k / batter_rbi / batter_walks / batter_runs).
+--     scoring_method text NOT NULL DEFAULT 'artifact',
+--                        -- 2026-09-07: how the model produces its number, so a
+--                        -- reader knows whether a MISSING model_registry row is
+--                        -- a fault or the design. 'artifact' (a registry row is
+--                        -- expected), 'rule' (a frozen rule -- no ML artifact
+--                        -- exists anywhere), 'engine' (trained, but the artifact
+--                        -- lives outside the registry). Mirrors
+--                        -- config.SCORING_METHODS; added and written by
+--                        -- data/threshold_sync.py, which gates the ALTER on
+--                        -- data.ddl_guard.schema_is_current.
 --     updated_at timestamptz NOT NULL DEFAULT now());
 --   ALTER TABLE model_action_thresholds ENABLE ROW LEVEL SECURITY;
 --   CREATE POLICY "anon read model_action_thresholds"
