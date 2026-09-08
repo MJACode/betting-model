@@ -139,3 +139,66 @@ def test_interpolation_stays_a_probability_across_a_wide_gap():
     assert all(a >= b - 1e-12 for a, b in zip(ps, ps[1:]))
     assert ps[0] == pytest.approx(0.20, abs=1e-9)
     assert ps[-1] == pytest.approx(0.03, abs=1e-9)
+
+
+# --- one-sided book ladders, and the anchoring that makes them usable --------
+
+def test_a_one_sided_ladder_is_vigged_and_says_so():
+    """Every alternate quote a sportsbook posts is over-only -- 98,036 of 98,036
+    `player_reception_yds_alternate` rows. So implied() on those prices is
+    inflated by the margin, and the raw ladder must NOT be read as fair."""
+    from models.prop_ladder import from_one_sided_overs
+
+    lad = from_one_sided_overs([(199.5, -250), (224.5, -160), (249.5, 110),
+                                (274.5, 190), (299.5, 320)])
+    assert lad.usable
+    # The vigged survival at the middle rung is above the de-vigged truth we
+    # will anchor to below; that gap IS the margin.
+    assert lad.p_over(249.5) > 0.44
+
+
+def test_anchoring_moves_the_ladder_onto_an_honest_point():
+    from models.prop_ladder import from_one_sided_overs
+
+    lad = from_one_sided_overs([(199.5, -250), (224.5, -160), (249.5, 110),
+                                (274.5, 190), (299.5, 320)])
+    anc = lad.anchored(249.5, 0.44)
+    assert anc is not None
+    assert anc.p_over(249.5) == pytest.approx(0.44, abs=1e-9)
+    # Every other rung moves the same direction, and none escapes (0, 1).
+    for x in (199.5, 224.5, 274.5, 299.5):
+        assert 0.0 < anc.p_over(x) < 1.0
+        assert anc.p_over(x) < lad.p_over(x), "de-vigging must lower the ladder"
+
+
+def test_anchoring_preserves_the_ordering():
+    """A logit SHIFT cannot reorder the rungs; a probability SCALE could, near
+    the top of the ladder, and could also push a rung past 1.0."""
+    from models.prop_ladder import from_one_sided_overs
+
+    lad = from_one_sided_overs([(10.5, -2000), (20.5, -600), (30.5, -200),
+                                (40.5, 120), (50.5, 400)])
+    anc = lad.anchored(30.5, 0.60)
+    xs = [10.5, 20.5, 30.5, 40.5, 50.5]
+    ps = [anc.p_over(x) for x in xs]
+    assert all(a >= b - 1e-12 for a, b in zip(ps, ps[1:]))
+    assert all(0.0 < p < 1.0 for p in ps)
+    assert max(ps) < 1.0, "a near-certain rung must not be scaled past certainty"
+
+
+def test_anchoring_refuses_when_the_anchor_is_outside_the_ladder():
+    """No extrapolation, and no silently un-levelled ladder either."""
+    from models.prop_ladder import from_one_sided_overs
+
+    lad = from_one_sided_overs([(199.5, -250), (224.5, -160), (249.5, 110)])
+    assert lad.anchored(500.0, 0.44) is None
+    assert lad.anchored(249.5, 0.0) is None
+    assert lad.anchored(249.5, 1.0) is None
+
+
+def test_a_thin_one_sided_ladder_cannot_be_anchored():
+    from models.prop_ladder import from_one_sided_overs
+
+    lad = from_one_sided_overs([(199.5, -250), (224.5, -160)])
+    assert not lad.usable
+    assert lad.anchored(210.0, 0.5) is None
