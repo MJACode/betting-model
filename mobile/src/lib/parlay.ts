@@ -591,6 +591,25 @@ function handoffFrom(q: BetslipBookQuote, legs: ParlayLeg[]): Handoff {
   };
 }
 
+/**
+ * The hand-off at a book the member NAMED — a tile they tapped in "Open with",
+ * which is now the betslip's bet control (Matt, 2026-09-08).
+ *
+ * No fallback, deliberately. `handoffBookFor` swaps in DraftKings when the
+ * member's stored preference cannot price the slip, because that button had to
+ * pick a book on its own and "Bet on FanDuel" must never open a slip FanDuel
+ * cannot take. A tapped tile is not a guess: it already shows that book's own
+ * odds, or `N/M legs` when it prices only some, so opening anything else would
+ * be answering a different question than the one the tap asked.
+ */
+export function handoffAtBook(legs: ParlayLeg[], book: string): Handoff {
+  const [q] = priceBooksForParlay(legs, 1, [book]);
+  if (!q) {
+    return { book, links: legs.map(() => null), posted: legs.map(() => false), priced: 0, total: legs.length };
+  }
+  return handoffFrom(q, legs);
+}
+
 export function handoffBookFor(
   legs: ParlayLeg[],
   preferredBooks: readonly string[],

@@ -20,11 +20,10 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/types';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
-import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { BetslipBooksRow } from '@/components/BetslipBooksRow';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
-import { betOnBookLabel, bookButtonColors, DK_GREEN } from '@/lib/sportsbookLinks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
@@ -38,14 +37,11 @@ import {
 } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
-import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
-  handoffBookFor,
   isValidCombo,
   lineShopParlay,
   makeCustomLeg,
-  matchupForLeg,
   parlayRecommendedUnits,
   type LineShop,
   type ParlayLeg,
@@ -57,7 +53,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, bookName, booksName, MODEL_BOOK } from '@/lib/markets';
+import { bookLabel, bookName } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -426,24 +422,30 @@ export function ParlayScreen() {
 }
 
 /**
- * Save-for-later + sportsbook hand-off, shared by the Optimize result card and
- * the manual builder.
+ * Save-for-later, shared by the Optimize result card and the manual builder.
  *
- * THE BUTTON IS THE USER'S OWN BOOK (Matt, 2026-09-04): "the parlay button …
- * should change to match the Sportsbook the user selects as their preferred."
- * Placing a bet is the one thing the member does at THEIR book, so the button
- * that sends them there follows their pick — the Stats board's line pill and
- * this button now read the same setting.
+ * IT USED TO CARRY THE BET BUTTON TOO, AND NO LONGER DOES (Matt, 2026-09-08):
+ * "why does it say bet DK at the bottom when we give the user the ability to
+ * bet with multiple sportsbooks". The green button named ONE book — the
+ * member's own, or DraftKings when theirs could not take the slip (his
+ * 2026-09-04 call) — 40pt under an "Open with" row that already prices the slip
+ * at every bettable book and ranks them by payout. Two controls for one action,
+ * and the smaller one was the one that showed the prices.
  *
- * It is only the hand-off. The slip is still PRICED and modeled at DraftKings
- * (§6), and the "Open with" row above still ranks every bettable book by
- * payout, so a better price is always one tap away.
+ * So the tiles ARE the bet button now: tapping one opens the leg-by-leg
+ * hand-off sheet for that book, which is exactly what the green button did, at
+ * the price the tile is showing. The member picks the book instead of the app
+ * picking it for them — which is the guess the preferred-book fallback existed
+ * to cover for.
  *
- * `handoffBookFor` falls back to DraftKings when their book does not price
- * every leg — "Bet on FanDuel" must never open a slip FanDuel cannot take.
- * No book has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
+ * Save is a secondary action and now sits with the other slip-level ones below
+ * the card, so the card ends on the legs.
+ *
+ * The slip is still PRICED and modeled at DraftKings (§6) wherever it is
+ * placed — the "Priced at DraftKings" note above says so, and the sheet's own
+ * odds are the chosen book's.
  */
-function ParlayActions({
+function ParlaySaveButton({
   legs,
   sport,
   editingId,
@@ -461,45 +463,6 @@ function ParlayActions({
   onSaved: (id: string) => void;
 }) {
   const { save, update } = useSavedParlays();
-  const [handoffOpen, setHandoffOpen] = useState(false);
-  // `ready` gates the button: the hook seeds to DraftKings and resolves storage
-  // in an effect, so without it a FanDuel member sees a green "Bet on
-  // DraftKings" for a frame — and a tap landing in that window hands off to the
-  // wrong book with no way to tell (UX review).
-  const { books: preferredBooks, ready: bookReady } = usePreferredBooks();
-
-  const handoff = useMemo(
-    () => handoffBookFor(legs, preferredBooks),
-    [legs, preferredBooks],
-  );
-  // None of their books could take the whole slip, so the button is opening DK
-  // instead. A STATE, not a standing pricing note — it renders only when the
-  // app has just overridden the member's own choice on a money-moving action.
-  const fellBack = bookReady && !(preferredBooks as readonly string[]).includes(handoff.book);
-  // The slip is PRICED at DraftKings but this button opens somewhere else, and
-  // "Potential payout" is 40pt above it. Still a state and not the standing
-  // note Matt removed: with DraftKings taking the slip — the common case —
-  // nothing renders (UX review).
-  const opensElsewhere = bookReady && handoff.book !== MODEL_BOOK;
-  const btnColors = bookButtonColors(handoff.book);
-
-  const handoffLegs: HandoffLeg[] = useMemo(
-    () =>
-      legs.map((l, i) => ({
-        key: String(l.pickId),
-        label: l.label,
-        matchup: matchupForLeg(l.game),
-        americanOdds: l.americanOdds,
-        betLink: handoff.links[i] ?? null,
-        posted: handoff.posted[i] ?? true,
-      })),
-    [legs, handoff],
-  );
-  // No book prices every leg — a Stats line leg DraftKings never posted, on a
-  // slip another book cannot complete. The button opens the book covering the
-  // most, and says how many, so nobody taps a green button into a slip that
-  // book cannot take (UX review).
-  const partial = bookReady && handoff.priced < handoff.total;
 
   /**
    * Save is an INSERT once and an UPDATE thereafter.
@@ -546,88 +509,21 @@ function ParlayActions({
   if (legs.length === 0) return null;
 
   return (
-    <>
-      <View style={styles.parlayActions}>
-        <Pressable
-          onPress={onSave}
-          accessibilityRole="button"
-          accessibilityLabel={editingId ? 'Update saved parlay' : 'Save parlay'}
-          style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}
-        >
-          <Ionicons
-            name={editingId ? 'bookmark' : 'bookmark-outline'}
-            size={18}
-            color={colors.tint}
-          />
-          <Text style={styles.saveBtnText}>{editingId ? 'Update parlay' : 'Save parlay'}</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setHandoffOpen(true)}
-          disabled={!bookReady}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !bookReady }}
-          accessibilityLabel={
-            fellBack
-              ? `${betOnBookLabel(handoff.book)}. ${booksName(preferredBooks)} ${preferredBooks.length === 1 ? 'does' : 'do'} not price every leg.`
-              : betOnBookLabel(handoff.book)
-          }
-          style={({ pressed }) => [
-            styles.dkBtn,
-            { backgroundColor: btnColors.bg },
-            (pressed || !bookReady) && styles.pressed,
-          ]}
-        >
-          <Ionicons name="open-outline" size={18} color={btnColors.fg} />
-          <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
-            {betOnBookLabel(handoff.book)}
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* The mode itself is stated in the subtitle and on the button — no
-          standing caption here, which would render forever under an ordinary
-          save and stack with the hand-off captions below. What DOES belong
-          here is the loss: updating writes the shorter slip over the save.
-          Shaped like the same-game warning above, because colour alone is not
-          a signal — colors.med measures 2.20:1 on this card, half the AA
-          floor, so the tint, the icon and the wording all have to carry it. */}
-      {editingId && droppedCount > 0 ? (
-        <View style={[styles.warnBanner, styles.updateWarn]}>
-          <Ionicons name="warning-outline" size={16} color={colors.med} />
-          <Text style={styles.warnText}>
-            {droppedCount} leg{droppedCount === 1 ? '' : 's'}{' '}
-            {droppedCount === 1 ? 'is' : 'are'} no longer on the board —
-            “Update parlay” saves this slip without {droppedCount === 1 ? 'it' : 'them'}.
-          </Text>
-        </View>
-      ) : null}
-
-      {partial ? (
-        <Text style={styles.handoffFallback}>
-          {bookName(handoff.book)} prices {handoff.priced} of {handoff.total} legs — add the
-          rest at a book that posts them
-        </Text>
-      ) : fellBack ? (
-        <Text style={styles.handoffFallback}>
-          {booksName(preferredBooks)} {preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price
-          every leg — opening {bookName(handoff.book)}
-        </Text>
-      ) : opensElsewhere ? (
-        <Text style={styles.handoffFallback}>
-          Priced at DraftKings · opening {bookName(handoff.book)}
-        </Text>
-      ) : null}
-
-      {/* Sibling, not a child of the row: parlayActions is flexDirection row
-          with a gap, and a Modal that ever became a layout participant would
-          open one. */}
-      <ParlayDkHandoff
-        visible={handoffOpen}
-        legs={handoffLegs}
-        book={handoff.book}
-        onClose={() => setHandoffOpen(false)}
+    <Pressable
+      onPress={onSave}
+      accessibilityRole="button"
+      accessibilityLabel={editingId ? 'Update saved parlay' : 'Save parlay'}
+      style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
+    >
+      <Ionicons
+        name={editingId ? 'bookmark' : 'bookmark-outline'}
+        size={18}
+        color={colors.tint}
       />
-    </>
+      <Text style={styles.gridBtnText} numberOfLines={1}>
+        {editingId ? 'Update parlay' : 'Save parlay'}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -635,6 +531,17 @@ function ParlayActions({
  * Honest framing on every parlay: books love parlays because they stack hold
  * (~15-25% vs ~5% on straights). We only build +EV combos, but we say so plainly
  * and warn hard when the combined EV is negative.
+ *
+ * ONE LINE ON THE CARD, THE REST BEHIND A TAP (Matt, 2026-09-08). This was a
+ * five-line paragraph — on a negative slip, five lines of red between the Open
+ * with row and the legs, pushing the legs themselves off a small screen. The
+ * paragraph was right; its PLACEMENT was the cost. So the claim the reader must
+ * not miss stays on the card ("Negative EV — straight bets are better value"),
+ * and the reasoning, the hold numbers and the DraftKings pricing note move into
+ * the tooltip body.
+ *
+ * The summary is never a teaser: a reader who never taps "Details" has still
+ * been told not to place the slip. That is the test for changing this copy.
  */
 function ParlayHoldNote({
   ev,
@@ -657,22 +564,25 @@ function ParlayHoldNote({
   const priced = exception
     ? `Priced at DraftKings, except ${exception}.`
     : 'Every leg is priced at DraftKings — that’s the book the models score against, whichever book you bet at.';
+  const body = negative
+    ? modelBacked
+      ? `The books’ parlay hold outweighs the model’s edge here, so this slip prices worse than the straight bets behind it.\n\n${priced}`
+      : `These are your own lines at the books’ own prices, so the parlay hold is the whole story — no model edge is offsetting it.\n\n${priced}`
+    : modelBacked
+      ? `${priced}\n\nParlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats the price.`
+      : `${priced}\n\nThese are your own lines, priced at what the book is offering — no model has an opinion on them. Parlays carry far more hold (~15–25%) than straight bets (~5%).`;
   return (
-    <View style={[styles.holdNote, negative && styles.holdNoteBad]}>
-      <Ionicons
-        name={negative ? 'warning-outline' : 'information-circle-outline'}
-        size={14}
-        color={negative ? colors.avoid : colors.textTertiary}
+    <View style={styles.holdNote}>
+      <InfoTooltip
+        tone={negative ? 'warn' : 'info'}
+        title={negative ? 'Negative EV' : 'How this slip is priced'}
+        label={
+          negative
+            ? 'Negative EV — straight bets are better value'
+            : `${exception ? 'Where each leg is priced' : 'Priced at DraftKings'} · parlay hold`
+        }
+        body={body}
       />
-      <Text style={[styles.holdNoteText, negative && styles.holdNoteTextBad]}>
-        {negative
-          ? modelBacked
-            ? `Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value. ${priced}`
-            : `Negative EV — these are your own lines at the books’ own prices, so the parlay hold is the whole story. Straight bets are the better value. ${priced}`
-          : modelBacked
-            ? `${priced} Parlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats the price.`
-            : `${priced} These are your own lines, priced at what the book is offering — no model has an opinion on them. Parlays carry far more hold (~15–25%) than straight bets (~5%).`}
-      </Text>
     </View>
   );
 }
@@ -762,7 +672,8 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
       </View>
       <Text style={styles.corrHint}>
         {lineShop.shoppedCount} leg{lineShop.shoppedCount === 1 ? '' : 's'} priced better at {books}.
-        Display-only — the odds above are DraftKings’. Tap a book in Open with to place at its price.
+        Display-only — the odds above are DraftKings’. Tap that book in “Place this bet at” to
+        take its price.
       </Text>
     </View>
   );
@@ -943,37 +854,70 @@ function SlipBody({
             <ParlayLegCard key={leg.pickId} leg={leg} onRemove={() => onRemove(leg.pickId)} />
           ))}
         </View>
+      </View>
 
-        <ParlayActions
+      {/* The loss, stated before the tap: updating writes the shorter slip over
+          the save, and there is no undo. Shaped like the same-game warning
+          above, because colour alone is not a signal — colors.med measures
+          2.20:1 here, half the AA floor, so the tint, the icon and the wording
+          all have to carry it. Above the grid, not inside it: a full-width
+          banner as a fifth grid cell splits the two rows apart. */}
+      {editingId && staleCount + removedCount > 0 ? (
+        <View style={styles.warnBanner}>
+          <Ionicons name="warning-outline" size={16} color={colors.med} />
+          <Text style={styles.warnText}>
+            {staleCount + removedCount} leg{staleCount + removedCount === 1 ? '' : 's'}{' '}
+            {staleCount + removedCount === 1 ? 'is' : 'are'} no longer on the board —
+            “Update parlay” saves this slip without{' '}
+            {staleCount + removedCount === 1 ? 'it' : 'them'}.
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Two-up, not four stacked full-width rows. These are the slip's
+          SECONDARY actions — the bet itself is the Open with row inside the
+          card — and four of them stacked was ~200pt of chrome under a card the
+          user is trying to read. Save joined them when the green bet button
+          left (Matt, 2026-09-08); at half width the four fit in the height two
+          used to take. */}
+      <View style={styles.manualActions}>
+        <ParlaySaveButton
           legs={legs}
           sport={sport}
           editingId={editingId}
           droppedCount={staleCount + removedCount}
           onSaved={onSaved}
         />
-      </View>
-
-      <View style={styles.manualActions}>
         <Pressable
           onPress={onFindPlayers}
-          style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
         >
           <Ionicons name="search" size={18} color={colors.tint} />
-          <Text style={styles.addCustomBtnText}>Find more players</Text>
+          <Text style={styles.gridBtnText} numberOfLines={1}>
+            Find players
+          </Text>
         </Pressable>
         <Pressable
           onPress={onAddCustom}
-          style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
         >
           <Ionicons name="create-outline" size={18} color={colors.tint} />
-          <Text style={styles.addCustomBtnText}>Add a custom leg</Text>
+          <Text style={styles.gridBtnText} numberOfLines={1}>
+            Custom leg
+          </Text>
         </Pressable>
         <Pressable
           onPress={onClear}
-          style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Clear betslip"
+          style={({ pressed }) => [styles.gridBtn, styles.clearGridBtn, pressed && styles.pressed]}
         >
           <Ionicons name="trash-outline" size={18} color={colors.avoid} />
-          <Text style={styles.clearBtnText}>Clear betslip</Text>
+          <Text style={[styles.gridBtnText, styles.clearBtnText]} numberOfLines={1}>
+            Clear slip
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -1131,9 +1075,40 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
   },
+  // Two-up grid for the slip's secondary actions. `flexBasis` with a gap
+  // rather than a percentage width: '48%' plus a gap overflows at the
+  // narrowest widths, and a fifth cell would silently start a third row.
   manualActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
     marginBottom: spacing.lg,
   },
+  gridBtn: {
+    flexGrow: 1,
+    flexBasis: '45%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+  },
+  gridBtnText: {
+    color: colors.tint,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+  },
+  outlineBtn: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+  },
+  // Clear is destructive and stays borderless, so it never reads as a peer of
+  // the three it sits beside.
+  clearGridBtn: {},
   clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1149,25 +1124,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
+  // No vertical padding of its own — InfoTooltip's summary row carries it, so
+  // the note is one 44pt-class tap target rather than a rule plus a paragraph.
   holdNote: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    paddingTop: spacing.sm,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
-  },
-  holdNoteBad: {},
-  holdNoteText: {
-    flex: 1,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 16,
-  },
-  holdNoteTextBad: {
-    color: colors.avoid,
-    fontWeight: font.weight.medium,
   },
   warnBanner: {
     flexDirection: 'row',
@@ -1349,53 +1311,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
-  },
-  parlayActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  saveBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.tint,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-  },
-  saveBtnText: {
-    color: colors.tint,
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-  },
-  dkBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: DK_GREEN,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-  },
-  // The same-game warning is laid out for a full-width row above the actions;
-  // here it sits inside the result card, under the button pair.
-  updateWarn: {
-    marginTop: spacing.sm,
-    marginHorizontal: 0,
-  },
-  handoffFallback: {
-    marginTop: spacing.xs,
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-  },
-  dkBtnText: {
-    color: '#000',
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
   },
   pressed: {
     opacity: 0.6,

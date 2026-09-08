@@ -1,23 +1,34 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { InfoTooltip } from '@/components/InfoTooltip';
+import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { formatAmerican } from '@/lib/format';
 import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
-import { priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
-import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
+import { handoffAtBook, matchupForLeg, priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
+import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
  * "Open with" — this slip priced at every book a member can bet at
  * (BETTABLE_BOOKS), one tile per book:
  * combined odds where the book prices every leg, otherwise how many legs it
- * covers (N/M). The best payout is starred (ties all starred), and tapping a
- * tile opens that book (its first leg's betslip link when we have one, else the
- * book's app/site). No tile is singled out as the user's — the bet button
- * below the slip is already their own book (Matt, 2026-09-04), so this row's
- * one job is ranking by payout.
+ * covers (N/M). The best payout is starred (ties all starred).
+ *
+ * THIS ROW IS THE BET CONTROL (Matt, 2026-09-08): "why does it say bet DK at
+ * the bottom when we give the user the ability to bet with multiple
+ * sportsbooks". A green "Bet on <one book>" button used to sit under the legs,
+ * naming the member's stored preference — or DraftKings when theirs could not
+ * take the slip — while this row, 40pt above it, already priced the slip at
+ * every book. Two controls for one action, and the button was the one that
+ * showed no prices.
+ *
+ * So a tile now opens the same leg-by-leg hand-off sheet that button opened, at
+ * that book. It is the tap that chooses the book, which is what the old
+ * button's DraftKings fallback existed to guess. A partial tile opens too — its
+ * sheet marks the legs that book does not post, rather than pretending to a
+ * quote it cannot give.
  *
  * The odds differ per book because each leg is re-priced at that book's own
  * line-shop snapshot; the slip's win probability is book-independent, so the
@@ -32,6 +43,28 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
     // ESPN BET cannot take the slip (legFromPick prices no leg there anyway).
     () => priceBooksForParlay(legs, 1, BETTABLE_BOOKS),
     [legs],
+  );
+  // The book whose hand-off sheet is open, or null. Held as the book key rather
+  // than a boolean so the sheet's own `book` prop cannot drift from the tile
+  // that opened it.
+  const [openBook, setOpenBook] = useState<string | null>(null);
+  const handoff = useMemo(
+    () => (openBook ? handoffAtBook(legs, openBook) : null),
+    [legs, openBook],
+  );
+  const handoffLegs: HandoffLeg[] = useMemo(
+    () =>
+      handoff == null
+        ? []
+        : legs.map((l, i) => ({
+            key: String(l.pickId),
+            label: l.label,
+            matchup: matchupForLeg(l.game),
+            americanOdds: l.americanOdds,
+            betLink: handoff.links[i] ?? null,
+            posted: handoff.posted[i] ?? true,
+          })),
+    [legs, handoff],
   );
 
   if (legs.length === 0 || quotes.length === 0) return null;
@@ -48,13 +81,13 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
           beside the thing it labels is read; a paragraph below it is not. */}
       <View style={styles.headerRow}>
         <View style={styles.headerLeft}>
-          <Text style={styles.title}>Open with</Text>
+          <Text style={styles.title}>Place this bet at</Text>
           <InfoTooltip
-            title="Open with"
+            title="Place this bet at"
             body={
-              'Every book we price this slip at, best payout first. Tap one to open it.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nBooks can’t accept a whole parlay from a link, so add each leg once you’re there.\n\nThis row is every book, not just the ones you selected in Settings — your books decide the green button, never where you’re allowed to place.'
+              'Every book we price this slip at, best payout first. Tap one to place the slip there.\n\nN/M legs means that book doesn’t post every leg at the same line, so it can’t price the whole slip — you can still open it and add the legs it does have.\n\nBooks can’t accept a whole parlay from a link, so you add each leg once you’re there — the sheet lists them in order.\n\nThis row is every book, not just the ones you selected in Settings. The slip is always priced and modelled at DraftKings, whichever book you place it at.'
             }
-            accessibilityLabel="About the Open with row"
+            accessibilityLabel="About placing this bet"
           />
         </View>
         <Text style={styles.headerHint}>★ = best odds</Text>
@@ -67,20 +100,17 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
       >
         {quotes.map((q) => {
           const full = q.americanOdds != null;
-          const firstLink = q.links.find((l) => l != null) ?? null;
           return (
             <Pressable
               key={q.book}
-              onPress={() => {
-                void openBookBetslip(q.book, firstLink);
-              }}
+              onPress={() => setOpenBook(q.book)}
               accessibilityRole="button"
               accessibilityLabel={
                 full
-                  ? `Open ${bookName(q.book)}, combined odds ${formatAmerican(q.americanOdds!)}${
+                  ? `Bet on ${bookName(q.book)}, combined odds ${formatAmerican(q.americanOdds!)}${
                       q.isBest && fullCount > 1 ? ', best payout' : ''
                     }`
-                  : `Open ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
+                  : `Bet on ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
               }
               // A partial tile fades its ODDS only (oddsNa below): the badge
               // and the "2/3 legs" coverage are the information, and at 55%
@@ -110,7 +140,14 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
         })}
       </ScrollView>
 
-
+      {/* Sibling of the tiles, not a child of one: a Modal that ever became a
+          layout participant would open a gap in the horizontal row. */}
+      <ParlayDkHandoff
+        visible={openBook != null}
+        legs={handoffLegs}
+        book={openBook ?? undefined}
+        onClose={() => setOpenBook(null)}
+      />
     </View>
   );
 }

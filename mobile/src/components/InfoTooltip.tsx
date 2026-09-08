@@ -8,14 +8,39 @@ interface Props {
   body: string;
   /** Accessibility label for the info icon. Defaults to "More info". */
   accessibilityLabel?: string;
+  /**
+   * One-line summary rendered next to the icon, making the whole row the tap
+   * target. Without it the trigger is the bare ⓘ.
+   *
+   * This is how a note that was five lines of body copy becomes one: the claim
+   * stays on the screen, the explanation moves behind the tap. A summary that
+   * does not survive alone belongs in `body` — the reader who never taps must
+   * still get the point (Matt, 2026-09-08).
+   */
+  label?: string;
+  /**
+   * 'warn' paints the trigger in the AVOID colour with a warning glyph, for a
+   * summary the reader must not scroll past — a negative-EV slip. Colour alone
+   * is not the signal: the glyph and the wording carry it too.
+   */
+  tone?: 'info' | 'warn';
 }
 
 /**
- * Small info (ⓘ) icon that opens a centered tooltip modal with explanatory
- * copy. Tap the backdrop or the "Got it" button to dismiss.
+ * Small info (ⓘ) icon — or, with `label`, a one-line summary row — that opens a
+ * centered tooltip modal with the full copy. Tap the backdrop or the "Got it"
+ * button to dismiss.
  */
-export function InfoTooltip({ title, body, accessibilityLabel = 'More info' }: Props) {
+export function InfoTooltip({
+  title,
+  body,
+  accessibilityLabel,
+  label,
+  tone = 'info',
+}: Props) {
   const [open, setOpen] = useState(false);
+  const warn = tone === 'warn';
+  const accent = warn ? colors.avoid : colors.tint;
 
   return (
     <>
@@ -23,17 +48,40 @@ export function InfoTooltip({ title, body, accessibilityLabel = 'More info' }: P
         onPress={() => setOpen(true)}
         hitSlop={10}
         accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel}
-        style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+        accessibilityLabel={accessibilityLabel ?? (label ? `${label}. More info` : 'More info')}
+        style={({ pressed }) => [
+          label ? styles.summaryBtn : styles.iconBtn,
+          pressed && styles.pressed,
+        ]}
       >
-        <Ionicons name="information-circle-outline" size={20} color={colors.tint} />
+        {label ? (
+          <>
+            <Ionicons
+              name={warn ? 'warning' : 'information-circle-outline'}
+              size={14}
+              color={warn ? colors.avoid : colors.textTertiary}
+            />
+            <Text numberOfLines={2} style={[styles.summaryText, warn && styles.summaryTextWarn]}>
+              {label}
+            </Text>
+            {/* A trailing word, not a second glyph: "there is more behind this"
+                is a thing to read, and it doubles the row's tap width. */}
+            <Text style={[styles.summaryMore, { color: accent }]}>Details</Text>
+          </>
+        ) : (
+          <Ionicons name="information-circle-outline" size={20} color={colors.tint} />
+        )}
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
           {/* Inner Pressable swallows taps so touching the card doesn't dismiss. */}
           <Pressable style={styles.card} onPress={() => {}}>
             <View style={styles.cardHeader}>
-              <Ionicons name="information-circle" size={22} color={colors.tint} />
+              <Ionicons
+                name={warn ? 'warning' : 'information-circle'}
+                size={22}
+                color={accent}
+              />
               <Text style={styles.cardTitle}>{title}</Text>
             </View>
             <Text style={styles.cardBody}>{body}</Text>
@@ -54,6 +102,28 @@ const styles = StyleSheet.create({
   iconBtn: {
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  summaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    // Row height, not padding: the bare icon sits inline in a header, but a
+    // summary row is the whole width and needs a 44pt-class target.
+    paddingVertical: spacing.sm,
+  },
+  summaryText: {
+    flex: 1,
+    fontSize: font.size.caption,
+    lineHeight: 16,
+    color: colors.textTertiary,
+  },
+  summaryTextWarn: {
+    color: colors.avoid,
+    fontWeight: font.weight.medium,
+  },
+  summaryMore: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
   },
   pressed: { opacity: 0.65 },
   backdrop: {
