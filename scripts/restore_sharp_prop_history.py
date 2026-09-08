@@ -39,7 +39,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 from loguru import logger
-from psycopg2.extras import execute_values
 
 from data import local_store
 from data.db import get_connection
@@ -130,14 +129,21 @@ def main() -> None:
             logger.info("dry run — nothing written" if a.dry_run else "nothing to do")
             return
 
-        cur = conn.cursor()
+        # MULTI-ROW INSERT THROUGH conn.execute, not a raw cursor.
+        # DBConnection wraps psycopg2 and exposes no .cursor(), so
+        # psycopg2.extras.execute_values cannot be used -- the first version of
+        # this script called conn.cursor() and died on the very first batch.
+        # executemany() exists but costs one round trip per row, which is
+        # 115,132 of them over a pooler. One statement per batch with flattened
+        # parameters gets execute_values' shape through the wrapper.
+        cols = ", ".join(INSERT_COLS)
+        row_ph = "(" + ", ".join(["%s"] * len(INSERT_COLS)) + ")"
         done = 0
         for i in range(0, len(missing), a.batch):
             chunk = missing[i:i + a.batch]
-            execute_values(
-                cur,
-                f"INSERT INTO player_prop_odds ({', '.join(INSERT_COLS)}) VALUES %s",
-                chunk)
+            sql = (f"INSERT INTO player_prop_odds ({cols}) VALUES "
+                   + ", ".join([row_ph] * len(chunk)))
+            conn.execute(sql, tuple(v for row in chunk for v in row))
             conn.commit()
             done += len(chunk)
             logger.info(f"  restored {done:,}/{len(missing):,}")
