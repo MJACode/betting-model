@@ -232,13 +232,13 @@ export function PicksHomeScreen() {
   const { entitled } = useEntitlement();
   const signalsLocked = !entitled && view !== 'today';
 
-  // For the signal views, restrict the filter options to what's on screen.
+  // Restrict the filter's Market options to what is on screen — on EVERY view,
+  // not just the signal ones. Today passed `undefined` here until 2026-09-09,
+  // which PickFilters read as "offer all four categories", so the NFL board
+  // offered MLB's Pitcher and Batter markets and the active pill named them.
   const availableModelIds = useMemo(
-    () =>
-      view === 'today'
-        ? undefined
-        : Array.from(new Set(activeItems.map((d) => d.pick.model_id))),
-    [view, activeItems],
+    () => Array.from(new Set(activeItems.map((d) => d.pick.model_id))),
+    [activeItems],
   );
 
   const filtered = useMemo(
