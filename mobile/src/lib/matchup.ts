@@ -159,6 +159,31 @@ export function gradeColorDiscriminates(grades: (MatchupGrade | null)[]): boolea
   return bands.some((b) => b !== bands[0]);
 }
 
+/**
+ * The grades a "B or better" style floor can be set to, best first.
+ *
+ * The FULL scale is thirteen letters and a filter row of thirteen chips is a
+ * wall; these are the five people actually reach for. The floor is compared on
+ * the percentile, never on the letter, so a cut between them still behaves.
+ */
+export const GRADE_FLOORS: MatchupGrade[] = ['A', 'B', 'C', 'D'];
+
+/** Is this grade at or above the floor? Ungraded rows never pass a floor. */
+export function meetsGradeFloor(
+  grade: MatchupGrade | null | undefined,
+  floor: MatchupGrade | null,
+): boolean {
+  if (!floor) return true;
+  if (!grade) return false; // a dash is not "good enough"; it is unknown
+  const rank = (g: MatchupGrade) => GRADE_ORDER.indexOf(g);
+  return rank(grade) <= rank(floor);
+}
+
+/** Best to worst. The index IS the ordering, so nothing sorts on a letter. */
+const GRADE_ORDER: MatchupGrade[] = [
+  'A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F',
+];
+
 /** A favourability percentile → its letter. */
 export function gradeFor(score: number | null): MatchupGrade | null {
   if (score == null || !Number.isFinite(score)) return null;

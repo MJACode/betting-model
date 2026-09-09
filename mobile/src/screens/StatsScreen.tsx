@@ -34,8 +34,10 @@ import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterField } from '@/components/filters/FilterField';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
+import { GameFilterSection } from '@/components/filters/GameFilterSection';
 import type { ActivePill } from '@/components/filters/FilterBar';
 import { useNow } from '@/hooks/useNow';
+import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { usePreferredBooks, BOOKS } from '@/hooks/usePreferredBooks';
 import {
@@ -60,6 +62,13 @@ import {
   type BookSideCoverage,
   type StatsOddsQuote,
 } from '@/lib/statsOdds';
+import {
+  gameFilterSummary,
+  isGameSelected,
+  pruneSelection,
+  selectableGames,
+  selectedTeams,
+} from '@/lib/gameFilter';
 import { computeHitRate, hitRateBandOf, hitRateColorDiscriminates } from '@/lib/hitRate';
 import {
   hitModeHeadline,
@@ -79,6 +88,8 @@ import {
   gradeOpponentDefence,
   gradeSpoken,
   gradesOnDefence,
+  meetsGradeFloor,
+  GRADE_FLOORS,
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
@@ -339,6 +350,12 @@ export function StatsScreen() {
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [hitMode, setHitMode] = useState<HitMode>('atLeast');
   const [modeOpen, setModeOpen] = useState<boolean>(false);
+  // TOUGHNESS as a filter, which is the half of Matt's ask the grade alone did
+  // not answer: the column is truthful on every sport now, but until this the
+  // board could not be cut or ordered by it. A FLOOR, not a band — "B or
+  // better" is the question ("show me the soft spots"); nobody asks for the
+  // hardest matchups on the board.
+  const [minGrade, setMinGrade] = useState<MatchupGrade | null>(null);
   const [minHitRate, setMinHitRate] = useState<string>('');
   const [maxHitRate, setMaxHitRate] = useState<string>('');
 
@@ -494,6 +511,29 @@ export function StatsScreen() {
   }, [teamStats]);
   /** The season the defence grade is computed from — named on screen, never assumed. */
   const defenceSeason = teamStats.season;
+
+  // ── The GAMES cut, shared with the Picks tab ───────────────────────────────
+  // One selection across both tabs (Matt, 2026-09-09), so picking tonight's
+  // SEA-NE here narrows the picks list to the same two teams and their bets.
+  const gamePicker = useGameSelection(sport);
+  const pickableGames = useMemo(
+    () => selectableGames(slateGames, sport, todayET()),
+    [slateGames, sport],
+  );
+  // A selection outlives the games it was made from — the day rolls over, a
+  // game leaves the window — and a stale id filters the board to nothing while
+  // every control still says a game is picked. Prune to "All games", which is
+  // wrong in the harmless direction.
+  useEffect(() => {
+    if (pickableGames.length === 0) return;
+    const pruned = pruneSelection(gamePicker.selected, pickableGames);
+    if (pruned !== gamePicker.selected) gamePicker.replace(pruned);
+  }, [pickableGames, gamePicker]);
+  /** The picked games as TEAMS — leaderboard rows carry a team, never a game. */
+  const gameTeams = useMemo(
+    () => selectedTeams(pickableGames, gamePicker.selected),
+    [pickableGames, gamePicker.selected],
+  );
   // Only filter when there is actually a slate — a stale toggle on an off day
   // (or after switching sports) must not empty the list.
   const hasSlate = slate.keys.size > 0;
@@ -514,8 +554,11 @@ export function StatsScreen() {
   // (UFC). Client-side `isOnSlate` still runs over what comes back, so the two
   // can never disagree about what is on screen; this only bounds what travels.
   const readTeams = useMemo(
-    () => slateTeams(sport, slate, tonightActive),
-    [sport, slate, tonightActive],
+    // A picked game is a NARROWER slate, so it wins: reading two teams when
+    // the user asked for one game is the same waste the slate narrowing
+    // exists to remove, one level down.
+    () => gameTeams ?? slateTeams(sport, slate, tonightActive),
+    [gameTeams, sport, slate, tonightActive],
   );
   // Array identity changes on every slate render; the loader keys on the
   // CONTENT so an unchanged slate does not refetch the board. JSON and not a
@@ -1026,6 +1069,8 @@ export function StatsScreen() {
       .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
       .filter((r) => !teamFilter || r.team === teamFilter)
       .filter((r) => !tonightActive || isOnSlate(r, slate))
+      .filter((r) => !gameTeams || (!!r.team && gameTeams.includes(r.team)))
+      .filter((r) => !minGrade || meetsGradeFloor(matchupFor(r)?.grade, minGrade))
       .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
       .map((r) => {
         const total = statValue(r, stat);
@@ -1040,7 +1085,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [rows, stat, sport, basis, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [rows, stat, sport, basis, query, teamFilter, effectiveMode, tonightActive, slate, sortKey, gameTeams, minGrade, matchupFor]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -1102,6 +1147,8 @@ export function StatsScreen() {
       .filter((p) => inHitRateBand(p.pct, band))
       .filter((p) => !teamFilter || p.team === teamFilter)
       .filter((p) => !tonightActive || isOnSlate(p, slate))
+      .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
+      .filter((p) => !minGrade || meetsGradeFloor(matchupFor(p)?.grade, minGrade))
       .filter((p) => !q || p.player_name.toLowerCase().includes(q))
       .sort((a, b) =>
         compareRows(
@@ -1110,7 +1157,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey, gameTeams, minGrade, matchupFor]);
 
   // Does the hit-rate column span more than one colour band? A rare-event
   // column (Doubles, Triples, Home Runs) does not — every player lands in the
@@ -1230,6 +1277,8 @@ export function StatsScreen() {
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (teamFilter) n += 1;
+    if (gamePicker.selected.size > 0) n += 1;
+    if (minGrade) n += 1;
     if (query.trim()) n += 1;
     if (sortKey !== 'default') n += 1;
     if (effectiveMode === 'hitRate') {
@@ -1238,7 +1287,7 @@ export function StatsScreen() {
       n += 1;
     }
     return n;
-  }, [teamFilter, query, sortKey, effectiveMode, band, basis]);
+  }, [teamFilter, gamePicker.selected, minGrade, query, sortKey, effectiveMode, band, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -1254,7 +1303,9 @@ export function StatsScreen() {
     setMaxHitRate('');
     setSortKey('default');
     setTonightOnly(false);
-  }, []);
+    setMinGrade(null);
+    gamePicker.clear();
+  }, [gamePicker]);
 
   // Removable chips for whatever is narrowing the board right now. Before this,
   // the only hint that a filter was on was a number badge on the Filters button.
@@ -1265,6 +1316,20 @@ export function StatsScreen() {
     }
     if (query.trim()) {
       out.push({ key: 'query', label: `"${query.trim()}"`, onRemove: () => setQuery('') });
+    }
+    if (gamePicker.selected.size > 0) {
+      out.push({
+        key: 'games',
+        label: gameFilterSummary(pickableGames, gamePicker.selected),
+        onRemove: () => gamePicker.clear(),
+      });
+    }
+    if (minGrade) {
+      out.push({
+        key: 'grade',
+        label: `${minGrade} or better`,
+        onRemove: () => setMinGrade(null),
+      });
     }
     if (tonightActive) {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
@@ -1291,7 +1356,8 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, slateLabel, sortKey, effectiveMode, band, bandSummary, basis]);
+  }, [teamFilter, query, tonightActive, slateLabel, sortKey, effectiveMode, band, bandSummary, basis,
+      gamePicker, pickableGames, minGrade]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
   // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
@@ -1795,6 +1861,58 @@ export function StatsScreen() {
         onReset={resetFilters}
         canReset={activeFilterCount > 0}
       >
+        {/* GAMES first, because it is the widest cut on the sheet and the one
+            Matt asked for by name. Shared with the Picks tab, so a game picked
+            here is the same game picked there. */}
+        <FilterSection
+          title="Games"
+          summary={gameFilterSummary(pickableGames, gamePicker.selected)}
+          defaultOpen={gamePicker.selected.size > 0}
+        >
+          <GameFilterSection
+            games={pickableGames}
+            selected={gamePicker.selected}
+            onToggle={gamePicker.toggle}
+            onClear={gamePicker.clear}
+            emptyNote={
+              sport === 'UFC'
+                ? 'A UFC card is fighters, not fixtures — filter by fighter with the search above.'
+                : `No ${sport} games scheduled in the next week.`
+            }
+          />
+        </FilterSection>
+
+        {/* TOUGHNESS. Only where the sport can answer it — a control over a
+            column of dashes is a filter that silently does nothing. */}
+        {showMatchupCol ? (
+          <FilterSection
+            title="Matchup grade"
+            summary={minGrade ? `${minGrade} or better` : 'Any matchup'}
+            defaultOpen={minGrade != null}
+          >
+            <Text style={styles.filterHint}>
+              How soft the defence is. A is the easiest spot on the board.
+              Ungraded rows are hidden while a floor is set.
+            </Text>
+            <View style={styles.sheetChipRow}>
+              <FilterChip
+                label="Any"
+                active={minGrade == null}
+                onPress={() => setMinGrade(null)}
+              />
+              {GRADE_FLOORS.map((g) => (
+                <FilterChip
+                  key={g}
+                  label={`${g}+`}
+                  active={minGrade === g}
+                  accessibilityLabel={`${gradeSpoken(g)} or better`}
+                  onPress={() => setMinGrade(minGrade === g ? null : g)}
+                />
+              ))}
+            </View>
+          </FilterSection>
+        ) : null}
+
         <FilterSection
           title="Search"
           summary={query.trim() ? `“${query.trim()}”` : 'Any player'}
@@ -2820,6 +2938,16 @@ const styles = StyleSheet.create({
   },
   // Group tabs (Passing | Rushing | …) — same uppercase-caption look the old
   // section labels had, but tappable and on one row.
+  sheetChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  filterHint: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
   chipRow: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,

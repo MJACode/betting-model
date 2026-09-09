@@ -64,6 +64,7 @@ import { LiveDot } from '@/components/LiveDot';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { showToast } from '@/components/Toast';
 import { useEntitlement } from '@/hooks/useEntitlement';
+import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
@@ -74,11 +75,12 @@ import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
+import { isGameSelected, pruneSelection, selectableGames } from '@/lib/gameFilter';
 import { slipKeyForPick } from '@/lib/parlay';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { isUnlockedPreview, passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
-import { formatCurrency, formatPct, gameStatus } from '@/lib/format';
+import { formatCurrency, formatPct, gameStatus, todayET } from '@/lib/format';
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -244,9 +246,40 @@ export function PicksHomeScreen() {
     [activeItems],
   );
 
+  // ── The GAMES cut, shared with the Stats tab ───────────────────────────────
+  // Matt, 2026-09-09: one selection across both tabs, so picking tonight's
+  // game on the Stats board narrows this list to that game's bets and back.
+  // Kept OUT of PicksFilterState deliberately: that object is cloned, reset and
+  // persisted as a set of thresholds, and a game id is none of those things —
+  // it is one fixture on one date and belongs to the slate, not to the filter.
+  const gamePicker = useGameSelection(sport);
+  const pickableGames = useMemo(
+    () =>
+      selectableGames(
+        activeItems.map((d) => d.game).filter((g): g is NonNullable<typeof g> => !!g),
+        sport,
+        todayET(),
+      ),
+    [activeItems, sport],
+  );
+  // Same pruning as the Stats board, for the same reason: an id that has left
+  // the slate filters this list to nothing while the sheet still shows a game
+  // ticked.
+  useEffect(() => {
+    if (pickableGames.length === 0) return;
+    const pruned = pruneSelection(gamePicker.selected, pickableGames);
+    if (pruned !== gamePicker.selected) gamePicker.replace(pruned);
+  }, [pickableGames, gamePicker]);
+
   const filtered = useMemo(
-    () => searchPicks(applyFilter(activeItems, filter), search),
-    [activeItems, filter, search],
+    () =>
+      searchPicks(
+        applyFilter(activeItems, filter).filter((d) =>
+          isGameSelected(d.pick.game_id, gamePicker.selected),
+        ),
+        search,
+      ),
+    [activeItems, filter, search, gamePicker.selected],
   );
   const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
 
@@ -418,6 +451,10 @@ export function PicksHomeScreen() {
           totalShown={filtered.length}
           totalAll={activeItems.length}
           availableModelIds={availableModelIds}
+          games={pickableGames}
+          selectedGames={gamePicker.selected}
+          onToggleGame={gamePicker.toggle}
+          onClearGames={gamePicker.clear}
           showSignals={view === 'today'}
           itemNoun={view === 'today' ? 'pick' : view === 'live' ? 'live pick' : 'signal'}
         />
