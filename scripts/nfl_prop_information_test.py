@@ -177,7 +177,7 @@ def main() -> None:
                  else "blend not better than book")
         print(f"{mid:26s} {r['n_train']:>5} {r['n_test']:>5} | {r['brier_book']:.4f} "
               f"{r['brier_model']:.4f} {r['brier_model_cal']:.4f} {r['brier_blend']:.4f} | "
-              f"{r['b']:+.3f} {r['b_se']:.3f} | {r['b_2025']:+.3f} {r['b_2025_se']:.3f}  "
+              f"{r['b']:+.3f} {r['b_se']:.3f} | {r['b_test']:+.3f} {r['b_test_se']:.3f}  "
               f"{v}; {beats}")
 
     print(f"\n3. THE BLEND AS A BET -- {a.test}, DraftKings price, fitted on {a.train}")
