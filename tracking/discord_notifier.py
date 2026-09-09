@@ -529,10 +529,24 @@ def _webhook_for_sport(sport: str) -> str | None:
     return config.DISCORD_WEBHOOKS.get(sport) or config.DISCORD_WEBHOOK_DEFAULT or None
 
 
+def _live_webhook_for_sport(sport: str) -> str | None:
+    """Where an IN-PLAY pick for `sport` posts (2026-09-09, mike).
+
+    Per-sport live room first (DISCORD_WEBHOOK_LIVE_{SPORT}), then the one
+    cross-sport live room (DISCORD_WEBHOOK_LIVE), then the sport's pre-game
+    channel. The last step is the fallback that had been serving every live
+    pick until today: with neither live variable set, the MLB and NCAAF live
+    loops posted every in-play card into #mlb-picks and #ncaaf-picks."""
+    return (config.DISCORD_LIVE_WEBHOOKS.get(sport)
+            or config.DISCORD_WEBHOOK_LIVE
+            or _webhook_for_sport(sport))
+
+
 def _configured() -> bool:
     return bool(config.DISCORD_WEBHOOKS
                 or config.DISCORD_WEBHOOK_DEFAULT
                 or config.DISCORD_WEBHOOK_LIVE
+                or config.DISCORD_LIVE_WEBHOOKS
                 or config.DISCORD_WEBHOOK_RESULTS)
 
 
@@ -1289,9 +1303,10 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
 
 
 def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -> int:
-    """Post new in-play BET signals to the live channel (falling back to the
-    sport's channel when DISCORD_WEBHOOK_LIVE isn't set). Called at the end of
-    each live-scorer pass. Returns the number posted."""
+    """Post new in-play BET signals to the sport's live channel
+    (DISCORD_WEBHOOK_LIVE_{SPORT}, then DISCORD_WEBHOOK_LIVE, then the sport's
+    pre-game channel -- see _live_webhook_for_sport). Called at the end of each
+    live-scorer pass. Returns the number posted."""
     if target_date is None:
         target_date = date.today().isoformat()
     if not _configured():
@@ -1318,7 +1333,7 @@ def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
 
     by_url: dict[tuple[str, str], list[dict]] = {}
     for s in signals:
-        url = config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(s["sport"])
+        url = _live_webhook_for_sport(s["sport"])
         if url:
             by_url.setdefault((url, s["sport"]), []).append(s)
     if not by_url:

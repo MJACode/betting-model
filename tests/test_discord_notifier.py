@@ -527,9 +527,85 @@ def test_configured_is_false_only_when_nothing_is_set(monkeypatch):
     for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE", "DISCORD_WEBHOOK_RESULTS"):
         monkeypatch.setattr(dn.config, attr, "")
     monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", {})
+    monkeypatch.setattr(dn.config, "DISCORD_LIVE_WEBHOOKS", {})
     assert dn._configured() is False
     monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_RESULTS", "http://x")
     assert dn._configured() is True
+
+
+def test_a_per_sport_live_room_alone_counts_as_configured(monkeypatch):
+    """A server wired with ONLY the three live rooms must still publish."""
+    for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE", "DISCORD_WEBHOOK_RESULTS"):
+        monkeypatch.setattr(dn.config, attr, "")
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", {})
+    monkeypatch.setattr(dn.config, "DISCORD_LIVE_WEBHOOKS", {"NFL": "http://nfl-live"})
+    assert dn._configured() is True
+
+
+# ── Live routing: one live room per sport (2026-09-09, mike) ─────────────────
+#
+# "too many live picks going to the regular channels." With neither live
+# variable set, every in-play card the MLB and NCAAF loops produced fell
+# through to the sport's PRE-GAME channel -- 13 MLB live bets on 2026-09-08
+# alone landed in #mlb-picks. The resolution order is the thing under test.
+
+def _live_row(game_id, sport="MLB", model_id="mlb_live_total", side="over"):
+    # Column order must match _new_live_signals' SELECT list.
+    return (game_id, model_id, side, f"label {game_id}", sport, 0.62, 0.08,
+            -115.0, 0.02, "5", None, "TEX", "LAA", "2026-09-08T22:00:00+00:00",
+            "2026-09-08T23:30:05+00:00", 0.0, -200.0)
+
+
+def _live_setup(monkeypatch, *, sport_hooks, live_hooks, generic_live=""):
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", sport_hooks)
+    monkeypatch.setattr(dn.config, "DISCORD_LIVE_WEBHOOKS", live_hooks)
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_LIVE", generic_live)
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_DEFAULT", "")
+    monkeypatch.setattr(dn.config, "DISCORD_MAX_EMBEDS_PER_RUN", 20)
+    monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+
+
+def test_live_pick_routes_to_its_own_sports_live_room(monkeypatch):
+    _live_setup(monkeypatch,
+                sport_hooks={"MLB": "http://mlb-picks"},
+                live_hooks={"MLB": "http://mlb-live"},
+                generic_live="http://all-live")
+    assert dn._live_webhook_for_sport("MLB") == "http://mlb-live"
+
+
+def test_live_routing_falls_through_generic_live_then_pregame(monkeypatch):
+    _live_setup(monkeypatch,
+                sport_hooks={"NHL": "http://nhl-picks"},
+                live_hooks={"MLB": "http://mlb-live"},
+                generic_live="http://all-live")
+    # No NHL live room: the one cross-sport live room.
+    assert dn._live_webhook_for_sport("NHL") == "http://all-live"
+    # No live room of any kind: the sport's pre-game channel, which is where
+    # every live pick had been going. Never nowhere.
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_LIVE", "")
+    assert dn._live_webhook_for_sport("NHL") == "http://nhl-picks"
+    assert dn._live_webhook_for_sport("NBA") is None
+
+
+def test_live_posts_go_to_the_live_room_and_never_the_pregame_channel(monkeypatch):
+    """End to end through the producer: two sports, two live rooms, and the
+    pre-game channels see nothing."""
+    posts: list = []
+    _live_setup(monkeypatch,
+                sport_hooks={"MLB": "http://mlb-picks", "NCAAF": "http://ncaaf-picks"},
+                live_hooks={"MLB": "http://mlb-live", "NCAAF": "http://ncaaf-live"})
+    monkeypatch.setattr(dn, "_post", lambda url, payload: posts.append(url) or "1")
+    conn = _FakeConn([_live_row("MLB_1"), _live_row("MLB_2"),
+                      _live_row("NCAAF_1", sport="NCAAF", model_id="ncaaf_live_total")])
+
+    assert dn._post_new_live_signals(conn, "2026-09-08", dry_run=False) == 3
+    assert sorted(posts) == ["http://mlb-live", "http://ncaaf-live"]
+    assert not any("picks" in u for u in posts), "a live card in a pre-game room"
+    # Every delivered pick is ledgered under the live kind, so the next pass
+    # (and the other sport's loop sweeping the same date) posts nothing twice.
+    assert sorted(p[0] for p in conn.inserts) == [
+        "live:MLB_1:mlb_live_total:over", "live:MLB_2:mlb_live_total:over",
+        "live:NCAAF_1:ncaaf_live_total:over"]
 
 
 # ── Delivery / retry ─────────────────────────────────────────────────────────
@@ -645,6 +721,7 @@ def _setup(monkeypatch, conn, webhooks=None):
     monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", webhooks if webhooks is not None else {"MLB": "http://mlb"})
     monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_DEFAULT", "")
     monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_LIVE", "")
+    monkeypatch.setattr(dn.config, "DISCORD_LIVE_WEBHOOKS", {})
     monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_RESULTS", "")
     monkeypatch.setattr(dn.config, "DISCORD_MAX_EMBEDS_PER_RUN", 20)
     monkeypatch.setattr(dn, "get_connection", lambda: conn)

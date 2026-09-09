@@ -116,6 +116,20 @@ DISCORD_WEBHOOK_DEFAULT: str = os.environ.get("DISCORD_WEBHOOK_DEFAULT", "").str
 # sport's channel when unset.
 DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
 
+# Per-sport in-play channels: DISCORD_WEBHOOK_LIVE_MLB, DISCORD_WEBHOOK_LIVE_NFL,
+# DISCORD_WEBHOOK_LIVE_NCAAF, ... (same sport keys as DISCORD_SPORTS). Added
+# 2026-09-09 (mike): three live loops were all falling back into the pre-game
+# sport channels because DISCORD_WEBHOOK_LIVE was never set, and a single
+# cross-sport live room would be as noisy. Resolution for an in-play pick is
+#   DISCORD_WEBHOOK_LIVE_{SPORT}  ->  DISCORD_WEBHOOK_LIVE  ->  the sport's
+#   pre-game channel (DISCORD_WEBHOOK_{SPORT} / DISCORD_WEBHOOK_DEFAULT)
+# so a sport without its own live room still posts somewhere rather than
+# dropping the pick on the floor.
+DISCORD_LIVE_WEBHOOKS: dict = {
+    sport: url for sport in DISCORD_SPORTS
+    if (url := os.environ.get(f"DISCORD_WEBHOOK_LIVE_{sport}", "").strip())
+}
+
 # Channel for the morning results recap (cross-sport, so it needs its own home).
 # Falls back to DISCORD_WEBHOOK_DEFAULT.
 DISCORD_WEBHOOK_RESULTS: str = os.environ.get("DISCORD_WEBHOOK_RESULTS", "").strip()

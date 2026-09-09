@@ -511,6 +511,34 @@ class GamedayWorker:
             except Exception:                           # noqa: BLE001
                 log.exception("ops alerter failed")
 
+    # ------------------------------------------------------------ publishing
+    def _publish_live_picks(self) -> None:
+        """Announce the tick's new live BETs on the same two surfaces the MLB
+        live scorer and the NCAAF gameday loop announce theirs (mobile push,
+        then the Discord live room), each in its own try so one being down
+        cannot suppress the other.
+
+        Added 2026-09-09 (mike). Until now this loop wrote its picks and
+        announced nothing: an NFL live pick reached Discord only if the MLB or
+        NCAAF loop happened to end a pass in the same window and swept it up,
+        which on an NFL Sunday in January is nobody. Both notifiers dedupe on
+        `push_sent`, so a pick swept by another loop first is not posted twice.
+
+        The date is the UTC date the pick writer stamps on the row
+        (pick_writer.decision_to_row), which is what the notifiers filter on.
+        """
+        game_date = datetime.now(timezone.utc).date().isoformat()
+        try:
+            from tracking.push_notifier import notify_live_signals
+            notify_live_signals(target_date=game_date, dry_run=False)
+        except Exception as exc:                        # noqa: BLE001
+            log.error("Live signal push failed (non-fatal): %s", exc)
+        try:
+            from tracking.discord_notifier import notify_discord_live
+            notify_discord_live(target_date=game_date, dry_run=False)
+        except Exception as exc:                        # noqa: BLE001
+            log.error("Live signal Discord post failed (non-fatal): %s", exc)
+
     # ------------------------------------------------------------ the loop
     def run(self, max_ticks: int | None = None, sleep_sec: int = POLL_STATE_SEC,
             idle_exit_ticks: int | None = IDLE_EXIT_TICKS):
@@ -550,6 +578,8 @@ class GamedayWorker:
                      summary.get("prop_bets", 0),
                      ",".join(sorted(set(summary.get("prop_skips", [])))) or "-",
                      self.meter.spent)
+            if summary.get("prop_bets") and not self.dry_run:
+                self._publish_live_picks()
             ticks += 1
             if max_ticks is not None and ticks >= max_ticks:
                 break

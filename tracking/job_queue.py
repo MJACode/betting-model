@@ -527,6 +527,13 @@ def _job_discord_probe(**kw):
 
     targets = {f"sport:{sport}": url
                for sport, url in config.DISCORD_WEBHOOKS.items()}
+    # The per-sport live rooms (2026-09-09). A live webhook pasted into the
+    # wrong variable is exactly the failure this probe exists to see, and a
+    # live room sharing a channel_id with its sport's pre-game room means the
+    # split did not happen.
+    targets.update({f"live:{sport}": url
+                    for sport, url in getattr(config, "DISCORD_LIVE_WEBHOOKS",
+                                              {}).items()})
     for label, attr in (("default", "DISCORD_WEBHOOK_DEFAULT"),
                         ("live", "DISCORD_WEBHOOK_LIVE"),
                         ("results", "DISCORD_WEBHOOK_RESULTS"),

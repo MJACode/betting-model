@@ -285,7 +285,8 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_GOLF` | `#golf-picks` |
 | `DISCORD_WEBHOOK_NCAAF` | `#ncaaf-picks` |
 | `DISCORD_WEBHOOK_DEFAULT` | Catch-all for any sport without its own channel. Leave unset to post nothing for unmapped sports rather than dumping everything into one room. |
-| `DISCORD_WEBHOOK_LIVE` | In-play signals. Worth its own channel — the live board re-scores every ~10 min during a slate. Falls back to the sport's channel if unset. |
+| `DISCORD_WEBHOOK_LIVE_MLB` / `_NFL` / `_NCAAF` (any sport in `DISCORD_SPORTS`) | **One in-play room per sport** (2026-09-09, mike): `#🔴-mlb-live`, `#🔴-nfl-live`, `#🔴-ncaaf-live`. A live pick resolves per-sport live → `DISCORD_WEBHOOK_LIVE` → the sport's pre-game channel. Set on `pollers` (runs all three live loops) and `worker` (runs the NFL loop and the `discord_probe` job). |
+| `DISCORD_WEBHOOK_LIVE` | The one cross-sport in-play room, used only for a sport with no `DISCORD_WEBHOOK_LIVE_{SPORT}`. Falls back to the sport's channel if unset — which is where every live pick went until 2026-09-09, because neither live variable had ever been set. |
 | `DISCORD_WEBHOOK_RESULTS` | The morning results recap (cross-sport, so it needs its own home). Falls back to `DISCORD_WEBHOOK_DEFAULT`. |
 | `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
   public audience than the full feed, so leaving it unset posts nothing rather than leaking the
@@ -300,7 +301,7 @@ so adding that channel later still delivers the rest of the day's picks.
 | Event | Trigger | Channel |
 |---|---|---|
 | **New BET signal** | The pick's first cross of the action thresholds — the same cut the app's Signals tab uses. Fires on the 6am run and each refresh pass as signals lock. | The sport's channel |
-| **Live (in-play) signal** | End of each live-scorer pass | `DISCORD_WEBHOOK_LIVE`, else the sport's |
+| **Live (in-play) signal** | End of each live-scorer pass (MLB, NCAAF, and from 2026-09-09 the NFL loop announces its own) | `DISCORD_WEBHOOK_LIVE_{SPORT}`, else `DISCORD_WEBHOOK_LIVE`, else the sport's |
 | **Results recap** | After settlement, once per settled day | `DISCORD_WEBHOOK_RESULTS` |
 | **Watchdog alert / recovery** | Database unreachable, or no completed pass in `WATCHDOG_STALE_MINUTES`. Checked every 15 minutes, around the clock. | `DISCORD_WEBHOOK_OPS` |
 | **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |

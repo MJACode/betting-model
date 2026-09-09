@@ -39,6 +39,7 @@ def test_the_probe_reports_the_channel_behind_each_sport(monkeypatch):
                  "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
                  "DISCORD_WEBHOOK_OPS"):
         monkeypatch.setattr(config, attr, "", raising=False)
+    monkeypatch.setattr(config, "DISCORD_LIVE_WEBHOOKS", {}, raising=False)
 
     seen = []
 
@@ -70,6 +71,7 @@ def test_two_sports_sharing_a_channel_are_flagged(monkeypatch):
                  "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
                  "DISCORD_WEBHOOK_OPS"):
         monkeypatch.setattr(config, attr, "", raising=False)
+    monkeypatch.setattr(config, "DISCORD_LIVE_WEBHOOKS", {}, raising=False)
 
     import requests
     monkeypatch.setattr(requests, "get",
@@ -91,6 +93,7 @@ def test_the_probe_never_posts_and_never_returns_the_url(monkeypatch):
                  "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
                  "DISCORD_WEBHOOK_OPS"):
         monkeypatch.setattr(config, attr, "", raising=False)
+    monkeypatch.setattr(config, "DISCORD_LIVE_WEBHOOKS", {}, raising=False)
 
     import requests
 
@@ -111,3 +114,31 @@ def test_the_probe_is_registered_and_takes_no_arguments():
     fn, validate = jq.JOBS["discord_probe"]
     assert fn is jq._job_discord_probe
     assert validate({"anything": "ignored"}) == {}
+
+
+def test_the_probe_covers_the_per_sport_live_rooms(monkeypatch):
+    """2026-09-09: one live room per sport. A live webhook pasted into the
+    wrong variable, or pointing at the sport's pre-game room, is invisible
+    from the ledger -- the probe is how it gets seen."""
+    import config
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS",
+                        {"MLB": "https://discord.com/api/webhooks/1/mlbtoken"},
+                        raising=False)
+    monkeypatch.setattr(config, "DISCORD_LIVE_WEBHOOKS",
+                        {"MLB": "https://discord.com/api/webhooks/3/mlblivetoken"},
+                        raising=False)
+    for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
+                 "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
+                 "DISCORD_WEBHOOK_OPS"):
+        monkeypatch.setattr(config, attr, "", raising=False)
+
+    import requests
+    monkeypatch.setattr(requests, "get",
+                        lambda url, timeout=None: _Resp(body={
+                            "channel_id": "111" if "mlbtoken" in url else "333",
+                            "name": "hook"}))
+    out = jq._job_discord_probe()
+    assert out["sport:MLB"]["channel_id"] == "111"
+    assert out["live:MLB"]["channel_id"] == "333"
+    assert out["_summary"]["probed"] == 2
+    assert out["_summary"]["collisions"] == []

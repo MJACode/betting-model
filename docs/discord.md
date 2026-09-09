@@ -30,6 +30,28 @@ sport posts **nowhere** rather than everything landing in one room.
 `DISCORD_WEBHOOK_LIVE` and `_RESULTS` get their own channels (in-play churns;
 the recap is cross-sport), each falling back sensibly.
 
+**Live picks route per sport (2026-09-09, mike: *"too many live picks going to
+the regular channels"*).** `config.DISCORD_LIVE_WEBHOOKS` is built from
+`DISCORD_WEBHOOK_LIVE_{SPORT}` over the same sport keys, and
+`_live_webhook_for_sport` resolves an in-play pick as **per-sport live room →
+`DISCORD_WEBHOOK_LIVE` → the sport's pre-game channel**. The last step is the
+one that had been serving EVERY live pick: neither live variable was set on
+either Railway service, so the MLB and NCAAF loops posted every in-play card
+into `#mlb-picks` and `#ncaaf-picks` (measured 2026-09-01 → 09-08: 80 MLB and
+50 NCAAF live BETs, all 130 ledgered `discord_live`, all into the sport rooms).
+The `discord_probe` job reports each live room as `live:{SPORT}` beside
+`sport:{SPORT}`, so a live webhook pasted into the wrong variable, or pointing
+at the pre-game room, shows up as a channel_id collision.
+
+**The NFL live loop announces its own picks from the same date.** Until
+2026-09-09 `nfl/live_model/workers/gameday.py` wrote a live BET and called
+neither notifier, so an NFL in-play pick reached push or Discord only if the
+MLB or NCAAF loop happened to end a pass in the same window and swept the row
+up — nobody, on an NFL Sunday in January. It now calls `notify_live_signals`
+and `notify_discord_live` after any tick that bet, the way the other two loops
+do; both dedupe on `push_sent`, so a row another loop swept first posts once.
+Pinned by `nfl/live_model/tests/test_publish_hook.py`.
+
 ### Producers (`tracking/discord_notifier.py`)
 
 | Function | Source of truth | Called from |
