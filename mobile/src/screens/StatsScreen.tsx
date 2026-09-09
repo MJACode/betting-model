@@ -176,6 +176,46 @@ const SEASON = new Date().getUTCFullYear();
 const MATCHUP_W = 64;
 const ODDS_W = 62;
 
+/**
+ * How long the board waits for the slate before reading the whole league.
+ *
+ * One `games` read over a 7-day window — 118 rows on the widest sport measured
+ * 2026-09-09 — so the normal case is far inside this and the user sees one
+ * continuous spinner rather than a second one. The bound is for the case that
+ * never returns at all (see the slate effect).
+ */
+const SLATE_GATE_MS = 4000;
+
+/** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
+const EMPTY_ROWS: never[] = [];
+
+/**
+ * Row-shaped placeholders, in place of a bare spinner.
+ *
+ * The board's loads are no longer instant — turning the slate chip off re-reads
+ * the whole league — and the rows that were on screen belong to the question
+ * the user just changed, so they must not be left up as if they were the
+ * answer. Rows rather than a centred spinner because that is what is arriving,
+ * and because a spinner at the top of a scrolled list is invisible to anyone
+ * who has scrolled into the board.
+ */
+function BoardSkeleton() {
+  return (
+    <View accessible accessibilityLabel="Loading players" style={styles.skeletonWrap}>
+      {Array.from({ length: 8 }, (_, i) => (
+        <View key={i} style={styles.skeletonRow}>
+          <View style={[styles.skeletonBlock, { width: 22 }]} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <View style={[styles.skeletonBlock, { width: '55%' }]} />
+            <View style={[styles.skeletonBlock, { width: '35%', height: 8 }]} />
+          </View>
+          <View style={[styles.skeletonBlock, { width: ODDS_W - 10 }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   { value: 3, label: 'L3' },
   { value: 5, label: 'L5' },
@@ -370,6 +410,17 @@ export function StatsScreen() {
     let cancelled = false;
     const from = todayET();
     setSlateReady(false);
+    // BOUNDED, because .finally() is not a guarantee that anything happens.
+    // The supabase client is created with no fetch timeout, so a request that
+    // hangs never settles: no `.finally`, no `error` to render the Retry banner
+    // with, and the tab sits on a spinner it cannot leave (pull-to-refresh
+    // bypasses the gate, but is undiscoverable under a spinner). Before this
+    // gate existed that user got a board. Releasing early fails OPEN —
+    // slateTeams() returns null for an empty slate, so the read is the
+    // whole-league one, which is exactly master's behaviour.
+    const release = setTimeout(() => {
+      if (!cancelled) setSlateReady(true);
+    }, SLATE_GATE_MS);
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
         if (cancelled) return;
@@ -386,6 +437,7 @@ export function StatsScreen() {
       });
     return () => {
       cancelled = true;
+      clearTimeout(release);
     };
   }, [sport]);
 
@@ -419,7 +471,22 @@ export function StatsScreen() {
   // inside one collapses two different slates onto the same key.
   const readTeamsKey = readTeams ? JSON.stringify(readTeams.slice().sort()) : '';
 
+  // WHAT THE ROWS ON SCREEN ARE AN ANSWER TO. A read is now up to several
+  // sequential requests instead of one, so the window in which a stale response
+  // can land on a board the user has already left is 10-50x wider than it was.
+  // Two things key on this: `load` drops every setState whose stamp is no longer
+  // current (so NCAAF rows cannot be painted under NFL stat labels, and an error
+  // banner cannot appear for a sport the user left), and the list shows a
+  // placeholder rather than rows it knows belong to a different question.
+  const readKey = `${sport}|${playerType ?? ''}|${timeWindow}|${effectiveMode}|${seasonStatKey ?? ''}|${readTeamsKey}`;
+  const inFlight = useRef<string | null>(null);
+  const [shownKey, setShownKey] = useState<string | null>(null);
+  /** The rows on screen answer a question the user has since changed. */
+  const rowsAreStale = shownKey !== null && shownKey !== readKey;
+
   const load = useCallback(async () => {
+    const stamp = readKey;
+    inFlight.current = stamp;
     setLoading(true);
     setError(null);
     try {
@@ -434,22 +501,27 @@ export function StatsScreen() {
         if (timeWindow === 'season') {
           const key = String(stat.key);
           const data = await fetchSeasonStatValues(sport, SEASON, key, playerType, teams);
+          if (inFlight.current !== stamp) return;
           setSeasonValues({ statKey: key, rows: data });
         } else {
           const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType, teams);
+          if (inFlight.current !== stamp) return;
           setRecentRows(data);
         }
       } else {
         const win = timeWindow === 'season' ? null : timeWindow;
         const data = await fetchWindowTotals(sport, SEASON, win, playerType, teams);
+        if (inFlight.current !== stamp) return;
         setRows(data);
       }
+      setShownKey(stamp);
     } catch (e: unknown) {
+      if (inFlight.current !== stamp) return;
       setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (inFlight.current === stamp) setLoading(false);
     }
-    // `readTeamsKey` and not `readTeams`: see above.
+    // `readTeamsKey` and not `readTeams`: see above. `readKey` carries the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey]);
 
@@ -1324,10 +1396,25 @@ export function StatsScreen() {
         {hasSlate ? (
           <>
             <View style={styles.rowDivider} />
+            {/* This chip re-READS the board now (the server is narrowed to the
+                slate's teams), so it is the one chip on the row whose tap is
+                not instant. Two consequences, both handled here rather than
+                left to the list: a second impatient tap must not queue a
+                second whole-league read, and VoiceOver has to be told that
+                something is happening — focus stays on the chip while the
+                rows underneath it change silently. */}
             <FilterChip
               label={slateLabel}
               icon="flame-outline"
               active={tonightActive}
+              disabled={loading}
+              accessibilityLabel={
+                loading
+                  ? `${slateLabel}, loading`
+                  : tonightActive
+                    ? `${slateLabel}, on. Turn off to show every player`
+                    : `${slateLabel}, off`
+              }
               onPress={() => setTonightOnly((v) => !v)}
             />
           </>
@@ -1452,7 +1539,7 @@ export function StatsScreen() {
 
       {effectiveMode === 'hitRate' ? (
         <FlatList
-          data={hitRatePlayers}
+          data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
             const mu = item.team ? matchupByTeam.get(item.team) : undefined;
@@ -1478,7 +1565,7 @@ export function StatsScreen() {
           }}
           ListEmptyComponent={
             loading ? (
-              <ActivityIndicator style={styles.loading} />
+              <BoardSkeleton />
             ) : (
               <EmptyState
                 title={error ? 'Couldn’t load players' : 'No players'}
@@ -1498,7 +1585,7 @@ export function StatsScreen() {
         />
       ) : (
         <FlatList
-          data={ranked}
+          data={rowsAreStale ? EMPTY_ROWS : ranked}
           keyExtractor={(item) => item.row.player_id}
           renderItem={({ item, index }) => {
             const mu = item.row.team ? matchupByTeam.get(item.row.team) : undefined;
@@ -1526,7 +1613,7 @@ export function StatsScreen() {
           }}
           ListEmptyComponent={
             loading ? (
-              <ActivityIndicator style={styles.loading} />
+              <BoardSkeleton />
             ) : (
               <EmptyState
                 title={error ? 'Couldn’t load players' : 'No players'}
@@ -2807,6 +2894,19 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
+  skeletonWrap: { paddingTop: spacing.xs },
+  skeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  skeletonBlock: {
+    height: 10,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+  },
   retryBtn: {
     paddingHorizontal: spacing.md,
     paddingVertical: 4,

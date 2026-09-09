@@ -92,6 +92,10 @@ async function main() {
 
   // The narrowing REPLACES a read the client already filters — the two must
   // pick the same rows, or the board silently disagrees with itself.
+  //
+  // ONE ROW PER PLAYER (window totals, season stat values): a request-level
+  // `.in('team', …)` is exact, because `team` on those rows already IS the
+  // latest team.
   {
     const rows = [
       { player_id: '1', player_name: 'Sam Darnold', team: 'SEA' },
@@ -102,7 +106,53 @@ async function main() {
     const teams = slateTeams('NFL', nflSlate, true)!;
     const server = rows.filter((r) => !!r.team && teams.includes(r.team)).map((r) => r.player_id);
     const client = rows.filter((r) => isOnSlate(r, nflSlate)).map((r) => r.player_id);
-    check('server narrowing and isOnSlate select the same players', JSON.stringify(server) === JSON.stringify(client), `${server} vs ${client}`);
+    check('one-row-per-player: team narrowing and isOnSlate agree', JSON.stringify(server) === JSON.stringify(client), `${server} vs ${client}`);
+  }
+
+  // ONE ROW PER GAME (recent games): the SAME filter is wrong, in both
+  // directions, and this is the case that made it a parameter on the function
+  // instead. Measured on tonight's SEA-NE slate: 5 players truncated, 5 who
+  // have left those teams admitted. The first fixture below is a traded
+  // player, the second a departed one — neither exists in the fixture the
+  // one-row-per-player check uses, which is why that one passed on the
+  // broken code.
+  {
+    const perGame = [
+      // Traded INTO the slate: newest row SEA, older rows LV.
+      { player_id: 'traded', team: 'SEA', rn: 1 },
+      { player_id: 'traded', team: 'LV', rn: 2 },
+      { player_id: 'traded', team: 'LV', rn: 3 },
+      // Left the slate: newest row KC, older rows NE.
+      { player_id: 'departed', team: 'KC', rn: 1 },
+      { player_id: 'departed', team: 'NE', rn: 2 },
+    ];
+    const teams = slateTeams('NFL', nflSlate, true)!;
+    const latestTeam = (id: string) =>
+      perGame.filter((r) => r.player_id === id).sort((a, b) => a.rn - b.rn)[0]!.team;
+
+    // What a request-level filter would have returned, and what the board makes
+    // of it: `traded` keeps 1 of its 3 games, `departed` is admitted at all.
+    const byRow = perGame.filter((r) => teams.includes(r.team));
+    check(
+      'per-game team filter truncates a traded player to 1 of 3 games',
+      byRow.filter((r) => r.player_id === 'traded').length === 1,
+    );
+    check(
+      'per-game team filter admits a player who LEFT the slate',
+      byRow.some((r) => r.player_id === 'departed'),
+    );
+
+    // What p_teams returns: whole windows, and only for players whose rn=1 team
+    // is on the slate.
+    const byPlayer = perGame.filter((r) => teams.includes(latestTeam(r.player_id)));
+    check('p_teams keeps the traded player\'s whole window', byPlayer.filter((r) => r.player_id === 'traded').length === 3);
+    check('p_teams drops the departed player', !byPlayer.some((r) => r.player_id === 'departed'));
+    const client = perGame
+      .map((r) => r.player_id)
+      .filter((id, i, a) => a.indexOf(id) === i)
+      .filter((id) => isOnSlate({ team: latestTeam(id) }, nflSlate));
+    const server = byPlayer.map((r) => r.player_id).filter((id, i, a) => a.indexOf(id) === i);
+    check('per-game: p_teams and isOnSlate select the same players', JSON.stringify(server) === JSON.stringify(client), `${server} vs ${client}`);
   }
 
   // ── the cap ────────────────────────────────────────────────────────────────
@@ -169,6 +219,30 @@ async function main() {
   check('pageRpc narrows on team when the caller has a slate', /function pageRpc[\s\S]{0,900}\.in\('team'/.test(q));
   check('pageRpc drains through fetchAllPages', /function pageRpc[\s\S]{0,900}fetchAllPages</.test(q));
 
+  // THE PER-GAME READ NARROWS THROUGH THE FUNCTION, NEVER THE REQUEST.
+  const recentAt = q.indexOf('export async function fetchRecentGames');
+  const recentBody = q.slice(recentAt, q.indexOf('\n/** (player, game)', recentAt));
+  check('fetchRecentGames was found', recentAt > 0 && recentBody.length > 200, `${recentBody.length} chars`);
+  check('it passes p_teams to the RPC', /p_teams: teams/.test(recentBody));
+  // The literal, not the prose: the comment above the code names `.in('team', …)`
+  // as the thing it must NOT do.
+  check('and never narrows this read at the request', !recentBody.includes(".in('team', teams"));
+  check('every one of its five RPC calls goes through the pager with p_teams',
+    (recentBody.match(/withTeams\(\{/g) ?? []).length === 3, `${(recentBody.match(/withTeams\(\{/g) ?? []).length}`);
+  // fetchSlateGames now decides which teams the board asks for, so its own
+  // read must not be capped either.
+  const slateAt = q.indexOf('export async function fetchSlateGames');
+  // To the function's own closing brace: a `.limit(` in whatever follows is
+  // not this read's, and a fixed window silently borrows it.
+  const slateBody = q.slice(slateAt, q.indexOf('\n}\n', slateAt));
+  check('fetchSlateGames pages instead of .limit()',
+    slateBody.includes('fetchAllPages<') && slateBody.includes('.range(fromRow, toRow)')
+      // A NUMERIC limit — the comment above the read names `.limit()` as the
+      // thing it stopped doing, and matching prose is how a guard passes on
+      // the wrong evidence.
+      && !/\.limit\(\d/.test(slateBody));
+  check('fetchSlateGames orders deterministically', slateBody.includes(".order('game_date')") && slateBody.includes(".order('game_id')"));
+
   // The season-totals VIEWS are the same read by another route. Checked at the
   // `.from(...)` rather than at the name, because the two football views are
   // picked by a ternary well above the read that uses them.
@@ -201,6 +275,27 @@ async function main() {
   // league and is thrown away the moment the slate lands.
   check('the board waits for the slate before reading', /if \(!slateReady\) return;/.test(s));
   check('the slate releases the board even when it fails', /\.finally\(\(\) => \{[\s\S]{0,120}setSlateReady\(true\)/.test(s));
+  // …and even when it never settles at all: supabase-js has no fetch timeout,
+  // so `.finally` is not a guarantee. Without the bound the tab parks on a
+  // spinner with no Retry (error stays null) and no way back.
+  check('the slate gate is BOUNDED', /setTimeout\(\(\) => \{[\s\S]{0,80}setSlateReady\(true\)[\s\S]{0,40}SLATE_GATE_MS\)/.test(s));
+  check('and the bound is cleared on unmount', /clearTimeout\(release\)/.test(s));
+
+  // A read is several sequential requests now, so a response can land on a
+  // board the user has already left.
+  check('every load is stamped', /const stamp = readKey;/.test(s));
+  check('a stale response writes nothing', (s.match(/if \(inFlight\.current !== stamp\) return;/g) ?? []).length >= 4,
+    `${(s.match(/if \(inFlight\.current !== stamp\) return;/g) ?? []).length} guards`);
+  check('including the error banner and the spinner',
+    /if \(inFlight\.current !== stamp\) return;\s*\n\s*setError/.test(s) && /if \(inFlight\.current === stamp\) setLoading\(false\)/.test(s));
+  check('rows known to answer a different question are not shown as the answer',
+    /rowsAreStale = shownKey !== null && shownKey !== readKey/.test(s)
+    && (s.match(/rowsAreStale \? EMPTY_ROWS :/g) ?? []).length === 2);
+  check('and a row-shaped placeholder stands in while it loads',
+    (s.match(/<BoardSkeleton \/>/g) ?? []).length === 2 && /accessibilityLabel="Loading players"/.test(s));
+  // The slate chip is the one chip whose tap is a network read.
+  check('the slate chip cannot queue a second whole-league read', /label=\{slateLabel\}[\s\S]{0,200}disabled=\{loading\}/.test(s));
+  check('and it tells VoiceOver it is busy', /\$\{slateLabel\}, loading/.test(s));
   for (const fn of ['fetchSeasonStatValues', 'fetchRecentGames', 'fetchWindowTotals']) {
     check(`${fn} is handed the slate teams`, new RegExp(`${fn}\\([^)]*, teams\\)`).test(s));
   }

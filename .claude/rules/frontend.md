@@ -88,6 +88,26 @@ Two halves, and the second is the one that was missed:
   Paging a 54,687-row read onto a phone to render one game is a second bug
   wearing the first one's fix.
 
+**A SERVER NARROWING ONLY REPLACES A CLIENT FILTER WHEN THE ROW MEANS THE SAME
+THING.** `.in('team', …)` is exact on a read that returns ONE ROW PER PLAYER
+(`player_window_totals_*`, `player_season_stat_values_*` — `team` there is
+already `(array_agg(team ORDER BY game_date DESC))[1]`, the row the board groups
+to). On a read that returns one row per GAME it filters GAMES while the board
+filters PLAYERS, and the two then disagree for everyone who changed team inside
+the window — in BOTH directions: a traded player's last-10 is silently cut to
+his games for tonight's team, and a player who LEFT that team is admitted to its
+board. Neither is visible; the row prints "3 of 5" under a chip that says L10.
+Narrow a per-game read through the FUNCTION instead (`p_teams`, filtering the
+ranked CTE on `rn = 1`), and if the parameter is new, DROP the old signature in
+the same DO block — an added argument makes an OVERLOAD, and a call carrying
+only the old arguments then matches both, which PostgREST answers with 300
+Multiple Choices for every app build already in the field.
+
+The guard for this had already been written and it PASSED: every row in its
+fixture carried one team. **When you assert that two filters agree, the fixture
+must contain the population they can disagree about** — §7's blind-spot rule in
+its narrowing-shaped form.
+
 **BEFORE ADDING A READ, GET ITS ROW COUNT FROM PRODUCTION.** Not its shape, not
 "a few hundred rows" in the docstring above it — the count, on the biggest day
 it will ever have. Four of these carried a comment saying the set was small.

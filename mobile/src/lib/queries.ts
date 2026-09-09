@@ -268,14 +268,21 @@ export async function fetchWindowTotals(
 }
 
 /**
- * Drain one set-returning RPC past the row cap, narrowed to the slate's teams
- * when the caller has one.
+ * Drain one set-returning RPC past the row cap.
  *
  * `.in()` and `.range()` are applied to the /rpc/ request itself — PostgREST
  * filters and pages a function that returns a table exactly like a view, and
  * `rpc()` hands back a filter builder for that reason. The order is explicit
  * rather than left to the function body's own ORDER BY: range paging without a
  * deterministic order at the REQUEST can repeat or skip rows between windows.
+ *
+ * `teams` NARROWS AT THE REQUEST, WHICH IS ONLY CORRECT FOR A READ THAT RETURNS
+ * ONE ROW PER PLAYER — `player_window_totals_*` and `player_season_stat_values_*`
+ * both do, each carrying `team = (array_agg(team ORDER BY game_date DESC))[1]`,
+ * i.e. exactly the team the board would have grouped that player to. A read that
+ * returns one row per GAME must narrow through the FUNCTION instead (`p_teams`
+ * in `args`), or it filters games where the board filters players; see
+ * fetchRecentGames for what that costs.
  */
 function pageRpc<T>(
   fn: string,
@@ -310,12 +317,32 @@ export async function fetchRecentGames(
   // The heaviest read on the board — N rows per player, league-wide. Every
   // sport is over the 1,000-row cap here (WNBA 2,074, NBA 5,447, MLB 6,216,
   // NFL 12,850, NCAAF 54,687), so it is both paged and narrowed.
+  //
+  // NARROWED THROUGH `p_teams`, NOT THROUGH `.in('team', …)` LIKE THE OTHER TWO
+  // READS, and that difference is load-bearing. This is the one leaderboard read
+  // that returns a row PER GAME, each carrying the team the player played THAT
+  // GAME for — so a request-level team filter filters GAMES, while the board
+  // filters PLAYERS (it groups by player_id and takes the newest row's team,
+  // which is what `isOnSlate` then matches). The two disagree for exactly the
+  // players who changed team inside the window, in both directions: on tonight's
+  // SEA-NE slate, 5 players would have had their last-10 silently cut to only
+  // the games played for tonight's team, and 5 who have LEFT those teams would
+  // have appeared on the board as though they were still on them. Neither shows:
+  // the row prints "3 of 5" under a chip that says L10.
+  //
+  // `p_teams` filters inside the ranked CTE on rn = 1 — the same row the client
+  // groups to — so the server and the client select the same players and each
+  // keeps a whole window. Measured after the migration: 110 players either way,
+  // zero difference in either direction. Null narrows nothing, which is also
+  // what an app build older than the migration sends.
+  const withTeams = (args: Record<string, unknown>) =>
+    hasTeams(teams) ? { ...args, p_teams: teams } : args;
   if (sport === 'WNBA' || sport === 'NBA') {
     const fn = sport === 'WNBA' ? 'player_recent_games_wnba' : 'player_recent_games_nba';
     return pageRpc<RecentGameRow>(
       fn,
-      { p_season: season, p_window: window },
-      teams,
+      withTeams({ p_season: season, p_window: window }),
+      null,
       recentGameRowKey,
       RECENT_ORDER,
     );
@@ -323,8 +350,8 @@ export async function fetchRecentGames(
   if (sport === 'MLB') {
     return pageRpc<RecentGameRow>(
       'player_recent_games_mlb',
-      { p_season: season, p_player_type: playerType ?? 'batter', p_window: window },
-      teams,
+      withTeams({ p_season: season, p_player_type: playerType ?? 'batter', p_window: window }),
+      null,
       recentGameRowKey,
       RECENT_ORDER,
     );
@@ -334,8 +361,8 @@ export async function fetchRecentGames(
     for (const s of footballSeasonCandidates(season)) {
       const rows = await pageRpc<RecentGameRow>(
         fn,
-        { p_season: s, p_window: window },
-        teams,
+        withTeams({ p_season: s, p_window: window }),
+        null,
         recentGameRowKey,
         RECENT_ORDER,
       );
@@ -1304,15 +1331,26 @@ export async function fetchSlateGames(
   from: string,
   through: string,
 ): Promise<GameRow[]> {
-  const { data, error } = await supabase
-    .from('games')
-    .select(GAME_COLUMNS)
-    .eq('sport', sport)
-    .gte('game_date', from)
-    .lte('game_date', through)
-    .limit(500);
-  if (error) throw error;
-  return (data ?? []) as unknown as GameRow[];
+  // Paged, and no `.limit()`. This used to decide only a client-side filter, so
+  // an arbitrary 500 of the window was survivable; it now decides which teams
+  // the leaderboard read asks the server for, and therefore which players exist
+  // on the board at all. An unordered cap on THAT is the same silent truncation
+  // the rest of this file exists to remove. Headroom today is wide — the widest
+  // 7-day window measured 2026-09-09 is 118 NCAAF games — which is the argument
+  // for ordering it, not for trusting the number.
+  return fetchAllPages<GameRow>(
+    (fromRow, toRow) =>
+      supabase
+        .from('games')
+        .select(GAME_COLUMNS)
+        .eq('sport', sport)
+        .gte('game_date', from)
+        .lte('game_date', through)
+        .order('game_date')
+        .order('game_id')
+        .range(fromRow, toRow),
+    (g) => g.game_id,
+  );
 }
 
 /**
