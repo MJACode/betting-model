@@ -464,6 +464,7 @@ def run_system_health(run_date: str | None = None) -> dict:
         run_date = today_et()
     d = datetime.strptime(run_date, "%Y-%m-%d")
     yday = (d - timedelta(days=1)).strftime("%Y-%m-%d")
+    day2 = (d - timedelta(days=2)).strftime("%Y-%m-%d")
     d3 = (d - timedelta(days=3)).strftime("%Y-%m-%d")
 
     conn = get_connection()
@@ -472,6 +473,24 @@ def run_system_health(run_date: str | None = None) -> dict:
         mlb_today = _games_count(conn, "MLB", run_date, run_date) > 0
         mlb_yday_finals = _games_count(conn, "MLB", yday, yday, finals_only=True) > 0
         any_today = _scalar(conn, "SELECT COUNT(*) FROM games WHERE game_date = ? AND sport <> 'GOLF'", (run_date,)) or 0
+
+        # mlb_team_stats / mlb_bullpen_workload / mlb_player_game_log / umpires
+        # are written ONLY by the once-daily 6am ET run (Steps 0d/3/3b/5c) --
+        # refresh_pass.sh's hourly steps never touch them (odds/lineups/weather/
+        # public-betting do run hourly; these four do not). This health check
+        # itself runs on EVERY hourly pass too, so between midnight ET and the
+        # daily run's completion (~6:20am ET, measured 2026-09-08) "today" /
+        # "yesterday" genuinely has no row yet, and every one of these four
+        # CRIT/WARN checks fired STALE on all 6 overnight hourly passes --
+        # 2026-09-08's own report caught exactly this and all four self-healed
+        # within minutes of the 10:00 UTC run reaching their step. Not a feed
+        # problem; a cadence mismatch between when this check runs (hourly,
+        # around the clock) and when the data it reads is expected to exist
+        # (once daily, after ~6:20am ET). Relax the expectation by one day
+        # during that window, mirroring `in_pass_window` below -- a feed that
+        # is ALSO behind the relaxed date is still genuinely stale and still
+        # fires.
+        daily_pipeline_pending = datetime.now(ZoneInfo("America/New_York")).hour < 7
 
         # ── Odds feeds (The Odds API) ────────────────────────────────────────
         # NOT gated on games existing: MLB/WNBA games rows are CREATED by this
@@ -556,22 +575,26 @@ def run_system_health(run_date: str | None = None) -> dict:
 
         # ── MLB stat feeds (MLB Stats API / Savant / Open-Meteo / ESPN) ─────
         r.date_check(conn, "mlb_team_stats", "CRIT", "mlb_team_stats", "as_of_date",
-                     run_date, gate_ok=mlb_today, gate_note="no MLB games today")
+                     yday if daily_pipeline_pending else run_date,
+                     gate_ok=mlb_today, gate_note="no MLB games today")
         r.date_check(conn, "mlb_bullpen_workload", "CRIT", "mlb_bullpen_stats", "game_date",
-                     yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     day2 if daily_pipeline_pending else yday,
+                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "mlb_pitcher_stats", "WARN", "mlb_pitcher_stats", "game_date",
                      d3, gate_ok=_games_count(conn, "MLB", d3, yday, finals_only=True) > 0,
                      gate_note="no MLB finals in last 3 days")
         r.date_check(conn, "mlb_weather", "CRIT", "game_weather", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
         r.date_check(conn, "mlb_player_game_log", "CRIT", "player_game_log", "game_date",
-                     yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     day2 if daily_pipeline_pending else yday,
+                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "injuries", "WARN", "injuries", "report_date",
                      yday, gate_ok=any_today > 0, gate_note="no games today")
         r.date_check(conn, "lineups", "WARN", "lineup_slots", "game_date",
                      yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "umpires", "WARN", "umpires", "game_date",
-                     yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     day2 if daily_pipeline_pending else yday,
+                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "public_betting", "WARN", "public_betting", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
 
