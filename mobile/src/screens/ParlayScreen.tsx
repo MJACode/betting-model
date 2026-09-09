@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -546,10 +547,15 @@ function ParlaySaveButton({
 function ParlayHoldNote({
   ev,
   exception,
+  exceptionCount,
   modelBacked,
 }: {
   ev: number;
   exception: string | null;
+  /** How many legs `exception` names. The one-line summary has no room for the
+   *  legs themselves, and "Where each leg is priced" dropped the very fact it
+   *  replaced — that a leg is NOT at DraftKings (UX review). A count fits. */
+  exceptionCount: number;
   /**
    * Does any leg carry a model's number? A slip built entirely of Stats line
    * legs does not — Doubles and Triples have no model at all — so the positive
@@ -572,14 +578,18 @@ function ParlayHoldNote({
       ? `${priced}\n\nParlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats the price.`
       : `${priced}\n\nThese are your own lines, priced at what the book is offering — no model has an opinion on them. Parlays carry far more hold (~15–25%) than straight bets (~5%).`;
   return (
-    <View style={styles.holdNote}>
+    // The warn tone brings its own tinted panel, so the hairline that separates
+    // a footnote from the row above would double as a border on it.
+    <View style={negative ? styles.holdNoteWarn : styles.holdNote}>
       <InfoTooltip
         tone={negative ? 'warn' : 'info'}
         title={negative ? 'Negative EV' : 'How this slip is priced'}
         label={
           negative
             ? 'Negative EV — straight bets are better value'
-            : `${exception ? 'Where each leg is priced' : 'Priced at DraftKings'} · parlay hold`
+            : exceptionCount > 0
+              ? `${exceptionCount} leg${exceptionCount === 1 ? '' : 's'} priced away from DraftKings · parlay hold`
+              : 'Priced at DraftKings · parlay hold'
         }
         body={body}
       />
@@ -734,6 +744,26 @@ function SlipBody({
     if (off.length === 0) return null;
     return off.map((l) => `${l.label} at ${bookName(l.pricedAt ?? '')}`).join(' and ');
   }, [legs]);
+  const dkExceptionCount = useMemo(
+    () => legs.filter((l) => l.dkPriced === false).length,
+    [legs],
+  );
+  // Past ~1.3 the two-up grid's fixed 45% cells are narrower than their own
+  // labels, so it stacks instead of truncating them (UX review).
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale > 1.3;
+  // Clearing destroys the hand-typed custom legs, which exist nowhere else, and
+  // there is no undo behind it — so it asks, the way the dropping-legs save does.
+  const confirmClear = useCallback(() => {
+    Alert.alert(
+      'Clear your betslip?',
+      'This removes every selection, including any legs you entered by hand. It can’t be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: onClear },
+      ],
+    );
+  }, [onClear]);
   const staleNote =
     staleCount > 0 ? (
       <Pressable
@@ -843,11 +873,38 @@ function SlipBody({
           </View>
         ) : null}
 
+        {/* A NEGATIVE-EV WARNING GOES ABOVE THE BET CONTROL, NEVER BELOW IT
+            (UX review, 2026-09-08). It used to sit below because the bet
+            control was a button under the legs; now the book tiles are the bet
+            control, and leaving the note under them let a member read the
+            payout, tap a tile and reach the hand-off sheet — which says nothing
+            about EV — with the warning never on screen. The "EV −0.0%" stat
+            above is a number, not a recommendation.
+
+            The non-negative note keeps its old slot: it is a pricing footnote,
+            and hoisting it would put a paragraph between the payout and the
+            books for no gain. */}
+        {metrics.ev < 0 ? (
+          <ParlayHoldNote
+            ev={metrics.ev}
+            exception={dkException}
+            exceptionCount={dkExceptionCount}
+            modelBacked={modelBacked}
+          />
+        ) : null}
+
         <BetslipBooksRow legs={legs} />
 
         <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
-        <ParlayHoldNote ev={metrics.ev} exception={dkException} modelBacked={modelBacked} />
+        {metrics.ev >= 0 ? (
+          <ParlayHoldNote
+            ev={metrics.ev}
+            exception={dkException}
+            exceptionCount={dkExceptionCount}
+            modelBacked={modelBacked}
+          />
+        ) : null}
 
         <View style={styles.legsList}>
           {legs.map((leg) => (
@@ -875,12 +932,17 @@ function SlipBody({
       ) : null}
 
       {/* Two-up, not four stacked full-width rows. These are the slip's
-          SECONDARY actions — the bet itself is the Open with row inside the
-          card — and four of them stacked was ~200pt of chrome under a card the
-          user is trying to read. Save joined them when the green bet button
-          left (Matt, 2026-09-08); at half width the four fit in the height two
-          used to take. */}
-      <View style={styles.manualActions}>
+          SECONDARY actions — the bet itself is the book row inside the card —
+          and four of them stacked was ~200pt of chrome under a card the user is
+          trying to read. Save joined them when the green bet button left (Matt,
+          2026-09-08); at half width three fit in the height two used to take.
+
+          ONE COLUMN ONCE THE TYPE GROWS (UX review). `flexBasis: '45%'` does not
+          respond to fontScale, so at XXXL "Update parlay" is wider than its cell
+          and every label collapses at accessibility sizes. Past 1.3 the grid
+          gives up and stacks, which is what the labels were shortened to avoid
+          having to do at the DEFAULT size. */}
+      <View style={[styles.manualActions, stacked && styles.manualActionsStacked]}>
         <ParlaySaveButton
           legs={legs}
           sport={sport}
@@ -894,9 +956,7 @@ function SlipBody({
           style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
         >
           <Ionicons name="search" size={18} color={colors.tint} />
-          <Text style={styles.gridBtnText} numberOfLines={1}>
-            Find players
-          </Text>
+          <Text style={styles.gridBtnText}>Find players</Text>
         </Pressable>
         <Pressable
           onPress={onAddCustom}
@@ -904,22 +964,25 @@ function SlipBody({
           style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
         >
           <Ionicons name="create-outline" size={18} color={colors.tint} />
-          <Text style={styles.gridBtnText} numberOfLines={1}>
-            Custom leg
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={onClear}
-          accessibilityRole="button"
-          accessibilityLabel="Clear betslip"
-          style={({ pressed }) => [styles.gridBtn, styles.clearGridBtn, pressed && styles.pressed]}
-        >
-          <Ionicons name="trash-outline" size={18} color={colors.avoid} />
-          <Text style={[styles.gridBtnText, styles.clearBtnText]} numberOfLines={1}>
-            Clear slip
-          </Text>
+          <Text style={styles.gridBtnText}>Custom leg</Text>
         </Pressable>
       </View>
+
+      {/* CLEAR IS NOT A PEER OF THE THREE ABOVE (UX review). In the grid it was
+          the same size and shape as "Custom leg" and sat bottom-right, under a
+          right thumb — and `handleClear` wipes the slip, the Stats line legs and
+          the hand-typed custom legs, which have no other copy, with no undo.
+          Its own row, and it asks first: the same Alert shape Save already uses
+          before an update that drops legs. */}
+      <Pressable
+        onPress={confirmClear}
+        accessibilityRole="button"
+        accessibilityLabel="Clear betslip"
+        style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+      >
+        <Ionicons name="trash-outline" size={18} color={colors.avoid} />
+        <Text style={styles.clearBtnText}>Clear betslip</Text>
+      </Pressable>
     </View>
   );
 }
@@ -1086,6 +1149,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.lg,
   },
+  manualActionsStacked: {
+    flexDirection: 'column',
+  },
   gridBtn: {
     flexGrow: 1,
     flexBasis: '45%',
@@ -1096,8 +1162,15 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.sm,
+    // spacing.md x2 + a ~19pt line is 43pt — one point under the floor, and
+    // these are half-width now, so the whole target has roughly halved.
+    minHeight: 44,
   },
+  // No numberOfLines cap on the label: a half-width cell that cannot grow must
+  // at least be allowed to wrap (UX review).
   gridBtnText: {
+    flexShrink: 1,
+    textAlign: 'center',
     color: colors.tint,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
@@ -1106,9 +1179,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.tint,
   },
-  // Clear is destructive and stays borderless, so it never reads as a peer of
-  // the three it sits beside.
-  clearGridBtn: {},
+
   clearBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1131,6 +1202,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
   },
+  holdNoteWarn: {},
   warnBanner: {
     flexDirection: 'row',
     alignItems: 'center',

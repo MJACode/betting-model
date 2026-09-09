@@ -468,11 +468,15 @@ export interface BetslipBookQuote {
 function legPriceAtBook(
   leg: ParlayLeg,
   book: string,
-): { decimal: number; link: string | null } | null {
+): { decimal: number; american: number; link: string | null } | null {
   if (book === MODEL_BOOK) {
     // A Stats line leg DraftKings never posted is not DK's to price.
     if (leg.dkPriced === false) return null;
-    return { decimal: leg.decimalOdds, link: leg.pick?.dk_bet_link ?? leg.dkLink ?? null };
+    return {
+      decimal: leg.decimalOdds,
+      american: leg.americanOdds,
+      link: leg.pick?.dk_bet_link ?? leg.dkLink ?? null,
+    };
   }
   // A leg restored from a saved parlay is priced by its SNAPSHOT: the books
   // whose keys the save recorded are the books that had it, at the price the
@@ -481,16 +485,20 @@ function legPriceAtBook(
   const savedLinks = leg.saved?.bookLinks;
   if (savedLinks) {
     if (!(book in savedLinks)) return null;
-    return { decimal: leg.decimalOdds, link: savedLinks[book] ?? null };
+    return {
+      decimal: leg.decimalOdds,
+      american: leg.americanOdds,
+      link: savedLinks[book] ?? null,
+    };
   }
   // Only a hand-entered custom leg is book-agnostic (the user quoted a market
   // number, not one book's). A Stats line leg always carries `dkPriced`, so a
   // DraftKings-only line leg is NOT credited to every other book.
   if (leg.pick == null && leg.dkPriced === undefined) {
-    return { decimal: leg.decimalOdds, link: null };
+    return { decimal: leg.decimalOdds, american: leg.americanOdds, link: null };
   }
   const row = leg.bookPrices.find((b) => b.bookmaker === book);
-  return row ? { decimal: row.decimal, link: row.link } : null;
+  return row ? { decimal: row.decimal, american: row.american, link: row.link } : null;
 }
 
 /**
@@ -576,16 +584,30 @@ export interface Handoff {
   /** Per-leg: does that book price the leg at all? A null link with `posted`
    *  true is "add it by hand"; with `posted` false it is "not posted here". */
   posted: boolean[];
+  /**
+   * Per-leg American price AT THIS BOOK, slip order; null where it prices no
+   * leg. The hand-off sheet used to list the leg's DraftKings price under a
+   * heading naming a different book, so a FanDuel tile showing +648 opened a
+   * sheet whose legs multiplied out to DraftKings' payout — two prices for one
+   * slip, one tap apart (UX review, 2026-09-08). `handoffFrom` already called
+   * `legPriceAtBook` per leg to fill `posted` and threw the number away.
+   *
+   * Display only. The BET decision — edge, EV, stake, CLV — is DraftKings' and
+   * stays DraftKings' (CLAUDE.md §6).
+   */
+  prices: (number | null)[];
   /** How many legs the book prices, of how many. */
   priced: number;
   total: number;
 }
 
 function handoffFrom(q: BetslipBookQuote, legs: ParlayLeg[]): Handoff {
+  const at = legs.map((l) => legPriceAtBook(l, q.book));
   return {
     book: q.book,
     links: q.links,
-    posted: legs.map((l) => legPriceAtBook(l, q.book) != null),
+    posted: at.map((p) => p != null),
+    prices: at.map((p) => p?.american ?? null),
     priced: q.priced,
     total: q.total,
   };
@@ -605,7 +627,14 @@ function handoffFrom(q: BetslipBookQuote, legs: ParlayLeg[]): Handoff {
 export function handoffAtBook(legs: ParlayLeg[], book: string): Handoff {
   const [q] = priceBooksForParlay(legs, 1, [book]);
   if (!q) {
-    return { book, links: legs.map(() => null), posted: legs.map(() => false), priced: 0, total: legs.length };
+    return {
+      book,
+      links: legs.map(() => null),
+      posted: legs.map(() => false),
+      prices: legs.map(() => null),
+      priced: 0,
+      total: legs.length,
+    };
   }
   return handoffFrom(q, legs);
 }
@@ -630,7 +659,14 @@ export function handoffBookFor(
   if (full) return handoffFrom(full, legs);
   const most = any[0];
   if (most) return handoffFrom(most, legs);
-  return { book: MODEL_BOOK, links: legs.map(() => null), posted: legs.map(() => false), priced: 0, total: legs.length };
+  return {
+    book: MODEL_BOOK,
+    links: legs.map(() => null),
+    posted: legs.map(() => false),
+    prices: legs.map(() => null),
+    priced: 0,
+    total: legs.length,
+  };
 }
 
 // ── Edit helpers (pure) ──────────────────────────────────────────────────────

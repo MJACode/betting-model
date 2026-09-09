@@ -238,10 +238,23 @@ check('a tapped full tile carries that book’s own links',
 check('a tapped DK tile carries the stored DK links',
   handoffAtBook(legs, 'draftkings').links[1] === 'dk://leg2');
 
+// The sheet lists THAT BOOK's prices, not DraftKings'. Before this the sheet
+// under a FanDuel tile showing +648 listed DK's leg numbers (UX review).
+check('a tapped tile carries that book’s own per-leg prices',
+  tapFd.prices[0] === -105 && tapFd.prices[1] === 100,
+  `got ${tapFd.prices.join(',')}`);
+check('the DK tile carries the STORED scored prices, not a fresh snapshot',
+  handoffAtBook(legs, 'draftkings').prices[0] === -110 &&
+    handoffAtBook(legs, 'draftkings').prices[1] === -120);
+check('a leg the book does not post has no price rather than DK’s',
+  tapMgm.prices[0] === -115 && tapMgm.prices[1] === null,
+  `got ${tapMgm.prices.join(',')}`);
+
 const tapNone = handoffAtBook(legs, 'espnbet');
 check('a tile that prices nothing still hands off there, with every leg unposted',
   tapNone.book === 'espnbet' && tapNone.priced === 0 && tapNone.total === 2 &&
-    tapNone.posted.every((p) => p === false) && tapNone.links.every((l) => l == null));
+    tapNone.posted.every((p) => p === false) && tapNone.links.every((l) => l == null) &&
+    tapNone.prices.every((p) => p == null));
 
 // ── savedHandoffBookFor (saved-parlay snapshots) ────────────────────────────
 // Same honesty rule as handoffBookFor, but off the persisted bookLinks

@@ -60,7 +60,13 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
             key: String(l.pickId),
             label: l.label,
             matchup: matchupForLeg(l.game),
-            americanOdds: l.americanOdds,
+            // THAT BOOK'S price, not DraftKings' (UX review, 2026-09-08). The
+            // whole premise of this row is that the prices differ, so listing DK
+            // numbers under a sheet titled "Bet on FanDuel" is two prices for
+            // one slip, one tap apart. Falls back to the leg's DK price only
+            // where the book prices no leg — the sheet marks those `posted:
+            // false` anyway.
+            americanOdds: handoff.prices[i] ?? l.americanOdds,
             betLink: handoff.links[i] ?? null,
             posted: handoff.posted[i] ?? true,
           })),
@@ -93,9 +99,13 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
         <Text style={styles.headerHint}>★ = best odds</Text>
       </View>
 
+      {/* The indicator stays ON here, unlike every other horizontal strip in
+          the app. There are 10 bettable books at 86pt in a ~311pt card, so 7 of
+          them are off-screen — and since this row became the bet control there
+          is no other affordance saying the rest exist (UX review). */}
       <ScrollView
         horizontal
-        showsHorizontalScrollIndicator={false}
+        showsHorizontalScrollIndicator
         contentContainerStyle={styles.tiles}
       >
         {quotes.map((q) => {
@@ -112,6 +122,7 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
                     }`
                   : `Bet on ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines`
               }
+              accessibilityHint="Opens the leg-by-leg hand-off for this book"
               // A partial tile fades its ODDS only (oddsNa below): the badge
               // and the "2/3 legs" coverage are the information, and at 55%
               // on textTertiary they were under AA — on DraftKings' own tile,
