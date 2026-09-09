@@ -1420,3 +1420,34 @@ as **not eligible** until the state is known (the model loses nothing — a
 genuinely open roof re-qualifies once the state lands); or source the roof
 state pre-game rather than from the schedule file. Do NOT default blank to
 `outdoors`, which is what happens today by omission.
+
+---
+
+## Historical `sbr_consensus` odds ties are broken arbitrarily (2026-09-08)
+
+**Not urgent, and deliberately not fixed inside the `pregame_total_line` work
+that found it** — the fix rewrites training data for every MLB model, which is
+a wider change than that PR was measuring.
+
+Historical `sbr_consensus` rows carry a **date-only** `snapshot_at`
+(`2025-10-13`, not a timestamp). A game therefore has two rows tying exactly on
+`snapshot_at` — one `open`, one `close` — and every "latest pre-game price"
+read picks between them arbitrarily:
+
+| game | `_build_bulk_mlb_lookups` (training) | `_get_dk_odds` (serving) |
+|---|---|---|
+| MLB_2025-10-13_SEA_TOR | 7.0 (`close`) | 8.0 (`open`) |
+| MLB_2025-10-09_PHI_LAD | 8.5 | 7.5 |
+| MLB_2025-10-08_MIL_CHC | 6.5 | 7.0 |
+
+8 of 40 sampled 2025 games disagree. DK-priced games are unaffected — they
+carry full timestamps, and the same comparison on 60 2026 games is 60/60
+identical — so this is historical training data only, never a live decision.
+
+The fix is one ORDER BY term in both readers, applied together:
+`snapshot_at DESC, CASE snapshot_type WHEN 'close' THEN 0 WHEN 'open' THEN 1
+ELSE 2 END`. `close` is the right pre-game number on a tie.
+
+**Before doing it, measure what moves.** It changes `total_line` and
+`spread_home` for pre-2024 games in the training set of every MLB model, so it
+is a retrain-scope change, not a cleanup.

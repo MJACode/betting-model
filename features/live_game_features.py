@@ -237,9 +237,12 @@ def build_live_training_dataset(model_id: str,
         pregame_rows = []
         for gid, m in game_meta.items():
             odds_row = bulk["odds"].get((gid, "h2h"))
+            # Twin of live_scorer._pregame_features — both paths pass h2h AND
+            # totals so `pregame_total_line` means the same thing in each.
             feat = _build_mlb_features_from_bulk(
                 bulk, gid, m["game_date"], m["home_team"], m["away_team"],
-                m["season"], odds_row)
+                m["season"], odds_row,
+                totals_row=bulk["odds"].get((gid, "totals")))
             pregame_rows.append({
                 "game_id": gid,
                 "game_date": m["game_date"],

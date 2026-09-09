@@ -23,6 +23,13 @@ attributable to stats drift alone.
 
     python -m scripts.live_feature_sensitivity
     python -m scripts.live_feature_sensitivity --since 2026-08-24 --limit 60
+    python -m scripts.live_feature_sensitivity --artifact models/saved/_baseline/x.pkl
+
+READ THE RESULT CORRECTLY. This measures sensitivity to the SEASON-TO-DATE
+STATS specifically. A model that does not carry those features scores 0.0000
+here BY CONSTRUCTION, and that is not evidence it is better -- it is the
+definition of the candidate. Necessary, never sufficient: the number that
+ranks candidates is out-of-sample calibration at the decision band, not this.
 """
 
 from __future__ import annotations
@@ -46,9 +53,17 @@ STATE = ["inning", "inning_half", "outs", "bases_state", "home_score",
          "away_score", "abstract_game_state", "snapshot_at"]
 
 
-def measure(since: str, limit: int | None) -> list[tuple[str, float]]:
+def measure(since: str, limit: int | None,
+            artifact_path: str | None = None) -> list[tuple[str, float]]:
     conn = get_connection()
-    artifact = load_model(MODEL)
+    if artifact_path:
+        import pickle
+        with open(artifact_path, "rb") as fh:
+            artifact = pickle.load(fh)
+        logger.info(f"measuring candidate artifact {artifact_path} "
+                    f"({len(artifact['feature_cols'])} features)")
+    else:
+        artifact = load_model(MODEL)
     if artifact is None:
         raise SystemExit(f"no active artifact for {MODEL}")
     cols, clf = artifact["feature_cols"], artifact["model"]
@@ -81,7 +96,8 @@ def measure(since: str, limit: int | None) -> list[tuple[str, float]]:
                 asof = (base - dt.timedelta(days=back)).isoformat()
                 pre = build_mlb_game_features(
                     conn, gid, asof, home, away, season,
-                    odds_row=_get_dk_odds(conn, gid, "h2h"))
+                    odds_row=_get_dk_odds(conn, gid, "h2h"),
+                    totals_row=_get_dk_odds(conn, gid, "totals"))
                 if not pre:
                     continue
                 row = build_live_state_row(state, pre, MODEL)
@@ -105,9 +121,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--since", default="2026-08-24")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--artifact", default=None,
+                    help="measure this .pkl instead of the registered active "
+                         "one — for a candidate that is not promoted yet")
     args = ap.parse_args()
 
-    rows = measure(args.since, args.limit)
+    rows = measure(args.since, args.limit, args.artifact)
     if not rows:
         logger.warning("no comparable games — nothing measured")
         return

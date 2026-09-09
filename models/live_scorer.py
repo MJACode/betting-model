@@ -450,9 +450,15 @@ def _pregame_features(conn: DBConnection, game: dict, build, get_dk_odds):
         return hit
     for stale in [k for k in _PREGAME_CACHE if k[0] != game["game_date"]]:
         _PREGAME_CACHE.pop(stale, None)
+    # TWO markets, deliberately. h2h fills the moneyline context columns; the
+    # totals row is what carries `pregame_total_line`, the anchor the book
+    # re-prices its live total off (CLAUDE.md 1b). Passing only h2h left that
+    # feature None at serve time while training filled it — the exact
+    # train/serve split that tests/test_live_pregame_total_line.py now pins.
     row = build(conn, game["game_id"], game["game_date"],
                 game["home_team"], game["away_team"], game["season"],
-                odds_row=get_dk_odds(conn, game["game_id"], "h2h"))
+                odds_row=get_dk_odds(conn, game["game_id"], "h2h"),
+                totals_row=get_dk_odds(conn, game["game_id"], "totals"))
     if row:
         _PREGAME_CACHE[key] = row
     return row

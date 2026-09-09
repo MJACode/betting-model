@@ -963,3 +963,110 @@ This is the most plausible mechanical account of **claims ~73%, delivers ~54%**
   cut is −1.26u over 70 (z −0.12) — indistinguishable from zero, which is
   exactly what a model driven by input noise would look like, but it is not on
   its own grounds to stop it. That is mike's call.
+
+---
+
+## 15. The anchor the model never had (2026-09-08, mike)
+
+§14 established the defect: `mlb_live_total_runs` moves a median 12.8
+probability points on season-to-date stats that drift by hundredths a day. This
+section is the fix, and — because a fix asserted is not a fix measured — the
+gate it had to clear.
+
+### 15.1 The diagnosis, restated as a missing feature
+
+CLAUDE.md §1b states the live thesis in one line: a live total is priced
+**relative to the starting line**. The book re-anchors its live total
+mechanically off the pre-game number and the clock; the edge is predicting
+where true remaining production deviates from that anchor.
+
+`mlb_live_total_runs` did not carry the anchor. Its 18 features were nine
+in-game state columns, six season-to-date stats (`home_team_era`,
+`away_team_era`, `home_bullpen_era`, `away_bullpen_era`, `home_runs_last_10`,
+`away_runs_last_10`) and three weather columns. The pre-game total appeared
+nowhere. The six stats were standing in for the run environment the market had
+already priced — and doing it badly enough to move the output 12.8 points on
+noise.
+
+### 15.2 Why the feature could not simply be switched on
+
+`total_line` already existed in the MLB feature dict, and it was **empty on
+both live paths**, for the same reason in each: it is filled from whichever
+market the caller happens to pass as `odds_row`, and both live paths pass
+`h2h`.
+
+```
+features["total_line"] = odds_row.get("total_line")   # h2h row -> None
+```
+
+The pre-game over/under model passes the `totals` row and gets a real number;
+every h2h caller gets `None` from the same slot. A feature read from a slot
+whose meaning depends on the caller is the "same understanding, same blind
+spot" trap in CLAUDE.md §7 — it is filled in one path and empty in the other
+with nothing raising.
+
+So the plumbing came first, as its own change: a dedicated
+**`pregame_total_line`**, sourced from the TOTALS market explicitly, passed by
+both MLB builders (`build_mlb_game_features` and
+`_build_mlb_features_from_bulk`) via a separate `totals_row` argument, and
+supplied by both live paths — `live_scorer._pregame_features` at serve time and
+`build_live_training_dataset` at training time.
+
+### 15.3 Coverage, measured before anything was retrained
+
+A feature that is mostly NULL is not a feature. Games with a leak-guarded
+pre-game totals row from DK or `sbr_consensus`, by season:
+
+| Season | Games | With pre-game total | % |
+|---|---|---|---|
+| 2019 | 2,758 | 2,758 | 100.0 |
+| 2020 | 1,109 | 1,109 | 100.0 |
+| 2021 | 2,686 | 2,400 | 89.4 |
+| 2022 | 2,762 | 2,408 | 87.2 |
+| 2023 | 2,763 | 2,436 | 88.2 |
+| 2024 | 2,933 | 2,930 | 99.9 |
+| 2025 (holdout) | 3,102 | 3,102 | 100.0 |
+
+The 2021-23 gap does **not** delete training rows: the live trainer does
+`df[feature_cols].values.astype(float)` with no `dropna`, so a missing line
+becomes NaN and XGBoost routes it natively. It does mean the model learns a
+"no line" branch that serving never reaches — serve-side coverage is **100% on
+every completed day since 2026-08-24**.
+
+One honest caveat: 2019-20 are covered by `sbr_consensus`, not DK, because DK's
+feed does not reach back that far. The model absorbs a small systematic book
+offset on those seasons.
+
+### 15.4 Train/serve parity — and the bound that was wrong
+
+Building `pregame_total_line` down both paths for the same games is the check
+that the two agree. On **60 completed 2026 games: 60 identical, 0 different.**
+
+Getting there turned up a real defect. The training path bounds "pre-game" with
+`_is_pregame_snapshot`, which uses the ACTUAL first pitch (clamped by
+`trusted_first_pitch`). The serving path's `_pregame_cutoff`, shipped in #606,
+bounded on `commence_time` alone — the SCHEDULED start, which over 415 games
+lands a mean **18.7 minutes after** the game actually begins. That is the
+permissive direction: it admits a quarter-hour of in-play quotes as pre-game,
+on the DECISION path, while training excludes them.
+
+`_pregame_cutoff` now uses `pregame_cutoff_sql`, the same bound
+`_pregame_cutoff_map`, the odds ingestor and `market_movement` already use.
+Blast radius over all 415 games carrying a first pitch:
+
+| Market | Games | Price changed | Price lost |
+|---|---|---|---|
+| totals | 415 | 0 | 0 |
+| h2h | 415 | 3 | 0 |
+| spreads | 415 | 3 | 0 |
+
+**A divergence that was NOT this, and was not fixed.** Forty 2025 postseason
+games showed 7-8 mismatches that survived the bound fix. They are historical
+`sbr_consensus` rows carrying a **date-only** `snapshot_at`: on
+`MLB_2025-10-13_SEA_TOR` the `open` (8.0) and `close` (7.0) rows tie exactly,
+and the two paths break the tie differently — arbitrarily, and differently
+between runs. It is confined to historical sbr rows; DK-priced games have no
+ties, which is why 2026 is clean. It was left alone deliberately: preferring
+`close` on a tie would rewrite `total_line` in **every** MLB model's training
+set, which is a far wider change than this one and belongs to whoever measures
+that. Logged in `docs/followups.md`.
