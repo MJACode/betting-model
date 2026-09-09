@@ -127,3 +127,56 @@ to get a distribution.
    and neither is our binding constraint. Our constraint is that the eleven
    distributional models measure -1.90% and the one working rule had never been
    run in the regime it was measured in.
+
+---
+
+## 4. GRADED, AND IT DOES NOT WORK (2026-09-08)
+
+The alternates were backfilled across three seasons and the anchored-ladder
+construction was graded against them. **It fails the bar on every clause.**
+
+`scripts/nfl_prop_ladder_grade`, reference betonlineag, one bet per proposition:
+
+| cut | bets | win% | units | ROI | 90% CI | by season |
+|---|---|---|---|---|---|---|
+| 3% | 849 | 48.6% | -7.05 | -0.83% | (-7.0, +5.4) | 2024 -2.2%, 2025 +0.5% |
+| 4% | 545 | 49.5% | -9.51 | -1.74% | (-9.2, +6.0) | 2024 -2.1%, 2025 -1.3% |
+| 5% | 365 | 50.4% | -0.68 | -0.19% | (-9.6, +9.2) | 2024 +3.2%, 2025 -3.5% |
+| **6%** | 237 | 45.1% | **-36.72** | **-15.49%** | **(-26.1, -4.8)** | 2024 -22.2%, 2025 -9.3% |
+
+- **No plateau.** The shipped rule rises monotonically with the cut
+  (2.46 -> 4.31 -> 9.83 -> 12.15%). This does the opposite.
+- **Every usable interval spans zero.**
+- **The placebo fails outright.** Standing a retail book in as the ladder
+  reference: fanduel **+5.00%** (311 bets), espnbet +0.38%, hardrockbet -1.80%,
+  draftkings -12.98%. A retail book beats the sharp reference, which is the
+  same failure that killed the NCAAF attempt.
+
+### The informative part: the biggest edges are the worst bets
+
+The 6pp cell is not merely negative, it is SIGNIFICANTLY negative -- the only
+interval in the table excluding zero, and on the wrong side. A fair value that
+is right on average but wrong where it deviates most is the signature of a
+miscalibrated tail, and that points straight at this module's one stated
+assumption: `Ladder.anchored` shifts by a CONSTANT in logit space, i.e. it
+assumes the book's margin is uniform across its own ladder. It is not. Books
+charge far more at the extremes, so the correction under-removes vig exactly
+where the large apparent edges live, and the rule then bets hardest on its own
+worst estimates.
+
+That is worth knowing beyond this construction: any future use of a one-sided
+ladder needs a margin model that varies with the strike, not a single shift.
+
+### And the history is shallower than the spend assumed
+
+**Alternate coverage effectively begins in 2024.** For 2023 only draftkings
+(5,308 rows), fanduel (26,469) and hardrockbet (2,710) carry any at all, and
+**betonlineag carries none** -- so 2023 contributed no bets to the sweep and the
+72,094 credits spent on it bought nothing usable for this. Total backfill spend
+was ~514k credits against a ~291k estimate; the per-event cost was 583, not the
+341 measured from a single cheap event.
+
+**Verdict: do not wire the anchored ladder into scoring.** The 19.3% coverage
+gain is real and the bets it unlocks are not profitable. What survives is the
+machinery (`models/prop_ladder`), the Kalshi recorder, and a now-graded reason
+not to spend more on this idea.
