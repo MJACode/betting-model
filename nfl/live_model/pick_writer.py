@@ -229,6 +229,36 @@ def _is_market_opinion(reason: str | None) -> bool:
     return str(reason or "").split(":", 1)[0] in _AVOID_REASONS
 
 
+def announce_live_picks(game_date: str) -> None:
+    """Publish the lane's newly written live BETs for `game_date` -- Discord to
+    #nfl-live (mike, 2026-09-09: live picks go to their sport's live channel)
+    and the mobile push -- the same two calls the MLB live scorer and the NCAAF
+    loop make at the end of every pass.
+
+    Until 2026-09-09 nothing called either notifier for this lane: the MLB and
+    NCAAF loops publish at the end of a scoring pass, and this worker has no
+    pass, only a tick per decision, so its BETs reached the app's Live tab and
+    nowhere else. Called with the pick's OWN game_date rather than a clock
+    date: the row stamps the decision's UTC date, and a Sunday-night bet is
+    Monday in UTC, so resolving "today" here would hunt the wrong day.
+
+    Both notifiers dedupe on push_sent and take the publisher lock, so calling
+    per BET rather than per pass costs nothing but one query each. Separate
+    try blocks, same as the other loops: a broken webhook must not suppress
+    the push, and neither may raise into the write.
+    """
+    try:
+        from tracking.push_notifier import notify_live_signals
+        notify_live_signals(target_date=game_date, dry_run=False)
+    except Exception as exc:            # noqa: BLE001
+        log.error("live signal push failed (non-fatal): %s", exc)
+    try:
+        from tracking.discord_notifier import notify_discord_live
+        notify_discord_live(target_date=game_date, dry_run=False)
+    except Exception as exc:            # noqa: BLE001
+        log.error("live signal Discord post failed (non-fatal): %s", exc)
+
+
 class PicksRecorder:
     """Recorder that writes BET decisions to `picks`. Never raises.
 
@@ -238,9 +268,13 @@ class PicksRecorder:
     either way, so a decision dropped here is still recoverable afterwards.
     """
 
-    def __init__(self, bankroll: float | None = None, conn_factory=None):
+    def __init__(self, bankroll: float | None = None, conn_factory=None,
+                 announce=announce_live_picks):
         self._bankroll = bankroll
         self._conn_factory = conn_factory
+        # Called with the game_date of every BET this recorder commits, AFTER
+        # the commit: the announcers read the row back out of `picks`.
+        self._announce = announce
         # (game, model, player, side) -> the (line, price) last written as AVOID.
         self._avoid_sigs: dict[tuple, tuple] = {}
 
@@ -379,6 +413,13 @@ class PicksRecorder:
                 conn.close()
             except Exception:           # noqa: BLE001
                 pass
+        # After the connection is closed and the row is durable. The announcers
+        # open their own connection and read the row back; an exception here
+        # is theirs to log, never the write's to fail.
+        try:
+            self._announce(row["game_date"])
+        except Exception:               # noqa: BLE001
+            log.exception("live pick announce failed; the pick is written and stands")
 
 
 class TeeRecorder:

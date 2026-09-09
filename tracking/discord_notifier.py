@@ -7,8 +7,10 @@ Three producers, each independently enabled by whether its webhook is configured
     it clears the action thresholds (the same cut the app's Signals tab and the
     §16 mobile query use). Reads the LOCKED opening_signals row, so what posts is
     the bet of record, not a mid-refresh flicker.
-  • notify_discord_live    — in-play BET signals from the live loop, to the
-    dedicated live channel (or the sport's channel if none is set).
+  • notify_discord_live    — in-play BET signals from the live loops (MLB,
+    NCAAF, and the NFL in-play worker), to the SPORT'S live channel
+    (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
+    channel, else the sport's pre-game channel.
   • notify_discord_results — one morning recap after settlement: yesterday's
     record, P&L and ROI, overall and by sport.
 
@@ -530,8 +532,23 @@ def _webhook_for_sport(sport: str) -> str | None:
     return config.DISCORD_WEBHOOKS.get(sport) or config.DISCORD_WEBHOOK_DEFAULT or None
 
 
+def _live_webhook_for_sport(sport: str) -> str | None:
+    """Where an IN-PLAY signal for `sport` posts.
+
+    The sport's own live channel first (mike, 2026-09-09: live picks go to
+    #nfl-live / #mlb-live / #ncaaf-live), then the shared live channel, then
+    the sport's pre-game channel. The last fallback is deliberate: a sport that
+    has a live loop and no live channel yet still posts SOMEWHERE its members
+    read, and the ledger keeps it from re-posting once the channel is added.
+    """
+    return (config.DISCORD_WEBHOOKS_LIVE.get(sport)
+            or config.DISCORD_WEBHOOK_LIVE
+            or _webhook_for_sport(sport))
+
+
 def _configured() -> bool:
     return bool(config.DISCORD_WEBHOOKS
+                or config.DISCORD_WEBHOOKS_LIVE
                 or config.DISCORD_WEBHOOK_DEFAULT
                 or config.DISCORD_WEBHOOK_LIVE
                 or config.DISCORD_WEBHOOK_RESULTS)
@@ -1299,9 +1316,10 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
 
 
 def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -> int:
-    """Post new in-play BET signals to the live channel (falling back to the
-    sport's channel when DISCORD_WEBHOOK_LIVE isn't set). Called at the end of
-    each live-scorer pass. Returns the number posted."""
+    """Post new in-play BET signals to the sport's live channel (see
+    _live_webhook_for_sport for the fallback chain). Called at the end of each
+    MLB and NCAAF live pass, and by the NFL in-play worker after every live
+    BET it writes. Returns the number posted."""
     if target_date is None:
         target_date = date.today().isoformat()
     if not _configured():
@@ -1328,7 +1346,7 @@ def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
 
     by_url: dict[tuple[str, str], list[dict]] = {}
     for s in signals:
-        url = config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(s["sport"])
+        url = _live_webhook_for_sport(s["sport"])
         if url:
             by_url.setdefault((url, s["sport"]), []).append(s)
     if not by_url:

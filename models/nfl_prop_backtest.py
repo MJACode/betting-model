@@ -301,6 +301,10 @@ def backtest_model(model_id: str, test_seasons: list[int],
                         "over_price": q.get("over_price"),
                         "under_price": q.get("under_price"),
                         "snapshot_at": q.get("snapshot_at"),
+                        # The fitted tail, so a reader can price ANY strike
+                        # (DK's alternate ladder) with _nfl_prop_probs.
+                        "art": json.dumps({k: v for k, v in art.items()
+                                           if k != "model"}, default=float),
                         # The naive projection the book had to beat: the
                         # player's own rolling mean of the target stat.
                         "roll3": row.get(f"{_TARGET_COL.get(model_id, '')}_r3"),

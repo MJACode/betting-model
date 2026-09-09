@@ -567,3 +567,109 @@ def test_recording_a_decline_can_never_break_a_bet():
     rec(_mk_decline("below_threshold:0.02<0.06"))
     rec(_Decision())
     assert any(i["signal_type"] == "BET" for i in conn.inserts)
+
+
+# ── every live BET is announced: Discord (#nfl-live) and push (2026-09-09) ────
+# mike: "Push picks to discord in live games to their live channels". Until
+# this the MLB and NCAAF loops announced at the end of a pass and this worker,
+# which has no pass, announced nowhere: its BETs reached the app's Live tab only.
+
+class _OpenConn(_Conn):
+    def fetchall(self):
+        return [("NFL_2026_01_BUF_HOU",)] if len(self.executed) == 1 else []
+
+
+def test_a_written_bet_is_announced_with_its_own_game_date():
+    """The pick's game_date is the decision's UTC date (a Sunday-night bet is
+    Monday in UTC), so the announcer must be handed the row's date, never a
+    clock's."""
+    announced = []
+    conn = _OpenConn()
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn,
+                  announce=announced.append)(_Decision(
+                      ts=datetime(2026, 9, 14, 0, 30, tzinfo=timezone.utc)))
+    assert conn.commits == 1
+    assert announced == ["2026-09-14"]
+
+
+def test_the_announce_runs_after_the_commit_and_after_the_connection_closes():
+    """The announcers read the row back out of `picks` on their own connection;
+    announcing before the commit would find nothing and ledger nothing."""
+    order = []
+
+    class _Conn2(_OpenConn):
+        def commit(self):
+            order.append("commit")
+            super().commit()
+
+        def close(self):
+            order.append("close")
+
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: _Conn2(),
+                  announce=lambda d: order.append("announce"))(_Decision())
+    assert order == ["commit", "close", "announce"]
+
+
+@pytest.mark.parametrize("why, conn", [
+    ("no game id", lambda: _Conn(rows=[])),
+    ("locked lane", lambda: type("L", (_Conn,), {
+        "fetchall": lambda self: [("NFL_2026_01_BUF_HOU",)]
+        if len(self.executed) == 1 else [(MODEL_ID,)]})()),
+])
+def test_nothing_written_means_nothing_announced(why, conn):
+    """A refused or locked decision writes no row, so there is nothing to
+    announce -- and announcing would re-run the notifiers for no reason."""
+    announced = []
+    PicksRecorder(bankroll=1000.0, conn_factory=conn,
+                  announce=announced.append)(_Decision())
+    assert announced == [], why
+
+
+def test_a_pass_is_never_announced():
+    announced = []
+    PicksRecorder(bankroll=1000.0, conn_factory=_OpenConn,
+                  announce=announced.append)(_Decision(bet=False))
+    assert announced == []
+
+
+def test_a_failing_announcer_cannot_undo_or_fail_the_write():
+    def boom(_d):
+        raise RuntimeError("discord is down")
+
+    conn = _OpenConn()
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn, announce=boom)(_Decision())
+    assert conn.commits == 1
+
+
+def test_the_default_announcer_calls_both_live_notifiers(monkeypatch):
+    """Same two calls the MLB scorer and the NCAAF loop make, in the same
+    order, each in its own try: a broken webhook must not suppress the push."""
+    import tracking.discord_notifier as dn
+    import tracking.push_notifier as pn
+    from live_model.pick_writer import announce_live_picks
+
+    calls = []
+    monkeypatch.setattr(pn, "notify_live_signals",
+                        lambda target_date, dry_run: calls.append(("push", target_date, dry_run)))
+
+    def _discord(target_date, dry_run):
+        calls.append(("discord", target_date, dry_run))
+        raise RuntimeError("webhook 404")
+
+    monkeypatch.setattr(dn, "notify_discord_live", _discord)
+    announce_live_picks("2026-09-13")
+    assert calls == [("push", "2026-09-13", False), ("discord", "2026-09-13", False)]
+
+    calls.clear()
+    monkeypatch.setattr(pn, "notify_live_signals",
+                        lambda target_date, dry_run: (_ for _ in ()).throw(RuntimeError("apns")))
+    announce_live_picks("2026-09-13")
+    assert [c[0] for c in calls] == ["discord"], "a push failure must not skip Discord"
+
+
+def test_the_worker_wires_the_announcing_recorder():
+    """The hook is only worth anything if the gameday worker's PicksRecorder is
+    built with it -- the default -- rather than a silenced one."""
+    src = (Path(__file__).parent.parent / "nfl" / "live_model" / "workers"
+           / "gameday.py").read_text(encoding="utf-8")
+    assert "TeeRecorder(audit, PicksRecorder())" in src
