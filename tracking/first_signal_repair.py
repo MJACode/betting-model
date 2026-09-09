@@ -42,6 +42,7 @@ from loguru import logger
 
 import config
 from data.db import get_connection, DBConnection
+from tracking.publish_keys import live_lock_key
 
 
 # picks_log carries no is_live column (the audit trigger predates it), so a
@@ -205,7 +206,10 @@ def restore_first_signals(game_date: str | None = None,
                     DELETE FROM push_sent
                     WHERE lock_key = %(k)s
                       AND kind IN ('discord_live', 'live_signal')
-                """, {"k": f"live:{gid}:{mid}:{side}"})
+                """, {"k": live_lock_key(gid, mid, side,
+                                          first.get("player_id"),
+                                          first.get("player_key"),
+                                          first.get("prop_market"))})
             repaired += 1
 
         if not dry_run and repaired:

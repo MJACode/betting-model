@@ -77,3 +77,42 @@ def key_partition_sql(alias: str = "p") -> str:
     """
     cols = ", ".join(f"COALESCE({alias}.{c}, '')" for c in KEY_PARTS)
     return f"{alias}.game_id, {alias}.model_id, {cols}"
+
+
+# ── The LIVE key ─────────────────────────────────────────────────────────────
+# In-play picks ledger under their own key -- `live:` prefixed, and carrying
+# pick_side, because a live lane can legitimately hold an over AND an under on
+# the same total across a game (each locked as its own bet of record, §1c).
+#
+# THE SAME COLLISION, ONE DAY LATER (2026-09-09). The live key was
+# `live:game_id:model_id:pick_side` with NO player component, so every live
+# prop BET a model wrote in one game collapsed onto one key -- a second
+# quarterback's pass-attempt over, a second batter's hits over -- and the
+# second one never announced. Same tail as the pre-game key, same guarantee:
+# a row with no player columns produces a BYTE-IDENTICAL key to the old
+# expression, which every game-level live model is, so nothing republishes.
+# Measured before the change: of 172 discord_live and 609 live_signal ledger
+# rows, ONE belonged to a pick with a player, and it was settled.
+
+LIVE_KEY_PREFIX = "live:"
+
+
+def live_lock_key_sql(alias: str = "p") -> str:
+    """The in-play lock_key, as a SQL expression over `picks`."""
+    tail = "".join(
+        f"\n                       || COALESCE(':' || {alias}.{c}, '')"
+        for c in KEY_PARTS
+    )
+    return (f"'{LIVE_KEY_PREFIX}' || {alias}.game_id || ':' || {alias}.model_id "
+            f"|| ':' || {alias}.pick_side{tail}")
+
+
+def live_lock_key(game_id: str, model_id: str, pick_side: str,
+                  player_id: str | None = None, player_key: str | None = None,
+                  prop_market: str | None = None) -> str:
+    """The same key, minted in Python. MUST agree with live_lock_key_sql --
+    pinned by tests/test_publish_key_identity.py."""
+    parts = {"player_id": player_id, "player_key": player_key,
+             "prop_market": prop_market}
+    tail = "".join(f":{parts[c]}" for c in KEY_PARTS if parts[c])
+    return f"{LIVE_KEY_PREFIX}{game_id}:{model_id}:{pick_side}{tail}"

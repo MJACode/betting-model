@@ -38,7 +38,7 @@ import argparse
 from loguru import logger
 
 from data.db import get_connection
-from tracking.publish_keys import lock_key_sql
+from tracking.publish_keys import live_lock_key_sql, lock_key_sql
 
 # The key as it was minted before this change: game, model, player_id only.
 _OLD_KEY = ("p.game_id || ':' || p.model_id "
@@ -61,11 +61,34 @@ _OWNERS = f"""
 """
 
 
+# The LIVE key as it was minted before 2026-09-09: game, model, side, no
+# player. Same shape of fix, same ordering argument, own ledger kinds
+# (discord_live / live_signal). Applied to production by hand on 2026-09-09
+# (one row: a settled 08-09 MLB walks prop) before the producers changed.
+_OLD_LIVE_KEY = "'live:' || p.game_id || ':' || p.model_id || ':' || p.pick_side"
+
+_LIVE_OWNERS = f"""
+    WITH k AS (
+        SELECT {_OLD_LIVE_KEY} AS old_key,
+               {live_lock_key_sql()} AS new_key,
+               p.pick_label, p.pick_side, p.game_date, p.created_at
+        FROM picks p
+        WHERE p.signal_type = 'BET' AND p.is_live = TRUE
+    )
+    SELECT DISTINCT ON (old_key)
+           old_key, new_key, pick_label, pick_side, game_date
+    FROM k
+    WHERE new_key <> old_key
+    ORDER BY old_key, created_at
+"""
+
+
 def run(apply: bool = False) -> tuple[int, int]:
     """Returns (push_sent rows added, opening_signals rows re-keyed)."""
     with get_connection() as conn:
         owners = conn.execute(_OWNERS).fetchall()
-        if not owners:
+        live_owners = conn.execute(_LIVE_OWNERS).fetchall()
+        if not owners and not live_owners:
             logger.info("no keys change under the current KEY_PARTS — nothing "
                         "to do")
             return 0, 0
@@ -75,6 +98,15 @@ def run(apply: bool = False) -> tuple[int, int]:
             FROM ({_OWNERS}) o
             JOIN push_sent s ON s.lock_key = o.old_key
             WHERE NOT EXISTS (
+                SELECT 1 FROM push_sent n
+                WHERE n.lock_key = o.new_key AND n.kind = s.kind
+            )
+            UNION ALL
+            SELECT o.old_key, o.new_key, s.kind
+            FROM ({_LIVE_OWNERS}) o
+            JOIN push_sent s ON s.lock_key = o.old_key
+            WHERE s.kind IN ('discord_live', 'live_signal')
+              AND NOT EXISTS (
                 SELECT 1 FROM push_sent n
                 WHERE n.lock_key = o.new_key AND n.kind = s.kind
             )
@@ -103,6 +135,14 @@ def run(apply: bool = False) -> tuple[int, int]:
             SELECT o.new_key, s.kind, s.sent_at, s.message_id
             FROM ({_OWNERS}) o
             JOIN push_sent s ON s.lock_key = o.old_key
+            ON CONFLICT (lock_key, kind) DO NOTHING
+        """)
+        conn.execute(f"""
+            INSERT INTO push_sent (lock_key, kind, sent_at, message_id)
+            SELECT o.new_key, s.kind, s.sent_at, s.message_id
+            FROM ({_LIVE_OWNERS}) o
+            JOIN push_sent s ON s.lock_key = o.old_key
+            WHERE s.kind IN ('discord_live', 'live_signal')
             ON CONFLICT (lock_key, kind) DO NOTHING
         """)
         conn.execute(f"""

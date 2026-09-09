@@ -30,7 +30,7 @@ from loguru import logger
 
 from data.db import get_connection
 from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
-from tracking.publish_keys import key_partition_sql, lock_key_sql
+from tracking.publish_keys import key_partition_sql, live_lock_key_sql, lock_key_sql
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _MAX_LABELS = 3          # labels listed in a summary body before "+N more"
@@ -447,12 +447,15 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
 # ── Live (in-play) signal alerts ─────────────────────────────────────────────
 
 def _new_live_signals(conn, target_date: str) -> list[dict]:
-    """Live (in-play) BET picks not yet pushed. Deduped per (game, model, side)
+    """Live (in-play) BET picks not yet pushed. Deduped on the live lock_key
+    (publish_keys.live_lock_key_sql: game, model, side AND the player columns)
     so the churning live board — delete+rescored every pass — doesn't re-notify
-    the same signal. A signal that disappears and returns isn't re-pushed (v1)."""
-    rows = conn.execute("""
+    the same signal, and two players' props in one game are two signals. A
+    signal that disappears and returns isn't re-pushed (v1)."""
+    rows = conn.execute(f"""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label,
-               p.inning_at_pick, p.sport, p.pick_id
+               p.inning_at_pick, p.sport, p.pick_id,
+               {live_lock_key_sql()} AS lock_key
         FROM picks p
         WHERE p.game_date = %s
           AND p.is_live = TRUE
@@ -460,13 +463,13 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
           AND p.result IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM push_sent s
-              WHERE s.lock_key = 'live:' || p.game_id || ':' || p.model_id || ':' || p.pick_side
+              WHERE s.lock_key = {live_lock_key_sql()}
                 AND s.kind = 'live_signal'
           )
         ORDER BY p.game_id
     """, (target_date,)).fetchall()
     return [{
-        "lock_key": f"live:{r[0]}:{r[1]}:{r[2]}",
+        "lock_key": r[7],
         "label": r[3],
         "inning": r[4],
         "sport": r[5],
