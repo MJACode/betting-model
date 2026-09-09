@@ -963,3 +963,470 @@ This is the most plausible mechanical account of **claims ~73%, delivers ~54%**
   cut is −1.26u over 70 (z −0.12) — indistinguishable from zero, which is
   exactly what a model driven by input noise would look like, but it is not on
   its own grounds to stop it. That is mike's call.
+
+---
+
+## 15. The anchor the model never had (2026-09-08, mike)
+
+§14 established the defect: `mlb_live_total_runs` moves a median 12.8
+probability points on season-to-date stats that drift by hundredths a day. This
+section is the fix, and — because a fix asserted is not a fix measured — the
+gate it had to clear.
+
+### 15.1 The diagnosis, restated as a missing feature
+
+CLAUDE.md §1b states the live thesis in one line: a live total is priced
+**relative to the starting line**. The book re-anchors its live total
+mechanically off the pre-game number and the clock; the edge is predicting
+where true remaining production deviates from that anchor.
+
+`mlb_live_total_runs` did not carry the anchor. Its 18 features were nine
+in-game state columns, six season-to-date stats (`home_team_era`,
+`away_team_era`, `home_bullpen_era`, `away_bullpen_era`, `home_runs_last_10`,
+`away_runs_last_10`) and three weather columns. The pre-game total appeared
+nowhere. The six stats were standing in for the run environment the market had
+already priced — and doing it badly enough to move the output 12.8 points on
+noise.
+
+### 15.2 Why the feature could not simply be switched on
+
+`total_line` already existed in the MLB feature dict, and it was **empty on
+both live paths**, for the same reason in each: it is filled from whichever
+market the caller happens to pass as `odds_row`, and both live paths pass
+`h2h`.
+
+```
+features["total_line"] = odds_row.get("total_line")   # h2h row -> None
+```
+
+The pre-game over/under model passes the `totals` row and gets a real number;
+every h2h caller gets `None` from the same slot. A feature read from a slot
+whose meaning depends on the caller is the "same understanding, same blind
+spot" trap in CLAUDE.md §7 — it is filled in one path and empty in the other
+with nothing raising.
+
+So the plumbing came first, as its own change: a dedicated
+**`pregame_total_line`**, sourced from the TOTALS market explicitly, passed by
+both MLB builders (`build_mlb_game_features` and
+`_build_mlb_features_from_bulk`) via a separate `totals_row` argument, and
+supplied by both live paths — `live_scorer._pregame_features` at serve time and
+`build_live_training_dataset` at training time.
+
+### 15.3 Coverage, measured before anything was retrained
+
+A feature that is mostly NULL is not a feature. Games with a leak-guarded
+pre-game totals row from DK or `sbr_consensus`, by season:
+
+| Season | Games | With pre-game total | % |
+|---|---|---|---|
+| 2019 | 2,758 | 2,758 | 100.0 |
+| 2020 | 1,109 | 1,109 | 100.0 |
+| 2021 | 2,686 | 2,400 | 89.4 |
+| 2022 | 2,762 | 2,408 | 87.2 |
+| 2023 | 2,763 | 2,436 | 88.2 |
+| 2024 | 2,933 | 2,930 | 99.9 |
+| 2025 (holdout) | 3,102 | 3,102 | 100.0 |
+
+The 2021-23 gap does **not** delete training rows: the live trainer does
+`df[feature_cols].values.astype(float)` with no `dropna`, so a missing line
+becomes NaN and XGBoost routes it natively. It does mean the model learns a
+"no line" branch that serving never reaches — serve-side coverage is **100% on
+every completed day since 2026-08-24**.
+
+One honest caveat: 2019-20 are covered by `sbr_consensus`, not DK, because DK's
+feed does not reach back that far. The model absorbs a small systematic book
+offset on those seasons.
+
+### 15.4 Train/serve parity — and the bound that was wrong
+
+Building `pregame_total_line` down both paths for the same games is the check
+that the two agree. On **60 completed 2026 games: 60 identical, 0 different.**
+
+Getting there turned up a real defect. The training path bounds "pre-game" with
+`_is_pregame_snapshot`, which uses the ACTUAL first pitch (clamped by
+`trusted_first_pitch`). The serving path's `_pregame_cutoff`, shipped in #606,
+bounded on `commence_time` alone — the SCHEDULED start, which over 415 games
+lands a mean **18.7 minutes after** the game actually begins. That is the
+permissive direction: it admits a quarter-hour of in-play quotes as pre-game,
+on the DECISION path, while training excludes them.
+
+`_pregame_cutoff` now uses `pregame_cutoff_sql`, the same bound
+`_pregame_cutoff_map`, the odds ingestor and `market_movement` already use.
+Blast radius over all 415 games carrying a first pitch:
+
+| Market | Games | Price changed | Price lost |
+|---|---|---|---|
+| totals | 415 | 0 | 0 |
+| h2h | 415 | 3 | 0 |
+| spreads | 415 | 3 | 0 |
+
+**A divergence that was NOT this, and was not fixed.** Forty 2025 postseason
+games showed 7-8 mismatches that survived the bound fix. They are historical
+`sbr_consensus` rows carrying a **date-only** `snapshot_at`: on
+`MLB_2025-10-13_SEA_TOR` the `open` (8.0) and `close` (7.0) rows tie exactly,
+and the two paths break the tie differently — arbitrarily, and differently
+between runs. It is confined to historical sbr rows; DK-priced games have no
+ties, which is why 2026 is clean. It was left alone deliberately: preferring
+`close` on a tie would rewrite `total_line` in **every** MLB model's training
+set, which is a far wider change than this one and belongs to whoever measures
+that. Logged in `docs/followups.md`.
+
+---
+
+## 16. The model was memorising its training games (2026-09-08, mike)
+
+§15 gave the model the market anchor it never had. It did not fix the
+calibration, and chasing why produced the actual cause of **claims ~73%,
+delivers ~54%**.
+
+### 16.1 The feature change was not the fix, and the numbers say so
+
+Three matched fits on the same cached frames, same trainer, 2025 holdout:
+
+| candidate | features | RMSE | MAE | prob cal error (actionable) | fixed-ref gap | band n |
+|---|---|---|---|---|---|---|
+| baseline18 | 18 (today's) | 3.5801 | 2.5919 | **0.0985** | +0.1182 | 73,702 |
+| A19 | 18 + pre-game line | 3.5271 | 2.5609 | **0.0976** | +0.1117 | 72,455 |
+| B13 | state + weather + line | 3.5422 | 2.6038 | **0.0971** | +0.1112 | 69,857 |
+
+`pregame_total_line` is a top-5 feature in both models that carry it, and it
+improves the COUNT fit. It moves the calibration error by 0.9 of one
+percentage point. All three remain ~10pp overconfident and fail the 5% gate.
+
+A feature that matters this much to the fit and this little to the calibration
+means the calibration error is not in the features.
+
+### 16.2 The Poisson tail looked wrong, and that was a symptom
+
+Conditional on the model's own lambda, the 2025 holdout is badly overdispersed
+— `Var(y|lambda) / mean` of 2.5-2.7 in every bin, where a Poisson head asserts
+exactly 1.0. The obvious reading is that the tail is too tight and the head
+should be negative binomial.
+
+**Fitting the dispersion on the TRAINING rows killed that reading.** The MLE
+collapses to the Poisson boundary (NB1 alpha -> 0.05, NB2 r -> 200) and plain
+Poisson has the lowest train NLL. The two halves side by side:
+
+| lambda bin | in-sample var/mean | holdout var/mean |
+|---|---|---|
+| [1,2) | 1.10 | 2.75 |
+| [3,4) | 0.83 | 2.71 |
+| [5,6) | 0.69 | 2.65 |
+| [7,8) | 0.65 | 2.37 |
+
+**An in-sample dispersion BELOW Poisson is not a count property. It is a
+model that is more certain about its training rows than the count
+distribution allows** — the signature of memorisation. A negative-binomial
+head would have widened the tail of a model that should never have been that
+confident: right symptom, wrong layer.
+
+### 16.3 The cause: the cross-validation was a lookup
+
+`mlb_live_total_runs` trains on PLAY rows. One game becomes ~64 of them, every
+one carrying the same game-level label (runs remaining is a function of the
+final score). The pre-game context columns are constant within a game and
+continuous to four decimals — a fingerprint. `_poisson_objective` split those
+rows with `KFold(shuffle=True)`, so a game's own plays sat on both sides of
+every fold.
+
+The validation score was therefore partly recall, and 25 Optuna trials
+optimised toward whichever hyperparameters memorised hardest.
+
+| | |
+|---|---|
+| Optuna's best CV NLL | **1.9200** — what the tuner believed |
+| 2025 holdout NLL | **2.7422** — what it actually was |
+
+Cross-validation exists to estimate out-of-sample error. It was off by 43%.
+
+On a synthetic fixture built to contain **no signal at all** — a per-game
+fingerprint drawn independently of the label — the shuffled split scores
+NLL 1.52 and an honest grouped, time-ordered split scores 4.89. The entire
+3.38-nat gap is lookup. (`tests/test_live_cv_grouping.py`.)
+
+### 16.4 What this explains, and what it costs
+
+- the ~10pp overconfidence at the band the model bets, on every candidate
+- **claims ~73%, delivers ~54%** (§11.2)
+- **§14's 12.8-point swing on a stats snapshot.** §14 called it "the model
+  amplifying noise" and left the mechanism open. This is the mechanism:
+  changing the stats snapshot changes the fingerprint, which moves the model to
+  a different memorised game. Amplification via recall.
+
+**The production artifact has been fit this way since 2026-06-14.**
+
+`_time_ordered_cv` fixed this same class of bug for the PRE-GAME models on
+2026-09-03 — its docstring already makes the argument: *"the tuner was scoring
+a different task: interpolating between games it had already seen."* The live
+path was never brought across. CLAUDE.md §1b asks whether a change to one
+model's mechanics wants to reach the others; that assessment was made and this
+lane was missed.
+
+### 16.5 The fix, and what it must be checked against
+
+`_poisson_objective` takes an optional `groups`. Given it, rows are sorted by
+group and split with `TimeSeriesSplit`: folds are time-ordered AND no game
+straddles a boundary. `train_live_model` passes `game_id`. Ungrouped callers —
+props, game models — default to `None` and keep `KFold`, unchanged.
+
+Sorting by `game_id` gives time order only because an MLB id is
+`MLB_<ISO date>_<away>_<home>`, so lexicographic order is date order. That
+precondition is pinned (`test_game_ids_sort_chronologically`), for the same
+reason `_time_ordered_cv` pins its own.
+
+**Stated before the honest refits ran, so they could fail:** CV NLL within
+~0.05 of the 2025 holdout NLL; in-sample var/mean near 1; fixed-reference gap
+in the 0.70-0.80 band under ~0.03. A gap still near 0.10 under a clean CV means
+something else is wrong.
+
+### 16.6 What this does NOT settle
+
+- **Every threshold on this model was swept on the leaked probabilities.**
+  0.70 / 0.14 / 0.32 mean something different on an honestly-fit model and need
+  re-sweeping. The ~70 settled live BETs cannot do it.
+- **A separate mean bias, not dispersion.** At lambda ~0.59 the holdout mean is
+  0.95. `half_innings_left` clamps to 1, so extra innings arrive under the same
+  state as a settled 9th. Flagged, not fixed.
+- **Not measured on the other MLB models.** They are per-game rows, not play
+  rows, so they do not share this exact leak — but `_oof_predictions` shuffles
+  folds for prop dispersion, which is the same shape and unmeasured
+  (`docs/followups.md`).
+
+---
+
+## 17. What the honest refits showed — and the third defect (2026-09-08, mike)
+
+§16 fixed the CV. This is what the same three candidates look like refit
+through it, and the one thing that survived.
+
+### 17.1 The CV fix is real, and it is not the whole fix
+
+| honest fit | features | RMSE | MAE | holdout NLL | fixed-ref gap | band n |
+|---|---|---|---|---|---|---|
+| baseline18 | 18 | 3.3565 | 2.4898 | 2.5732 | +0.0682 | 65,457 |
+| B13 | 13 | **3.3252** | 2.4771 | **2.5578** | +0.0586 | 62,838 |
+| A19 | 19 | 3.3268 | **2.4724** | 2.5591 | **+0.0569** | 62,712 |
+
+Optuna CV vs 2025 holdout NLL: baseline18 2.5369 / 2.5732 (**+0.036**),
+B13 2.5166 / 2.5578 (**+0.041**). Count calibration error 0.0507 and 0.0662.
+
+Against the leaky fits (§16.1): RMSE 3.5801 -> 3.3565, count calibration error
+0.5383 -> 0.0507, and the CV/holdout gap **0.82 -> 0.04**. The three
+pass/fail conditions stated in §16.5 before these ran:
+
+- CV NLL within ~0.05 of holdout NLL — **passes**, +0.036 and +0.041.
+- in-sample var/mean near 1 — **passes in the sense that matters**: 2.15-2.18,
+  no longer BELOW Poisson, so the memorisation signature is gone. It is not
+  near 1 because the count is genuinely overdispersed (§17.3).
+- fixed-reference gap in the 0.70-0.80 band under ~0.03 — **FAILS**, +0.0504
+  (B13) and +0.0662 (baseline18).
+
+Two of three. Saying so is the point of stating them first.
+
+### 17.2 B13 is the best model on every count metric
+
+**`pregame_total_line` is B13's 4th most important feature**, and B13 carries
+FIVE FEWER features than today's model while beating it on RMSE, MAE and
+qualifying volume.
+
+**And B13 and A19 are the same model.** A19 keeps all six season-to-date stats
+AND adds the line; B13 keeps only the line. Across RMSE, MAE, holdout NLL and
+the calibration gap they separate in the fourth decimal, in both directions —
+B13 takes RMSE and NLL, A19 takes MAE and the gap. That is noise, not a
+ranking.
+
+So the six stats **add nothing once the line is present and the CV is honest.**
+Not that they were harmful: the line supplies whatever run-environment signal
+they were carrying, and carries it better. Both beat baseline18, so the line
+does add signal that the stats alone did not.
+
+This is why two fits were run instead of one. A single retrain would have shown
+B13 beating today's model and left it ambiguous whether the gain came from
+ADDING the line or from REMOVING the stats. It is the line. The removal is free,
+and it buys six fewer features and one fewer way for the model to be moved by
+inputs that drift by hundredths a day (§14).
+
+That is exactly the change mike approved, and it stands on its own evidence.
+
+### 17.3 The third defect: the Poisson tail really is too tight
+
+§16.2 raised overdispersion and withdrew it, because in-sample the memorising
+model was Poisson-TIGHT. With the leak gone, the dispersion is consistent on
+both sides — in-sample var/mean 2.15, holdout 2.41 — which is what a real
+distributional property looks like as opposed to an artefact of the fit.
+
+Fitting the count family on the TRAINING rows now separates cleanly instead of
+collapsing to a boundary:
+
+| candidate | Poisson train NLL | NB1 train NLL | alpha | NB2 train NLL |
+|---|---|---|---|---|
+| baseline18 | 2.5156 | **2.3255** | 1.2525 | 2.3513 |
+| B13 | 2.5030 | **2.3193** | 1.2208 | 2.3461 |
+
+NB1 (`var = mu*(1+alpha)`) wins, as the flat var/mean ratio across lambda bins
+predicted, and `1 + alpha = 2.22` matches the independently measured 2.15-2.41.
+
+**On the 2025 holdout, priced against the same reference line (pre-game total
+minus runs scored) for every candidate:**
+
+| B13, tail | [0.70,0.80) | [0.80,0.90) | [0.90,1.01) | >=0.70 | states >=0.70 |
+|---|---|---|---|---|---|
+| leaky Poisson (today) | +0.1092 | +0.1344 | +0.0971 | **+0.1112** | 69,857 |
+| honest Poisson | +0.0504 | +0.0676 | +0.0587 | **+0.0586** | 62,838 |
+| honest NB1 | **-0.0202** | **-0.0092** | **+0.0055** | **-0.0095** | **51,661** |
+
+Calibrated in every band, and slightly CONSERVATIVE rather than optimistic.
+Against today's production model on the same measure: **+0.1182 -> -0.0095**.
+
+### 17.4 The volume answer, which nobody had to choose
+
+mike, 2026-09-08: *"We need a aggressive cutoff to guarantee profit, big bets
+not volume."* The qualifying-state count at the same 0.70 floor:
+
+    production today   73,702
+    honest CV          65,457   (-11%)
+    honest CV + NB1    51,661   (-30%)
+
+**No threshold was moved to get this.** An overconfident tail is precisely
+what pushes states over 0.70; an honest one pulls them back toward 0.5. The
+volume cut falls out of correcting the probability, which is a better answer
+than picking a number, because it removes the states that never deserved to
+qualify rather than the ones at the bottom of an arbitrary ranking.
+
+### 17.5 Not done, and why
+
+- **The NB tail is measured, NOT implemented.** `_poisson_over_prob` is shared
+  with the K-prop models, so it needs a sibling plus an artifact-carried alpha,
+  and that is a third change beyond the approved swap. Shape when approved:
+  alpha in the artifact dict, `live_scorer` reads `artifact.get("dispersion")`
+  and falls back to Poisson when absent, so every existing artifact — props
+  included — is untouched.
+- **alpha here was fit on IN-SAMPLE training predictions.** It calibrated (and
+  slightly conservatively), but `_oof_predictions`' own docstring argues
+  dispersion belongs out-of-fold. A shipped version should fit alpha on
+  out-of-fold predictions from the grouped split and re-check that it does not
+  overshoot into under-confidence.
+- **The cut must be re-swept.** 0.70 / 0.14 / 0.32 were swept on the leaked
+  probabilities. ~70 settled BETs cannot re-sweep them.
+
+### 17.6 The original gate, and why it is the weakest number here
+
+The gate proposed when this work started was §14's probe: the median swing in
+`p_over` across three daily stats snapshots had to collapse from 0.1281.
+Measured on honest B13, 60 live BETs:
+
+    median swing 0.0000   mean 0.0000   p90 0.0000   max 0.0000
+    swing > 2%: 0 / 60
+
+**This proves nothing, and it is recorded here so nobody cites it.** B13
+carries no season-to-date stats, so varying which day's stats snapshot feeds
+the row changes no input at all. A swing of exactly zero is the DEFINITION of
+the candidate, not evidence about it. `scripts/live_feature_sensitivity.py`
+now says so in its own docstring.
+
+What the probe genuinely established was the DIAGNOSIS (§14) — a real
+instability in the model that shipped. Its disappearance is a tautology once
+the features it measured are gone.
+
+The numbers that actually rank these candidates are the two that cannot be
+satisfied by construction: the **CV/holdout NLL gap** (0.82 -> 0.041), which
+says the tuner is no longer scoring a lookup, and the **fixed-reference
+calibration gap** (+0.1112 -> -0.0095), which says the probability the model
+bets means what it claims.
+
+---
+
+## 18. What shipped, 2026-09-08 (mike: *"Yes do them both things"*)
+
+All three layers, as one registry swap. The artifact is
+`mlb_live_total_runs_20260908_230751` — 13 features, an NB1 tail, fit through
+the grouped CV.
+
+### 18.1 The numbers it ships on
+
+Trained by the real CLI under `--no-register`, 866,136 play rows over
+2019-2024, 2025 holdout:
+
+| | |
+|---|---|
+| Optuna best CV NLL | 2.5200 |
+| OOF dispersion | NB1 **alpha = 1.2720** (var/mean 2.272), 150,000 out-of-fold rows |
+| OOF NLL | Poisson 2.52002 -> **NB1 2.32353** |
+| holdout MAE / RMSE | 2.4779 / 3.3281 |
+| count calibration error | 0.0545 |
+| **probability calibration error (actionable)** | **0.0010** |
+
+The trainer's own 5% gate — the one that logs `FAILS the 5% calibration gate on
+the probability it actually bets` — passes by two orders of magnitude, and it
+now measures the tail that ships rather than a Poisson one nothing uses.
+
+`pregame_total_line` is the 4th most important feature, behind
+`half_innings_left`, `inning` and `score_diff`.
+
+### 18.2 The gate, stated in §17.5 before this ran
+
+Acceptance was: 0.70-0.80 band gap in [-0.03, +0.03], and band_n not below
+~45k. On the shipping artifact, priced by `scorer._count_over_prob` — the same
+function production calls:
+
+| band | Poisson | | NB1 (ships) | |
+|---|---|---|---|---|
+| | gap | n | gap | n |
+| [0.70,0.80) | +0.0510 | 18,621 | **-0.0201** | 20,533 |
+| [0.80,0.90) | +0.0686 | 16,914 | **-0.0109** | 16,813 |
+| [0.90,1.01) | +0.0594 | 27,477 | **+0.0067** | 14,300 |
+| **>=0.70** | +0.0594 | 63,012 | **-0.0097** | **51,646** |
+
+Both conditions pass: -0.0201 is inside +-0.03, and 51,646 is above 45k. Every
+band is slightly CONSERVATIVE — the model under-claims — which is the safe
+direction to miss in.
+
+The out-of-fold alpha (1.2720) landed close to the in-sample estimate that
+first suggested NB1 (1.2208), so the concern that an honest alpha would
+overshoot into under-confidence did not materialise. It was worth stating in
+advance anyway: if it had overshot, the fix would have been to report it, not
+to keep whichever alpha produced the better table.
+
+### 18.3 Against the model this replaces
+
+Same measure, same reference line, the 2026-06-14 artifact's procedure vs this
+one:
+
+    calibration gap at >=0.70    +0.1112  ->  -0.0097
+    qualifying states            69,857   ->  51,646     (-26%)
+
+**No threshold moved.** mike, earlier the same day: *"We need a aggressive
+cutoff to guarantee profit, big bets not volume."* This is that, arrived at by
+correcting the probability rather than by choosing a number — it removes the
+states that never deserved to clear 0.70, instead of the lowest-ranked ones.
+
+### 18.4 The three guards that make the swap safe
+
+- **`_count_over_prob` dispatches on the ARTIFACT's tail.** No dispersion means
+  Poisson, so every pre-2026-09-08 artifact — the K-prop models share
+  `_poisson_over_prob` — is bit-identical. An UNKNOWN family raises rather than
+  falling back: an unrecognised tail must not quietly price a different bet.
+- **`_score_live_model` fails closed on a map/artifact mismatch.**
+  `build_live_state_row` fills what LIVE_FEATURE_MAP names; `x` is indexed by
+  the artifact's `feature_cols`. This artifact against the OLD map would price
+  every pick with `pregame_total_line` as NaN, silently. It now refuses to
+  score and says why. A dark model is visible to the live health check; a NaN
+  bet is visible to nobody.
+- **`_count_cv_splits` is one definition with two callers**, so the tuning
+  objective and the dispersion fit cannot drift onto different folds — an alpha
+  estimated against folds the hyperparameters were never scored on is not the
+  tail this model was tuned for.
+
+### 18.5 Still open
+
+- **The cut has not been re-swept.** 0.70 / 0.14 / 0.32 were swept on the
+  leaked probabilities and mean something different on a calibrated model. This
+  swap does not change them, so the live lane keeps the old numbers against a
+  new probability until they are re-measured — and ~70 settled BETs cannot do
+  it. The -26% volume above is what those unchanged cuts produce on an honest
+  probability.
+- **The order of operations is load-bearing.** The artifact is registered only
+  AFTER the map reaches master, because the two going live out of step is the
+  silent-NaN case §18.4 guards against. `_promote.py` refuses an artifact whose
+  `feature_cols` disagree with the map, and refuses a Poisson-only artifact once
+  the map carries `pregame_total_line`.

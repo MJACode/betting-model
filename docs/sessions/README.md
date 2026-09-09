@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 264 - the live totals model was memorising its training games: KFold(shuffle=True) on play rows made its CV a lookup (CV NLL 1.92, holdout 2.74), which is the real cause of "claims 73%, delivers 54%"; the approved feature swap is good and was never the fix |
 | 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 259 - the model_calibration check was grading the RAW probability over a window that predated every promoted map, so three of the four models it accused were artefacts; four becomes one, and that one is real |
 | 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 258 - the "tons of skipped and stale" was my own wrong-dated verification run; the NCAAF residue cleared (36 split slots -> 0, 1,211 paid odds rows repointed rather than deleted); and a health row now carries a one-word reason and a derived refresh frequency |
 | 2026-09-08 | [2026-09](./2026-09.md) | 2026-09-08, session 257 - golf retired (the DataGolf key was never set, so the sport produced nothing ever) and its dead chips removed; the health clock was the container's UTC, not ET; and NCAAF is writing games nobody will play - 76 duplicated matchup slots, two mechanisms, one CRIT check |

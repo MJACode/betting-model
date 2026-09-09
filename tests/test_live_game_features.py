@@ -129,16 +129,19 @@ def test_feature_maps_start_with_state_features():
 def test_build_live_state_row_merges_pregame_context():
     state = {"inning": 6, "inning_half": "bottom", "outs": 1,
              "bases_state": "010", "home_score": 2, "away_score": 2}
-    pregame = {"home_team_era": 3.9, "away_team_era": 4.4, "temp_f": 71.0}
+    # The six season-to-date stats this used to merge were removed from the
+    # model on 2026-09-08 and replaced by the pre-game total line, which is
+    # what the model actually anchors on (docs/mlb_volume_efficiency.md §17).
+    pregame = {"pregame_total_line": 8.5, "temp_f": 71.0}
     row = build_live_state_row(state, pregame, "mlb_live_total_runs")
     assert row["inning"] == 6
     assert row["is_top_inning"] == 0
     assert row["on_2b"] == 1
     assert row["score_diff"] == 0
     assert row["total_runs"] == 4
-    assert row["home_team_era"] == 3.9
+    assert row["pregame_total_line"] == 8.5
     # Context columns absent from pregame come through as None (XGBoost NaN)
-    assert row["home_bullpen_era"] is None
+    assert row["wind_out_component"] is None
 
 
 def test_build_live_state_row_unusable_state():

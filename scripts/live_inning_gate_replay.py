@@ -111,7 +111,7 @@ import config
 from data.db import get_connection
 from features.live_game_features import build_live_state_row
 from models.live_scorer import (
-    _poisson_over_prob,
+    _count_over_prob,
     classify_live_signal,
     expected_value,
 )
@@ -221,7 +221,7 @@ def _signals(artifact, game: dict, pregame: dict,
         rest_line = float(price["total_line"]) - row["total_runs"]
         if rest_line < 0:
             continue
-        p_over = _poisson_over_prob(lam, rest_line)
+        p_over = _count_over_prob(lam, rest_line, artifact.get("dispersion"))
         for side, prob, odds in (("over", p_over, price["over_price"]),
                                  ("under", 1.0 - p_over, price["under_price"])):
             if odds is None:

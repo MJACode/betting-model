@@ -652,10 +652,18 @@ def build_mlb_game_features(conn: DBConnection,
                               home_team: str,
                               away_team: str,
                               season: int,
-                              odds_row: dict = None) -> dict:
+                              odds_row: dict = None,
+                              totals_row: dict = None) -> dict:
     """
     Build the full feature row for one MLB game.
     Returns a flat dict with all feature columns.
+
+    `odds_row` is whichever market the caller happens to be scoring, so
+    `total_line` means different things to different callers -- it is the real
+    total for the over/under model and None for every h2h caller. `totals_row`
+    is separate and always the pre-game TOTALS row, giving
+    `pregame_total_line` one meaning on both the training and the serving path.
+    See the twin assignment in _build_mlb_features_from_bulk.
     """
     from data.ingestors.injury_ingestor import query_injuries_for_game
 
@@ -828,6 +836,9 @@ def build_mlb_game_features(conn: DBConnection,
     else:
         features["total_line"]  = None
         features["spread_home"] = None
+
+    # The pre-game total, from the TOTALS market regardless of what odds_row is.
+    features["pregame_total_line"] = (totals_row or {}).get("total_line")
 
     return features
 
@@ -1582,10 +1593,12 @@ def _build_mlb_features_from_bulk(bulk: dict,
                                     game_id: str, game_date: str,
                                     home_team: str, away_team: str,
                                     season: int,
-                                    odds_row: dict | None) -> dict:
+                                    odds_row: dict | None,
+                                    totals_row: dict | None = None) -> dict:
     """
     Build the full MLB feature row using pre-loaded bulk data.
-    Equivalent to build_mlb_game_features but with in-memory lookups.
+    Equivalent to build_mlb_game_features but with in-memory lookups —
+    including `totals_row`, which must stay the twin of the per-game path's.
     """
     home_stats   = _blk_team_stats(bulk, home_team, season, game_date)
     away_stats   = _blk_team_stats(bulk, away_team, season, game_date)
@@ -1704,6 +1717,9 @@ def _build_mlb_features_from_bulk(bulk: dict,
 
         "total_line":  odds_row.get("total_line")  if odds_row else None,
         "spread_home": odds_row.get("spread_home") if odds_row else None,
+
+        # Always the TOTALS market — see build_mlb_game_features' docstring.
+        "pregame_total_line": (totals_row or {}).get("total_line"),
     }
 
 

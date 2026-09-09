@@ -1501,8 +1501,21 @@ def test_the_count_objective_has_its_own_fold_count():
     assert trainer.COUNT_CV_FOLDS == 3
     assert trainer.CV_FOLDS == 5, "the game-model CV was not part of the measurement"
 
-    count_src = inspect.getsource(trainer._poisson_objective)
-    assert "n_splits=COUNT_CV_FOLDS" in count_src, count_src
+    # The count folds moved into _count_cv_splits on 2026-09-08, when the live
+    # path needed a grouped, time-ordered variant and the tuning objective and
+    # the dispersion fit had to split identically. The pin follows them: BOTH
+    # branches of the shared splitter must size on COUNT_CV_FOLDS, and neither
+    # it nor the objective may reach for CV_FOLDS, which is what would silently
+    # re-tune the game models this test exists to protect.
+    count_src = inspect.getsource(trainer._count_cv_splits)
+    assert count_src.count("n_splits=COUNT_CV_FOLDS") == 2, count_src
+    assert "CV_FOLDS)" not in count_src.replace("COUNT_CV_FOLDS)", ""), count_src
+
+    obj_src = inspect.getsource(trainer._poisson_objective)
+    assert "_count_cv_splits(" in obj_src, obj_src
+    assert "n_splits=" not in obj_src, (
+        "the objective grew its own splitter again — it must delegate, or the "
+        "dispersion fit and the tuning score stop sharing folds")
 
     time_src = inspect.getsource(trainer._time_ordered_cv)
     assert "n_splits=CV_FOLDS" in time_src, time_src
