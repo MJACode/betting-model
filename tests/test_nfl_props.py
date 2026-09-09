@@ -481,10 +481,14 @@ class TestPlaceboCannotSilentlyNotHappen:
     def test_derived_targets_build_from_components(self):
         import pandas as pd
         from models.nfl_prop_backtest import _naive_projection
+        # Three components, not two: the box-score total the book grades is
+        # solo + with_assist + assists. A placebo built from two of them
+        # projects low and hands the model a win it did not earn.
         te = pd.DataFrame({"def_tackles_solo_r8": [3.0, 4.0],
+                           "def_tackles_with_assist_r8": [0.5, 0.0],
                            "def_tackle_assists_r8": [2.0, 1.0]})
         got = _naive_projection("nfl_prop_tackles_assists", te, 5.0)
-        assert list(got) == [5.0, 5.0]
+        assert list(got) == [5.5, 5.0]
 
     def test_unbuildable_placebo_raises_rather_than_passing_through(self):
         import pandas as pd

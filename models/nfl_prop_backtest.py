@@ -166,6 +166,9 @@ def _bootstrap_roi_ci(profits: np.ndarray, stakes: np.ndarray) -> tuple[float, f
     return float(np.percentile(rois, 2.5) * 100), float(np.percentile(rois, 97.5) * 100)
 
 
+from features.nfl_prop_feature_engine import _TARGET as _TARGET_COL  # noqa: E402
+
+
 def backtest_model(model_id: str, test_seasons: list[int],
                    placebo: bool = False, bookmaker: str = None,
                    rows_out: list | None = None,
@@ -297,6 +300,11 @@ def backtest_model(model_id: str, test_seasons: list[int],
                         "p_push": float(p_push), "fair_over": _fo,
                         "over_price": q.get("over_price"),
                         "under_price": q.get("under_price"),
+                        "snapshot_at": q.get("snapshot_at"),
+                        # The naive projection the book had to beat: the
+                        # player's own rolling mean of the target stat.
+                        "roll3": row.get(f"{_TARGET_COL.get(model_id, '')}_r3"),
+                        "roll8": row.get(f"{_TARGET_COL.get(model_id, '')}_r8"),
                         "actual": float(actual)})
 
                 for side, raw_p, price in (("over", p_over, q.get("over_price")),
@@ -336,7 +344,8 @@ def backtest_model(model_id: str, test_seasons: list[int],
 # none, so an unbuildable one now raises.
 _NAIVE_COMPONENTS: dict[str, list[str]] = {
     "nfl_prop_rush_rec_yards":  ["rushing_yards_r8", "receiving_yards_r8"],
-    "nfl_prop_tackles_assists": ["def_tackles_solo_r8", "def_tackle_assists_r8"],
+    "nfl_prop_tackles_assists": ["def_tackles_solo_r8", "def_tackles_with_assist_r8",
+                                 "def_tackle_assists_r8"],
     "nfl_prop_anytime_td":      ["rushing_tds_r8", "receiving_tds_r8"],
 }
 

@@ -35,6 +35,7 @@ ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS wopr                NUM
 ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS racr                NUMERIC;
 ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS def_tackles_solo    NUMERIC;
 ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS def_tackle_assists  NUMERIC;
+ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS def_tackles_with_assist NUMERIC;  -- 2026-09-09: the box-score total needs it
 ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS def_qb_hits         NUMERIC;
 ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS fg_made             INTEGER;
 ALTER TABLE nfl_player_game_log ADD COLUMN IF NOT EXISTS fg_att              INTEGER;

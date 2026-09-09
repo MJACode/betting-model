@@ -73,7 +73,7 @@ _PLAYER_ROLL_COLS = [
     "targets", "receptions", "receiving_yards", "receiving_tds",
     "receiving_air_yards", "receiving_yac",
     "target_share", "air_yards_share", "wopr",
-    "def_tackles_solo", "def_tackle_assists", "def_sacks", "def_qb_hits",
+    "def_tackles_solo", "def_tackles_with_assist", "def_tackle_assists", "def_sacks", "def_qb_hits",
     "offense_pct", "defense_pct", "st_pct",
 ]
 # Season-to-date expanding means — a slower signal than r8 that resets each year.
@@ -107,8 +107,8 @@ _RECV_F = SNAP_OFF + _f(["targets", "receptions", "receiving_yards", "receiving_
                          "receiving_air_yards", "receiving_yac", "target_share",
                          "air_yards_share", "wopr"]) + \
     ["targets_std", "receptions_std", "receiving_yards_std"]
-_DEF_F = SNAP_DEF + _f(["def_tackles_solo", "def_tackle_assists", "def_sacks",
-                        "def_qb_hits"])
+_DEF_F = SNAP_DEF + _f(["def_tackles_solo", "def_tackles_with_assist", "def_tackle_assists",
+                        "def_sacks", "def_qb_hits"])
 
 
 def _cols(*groups: list[str]) -> list[str]:
@@ -188,7 +188,8 @@ _PLAYER_SQL = """
            receptions, targets, receiving_yards, receiving_tds,
            receiving_air_yards, receiving_yac,
            target_share, air_yards_share, wopr,
-           def_tackles_solo, def_tackle_assists, def_sacks, def_qb_hits
+           def_tackles_solo, def_tackle_assists, def_sacks, def_qb_hits,
+           def_tackles_with_assist
     FROM nfl_player_game_log
     WHERE season = ANY(%s) AND season_type = 'REG'
 """
@@ -216,7 +217,8 @@ _PLAYER_COLS = ["player_id", "player_name", "norm_name", "pos", "team", "opponen
                 "receptions", "targets", "receiving_yards", "receiving_tds",
                 "receiving_air_yards", "receiving_yac",
                 "target_share", "air_yards_share", "wopr",
-                "def_tackles_solo", "def_tackle_assists", "def_sacks", "def_qb_hits"]
+                "def_tackles_solo", "def_tackle_assists", "def_sacks", "def_qb_hits",
+                "def_tackles_with_assist"]
 _TEAM_COLS = ["game_id", "team", "opponent", "game_date", "season", "week", "is_home",
               "pass_attempts", "carries", "plays", "pass_yards", "rush_yards",
               "spread_line", "total_line", "roof", "temp", "wind", "div_game",
@@ -341,10 +343,22 @@ def _add_features(player: pd.DataFrame, team: pd.DataFrame,
     for pos, flag in (("QB", "is_qb"), ("RB", "is_rb"), ("WR", "is_wr"), ("TE", "is_te")):
         df[flag] = (df["pos"] == pos).astype(int)
 
-    # derived targets
+    return derived_targets(df)
+
+
+def derived_targets(df: pd.DataFrame) -> pd.DataFrame:
+    """The three targets that are sums of stored columns."""
     df["rush_rec_yards"] = df["rushing_yards"] + df["receiving_yards"]
     df["any_td"] = ((df["rushing_tds"] + df["receiving_tds"]) >= 1).astype(int)
-    df["tackles_assists"] = df["def_tackles_solo"] + df["def_tackle_assists"]
+    # Solo + with-assist + assists is the box-score TOTAL the book grades;
+    # solo + assists alone ran 0.26 a game low and made every under look like
+    # edge (ingestor note, 2026-09-09). A row from before the column was
+    # backfilled would silently fall back to the short stat, so it is an error.
+    if df["def_tackles_with_assist"].isna().all():
+        raise ValueError("def_tackles_with_assist is empty: backfill the game log "
+                         "before building tackles features")
+    df["tackles_assists"] = (df["def_tackles_solo"] + df["def_tackles_with_assist"].fillna(0)
+                             + df["def_tackle_assists"])
     return df
 
 
