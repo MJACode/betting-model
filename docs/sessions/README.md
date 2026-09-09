@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 268 - the Stats board's leaderboard reads were never paged and every one is over the 1,000-row cap (NFL last-10 is 12,850 rows, NCAAF 54,687), so the NFL board - which opens filtered to the slate - had 6 of tonight's players and no quarterback; paged and narrowed to the slate's teams server-side. Separately: NFL game lines are DK spreads only, because odds_ingestor.SPORT_KEYS has no NFL entry |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 266 - the live cut re-swept on the new model over 47 slates: 0.70 -> 0.72, ~1.9 bets a slate, chosen as the centre of a plateau; scripts/live_cut_sweep.py |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 267 - the profitable NFL prop model was tackles all along, grading the wrong stat: solo+with_assist+assists matches the box score, and on it the model is +50.24u over 363 bets, positive all three seasons; at DraftKings nothing else beats a line the book prices flat; pass attempts at the soft books is a two-of-three lead |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 267 - the live cut re-swept on the new model over 47 slates: 0.70 -> 0.72, ~1.9 bets a slate, the centre of a plateau; scripts/live_cut_sweep.py; a shared-checkout collision recorded |

@@ -106,59 +106,96 @@ const UFC_TOTALS_COLUMNS =
   'sig_strikes, takedowns, knockdowns, sub_attempts';
 
 /**
+ * The Stats board's slate narrowing — the teams whose players the board is
+ * about, or null/[] for "the whole league".
+ *
+ * Not an optimisation. A leaderboard read is a PER-PLAYER SET and every one of
+ * them has outgrown the 1,000-row cap (lib/paging.ts): the NFL's last-10 read
+ * is 12,850 rows and the NCAAF's is 54,687, so the cap alone dropped 92% and
+ * 98% of them silently. Paging drains the cap, but draining 54,687 rows onto a
+ * phone to render the ~70 players in tonight's game is not a fix either, so a
+ * board that is already filtered to a slate asks the SERVER for that slate.
+ *
+ * Team abbrevs only. UFC's slate keys are FIGHTER NAMES (statsBoard.isOnSlate)
+ * and its rows carry no team, so the caller passes null there and the whole
+ * card is read — 2,266 rows, still paged.
+ */
+export type SlateTeams = readonly string[] | null | undefined;
+
+const hasTeams = (teams: SlateTeams): teams is readonly string[] =>
+  Array.isArray(teams) && teams.length > 0;
+
+/**
  * Season totals for every player in a sport/season, from the season-totals
- * views. The whole set (a few hundred rows) is loaded once; the Stats screen
- * does stat-switching, ranking basis, min-games and search client-side.
+ * views. The set is loaded once; the Stats screen does stat-switching, ranking
+ * basis, min-games and search client-side.
+ *
+ * Paged: 12,204 NCAAF rows and 1,568 MLB rows against the 1,000-row response
+ * cap, which returns an arbitrary 1,000 and says nothing.
  */
 export async function fetchSeasonTotals(
   sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
+  teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'NFL' || sport === 'NCAAF') {
-    const view = sport === 'NFL' ? 'v_player_season_totals_nfl' : 'v_player_season_totals_ncaaf';
     const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
     for (const s of footballSeasonCandidates(season)) {
-      const { data, error } = await supabase.from(view).select(cols).eq('season', s);
-      if (error) throw error;
-      if (data && data.length) return data as unknown as SeasonTotalsRow[];
+      const rows = await fetchAllPages<SeasonTotalsRow>((from, to) => {
+        // Two literal `.from(…)` calls rather than one `.from(view)`: the
+        // read-surface tripwire parses the relation name out of a literal
+        // (tests/test_anon_readable.py), and a relation reached through a
+        // variable is one it cannot see — which is how both football views
+        // stayed out of the manifest until 2026-09-09.
+        let q =
+          sport === 'NFL'
+            ? supabase.from('v_player_season_totals_nfl').select(cols).eq('season', s)
+            : supabase.from('v_player_season_totals_ncaaf').select(cols).eq('season', s);
+        if (hasTeams(teams)) q = q.in('team', teams as string[]);
+        return q.order('player_id').range(from, to);
+      }, totalsRowKey);
+      if (rows.length) return rows;
     }
     return [];
   }
   if (sport === 'UFC') {
-    const { data, error } = await supabase
-      .from('v_fighter_season_totals_ufc')
-      .select(UFC_TOTALS_COLUMNS)
-      .eq('season', season);
-    if (error) throw error;
-    return (data ?? []) as SeasonTotalsRow[];
+    return fetchAllPages<SeasonTotalsRow>(
+      (from, to) =>
+        supabase
+          .from('v_fighter_season_totals_ufc')
+          .select(UFC_TOTALS_COLUMNS)
+          .eq('season', season)
+          .order('player_id')
+          .range(from, to),
+      totalsRowKey,
+    );
   }
-  if (sport === 'WNBA') {
-    const { data, error } = await supabase
-      .from('v_player_season_totals_wnba')
-      .select(WNBA_TOTALS_COLUMNS)
-      .eq('season', season);
-    if (error) throw error;
-    return (data ?? []) as SeasonTotalsRow[];
+  if (sport === 'WNBA' || sport === 'NBA') {
+    return fetchAllPages<SeasonTotalsRow>((from, to) => {
+      // Literal, for the same reason as the football pair above.
+      let q =
+        sport === 'WNBA'
+          ? supabase.from('v_player_season_totals_wnba').select(WNBA_TOTALS_COLUMNS).eq('season', season)
+          : supabase.from('v_player_season_totals_nba').select(NBA_TOTALS_COLUMNS).eq('season', season);
+      if (hasTeams(teams)) q = q.in('team', teams as string[]);
+      return q.order('player_id').range(from, to);
+    }, totalsRowKey);
   }
-  if (sport === 'NBA') {
-    const { data, error } = await supabase
-      .from('v_player_season_totals_nba')
-      .select(NBA_TOTALS_COLUMNS)
-      .eq('season', season);
-    if (error) throw error;
-    return (data ?? []) as SeasonTotalsRow[];
-  }
-  let q = supabase
-    .from('v_player_season_totals_mlb')
-    .select(MLB_TOTALS_COLUMNS)
-    .eq('season', season);
-  if (playerType) q = q.eq('player_type', playerType);
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data ?? []) as SeasonTotalsRow[];
+  return fetchAllPages<SeasonTotalsRow>((from, to) => {
+    let q = supabase.from('v_player_season_totals_mlb').select(MLB_TOTALS_COLUMNS).eq('season', season);
+    if (playerType) q = q.eq('player_type', playerType);
+    if (hasTeams(teams)) q = q.in('team', teams as string[]);
+    // player_type as well as player_id: a two-way player has a row of each,
+    // and an order that repeats a key can repeat or skip rows across windows.
+    return q.order('player_id').order('player_type').range(from, to);
+  }, totalsRowKey);
 }
+
+/** Row identity for the per-player leaderboard reads (see fetchAllPages). */
+const totalsRowKey = (r: SeasonTotalsRow): string =>
+  `${r.player_id}:${(r as { player_type?: string }).player_type ?? ''}`;
 
 /**
  * Tonight's matchups for the Stats tab: one row per team side of today's (ET)
@@ -187,6 +224,7 @@ export async function fetchWindowTotals(
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
+  teams?: SlateTeams,
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'NHL') {
     // No per-player skater leaderboard for NHL (team + goalie stats only).
@@ -196,48 +234,63 @@ export async function fetchWindowTotals(
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
-      const { data, error } = await supabase.rpc(fn, {
-        p_season: s,
-        p_window: window,
-      });
-      if (error) throw error;
-      if (data && data.length) return data as SeasonTotalsRow[];
+      const rows = await pageRpc<SeasonTotalsRow>(
+        fn,
+        { p_season: s, p_window: window },
+        teams,
+        totalsRowKey,
+      );
+      if (rows.length) return rows;
     }
     return [];
   }
   if (sport === 'UFC') {
     // Fighters fight a handful of times a year, so the window ranks each
     // fighter's last N fights CAREER-WIDE (season only applies to totals mode).
-    const { data, error } = await supabase.rpc('fighter_window_totals_ufc', {
-      p_season: season,
-      p_window: window,
-    });
-    if (error) throw error;
-    return (data ?? []) as SeasonTotalsRow[];
+    // No team narrowing: a UFC slate key is a fighter name, not a team.
+    return pageRpc<SeasonTotalsRow>(
+      'fighter_window_totals_ufc',
+      { p_season: season, p_window: window },
+      null,
+      totalsRowKey,
+    );
   }
-  if (sport === 'WNBA') {
-    const { data, error } = await supabase.rpc('player_window_totals_wnba', {
-      p_season: season,
-      p_window: window,
-    });
-    if (error) throw error;
-    return (data ?? []) as SeasonTotalsRow[];
+  if (sport === 'WNBA' || sport === 'NBA') {
+    const fn = sport === 'WNBA' ? 'player_window_totals_wnba' : 'player_window_totals_nba';
+    return pageRpc<SeasonTotalsRow>(fn, { p_season: season, p_window: window }, teams, totalsRowKey);
   }
-  if (sport === 'NBA') {
-    const { data, error } = await supabase.rpc('player_window_totals_nba', {
-      p_season: season,
-      p_window: window,
-    });
-    if (error) throw error;
-    return (data ?? []) as SeasonTotalsRow[];
-  }
-  const { data, error } = await supabase.rpc('player_window_totals_mlb', {
-    p_season: season,
-    p_player_type: playerType ?? 'batter',
-    p_window: window,
-  });
-  if (error) throw error;
-  return (data ?? []) as SeasonTotalsRow[];
+  return pageRpc<SeasonTotalsRow>(
+    'player_window_totals_mlb',
+    { p_season: season, p_player_type: playerType ?? 'batter', p_window: window },
+    teams,
+    totalsRowKey,
+  );
+}
+
+/**
+ * Drain one set-returning RPC past the row cap, narrowed to the slate's teams
+ * when the caller has one.
+ *
+ * `.in()` and `.range()` are applied to the /rpc/ request itself — PostgREST
+ * filters and pages a function that returns a table exactly like a view, and
+ * `rpc()` hands back a filter builder for that reason. The order is explicit
+ * rather than left to the function body's own ORDER BY: range paging without a
+ * deterministic order at the REQUEST can repeat or skip rows between windows.
+ */
+function pageRpc<T>(
+  fn: string,
+  args: Record<string, unknown>,
+  teams: SlateTeams,
+  keyOf?: (row: T) => string,
+  orderBy: readonly string[] = ['player_id'],
+): Promise<T[]> {
+  return fetchAllPages<T>((from, to) => {
+    let q = supabase.rpc(fn, args);
+    if (hasTeams(teams)) q = q.in('team', teams as string[]);
+    let t = q.order(orderBy[0]!);
+    for (const col of orderBy.slice(1)) t = t.order(col);
+    return t.range(from, to);
+  }, keyOf);
 }
 
 /**
@@ -252,46 +305,50 @@ export async function fetchRecentGames(
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
+  teams?: SlateTeams,
 ): Promise<RecentGameRow[]> {
-  if (sport === 'WNBA') {
-    const { data, error } = await supabase.rpc('player_recent_games_wnba', {
-      p_season: season,
-      p_window: window,
-    });
-    if (error) throw error;
-    return (data ?? []) as RecentGameRow[];
-  }
-  if (sport === 'NBA') {
-    const { data, error } = await supabase.rpc('player_recent_games_nba', {
-      p_season: season,
-      p_window: window,
-    });
-    if (error) throw error;
-    return (data ?? []) as RecentGameRow[];
+  // The heaviest read on the board — N rows per player, league-wide. Every
+  // sport is over the 1,000-row cap here (WNBA 2,074, NBA 5,447, MLB 6,216,
+  // NFL 12,850, NCAAF 54,687), so it is both paged and narrowed.
+  if (sport === 'WNBA' || sport === 'NBA') {
+    const fn = sport === 'WNBA' ? 'player_recent_games_wnba' : 'player_recent_games_nba';
+    return pageRpc<RecentGameRow>(
+      fn,
+      { p_season: season, p_window: window },
+      teams,
+      recentGameRowKey,
+      RECENT_ORDER,
+    );
   }
   if (sport === 'MLB') {
-    const { data, error } = await supabase.rpc('player_recent_games_mlb', {
-      p_season: season,
-      p_player_type: playerType ?? 'batter',
-      p_window: window,
-    });
-    if (error) throw error;
-    return (data ?? []) as RecentGameRow[];
+    return pageRpc<RecentGameRow>(
+      'player_recent_games_mlb',
+      { p_season: season, p_player_type: playerType ?? 'batter', p_window: window },
+      teams,
+      recentGameRowKey,
+      RECENT_ORDER,
+    );
   }
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL' ? 'player_recent_games_nfl' : 'player_recent_games_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
-      const { data, error } = await supabase.rpc(fn, {
-        p_season: s,
-        p_window: window,
-      });
-      if (error) throw error;
-      if (data && data.length) return data as RecentGameRow[];
+      const rows = await pageRpc<RecentGameRow>(
+        fn,
+        { p_season: s, p_window: window },
+        teams,
+        recentGameRowKey,
+        RECENT_ORDER,
+      );
+      if (rows.length) return rows;
     }
     return [];
   }
   return []; // UFC / NHL / GOLF: no per-game player logs
 }
+
+/** (player, game) is the row's identity; `rn` orders a player's games. */
+const RECENT_ORDER = ['player_id', 'rn'] as const;
+const recentGameRowKey = (r: RecentGameRow): string => `${r.player_id}:${r.game_id}`;
 
 /**
  * Full-season per-game values for ONE stat, one compact row per player
@@ -306,36 +363,36 @@ export async function fetchSeasonStatValues(
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
+  teams?: SlateTeams,
 ): Promise<SeasonStatValuesRow[]> {
+  // One compact row per player, but still over the cap where the league is
+  // big: 1,798 NFL players on a season stat, 12,204 NCAAF.
+  const key = (r: SeasonStatValuesRow) =>
+    `${r.player_id}:${(r as { player_type?: string }).player_type ?? ''}`;
   if (sport === 'WNBA' || sport === 'NBA') {
     const fn = sport === 'WNBA' ? 'player_season_stat_values_wnba' : 'player_season_stat_values_nba';
-    const { data, error } = await supabase.rpc(fn, {
-      p_season: season,
-      p_stat: statKey,
-    });
-    if (error) throw error;
-    return (data ?? []) as unknown as SeasonStatValuesRow[];
+    return pageRpc<SeasonStatValuesRow>(fn, { p_season: season, p_stat: statKey }, teams, key);
   }
   if (sport === 'MLB') {
-    const { data, error } = await supabase.rpc('player_season_stat_values_mlb', {
-      p_season: season,
-      p_player_type: playerType ?? 'batter',
-      p_stat: statKey,
-    });
-    if (error) throw error;
-    return (data ?? []) as unknown as SeasonStatValuesRow[];
+    return pageRpc<SeasonStatValuesRow>(
+      'player_season_stat_values_mlb',
+      { p_season: season, p_player_type: playerType ?? 'batter', p_stat: statKey },
+      teams,
+      key,
+    );
   }
   if (sport === 'NFL' || sport === 'NCAAF') {
     const fn = sport === 'NFL'
       ? 'player_season_stat_values_nfl'
       : 'player_season_stat_values_ncaaf';
     for (const s of footballSeasonCandidates(season)) {
-      const { data, error } = await supabase.rpc(fn, {
-        p_season: s,
-        p_stat: statKey,
-      });
-      if (error) throw error;
-      if (data && data.length) return data as unknown as SeasonStatValuesRow[];
+      const rows = await pageRpc<SeasonStatValuesRow>(
+        fn,
+        { p_season: s, p_stat: statKey },
+        teams,
+        key,
+      );
+      if (rows.length) return rows;
     }
     return [];
   }

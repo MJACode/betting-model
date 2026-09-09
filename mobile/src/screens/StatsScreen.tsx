@@ -84,6 +84,7 @@ import {
   isStatParticipant,
   slateGameFor,
   slateSubline,
+  slateTeams,
   sublineSpoken,
   sortLabel,
   sortOptionsFor,
@@ -307,6 +308,12 @@ export function StatsScreen() {
   // the matchup views above this works for every sport.
   const [tonightOnly, setTonightOnly] = useState<boolean>(() => defaultTonightOnly(sport));
   const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
+  // The leaderboard read is NARROWED to the slate's teams when the board is
+  // filtered to it (statsBoard.slateTeams), so it has to wait for the slate to
+  // land — otherwise the first load reads the whole league (54,687 rows on a
+  // college Saturday) and is thrown away a moment later. Settled, not
+  // successful: a slate we could not reach still releases the board.
+  const [slateReady, setSlateReady] = useState<boolean>(false);
   // The slate's raw games. The prop-odds view has no sport column and
   // `player_points` is both an NBA and a WNBA market, so the odds read is
   // bounded to these game ids rather than to a date alone.
@@ -362,6 +369,7 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = todayET();
+    setSlateReady(false);
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
         if (cancelled) return;
@@ -372,6 +380,9 @@ export function StatsScreen() {
         if (cancelled) return;
         setSlate(EMPTY_SLATE);
         setSlateGames([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSlateReady(true);
       });
     return () => {
       cancelled = true;
@@ -394,6 +405,20 @@ export function StatsScreen() {
   const seasonStatKey =
     effectiveMode === 'hitRate' && timeWindow === 'season' ? String(stat?.key) : null;
 
+  // The teams the server should narrow the read to — null when the board is
+  // showing the whole league, or when the sport's slate keys are not teams
+  // (UFC). Client-side `isOnSlate` still runs over what comes back, so the two
+  // can never disagree about what is on screen; this only bounds what travels.
+  const readTeams = useMemo(
+    () => slateTeams(sport, slate, tonightActive),
+    [sport, slate, tonightActive],
+  );
+  // Array identity changes on every slate render; the loader keys on the
+  // CONTENT so an unchanged slate does not refetch the board. JSON and not a
+  // join: an NCAAF team id is a school NAME, and a separator that can occur
+  // inside one collapses two different slates onto the same key.
+  const readTeamsKey = readTeams ? JSON.stringify(readTeams.slice().sort()) : '';
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -404,18 +429,19 @@ export function StatsScreen() {
         setSeasonValues({ statKey: '', rows: [] });
         return;
       }
+      const teams = readTeams;
       if (effectiveMode === 'hitRate') {
         if (timeWindow === 'season') {
           const key = String(stat.key);
-          const data = await fetchSeasonStatValues(sport, SEASON, key, playerType);
+          const data = await fetchSeasonStatValues(sport, SEASON, key, playerType, teams);
           setSeasonValues({ statKey: key, rows: data });
         } else {
-          const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType);
+          const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType, teams);
           setRecentRows(data);
         }
       } else {
         const win = timeWindow === 'season' ? null : timeWindow;
-        const data = await fetchWindowTotals(sport, SEASON, win, playerType);
+        const data = await fetchWindowTotals(sport, SEASON, win, playerType, teams);
         setRows(data);
       }
     } catch (e: unknown) {
@@ -423,11 +449,14 @@ export function StatsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey]);
+    // `readTeamsKey` and not `readTeams`: see above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey]);
 
   useEffect(() => {
+    if (!slateReady) return; // the read is narrowed by the slate — wait for it
     void load();
-  }, [load]);
+  }, [load, slateReady]);
 
   const toggleBasis = (next: Basis) => setBasis(next);
 

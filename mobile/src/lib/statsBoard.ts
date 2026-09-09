@@ -167,6 +167,34 @@ export function isOnSlate(
   return !!row.player_name && slate.keys.has(row.player_name);
 }
 
+/**
+ * The slate as a TEAM narrowing the server can apply to a leaderboard read, or
+ * null when the board must read the whole league.
+ *
+ * `isOnSlate` above is the same filter client-side, and the two must agree:
+ * this exists because the read it narrows is over the row cap in every sport
+ * (lib/paging.ts — the NFL's last-10 read is 12,850 rows and the NCAAF's is
+ * 54,687), so the board was being handed an arbitrary first 1,000 and drawing
+ * whatever survived. On 2026-09-09 that left the NFL board — which opens
+ * filtered to the slate — with 6 of tonight's 73 players and not one
+ * quarterback, so the default Pass Yards board was empty.
+ *
+ * NULL, NOT [], FOR UFC: its slate keys are FIGHTER NAMES, not teams
+ * (`isOnSlate`'s second clause), and its rows carry no team to match them
+ * against — narrowing on `team` there would return nothing at all. Null for an
+ * unresolved or empty slate too: the board is showing the league, so read it.
+ */
+const TEAMLESS_SPORTS = new Set(['UFC', 'GOLF']);
+
+export function slateTeams(
+  sport: string,
+  slate: TonightSlate,
+  active: boolean,
+): string[] | null {
+  if (!active || TEAMLESS_SPORTS.has(sport) || slate.keys.size === 0) return null;
+  return Array.from(slate.keys);
+}
+
 // ── 4. The row's own game: when it starts, and against whom ──
 
 /**

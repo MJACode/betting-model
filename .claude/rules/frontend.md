@@ -65,3 +65,37 @@ which models were entitled to make it, and `ncaaf_spread` kept the line two rows
 above the card in the same screenshot. When a fix is scoped by a RULE rather
 than by the reported SYMPTOM, check the other rows on the same screen first.
 Measured story: `docs/rules_evidence.md`.
+
+**THE 1,000-ROW CAP IS A PROPERTY OF EVERY READ, NOT OF THE READS THAT HAVE
+ALREADY BITTEN.** (2026-09-09, second occurrence.) Supabase caps every
+PostgREST response at max-rows — 1,000 on this project — whatever `.limit()`
+asks for, and says nothing: no error, no header the client reads. The
+2026-09-04 fix paged the four all-books LINE reads and stopped there, so the
+per-player leaderboard reads behind the Stats board kept returning an arbitrary
+first 1,000 for another five days, at 12,850 rows for the NFL's last-10 and
+54,687 for the NCAAF's. It surfaced only on the board that opens filtered to a
+slate, as an EMPTY board — six of tonight's players survived the cut and not
+one played the default stat.
+
+Two halves, and the second is the one that was missed:
+
+- **Drain the cap** — `fetchAllPages` with a deterministic order on the
+  REQUEST, never the function body's own `ORDER BY`. `.range()`, `.order()`
+  and `.in()` all chain onto `supabase.rpc()`, which returns a filter builder;
+  PostgREST filters and pages a set-returning function exactly like a view.
+- **Then don't ask for what the screen will throw away.** A board already
+  filtered to a slate asks the SERVER for that slate (`statsBoard.slateTeams`).
+  Paging a 54,687-row read onto a phone to render one game is a second bug
+  wearing the first one's fix.
+
+**BEFORE ADDING A READ, GET ITS ROW COUNT FROM PRODUCTION.** Not its shape, not
+"a few hundred rows" in the docstring above it — the count, on the biggest day
+it will ever have. Four of these carried a comment saying the set was small.
+
+**AND NAME THE RELATION AT THE `.from(...)`, NEVER THROUGH A VARIABLE.**
+`tests/test_anon_readable.py` parses literal relation names out of `mobile/src`
+to check the read surface against `data/anon_readable.py`. A view picked by a
+ternary is one it cannot see: `v_player_season_totals_nfl` and `_ncaaf` sat
+outside the manifest from the day they shipped and would have lost anon SELECT
+the moment the default grant is revoked — silently, as an empty screen, which
+is the failure mode that manifest exists to end.
