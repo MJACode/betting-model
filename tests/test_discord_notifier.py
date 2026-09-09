@@ -1520,10 +1520,12 @@ def test_todays_slate_is_posted_before_tomorrows(monkeypatch):
 # fallback after that.
 
 def _live_row(sport, game_id="G1", model="x_live", commence="2026-08-29T16:00:00Z"):
-    # _new_live_signals' SELECT order (see tests/test_discord_live_field.py).
+    # _new_live_signals' SELECT order (see tests/test_discord_live_field.py);
+    # the lock_key is projected by the query, last.
     return (game_id, model, "over", f"{sport} Over 50.5 (live)", sport,
             0.662, 0.138, -110.0, 0.02, None, None, "HOME", "AWAY",
-            commence, "2026-08-29T16:14:38+00:00", 0.08, None)
+            commence, "2026-08-29T16:14:38+00:00", 0.08, None,
+            f"live:{game_id}:{model}:over")
 
 
 def _live_setup(monkeypatch, *, live=None, shared="", sport=None):

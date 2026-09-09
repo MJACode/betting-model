@@ -31,11 +31,16 @@ WHAT THESE TESTS PIN, and why each one is separate:
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+import pytest
 
 from tracking import discord_notifier as dn
 from tracking import opening_signals as osig
 from tracking import push_notifier as pn
-from tracking.publish_keys import KEY_PARTS, key_partition_sql, lock_key_sql
+from tracking.publish_keys import (
+    KEY_PARTS, key_partition_sql, live_lock_key, live_lock_key_sql, lock_key_sql,
+)
 
 
 # ── the key, evaluated as Python so the property is checked, not the string ──
@@ -260,3 +265,82 @@ def test_the_live_board_excludes_a_voided_pick_too():
     body = q[q.index("export async function fetchLivePicks("):]
     body = body[:body.index("\n}")]
     assert "condition_status.neq.VOID" in body
+
+
+# ── The LIVE key (mike, 2026-09-09: "Fix it now") ────────────────────────────
+# The in-play producers keyed on game:model:side with no player, so a second
+# quarterback's pass-attempt over -- or a second batter's hits over -- in the
+# same game could never announce. Same fix as the pre-game key, same
+# guarantees, pinned the same way.
+
+_OLD_LIVE_EXPR = "'live:' || p.game_id || ':' || p.model_id || ':' || p.pick_side"
+
+
+class _KeyConn:
+    def __init__(self, rows): self._rows = rows
+    def execute(self, sql, params=None):
+        self._sql = sql
+        return self
+    def fetchall(self): return self._rows
+
+
+def test_two_players_in_one_live_game_are_two_live_keys():
+    a = live_lock_key("NFL_2026_01_NE_SEA", "nfl_live_prop", "over",
+                      "cj-stroud", "cj-stroud", "player_pass_attempts")
+    b = live_lock_key("NFL_2026_01_NE_SEA", "nfl_live_prop", "over",
+                      "sam-darnold", "sam-darnold", "player_pass_attempts")
+    assert a != b
+    assert a.startswith("live:NFL_2026_01_NE_SEA:nfl_live_prop:over:")
+
+
+def test_a_game_level_live_row_keeps_the_key_it_was_published_under():
+    """Every ledgered discord_live row belongs to a game-level model (measured
+    2026-09-09: 172 of 172). Their key must not move by a byte, or every
+    standing live bet republishes into a paid channel."""
+    assert live_lock_key("NCAAF_2026-08-29_north-carolina_tcu",
+                         "ncaaf_live_total", "over") == \
+        "live:NCAAF_2026-08-29_north-carolina_tcu:ncaaf_live_total:over"
+
+
+def test_the_live_sql_is_the_old_expression_plus_the_player_tail():
+    """The SQL and the Python helper are two spellings of one key. The SQL
+    must START with the exact old expression, so a NULL-player row COALESCEs
+    to the old string, and carry every KEY_PARTS column after it."""
+    sql = live_lock_key_sql()
+    assert sql.startswith(_OLD_LIVE_EXPR)
+    for c in KEY_PARTS:
+        assert f"COALESCE(':' || p.{c}, '')" in sql
+    assert sql.index("player_id") < sql.index("player_key") < sql.index("prop_market")
+
+
+@pytest.mark.parametrize("producer", [dn._new_live_signals, pn._new_live_signals])
+def test_both_live_producers_mint_and_check_the_shared_live_key(producer):
+    """The NOT EXISTS lookup and the projected lock_key must be the SAME
+    expression, in both producers -- a lookup on the old key with a projection
+    of the new one would ledger under a key it never checks."""
+    conn = _KeyConn([])
+    producer(conn, "2026-09-09")
+    assert conn._sql.count(live_lock_key_sql()) == 2, \
+        "the live key must appear as the projection AND the ledger lookup"
+    assert _OLD_LIVE_EXPR + "\n" not in conn._sql.replace(live_lock_key_sql(), ""), \
+        "no bare old-key expression may survive beside the shared one"
+
+
+def test_the_live_producers_return_the_projected_key_not_a_rebuilt_one():
+    """A Python f-string rebuilding the key from three columns is how the
+    player component got lost. The dict must carry the column the query
+    projected."""
+    key = "live:G:nfl_live_prop:over:cj-stroud:cj-stroud:player_pass_attempts"
+    row = ("G", "nfl_live_prop", "over", "C.J. Stroud Over 32.5 Pass Attempts",
+           None, "NFL", 42, key)
+    assert pn._new_live_signals(_KeyConn([row]), "2026-09-09")[0]["lock_key"] == key
+    drow = ("G", "nfl_live_prop", "over", "C.J. Stroud Over 32.5 Pass Attempts",
+            "NFL", 0.6, 0.07, -115.0, 0.011, None, None, "SEA", "NE",
+            "2026-09-10T00:20:00Z", "2026-09-10T01:00:00+00:00", 0.0, -140, key)
+    assert dn._new_live_signals(_KeyConn([drow]), "2026-09-09")[0]["lock_key"] == key
+
+
+def test_the_first_signal_repair_clears_the_shared_live_key():
+    src = (Path(__file__).parent.parent / "tracking" / "first_signal_repair.py").read_text(encoding="utf-8")
+    assert "live_lock_key(" in src
+    assert 'f"live:{' not in src

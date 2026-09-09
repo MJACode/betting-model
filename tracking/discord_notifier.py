@@ -50,6 +50,7 @@ from data.db import get_connection
 from tracking.publish_lock import (
     DISCORD_LIVE_LOCK, DISCORD_SIGNALS_LOCK, publish_lock,
 )
+from tracking.publish_keys import live_lock_key_sql
 from tracking.publish_keys import key_partition_sql, lock_key_sql
 
 ET = ZoneInfo("America/New_York")
@@ -1283,13 +1284,16 @@ def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
 # ── Live (in-play) signals ───────────────────────────────────────────────────
 
 def _new_live_signals(conn, target_date: str) -> list[dict]:
-    """In-play BET picks not yet posted. Deduped per (game, model, side) so the
-    live board — delete-and-rescored every pass — can't re-post the same signal."""
-    rows = conn.execute("""
+    """In-play BET picks not yet posted. Deduped on the live lock_key
+    (tracking/publish_keys.live_lock_key_sql: game, model, side AND the player
+    columns) so the live board — delete-and-rescored every pass — can't re-post
+    the same signal, and two players' props in one game are two signals."""
+    rows = conn.execute(f"""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
-               g.commence_time, p.created_at, t.min_edge, t.min_odds
+               g.commence_time, p.created_at, t.min_edge, t.min_odds,
+               {live_lock_key_sql()} AS lock_key
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -1302,13 +1306,13 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
           AND p.result IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM push_sent s
-              WHERE s.lock_key = 'live:' || p.game_id || ':' || p.model_id || ':' || p.pick_side
+              WHERE s.lock_key = {live_lock_key_sql()}
                 AND s.kind = 'discord_live'
           )
         ORDER BY p.game_id
     """, (target_date,)).fetchall()
     return [{
-        "lock_key": f"live:{r[0]}:{r[1]}:{r[2]}",
+        "lock_key": r[17],
         "label": r[3], "sport": r[4], "model_id": r[1],
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
