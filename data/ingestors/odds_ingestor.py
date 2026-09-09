@@ -55,7 +55,35 @@ SPORT_KEYS = {
     "NBA": "basketball_nba",
     "UFC": "mma_mixed_martial_arts",
     "NCAAF": "americanfootball_ncaaf",
+    # 2026-09-09 (matt). Absent since this file was written, which is why the
+    # NFL held SPREADS FROM DRAFTKINGS AND NOTHING ELSE while MLB and NCAAF
+    # held h2h + spreads + totals across 14 books: every NFL row in `odds`
+    # came from the wind/opener card's own DK snapshot dump
+    # (nfl/data_ingest/line_snapshots.py), which only covers games a card has
+    # published. So the app's Teams board had one book's spread for the NFL
+    # and no moneyline at all.
+    #
+    # Cost is 3 credits a pass (3 markets x 1 region; the bookmakers param
+    # counts as one region), ~162/day over ~54 passes, against 3,068,382
+    # remaining measured the day this shipped.
+    #
+    # THE NFL IS READ-ONLY AGAINST `games` — see NFL_GAMES_ARE_NOT_OURS below.
+    "NFL": "americanfootball_nfl",
 }
+
+# The NFL is the one sport here whose games this ingestor MUST NOT create.
+#
+# `_build_game_id` mints `NFL_2026-09-09_NE_SEA`; the real row, owned by the
+# nflverse schedule, is `NFL_2026_01_NE_SEA` (season and week, not a date). Let
+# this file upsert and every slate grows sixteen phantom NFL games carrying
+# odds that no pick, no settle and no board would ever join to — the
+# `mlb_phantom_utc_rows_2026_09_07` shape, on purpose this time.
+#
+# So NFL events are RESOLVED onto the schedule instead, through the resolver
+# the NFL prop ingestor already uses in production (it is what matches tonight's
+# prop lines to the real game id). An event that does not resolve is dropped
+# with a warning: a line we cannot attach to a game is not a line we can price.
+NFL_GAMES_ARE_NOT_OURS = True
 
 # Markets to pull (full-game)
 MARKETS = ["h2h", "spreads", "totals"]
@@ -246,7 +274,10 @@ def _normalize_team(name: str, sport: str) -> str:
         # ncaaf_teams registry and falls back to the input unchanged.
         from data.ingestors.cfbd_ingestor import resolve_odds_api_school
         return resolve_odds_api_school(name)
-    if sport == "MLB":
+    if sport == "NFL":
+        from config import NFL_ODDS_API_MAP
+        mapping = NFL_ODDS_API_MAP
+    elif sport == "MLB":
         mapping = MLB_ODDS_API_MAP
     elif sport == "NHL":
         mapping = NHL_ODDS_API_MAP
@@ -260,6 +291,47 @@ def _normalize_team(name: str, sport: str) -> str:
         abbrev = name.split()[-1][:3].upper()
         logger.warning(f"Unknown {sport} team name from Odds API: '{name}' → using '{abbrev}'")
     return abbrev
+
+
+# ── Schedule resolution (NFL) ────────────────────────────────────────────────
+
+def _nfl_resolver(conn, around_date: str):
+    """A `resolve_game_id` for `_process_events`, or None when it can't build one.
+
+    Reuses the NFL prop ingestor's loader and matcher rather than growing a
+    second implementation of the same join -- that one is in production and is
+    what attaches tonight's prop lines to the real game id, and CLAUDE.md §1b's
+    cross-model rule exists because the retry fix in that same file was written
+    twice for want of exactly this.
+
+    FAILS OPEN TO None, and the caller must then SKIP the sport rather than fall
+    back to minting ids: a resolver we could not build is not permission to
+    invent sixteen games.
+
+    The window is deliberately wider than the target date. Books list a week
+    ahead, and a Sunday-night kickoff is Monday in UTC.
+    """
+    try:
+        from datetime import date as _date, timedelta as _td
+        from data.ingestors.nfl_prop_odds_ingestor import (
+            _load_nfl_games, resolve_nfl_game_id,
+        )
+        anchor = _date.fromisoformat(around_date[:10])
+        games = _load_nfl_games(conn,
+                                (anchor - _td(days=2)).isoformat(),
+                                (anchor + _td(days=10)).isoformat())
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(f"NFL: could not load the schedule to resolve odds ({exc})")
+        return None
+    if not games:
+        logger.warning(f"NFL: no scheduled games near {around_date}; odds skipped")
+        return None
+
+    def resolve(home_name: str, away_name: str, commence_time: str):
+        hit = resolve_nfl_game_id(games, home_name, away_name, commence_time)
+        return hit[0] if hit else None
+
+    return resolve
 
 
 # ── Game ID Builder ───────────────────────────────────────────────────────────
@@ -724,10 +796,18 @@ def _get_historical_odds(sport_key: str, markets: list[str],
 
 def _process_events(events: list[dict], sport: str,
                     snapshot_type: str, snapshot_at: str,
-                    include_3way: bool = False) -> tuple[list[dict], list[dict]]:
+                    include_3way: bool = False,
+                    resolve_game_id=None) -> tuple[list[dict], list[dict]]:
     """
     Parse a list of Odds API event dicts.
     Returns (game_rows, odds_rows) ready for DB insert.
+
+    `resolve_game_id(home_name, away_name, commence_time) -> game_id | None`
+    makes this read-only against `games` for the sport that passes one: the id
+    comes from the schedule, NO game row is emitted, and an event that does not
+    resolve is dropped. The NFL is the only caller today and must stay one
+    (NFL_GAMES_ARE_NOT_OURS); everything else still mints its own id, which is
+    correct because for those sports this ingestor IS the schedule.
     """
     game_rows = []
     odds_rows = []
@@ -773,19 +853,33 @@ def _process_events(events: list[dict], sport: str,
         else:
             season = year
 
-        game_id = _build_game_id(sport, game_date, away_team, home_team)
+        if resolve_game_id is not None:
+            # Read-only against the schedule. The resolver owns the date match
+            # too (a prime-time kickoff lands on the NEXT day in UTC), so the
+            # raw commence_time goes in rather than the ET date derived above.
+            resolved = resolve_game_id(home_name, away_name, commence_ts)
+            if not resolved:
+                logger.warning(
+                    f"{sport}: no scheduled game for {away_name!r} @ {home_name!r} "
+                    f"at {commence_ts!r}; {len(event.get('bookmakers', []))} "
+                    f"book(s) dropped rather than filed under an invented id")
+                continue
+            game_id = resolved
+            # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS.
+        else:
+            game_id = _build_game_id(sport, game_date, away_team, home_team)
 
-        # Game row (upsert-safe — will not overwrite scores)
-        game_rows.append({
-            "game_id":       game_id,
-            "sport":         sport,
-            "season":        season,
-            "game_date":     game_date,
-            "home_team":     home_team,
-            "away_team":     away_team,
-            "commence_time": game_dt.isoformat() if game_dt else None,
-            "data_source":   "live",
-        })
+            # Game row (upsert-safe — will not overwrite scores)
+            game_rows.append({
+                "game_id":       game_id,
+                "sport":         sport,
+                "season":        season,
+                "game_date":     game_date,
+                "home_team":     home_team,
+                "away_team":     away_team,
+                "commence_time": game_dt.isoformat() if game_dt else None,
+                "data_source":   "live",
+            })
 
         # Bookmaker odds. Store a row per line-shop book (DraftKings is the book
         # the models score against; the others are kept for line shopping only).
@@ -955,7 +1049,18 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
             continue
         if not events:
             continue
-        game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at)
+        resolve = None
+        if sp == "NFL":
+            try:
+                conn = conn or get_connection()
+                resolve = _nfl_resolver(conn, snapshot_at)
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(f"pregame fetch: NFL resolver unavailable ({exc})")
+                resolve = None
+            if resolve is None:
+                continue        # never fall back to minting NFL game ids
+        game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at,
+                                               resolve_game_id=resolve)
         if sp == "UFC":
             try:
                 conn = conn or get_connection()
@@ -1005,7 +1110,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
-    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF"]
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF", "NFL"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -1043,8 +1148,13 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 logger.info(f"{sp}: no events returned from Odds API")
                 continue
 
+            resolve = None
+            if sp == "NFL":
+                resolve = _nfl_resolver(conn, target_date)
+                if resolve is None:
+                    continue    # never fall back to minting NFL game ids
             game_rows, odds_rows = _process_events(
-                events, sp, snapshot_type, snapshot_at
+                events, sp, snapshot_type, snapshot_at, resolve_game_id=resolve
             )
 
             # The MMA feed mixes every promotion; drop events where no fighter

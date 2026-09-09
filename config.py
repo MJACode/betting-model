@@ -1730,9 +1730,12 @@ PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
 # Sports the poller watches. NHL is excluded while it is out of season -- its
 # per-event 3-way pull returns 422 on every event and costs 32 wasted round
 # trips a pass.
+# NFL joined 2026-09-09 (matt) with the game-line ingest -- until then the NFL
+# had no h2h or totals in `odds` at all and one book's spread, because
+# odds_ingestor.SPORT_KEYS had no NFL entry. One bulk call, 3 credits a pass.
 PREGAME_POLL_SPORTS: list = [
     s for s in os.environ.get(
-        "PREGAME_POLL_SPORTS", "MLB,WNBA,NBA,NCAAF,UFC").split(",") if s.strip()
+        "PREGAME_POLL_SPORTS", "MLB,WNBA,NBA,NCAAF,UFC,NFL").split(",") if s.strip()
 ]
 # Live game-state snapshots older than this mean the poller has stopped —
 # don't score from a frozen state.
