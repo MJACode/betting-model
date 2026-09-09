@@ -664,5 +664,12 @@
     "requested_by": "mike",
     "note": "The LIVE lock_key gained the player columns (#631, mike: 'Fix it now'). Measured before the change: ONE ledger row changes key, live_signal for a settled 08-09 MLB walks prop, so nothing can republish either way; this re-ledgers it so the ledger is complete. The session's Supabase MCP is read-only, hence a job.",
     "args": {}
+  },
+  {
+    "key": "backfill-live-publish-keys-20260909b",
+    "job_type": "backfill_publish_keys",
+    "requested_by": "mike",
+    "note": "Re-run of backfill-live-publish-keys-20260909 (job 47297, failed 3/3 on opening_signals_lock_key_key: seven nfl_prop_market propositions hold BOTH an old-key and a new-key shadow row, so the UPDATE collided and rolled the live-key INSERT back with it). The script now skips and reports those pairs; this run lands the one live_signal row.",
+    "args": {}
   }
 ]

@@ -111,11 +111,32 @@ def run(apply: bool = False) -> tuple[int, int]:
                 WHERE n.lock_key = o.new_key AND n.kind = s.kind
             )
         """).fetchall()
+        # Only rows whose NEW key is not already taken. Capture keeps writing
+        # after the code ships, so a proposition can hold BOTH an old-key row
+        # (captured before) and a new-key row (captured after). Re-keying the
+        # old one then violates opening_signals' UNIQUE(lock_key) and rolls
+        # the whole run back -- which is what failed job 47297 three times
+        # on 2026-09-09. Those pairs are reported, not touched: which capture
+        # is the opening line is a decision, not a migration.
         shadow = conn.execute(f"""
             SELECT o.old_key, o.new_key
             FROM ({_OWNERS}) o
             JOIN opening_signals os ON os.lock_key = o.old_key
+            WHERE NOT EXISTS (
+                SELECT 1 FROM opening_signals n WHERE n.lock_key = o.new_key
+            )
         """).fetchall()
+        duplicated = conn.execute(f"""
+            SELECT o.old_key, o.new_key
+            FROM ({_OWNERS}) o
+            JOIN opening_signals os ON os.lock_key = o.old_key
+            WHERE EXISTS (
+                SELECT 1 FROM opening_signals n WHERE n.lock_key = o.new_key
+            )
+        """).fetchall()
+        for old, new in duplicated:
+            logger.warning(f"opening_signals holds BOTH {old} and {new}; "
+                           f"left alone, needs a decision on which capture stands")
 
         for old, new, kind in ledger:
             logger.info(f"push_sent  {kind:<15} {old}  ->  {new}")
@@ -150,6 +171,9 @@ def run(apply: bool = False) -> tuple[int, int]:
                SET lock_key = o.new_key
               FROM ({_OWNERS}) o
              WHERE os.lock_key = o.old_key
+               AND NOT EXISTS (
+                   SELECT 1 FROM opening_signals n WHERE n.lock_key = o.new_key
+               )
         """)
         conn.commit()
         logger.success(f"re-ledgered {len(ledger)} push_sent row(s), re-keyed "
