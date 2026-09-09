@@ -134,6 +134,15 @@ _NUM_COLS = {
     "target_share": "target_share", "air_yards_share": "air_yards_share",
     "wopr": "wopr", "racr": "racr",
     "def_tackles_solo": "def_tackles_solo", "def_tackle_assists": "def_tackle_assists",
+    # THE THIRD TACKLE COLUMN, ingested from 2026-09-09. A book grades "tackles +
+    # assists" as the box-score TOTAL, and the box-score total is solo tackles
+    # PLUS tackles-with-assist PLUS assists: measured against ESPN's TOT column
+    # on 193 player-games (2024 week 10), solo+with_assist+assists matches
+    # 94.8% of rows (mean diff -0.07) while solo+assists -- what this table
+    # held -- matches 77.7% and runs 0.26 low. That gap is why the tackles
+    # model read 41% overs against the book's 50%: it was grading a stat the
+    # book does not sell.
+    "def_tackles_with_assist": "def_tackles_with_assist",
     "def_qb_hits": "def_qb_hits",
 }
 # Columns that decide whether a row carries anything we model. A row that is
