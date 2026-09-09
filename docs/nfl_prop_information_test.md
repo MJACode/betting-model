@@ -160,6 +160,10 @@ model this measurement produced (§4).
   The two totals differ only by seasons. On 2026-09-09 they held 21 open live
   BETs written 09-07/08, none graded yet. Pausing them is a model update and
   mike's call.
+- **DONE, same day: the tackles stat was reconciled and the coefficient
+  survived.** `docs/nfl_prop_profitability_search.md` §4: solo + with_assist +
+  assists matches the box score, and on it the model is +50.24u over 363 bets,
+  positive all three seasons. The paragraph below is the pre-fix wording.
 - **The one lead: reconcile the tackles stat.** Establish what DraftKings
   grades for `player_tackles_assists` (solo + assisted per the official
   gamebook, or something else) against what `nfl_player_game_log` stores,
