@@ -167,8 +167,18 @@ def _bootstrap_roi_ci(profits: np.ndarray, stakes: np.ndarray) -> tuple[float, f
 
 
 def backtest_model(model_id: str, test_seasons: list[int],
-                   placebo: bool = False, bookmaker: str = None) -> dict:
-    """Walk-forward: for each test season, fit on prior seasons and bet that one."""
+                   placebo: bool = False, bookmaker: str = None,
+                   rows_out: list | None = None,
+                   snapshot_types: tuple[str, ...] | None = None) -> dict:
+    """Walk-forward: for each test season, fit on prior seasons and bet that one.
+
+    `rows_out`, when given, receives one dict per QUOTED row -- the whole
+    universe the bets were selected from, with the model's projection, its
+    P(over), the book's fair price and the outcome. The evaluation rule says a
+    model is judged on every row it could have bet, and the summary numbers
+    above cannot answer the question that matters once a bias is found: does
+    the projection carry any information the line does not already hold?
+    """
     sport, market, model_type, _ = config.PROP_MODELS[model_id]
     artifact = _tuned_params(model_id)
     if artifact is None:
@@ -210,7 +220,16 @@ def backtest_model(model_id: str, test_seasons: list[int],
     # computed actual is not the stat they grade, and any ROI built on it is
     # measuring that gap.
     universe = {"over": 0, "under": 0, "push": 0, "sum_diff": 0.0,
-                "sum_fair_over": 0.0, "priced": 0}
+                "sum_fair_over": 0.0, "priced": 0,
+                # THE MODEL'S OWN OVER-RATE, added 2026-09-09. The universe
+                # already compared the actual over-rate to the book's de-vigged
+                # one, which tests whether we grade the right STAT. It never
+                # recorded what the MODEL said, so an 87%-unders lane read as a
+                # strategy rather than as the calibration symptom it is. Two
+                # sums, because mean bias (XGBoost projects low) and shape bias
+                # (the fitted tail is too thin) have different fixes and one
+                # number cannot separate them.
+                "sum_model_over": 0.0, "sum_pred": 0.0, "sum_actual": 0.0}
     try:
         bets: list[dict] = []
         for season in test_seasons:
@@ -240,7 +259,9 @@ def backtest_model(model_id: str, test_seasons: list[int],
 
             kickoffs = _kickoffs(conn, sorted(te["game_id"].unique().tolist()))
             odds = load_nfl_prop_odds(conn, sorted(te["game_id"].unique().tolist()),
-                                      [market], bookmaker=book)
+                                      [market], bookmaker=book,
+                                      **({"snapshot_types": snapshot_types}
+                                         if snapshot_types else {}))
             actuals = te["target"].values.astype(float)
 
             for i, (_, row) in enumerate(te.iterrows()):
@@ -258,6 +279,9 @@ def backtest_model(model_id: str, test_seasons: list[int],
                 universe["over" if actual > line else
                          "under" if actual < line else "push"] += 1
                 universe["sum_diff"] += float(actual - line)
+                universe["sum_model_over"] += float(p_over)
+                universe["sum_pred"] += float(preds[i])
+                universe["sum_actual"] += float(actual)
                 _fo, _fu = no_vig_pair(q.get("over_price"), q.get("under_price"))
                 # A single non-finite fair price would make the mean nan, and a
                 # nan gap silently switches the definitional gate off — the gate
@@ -265,6 +289,15 @@ def backtest_model(model_id: str, test_seasons: list[int],
                 if _fo is not None and np.isfinite(_fo):
                     universe["sum_fair_over"] += float(_fo)
                     universe["priced"] += 1
+                if rows_out is not None:
+                    rows_out.append({
+                        "model_id": model_id, "season": season, "game_id": gid,
+                        "player": row["player_name"], "line": line,
+                        "pred": float(preds[i]), "p_over": float(p_over),
+                        "p_push": float(p_push), "fair_over": _fo,
+                        "over_price": q.get("over_price"),
+                        "under_price": q.get("under_price"),
+                        "actual": float(actual)})
 
                 for side, raw_p, price in (("over", p_over, q.get("over_price")),
                                            ("under", p_under, q.get("under_price"))):
@@ -420,6 +453,14 @@ def _universe_summary(universe: dict | None) -> dict:
         if np.isfinite(book):
             out["book_over_pct"] = round(book, 1)
             out["gap_pp"] = round(out["over_pct"] - book, 1)
+    if "sum_model_over" in universe:
+        model = 100 * universe["sum_model_over"] / n
+        out["model_over_pct"] = round(model, 1)
+        # NEGATIVE = the model thinks overs are rarer than they are, so every
+        # under looks like edge. This is the number that explains 87% unders.
+        out["model_gap_pp"] = round(model - out["over_pct"], 1)
+        out["mean_pred"] = round(universe["sum_pred"] / n, 2)
+        out["mean_actual"] = round(universe["sum_actual"] / n, 2)
     return out
 
 
@@ -461,16 +502,31 @@ def main() -> None:
     ap.add_argument("--seasons", nargs="+", type=int, default=[2024, 2025])
     ap.add_argument("--placebo", action="store_true")
     ap.add_argument("--book", default=None)
+    ap.add_argument("--dump", default=None,
+                    help="directory: write every quoted row per model as CSV")
+    ap.add_argument("--snapshot", nargs="+", default=None,
+                    help="snapshot types to grade against (default: the loader's "
+                         "PREGAME_SNAPSHOT_TYPES, which is ('open',) -- the newest "
+                         "game-day open row before kickoff, ~7h lead, NOT the close)")
     args = ap.parse_args()
 
     ids = ([m for m in config.PROP_MODELS if m.startswith("nfl_prop")]
            if args.all else [args.model])
     for mid in ids:
+        rows: list | None = [] if args.dump else None
         try:
-            r = backtest_model(mid, args.seasons, placebo=args.placebo, bookmaker=args.book)
+            r = backtest_model(mid, args.seasons, placebo=args.placebo,
+                               bookmaker=args.book, rows_out=rows,
+                               snapshot_types=tuple(args.snapshot) if args.snapshot else None)
         except Exception as exc:                       # one model must not sink the sweep
             logger.error(f"{mid}: {type(exc).__name__}: {exc}")
             continue
+        if rows is not None:
+            import pandas as pd
+            from pathlib import Path
+            out = Path(args.dump); out.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(rows).to_csv(out / f"{mid}.csv", index=False)
+            logger.info(f"{mid}: {len(rows)} quoted rows -> {out / (mid + '.csv')}")
         if r.get("bets"):
             logger.success(
                 f"{mid}{' [PLACEBO]' if args.placebo else ''}: {r['bets']} bets "

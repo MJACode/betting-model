@@ -704,6 +704,7 @@ to be known BEFORE deciding which file to open.
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
 | **Who has beaten player props, how, and with what data** | `docs/prop_market_research.md` |
 | **Odds providers: what exists, what it costs, what it adds** | `docs/odds_sources.md` |
+| **The eleven NFL prop models hold no information the line lacks** | `docs/nfl_prop_information_test.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —
