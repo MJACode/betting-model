@@ -284,10 +284,16 @@ def replay(since: str, gates: list[int]) -> dict:
             if not prices:
                 dropped[gid] = "no DK in_play totals rows"
                 continue
+            # Both markets, as production's _pregame_features does: h2h for
+            # the moneyline context, totals for `pregame_total_line`. Passing
+            # only h2h replays the post-2026-09-08 artifact with its anchor
+            # NaN, which is the map/artifact mismatch the scorer's guard
+            # refuses -- so the replay must not quietly do it either.
             pregame = build_mlb_game_features(
                 conn, gid, game["game_date"], game["home_team"],
                 game["away_team"], game["season"],
-                odds_row=_get_dk_odds(conn, gid, "h2h"))
+                odds_row=_get_dk_odds(conn, gid, "h2h"),
+                totals_row=_get_dk_odds(conn, gid, "totals"))
             if not pregame:
                 dropped[gid] = "pre-game features unavailable"
                 continue
