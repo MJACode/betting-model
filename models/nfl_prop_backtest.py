@@ -505,8 +505,9 @@ def main() -> None:
     ap.add_argument("--dump", default=None,
                     help="directory: write every quoted row per model as CSV")
     ap.add_argument("--snapshot", nargs="+", default=None,
-                    help="snapshot types to grade against (default: every pre-game "
-                         "type, newest wins, i.e. the closing quote)")
+                    help="snapshot types to grade against (default: the loader's "
+                         "PREGAME_SNAPSHOT_TYPES, which is ('open',) -- the newest "
+                         "game-day open row before kickoff, ~7h lead, NOT the close)")
     args = ap.parse_args()
 
     ids = ([m for m in config.PROP_MODELS if m.startswith("nfl_prop")]

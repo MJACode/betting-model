@@ -12,7 +12,8 @@ THE TEST, per model, on the rows the backtest dumped (`--dump`):
   1. BRIER on the whole quoted universe -- the book's de-vigged price against
      the model's P(over) against a 2024-fitted calibration of the model. Lower
      is better; the book is the bar.
-  2. THE RESIDUAL REGRESSION, fitted on 2024 and read on 2025:
+  2. THE RESIDUAL REGRESSION, fitted on one season and read on the next
+     (--train/--test; default 2024 -> 2025, and 2023 -> 2024 is the second pair):
 
          logit P(over) = a + c * logit(book_fair) + b * z,   z = (pred - line) / sd
 
@@ -87,14 +88,14 @@ def grade(prof: np.ndarray, rng) -> str:
             f"{100*prof.mean():>+7.2f}%  ({lo:+.1f}, {hi:+.1f})")
 
 
-def analyse(df: pd.DataFrame, rng, cuts) -> dict:
+def analyse(df: pd.DataFrame, rng, cuts, train: int = 2024, test: int = 2025) -> dict:
     df = df.dropna(subset=["fair_over", "p_over", "pred", "line", "actual"]).copy()
     df = df[df["actual"] != df["line"]]                     # pushes carry no outcome
     df["y"] = (df["actual"] > df["line"]).astype(float)
     df["resid"] = df["pred"] - df["line"]
-    sd = df.loc[df["season"] == 2024, "resid"].std() or 1.0
+    sd = df.loc[df["season"] == train, "resid"].std() or 1.0
     df["z"] = df["resid"] / sd
-    tr, te = df[df["season"] == 2024], df[df["season"] == 2025]
+    tr, te = df[df["season"] == train], df[df["season"] == test]
     out = {"n_train": len(tr), "n_test": len(te)}
     if len(tr) < 100 or len(te) < 100:
         out["thin"] = True
@@ -117,10 +118,13 @@ def analyse(df: pd.DataFrame, rng, cuts) -> dict:
     Xt = np.column_stack([np.ones(len(te)), logit(te["fair_over"]), te["z"]])
     p_blend = sigmoid(Xt @ wb)
     out["brier_blend"] = float(np.mean((p_blend - y) ** 2))
-    # The same coefficient refitted on 2025 alone: the sign has to hold in a
-    # season the fit never saw, or it is one season's noise.
+    # The same coefficient refitted on the TEST season alone. This is
+    # in-sample for that season; it says whether the sign even holds there,
+    # not whether it was predictable. The out-of-sample evidence is `b` from
+    # the training season read against the test season's Brier and bets, and
+    # the second train/test pair (--train 2023 --test 2024).
     wb2, se2 = fit_logistic(Xt, y)
-    out["b_2025"], out["b_2025_se"] = float(wb2[2]), float(se2[2])
+    out["b_test"], out["b_test_se"] = float(wb2[2]), float(se2[2])
 
     # 3. The blend as a bet on 2025 against the DK price.
     bets = {}
@@ -143,27 +147,29 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rows", required=True)
     ap.add_argument("--cuts", nargs="+", type=float, default=[0.02, 0.03, 0.04, 0.05])
+    ap.add_argument("--train", type=int, default=2024)
+    ap.add_argument("--test", type=int, default=2025)
     a = ap.parse_args()
     rng = np.random.default_rng(42)
     files = sorted(Path(a.rows).glob("nfl_prop_*.csv"))
 
-    print("\n1+2. INFORMATION TEST -- 2025 rows, everything fitted on 2024")
-    print(f"{'model':26s} {'n24':>5} {'n25':>5} | {'book':>6} {'model':>6} {'cal':>6} "
-          f"{'blend':>6} | {'b(24)':>7} {'se':>5} | {'b(25)':>7} {'se':>5}  verdict")
+    print(f"\n1+2. INFORMATION TEST -- {a.test} rows, everything fitted on {a.train}")
+    print(f"{'model':26s} {'ntr':>5} {'nte':>5} | {'book':>6} {'model':>6} {'cal':>6} "
+          f"{'blend':>6} | {'b(tr)':>7} {'se':>5} | {'b(te)':>7} {'se':>5}  verdict")
     print("-" * 118)
     res = {}
     for f in files:
         mid = f.stem
-        r = analyse(pd.read_csv(f), rng, a.cuts)
+        r = analyse(pd.read_csv(f), rng, a.cuts, a.train, a.test)
         res[mid] = r
         if r.get("thin"):
             print(f"{mid:26s} {r['n_train']:>5} {r['n_test']:>5}   (thin)")
             continue
-        sig24 = abs(r["b"]) > 1.96 * r["b_se"]
-        sig25 = abs(r["b_2025"]) > 1.96 * r["b_2025_se"]
-        if r["b"] > 0 and r["b_2025"] > 0 and sig24 and sig25:
+        sig_tr = abs(r["b"]) > 1.96 * r["b_se"]
+        sig_te = abs(r["b_test"]) > 1.96 * r["b_test_se"]
+        if r["b"] > 0 and r["b_test"] > 0 and sig_tr and sig_te:
             v = "INFORMATION in both seasons"
-        elif r["b"] > 0 and r["b_2025"] > 0:
+        elif r["b"] > 0 and r["b_test"] > 0:
             v = "positive both, not significant"
         else:
             v = "none / unstable"
@@ -174,7 +180,7 @@ def main() -> None:
               f"{r['b']:+.3f} {r['b_se']:.3f} | {r['b_2025']:+.3f} {r['b_2025_se']:.3f}  "
               f"{v}; {beats}")
 
-    print("\n3. THE BLEND AS A BET -- 2025, DraftKings price, fitted on 2024")
+    print(f"\n3. THE BLEND AS A BET -- {a.test}, DraftKings price, fitted on {a.train}")
     print(f"{'model':26s} {'cut':>4} {'bets':>5} {'win%':>6} {'units':>9} {'ROI':>8}  90% CI")
     print("-" * 90)
     for mid, r in res.items():

@@ -55,7 +55,7 @@ If the projection adds anything to the line, `b` is positive with an interval
 excluding zero in a season the fit never saw. Brier on 2025 (lower is better;
 the book is the bar):
 
-| model | n 2025 | book | raw model | calibrated model | blend | b (fit 2024) | b (refit 2025) |
+| model | n 2025 | book | raw model | calibrated model | blend | b (fit 2024) | b (refit on 2025, in-sample) |
 |---|---|---|---|---|---|---|---|
 | pass_yards | 468 | 0.2501 | 0.2621 | 0.2502 | 0.2500 | +0.02 ± 0.09 | +0.01 ± 0.09 |
 | pass_attempts | 467 | 0.2511 | 0.2599 | 0.2506 | 0.2500 | −0.14 ± 0.11 | +0.04 ± 0.09 |
@@ -79,6 +79,39 @@ Read across:
   to the line.
 - **The blend does not beat the book by more than 0.001 Brier anywhere.**
 
+The last column is the coefficient refitted on 2025 itself. It is in-sample
+for that season and only says whether the sign holds there; the out-of-sample
+evidence is the 2024 fit read against 2025, and the second pair below.
+
+### The second pair: fitted on 2023, read on 2024
+
+Same test, one season earlier (`--train 2023 --test 2024`, rows from a
+2023-25 run). This is a genuine second out-of-sample read.
+
+| model | n 2024 | book | raw model | calibrated | blend | b (fit 2023) | b (refit 2024) |
+|---|---|---|---|---|---|---|---|
+| pass_yards | 474 | 0.2500 | 0.2621 | 0.2502 | 0.2505 | +0.06 ± 0.10 | +0.02 ± 0.10 |
+| pass_attempts | 359 | 0.2510 | 0.2718 | 0.2491 | 0.2489 | −0.06 ± 0.10 | −0.15 ± 0.12 |
+| pass_completions | 360 | 0.2467 | 0.2798 | 0.2510 | 0.2475 | +0.05 ± 0.10 | −0.32 ± 0.13 |
+| pass_tds | 448 | 0.2449 | 0.2499 | 0.2507 | 0.2491 | +0.18 ± 0.22 | +0.09 ± 0.18 |
+| rush_yards | 621 | 0.2501 | 0.2676 | 0.2513 | 0.2515 | −0.01 ± 0.08 | −0.05 ± 0.08 |
+| rush_attempts | 444 | 0.2499 | 0.2649 | 0.2489 | 0.2486 | +0.07 ± 0.09 | +0.15 ± 0.10 |
+| rec_yards | 1,580 | 0.2496 | 0.2632 | 0.2500 | 0.2493 | +0.00 ± 0.05 | −0.04 ± 0.05 |
+| receptions | 1,525 | 0.2468 | 0.2578 | 0.2495 | 0.2472 | +0.10 ± 0.06 | +0.01 ± 0.05 |
+| rush_rec_yards | 1,345 | 0.2499 | 0.2677 | 0.2511 | 0.2514 | +0.13 ± 0.08 | −0.03 ± 0.05 |
+| anytime_td | 2,991 | 0.1928 | 0.1947 | 0.1947 | 0.1918 | +0.06 ± 0.07 | +0.08 ± 0.07 |
+| sacks | thin in 2023 | | | | | | |
+
+Same picture. The book beats the raw model on every market, calibration
+reaches the book, and no coefficient clears zero out of sample. The blend
+as a bet on 2024: pass_tds −15.8% (105 bets, interval excluding zero on the
+negative side), rush_rec_yards −5.8% (117), rush_yards −3.9% (192),
+receptions +2.8% (127, interval −11.5 to +17.2). Nothing survives both pairs.
+
+The pass_attempts cell in the first pair (+10.6% at 3%, 137 bets) has a
+NEGATIVE fitted `b` in both pairs: the cell that looks positive is fading
+the model, not following it, and its interval spans zero.
+
 ## 3. The blend as a bet
 
 The fitted equation's probability against the DraftKings price on 2025, one
@@ -99,10 +132,18 @@ volume:
 pass_attempts is one cell whose interval spans zero and whose `b` is negative
 in the season it was fitted on. The only intervals excluding zero are negative.
 
-`tackles_assists` shows +9.66% to +12.83% with intervals excluding zero at
-every cut, and it is not usable: our computed actual lands over the line
-41.1% of the time against the book's 50.2%, which is a different stat, not an
-edge (the reason it is paused). The blend inherits that fiction.
+`tackles_assists` is the one market where the residual coefficient clears
+zero in BOTH pairs (+0.29 ± 0.06 fit 2024; +0.21 ± 0.06 fit 2023, +0.29 ± 0.06
+refit 2024), the blend beats the book on Brier (0.2351 vs 0.2491 on 2024),
+and the blend as a bet reads +17% to +23% with intervals excluding zero at
+every cut. **It is not usable as it stands**, and the reason is exactly why
+it looks so good: our computed actual lands over the line 41.1% of the time
+against the book's 50.2%, so the outcome column is a different stat from the
+one the book grades. A model trained on our stat will beat a price set for
+theirs without knowing anything. The coefficient may be entirely that
+artefact. Whether any of it survives once the actual matches the graded stat
+is the open question, and the only lead toward a profitable distributional
+model this measurement produced (§4).
 
 ## 4. What this settles
 
@@ -113,9 +154,18 @@ edge (the reason it is paused). The blend inherits that fiction.
   would have shown it on day one (`model_over_pct`) is now part of every
   backtest run.
 - **The eleven are live and losing.** Their backtest at the live cuts is
-  −12.26 units over 1,521 bets for 2024-25 (−40.53u over 2,133 including 2023,
-  `docs/nfl_prop_offset_evidence.md`). Pausing them is a model update and
+  −12.26 units over 1,521 bets for 2024-25, and −40.53u over 2,133 bets for
+  2023-25 — re-run this session on the current cache and reproduced to the
+  unit, per model, against the table in `docs/nfl_prop_offset_evidence.md`.
+  The two totals differ only by seasons. On 2026-09-09 they held 21 open live
+  BETs written 09-07/08, none graded yet. Pausing them is a model update and
   mike's call.
+- **The one lead: reconcile the tackles stat.** Establish what DraftKings
+  grades for `player_tackles_assists` (solo + assisted per the official
+  gamebook, or something else) against what `nfl_player_game_log` stores,
+  fix the actual, and re-run this test. If `b` still clears zero out of
+  sample with a matching stat, that is a distributional model with
+  information; if it collapses, the +197u was the mismatch and nothing more.
 - **What would be a model:** a residual against a market-implied distribution
   (the ladder, `models/prop_ladder`) with information the market lacks. The
   current feature set is not that information. The one construction with
@@ -124,6 +174,8 @@ edge (the reason it is paused). The blend inherits that fiction.
 Reproduce:
 
 ```
-python -m models.nfl_prop_backtest --all --dump <dir>
-python -m scripts.nfl_prop_information_test --rows <dir>
+python -m models.nfl_prop_backtest --all --dump <dir>                      # 2024-25
+python -m scripts.nfl_prop_information_test --rows <dir>                    # fit 2024, read 2025
+python -m models.nfl_prop_backtest --all --seasons 2023 2024 2025 --dump <dir3>
+python -m scripts.nfl_prop_information_test --rows <dir3> --train 2023 --test 2024
 ```
