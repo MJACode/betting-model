@@ -180,7 +180,11 @@ def test_the_poisson_gate_reports_the_models_own_floor():
     mu = rng.uniform(1, 8, 800)
     out = poisson_probability_metrics("mlb_live_total_runs",
                                       rng.poisson(mu).astype(float), mu)
-    assert out["prob_cal_floor"] == pytest.approx(0.70)
+    # "the model's OWN floor" -- so read it from config rather than encoding
+    # 0.70, which is what this did until the cut moved on 2026-09-09.
+    from config import MODEL_PROB_THRESHOLDS
+    assert out["prob_cal_floor"] == pytest.approx(
+        MODEL_PROB_THRESHOLDS["mlb_live_total_runs"])
 
 
 # ── stamping ─────────────────────────────────────────────────────────────────
