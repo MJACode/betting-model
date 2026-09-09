@@ -24,6 +24,15 @@ export interface FilterChipProps {
   count?: number;
   /** Dim + block taps — used for sports with nothing on the board today. */
   disabled?: boolean;
+  /**
+   * A load this chip started is in flight. Announced, NOT dimmed and NOT
+   * blocked: `disabled` renders textTertiary, and on an ACTIVE chip that puts
+   * tertiary text on the tint fill at 0.45 opacity, which erases the on/off
+   * affordance of the one control that changes the population of the board
+   * (UX_REVIEW §5, and the review that caught it 2026-09-09). Taps stay live
+   * because the caller stamps its requests and a second tap is harmless.
+   */
+  busy?: boolean;
   accessibilityLabel?: string;
 }
 
@@ -35,6 +44,7 @@ export function FilterChip({
   icon,
   count,
   disabled = false,
+  busy = false,
   accessibilityLabel,
 }: FilterChipProps) {
   const fg = disabled ? colors.textTertiary : active ? colors.textInverse : colors.textSecondary;
@@ -43,7 +53,7 @@ export function FilterChip({
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
-      accessibilityState={{ selected: active, disabled }}
+      accessibilityState={{ selected: active, disabled, busy }}
       accessibilityLabel={accessibilityLabel ?? label}
       style={({ pressed }) => [
         styles.chip,
