@@ -386,6 +386,20 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
 };
 
 /**
+ * The betslip link for the RECORD chip: DraftKings' link when DraftKings
+ * decided the pick, the scorer's best-price link when the deciding book is the
+ * one it stamped, and none otherwise. A chip is an invitation to bet, and the
+ * DK link opens DraftKings' slip whatever the chip is labelled
+ * (sportsbookLinks.openBookBetslip), so a FanDuel-priced chip must never carry
+ * it (UX review, 2026-09-09).
+ */
+function recordLink(pick: Pick, recordBook: string): string | null {
+  if (recordBook === MODEL_BOOK) return pick.dk_bet_link ?? null;
+  const stampBook = (pick.best_book ?? '').trim().toLowerCase();
+  return stampBook === recordBook ? (pick.best_bet_link ?? null) : null;
+}
+
+/**
  * Which book the price STORED on a pick came from.
  *
  * Everywhere except NFL that's DraftKings — the book the models score against.
@@ -396,7 +410,9 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
  * Labeling that "DK" tells the user a price they cannot get at the book named.
  * An unrecognised abbrev is returned as-is rather than guessed at.
  */
-export function storedQuoteBook(pick: Pick): string {
+export function storedQuoteBook(
+  pick: { model_id: string; pick_label?: string | null; decision_book?: string | null },
+): string {
   // Since 2026-09-09 the row says which book DECIDED it; only rows from
   // before the flip (and the NFL cards, which name their book in the label)
   // fall through to the rules below.
@@ -548,7 +564,7 @@ export function displayQuoteForPick(
     return {
       bookmaker: storedBook,
       price: stored,
-      link: pick.dk_bet_link ?? null,
+      link: recordLink(pick, storedBook),
       line: numOrNull(pick.scored_line),
       isPreferred,
       isFallback: !isPreferred,
@@ -659,7 +675,7 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
       : {
           bookmaker: recordBook,
           price: recordPrice,
-          link: pick.dk_bet_link ?? null,
+          link: recordLink(pick, recordBook),
           line: scoredLine,
           isRecord: true,
         };

@@ -512,7 +512,7 @@ function ClvCard({ pick }: { pick: Pick }) {
 
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Signal line</Text>
+          <Text style={styles.clvRowLabel}>Signal line (DK)</Text>
           <Text style={styles.clvRowValue}>
             {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.dk_odds)}
@@ -521,7 +521,7 @@ function ClvCard({ pick }: { pick: Pick }) {
       ) : null}
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Closing line</Text>
+          <Text style={styles.clvRowLabel}>Closing line (DK)</Text>
           <Text style={styles.clvRowValue}>
             {formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.closing_dk_odds)}
@@ -529,7 +529,7 @@ function ClvCard({ pick }: { pick: Pick }) {
         </View>
       ) : (
         <Text style={styles.infoBody}>
-          Bet {formatAmerican(pick.dk_odds)} → Close {formatAmerican(pick.closing_dk_odds)}
+          DK {formatAmerican(pick.dk_odds)} at signal → DK {formatAmerican(pick.closing_dk_odds)} at close
         </Text>
       )}
 

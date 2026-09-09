@@ -34,10 +34,13 @@ violates one is a **Blocker** regardless of how it looks.
 - **A pick is a pick** (§1c). The UI never shows a re-priced pick as if it were
   the original. Line movement is shown *beside* the locked number, never in
   its place.
-- **DraftKings decides, best line only displays** (§6). Edge, the BET/AVOID
-  badge, stake and P&L are computed against DK. A `best_*` field may appear on
-  the card and in the betslip hand-off, never in anything that reads as the
-  decision.
+- **Decided at the best bettable price at the DraftKings line** (§6, since
+  2026-09-09). Edge, the BET/AVOID badge, stake, P&L and the action filter are
+  computed at `decision_*` (read through `lib/decisionPrice.ts`, which falls
+  back to DK for pre-flip rows); `dk_odds` / `edge` are the DraftKings
+  reference and the CLV basis. A row must name the book that decided it, a
+  chip labelled with one book must never carry another book's betslip link,
+  and parlays stay priced at DraftKings.
 - **The platform is LIVE, not paper trading** (§2). The words "paper",
   "paper trading", "simulated" must not appear in user-facing copy.
 - **Access is `useEntitlement()`**, never `useSubscription().entitled` (§6).

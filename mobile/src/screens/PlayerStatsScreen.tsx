@@ -43,8 +43,8 @@ import { todayET } from '@/lib/format';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
-import { bookName } from '@/lib/markets';
-import { decisionBook, decisionOdds } from '@/lib/decisionPrice';
+import { bookName, storedQuoteBook } from '@/lib/markets';
+import { decisionOdds } from '@/lib/decisionPrice';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
@@ -368,7 +368,7 @@ export function PlayerStatsScreen() {
                   </Text>
                   {decisionOdds(slipPick.pick) != null ? (
                     <Text style={styles.slipPrice}>
-                      {formatAmerican(decisionOdds(slipPick.pick))} · {bookName(decisionBook(slipPick.pick) ?? 'draftkings')}
+                      {formatAmerican(decisionOdds(slipPick.pick))} · {bookName(storedQuoteBook(slipPick.pick))}
                     </Text>
                   ) : null}
                 </View>

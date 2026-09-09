@@ -24,6 +24,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
+import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Tab = 'builtin' | 'custom';
@@ -400,7 +401,7 @@ function CustomModelRow({
                   {ep.pick.pick_label}
                 </Text>
                 <Text style={styles.betOdds}>
-                  {decisionOdds(ep.pick) == null ? '—' : formatAmerican(decisionOdds(ep.pick))}
+                  {decisionOdds(ep.pick) == null ? '—' : `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`}
                 </Text>
               </View>
             ))}

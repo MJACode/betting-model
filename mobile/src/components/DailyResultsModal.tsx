@@ -27,8 +27,8 @@ import {
   type SportDayBreakdown,
 } from '@/lib/dailyResults';
 import type { Pick } from '@/types';
-import { bookLabelShort } from '@/lib/markets';
-import { decisionBook, decisionOdds } from '@/lib/decisionPrice';
+import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { decisionOdds } from '@/lib/decisionPrice';
 
 /**
  * Daily results: how every model did on a given day — a consolidated "All"
@@ -443,7 +443,7 @@ function PickRow({ pick }: { pick: Pick }) {
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
-          {decisionOdds(pick) != null ? ` · ${bookLabelShort(decisionBook(pick) ?? 'draftkings')} ${formatAmerican(decisionOdds(pick))}` : ''}
+          {decisionOdds(pick) != null ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` : ''}
         </Text>
       </View>
       {recordOnly ? (
@@ -470,7 +470,7 @@ function PendingPickRow({ pick }: { pick: Pick }) {
         </Text>
         <Text style={styles.modelSub}>
           {modelShort(pick.model_id)}
-          {decisionOdds(pick) != null ? ` · ${bookLabelShort(decisionBook(pick) ?? 'draftkings')} ${formatAmerican(decisionOdds(pick))}` : ''}
+          {decisionOdds(pick) != null ? ` · ${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` : ''}
         </Text>
       </View>
       <Text style={styles.openLabel}>Open</Text>

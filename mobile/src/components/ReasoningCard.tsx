@@ -15,11 +15,12 @@ import {
   UNIT_KELLY_FRACTION,
   type KellySizingOpts,
   isUnlockedPreview,
+  passesActionFilter,
 } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
-import { bookLabel } from '@/lib/markets';
-import { decisionBook, decisionEdge, decisionOdds } from '@/lib/decisionPrice';
+import { bookLabel, bookName, storedQuoteBook } from '@/lib/markets';
+import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 
 interface Props {
   pick: Pick;
@@ -33,7 +34,9 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
   // rows from before the flip.
   const odds = decisionOdds(pick);
   const edge = decisionEdge(pick);
-  const book = bookLabel(decisionBook(pick) ?? 'draftkings');
+  const bookKey = storedQuoteBook(pick);
+  const book = bookLabel(bookKey);
+  const bookFull = bookName(bookKey);
   const implied = pick.decision_implied_prob ?? pick.dk_implied_prob;
   const stake = stakeFor(pick.kelly_fraction, odds, kelly);
   // isProbOnlyModel, not the strict config mirror: a retired prob-only model's
@@ -57,7 +60,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
         <Row
           label={`${book} ${formatAmerican(odds)} implied`}
           value={formatPct(implied)}
-          sub={`What ${book}'s odds imply about that chance (1 / decimal odds) — the price this pick was decided at.`}
+          sub={`What the ${bookFull} price implies about that chance (1 / decimal odds) — the price this pick was decided at.`}
         />
       ) : (
         <Row
@@ -71,7 +74,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
         <Row
           label="Edge"
           value={formatPctSigned(edge)}
-          tint={edge >= 0.05 ? colors.bet : edge <= -0.05 ? colors.avoid : undefined}
+          tint={passesActionFilter(pick) ? colors.bet : pick.signal_type === 'AVOID' ? colors.avoid : undefined}
           sub={`= model ${formatPct(pick.model_probability)} − ${book} ${formatPct(implied)}. Positive means we think the side is mispriced in our favor.`}
         />
       ) : (

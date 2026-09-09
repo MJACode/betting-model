@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { getDeviceId } from './useDeviceId';
 import { trackBet, untrackBet } from '@/lib/queries';
 import type { Pick } from '@/types';
-import { decisionOdds } from '@/lib/decisionPrice';
 
 /**
  * Track-a-bet state.
@@ -59,8 +58,11 @@ function snapshotFromPick(pick: Pick): LiveTrackSnapshot {
     pick_label: pick.pick_label,
     sport: pick.sport,
     game_date: pick.game_date,
-    // The price the pick was DECIDED at (2026-09-09) -- what the user tracks.
-    dk_odds: decisionOdds(pick),
+    // The DraftKings price, deliberately: tracked_bets.locked_odds is what the
+    // line-change alert compares DK-to-DK against (push_notifier), so the
+    // tracked number stays on the same basis. The pick's deciding price is on
+    // the pick row (decision_*). UX review, 2026-09-09.
+    dk_odds: pick.dk_odds,
     scored_line: pick.scored_line,
     tracked_at: new Date().toISOString(),
   };
