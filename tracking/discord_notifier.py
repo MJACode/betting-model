@@ -50,6 +50,7 @@ from data.db import get_connection
 from tracking.publish_lock import (
     DISCORD_LIVE_LOCK, DISCORD_SIGNALS_LOCK, publish_lock,
 )
+from tracking.publish_keys import key_partition_sql, lock_key_sql
 
 ET = ZoneInfo("America/New_York")
 
@@ -626,11 +627,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     the key capture minted (`game:model[:player]`), so the push_sent ledger
     carries over and nothing already posted posts twice.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         WITH bet AS (
-            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
-                   p.game_id || ':' || p.model_id
-                       || COALESCE(':' || p.player_id, '') AS lock_key,
+            SELECT DISTINCT ON ({key_partition_sql()})
+                   {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
@@ -656,13 +656,20 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               -- game with a real commence_time in the future needs no bound.
               AND (g.commence_time IS NOT NULL OR p.game_date >= %s)
               -- The app's passesActionFilter, in SQL, off the same row.
+              -- A VOIDED pick is not publishable (CLAUDE.md §1c): the row
+              -- is kept as evidence of a model that fired where it should not
+              -- have, and it stops counting. Mirrored by the app's
+              -- passesActionFilter, which added the same exclusion the same
+              -- day. Only 'VOID': scripts/nfl_pick_monitor.py writes
+              -- 'OK' / 'DEGRADED' / 'GONE' here as health states on real,
+              -- STANDING picks, which must keep publishing.
+              AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
               AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
               AND (t.min_odds IS NULL OR p.dk_odds IS NULL
                    OR p.dk_odds >= t.min_odds)
-            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
-                     p.created_at
+            ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
         WHERE NOT EXISTS (
@@ -728,11 +735,10 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
     identity ordered by created_at, so a pre-#311 side flip collapses to the
     one bet of record rather than restating both halves of it.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         WITH bet AS (
-            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
-                   p.game_id || ':' || p.model_id
-                       || COALESCE(':' || p.player_id, '') AS lock_key,
+            SELECT DISTINCT ON ({key_partition_sql()})
+                   {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
@@ -750,13 +756,20 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
               -- character for character the cut _new_signals applies, because
               -- a restatement that selected differently from the slate it
               -- corrects would be a third board.
+              -- A VOIDED pick is not publishable (CLAUDE.md §1c): the row
+              -- is kept as evidence of a model that fired where it should not
+              -- have, and it stops counting. Mirrored by the app's
+              -- passesActionFilter, which added the same exclusion the same
+              -- day. Only 'VOID': scripts/nfl_pick_monitor.py writes
+              -- 'OK' / 'DEGRADED' / 'GONE' here as health states on real,
+              -- STANDING picks, which must keep publishing.
+              AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
               AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
               AND (t.min_odds IS NULL OR p.dk_odds IS NULL
                    OR p.dk_odds >= t.min_odds)
-            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
-                     p.created_at
+            ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet ORDER BY created_at
     """, (target_date,)).fetchall()
@@ -1009,12 +1022,11 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
     if not url:
         return 0
     try:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT DISTINCT ps.message_id
               FROM push_sent ps
               JOIN picks p
-                ON ps.lock_key = p.game_id || ':' || p.model_id
-                                 || COALESCE(':' || p.player_id, '')
+                ON ps.lock_key = {lock_key_sql()}
              WHERE ps.kind = %s
                AND ps.message_id IS NOT NULL
                AND p.game_date = %s

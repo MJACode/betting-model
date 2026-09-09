@@ -30,6 +30,7 @@ from loguru import logger
 
 from data.db import get_connection
 from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
+from tracking.publish_keys import key_partition_sql, lock_key_sql
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _MAX_LABELS = 3          # labels listed in a summary body before "+N more"
@@ -101,11 +102,10 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
     stay independent (`new_bet` here, `discord_signal` there), so neither
     surface can suppress the other.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         WITH bet AS (
-            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
-                   p.game_id || ':' || p.model_id
-                       || COALESCE(':' || p.player_id, '') AS lock_key,
+            SELECT DISTINCT ON ({key_partition_sql()})
+                   {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.created_at, p.pick_id
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
@@ -121,13 +121,20 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
               AND (g.commence_time IS NULL
                    OR g.commence_time::timestamptz > NOW())
               AND (g.commence_time IS NOT NULL OR p.game_date >= %s)
+              -- A VOIDED pick is not publishable (CLAUDE.md §1c): the row
+              -- is kept as evidence of a model that fired where it should not
+              -- have, and it stops counting. Mirrored by the app's
+              -- passesActionFilter, which added the same exclusion the same
+              -- day. Only 'VOID': scripts/nfl_pick_monitor.py writes
+              -- 'OK' / 'DEGRADED' / 'GONE' here as health states on real,
+              -- STANDING picks, which must keep publishing.
+              AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
               AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
               AND (t.min_odds IS NULL OR p.dk_odds IS NULL
                    OR p.dk_odds >= t.min_odds)
-            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
-                     p.created_at
+            ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT lock_key, pick_label, sport, pick_id FROM bet
         WHERE NOT EXISTS (
@@ -143,17 +150,23 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
 def _dropped_signals(conn, target_date: str) -> list[dict]:
     """Signals we previously pushed as new_bet whose live pick is now AVOID
     (flipped against us), still pre-settlement, not yet pushed as dropped."""
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT DISTINCT os.lock_key, os.pick_label, os.sport, os.locked_at,
                p.pick_id
         FROM opening_signals os
         JOIN push_sent prior
           ON prior.lock_key = os.lock_key AND prior.kind = 'new_bet'
+        -- MATCHED ON THE LOCK_KEY, not on the component columns (2026-09-09).
+        -- The old join carried `COALESCE(p.player_id,'') =
+        -- COALESCE(os.player_id,'')`, which is not a match at all for a model
+        -- that leaves player_id NULL: every `nfl_prop_market` pick in a game
+        -- matched every shadow row for that game, so one flipped prop could
+        -- announce another prop as dropped. opening_signals stores no
+        -- player_key/prop_market column, and does not need one -- its lock_key
+        -- already carries them, and it is the identity every surface agrees on.
         JOIN picks p
-          ON p.game_id = os.game_id
-         AND p.model_id = os.model_id
+          ON os.lock_key = {lock_key_sql()}
          AND p.pick_side = os.pick_side
-         AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
          AND p.game_date = os.game_date
         WHERE os.game_date = %s
           AND os.lock_key NOT LIKE '%%:early'
