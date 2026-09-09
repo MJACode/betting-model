@@ -289,11 +289,14 @@ in session 273: pre-game rows since 2026-08-28 with a stamped `best_odds`,
 NONE or AVOID at DraftKings, passing their model's `min_prob` / `min_edge` /
 `min_odds` on `best_edge` / `best_odds`, graded through
 `mv_scored_pick_outcomes` and paid at the best price; excludes rows with no
-stamp and games over `MAX_EDGE_CAP`, which have no row): **17 rows would have
-become BETs beside the 323 pre-game BETs actually written — 16 graded, 11-5,
-+5.1 units.** Seven models, five of them MLB props; no model contributes more
-than 5. That is the population the flip reaches, and it is too small to be
-evidence either way — it is reported so the first weekly sweep has a baseline.
+stamp and games over `MAX_EDGE_CAP`, which have no row): **at most 17 rows
+would have become BETs beside the 324 pre-game BETs actually written (296 of
+them stamped, 139 at a book other than DraftKings) — 16 graded, 11-5, +5.1
+units.** Seven models, five of them MLB props; no model contributes more than
+5. A ceiling, not the population: those stamps were written before the cutoff
+bound, the in-play exclusion and the freshness filter existed, so the new
+lookup can only flip a subset. Too small to be evidence either way; reported so
+the first weekly sweep has a baseline.
 
 What shipped, in one change:
 
