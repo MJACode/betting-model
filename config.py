@@ -111,9 +111,24 @@ DISCORD_WEBHOOKS: dict = {
 # for unmapped sports rather than dumping every sport into one channel.
 DISCORD_WEBHOOK_DEFAULT: str = os.environ.get("DISCORD_WEBHOOK_DEFAULT", "").strip()
 
-# Dedicated in-play channel. The live board re-scores every ~10 minutes during a
-# slate, so it is worth separating from the pre-game picks. Falls back to the
-# sport's channel when unset.
+# LIVE PICKS GO TO THEIR SPORT'S LIVE CHANNEL (mike, 2026-09-09: "Push picks
+# to discord in live games to their live channels" -- #nfl-live, #mlb-live,
+# #ncaaf-live). One variable per sport, same shape as the pre-game map:
+#   DISCORD_WEBHOOK_LIVE_NFL, DISCORD_WEBHOOK_LIVE_MLB, DISCORD_WEBHOOK_LIVE_NCAAF
+# The URLs are bearer credentials and live ONLY in Railway variables (worker AND
+# pollers -- the NFL in-play worker runs on one, the MLB and NCAAF loops on the
+# other), never in this file. Resolution order for an in-play signal, in
+# tracking/discord_notifier._live_webhook_for_sport:
+#   the sport's LIVE channel -> the shared LIVE channel -> the sport's channel.
+DISCORD_WEBHOOKS_LIVE: dict = {
+    sport: url for sport in DISCORD_SPORTS
+    if (url := os.environ.get(f"DISCORD_WEBHOOK_LIVE_{sport}", "").strip())
+}
+
+# Shared in-play channel, the fallback for a sport with no live channel of its
+# own. The live board re-scores every ~10 minutes during a slate, so it is worth
+# separating from the pre-game picks. Falls back to the sport's channel when
+# unset.
 DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
 
 # Channel for the morning results recap (cross-sport, so it needs its own home).

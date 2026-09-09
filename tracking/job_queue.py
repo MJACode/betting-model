@@ -527,6 +527,11 @@ def _job_discord_probe(**kw):
 
     targets = {f"sport:{sport}": url
                for sport, url in config.DISCORD_WEBHOOKS.items()}
+    # The per-sport LIVE channels (mike, 2026-09-09). A live channel sharing
+    # its id with the sport's pre-game channel is the mis-paste this probe
+    # exists to catch.
+    targets.update({f"live:{sport}": url
+                    for sport, url in config.DISCORD_WEBHOOKS_LIVE.items()})
     for label, attr in (("default", "DISCORD_WEBHOOK_DEFAULT"),
                         ("live", "DISCORD_WEBHOOK_LIVE"),
                         ("results", "DISCORD_WEBHOOK_RESULTS"),
@@ -674,8 +679,23 @@ def _validate_health_check(args: dict) -> dict:
     return {"run_date": run_date}
 
 
+def _job_backfill_publish_keys(**kw):
+    """Re-ledger already-announced picks under the current publishing keys,
+    from the worker (scripts/backfill_publish_keys.py, --apply).
+
+    The Supabase MCP a session holds is READ-ONLY (2026-09-09: "cannot execute
+    INSERT in a read-only transaction"), so a key-component change found in a
+    session cannot run its own migration; this is the route. Idempotent:
+    ON CONFLICT DO NOTHING on the ledger, so a re-run is free.
+    """
+    from scripts.backfill_publish_keys import run
+    added, rekeyed = run(apply=True)
+    return {"push_sent_added": added, "opening_signals_rekeyed": rekeyed}
+
+
 JOBS = {
     "void_picks":      (_job_void_picks,       _validate_void_picks),
+    "backfill_publish_keys": (_job_backfill_publish_keys, lambda a: {}),
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),

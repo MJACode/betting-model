@@ -39,6 +39,7 @@ _ROW = (
     "2026-08-29T16:14:38.528378+00:00",      # created_at (written to the DB)
     0.08,                                    # t.min_edge  (the model's gate)
     None,                                    # t.min_odds
+    "live:NCAAF_2026-08-29_north-carolina_tcu:ncaaf_live_total:over",  # lock_key
 )
 
 

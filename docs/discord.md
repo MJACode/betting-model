@@ -30,12 +30,24 @@ sport posts **nowhere** rather than everything landing in one room.
 `DISCORD_WEBHOOK_LIVE` and `_RESULTS` get their own channels (in-play churns;
 the recap is cross-sport), each falling back sensibly.
 
+**Live picks go to their SPORT'S live channel** (mike, 2026-09-09: *"Push
+picks to discord in live games to their live channels"*): `#nfl-live`,
+`#mlb-live`, `#ncaaf-live`, one `DISCORD_WEBHOOK_LIVE_{SPORT}` each, collected
+into `config.DISCORD_WEBHOOKS_LIVE`. `_live_webhook_for_sport` resolves an
+in-play signal as the sport's live channel, else the shared
+`DISCORD_WEBHOOK_LIVE`, else the sport's pre-game channel. The three URLs are
+Railway variables on BOTH services: the NFL in-play worker runs on `worker`
+(it owns the volume its decision log writes to), the MLB and NCAAF loops on
+`pollers`. The channel probe (`worker_jobs` kind `discord_probe`) reports
+each as `live:{SPORT}`, so a live webhook pasted from the pre-game channel
+shows up as a collision.
+
 ### Producers (`tracking/discord_notifier.py`)
 
 | Function | Source of truth | Called from |
 |---|---|---|
 | `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `docs/mobile_picks_prompt.md` query. Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
-| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
+| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer`, end of each `ncaaf_live.gameday` pass, and `nfl/live_model/pick_writer.announce_live_picks` after every NFL live BET the in-play worker commits (2026-09-09; before that the NFL lane announced nowhere) |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
 | `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` |
@@ -72,6 +84,58 @@ Consequences worth knowing before touching either producer:
   from it.
 - **The started-game guard stays** — on both surfaces. It is the one bound that
   should exist.
+
+### One board is not enough — the KEY has to tell two picks apart (2026-09-09)
+
+Matt: *"Make sure the NFL bets line up with discord."* They did not, in two ways
+neither #489 nor #493 could have caught, because both are about the identity of
+a pick rather than about which table it comes from.
+
+**1. `nfl_prop_market` collapsed a whole game's props onto ONE key.** Every
+surface identifies a pick by `push_sent.lock_key`, which was synthesised as
+`game_id:model_id[:player_id]`. That is unique per pick for every model in the
+repo except one: `nfl_prop_market` writes `player_key` (a name slug — its
+settlement join) and `prop_market`, and leaves `player_id` NULL. So the key for
+every prop it picked in a game was the bare `<game_id>:nfl_prop_market`, and
+`push_sent(lock_key, kind)` is UNIQUE.
+
+Measured 2026-09-09: **8 eligible BETs, 7 ledgered keys, 7 shadow rows.**
+`Sam Darnold Under 19.5 Comp (MGM)` — written 09-09 08:26 ET for that night's
+NE @ SEA kickoff — was on the app's board and could reach neither Discord nor a
+phone, because `Jadarian Price Over 1.5 Rec (FD)` had taken the key the previous
+morning. Not delayed: gone, because the ledger row answers "already announced"
+forever. It was also missing from `opening_signals`, whose
+`ON CONFLICT (lock_key) DO NOTHING` drops the same row.
+
+It gets worse with the 24 h prop lead ceiling (#610), which clusters a game's
+prop picks onto game day — exactly when they collide.
+
+The key now lives in **`tracking/publish_keys.py`** and carries `player_key` and
+`prop_market` when the row has them. A row with only `player_id` — every other
+model, every sport, every row ledgered before this — produces a byte-identical
+key, verified against production before the change: of every ledgered key,
+`nfl_prop_market`'s were the only ones that moved. `pick_side` stays OUT (§1c: a
+side flip is one bet of record). The seven already-posted picks were re-ledgered
+under their new keys by `scripts/backfill_publish_keys.py` **before** the code
+shipped — run it in that order or every posted pick republishes.
+
+**2. A VOIDED pick was still a green BET in the app.** The six Week 1
+`nfl_wind_totals` picks were voided on 09-07 and mike removed them from Discord
+by hand. Nothing carried that to the app, which had no concept of
+`condition_status` at all, so all six were still drawing as stakeable BETs for
+the 09-13 board — the app and Discord showing different picks, again. Both
+halves now exclude `condition_status = 'VOID'`: the publishers in SQL, the app
+in `passesActionFilter`. Only `'VOID'` — NCAAF's `'OK'` / `'GONE'` are ordinary
+live states on real picks.
+
+**3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
+beyond it on the day (0 rows), so this is closed before it costs a pick rather
+than after. `NFL_AHEAD_DAYS` is 11 = the 10-day poll/prop horizon
+(`scheduler.NFL_POLL_HORIZON_DAYS`, `config.NFL_PROP_WINDOW_HOURS` = 240 h) plus
+a day of ET/UTC margin. Raise it whenever a server-side NFL horizon is raised.
+
+Pinned by `tests/test_publish_key_identity.py` (nine mutations, each watched
+failing).
 
 ### The repair paths read the same board too (2026-09-05)
 
@@ -238,7 +302,7 @@ the only symptom was an absence.**
 | Producer | Called from | Failure signature |
 |---|---|---|
 | `notify_discord_signals` | `--step push-notifications` (6am + every refresh pass) | a sport with no eligible BET posts nothing — indistinguishable from "no picks today". **And the step is its only caller**, so a refresh pass that dies (a deploy restart, a crash) is the same silence: 2026-09-05, the 11:17 pass was killed at 15:22:48Z and two NFL picks sat unposted for an hour with nothing logged. `publish_discord_signals` is the way out; `push_sent` is how you see it. (Pre-2026-09-05 this row read "no LOCKED signal for `game_date = today`" — both the capture gate and the date bound are gone, see §30.) |
-| `notify_discord_live` | end of `models/live_scorer.run_live_scorer` AND `ncaaf_live.gameday.write_picks` | caller swallows and logs; a raise inside the notifier is invisible outside the Railway log |
+| `notify_discord_live` | end of `models/live_scorer.run_live_scorer`, `ncaaf_live.gameday.notify_live`, and `nfl/live_model/pick_writer.announce_live_picks` (per NFL live BET) | caller swallows and logs; a raise inside the notifier is invisible outside the Railway log |
 | `notify_discord_results` | inside `step_settle` | refuses `game_date >= today`, so a mid-slate call is a silent no-op by design |
 
 **`push_sent` is the ground truth for "did anything ever post".** Nothing is
@@ -332,6 +396,13 @@ back and the rest of the board still prices.
 
 `models/live_scorer.py` (MLB) already did it this way — the NCAAF loop was the
 outlier. When adding a sport's live loop, copy that shape.
+
+The NFL in-play worker (2026-09-09) is the one deliberate exception, and it
+does not reintroduce the problem: it has no scoring pass, only a decision per
+tick, so `PicksRecorder` announces once per **BET it commits** — O(bets), not
+O(games), and the lane's first-signal lock bounds bets to one per (game,
+player). It hands the notifiers the pick's own `game_date` (the decision's UTC
+date, so a Sunday-night bet is Monday's) rather than a clock date.
 
 ### Live MLB is one model now, and the loop runs at 5s (2026-08-29)
 
