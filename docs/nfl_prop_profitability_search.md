@@ -249,7 +249,7 @@ models unchanged, live cuts, DK price at that snapshot:
 | t72 (3 days out) | 8 markets | receptions +3.2% (322) | rec_yards −9.2% (189) | none |
 | t48 | 9 markets | receptions +3.6% (471) | pass_yards −12.0% (128) | none |
 | t24 (2024-25 only) | 8 markets | receptions +1.2% (199) | pass_yards −23.5% (32) | none |
-| t1 (2024-25 only; 2,928 DK rows, 115 bets across the ten) | 8 markets | pass_yards +41.7% (8) | pass_tds −1.6% (3) | none; the largest cell is receptions +14.6% (52), CI (−9.6, +40.0) |
+| t1 (2024-25 only; 2,928 DK rows, 115 bets across the ten) | 7 markets | pass_yards +41.7% (8) | pass_tds −1.6% (3) | none; the largest cell is receptions +14.6% (52), CI (−9.6, +40.0) |
 
 Earlier lines are not softer for these models, and the one-hour snapshot is
 too thin to say anything on its own (rush_attempts, rush_rec_yards, tackles
