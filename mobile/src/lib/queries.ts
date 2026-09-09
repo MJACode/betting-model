@@ -346,7 +346,7 @@ const PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
   'model_probability, model_probability_cal, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
-  'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +
+  'injury_detail, signal_type, confidence_tier, condition_status, result, profit_flat, ' +
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
   'is_live, inning_at_pick, score_diff_at_pick, ' +
   'public_bet_pct, public_money_pct, ' +
@@ -360,8 +360,8 @@ const PICK_COLUMNS =
 const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
-  'confidence_tier, result, profit_flat, player_id, public_bet_pct, ' +
-  'injury_flag, clv_pct';
+  'confidence_tier, condition_status, result, profit_flat, player_id, ' +
+  'public_bet_pct, injury_flag, clv_pct';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -871,8 +871,16 @@ export async function fetchUpcomingNflPicks(
       .eq('sport', 'NFL')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate)
+      // BET/AVOID before NONE so a signal is never dropped by the row cap
+      // ('AVOID' < 'BET' < 'NONE' alphabetically) -- the NCAAF read below has
+      // ordered this way all along. It matters more since the window went 8 ->
+      // 11 days: a locked opener pick has the OLDEST created_at in the window
+      // by construction (it locks at T-7), so under a created_at-only order it
+      // was first off the end of the cap, competing with the NONE rows of
+      // twelve nfl_prop_* models. 5000 matches the NCAAF read.
+      .order('signal_type', { ascending: true })
       .order('created_at', { ascending: false })
-      .limit(200),
+      .limit(5000),
     supabase
       .from('games')
       .select(GAME_COLUMNS)
@@ -882,6 +890,13 @@ export async function fetchUpcomingNflPicks(
     supabase
       .from('v_latest_dk_odds')
       .select(LATEST_ODDS_COLUMNS)
+      // Scoped to NFL for the same reason the all-books read below is: the view
+      // has no sport column, so a date-only bound pulls 11 days of every
+      // sport's future odds into one unpaged read. Past PostgREST's 1,000-row
+      // default that truncates SILENTLY -- a short page is a success, so the
+      // `partial` banner never fires and the line-movement chip just stops
+      // appearing on NFL cards.
+      .like('game_id', 'NFL_%')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
     // Per-book prices for the user's own sportsbook. NFL picks are priced by the
@@ -889,7 +904,7 @@ export async function fetchUpcomingNflPicks(
     // price is NOT DraftKings (see storedQuoteBook) — these rows are what lets a
     // user see a real, current number for the book they actually bet at. Scoped
     // by the game_id prefix (§28: `NFL_{nflverse_id}`) — the view has no sport
-    // column, and an 8-day window spans other sports' future slates.
+    // column, and an 11-day window spans other sports' future slates.
     // Paged (see fetchAllPages): a 16-game week is ~600 rows, under the
     // 1,000-row response cap today and over it once every book posts every
     // market; wrapped so a failure stays an {error}.
@@ -1080,6 +1095,11 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
       // Live tab shows only actionable, recommended bets — AVOID (fade) picks
       // are still written + settled for model tracking, just not surfaced here.
       .eq('signal_type', 'BET')
+      // A VOIDED pick is not displayable (§1c), on this board like every other.
+      // The publishers' exclusion is unconditional across sports and
+      // scripts/void_picks.py takes any --model, so a voided live pick would
+      // otherwise vanish from Discord and stay on the Live tab.
+      .or('condition_status.is.null,condition_status.neq.VOID')
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase

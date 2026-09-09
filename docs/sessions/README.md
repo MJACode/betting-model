@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 270 - the NFL board did not line up with Discord: one lock_key served a whole game's nfl_prop_market props (8 BETs, 7 keys - one pick could never publish), and six VOIDED wind picks were still green in the app; the key moved to tracking/publish_keys.py with the ledger migrated first |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 269 - live picks post to their sport's live Discord channel (DISCORD_WEBHOOK_LIVE_{NFL,MLB,NCAAF}, mike's rule promoted to CLAUDE.md); the NFL in-play lane announced nowhere since 2026-09-05 and now announces every committed live BET |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 268 - tackles unpaused (#623, #624); the second pass over every DraftKings prop data set: earlier snapshots, the alternate ladders, the line's own movement (which the models predict, worth less than the vig) and a boosted stack -- DK is efficient against the ten at every snapshot and on its ladder |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 267 - the profitable NFL prop model was tackles all along, grading the wrong stat: solo+with_assist+assists matches the box score, and on it the model is +50.24u over 363 bets, positive all three seasons; at DraftKings nothing else beats a line the book prices flat; pass attempts at the soft books is a two-of-three lead |

@@ -33,6 +33,7 @@ from loguru import logger
 from config import (UFC_SCORE_AHEAD_DAYS, NFL_LOCK_AHEAD_DAYS,
                     NCAAF_SCORE_AHEAD_DAYS)
 from data.db import get_connection, DBConnection
+from tracking.publish_keys import lock_key_sql
 
 
 # Model prefixes settled here (game-level markets only, Phase 1). Props, UFC,
@@ -160,13 +161,21 @@ def capture_opening_signals(target_date: str | None = None,
                 bankroll_at_pick, locked_at
             )
             SELECT
-                -- One key per (game, model, player), with no sport-specific
-                -- suffix. The ':early' branch that used to sit here is gone,
-                -- not merely unused: leaving it would keep minting shadow keys
+                -- One key per PROPOSITION, minted by tracking.publish_keys so
+                -- the shadow track, Discord and push cannot disagree about
+                -- what one pick is. Until 2026-09-09 this was
+                -- `game:model[:player_id]`, which cannot tell two
+                -- `nfl_prop_market` picks in one game apart -- that model
+                -- writes player_key + prop_market and leaves player_id NULL,
+                -- so `ON CONFLICT (lock_key) DO NOTHING` below silently
+                -- dropped every prop after the first one in a game.
+                --
+                -- The ':early' branch that used to sit here is gone, not
+                -- merely unused: leaving it would keep minting shadow keys
                 -- that the poster's NOT LIKE '%%:early' filter then hides, so a
                 -- published UFC look-ahead pick would exist under one key and
                 -- be suppressed under another.
-                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, ''),
+                {lock_key_sql()},
                 p.game_id, p.model_id, p.sport, p.game_date, p.player_id,
                 p.pick_side, p.pick_label, p.model_probability, p.dk_implied_prob,
                 p.edge, p.dk_odds, p.scored_line, p.public_bet_pct,
