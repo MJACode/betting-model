@@ -280,8 +280,21 @@ A surface with an extra GATE can only lose rows, and does it silently —
   one window both send and the second INSERT is swallowed: one row, two
   messages. Take `tracking/publish_lock.py`'s advisory lock — `pollers` and
   `worker` both publish, so this is live.
+- **ONE PICK, ONE KEY — and two picks are never one key.** Every surface
+  identifies a pick by the synthesised `push_sent.lock_key`, which is UNIQUE per
+  `kind`, so two picks that share a key are ONE pick: the second is not delayed,
+  it is gone. Mint it ONLY from `tracking/publish_keys.py`, and when a model
+  writes a NEW identity column, add it there — `nfl_prop_market` writes
+  `player_key` + `prop_market` and no `player_id`, so a whole game's props
+  collapsed onto one key (`docs/discord.md`). Changing the key is a data
+  migration, not a code change: re-ledger the already-published picks
+  (`scripts/backfill_publish_keys.py`) BEFORE the code ships, or every one of
+  them republishes.
+- **A VOIDED pick is not publishable and not displayable** (§1c). Excluded in
+  the publishers' SQL and in the app's `passesActionFilter`. Only `'VOID'` —
+  NCAAF's `'OK'` / `'GONE'` are live states on real picks.
 - **A new surface is a line in the parity tests**, not a copied query:
-  `tests/test_{nfl_lookahead_signals,publisher_lock}.py`.
+  `tests/test_{nfl_lookahead_signals,publish_key_identity,publisher_lock}.py`.
 - **LIVE PICKS POST TO THEIR SPORT'S LIVE CHANNEL.** (mike, 2026-09-09: *"Push
   picks to discord in live games to their live channels."*) `#nfl-live`,
   `#mlb-live`, `#ncaaf-live` via `DISCORD_WEBHOOK_LIVE_{SPORT}` on Railway

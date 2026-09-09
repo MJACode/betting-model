@@ -155,6 +155,12 @@ function PickDetailContent({
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const retired = isModelRetired(pick.model_id);
+  // WITHDRAWN. A VOIDED pick (CLAUDE.md §1c) is a row the model should never
+  // have produced. The board drops it, but this screen stays deep-linkable from
+  // a push already sent for it and from a tracked bet on Performance — so it
+  // must not go on offering the bet. Same shape as `retired` above: every
+  // number stays on screen (the row IS the record), the hand-off does not.
+  const voided = pick.condition_status === 'VOID';
   // One plain-English line saying whose price this screen is showing — always
   // the book the pick was modeled at. Renders in the header so the provenance
   // is never implicit.
@@ -267,10 +273,16 @@ function PickDetailContent({
                 <Text style={styles.previewBadgeText}>PREVIEW</Text>
               </View>
             ) : (
-              <SignalBadge signal={pick.signal_type} />
+              <SignalBadge signal={voided ? 'NONE' : pick.signal_type} />
             )}
             <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
           </View>
+          {voided ? (
+            <Text style={styles.previewNote}>
+              Withdrawn — this pick was published in error and does not count
+              toward the record.
+            </Text>
+          ) : null}
           {preview ? (
             <Text style={styles.previewNote}>
               {pick.sport === 'GOLF'
@@ -319,7 +331,7 @@ function PickDetailContent({
             table below carries books at a different number and the reference
             books that cannot be bet. Not for live picks: they are DraftKings
             only, and the in-play rows are no longer fetched. */}
-        {pick.signal_type === 'BET' && !preview && !retired ? (
+        {pick.signal_type === 'BET' && !preview && !retired && !voided ? (
           <View style={styles.linesCard}>
             <BookLinesRow pick={pick} bookRows={bookRows} />
           </View>
@@ -330,7 +342,8 @@ function PickDetailContent({
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
-        {pick.dk_odds != null && pick.result == null && !preview && !retired ? (
+        {pick.dk_odds != null && pick.result == null && !preview && !retired
+          && !voided ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
               <Text style={styles.trackTitle}>

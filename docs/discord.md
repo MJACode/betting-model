@@ -85,6 +85,58 @@ Consequences worth knowing before touching either producer:
 - **The started-game guard stays** — on both surfaces. It is the one bound that
   should exist.
 
+### One board is not enough — the KEY has to tell two picks apart (2026-09-09)
+
+Matt: *"Make sure the NFL bets line up with discord."* They did not, in two ways
+neither #489 nor #493 could have caught, because both are about the identity of
+a pick rather than about which table it comes from.
+
+**1. `nfl_prop_market` collapsed a whole game's props onto ONE key.** Every
+surface identifies a pick by `push_sent.lock_key`, which was synthesised as
+`game_id:model_id[:player_id]`. That is unique per pick for every model in the
+repo except one: `nfl_prop_market` writes `player_key` (a name slug — its
+settlement join) and `prop_market`, and leaves `player_id` NULL. So the key for
+every prop it picked in a game was the bare `<game_id>:nfl_prop_market`, and
+`push_sent(lock_key, kind)` is UNIQUE.
+
+Measured 2026-09-09: **8 eligible BETs, 7 ledgered keys, 7 shadow rows.**
+`Sam Darnold Under 19.5 Comp (MGM)` — written 09-09 08:26 ET for that night's
+NE @ SEA kickoff — was on the app's board and could reach neither Discord nor a
+phone, because `Jadarian Price Over 1.5 Rec (FD)` had taken the key the previous
+morning. Not delayed: gone, because the ledger row answers "already announced"
+forever. It was also missing from `opening_signals`, whose
+`ON CONFLICT (lock_key) DO NOTHING` drops the same row.
+
+It gets worse with the 24 h prop lead ceiling (#610), which clusters a game's
+prop picks onto game day — exactly when they collide.
+
+The key now lives in **`tracking/publish_keys.py`** and carries `player_key` and
+`prop_market` when the row has them. A row with only `player_id` — every other
+model, every sport, every row ledgered before this — produces a byte-identical
+key, verified against production before the change: of every ledgered key,
+`nfl_prop_market`'s were the only ones that moved. `pick_side` stays OUT (§1c: a
+side flip is one bet of record). The seven already-posted picks were re-ledgered
+under their new keys by `scripts/backfill_publish_keys.py` **before** the code
+shipped — run it in that order or every posted pick republishes.
+
+**2. A VOIDED pick was still a green BET in the app.** The six Week 1
+`nfl_wind_totals` picks were voided on 09-07 and mike removed them from Discord
+by hand. Nothing carried that to the app, which had no concept of
+`condition_status` at all, so all six were still drawing as stakeable BETs for
+the 09-13 board — the app and Discord showing different picks, again. Both
+halves now exclude `condition_status = 'VOID'`: the publishers in SQL, the app
+in `passesActionFilter`. Only `'VOID'` — NCAAF's `'OK'` / `'GONE'` are ordinary
+live states on real picks.
+
+**3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
+beyond it on the day (0 rows), so this is closed before it costs a pick rather
+than after. `NFL_AHEAD_DAYS` is 11 = the 10-day poll/prop horizon
+(`scheduler.NFL_POLL_HORIZON_DAYS`, `config.NFL_PROP_WINDOW_HOURS` = 240 h) plus
+a day of ET/UTC margin. Raise it whenever a server-side NFL horizon is raised.
+
+Pinned by `tests/test_publish_key_identity.py` (nine mutations, each watched
+failing).
+
 ### The repair paths read the same board too (2026-09-05)
 
 **One board is a property of every producer, not just the two that publish.**
