@@ -527,6 +527,11 @@ def _job_discord_probe(**kw):
 
     targets = {f"sport:{sport}": url
                for sport, url in config.DISCORD_WEBHOOKS.items()}
+    # The per-sport LIVE channels (mike, 2026-09-09). A live channel sharing
+    # its id with the sport's pre-game channel is the mis-paste this probe
+    # exists to catch.
+    targets.update({f"live:{sport}": url
+                    for sport, url in config.DISCORD_WEBHOOKS_LIVE.items()})
     for label, attr in (("default", "DISCORD_WEBHOOK_DEFAULT"),
                         ("live", "DISCORD_WEBHOOK_LIVE"),
                         ("results", "DISCORD_WEBHOOK_RESULTS"),
