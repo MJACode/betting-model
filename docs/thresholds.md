@@ -418,16 +418,38 @@ early weeks undercount VOLUME for that reason only; they remain an honest
 out-of-sample test of the probability, which is what the early/late column is
 for.
 
-**Two things this does NOT settle.**
-- **The 0.20 edge cap.** Every bet in the backtest sits at edge 0.17–0.198,
-  just under a cap set for the old model on the theory that an implausible edge
-  meant a stale snapshot. The new model reaches those edges honestly and the
-  cap removes candidates like 0.75 at −110 (+0.226). Not moved; measure how
-  many it removes and at what claimed probability before touching it.
-- **Replay fidelity is an upper bound on volume until production is compared
-  against it.** The reconstruction evaluates every snapshot; production runs on
-  its own cadence. The check: for each game production bets or declines, run
-  the sweep's `decide()` on the same candidates and diff.
+**The 0.20 edge cap — measured the same evening, and it stays.** Every bet in
+the backtest sits at edge 0.17–0.198, just under a cap set for the old model on
+the theory that an implausible edge meant a stale snapshot. At 0.72 the cap
+removes **101 of 126** first qualifiers; graded as if taken they go 77-24,
++44u, and uncapped the cut would run 126 bets at 95-31. That number is a trap,
+and the trap has a mechanism: our state poller sees a run the instant it
+scores, DK's in-play total lags it, and the replay pairs each state with the
+newest price AT OR BEFORE it — so right after a scoring play the paired price
+predates the run and the "edge" is the run itself, priced twice. The replay
+grades on the final score and cannot see this. The test that can
+(`cap_stale_test`, mike: *"run the stale quote test now anyway"*), on all 101:
+
+| cap-removed candidates | n | graded as if taken |
+|---|---|---|
+| score changed between the paired price and the state — phantom | **57** | 51-6, +38.15u |
+| quote current | 44 | 26-18, +5.87u |
+
+Re-priced on the **next** DK snapshot, the median edge collapses from
+**+0.254 to +0.061**. 35 of 98 keep an edge ≥ 0.14, and those go **19-16,
++0.48u** — nothing. The 63 whose edge evaporates are the ones that "won"
+55-8: prices nobody could have taken. Median price age at those candidates
+was 31s, p90 73s. **The cap is discarding phantom edges, not the model's
+best bets. Not moved, on evidence.**
+
+**The same measurement answers the freshness bound.** `LIVE_ODDS_MAX_AGE_SEC`
+is 30s; in-play rows carry a `snapshot_at` stamped at fetch START and land a
+mean ~30s later (p90 ~55s, identical on 09-08 and 09-09 — structural, not
+load), so the scorer prices roughly half its passes and skips the rest as
+stale. Loosening it would admit exactly the 30–70s-old quotes the table above
+shows to be phantom. Left alone. It is, however, why replay volume is an
+upper bound: the reconstruction evaluates every snapshot, production about
+half of them.
 
 **Re-sweep trigger: n ≥ 75 settled BETs on `v20260908_230751`** — about 40
 slates at 1.9 a slate. Same population query as the dated criteria above.
