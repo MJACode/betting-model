@@ -30,12 +30,24 @@ sport posts **nowhere** rather than everything landing in one room.
 `DISCORD_WEBHOOK_LIVE` and `_RESULTS` get their own channels (in-play churns;
 the recap is cross-sport), each falling back sensibly.
 
+**Live picks go to their SPORT'S live channel** (mike, 2026-09-09: *"Push
+picks to discord in live games to their live channels"*): `#nfl-live`,
+`#mlb-live`, `#ncaaf-live`, one `DISCORD_WEBHOOK_LIVE_{SPORT}` each, collected
+into `config.DISCORD_WEBHOOKS_LIVE`. `_live_webhook_for_sport` resolves an
+in-play signal as the sport's live channel, else the shared
+`DISCORD_WEBHOOK_LIVE`, else the sport's pre-game channel. The three URLs are
+Railway variables on BOTH services: the NFL in-play worker runs on `worker`
+(it owns the volume its decision log writes to), the MLB and NCAAF loops on
+`pollers`. The channel probe (`worker_jobs` kind `discord_probe`) reports
+each as `live:{SPORT}`, so a live webhook pasted from the pre-game channel
+shows up as a collision.
+
 ### Producers (`tracking/discord_notifier.py`)
 
 | Function | Source of truth | Called from |
 |---|---|---|
 | `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `docs/mobile_picks_prompt.md` query. Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
-| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
+| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer`, end of each `ncaaf_live.gameday` pass, and `nfl/live_model/pick_writer.announce_live_picks` after every NFL live BET the in-play worker commits (2026-09-09; before that the NFL lane announced nowhere) |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
 | `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` |
@@ -238,7 +250,7 @@ the only symptom was an absence.**
 | Producer | Called from | Failure signature |
 |---|---|---|
 | `notify_discord_signals` | `--step push-notifications` (6am + every refresh pass) | a sport with no eligible BET posts nothing — indistinguishable from "no picks today". **And the step is its only caller**, so a refresh pass that dies (a deploy restart, a crash) is the same silence: 2026-09-05, the 11:17 pass was killed at 15:22:48Z and two NFL picks sat unposted for an hour with nothing logged. `publish_discord_signals` is the way out; `push_sent` is how you see it. (Pre-2026-09-05 this row read "no LOCKED signal for `game_date = today`" — both the capture gate and the date bound are gone, see §30.) |
-| `notify_discord_live` | end of `models/live_scorer.run_live_scorer` AND `ncaaf_live.gameday.write_picks` | caller swallows and logs; a raise inside the notifier is invisible outside the Railway log |
+| `notify_discord_live` | end of `models/live_scorer.run_live_scorer`, `ncaaf_live.gameday.notify_live`, and `nfl/live_model/pick_writer.announce_live_picks` (per NFL live BET) | caller swallows and logs; a raise inside the notifier is invisible outside the Railway log |
 | `notify_discord_results` | inside `step_settle` | refuses `game_date >= today`, so a mid-slate call is a silent no-op by design |
 
 **`push_sent` is the ground truth for "did anything ever post".** Nothing is
@@ -332,6 +344,13 @@ back and the rest of the board still prices.
 
 `models/live_scorer.py` (MLB) already did it this way — the NCAAF loop was the
 outlier. When adding a sport's live loop, copy that shape.
+
+The NFL in-play worker (2026-09-09) is the one deliberate exception, and it
+does not reintroduce the problem: it has no scoring pass, only a decision per
+tick, so `PicksRecorder` announces once per **BET it commits** — O(bets), not
+O(games), and the lane's first-signal lock bounds bets to one per (game,
+player). It hands the notifiers the pick's own `game_date` (the decision's UTC
+date, so a Sunday-night bet is Monday's) rather than a clock date.
 
 ### Live MLB is one model now, and the loop runs at 5s (2026-08-29)
 

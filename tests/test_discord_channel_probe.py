@@ -111,3 +111,28 @@ def test_the_probe_is_registered_and_takes_no_arguments():
     fn, validate = jq.JOBS["discord_probe"]
     assert fn is jq._job_discord_probe
     assert validate({"anything": "ignored"}) == {}
+
+
+def test_the_probe_covers_the_per_sport_live_channels(monkeypatch):
+    """mike, 2026-09-09: live picks go to #nfl-live / #mlb-live / #ncaaf-live.
+    A live webhook pasted from the sport's pre-game channel is the mistake the
+    probe exists to see, so the live map has to be in its target set."""
+    import config
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS",
+                        {"NFL": "https://discord.com/api/webhooks/1/nfl"}, raising=False)
+    monkeypatch.setattr(config, "DISCORD_WEBHOOKS_LIVE",
+                        {"NFL": "https://discord.com/api/webhooks/2/nfllive"}, raising=False)
+    for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
+                 "DISCORD_WEBHOOK_RESULTS", "DISCORD_WEBHOOK_FREE",
+                 "DISCORD_WEBHOOK_OPS"):
+        monkeypatch.setattr(config, attr, "", raising=False)
+
+    import requests
+    monkeypatch.setattr(requests, "get",
+                        lambda url, timeout=None: _Resp(
+                            body={"channel_id": "pre" if url.endswith("/nfl") else "live",
+                                  "name": "hook"}))
+    out = jq._job_discord_probe()
+    assert out["live:NFL"]["channel_id"] == "live"
+    assert out["sport:NFL"]["channel_id"] == "pre"
+    assert out["_summary"]["collisions"] == []
