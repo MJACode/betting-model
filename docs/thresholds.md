@@ -331,7 +331,7 @@ even money and a fixed number would mis-call every one of them.
 |---|---|---|---|---|
 | `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | 35 (16W, bx .530, −4.81u, z −0.86) | pause if still below breakeven |
 | `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | 15 (6W, bx .503, −3.92u, z −0.80) | pause if still below breakeven |
-| `mlb_live_total_runs` | 2026-08-31 | n ≥ 150 | 70 (38W, bx .550, −1.26u, z −0.12) | full re-sweep, see below |
+| `mlb_live_total_runs` | ~~2026-08-31~~ **2026-09-09** | ~~n ≥ 150~~ **n ≥ 75** | 0 on the current artifact (the 70 above were the June model, retired 09-09) | re-sweep the cut on the honest replay — see "mlb_live_total_runs cut, 2026-09-09" |
 
 **Why `k` is not paused today**, given it is the largest single loss in the
 30-day table at −18.30u/72: **that record spans two artifacts.** Split at the
@@ -366,3 +366,68 @@ evidence, not better**. The #572 cap already bounds the volume damage to 2/day
 each. So the fix is the refit at n ≥ 150 graded since their retrains (47 and 26
 at the last weekly pass), expected ~09-12 to 09-15; promotion and a cut re-sweep
 are ONE decision, never two.
+
+
+---
+
+## `mlb_live_total_runs` cut, 2026-09-09 (mike): 0.70 → 0.72
+
+mike: *"go with 0.72 and land it."* Chosen from a backtest, not from a settled
+record — his instruction, and the right one: the replay is the instrument.
+
+**The model changed on 2026-09-09** (`v20260908_230751`: pre-game total line
+in, six season-to-date stats out, honest grouped CV, NB1 tail —
+`docs/mlb_volume_efficiency.md` §§15–18). Every threshold it carried was swept
+on the OLD model's leaked probabilities, so the cut had to be re-measured on
+the new one. `scripts/live_cut_sweep.py` does that: every live state since
+2026-07-22 paired with the newest DK in-play total within the age bound, the
+new artifact's probability at each, and the production decision — 0.20 cap,
+prob floor, edge floor, EV floor, first-signal lock — applied at each grid cell.
+
+**520 games, 47 slates, all of 2026 out-of-sample for the model** (trained
+2019–2024, held out 2025). Grading checked against settled `picks.result` on
+the 12 same-side overlap games: 12 agree. Zero replay defects, zero blind
+moments among the 87 games the old model bet and the new one declined.
+
+| prob / edge / EV | bets | W-L | delivers (90% CI) | breakeven | early / late (split 08-16) | per slate |
+|---|---|---|---|---|---|---|
+| 0.70 / 0.14 / 0.32 (was) | 48 | 33-15 | 68.8% [57–79] | 54.9% | 13-4 / 20-11 | 2.5 |
+| **0.72 / 0.14 / 0.32** | **34** | **25-9** | **73.5% [60–84]** | 55.8% | **9-3 / 16-6** | **1.9** |
+| 0.74 / 0.14 / 0.32 | 23 | 18-5 | 78.3% [62–89] | 56.8% | 5-3 / 13-2 | 1.4 |
+| 0.76 / 0.14 / 0.32 | 8 | 6-2 | too few | — | — | 0.5 |
+
+**Why 0.72.** It is the centre of a plateau, not a peak: 0.70, 0.72 and 0.74
+are all positive and the delivered rate rises monotonically as the floor
+tightens, which is what a calibrated probability should do. Its interval's
+LOWER bound clears breakeven, and so do both time halves. **0.74 fails the
+time split** — its early half is 5-3 with an interval [35%, 84%] that spans
+breakeven; the cell's number is carried by the late half, which is the shape
+§7 says not to ship. 0.70 is equally supported and simply yields more; 0.72 is
+the volume mike asked for.
+
+**Edge and EV floors are untouched, on measurement.** 0.14 → 0.16 changes no
+cell at any probability (the prob and EV floors do all the cutting). 0.32 →
+0.36 collapses the whole grid to 12 bets; 0.40 to zero. The EV floor is a
+cliff, not a dial.
+
+**"Per slate" is the post-08-29 rate, and the reason matters.** Before the
+live price log went in, the DK in-play feed was sparse: the replay pairs ~90
+snapshots a game before 08-29 and ~800 after. At a ninth of the resolution it
+catches far fewer qualifying moments (6.8% of games get a bet vs 18.5%). The
+early weeks undercount VOLUME for that reason only; they remain an honest
+out-of-sample test of the probability, which is what the early/late column is
+for.
+
+**Two things this does NOT settle.**
+- **The 0.20 edge cap.** Every bet in the backtest sits at edge 0.17–0.198,
+  just under a cap set for the old model on the theory that an implausible edge
+  meant a stale snapshot. The new model reaches those edges honestly and the
+  cap removes candidates like 0.75 at −110 (+0.226). Not moved; measure how
+  many it removes and at what claimed probability before touching it.
+- **Replay fidelity is an upper bound on volume until production is compared
+  against it.** The reconstruction evaluates every snapshot; production runs on
+  its own cadence. The check: for each game production bets or declines, run
+  the sweep's `decide()` on the same candidates and diff.
+
+**Re-sweep trigger: n ≥ 75 settled BETs on `v20260908_230751`** — about 40
+slates at 1.9 a slate. Same population query as the dated criteria above.
