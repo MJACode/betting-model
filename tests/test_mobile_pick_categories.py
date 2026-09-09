@@ -202,6 +202,37 @@ def test_the_market_categories_are_never_the_hardcoded_four():
     assert "ALL_CATEGORIES.length" not in _read(FILTER_STATE)
 
 
+def test_the_quick_chip_row_never_changes_shape():
+    """Game/Props are disabled in the bar, never removed from it.
+
+    That row is positional and shared with SORT, so dropping ~150pt of leading
+    content slides every sort chip left under a thumb already on the row and a
+    tap meaning "Game" silently re-sorts the board. The sheet is a vertical
+    list and hides its Market section instead -- a faceted filter dropping an
+    empty facet moves nothing anyone is aiming at (UX review, 2026-09-09).
+    """
+    src = _read(MOBILE / "src" / "components" / "filters" / "PickFilters.tsx")
+    bar = _block(src, "<ScrollView", "</ScrollView>")
+    assert 'label="Game"' in bar and 'label="Props"' in bar, "the quick chips left the bar"
+    assert "disabled={!marketCutBites" in bar, (
+        "the quick chips must go disabled, not disappear -- removing them "
+        "reflows the shared SORT row under the user's thumb"
+    )
+    sheet = _block(src, "<FilterSheet", "</FilterSheet>")
+    assert "{marketCutBites ? (" in sheet, "the sheet's Market section is hidden, not disabled"
+
+
+def test_the_props_chip_never_writes_a_market_the_board_cannot_hold():
+    """One tap used to put pitcher_prop and batter_prop into the state on an
+    NFL board. Invisible today because every read intersects with
+    presentCategories -- which is the bug masked, not absent."""
+    src = _read(MOBILE / "src" / "components" / "filters" / "PickFilters.tsx")
+    assert "setCategories(propsOnly ? ALL_CATEGORIES : presentProps)" in src
+    assert "PROP_CATEGORIES" not in src, (
+        "PickFilters must not reach for the all-sports prop list at all"
+    )
+
+
 @pytest.mark.skipif(
     not (MOBILE / "node_modules" / ".bin").exists() or shutil.which("node") is None,
     reason="mobile node modules not installed",

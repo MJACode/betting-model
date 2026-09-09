@@ -76,15 +76,37 @@ export function freshFilter(): PicksFilterState {
  * The market categories the picks on screen actually contain, in canonical
  * order — the only ones a filter may offer.
  *
- * An empty board falls back to the full set rather than to nothing: a filter
- * bar with no options at all reads as broken, and there is nothing on screen
- * for the cut to be wrong about.
+ * An empty board offers NOTHING, deliberately. The first version fell back to
+ * all four "so the bar doesn't read as broken", which re-created the reported
+ * bug exactly (Pitcher and Batter on an NFL board) and was unreachable only by
+ * accident — PicksHomeScreen happens to gate the whole filter bar on
+ * `activeItems.length > 0`. A rule that depends on another component's accident
+ * is not a rule (UX review, 2026-09-09).
  */
 export function presentCategoriesFor(modelIds: Iterable<string>): ModelCategory[] {
   const present = new Set<ModelCategory>();
   for (const id of modelIds) present.add(modelCategory(id));
-  const shown = ALL_CATEGORIES.filter((c) => present.has(c));
-  return shown.length > 0 ? shown : ALL_CATEGORIES;
+  return ALL_CATEGORIES.filter((c) => present.has(c));
+}
+
+/**
+ * How many picks each market category holds — the count that goes on the facet
+ * chip. Pass the model id of EVERY pick on the board, duplicates included.
+ *
+ * A facet that says how much is behind it explains an empty board before the
+ * user commits to it, which is the one thing the Today→Signals switch could
+ * not do: the two segments hold different markets, so a cut made on one can
+ * empty the other with nothing on screen tying the result to the tap.
+ */
+export function categoryCountsFor(modelIds: Iterable<string>): Record<ModelCategory, number> {
+  const counts: Record<ModelCategory, number> = {
+    game: 0,
+    pitcher_prop: 0,
+    batter_prop: 0,
+    player_prop: 0,
+  };
+  for (const id of modelIds) counts[modelCategory(id)] += 1;
+  return counts;
 }
 
 /** The selected categories, restricted to the ones this board can show. */

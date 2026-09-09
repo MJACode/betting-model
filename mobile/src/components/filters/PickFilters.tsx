@@ -35,9 +35,9 @@ import {
   ALL_CATEGORIES,
   ALL_SIGNALS,
   CATEGORY_LABEL,
-  PROP_CATEGORIES,
   activeFilterCount,
   categoriesAreNarrowed,
+  categoryCountsFor,
   cloneFilter,
   freshFilter,
   presentCategoriesFor,
@@ -72,10 +72,11 @@ interface Props {
   totalShown: number;
   totalAll: number;
   /**
-   * The model ids on screen. REQUIRED: the Market options are derived from it,
-   * so a board can never offer a market it cannot contain. This was optional
-   * until 2026-09-09, and the "undefined offers everything" default is what put
-   * MLB's Pitcher and Batter chips on the NFL board.
+   * The model id of EVERY pick on screen, duplicates included. REQUIRED: the
+   * Market options and their counts are derived from it, so a board can never
+   * offer a market it cannot contain. This was optional until 2026-09-09, and
+   * the "undefined offers everything" default is what put MLB's Pitcher and
+   * Batter chips on the NFL board.
    */
   availableModelIds: string[];
   /** Hide the Signal section (Signals are all BET — the chips are noise). */
@@ -101,6 +102,10 @@ export function PickFilters({
 
   const presentCategories = useMemo(
     () => presentCategoriesFor(availableModelIds),
+    [availableModelIds],
+  );
+  const categoryCounts = useMemo(
+    () => categoryCountsFor(availableModelIds),
     [availableModelIds],
   );
   const presentProps = useMemo(
@@ -149,12 +154,24 @@ export function PickFilters({
     });
 
   // A cut with nothing to cut is a dead control: NCAAF and UFC boards are 100%
-  // game models, so Game/Props and the whole Market section did nothing there.
-  // Kept visible while the state IS narrowed, so the control that produced a
+  // game models, so Game/Props and the Market section did nothing there. The
+  // two surfaces answer that differently, on purpose (UX review, 2026-09-09):
+  //
+  //  - IN THE SHEET, the section is HIDDEN. A faceted filter that drops a facet
+  //    with nothing behind it is the standard shape, and the sheet is a
+  //    vertical list, so removing a section moves nothing the user is aiming at.
+  //  - IN THE BAR, the chips stay and go DISABLED. That row is positional and
+  //    shared with SORT: removing ~150pt of leading content slides every sort
+  //    chip left under a thumb already on the row, so a tap meaning "Game"
+  //    silently re-sorts the board. SportToggle one row above already mutes
+  //    rather than removes, and FilterChip has carried a `disabled` prop for
+  //    exactly this since it was written.
+  //
+  // Both stay live while the state IS narrowed, so the control that produced a
   // filter is always reachable to undo it (the state survives a Today→Signals
   // switch, and those two segments can hold different markets).
   const marketIsNarrowed = categoriesAreNarrowed(state, presentCategories);
-  const showMarketCut = presentCategories.length > 1 || marketIsNarrowed;
+  const marketCutBites = presentCategories.length > 1 || marketIsNarrowed;
 
   const pills = useMemo(
     () => buildPills(state, onChange, presentCategories),
@@ -198,21 +215,26 @@ export function PickFilters({
           contentContainerStyle={chipRowStyle}
           keyboardShouldPersistTaps="handled"
         >
-          {showMarketCut ? (
-            <>
-              <FilterChip
-                label="Game"
-                active={gameOnly}
-                onPress={() => setCategories(gameOnly ? ALL_CATEGORIES : ['game'])}
-              />
-              <FilterChip
-                label="Props"
-                active={propsOnly}
-                onPress={() => setCategories(propsOnly ? ALL_CATEGORIES : PROP_CATEGORIES)}
-              />
-              <View style={styles.divider} />
-            </>
-          ) : null}
+          {/* Always rendered, so the row's geometry never changes under a
+              thumb — see marketCutBites. */}
+          <FilterChip
+            label="Game"
+            active={gameOnly}
+            disabled={!marketCutBites}
+            onPress={() => setCategories(gameOnly ? ALL_CATEGORIES : ['game'])}
+          />
+          <FilterChip
+            label="Props"
+            active={propsOnly}
+            disabled={!marketCutBites || presentProps.length === 0}
+            // The PRESENT props, not all three: one tap used to write
+            // pitcher_prop and batter_prop into the state on an NFL board —
+            // invisible today because every read intersects with
+            // presentCategories, but that is the bug masked rather than absent,
+            // and the next surface to read the state raw re-ships it.
+            onPress={() => setCategories(propsOnly ? ALL_CATEGORIES : presentProps)}
+          />
+          <View style={styles.divider} />
           <Text style={styles.sortLabel}>SORT</Text>
           {SORT_OPTIONS.map((o) => (
             <FilterChip
@@ -257,7 +279,7 @@ export function PickFilters({
           </FilterSection>
         ) : null}
 
-        {showMarketCut ? (
+        {marketCutBites ? (
           <FilterSection
             title="Market"
             subtitle="Game = the regular betting lines (moneyline, spread, total). The rest are player props."
@@ -268,6 +290,9 @@ export function PickFilters({
                 <FilterChip
                   key={c}
                   label={CATEGORY_LABEL[c]}
+                  // The count is what makes an empty result attributable to the
+                  // tap that caused it, rather than to a board that looks broken.
+                  count={categoryCounts[c]}
                   active={state.categories.has(c)}
                   onPress={() => toggleCategory(c)}
                 />
@@ -348,7 +373,11 @@ function buildPills(
     const shown = selectedCategories(state, presentCategories);
     out.push({
       key: 'categories',
-      label: shown.map((c) => CATEGORY_LABEL[c]).join(', ') || 'No markets',
+      // "No markets on this board", not "No markets": this fires when the user
+      // narrows on one segment and switches to another that holds different
+      // markets, so the empty result is a state they never chose. The pill has
+      // to say which half is wrong — the filter, not the board.
+      label: shown.map((c) => CATEGORY_LABEL[c]).join(', ') || 'No markets on this board',
       onRemove: () => patch((d) => (d.categories = new Set(ALL_CATEGORIES))),
     });
   }

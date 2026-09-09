@@ -467,7 +467,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // has never been SEEN, which is the only reason it is not the same bug as the
   // twelve below. Its first pick would have rendered "nfl_live_prop" on a card.
   nfl_live_prop: {
-    shortLabel: 'LIVE Pass Att',
+    shortLabel: 'LIVE Att',
     longLabel: 'Live Pass Attempts',
     type: 'player_prop',
     statKey: null,
@@ -491,14 +491,14 @@ export const MODEL_META: Record<string, ModelMeta> = {
     longLabel: 'Pass Attempts',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Att',
+    statLabel: 'Pass Att',
   },
   nfl_prop_pass_completions: {
-    shortLabel: 'Comp',
+    shortLabel: 'Pass Comp',
     longLabel: 'Pass Completions',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Comp',
+    statLabel: 'Pass Comp',
   },
   nfl_prop_pass_tds: {
     shortLabel: 'Pass TD',
@@ -519,7 +519,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
     longLabel: 'Rush Attempts',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Att',
+    statLabel: 'Rush Att',
   },
   nfl_prop_rec_yards: {
     shortLabel: 'Rec Yds',
@@ -529,11 +529,11 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: 'Rec Yds',
   },
   nfl_prop_receptions: {
-    shortLabel: 'Rec',
+    shortLabel: 'Recs',
     longLabel: 'Receptions',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Rec',
+    statLabel: 'Recs',
   },
   nfl_prop_rush_rec_yards: {
     shortLabel: 'Ru+Re Yds',
@@ -543,7 +543,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: 'Ru+Re Yds',
   },
   nfl_prop_anytime_td: {
-    shortLabel: 'Any TD',
+    shortLabel: 'Anytime TD',
     longLabel: 'Anytime Touchdown Scorer',
     type: 'player_prop',
     statKey: null,

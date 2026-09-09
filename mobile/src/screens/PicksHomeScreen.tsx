@@ -236,8 +236,11 @@ export function PicksHomeScreen() {
   // not just the signal ones. Today passed `undefined` here until 2026-09-09,
   // which PickFilters read as "offer all four categories", so the NFL board
   // offered MLB's Pitcher and Batter markets and the active pill named them.
+  //
+  // NOT deduplicated: the filter counts picks per market to put a number on
+  // each facet chip, and a Set of model ids counts models instead.
   const availableModelIds = useMemo(
-    () => Array.from(new Set(activeItems.map((d) => d.pick.model_id))),
+    () => activeItems.map((d) => d.pick.model_id),
     [activeItems],
   );
 

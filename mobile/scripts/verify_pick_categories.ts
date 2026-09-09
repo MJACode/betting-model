@@ -20,10 +20,10 @@
  */
 
 import {
-  ALL_CATEGORIES,
   activeFilterCount,
   applyFilter,
   categoriesAreNarrowed,
+  categoryCountsFor,
   freshFilter,
   presentCategoriesFor,
   selectedCategories,
@@ -87,9 +87,32 @@ check(
   labels(presentCategoriesFor(NCAAF_BOARD)) === 'game',
 );
 check('an all-game board (UFC) offers only Game', labels(presentCategoriesFor(UFC_BOARD)) === 'game');
+// The first fix fell back to ALL_CATEGORIES here "so the bar doesn't read as
+// broken" — which is the reported bug again (Pitcher and Batter on an NFL
+// board), unreachable only because PicksHomeScreen gates the filter bar on a
+// non-empty board. An empty board offers nothing.
+check('an empty board offers no markets rather than four wrong ones', presentCategoriesFor([]).length === 0);
 check(
-  'an empty board falls back to the full set rather than to no options',
-  labels(presentCategoriesFor([])) === labels(ALL_CATEGORIES),
+  'and an empty board therefore never reads as filtered',
+  !categoriesAreNarrowed(freshFilter(), presentCategoriesFor([])) &&
+    activeFilterCount(freshFilter(), presentCategoriesFor([])) === 0,
+);
+
+// ── the facet counts that make an empty result attributable ──
+const nflCounts = categoryCountsFor(NFL_BOARD);
+check(
+  'the NFL facet counts are picks, not models',
+  nflCounts.game === 2 && nflCounts.player_prop === 8,
+  JSON.stringify(nflCounts),
+);
+check(
+  'a duplicated model id counts once per PICK',
+  categoryCountsFor(['nfl_prop_rec_yards', 'nfl_prop_rec_yards', 'nfl_wind_totals'])
+    .player_prop === 2,
+);
+check(
+  'no MLB-only category is counted on an NFL board',
+  nflCounts.pitcher_prop === 0 && nflCounts.batter_prop === 0,
 );
 
 // ── 2. the pill the screenshot showed: "Props" on NFL names Player, alone ──
