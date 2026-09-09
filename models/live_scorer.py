@@ -67,7 +67,7 @@ from models.scorer import (
     _insert_picks,
     _locked_live_lanes,
     _link_for_side,
-    _poisson_over_prob,
+    _count_over_prob,
     american_to_implied_prob,
     quarter_kelly,
 )
@@ -349,6 +349,23 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
         return []
 
     feat_cols = artifact["feature_cols"]
+
+    # FAIL CLOSED ON A MAP/ARTIFACT MISMATCH. `build_live_state_row` fills the
+    # columns LIVE_FEATURE_MAP names; `x` is indexed by the ARTIFACT's
+    # feature_cols. When an artifact wants a column the map does not supply,
+    # row.get(c) returns None and the model prices with that feature NaN --
+    # silently, and on its most important feature if the mismatch is the one
+    # this guard was written for (a B13 artifact registered against a map that
+    # still lacks pregame_total_line). A dark model is visible to the live
+    # health check; a NaN bet is visible to nobody.
+    missing = [c for c in feat_cols if c not in row]
+    if missing:
+        logger.error(
+            f"  {game_id}/{model_id}: artifact wants {missing} but "
+            f"LIVE_FEATURE_MAP does not supply them — refusing to score. "
+            f"The registered artifact and the deployed feature map disagree.")
+        return []
+
     x = np.array([[np.nan if row.get(c) is None else float(row[c])
                    for c in feat_cols]], dtype=float)
 
@@ -398,7 +415,9 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
         if rest_line < 0:
             # Over already clinched — no bettable proposition.
             return []
-        p_over = _poisson_over_prob(lam, rest_line)
+        # The artifact's own tail — Poisson when it carries none, which is
+        # every artifact trained before 2026-09-08.
+        p_over = _count_over_prob(lam, rest_line, artifact.get("dispersion"))
 
         for side, prob, price in [("over", p_over, odds.get("over_price")),
                                   ("under", 1.0 - p_over, odds.get("under_price"))]:

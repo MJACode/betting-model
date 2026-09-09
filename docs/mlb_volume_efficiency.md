@@ -1333,3 +1333,100 @@ satisfied by construction: the **CV/holdout NLL gap** (0.82 -> 0.041), which
 says the tuner is no longer scoring a lookup, and the **fixed-reference
 calibration gap** (+0.1112 -> -0.0095), which says the probability the model
 bets means what it claims.
+
+---
+
+## 18. What shipped, 2026-09-08 (mike: *"Yes do them both things"*)
+
+All three layers, as one registry swap. The artifact is
+`mlb_live_total_runs_20260908_230751` — 13 features, an NB1 tail, fit through
+the grouped CV.
+
+### 18.1 The numbers it ships on
+
+Trained by the real CLI under `--no-register`, 866,136 play rows over
+2019-2024, 2025 holdout:
+
+| | |
+|---|---|
+| Optuna best CV NLL | 2.5200 |
+| OOF dispersion | NB1 **alpha = 1.2720** (var/mean 2.272), 150,000 out-of-fold rows |
+| OOF NLL | Poisson 2.52002 -> **NB1 2.32353** |
+| holdout MAE / RMSE | 2.4779 / 3.3281 |
+| count calibration error | 0.0545 |
+| **probability calibration error (actionable)** | **0.0010** |
+
+The trainer's own 5% gate — the one that logs `FAILS the 5% calibration gate on
+the probability it actually bets` — passes by two orders of magnitude, and it
+now measures the tail that ships rather than a Poisson one nothing uses.
+
+`pregame_total_line` is the 4th most important feature, behind
+`half_innings_left`, `inning` and `score_diff`.
+
+### 18.2 The gate, stated in §17.5 before this ran
+
+Acceptance was: 0.70-0.80 band gap in [-0.03, +0.03], and band_n not below
+~45k. On the shipping artifact, priced by `scorer._count_over_prob` — the same
+function production calls:
+
+| band | Poisson | | NB1 (ships) | |
+|---|---|---|---|---|
+| | gap | n | gap | n |
+| [0.70,0.80) | +0.0510 | 18,621 | **-0.0201** | 20,533 |
+| [0.80,0.90) | +0.0686 | 16,914 | **-0.0109** | 16,813 |
+| [0.90,1.01) | +0.0594 | 27,477 | **+0.0067** | 14,300 |
+| **>=0.70** | +0.0594 | 63,012 | **-0.0097** | **51,646** |
+
+Both conditions pass: -0.0201 is inside +-0.03, and 51,646 is above 45k. Every
+band is slightly CONSERVATIVE — the model under-claims — which is the safe
+direction to miss in.
+
+The out-of-fold alpha (1.2720) landed close to the in-sample estimate that
+first suggested NB1 (1.2208), so the concern that an honest alpha would
+overshoot into under-confidence did not materialise. It was worth stating in
+advance anyway: if it had overshot, the fix would have been to report it, not
+to keep whichever alpha produced the better table.
+
+### 18.3 Against the model this replaces
+
+Same measure, same reference line, the 2026-06-14 artifact's procedure vs this
+one:
+
+    calibration gap at >=0.70    +0.1112  ->  -0.0097
+    qualifying states            69,857   ->  51,646     (-26%)
+
+**No threshold moved.** mike, earlier the same day: *"We need a aggressive
+cutoff to guarantee profit, big bets not volume."* This is that, arrived at by
+correcting the probability rather than by choosing a number — it removes the
+states that never deserved to clear 0.70, instead of the lowest-ranked ones.
+
+### 18.4 The three guards that make the swap safe
+
+- **`_count_over_prob` dispatches on the ARTIFACT's tail.** No dispersion means
+  Poisson, so every pre-2026-09-08 artifact — the K-prop models share
+  `_poisson_over_prob` — is bit-identical. An UNKNOWN family raises rather than
+  falling back: an unrecognised tail must not quietly price a different bet.
+- **`_score_live_model` fails closed on a map/artifact mismatch.**
+  `build_live_state_row` fills what LIVE_FEATURE_MAP names; `x` is indexed by
+  the artifact's `feature_cols`. This artifact against the OLD map would price
+  every pick with `pregame_total_line` as NaN, silently. It now refuses to
+  score and says why. A dark model is visible to the live health check; a NaN
+  bet is visible to nobody.
+- **`_count_cv_splits` is one definition with two callers**, so the tuning
+  objective and the dispersion fit cannot drift onto different folds — an alpha
+  estimated against folds the hyperparameters were never scored on is not the
+  tail this model was tuned for.
+
+### 18.5 Still open
+
+- **The cut has not been re-swept.** 0.70 / 0.14 / 0.32 were swept on the
+  leaked probabilities and mean something different on a calibrated model. This
+  swap does not change them, so the live lane keeps the old numbers against a
+  new probability until they are re-measured — and ~70 settled BETs cannot do
+  it. The -26% volume above is what those unchanged cuts produce on an honest
+  probability.
+- **The order of operations is load-bearing.** The artifact is registered only
+  AFTER the map reaches master, because the two going live out of step is the
+  silent-NaN case §18.4 guards against. `_promote.py` refuses an artifact whose
+  `feature_cols` disagree with the map, and refuses a Poisson-only artifact once
+  the map carries `pregame_total_line`.

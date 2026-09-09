@@ -44,7 +44,7 @@ from loguru import logger
 from data.db import get_connection
 from features.feature_engine import build_mlb_game_features
 from features.live_game_features import build_live_state_row
-from models.live_scorer import _poisson_over_prob
+from models.scorer import _count_over_prob
 from models.scorer import _get_dk_odds
 from models.trainer import load_model
 
@@ -109,7 +109,7 @@ def measure(since: str, limit: int | None,
                 rest = float(line) - row["total_runs"]
                 if rest < 0:
                     continue
-                probs.append(_poisson_over_prob(lam, rest))
+                probs.append(_count_over_prob(lam, rest, artifact.get("dispersion")))
             if len(probs) >= 2:
                 out.append((gid, max(probs) - min(probs)))
         return out

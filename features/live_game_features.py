@@ -22,9 +22,21 @@ Live models (config.LIVE_MODELS):
     mlb_live_total_runs  poisson  target = runs scored in the REMAINDER of the
                                   game (final_total − total_before). At score
                                   time P(over L) = P(rest > L − current_total)
-                                  via the Poisson CDF — the live line never
-                                  enters the feature vector, so there is no
-                                  line leakage between train and serve.
+                                  via the model's own count tail (Poisson,
+                                  or NB1 when the artifact carries a
+                                  dispersion — scorer._count_over_prob).
+
+                                  THE LIVE LINE never enters the feature
+                                  vector, so there is no line leakage
+                                  between train and serve. The PRE-GAME
+                                  total does, as `pregame_total_line`,
+                                  and that is the point rather than an
+                                  exception: it is known before first
+                                  pitch and bounded at the actual first
+                                  pitch on both paths. CLAUDE.md §1b asks
+                                  for exactly it — "do not rebuild a
+                                  player projection from scratch and
+                                  throw the pregame line away".
 
 mlb_live_win_prob (binary, home_won) and mlb_live_runline (binary, home by 2+)
 were RETIRED 2026-08-30 — both were badly overconfident in production and their
@@ -74,10 +86,31 @@ LIVE_PREGAME_H2H_CONTEXT = [
     "home_win_pct", "away_win_pct", "d_run_differential",
 ]
 
+# THE PRE-GAME TOTAL IS THE ANCHOR, NOT A CONVENIENCE (CLAUDE.md §1b): a live
+# total is priced RELATIVE TO THE STARTING LINE, because the book re-anchors
+# its live number mechanically off the pre-game one and the clock. This model
+# carried no such feature until 2026-09-08.
+#
+# The six season-to-date stats that used to sit here -- home/away team era,
+# home/away bullpen era, home/away runs_last_10 -- were REMOVED the same day,
+# on measurement rather than taste. Matched fits through the fixed CV, 2025
+# holdout (docs/mlb_volume_efficiency.md §17):
+#
+#   stats + line (19 feat)   RMSE 3.3268  MAE 2.4724  gap +0.0569
+#   line only    (13 feat)   RMSE 3.3252  MAE 2.4771  gap +0.0586
+#
+# They separate in the FOURTH DECIMAL, in both directions. The stats add
+# nothing once the line is present: the line supplies the run-environment
+# signal they were standing in for, and supplies it better. Both beat the
+# 18-feature model that had the stats and no line, so the line is the part
+# carrying information.
+#
+# Removing them also removes an instability. Those six moved the model's
+# probability a median 12.8 points on inputs that drift 0.0164 ERA/day
+# (docs/mlb_volume_efficiency.md §14) -- comparable to the whole 0.70/0.14
+# decision margin.
 LIVE_PREGAME_TOTALS_CONTEXT = [
-    "home_team_era", "away_team_era",
-    "home_bullpen_era", "away_bullpen_era",
-    "home_runs_last_10", "away_runs_last_10",
+    "pregame_total_line",
     "wind_out_component", "temp_f", "is_dome_game",
 ]
 
