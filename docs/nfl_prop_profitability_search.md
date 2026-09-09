@@ -8,7 +8,7 @@ cache; the scripts that produced them are named so each table can be re-run.
 
 **What won.** One of the eleven, `nfl_prop_tackles_assists`, was never
 losing: it was grading the wrong stat. With the stat corrected it measures
-**+50.24 units over 363 bets (+13.84%, 90% CI +5.2 to +23.2), positive in all
+**+53.03 units over 340 bets (+15.6%, 90% CI +6.4 to +24.8), positive in all
 three seasons**, its projection carries information the line does not (§4),
 and it beats its own naive-projection placebo in every season. It is paused,
 and unpausing is a model update.
@@ -140,39 +140,49 @@ and refuses to build tackles features if the column is empty.
 ### The model on the corrected stat
 
 `models.nfl_prop_backtest --model nfl_prop_tackles_assists --seasons 2023 2024
-2025`, the deployed hyperparameters, walk-forward, the live cut (0.70 / 0.15):
+2025`, the hyperparameters of the artifact retrained on the corrected stat
+(v20260909_160911, the registered one), walk-forward, the live cut (0.70 /
+0.15). That cut was swept on the OLD stat's record, so it is out of sample
+with respect to this target:
 
 | | bets | win % | ROI | 90% CI | units |
 |---|---|---|---|---|---|
-| **all** | **363** | **62.8%** | **+13.84%** | **(+5.2, +23.2)** | **+50.24** |
-| 2023 | 113 | 55.8% | +1.86% | | |
-| 2024 | 144 | 68.1% | +24.10% | | |
-| 2025 | 106 | 63.2% | +12.68% | | |
+| **all** | **340** | **63.8%** | **+15.60%** | **(+6.4, +24.8)** | **+53.03** |
+| 2023 | 100 | 58.0% | +5.37% | | |
+| 2024 | 141 | 70.9% | +28.98% | | |
+| 2025 | 99 | 59.6% | +6.86% | | |
 
-Sides: 319 unders (+16.6%), 44 overs (−6.1%). Universe: our actual now lands
+Three positive seasons; the pooled interval excludes zero, and only 2024 does
+so on its own (the backtest's own verdict string says "one season"). Sides:
+301 unders (+17.8%), 39 overs (−1.7%). On the previous artifact's
+hyperparameters the same run reads +50.24u over 363 bets (+13.84%, CI +5.2
+to +23.2; +1.9% / +24.1% / +12.7%), so the result is not a property of one
+parameter draw. The correction bit hardest in 2024: the 2025 feed already
+folds most with-assist tackles into the other columns (the old stat matched
+ESPN 93% there against 83% in 2024), so 2025 is graded nearly the same before
+and after. Universe: our actual now lands
 over 47.8% against the book's 50.2% (was 41.1% vs 50.2%), the same −2.4pp the
 book runs on rush_yards and receptions, so the stat is no longer a different
 stat. The model's own mean P(over) is 45.5%, 2.3pp under reality: the same
 mean bias as the other ten, and the model wins anyway.
 
 **The placebo** (`--placebo`: the player's own rolling-8 of all three tackle
-components as the projection, same distribution, same cut): 392 bets, +1.15%,
-CI (−7.7, +10.2); 2023 −13.0%, 2024 +12.2%, 2025 +3.9%. The model beats it in
-every season, by 15pp, 12pp and 9pp. (The placebo had been built from two
+components as the projection, same distribution, same cut): 376 bets, +0.59%,
+CI (−8.7, +9.5); 2023 −13.6%, 2024 +12.3%, 2025 +3.4%. The model beats it in
+every season, by 19pp, 17pp and 3pp. (The placebo had been built from two
 components and projected low; fixed this session, and it is the fair one that
 is reported.) The corrected stat is not a blind-unders artefact either: blind
 unders at DK grade −9.8%, +1.2%, +5.1% across the three seasons.
 
 **The information test** (`scripts/nfl_prop_information_test` on the corrected
-rows): the residual coefficient is +0.15 ± 0.06 fitted on 2023 and +0.24 ± 0.06
-on 2024, the blend beats the book on Brier in both test seasons (0.2470 vs
-0.2492 on 2024; 0.2461 vs 0.2477 on 2025), and the blend as a bet at the DK
-price is positive with an interval excluding zero at the 3% and 4% cuts in
-BOTH test seasons (2024: +19.0% on 95, +29.3% on 56; 2025: +8.4% on 369,
-+9.3% on 297). It is the only one of the eleven for which any of that is true.
+rows): the residual coefficient is +0.14 ± 0.06 fitted on 2023 and +0.23 ± 0.06
+on 2024, the blend beats the book on Brier in both test seasons (0.2471 vs
+0.2492 on 2024; 0.2459 vs 0.2477 on 2025), and the blend as a bet at the DK
+price is positive with an interval excluding zero at the 3% cut in BOTH test
+seasons (2024: +21.3% on 82; 2025: +9.3% on 360, and +12.7% on 286 at 4%). It is the only one of the eleven for which any of that is true.
 
-**What has not been done:** the live artifact was trained on the old stat and
-must be retrained; the model is paused (`config.PAUSED_MODELS`, with the
+**What has not been done:** the artifact HAS been retrained on the corrected
+stat and registered (v20260909_160911, holdout 2025 O/U accuracy 0.666); the model is paused (`config.PAUSED_MODELS`, with the
 unpause condition "reconciled against a gamebook source and the gap closes",
 which this session met); unpausing is a model update.
 
@@ -210,6 +220,17 @@ not significant. Two of three, not the bar. It would also bet the soft books,
 not DraftKings, so it is a second `nfl_prop_market`-style construction rather
 than one of the eleven.
 
+### 4a. Found while checking: the backtest was not grading the deployed hyperparameters
+
+`models/nfl_prop_backtest` reads hyperparameters from
+`models/saved/nfl_prop_params.json`, and that file still carried the
+2026-08-23 versions for all twelve models while the registry had pointed at the
+2026-09-07 retrains since then. Every prop backtest between those dates
+(including the −40.53u table and the information test) graded the 08-23
+parameters. Refreshed from the active artifacts this session and pinned by
+`tests/test_nfl_prop_params_match_artifacts.py`; the eleven re-graded on the
+deployed parameters are in the session log.
+
 ## 6. What this settles
 
 - **A DraftKings-decided distributional model has no information to work
@@ -218,8 +239,8 @@ than one of the eleven.
   and none survives two. The book prices flat and hangs its line as well as
   Pinnacle does at seven hours.
 - **Tackles is the profitable distributional model.** It always was; the
-  ruler was wrong. +50.24u over 363 bets, three positive seasons, information
-  beyond the line, ahead of its placebo.
+  ruler was wrong. +53.03u over 340 bets, three positive seasons, information
+  beyond the line, ahead of its placebo in each.
 - **The only edge in the wider data is other books' prices**, which the
   shipped rule already takes, and which a learned stack may take better on
   pass attempts.
