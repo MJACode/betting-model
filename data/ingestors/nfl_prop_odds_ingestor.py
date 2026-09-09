@@ -163,10 +163,36 @@ def _credits_used(resp) -> int | None:
         return None
 
 
-def _get(url: str, params: dict, timeout: int = 30):
-    resp = requests.get(url, params=params, timeout=timeout)
-    record_quota_headers(resp)
-    return resp
+def _get(url: str, params: dict, timeout: int = 60, attempts: int = 4):
+    """GET that survives a transient network hiccup. None when it does not.
+
+    NO RETRY AT ALL UNTIL 2026-09-08, and it cost a run that day: the alternate
+    backfill died 53 dates into the 2024 season on a single
+    requests.exceptions.ReadTimeout, roughly forty minutes and 240,000 rows in.
+    The identical fix already existed in data/ingestors/prop_odds_ingestor
+    (_get_with_retry, written earlier the same day for the MLB backfill after
+    the identical failure) and was never carried across -- which is precisely
+    what CLAUDE.md §1b's cross-model rule exists to catch.
+
+    Backs off 2s, 4s, 8s. ONLY the network layer is retried: a non-200 is
+    returned to the caller untouched, because an HTTP error is an ANSWER (rate
+    limit, no coverage at that snapshot) and retrying it spends credits to be
+    told the same thing again.
+    """
+    for i in range(attempts):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            record_quota_headers(resp)
+            return resp
+        except requests.RequestException as exc:
+            if i == attempts - 1:
+                logger.warning(f"  giving up after {attempts} attempts: "
+                               f"{type(exc).__name__}")
+                return None
+            wait = 2 ** (i + 1)
+            logger.debug(f"  {type(exc).__name__} — retrying in {wait}s")
+            time.sleep(wait)
+    return None
 
 
 def list_events(days_ahead: int = 8) -> list[dict]:
@@ -174,6 +200,9 @@ def list_events(days_ahead: int = 8) -> list[dict]:
     _require_key()
     resp = _get(f"{ODDS_API_BASE}/sports/{SPORT_KEY}/events",
                 {"apiKey": ODDS_API_KEY, "dateFormat": "iso"}, timeout=20)
+    if resp is None:
+        logger.warning("NFL events: network gave up")
+        return []
     if resp.status_code != 200:
         logger.warning(f"NFL events: HTTP {resp.status_code}")
         return []
@@ -200,6 +229,9 @@ def list_historical_events(snapshot_iso: str) -> tuple[list[dict], str | None]:
     _require_key()
     resp = _get(f"{ODDS_API_BASE}/historical/sports/{SPORT_KEY}/events",
                 {"apiKey": ODDS_API_KEY, "date": snapshot_iso, "dateFormat": "iso"})
+    if resp is None:
+        logger.warning(f"NFL historical events {snapshot_iso}: network gave up")
+        return [], None
     if resp.status_code != 200:
         logger.warning(f"NFL historical events {snapshot_iso}: HTTP {resp.status_code} "
                        f"{resp.text[:160]}")
@@ -255,6 +287,11 @@ def _event_props(event_id: str, markets: list[str],
         if snapshot_iso:
             params["date"] = snapshot_iso
         resp = _get(base, params)
+        if resp is None:
+            # The date survives; only this chunk is lost. A backfill that dies
+            # on one dropped connection is what this whole change is about.
+            logger.warning(f"  event {event_id}: network gave up on {chunk}")
+            continue
         if used_before is None:
             u = _credits_used(resp)
             used_before = u - 1 if u is not None else None
@@ -273,6 +310,9 @@ def _event_props(event_id: str, markets: list[str],
             if dk_requested and params["bookmakers"] != ODDS_API_BOOKMAKER:
                 params["bookmakers"] = ODDS_API_BOOKMAKER
                 resp = _get(base, params)
+                if resp is None:
+                    logger.warning(f"  event {event_id}: network gave up on retry")
+                    continue
                 used_after = _credits_used(resp) or used_after
             if resp.status_code != 200:
                 logger.debug(f"  event {event_id}: 422 on {chunk}")
@@ -366,12 +406,38 @@ def run_nfl_prop_odds_ingestor(days_ahead: int = 8) -> dict:
             conn.close()
 
 
+def backfilled_dates(conn: DBConnection, dates: list[str], snapshot_type: str,
+                     probe_market: str) -> set[str]:
+    """Which of `dates` already carry rows for `probe_market` at that snapshot.
+
+    A PAID APPEND-ONLY BACKFILL MUST BE RESUMABLE. On 2026-09-08 the alternate
+    run died 53 dates into 2024 on a network timeout; without this, re-running
+    the range would silently RE-BUY every completed date at 341 credits each.
+
+    PROBED ON ONE NAMED MARKET, not on "any row for that date", and the
+    distinction is the whole reason this takes an argument. Those dates already
+    hold STANDARD rows from an earlier backfill, so a generic existence check
+    would report every date as done and skip the entire run -- failing by doing
+    nothing, which is the hardest failure to notice.
+    """
+    if not dates or not probe_market:
+        return set()
+    rows = conn.execute(
+        "SELECT DISTINCT game_date FROM player_prop_odds "
+        "WHERE game_id LIKE 'NFL%%' AND game_date = ANY(%s) "
+        "AND snapshot_type = %s AND market = %s",
+        (list(dates), snapshot_type, probe_market)).fetchall()
+    return {str(r[0]) for r in rows}
+
+
 def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
                            limit_events: int | None = None,
                            markets: list[str] | None = None,
                            snapshot_type: str = "open",
                            books: str | None = MARKET_BOOKS,
-                           regions: str | None = MARKET_REGIONS) -> dict:
+                           regions: str | None = MARKET_REGIONS,
+                           skip_existing: bool = False,
+                           probe_market: str | None = None) -> dict:
     """
     Historical prop lines for each game date, snapshotted `hours_before` kickoff.
 
@@ -384,7 +450,17 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
     conn = get_connection()
     total = {"rows": 0, "events": 0, "skipped": 0, "credits": 0, "dates": 0}
     try:
+        done: set[str] = set()
+        if skip_existing:
+            done = backfilled_dates(conn, dates, snapshot_type,
+                                    probe_market or "")
+            if done:
+                logger.info(f"  {len(done)} of {len(dates)} dates already hold "
+                            f"{probe_market!r} at {snapshot_type} — skipping")
+            total["resumed"] = len(done)
         for d in dates:
+            if d in done:
+                continue
             # Kickoffs are UTC; a 13:00 ET Sunday game is 17:00 UTC, so the
             # early window is anchored there and the offset counted back from
             # it. Computed as a real datetime, not 17 - hours_before: past 17
