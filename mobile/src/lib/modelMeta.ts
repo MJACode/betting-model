@@ -5,10 +5,18 @@
 
 import { isModelRetired } from './thresholds';
 
+/**
+ * The market a model trades. `pitcher_prop` / `batter_prop` are MLB-only cuts;
+ * every other sport's player market is `player_prop`. Surfaces that OFFER these
+ * as a filter must scope the list to the sport on screen — see
+ * `lib/pickFilterState.presentCategoriesFor`.
+ */
+export type ModelCategory = 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop';
+
 export interface ModelMeta {
   shortLabel: string;
   longLabel: string;
-  type: 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop';
+  type: ModelCategory;
   statKey: keyof PlayerStats | null;
   statLabel: string;
 }
@@ -453,6 +461,108 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The in-play NFL prop lane (nfl/live_model — the frozen pass-attempt bias
+  // rule). LIVE since 2026-09-05 with the §2 go-live gate deliberately not met
+  // (Matt's call), and it has written zero picks so far — so its missing label
+  // has never been SEEN, which is the only reason it is not the same bug as the
+  // twelve below. Its first pick would have rendered "nfl_live_prop" on a card.
+  nfl_live_prop: {
+    shortLabel: 'LIVE Att',
+    longLabel: 'Live Pass Attempts',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Att',
+  },
+  // The twelve per-stat NFL prop models. They were unpaused server-side
+  // (model_action_thresholds.paused = false for all thirteen NFL prop ids on
+  // 2026-09-09) while none of them had an entry here — so the board rendered
+  // their RAW MODEL ID as the card's market chip ("nfl_prop_rush_rec_yards"),
+  // and `MODEL_META[id]?.type` was undefined everywhere it is read, which let
+  // them slip through the Market filter's category cut entirely.
+  nfl_prop_pass_yards: {
+    shortLabel: 'Pass Yds',
+    longLabel: 'Passing Yards',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Pass Yds',
+  },
+  nfl_prop_pass_attempts: {
+    shortLabel: 'Pass Att',
+    longLabel: 'Pass Attempts',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Pass Att',
+  },
+  nfl_prop_pass_completions: {
+    shortLabel: 'Pass Comp',
+    longLabel: 'Pass Completions',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Pass Comp',
+  },
+  nfl_prop_pass_tds: {
+    shortLabel: 'Pass TD',
+    longLabel: 'Passing Touchdowns',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Pass TD',
+  },
+  nfl_prop_rush_yards: {
+    shortLabel: 'Rush Yds',
+    longLabel: 'Rushing Yards',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Rush Yds',
+  },
+  nfl_prop_rush_attempts: {
+    shortLabel: 'Rush Att',
+    longLabel: 'Rush Attempts',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Rush Att',
+  },
+  nfl_prop_rec_yards: {
+    shortLabel: 'Rec Yds',
+    longLabel: 'Receiving Yards',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Rec Yds',
+  },
+  nfl_prop_receptions: {
+    shortLabel: 'Recs',
+    longLabel: 'Receptions',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Recs',
+  },
+  nfl_prop_rush_rec_yards: {
+    shortLabel: 'Ru+Re Yds',
+    longLabel: 'Rush + Receiving Yards',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Ru+Re Yds',
+  },
+  nfl_prop_anytime_td: {
+    shortLabel: 'Anytime TD',
+    longLabel: 'Anytime Touchdown Scorer',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'TD',
+  },
+  nfl_prop_tackles_assists: {
+    shortLabel: 'Tkl+Ast',
+    longLabel: 'Tackles + Assists',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Tkl+Ast',
+  },
+  nfl_prop_sacks: {
+    shortLabel: 'Sacks',
+    longLabel: 'Sacks',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Sacks',
+  },
 
   // ── GOLF ──────────────────────────────────────────────────────────────────
   // Per-player markets rendered as single bets (player name in pick_label).
@@ -503,9 +613,34 @@ export function modelLong(modelId: string): string {
   return MODEL_META[modelId]?.longLabel ?? modelId;
 }
 
+/**
+ * The market category of a model — MODEL_META when it has an entry, and the
+ * MODEL ID when it does not.
+ *
+ * Never returns undefined, and that is the point. Every caller that reached
+ * for `MODEL_META[id]?.type` had to decide what an unknown model means, and the
+ * Market filter decided "let it through": `if (meta && !categories.has(...))`
+ * skipped the cut entirely for a model with no entry, so the twelve NFL prop
+ * models survived EVERY category — including "Game", where they are not game
+ * lines. A model missing its metadata is a labelling bug; it must not also be a
+ * filtering bug.
+ *
+ * The id is a reliable fallback because every model in the registry is named
+ * `<sport>_prop_<market>` or `<sport>_<game market>` — pinned by
+ * tests/test_mobile_pick_categories.py, which walks every id in
+ * ACTION_THRESHOLDS and asserts the derived category matches MODEL_META's.
+ */
+export function modelCategory(modelId: string): ModelCategory {
+  const meta = MODEL_META[modelId];
+  if (meta) return meta.type;
+  if (modelId.includes('_prop_pitcher_')) return 'pitcher_prop';
+  if (modelId.includes('_prop_batter_')) return 'batter_prop';
+  if (modelId.includes('_prop_') || modelId.endsWith('_prop')) return 'player_prop';
+  return 'game';
+}
+
 export function isPropModel(modelId: string): boolean {
-  const m = MODEL_META[modelId];
-  return m?.type === 'pitcher_prop' || m?.type === 'batter_prop' || m?.type === 'player_prop';
+  return modelCategory(modelId) !== 'game';
 }
 
 // ---------------------------------------------------------------------------

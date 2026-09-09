@@ -18,13 +18,33 @@
  * sport in one flat list (four unlabeled "Moneyline" chips, and so on), and the
  * cut people actually want — regular betting lines vs player props — is what the
  * Market section and the Game/Props quick chips express.
+ *
+ * THE MARKET CUT IS SCOPED TO THE BOARD ON SCREEN (2026-09-09). `pitcher_prop`
+ * and `batter_prop` are MLB-only markets and this offered all four categories
+ * everywhere, so the NFL board shipped Pitcher and Batter chips and an active
+ * pill reading "Pitcher, Batter, Player" over football props. The offered set
+ * now comes from `presentCategoriesFor(availableModelIds)` — which is why that
+ * prop is REQUIRED rather than "undefined offers everything", the exact
+ * default that produced the bug. The pure half lives in lib/pickFilterState.
  */
 
 import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { expectedValue } from '@/lib/format';
-import { MODEL_META } from '@/lib/modelMeta';
 import { SORT_OPTIONS, type SortKey } from '@/lib/pickSort';
+import {
+  ALL_CATEGORIES,
+  ALL_SIGNALS,
+  CATEGORY_LABEL,
+  activeFilterCount,
+  categoriesAreNarrowed,
+  categoryCountsFor,
+  cloneFilter,
+  freshFilter,
+  presentCategoriesFor,
+  selectedCategories,
+  type ModelCategory,
+  type PicksFilterState,
+} from '@/lib/pickFilterState';
 import { colors, font, spacing } from '@/lib/theme';
 import { FilterBar, type ActivePill } from './FilterBar';
 import { FilterChip, chipRowStyle } from './FilterChip';
@@ -32,58 +52,15 @@ import { FilterField } from './FilterField';
 import { FilterSection, FilterSheet } from './FilterSheet';
 import type { SignalType } from '@/types';
 
-export type ModelCategory = 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop';
-
-const ALL_CATEGORIES: ModelCategory[] = ['game', 'pitcher_prop', 'batter_prop', 'player_prop'];
-const PROP_CATEGORIES: ModelCategory[] = ['pitcher_prop', 'batter_prop', 'player_prop'];
-
-export interface PicksFilterState {
-  signals: Set<SignalType>;
-  categories: Set<ModelCategory>;
-  minProb: number | null;
-  minEdge: number | null;
-  minEV: number | null;
-}
-
-export const DEFAULT_FILTER: PicksFilterState = {
-  signals: new Set<SignalType>(['BET', 'AVOID', 'NONE']),
-  categories: new Set<ModelCategory>(ALL_CATEGORIES),
-  minProb: null,
-  minEdge: null,
-  minEV: null,
-};
-
-const ALL_SIGNALS: SignalType[] = ['BET', 'AVOID', 'NONE'];
-const CATEGORY_LABEL: Record<ModelCategory, string> = {
-  game: 'Game',
-  pitcher_prop: 'Pitcher',
-  batter_prop: 'Batter',
-  player_prop: 'Player',
-};
-
-export function activeFilterCount(state: PicksFilterState): number {
-  let n = 0;
-  if (state.signals.size < ALL_SIGNALS.length) n++;
-  if (state.categories.size < ALL_CATEGORIES.length) n++;
-  if (state.minProb != null) n++;
-  if (state.minEdge != null) n++;
-  if (state.minEV != null) n++;
-  return n;
-}
-
-export function cloneFilter(state: PicksFilterState): PicksFilterState {
-  return {
-    signals: new Set(state.signals),
-    categories: new Set(state.categories),
-    minProb: state.minProb,
-    minEdge: state.minEdge,
-    minEV: state.minEV,
-  };
-}
-
-export function freshFilter(): PicksFilterState {
-  return cloneFilter(DEFAULT_FILTER);
-}
+// Re-exported so the screens keep one import site for the whole filter surface.
+export {
+  DEFAULT_FILTER,
+  activeFilterCount,
+  applyFilter,
+  cloneFilter,
+  freshFilter,
+} from '@/lib/pickFilterState';
+export type { ModelCategory, PicksFilterState } from '@/lib/pickFilterState';
 
 interface Props {
   state: PicksFilterState;
@@ -95,10 +72,13 @@ interface Props {
   totalShown: number;
   totalAll: number;
   /**
-   * Restricts the Market options to the model types actually on screen.
-   * Used by the Signals view; undefined offers everything (Today).
+   * The model id of EVERY pick on screen, duplicates included. REQUIRED: the
+   * Market options and their counts are derived from it, so a board can never
+   * offer a market it cannot contain. This was optional until 2026-09-09, and
+   * the "undefined offers everything" default is what put MLB's Pitcher and
+   * Batter chips on the NFL board.
    */
-  availableModelIds?: string[];
+  availableModelIds: string[];
   /** Hide the Signal section (Signals are all BET — the chips are noise). */
   showSignals?: boolean;
   /** Noun for counts and the sheet footer, e.g. "pick" / "signal". */
@@ -120,15 +100,18 @@ export function PickFilters({
 }: Props) {
   const [open, setOpen] = useState(false);
 
-  const presentCategories = useMemo(() => {
-    if (!availableModelIds) return ALL_CATEGORIES;
-    const present = new Set<ModelCategory>();
-    for (const id of availableModelIds) {
-      const meta = MODEL_META[id];
-      if (meta) present.add(meta.type);
-    }
-    return ALL_CATEGORIES.filter((c) => present.has(c));
-  }, [availableModelIds]);
+  const presentCategories = useMemo(
+    () => presentCategoriesFor(availableModelIds),
+    [availableModelIds],
+  );
+  const categoryCounts = useMemo(
+    () => categoryCountsFor(availableModelIds),
+    [availableModelIds],
+  );
+  const presentProps = useMemo(
+    () => presentCategories.filter((c) => c !== 'game'),
+    [presentCategories],
+  );
 
   const patch = (fn: (draft: PicksFilterState) => void) => {
     const next = cloneFilter(state);
@@ -156,30 +139,55 @@ export function PickFilters({
   };
 
   // Quick chips: whole-category shortcuts for the two cuts people actually use.
-  const gameOnly = state.categories.size === 1 && state.categories.has('game');
+  // Both are judged on what is PRESENT — "Props only" on an NFL board means the
+  // one prop category it has, not all three (two of which are baseball).
+  const shownCategories = selectedCategories(state, presentCategories);
+  const gameOnly = shownCategories.length === 1 && shownCategories[0] === 'game';
   const propsOnly =
-    !state.categories.has('game') && PROP_CATEGORIES.every((c) => state.categories.has(c));
+    presentProps.length > 0 &&
+    !shownCategories.includes('game') &&
+    shownCategories.length === presentProps.length;
 
   const setCategories = (cats: ModelCategory[]) =>
     patch((d) => {
       d.categories = new Set(cats);
     });
 
+  // A cut with nothing to cut is a dead control: NCAAF and UFC boards are 100%
+  // game models, so Game/Props and the Market section did nothing there. The
+  // two surfaces answer that differently, on purpose (UX review, 2026-09-09):
+  //
+  //  - IN THE SHEET, the section is HIDDEN. A faceted filter that drops a facet
+  //    with nothing behind it is the standard shape, and the sheet is a
+  //    vertical list, so removing a section moves nothing the user is aiming at.
+  //  - IN THE BAR, the chips stay and go DISABLED. That row is positional and
+  //    shared with SORT: removing ~150pt of leading content slides every sort
+  //    chip left under a thumb already on the row, so a tap meaning "Game"
+  //    silently re-sorts the board. SportToggle one row above already mutes
+  //    rather than removes, and FilterChip has carried a `disabled` prop for
+  //    exactly this since it was written.
+  //
+  // Both stay live while the state IS narrowed, so the control that produced a
+  // filter is always reachable to undo it (the state survives a Today→Signals
+  // switch, and those two segments can hold different markets).
+  const marketIsNarrowed = categoriesAreNarrowed(state, presentCategories);
+  const marketCutBites = presentCategories.length > 1 || marketIsNarrowed;
+
   const pills = useMemo(
     () => buildPills(state, onChange, presentCategories),
     [state, onChange, presentCategories],
   );
 
-  const count = activeFilterCount(state);
+  const count = activeFilterCount(state, presentCategories);
 
   // Collapsed-row summaries. "All" rather than an exhaustive list when nothing
   // is excluded — the row exists to say what is NARROWING the board.
   const marketSummary = useMemo(() => {
-    const shown = presentCategories.filter((c) => state.categories.has(c));
+    const shown = selectedCategories(state, presentCategories);
     if (shown.length === presentCategories.length) return 'All';
     if (shown.length === 0) return 'None';
     return shown.map((c) => CATEGORY_LABEL[c]).join(', ');
-  }, [state.categories, presentCategories]);
+  }, [state, presentCategories]);
 
   const minimumsSummary = useMemo(() => {
     const parts: string[] = [];
@@ -207,15 +215,24 @@ export function PickFilters({
           contentContainerStyle={chipRowStyle}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Always rendered, so the row's geometry never changes under a
+              thumb — see marketCutBites. */}
           <FilterChip
             label="Game"
             active={gameOnly}
+            disabled={!marketCutBites}
             onPress={() => setCategories(gameOnly ? ALL_CATEGORIES : ['game'])}
           />
           <FilterChip
             label="Props"
             active={propsOnly}
-            onPress={() => setCategories(propsOnly ? ALL_CATEGORIES : PROP_CATEGORIES)}
+            disabled={!marketCutBites || presentProps.length === 0}
+            // The PRESENT props, not all three: one tap used to write
+            // pitcher_prop and batter_prop into the state on an NFL board —
+            // invisible today because every read intersects with
+            // presentCategories, but that is the bug masked rather than absent,
+            // and the next surface to read the state raw re-ships it.
+            onPress={() => setCategories(propsOnly ? ALL_CATEGORIES : presentProps)}
           />
           <View style={styles.divider} />
           <Text style={styles.sortLabel}>SORT</Text>
@@ -262,22 +279,27 @@ export function PickFilters({
           </FilterSection>
         ) : null}
 
-        <FilterSection
-          title="Market"
-          subtitle="Game = the regular betting lines (moneyline, spread, total). The rest are player props."
-          summary={marketSummary}
-        >
-          <View style={styles.chipWrap}>
-            {presentCategories.map((c) => (
-              <FilterChip
-                key={c}
-                label={CATEGORY_LABEL[c]}
-                active={state.categories.has(c)}
-                onPress={() => toggleCategory(c)}
-              />
-            ))}
-          </View>
-        </FilterSection>
+        {marketCutBites ? (
+          <FilterSection
+            title="Market"
+            subtitle="Game = the regular betting lines (moneyline, spread, total). The rest are player props."
+            summary={marketSummary}
+          >
+            <View style={styles.chipWrap}>
+              {presentCategories.map((c) => (
+                <FilterChip
+                  key={c}
+                  label={CATEGORY_LABEL[c]}
+                  // The count is what makes an empty result attributable to the
+                  // tap that caused it, rather than to a board that looks broken.
+                  count={categoryCounts[c]}
+                  active={state.categories.has(c)}
+                  onPress={() => toggleCategory(c)}
+                />
+              ))}
+            </View>
+          </FilterSection>
+        ) : null}
 
         <FilterSection
           title="Minimums"
@@ -344,12 +366,18 @@ function buildPills(
       onRemove: () => patch((d) => (d.signals = new Set(ALL_SIGNALS))),
     });
   }
-  if (state.categories.size < ALL_CATEGORIES.length) {
-    const shown = presentCategories.filter((c) => state.categories.has(c));
-    const list = (shown.length > 0 ? shown : Array.from(state.categories)) as ModelCategory[];
+  // Only the categories THIS board can show are named. The pill read
+  // "Pitcher, Batter, Player" on an NFL board of football props until
+  // 2026-09-09, because it listed the state rather than the intersection.
+  if (categoriesAreNarrowed(state, presentCategories)) {
+    const shown = selectedCategories(state, presentCategories);
     out.push({
       key: 'categories',
-      label: list.map((c) => CATEGORY_LABEL[c]).join(', ') || 'No markets',
+      // "No markets on this board", not "No markets": this fires when the user
+      // narrows on one segment and switches to another that holds different
+      // markets, so the empty result is a state they never chose. The pill has
+      // to say which half is wrong — the filter, not the board.
+      label: shown.map((c) => CATEGORY_LABEL[c]).join(', ') || 'No markets on this board',
       onRemove: () => patch((d) => (d.categories = new Set(ALL_CATEGORIES))),
     });
   }
@@ -375,34 +403,6 @@ function buildPills(
     });
   }
   return out;
-}
-
-interface FilterablePick {
-  signal_type: SignalType;
-  model_id: string;
-  model_probability: number;
-  edge: number;
-  dk_odds: number | null;
-}
-
-export function applyFilter<T extends { pick: FilterablePick }>(
-  items: T[],
-  state: PicksFilterState,
-): T[] {
-  return items.filter((it) => {
-    const p = it.pick;
-    if (!state.signals.has(p.signal_type)) return false;
-    const meta = MODEL_META[p.model_id];
-    if (meta && !state.categories.has(meta.type)) return false;
-    if (state.minProb != null && p.model_probability < state.minProb) return false;
-    if (state.minEdge != null && p.edge < state.minEdge) return false;
-    if (state.minEV != null) {
-      const ev = expectedValue(p.model_probability, p.dk_odds);
-      // null EV (prob-only markets with no payout) is excluded when minEV is set.
-      if (ev == null || ev < state.minEV) return false;
-    }
-    return true;
-  });
 }
 
 const styles = StyleSheet.create({
