@@ -1423,7 +1423,7 @@ state pre-game rather than from the schedule file. Do NOT default blank to
 
 ---
 
-## Historical `sbr_consensus` odds ties are broken arbitrarily (2026-09-08)
+## [ ] Historical `sbr_consensus` odds ties are broken arbitrarily (2026-09-08)
 
 **Not urgent, and deliberately not fixed inside the `pregame_total_line` work
 that found it** — the fix rewrites training data for every MLB model, which is
@@ -1454,7 +1454,7 @@ is a retrain-scope change, not a cleanup.
 
 ---
 
-## Two more shuffled-fold splitters, neither fixed here (2026-09-08)
+## [ ] Two more shuffled-fold splitters, neither fixed here (2026-09-08)
 
 Found while fixing the live Poisson CV leak
 (`docs/mlb_volume_efficiency.md` §16). Both are the same shape — `KFold(shuffle=True)`

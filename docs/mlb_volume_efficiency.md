@@ -1191,3 +1191,100 @@ something else is wrong.
   rows, so they do not share this exact leak — but `_oof_predictions` shuffles
   folds for prop dispersion, which is the same shape and unmeasured
   (`docs/followups.md`).
+
+---
+
+## 17. What the honest refits showed — and the third defect (2026-09-08, mike)
+
+§16 fixed the CV. This is what the same three candidates look like refit
+through it, and the one thing that survived.
+
+### 17.1 The CV fix is real, and it is not the whole fix
+
+| honest fit | features | RMSE | MAE | count cal err | Optuna CV NLL | 2025 holdout NLL | gap |
+|---|---|---|---|---|---|---|---|
+| baseline18 | 18 | 3.3565 | 2.4898 | 0.0507 | 2.5369 | 2.5732 | **+0.036** |
+| B13 | 13 | **3.3252** | **2.4771** | 0.0662 | 2.5166 | 2.5578 | **+0.041** |
+
+Against the leaky fits (§16.1): RMSE 3.5801 -> 3.3565, count calibration error
+0.5383 -> 0.0507, and the CV/holdout gap **0.82 -> 0.04**. The three
+pass/fail conditions stated in §16.5 before these ran:
+
+- CV NLL within ~0.05 of holdout NLL — **passes**, +0.036 and +0.041.
+- in-sample var/mean near 1 — **passes in the sense that matters**: 2.15-2.18,
+  no longer BELOW Poisson, so the memorisation signature is gone. It is not
+  near 1 because the count is genuinely overdispersed (§17.3).
+- fixed-reference gap in the 0.70-0.80 band under ~0.03 — **FAILS**, +0.0504
+  (B13) and +0.0662 (baseline18).
+
+Two of three. Saying so is the point of stating them first.
+
+### 17.2 B13 is the best model on every count metric
+
+**`pregame_total_line` is B13's 4th most important feature**, and B13 carries
+FIVE FEWER features than today's model while beating it on RMSE, MAE and
+qualifying volume. The six season-to-date stats are not merely noisy — once
+the fit is honest, dropping them makes the model better.
+
+That is the change mike approved, and it stands on its own evidence.
+
+### 17.3 The third defect: the Poisson tail really is too tight
+
+§16.2 raised overdispersion and withdrew it, because in-sample the memorising
+model was Poisson-TIGHT. With the leak gone, the dispersion is consistent on
+both sides — in-sample var/mean 2.15, holdout 2.41 — which is what a real
+distributional property looks like as opposed to an artefact of the fit.
+
+Fitting the count family on the TRAINING rows now separates cleanly instead of
+collapsing to a boundary:
+
+| candidate | Poisson train NLL | NB1 train NLL | alpha | NB2 train NLL |
+|---|---|---|---|---|
+| baseline18 | 2.5156 | **2.3255** | 1.2525 | 2.3513 |
+| B13 | 2.5030 | **2.3193** | 1.2208 | 2.3461 |
+
+NB1 (`var = mu*(1+alpha)`) wins, as the flat var/mean ratio across lambda bins
+predicted, and `1 + alpha = 2.22` matches the independently measured 2.15-2.41.
+
+**On the 2025 holdout, priced against the same reference line (pre-game total
+minus runs scored) for every candidate:**
+
+| B13, tail | [0.70,0.80) | [0.80,0.90) | [0.90,1.01) | >=0.70 | states >=0.70 |
+|---|---|---|---|---|---|
+| leaky Poisson (today) | +0.1092 | +0.1344 | +0.0971 | **+0.1112** | 69,857 |
+| honest Poisson | +0.0504 | +0.0676 | +0.0587 | **+0.0586** | 62,838 |
+| honest NB1 | **-0.0202** | **-0.0092** | **+0.0055** | **-0.0095** | **51,661** |
+
+Calibrated in every band, and slightly CONSERVATIVE rather than optimistic.
+Against today's production model on the same measure: **+0.1182 -> -0.0095**.
+
+### 17.4 The volume answer, which nobody had to choose
+
+mike, 2026-09-08: *"We need a aggressive cutoff to guarantee profit, big bets
+not volume."* The qualifying-state count at the same 0.70 floor:
+
+    production today   73,702
+    honest CV          65,457   (-11%)
+    honest CV + NB1    51,661   (-30%)
+
+**No threshold was moved to get this.** An overconfident tail is precisely
+what pushes states over 0.70; an honest one pulls them back toward 0.5. The
+volume cut falls out of correcting the probability, which is a better answer
+than picking a number, because it removes the states that never deserved to
+qualify rather than the ones at the bottom of an arbitrary ranking.
+
+### 17.5 Not done, and why
+
+- **The NB tail is measured, NOT implemented.** `_poisson_over_prob` is shared
+  with the K-prop models, so it needs a sibling plus an artifact-carried alpha,
+  and that is a third change beyond the approved swap. Shape when approved:
+  alpha in the artifact dict, `live_scorer` reads `artifact.get("dispersion")`
+  and falls back to Poisson when absent, so every existing artifact — props
+  included — is untouched.
+- **alpha here was fit on IN-SAMPLE training predictions.** It calibrated (and
+  slightly conservatively), but `_oof_predictions`' own docstring argues
+  dispersion belongs out-of-fold. A shipped version should fit alpha on
+  out-of-fold predictions from the grouped split and re-check that it does not
+  overshoot into under-confidence.
+- **The cut must be re-swept.** 0.70 / 0.14 / 0.32 were swept on the leaked
+  probabilities. ~70 settled BETs cannot re-sweep them.
