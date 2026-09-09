@@ -239,7 +239,7 @@ What had not been used: DK's earlier snapshots, DK's own alternate ladders,
 DK's line movement as a target, and a nonlinear learner over the market
 features. Each is now graded.
 
-### 7a. The earlier snapshots: t72, t48, t24
+### 7a. The other snapshots: t72, t48, t24, t1
 
 `nfl_prop_backtest --all --seasons 2023 2024 2025 --snapshot <type>`, the
 models unchanged, live cuts, DK price at that snapshot:
@@ -249,8 +249,11 @@ models unchanged, live cuts, DK price at that snapshot:
 | t72 (3 days out) | 8 markets | receptions +3.2% (322) | rec_yards −9.2% (189) | none |
 | t48 | 9 markets | receptions +3.6% (471) | pass_yards −12.0% (128) | none |
 | t24 (2024-25 only) | 8 markets | receptions +1.2% (199) | pass_yards −23.5% (32) | none |
+| t1 (2024-25 only; 2,928 DK rows, 115 bets across the ten) | 8 markets | pass_yards +41.7% (8) | pass_tds −1.6% (3) | none; the largest cell is receptions +14.6% (52), CI (−9.6, +40.0) |
 
-Earlier lines are not softer for these models.
+Earlier lines are not softer for these models, and the one-hour snapshot is
+too thin to say anything on its own (rush_attempts, rush_rec_yards, tackles
+and sacks have no t1 rows at all).
 
 ### 7b. The model does predict where DraftKings will move its line
 
@@ -325,7 +328,7 @@ Nothing. `player_prop_odds` holds **zero** NFL rows with
 `snapshot_type='in_play'`, in production and in the cache, so the live-prop
 programme CLAUDE.md names as the priority has no recorded history to build
 on either; that is a recording gap, not a feature for these ten. Every
-DraftKings prop data set this repo holds -- the main line at four pre-game
+DraftKings prop data set this repo holds -- the main line at five pre-game
 snapshots, the alternate ladder, the line's own movement, the other books'
 prices around it -- has now been graded against these models across three
 seasons.
