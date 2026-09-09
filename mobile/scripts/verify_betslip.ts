@@ -39,6 +39,7 @@ import {
   BETSLIP_BAR_STAKE,
   betslipSummary,
   computeParlayMetrics,
+  handoffAtBook,
   handoffBookFor,
   legFromPick,
   makeCustomLeg,
@@ -216,6 +217,44 @@ const hPayout = handoffBookFor(legs, ['draftkings', 'fanduel']);
 check('multi-book: with both covering, the better payout takes the button',
   hPayout.book === 'fanduel',
   `got ${hPayout.book}`);
+
+// ── handoffAtBook (a tapped "Place this bet at" tile) ───────────────────────
+// The tile IS the bet control now (Matt, 2026-09-08), so the tap names the
+// book. handoffBookFor's DraftKings fallback must NOT apply here: the tile the
+// member tapped showed betmgm's own coverage, and opening DraftKings instead
+// would answer a question they did not ask.
+
+const tapMgm = handoffAtBook(legs, 'betmgm');
+check('a tapped partial tile hands off at THAT book, no DK fallback',
+  tapMgm.book === 'betmgm' && tapMgm.priced === 1 && tapMgm.total === 2,
+  `got ${tapMgm.book} ${tapMgm.priced}/${tapMgm.total}`);
+check('a tapped partial tile marks the leg that book does not post',
+  tapMgm.posted[0] === true && tapMgm.posted[1] === false);
+
+const tapFd = handoffAtBook(legs, 'fanduel');
+check('a tapped full tile carries that book’s own links',
+  tapFd.book === 'fanduel' && tapFd.priced === 2 &&
+    tapFd.links[0] === 'fd://leg1' && tapFd.links[1] === 'fd://leg2');
+check('a tapped DK tile carries the stored DK links',
+  handoffAtBook(legs, 'draftkings').links[1] === 'dk://leg2');
+
+// The sheet lists THAT BOOK's prices, not DraftKings'. Before this the sheet
+// under a FanDuel tile showing +648 listed DK's leg numbers (UX review).
+check('a tapped tile carries that book’s own per-leg prices',
+  tapFd.prices[0] === -105 && tapFd.prices[1] === 100,
+  `got ${tapFd.prices.join(',')}`);
+check('the DK tile carries the STORED scored prices, not a fresh snapshot',
+  handoffAtBook(legs, 'draftkings').prices[0] === -110 &&
+    handoffAtBook(legs, 'draftkings').prices[1] === -120);
+check('a leg the book does not post has no price rather than DK’s',
+  tapMgm.prices[0] === -115 && tapMgm.prices[1] === null,
+  `got ${tapMgm.prices.join(',')}`);
+
+const tapNone = handoffAtBook(legs, 'espnbet');
+check('a tile that prices nothing still hands off there, with every leg unposted',
+  tapNone.book === 'espnbet' && tapNone.priced === 0 && tapNone.total === 2 &&
+    tapNone.posted.every((p) => p === false) && tapNone.links.every((l) => l == null) &&
+    tapNone.prices.every((p) => p == null));
 
 // ── savedHandoffBookFor (saved-parlay snapshots) ────────────────────────────
 // Same honesty rule as handoffBookFor, but off the persisted bookLinks
