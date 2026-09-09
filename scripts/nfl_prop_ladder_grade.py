@@ -72,8 +72,18 @@ def _nn(v):
     return None if f != f else f
 
 
-def build(min_edge: float, ref: str, soft_books: tuple[str, ...],
-          snapshot: str = "open"):
+_BOARD_CACHE: dict = {}
+
+
+def candidates(ref: str, soft_books: tuple[str, ...],
+               snapshot: str = "open"):
+    """Every (proposition, side) with its edge and outcome, cut-INDEPENDENT.
+
+    SEPARATED FROM THE CUT because the board is 5.5M rows and the sweep asks
+    the same question at four thresholds. Rebuilding per cut made it four full
+    passes, and the first attempt died on a timeout before printing anything --
+    an analysis that cannot finish is not a slow analysis, it is no analysis.
+    """
     local_store.activate()
     odds = local_store.read_table("nfl_prop_odds")
     act = {(norm_player_name(r.player_name), r.game_id): r
@@ -129,7 +139,7 @@ def build(min_edge: float, ref: str, soft_books: tuple[str, ...],
         elif book in soft_books and not is_alt and op is not None and up is not None:
             soft[prop].append((line, book, op, up))
 
-    staged: dict = {}
+    out: list = []
     diag = defaultdict(int)
     for prop, quotes in soft.items():
         gid, player, bm = prop
@@ -176,17 +186,26 @@ def build(min_edge: float, ref: str, soft_books: tuple[str, ...],
                 if imp is None:
                     continue
                 edge = fair - imp
-                if edge < min_edge:
-                    continue
                 won = went_over if side == "over" else not went_over
-                # ONE BET PER PROPOSITION, as models.nfl_prop_market.best_per_prop
-                # does: the same prop at six books is six copies of one opinion.
-                k = (gid, player, bm, side)
-                p = profit(price, won)
-                if k not in staged or edge > staged[k][0]:
-                    staged[k] = (edge, season, p)
+                out.append((gid, player, bm, side, edge, season,
+                            profit(price, won)))
 
-    return [(s, p) for _e, s, p in staged.values()], diag
+    return out, diag
+
+
+def select(cands, min_edge: float):
+    """ONE BET PER PROPOSITION at this cut, as best_per_prop does for the live
+    card: the same prop at six books is six copies of one opinion, and counting
+    them separately inflates the bet count and correlates the outcomes.
+    """
+    best: dict = {}
+    for gid, player, bm, side, edge, season, p in cands:
+        if edge < min_edge:
+            continue
+        k = (gid, player, bm, side)
+        if k not in best or edge > best[k][0]:
+            best[k] = (edge, season, p)
+    return [(s, p) for _e, s, p in best.values()]
 
 
 def grade(rows, rng, label):
@@ -222,11 +241,12 @@ def main() -> None:
     print("-" * 104)
 
     cuts = [a.min_edge] if a.min_edge is not None else [0.03, 0.04, 0.05, 0.06]
+    soft = tuple(b for b in mk.SOFT_BOOKS if b != a.ref)
+    cands, diag = candidates(a.ref, soft)
     for cut in cuts:
-        soft = tuple(b for b in mk.SOFT_BOOKS if b != a.ref)
-        rows, diag = build(cut, a.ref, soft)
-        grade(rows, rng, f"cut {cut:.0%}")
-    print(f"\n  diagnostics: {dict(diag)}")
+        grade(select(cands, cut), rng, f"cut {cut:.0%}")
+    print()
+    print("  diagnostics:", dict(diag))
 
     if a.placebo:
         print("\nTHE PLACEBO — a retail book as the ladder reference")
@@ -235,8 +255,8 @@ def main() -> None:
         print("-" * 104)
         for stand_in in ("draftkings", "fanduel", "espnbet", "hardrockbet"):
             soft = tuple(b for b in mk.SOFT_BOOKS if b != stand_in)
-            rows, _d = build(0.05, stand_in, soft)
-            grade(rows, rng, stand_in)
+            c, _d = candidates(stand_in, soft)
+            grade(select(c, 0.05), rng, stand_in)
 
 
 if __name__ == "__main__":
