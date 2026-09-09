@@ -1438,9 +1438,10 @@ def test_the_restate_producer_keeps_the_first_bet_only():
     """1c: `picks` can hold more than one BET per identity from before the lock
     was general, so the earliest created_at is the bet of record -- the same row
     _new_signals picks, or a restatement would correct a pick nobody was given."""
+    from tracking.publish_keys import key_partition_sql, lock_key_sql
     sql = _sql_for("_locked_signals")
-    assert "DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))" in sql
-    assert "|| ':' || p.model_id" in sql, "lock_key must be synthesised as capture minted it"
+    assert f"DISTINCT ON ({key_partition_sql()})" in sql
+    assert lock_key_sql() in sql, "lock_key must be synthesised as capture minted it"
 
 
 def test_the_restate_producer_has_no_started_game_guard():

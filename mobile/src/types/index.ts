@@ -36,6 +36,13 @@ export interface Pick {
   injury_detail: string | null;
   signal_type: SignalType;
   confidence_tier: ConfidenceTier;
+  /** Server-side display state, NOT a settlement. 'VOID' means the row is a
+   *  pick the model should never have PRODUCED — fired outside its validated
+   *  window, or on a game that was never eligible — retired by
+   *  scripts/void_picks.py (CLAUDE.md §1c). The row survives as the evidence
+   *  the bug happened, and must never be drawn as a standing bet. NCAAF also
+   *  uses this column for 'OK' / 'GONE', which are ordinary live states. */
+  condition_status: string | null;
   result: PickResult;
   profit_flat: number | null;
   profit_kelly: number | null;

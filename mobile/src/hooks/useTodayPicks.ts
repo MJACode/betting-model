@@ -13,14 +13,26 @@ import type { EnrichedPick } from '@/types';
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
 const UFC_AHEAD_DAYS = 7;
 /**
- * How far ahead the NFL board looks. Must cover the OPENER's lock window, not
- * just the wind card's: the opener card takes bets from T-7 (daily_opener_card
- * LEAD_HI_DAYS) and never re-prices them, so a 5-day window left a pick locked
- * at T-7/T-6 invisible for up to two days — precisely when its stale number is
- * still gettable. 8 = the full T-7 window plus a day of ET/UTC-boundary margin.
- * (The wind card only reaches 4 days out, so it was always covered.)
+ * How far ahead the NFL board looks. Must cover the WIDEST window any NFL
+ * producer can write a pick in, because Discord and push have NO date horizon
+ * at all (CLAUDE.md §1b) — whatever this number is short by is a pick a member
+ * gets in the channel and cannot find in the app.
+ *
+ * 11, not 8 (2026-09-09). 8 covered the opener's T-7 lock window plus a day of
+ * ET/UTC margin, which was the widest producer when it was written. It is not
+ * any more: `scheduler.NFL_POLL_HORIZON_DAYS` is 10 and
+ * `config.NFL_PROP_WINDOW_HOURS` is 240h — also 10 — so the prop card prices,
+ * and the scorer can lock, a game ten days out. Measured against production
+ * the day this changed, nothing was actually beyond 8 days, so this is closing
+ * the gap before it costs a pick rather than after: the last time these two
+ * windows were allowed to differ, two Week 1 wind picks 9 days out reached the
+ * app and nothing else, and it took a month to notice.
+ *
+ * 11 = the 10-day poll/prop horizon plus one day of ET/UTC-boundary margin.
+ * Raise this whenever a server-side NFL horizon is raised; never lower it below
+ * the largest of them.
  */
-const NFL_AHEAD_DAYS = 8;
+const NFL_AHEAD_DAYS = 11;
 /**
  * Mirrors config.NCAAF_SCORE_AHEAD_DAYS. NCAAF is scored as far ahead as
  * DraftKings has a line (Matt, 2026-09-07: "whenever lines are released"),

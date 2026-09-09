@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 268 - the NFL board did not line up with Discord: one lock_key served a whole game's nfl_prop_market props (8 BETs, 7 keys - one pick could never publish), and six VOIDED wind picks were still green in the app; the key moved to tracking/publish_keys.py with the ledger migrated first |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 266 - the live cut re-swept on the new model over 47 slates: 0.70 -> 0.72, ~1.9 bets a slate, chosen as the centre of a plateau; scripts/live_cut_sweep.py |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 267 - the profitable NFL prop model was tackles all along, grading the wrong stat: solo+with_assist+assists matches the box score, and on it the model is +50.24u over 363 bets, positive all three seasons; at DraftKings nothing else beats a line the book prices flat; pass attempts at the soft books is a two-of-three lead |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 267 - the live cut re-swept on the new model over 47 slates: 0.70 -> 0.72, ~1.9 bets a slate, the centre of a plateau; scripts/live_cut_sweep.py; a shared-checkout collision recorded |

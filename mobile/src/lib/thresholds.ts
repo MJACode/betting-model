@@ -16,7 +16,11 @@ import type { Pick as PickRow } from '@/types';
 export type ActionFilterable = Pick<
   PickRow,
   'model_id' | 'model_probability' | 'edge' | 'dk_odds' | 'signal_type'
->;
+  // OPTIONAL on purpose. The settled-pick reads (SETTLED_PICK_COLUMNS) don't
+  // select this column and don't need to — a VOID row is already excluded from
+  // every record by `result = 'NO_ACTION'`. Requiring it here would only force
+  // a wider select on the screens that cache thousands of graded rows.
+> & { condition_status?: string | null };
 
 export interface ModelThreshold {
   min_prob: number;
@@ -462,6 +466,23 @@ export function isUnlockedPreview(
 
 export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
+  // A VOIDED pick is not an action either (CLAUDE.md §1c). It is a row the
+  // model should never have produced — fired outside its validated window, or
+  // on a game that was never eligible — kept deliberately, because deleting it
+  // would destroy the evidence of the bug that is usually how it was found.
+  //
+  // WHY THIS IS A PARITY FIX, not a display tweak (2026-09-09). The six Week 1
+  // `nfl_wind_totals` picks were voided on 09-07 and REMOVED FROM DISCORD by
+  // hand ("I deleted older wind picks from the discord and they should not be
+  // stored as official picks"). Nothing carried that to the app, which has no
+  // concept of condition_status at all, so all six were still drawing as green,
+  // stakeable BETs for the 09-13 slate — the app and Discord showing different
+  // picks, which is the one thing §1b says they must never do. The publishers
+  // now apply the same exclusion in SQL.
+  //
+  // ONLY 'VOID'. NCAAF writes 'OK' / 'GONE' in this column for ordinary live
+  // display states, and those rows are real picks.
+  if (p.condition_status === 'VOID') return false;
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.
   if (RETIRED_MODELS.has(p.model_id)) return false;

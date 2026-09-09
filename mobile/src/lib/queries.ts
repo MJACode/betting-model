@@ -346,7 +346,7 @@ const PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
   'model_probability, model_probability_cal, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
-  'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +
+  'injury_detail, signal_type, confidence_tier, condition_status, result, profit_flat, ' +
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
   'is_live, inning_at_pick, score_diff_at_pick, ' +
   'public_bet_pct, public_money_pct, ' +
