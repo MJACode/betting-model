@@ -20,6 +20,21 @@
  *   NFL   points allowed/G   n=32   p25 20.07  median 23.09  p75 25.06
  *   NCAAF EPA/play allowed   n=136  p25 0.098  median 0.155  p75 0.203
  *   NBA   defensive rating   n=30   p25 110.42 median 112.40 p75 115.55
+ *
+ * AND THE JOIN WAS MEASURED, not assumed — the column silently returns to
+ * dashes if `games.home_team/away_team` and `team_stats_board.team` disagree,
+ * which is the exact failure this change exists to end and is invisible from
+ * inside a fixture. Slate teams found in the team-stats read, 2026-09-09:
+ *
+ *   NFL     32 of 32     (week 1)
+ *   NBA     30 of 30
+ *   NCAAF  133 of 211    (Saturday 09-12)
+ *
+ * The 78 NCAAF misses are FCS and lower-division visitors — Alabama State,
+ * Arkansas Baptist, Bluffton — which have no rating because the read covers the
+ * 137 FBS programs. An FBS player facing one grades to a dash, which is the
+ * honest answer: we hold no rating for that defence. It is NOT a join bug, and
+ * the distinction matters because the two look identical on screen.
  */
 
 import { readFileSync } from 'node:fs';
@@ -27,6 +42,8 @@ import { join } from 'node:path';
 
 import {
   defenceMetricLabel,
+  defenceMetricSpoken,
+  gradeColorDiscriminates,
   gradeOpponentDefence,
   gradesOnDefence,
   normalCdf,
@@ -41,8 +58,8 @@ function check(name: string, cond: boolean, detail = '') {
   console.log(`[${cond ? 'PASS' : 'FAIL'}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
-const grade = (sport: string, opp: Record<string, number> | null, team = 'OPP') =>
-  gradeOpponentDefence(sport, opp, team);
+const grade = (sport: string, opp: Record<string, number> | null, team = 'OPP', season?: number) =>
+  gradeOpponentDefence(sport, opp, team, season);
 
 function main() {
   // ── which sports answer at all ─────────────────────────────────────────────
@@ -97,8 +114,33 @@ function main() {
   const neSide = grade('NFL', { points_against_pg: 16.9 }, 'SEA');
   check('a SEA player faces NE and grades D or worse', ['D+', 'D', 'D-', 'F'].includes(seaSide?.grade ?? ''), `${seaSide?.grade}`);
   check('a NE player faces SEA and grades D or worse', ['D+', 'D', 'D-', 'F'].includes(neSide?.grade ?? ''), `${neSide?.grade}`);
-  check('the cell says what it graded on', seaSide?.text === 'vs NE · 17.9 pts allowed/g', `${seaSide?.text}`);
-  check('the metric is named for the reader', defenceMetricLabel('NFL') === 'pts allowed/g');
+  // SUBJECT, number, season. MLB's version names a person, so its subject is
+  // obvious; a bare team-season rate under a header reading "Tonight's matchup"
+  // can be taken for the player's own number (UX review, 2026-09-09).
+  const dated = grade('NFL', { points_against_pg: 17.86 }, 'NE', 2025);
+  check('the cell names whose number it is, and from when',
+    dated?.text === 'vs NE · NE allows 17.9 pts/g (2025)', `${dated?.text}`);
+  check('and the spoken form is words, not a slash',
+    dated?.fact === 'NE 17.9 points allowed per game (2025)', `${dated?.fact}`);
+  check('with no season it makes no claim about one', !/\(\d{4}\)/.test(seaSide?.text ?? ''), `${seaSide?.text}`);
+  // The visible label is the Teams board's own wording for the same number, so
+  // one stat is not two idioms on one tab.
+  check('the column label matches teamStatCatalog', defenceMetricLabel('NFL') === 'Allowed/G');
+  check('NCAAF too', defenceMetricLabel('NCAAF') === 'EPA/play Def');
+  check('and NBA', defenceMetricLabel('NBA') === 'Def Rtg');
+  check('the tooltip gets a sentence, not an abbreviation',
+    defenceMetricSpoken('NFL') === 'points allowed per game'
+    && defenceMetricSpoken('NCAAF') === 'EPA per play allowed'
+    && defenceMetricSpoken('NBA') === 'defensive rating');
+
+  // ── the colour ramp goes quiet when it cannot discriminate ─────────────────
+  // Tonight is the case: both defences top-decile, every row D-, and gradeColor
+  // would paint ~110 rows one red 60pt from a live price.
+  check('a column of one band is not coloured',
+    !gradeColorDiscriminates(['D-', 'D-', 'D-', 'D']));
+  check('a column that spans bands is', gradeColorDiscriminates(['D-', 'B+', 'C']));
+  check('one row is never coloured on its own', !gradeColorDiscriminates(['A+']));
+  check('nulls do not count as a band', !gradeColorDiscriminates(['D-', null, null]));
 
   // ── an unknown defence is a dash, never a C ────────────────────────────────
   const unknown = grade('NFL', null, 'NE');
@@ -111,6 +153,22 @@ function main() {
   const m = read('src/lib/matchup.ts');
   const q = read('src/lib/queries.ts');
   const s = read('src/screens/StatsScreen.tsx');
+  const tb = read('src/components/TeamsBoard.tsx');
+  check('the football grade names the season it fell back to',
+    /the \$\{defenceSeason\} season/.test(s) || /defenceSeason != null/.test(s));
+  check('the tooltip is built per sport, not one MLB paragraph',
+    /gradesOnDefence\(sport\)\s*\n?\s*\?\s*`Graded on \$\{defenceMetricSpoken\(sport\)\}/.test(s));
+  check('and the dash sentence no longer talks about a starter on those sports',
+    /no matchup data for this row yet/.test(s));
+  check('the slate gate is an identity, not a boolean read stale on a switch',
+    /slateFor !== sport/.test(s) && !/slateReady/.test(s));
+  check('the slate chip is announced busy, not dimmed',
+    /busy=\{loading\}/.test(s) && !/label=\{slateLabel\}[\s\S]{0,200}disabled=\{loading\}/.test(s));
+  check('the team-stats read reports which season it used',
+    /\{ season: s, rows: data as unknown as TeamStatsRow\[\] \}/.test(q));
+  check('and the Teams board labels its header from that, not from what it asked for',
+    /const \{ season: used, rows: data \} = await fetchTeamStats/.test(tb)
+    && /setSeason\(used\)/.test(tb));
   check('the anchors carry the measurement that produced them',
     /Measured 2026-09-09 against production/.test(m) && /n=32/.test(m) && /n=136/.test(m));
   check('NHL is documented as absent-on-purpose, not forgotten',
@@ -121,7 +179,7 @@ function main() {
   check('the team-stats read falls back a football season',
     /footballSeasonCandidates\(season\)\s*\n?\s*:\s*\[season\]/.test(q));
   check('the board only fetches team stats where it grades on them',
-    /if \(!gradesOnDefence\(sport\)\) \{[\s\S]{0,80}setTeamStats\(\[\]\)/.test(s));
+    /if \(!gradesOnDefence\(sport\)\) \{[\s\S]{0,120}setTeamStats\(\{ season: null, rows: \[\] \}\)/.test(s));
   check('and one helper answers the column for every sport',
     /const matchupFor = useCallback/.test(s) && !/gradeMatchup\(sport, playerType, mu\)/.test(s));
 

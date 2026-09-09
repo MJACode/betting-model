@@ -141,6 +141,24 @@ export function normalCdf(z: number): number {
   return z >= 0 ? 1 - p : p;
 }
 
+/**
+ * Does the grade column span more than one COLOUR on screen?
+ *
+ * `gradeColor` collapses A/B into good, C into mid and D/F into bad, so a
+ * two-team NFL slate whose defences were both top-decile paints every one of
+ * ~110 rows the same red, 60pt from a live price — which reads as a verdict on
+ * the bet rather than a ranking of players. The LETTER is right and stays
+ * (D- on both sides of tonight's opener is true); it is the ramp that has to
+ * go quiet. Same rule, and the same reason, as hitRateColorDiscriminates.
+ */
+export function gradeColorDiscriminates(grades: (MatchupGrade | null)[]): boolean {
+  const bands = grades
+    .filter((g): g is MatchupGrade => g != null)
+    .map((g) => (g.startsWith('A') || g.startsWith('B') ? 'good' : g.startsWith('C') ? 'mid' : 'bad'));
+  if (bands.length < 2) return false;
+  return bands.some((b) => b !== bands[0]);
+}
+
 /** A favourability percentile → its letter. */
 export function gradeFor(score: number | null): MatchupGrade | null {
   if (score == null || !Number.isFinite(score)) return null;
@@ -311,10 +329,36 @@ export function gradeMatchup(
 // is a number nobody measured. It grades as null (a dash) until those rows
 // exist, which is the honest answer and the one this file already gives for an
 // unknown starter.
-const DEFENCE_ANCHORS: Record<string, { key: string; median: number; sigma: number; label: string }> = {
-  NFL: { key: 'points_against_pg', median: 23.085, sigma: 3.695, label: 'pts allowed/g' },
-  NCAAF: { key: 'epa_def', median: 0.155, sigma: 0.0778, label: 'EPA/play allowed' },
-  NBA: { key: 'def_rating', median: 112.395, sigma: 3.807, label: 'def rtg' },
+// `label` is what the cell prints; `spoken` is what VoiceOver says, for the
+// same reason this file already turns "(R)" into "right-handed" — an
+// abbreviation and a slash are read out as punctuation. `label` matches the
+// Teams board's own wording for the identical number (teamStatCatalog), so one
+// stat is not two idioms on one tab.
+const DEFENCE_ANCHORS: Record<
+  string,
+  {
+    key: string; median: number; sigma: number; dp: number;
+    /** Column wording, matching teamStatCatalog for the same number. */
+    label: string;
+    /** The metric as a sentence, for the tooltip and for VoiceOver. */
+    spoken: string;
+    /** Sentence form for the cell's fact: "NE allows 17.9 pts/g". */
+    verb: string;
+    unit: string;
+  }
+> = {
+  NFL: {
+    key: 'points_against_pg', median: 23.085, sigma: 3.695, dp: 1,
+    label: 'Allowed/G', spoken: 'points allowed per game', verb: 'allows', unit: 'pts/g',
+  },
+  NCAAF: {
+    key: 'epa_def', median: 0.155, sigma: 0.0778, dp: 3,
+    label: 'EPA/play Def', spoken: 'EPA per play allowed', verb: 'allows', unit: 'EPA/play',
+  },
+  NBA: {
+    key: 'def_rating', median: 112.395, sigma: 3.807, dp: 1,
+    label: 'Def Rtg', spoken: 'defensive rating', verb: '', unit: 'def rtg',
+  },
 };
 
 /** Does this sport grade a spot off the opponent's defence? */
@@ -325,6 +369,11 @@ export function gradesOnDefence(sport: string): boolean {
 /** How the grade is worded on screen, for the sports that use one. */
 export function defenceMetricLabel(sport: string): string | null {
   return DEFENCE_ANCHORS[sport]?.label ?? null;
+}
+
+/** The same metric as a sentence, for the column's tooltip. */
+export function defenceMetricSpoken(sport: string): string | null {
+  return DEFENCE_ANCHORS[sport]?.spoken ?? null;
 }
 
 /**
@@ -339,6 +388,8 @@ export function gradeOpponentDefence(
   sport: string,
   opponent: Record<string, unknown> | null | undefined,
   opponentTeam: string | null,
+  /** The season the opponent's row is from — printed, never assumed. */
+  season?: number | null,
 ): MatchupInfo | null {
   const anchor = DEFENCE_ANCHORS[sport];
   if (!anchor) return null;
@@ -353,12 +404,20 @@ export function gradeOpponentDefence(
     };
   }
   const score = normalCdf(z(value, anchor));
-  const shown = anchor.key === 'epa_def' ? value.toFixed(3) : value.toFixed(1);
+  const shown = value.toFixed(anchor.dp);
+  // SUBJECT, then number, then the season it came from. MLB's version names a
+  // person ("S. Gray 5.90 ERA") so its subject is obvious; a bare team-season
+  // rate under a header reading "Tonight's matchup" can be taken for the
+  // player's own number or for a projection of this game (UX review).
+  const seasonNote = season != null ? ` (${season})` : '';
+  const claim = [opponentTeam, anchor.verb, shown, anchor.unit].filter(Boolean).join(' ');
   return {
     grade: gradeFor(score),
     score,
-    text: opponentTeam ? `vs ${opponentTeam} · ${shown} ${anchor.label}` : `${shown} ${anchor.label}`,
-    fact: `${shown} ${anchor.label}`,
+    text: opponentTeam ? `vs ${opponentTeam} · ${claim}${seasonNote}` : `${claim}${seasonNote}`,
+    // Spoken: words, not a slash. Same reason this file says "right-handed"
+    // rather than "(R)".
+    fact: `${opponentTeam ? `${opponentTeam} ` : ''}${shown} ${anchor.spoken}${seasonNote}`,
     row: {} as TonightMatchupRow,
   };
 }

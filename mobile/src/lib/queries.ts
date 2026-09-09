@@ -59,6 +59,7 @@ import type {
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
+  TeamSeasonStats,
   TeamStatsRow,
   TonightMatchupRow,
   TrackRecordDailyRow,
@@ -1986,8 +1987,15 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
 export async function fetchTeamStats(
   sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
-): Promise<TeamStatsRow[]> {
-  if (sport === 'UFC' || sport === 'GOLF') return [];
+): Promise<TeamSeasonStats> {
+  if (sport === 'UFC' || sport === 'GOLF') return { season: null, rows: [] };
+  // RETURNS THE SEASON IT ACTUALLY USED, and that is not decoration. The Teams
+  // board prints "TEAM · {season}" over these numbers and used to run the
+  // fallback itself, one call per candidate; moving the loop in here without
+  // reporting back would have had its FIRST call succeed on 2025 rows and the
+  // header label them 2026 — last season's numbers under this season's name, on
+  // the NFL and NCAAF boards, today (UX review, 2026-09-09).
+  //
   // Football falls back a season for the same reason every other football read
   // does: the label is the year the season STARTS, so on opening night the
   // current label has no rows at all. Measured 2026-09-09 —
@@ -2002,9 +2010,11 @@ export async function fetchTeamStats(
       p_season: s,
     });
     if (error) throw error;
-    if (data && (data as unknown[]).length) return data as unknown as TeamStatsRow[];
+    if (data && (data as unknown[]).length) {
+      return { season: s, rows: data as unknown as TeamStatsRow[] };
+    }
   }
-  return [];
+  return { season: null, rows: [] };
 }
 
 /**

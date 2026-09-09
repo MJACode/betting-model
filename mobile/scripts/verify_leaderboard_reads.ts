@@ -273,12 +273,17 @@ async function main() {
 
   // The screen has to wait for the slate, or its first read is the whole
   // league and is thrown away the moment the slate lands.
-  check('the board waits for the slate before reading', /if \(!slateReady\) return;/.test(s));
-  check('the slate releases the board even when it fails', /\.finally\(\(\) => \{[\s\S]{0,120}setSlateReady\(true\)/.test(s));
+  // GATED ON WHICH SPORT the slate is for, not on a boolean. As a boolean it was
+  // read stale on a sport switch — the reset and the load effect land in the
+  // same commit, so the effect still saw `true` and fired a read narrowed by
+  // the OUTGOING sport's teams (UX review, 2026-09-09).
+  check('the board waits for THIS sport\'s slate before reading', /if \(slateFor !== sport\) return;/.test(s));
+  check('and the old boolean is gone, not shadowed', !/slateReady/.test(s));
+  check('the slate releases the board even when it fails', /\.finally\(\(\) => \{[\s\S]{0,120}setSlateFor\(sport\)/.test(s));
   // …and even when it never settles at all: supabase-js has no fetch timeout,
   // so `.finally` is not a guarantee. Without the bound the tab parks on a
   // spinner with no Retry (error stays null) and no way back.
-  check('the slate gate is BOUNDED', /setTimeout\(\(\) => \{[\s\S]{0,80}setSlateReady\(true\)[\s\S]{0,40}SLATE_GATE_MS\)/.test(s));
+  check('the slate gate is BOUNDED', /setTimeout\(\(\) => \{[\s\S]{0,80}setSlateFor\(sport\)[\s\S]{0,40}SLATE_GATE_MS\)/.test(s));
   check('and the bound is cleared on unmount', /clearTimeout\(release\)/.test(s));
 
   // A read is several sequential requests now, so a response can land on a
@@ -293,9 +298,17 @@ async function main() {
     && (s.match(/rowsAreStale \? EMPTY_ROWS :/g) ?? []).length === 2);
   check('and a row-shaped placeholder stands in while it loads',
     (s.match(/<BoardSkeleton \/>/g) ?? []).length === 2 && /accessibilityLabel="Loading players"/.test(s));
-  // The slate chip is the one chip whose tap is a network read.
-  check('the slate chip cannot queue a second whole-league read', /label=\{slateLabel\}[\s\S]{0,200}disabled=\{loading\}/.test(s));
-  check('and it tells VoiceOver it is busy', /\$\{slateLabel\}, loading/.test(s));
+  // The slate chip is the one chip whose tap is a network read. It is
+  // ANNOUNCED busy, never dimmed: `disabled` renders tertiary text, and on an
+  // active chip that is tertiary on the tint fill — which erases the on/off
+  // affordance of the one control that changes the population of the board
+  // (UX_REVIEW §5). A second tap is harmless because the read is stamped.
+  check('the slate chip is announced busy', /busy=\{loading\}/.test(s));
+  check('and never dimmed while active', !/label=\{slateLabel\}[\s\S]{0,300}disabled=\{loading\}/.test(s));
+  check('and it tells VoiceOver so', /\$\{slateLabel\}, loading/.test(s));
+  check('FilterChip keeps the active fill when busy',
+    /busy\?: boolean;/.test(read('src/components/filters/FilterChip.tsx'))
+    && /accessibilityState=\{\{ selected: active, disabled, busy \}\}/.test(read('src/components/filters/FilterChip.tsx')));
   for (const fn of ['fetchSeasonStatValues', 'fetchRecentGames', 'fetchWindowTotals']) {
     check(`${fn} is handed the slate teams`, new RegExp(`${fn}\\([^)]*, teams\\)`).test(s));
   }

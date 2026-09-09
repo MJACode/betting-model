@@ -815,6 +815,22 @@ export interface SeasonStatValuesRow {
  * RPC; every metric column is optional because the set varies by sport (a
  * baseball row has no offensive rating, a hockey row has no wRC+).
  */
+/**
+ * A team-stats read, WITH the season it came from.
+ *
+ * Football labels a season by the year it starts, so on opening night the
+ * current label has no rows and the read falls back one year. The season has to
+ * travel with the rows because two surfaces write it down — the Teams board's
+ * "TEAM · 2025" header and the Stats tab's matchup tooltip — and a fallback
+ * whose result is silent is how last season's numbers end up under this
+ * season's name.
+ */
+export interface TeamSeasonStats {
+  /** The season the rows are from, or null when there were none. */
+  season: number | null;
+  rows: TeamStatsRow[];
+}
+
 export interface TeamStatsRow {
   team: string;
   conference: string | null; // NCAAF only

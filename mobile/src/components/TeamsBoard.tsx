@@ -178,16 +178,14 @@ export function TeamsBoard({
     setLoading(true);
     setError(null);
     try {
-      for (const s of seasonCandidates()) {
-        const data = await fetchTeamStats(sport, s);
-        if (data.length) {
-          setRows(data);
-          setSeason(s);
-          return;
-        }
-      }
-      setRows([]);
-      setSeason(null);
+      // ONE call, and the season comes back with the rows. This used to loop
+      // the candidates itself; fetchTeamStats owns the fallback now, so asking
+      // for 2026 can return 2025 rows and only the reply knows which — label
+      // the header from that, never from what we asked for (UX review,
+      // 2026-09-09).
+      const { season: used, rows: data } = await fetchTeamStats(sport, seasonCandidates()[0]);
+      setRows(data);
+      setSeason(used);
     } catch (e: unknown) {
       setError(errorText(e));
       setRows([]);

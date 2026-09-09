@@ -73,10 +73,13 @@ import {
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import {
   buildMatchupMap,
+  defenceMetricSpoken,
+  gradeColorDiscriminates,
   gradeMatchup,
   gradeOpponentDefence,
   gradeSpoken,
   gradesOnDefence,
+  type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
@@ -121,6 +124,7 @@ import type {
   RecentGameRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
+  TeamSeasonStats,
   TeamStatsRow,
   TonightMatchupRow,
   RootStackParamList,
@@ -362,13 +366,20 @@ export function StatsScreen() {
   // land — otherwise the first load reads the whole league (54,687 rows on a
   // college Saturday) and is thrown away a moment later. Settled, not
   // successful: a slate we could not reach still releases the board.
-  const [slateReady, setSlateReady] = useState<boolean>(false);
+  // WHICH SPORT the slate belongs to, not whether one arrived. As a boolean it
+  // was read stale on a sport switch: `setSlateReady(false)` and the load effect
+  // land in the same commit, so the effect's closure still saw `true` and fired
+  // a read narrowed by the OUTGOING sport's teams — NCAAF school names sent at
+  // an NFL read, or the whole-league 12,850-row one this gate exists to avoid
+  // (UX review, 2026-09-09). The stamping below means no wrong rows were ever
+  // painted; the cost was a wasted multi-page request and a slower first paint.
+  const [slateFor, setSlateFor] = useState<string | null>(null);
   // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
   // grade a spot off the probable starter or the lineup; every other sport had
   // a column of dashes, so a toughness filter over it would have filtered
   // nothing (Matt, 2026-09-09). Failure-tolerant: no team stats is an ungraded
   // column, never a wrong one.
-  const [teamStats, setTeamStats] = useState<TeamStatsRow[]>([]);
+  const [teamStats, setTeamStats] = useState<TeamSeasonStats>({ season: null, rows: [] });
   // The slate's raw games. The prop-odds view has no sport column and
   // `player_points` is both an NBA and a WNBA market, so the odds read is
   // bounded to these game ids rather than to a date alone.
@@ -424,7 +435,6 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = todayET();
-    setSlateReady(false);
     // BOUNDED, because .finally() is not a guarantee that anything happens.
     // The supabase client is created with no fetch timeout, so a request that
     // hangs never settles: no `.finally`, no `error` to render the Retry banner
@@ -434,7 +444,7 @@ export function StatsScreen() {
     // slateTeams() returns null for an empty slate, so the read is the
     // whole-league one, which is exactly master's behaviour.
     const release = setTimeout(() => {
-      if (!cancelled) setSlateReady(true);
+      if (!cancelled) setSlateFor(sport);
     }, SLATE_GATE_MS);
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
@@ -448,7 +458,7 @@ export function StatsScreen() {
         setSlateGames([]);
       })
       .finally(() => {
-        if (!cancelled) setSlateReady(true);
+        if (!cancelled) setSlateFor(sport);
       });
     return () => {
       cancelled = true;
@@ -460,16 +470,16 @@ export function StatsScreen() {
   // so the sports that already grade off a matchup view pay nothing for it.
   useEffect(() => {
     if (!gradesOnDefence(sport)) {
-      setTeamStats([]);
+      setTeamStats({ season: null, rows: [] });
       return;
     }
     let cancelled = false;
     fetchTeamStats(sport, SEASON)
-      .then((rows) => {
-        if (!cancelled) setTeamStats(rows);
+      .then((res) => {
+        if (!cancelled) setTeamStats(res);
       })
       .catch(() => {
-        if (!cancelled) setTeamStats([]);
+        if (!cancelled) setTeamStats({ season: null, rows: [] });
       });
     return () => {
       cancelled = true;
@@ -479,9 +489,11 @@ export function StatsScreen() {
   const matchupByTeam = useMemo(() => buildMatchupMap(matchups), [matchups]);
   const defenceByTeam = useMemo(() => {
     const m = new Map<string, TeamStatsRow>();
-    for (const r of teamStats) if (r.team) m.set(r.team, r);
+    for (const r of teamStats.rows) if (r.team) m.set(r.team, r);
     return m;
   }, [teamStats]);
+  /** The season the defence grade is computed from — named on screen, never assumed. */
+  const defenceSeason = teamStats.season;
   // Only filter when there is actually a slate — a stale toggle on an off day
   // (or after switching sports) must not empty the list.
   const hasSlate = slate.keys.size > 0;
@@ -566,9 +578,9 @@ export function StatsScreen() {
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey]);
 
   useEffect(() => {
-    if (!slateReady) return; // the read is narrowed by the slate — wait for it
+    if (slateFor !== sport) return; // the read is narrowed by THIS sport's slate
     void load();
-  }, [load, slateReady]);
+  }, [load, slateFor, sport]);
 
   const toggleBasis = (next: Basis) => setBasis(next);
 
@@ -891,13 +903,42 @@ export function StatsScreen() {
         sport,
         opp as unknown as Record<string, unknown> | null,
         opponent,
+        defenceSeason,
       );
     },
-    [matchupByTeam, sport, playerType, slateGameIndex, defenceByTeam],
+    [matchupByTeam, sport, playerType, slateGameIndex, defenceByTeam, defenceSeason],
   );
 
   /** Does the column have anything to say for this sport at all? */
   const showMatchupCol = matchupByTeam.size > 0 || (gradesOnDefence(sport) && defenceByTeam.size > 0);
+
+  /**
+   * The GRADE column's legend, per sport and naming the season it graded on.
+   *
+   * It has to be per sport because the column now answers the same question
+   * three different ways, and it has to name the season because the football
+   * grade reads from LAST season until the new one has games in it — a
+   * tooltip asserting "this season" over 2025 numbers is the column lying in
+   * the one place it explains itself.
+   */
+  const matchupTooltip = useMemo(() => {
+    const seasonWords = defenceSeason != null ? `the ${defenceSeason} season` : 'the season so far';
+    const head =
+      'How hard tonight\u2019s spot is for this player, graded against the rest of ' +
+      'the league. A+ is the easiest matchup on the board and F the hardest.';
+    const how = gradesOnDefence(sport)
+      ? `Graded on ${defenceMetricSpoken(sport)} for the team this player faces, over ${seasonWords}.`
+      : 'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
+        'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
+        'opposing defence\u2019s rating.';
+    const dash = gradesOnDefence(sport)
+      ? 'A dash means we have no matchup data for this row yet \u2014 no game ' +
+        'tonight, or nothing on file for the opponent. An unknown matchup is ' +
+        'never graded as average.'
+      : 'A dash means the starter isn\u2019t confirmed yet \u2014 an unknown matchup ' +
+        'is never graded as average.';
+    return `${head}\n\n${how}\n\n${dash}`;
+  }, [sport, defenceSeason]);
 
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
@@ -1077,6 +1118,22 @@ export function StatsScreen() {
   // a verdict on the bet rather than a ranking of players. Computed over what
   // is actually on screen, so the board never colours what it cannot
   // distinguish.
+  /**
+   * Does the GRADE column span more than one colour on what is rendered?
+   *
+   * Computed here, over the visible rows, for the same reason `colorful` is:
+   * on a two-team NFL slate whose defences were both elite, every row grades
+   * D- and the column paints one red block beside a live price. The letter
+   * stays — it is true — and only the ramp goes quiet.
+   */
+  const gradesColorful = useMemo(() => {
+    const rowsOnScreen: { team?: string | null; player_name?: string | null }[] =
+      effectiveMode === 'hitRate' ? hitRatePlayers : ranked.map((r) => r.row);
+    return gradeColorDiscriminates(
+      rowsOnScreen.slice(0, 60).map((r) => matchupFor(r)?.grade ?? null),
+    );
+  }, [effectiveMode, hitRatePlayers, ranked, matchupFor]);
+
   const colorful = useMemo(
     () => hitRateColorDiscriminates(hitRatePlayers.map((p) => p.pct)),
     [hitRatePlayers],
@@ -1479,7 +1536,7 @@ export function StatsScreen() {
               label={slateLabel}
               icon="flame-outline"
               active={tonightActive}
-              disabled={loading}
+              busy={loading}
               accessibilityLabel={
                 loading
                   ? `${slateLabel}, loading`
@@ -1606,6 +1663,7 @@ export function StatsScreen() {
           // date. An undated header would read as "now" (UX_REVIEW §3).
           oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}
           showMatchup={showMatchupCol}
+          matchupTooltip={matchupTooltip}
         />
       ) : null}
 
@@ -1621,6 +1679,7 @@ export function StatsScreen() {
                 player={item}
                 matchup={matchupFor(item)}
                 showMatchup={showMatchupCol}
+                gradeColorful={gradesColorful}
                 subline={sublineFor(item)}
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
@@ -1669,6 +1728,7 @@ export function StatsScreen() {
                 basis={basis}
                 matchup={matchupFor(item.row)}
                 showMatchup={showMatchupCol}
+                gradeColorful={gradesColorful}
                 subline={sublineFor(item.row)}
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
@@ -2197,7 +2257,19 @@ function OddsCell({
  * An ungraded matchup is a DASH, never a C: grading a starter we do not know
  * as average invents the one fact this column exists to report.
  */
-function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
+function MatchupCell({
+  matchup,
+  colorful = true,
+}: {
+  matchup: MatchupInfo | null;
+  /**
+   * False when every visible row lands in the same colour band — the letter is
+   * still right, but a whole column of one colour beside a live price reads as
+   * a verdict on the bet rather than a ranking of players (the same rule
+   * `colorful` applies to the hit-rate column).
+   */
+  colorful?: boolean;
+}) {
   if (!matchup?.grade) {
     return (
       <View
@@ -2215,7 +2287,13 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
       accessible
       accessibilityLabel={`Matchup grade ${gradeSpoken(matchup.grade)}${matchup.fact ? `, ${matchup.fact}` : ''}`}
     >
-      <Text style={[styles.matchupGrade, { color: gradeColor(matchup.grade) }]} numberOfLines={1}>
+      <Text
+        style={[
+          styles.matchupGrade,
+          { color: colorful ? gradeColor(matchup.grade) : colors.textPrimary },
+        ]}
+        numberOfLines={1}
+      >
         {matchup.grade}
       </Text>
     </View>
@@ -2229,6 +2307,7 @@ function ColumnHeader({
   oddsLabel,
   oddsDateLabel,
   showMatchup,
+  matchupTooltip,
 }: {
   rightLabel: string;
   showOdds: boolean;
@@ -2237,6 +2316,7 @@ function ColumnHeader({
   /** Weekday of the slate the prices are for, when it is not today. */
   oddsDateLabel?: string | null;
   showMatchup: boolean;
+  matchupTooltip: string;
 }) {
   return (
     <View style={styles.colHeader}>
@@ -2255,18 +2335,15 @@ function ColumnHeader({
           <Text style={styles.colHeaderRight} numberOfLines={1}>
             GRADE
           </Text>
+          {/* The column's only legend, so it has to describe the grade the
+              reader is ACTUALLY looking at. It named the two baseball answers
+              alone and asserted "this season" -- both wrong for the three
+              sports now graded on defence, whose numbers come from the season
+              this text names, which on opening night is LAST season (UX
+              review, 2026-09-09). */}
           <InfoTooltip
             title="Matchup grade"
-            body={
-              'How hard tonight\u2019s spot is for this player, graded against the ' +
-              'rest of the league this season. A+ is the easiest matchup on the ' +
-              'board and F the hardest.\n\n' +
-              'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
-              'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
-              'opposing defence\u2019s rating.\n\n' +
-              'A dash means the starter isn\u2019t confirmed yet — an unknown matchup ' +
-              'is never graded as average.'
-            }
+            body={matchupTooltip}
             accessibilityLabel="What the matchup grade means"
           />
         </View>
@@ -2283,6 +2360,7 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
+  gradeColorful,
   subline,
   quote,
   started,
@@ -2300,6 +2378,8 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** False when every visible grade lands in one colour band. */
+  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -2358,7 +2438,7 @@ function LeaderRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -2383,6 +2463,7 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
+  gradeColorful,
   subline,
   quote,
   started,
@@ -2398,6 +2479,8 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** False when every visible grade lands in one colour band. */
+  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -2464,7 +2547,7 @@ function HitRateRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
