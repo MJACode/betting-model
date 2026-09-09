@@ -43,6 +43,7 @@ import {
   fetchRecentGames,
   fetchSeasonStatValues,
   fetchSlateGames,
+  fetchTeamStats,
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
@@ -70,7 +71,14 @@ import {
   type HitMode,
 } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
-import { buildMatchupMap, gradeMatchup, gradeSpoken, type MatchupInfo } from '@/lib/matchup';
+import {
+  buildMatchupMap,
+  gradeMatchup,
+  gradeOpponentDefence,
+  gradeSpoken,
+  gradesOnDefence,
+  type MatchupInfo,
+} from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import {
   EMPTY_SLATE,
@@ -113,6 +121,7 @@ import type {
   RecentGameRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
+  TeamStatsRow,
   TonightMatchupRow,
   RootStackParamList,
   TabParamList,
@@ -354,6 +363,12 @@ export function StatsScreen() {
   // college Saturday) and is thrown away a moment later. Settled, not
   // successful: a slate we could not reach still releases the board.
   const [slateReady, setSlateReady] = useState<boolean>(false);
+  // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
+  // grade a spot off the probable starter or the lineup; every other sport had
+  // a column of dashes, so a toughness filter over it would have filtered
+  // nothing (Matt, 2026-09-09). Failure-tolerant: no team stats is an ungraded
+  // column, never a wrong one.
+  const [teamStats, setTeamStats] = useState<TeamStatsRow[]>([]);
   // The slate's raw games. The prop-odds view has no sport column and
   // `player_points` is both an NBA and a WNBA market, so the odds read is
   // bounded to these game ids rather than to a date alone.
@@ -441,7 +456,32 @@ export function StatsScreen() {
     };
   }, [sport]);
 
+  // Team stats for the defence grade. Only fetched where it is actually used,
+  // so the sports that already grade off a matchup view pay nothing for it.
+  useEffect(() => {
+    if (!gradesOnDefence(sport)) {
+      setTeamStats([]);
+      return;
+    }
+    let cancelled = false;
+    fetchTeamStats(sport, SEASON)
+      .then((rows) => {
+        if (!cancelled) setTeamStats(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setTeamStats([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport]);
+
   const matchupByTeam = useMemo(() => buildMatchupMap(matchups), [matchups]);
+  const defenceByTeam = useMemo(() => {
+    const m = new Map<string, TeamStatsRow>();
+    for (const r of teamStats) if (r.team) m.set(r.team, r);
+    return m;
+  }, [teamStats]);
   // Only filter when there is actually a slate — a stale toggle on an off day
   // (or after switching sports) must not empty the list.
   const hasSlate = slate.keys.size > 0;
@@ -826,6 +866,39 @@ export function StatsScreen() {
     [slateGameIndex, startedTeams, showOdds],
   );
 
+  /**
+   * How tough this row's spot is, whichever way the sport can answer it.
+   *
+   * MLB and WNBA have a matchup view (the probable starter, the opposing
+   * lineup) and it stays the better answer where it exists. Everything else
+   * grades the OPPONENT'S DEFENCE off the Teams-board read — before this the
+   * column was a dash for every sport but those two, which is what made a
+   * toughness filter meaningless on the board Matt was looking at.
+   *
+   * Null means "this sport cannot answer", and the column hides entirely.
+   * A null GRADE inside a returned MatchupInfo means "this row cannot be
+   * answered" — an unknown defence is a dash, never a C.
+   */
+  const matchupFor = useCallback(
+    (row: { team?: string | null; player_name?: string | null }): MatchupInfo | null => {
+      const m = row.team ? matchupByTeam.get(row.team) : undefined;
+      if (m) return gradeMatchup(sport, playerType, m);
+      if (!gradesOnDefence(sport)) return null;
+      const match = slateGameFor(row, slateGameIndex);
+      const opponent = match?.game.opponent ?? null;
+      const opp = opponent ? defenceByTeam.get(opponent) ?? null : null;
+      return gradeOpponentDefence(
+        sport,
+        opp as unknown as Record<string, unknown> | null,
+        opponent,
+      );
+    },
+    [matchupByTeam, sport, playerType, slateGameIndex, defenceByTeam],
+  );
+
+  /** Does the column have anything to say for this sport at all? */
+  const showMatchupCol = matchupByTeam.size > 0 || (gradesOnDefence(sport) && defenceByTeam.size > 0);
+
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
   // STAT at all (nothing to wait for — six of the eighteen football columns,
@@ -1027,10 +1100,9 @@ export function StatsScreen() {
   const playerDetail = supportsPlayerDetail(sport);
 
   /** The board's matchup for a team, as the two params the detail screen takes. */
-  const matchupParams = (team?: string | null) => {
-    const m = team ? matchupByTeam.get(team) : undefined;
-    if (!m) return {};
-    const graded = gradeMatchup(sport, playerType, m);
+  const matchupParams = (row: { team?: string | null; player_name?: string | null }) => {
+    const graded = matchupFor(row);
+    if (!graded || !graded.text) return {};
     return { matchupText: graded.text, matchupGrade: graded.grade ?? undefined };
   };
 
@@ -1055,7 +1127,7 @@ export function StatsScreen() {
       fromParlay: fromParlay || undefined,
       // The matchup FACT rides along, because the board's column is now just
       // the grade (MatchupCell). Computed here rather than refetched there.
-      ...matchupParams(p.team),
+      ...matchupParams(p),
     });
   };
 
@@ -1533,7 +1605,7 @@ export function StatsScreen() {
           // On an off day the slate — and so the lines — belong to a FUTURE
           // date. An undated header would read as "now" (UX_REVIEW §3).
           oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}
-          showMatchup={matchupByTeam.size > 0}
+          showMatchup={showMatchupCol}
         />
       ) : null}
 
@@ -1542,14 +1614,13 @@ export function StatsScreen() {
           data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
-            const mu = item.team ? matchupByTeam.get(item.team) : undefined;
             const quote = quoteFor(item);
             return (
               <HitRateRow
                 rank={index + 1}
                 player={item}
-                matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
-                showMatchup={matchupByTeam.size > 0}
+                matchup={matchupFor(item)}
+                showMatchup={showMatchupCol}
                 subline={sublineFor(item)}
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
@@ -1588,7 +1659,6 @@ export function StatsScreen() {
           data={rowsAreStale ? EMPTY_ROWS : ranked}
           keyExtractor={(item) => item.row.player_id}
           renderItem={({ item, index }) => {
-            const mu = item.row.team ? matchupByTeam.get(item.row.team) : undefined;
             const quote = quoteFor(item.row);
             return (
               <LeaderRow
@@ -1597,8 +1667,8 @@ export function StatsScreen() {
                 value={item.value}
                 gp={item.gp}
                 basis={basis}
-                matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
-                showMatchup={matchupByTeam.size > 0}
+                matchup={matchupFor(item.row)}
+                showMatchup={showMatchupCol}
                 subline={sublineFor(item.row)}
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}

@@ -281,3 +281,84 @@ export function gradeMatchup(
   if (playerType === 'pitcher') return gradePitcher(m);
   return gradeBatter(m);
 }
+
+// ── Toughness for the sports with no matchup view ────────────────────────────
+//
+// Matt, 2026-09-09, asked to filter the board on how tough a spot is. That
+// column existed for MLB and WNBA ONLY — `v_mlb_tonight_matchups` and
+// `v_wnba_tonight_matchups` are the only two such views — so on the NFL board
+// he was looking at, and on NCAAF and NBA, it was a column of dashes and a
+// filter over it would have filtered nothing.
+//
+// The question those two views answer with a probable starter or a lineup, the
+// rest answer with the OPPONENT'S DEFENCE, which we already store for the Teams
+// board. Same A+..F scale and the same method as the anchors above: a z-score
+// against a MEASURED median and an IQR-derived sigma, run through the normal
+// CDF to a percentile. Never hand-set cliffs — that is what had the old
+// three-tier column printing one colour four times in five.
+//
+// Measured 2026-09-09 against production, `team_stats_board(sport, season)`:
+//
+//   NFL   points allowed/G   n=32   p25 20.07  median 23.09  p75 25.06
+//   NCAAF EPA/play allowed   n=136  p25 0.098  median 0.155  p75 0.203
+//   NBA   defensive rating   n=30   p25 110.42 median 112.40 p75 115.55
+//
+// All three point the same way — a HIGHER number is a worse defence and so a
+// FAVOURABLE spot for the player — so the percentile is used unflipped.
+//
+// NHL IS DELIBERATELY ABSENT: `team_stats_board('NHL', 2026)` returned zero
+// rows on the day this was written, and an anchor invented for an empty table
+// is a number nobody measured. It grades as null (a dash) until those rows
+// exist, which is the honest answer and the one this file already gives for an
+// unknown starter.
+const DEFENCE_ANCHORS: Record<string, { key: string; median: number; sigma: number; label: string }> = {
+  NFL: { key: 'points_against_pg', median: 23.085, sigma: 3.695, label: 'pts allowed/g' },
+  NCAAF: { key: 'epa_def', median: 0.155, sigma: 0.0778, label: 'EPA/play allowed' },
+  NBA: { key: 'def_rating', median: 112.395, sigma: 3.807, label: 'def rtg' },
+};
+
+/** Does this sport grade a spot off the opponent's defence? */
+export function gradesOnDefence(sport: string): boolean {
+  return sport in DEFENCE_ANCHORS;
+}
+
+/** How the grade is worded on screen, for the sports that use one. */
+export function defenceMetricLabel(sport: string): string | null {
+  return DEFENCE_ANCHORS[sport]?.label ?? null;
+}
+
+/**
+ * A player's spot graded on the defence he faces.
+ *
+ * `opponent` is the other team's row from the Teams board read. Null in, null
+ * grade out — an unknown defence is a dash, never a C, for the same reason a
+ * missing starter is: grading an absent fact as average invents the one thing
+ * the column exists to report.
+ */
+export function gradeOpponentDefence(
+  sport: string,
+  opponent: Record<string, unknown> | null | undefined,
+  opponentTeam: string | null,
+): MatchupInfo | null {
+  const anchor = DEFENCE_ANCHORS[sport];
+  if (!anchor) return null;
+  const value = opponent ? num(opponent[anchor.key] as number | string | null) : null;
+  if (value == null) {
+    return {
+      grade: null,
+      score: null,
+      text: opponentTeam ? `vs ${opponentTeam}` : '',
+      fact: null,
+      row: {} as TonightMatchupRow,
+    };
+  }
+  const score = normalCdf(z(value, anchor));
+  const shown = anchor.key === 'epa_def' ? value.toFixed(3) : value.toFixed(1);
+  return {
+    grade: gradeFor(score),
+    score,
+    text: opponentTeam ? `vs ${opponentTeam} · ${shown} ${anchor.label}` : `${shown} ${anchor.label}`,
+    fact: `${shown} ${anchor.label}`,
+    row: {} as TonightMatchupRow,
+  };
+}

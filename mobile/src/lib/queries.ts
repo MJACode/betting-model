@@ -1988,12 +1988,23 @@ export async function fetchTeamStats(
   season: number,
 ): Promise<TeamStatsRow[]> {
   if (sport === 'UFC' || sport === 'GOLF') return [];
-  const { data, error } = await supabase.rpc('team_stats_board', {
-    p_sport: sport,
-    p_season: season,
-  });
-  if (error) throw error;
-  return (data ?? []) as unknown as TeamStatsRow[];
+  // Football falls back a season for the same reason every other football read
+  // does: the label is the year the season STARTS, so on opening night the
+  // current label has no rows at all. Measured 2026-09-09 —
+  // team_stats_board('NFL', 2026) returned 0 and ('NFL', 2025) returned 32,
+  // which is the difference between a graded board and a column of dashes.
+  const seasons = sport === 'NFL' || sport === 'NCAAF'
+    ? footballSeasonCandidates(season)
+    : [season];
+  for (const s of seasons) {
+    const { data, error } = await supabase.rpc('team_stats_board', {
+      p_sport: sport,
+      p_season: s,
+    });
+    if (error) throw error;
+    if (data && (data as unknown[]).length) return data as unknown as TeamStatsRow[];
+  }
+  return [];
 }
 
 /**
