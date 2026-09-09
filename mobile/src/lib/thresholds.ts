@@ -16,11 +16,14 @@ import type { Pick as PickRow } from '@/types';
 export type ActionFilterable = Pick<
   PickRow,
   'model_id' | 'model_probability' | 'edge' | 'dk_odds' | 'signal_type'
-  // OPTIONAL on purpose. The settled-pick reads (SETTLED_PICK_COLUMNS) don't
-  // select this column and don't need to — a VOID row is already excluded from
-  // every record by `result = 'NO_ACTION'`. Requiring it here would only force
-  // a wider select on the screens that cache thousands of graded rows.
-> & { condition_status?: string | null };
+  // REQUIRED, not optional (2026-09-09). The guard is only as good as the
+  // SELECT that feeds it: a new query picking a column subset and forgetting
+  // this one would compile, pass ux_scan (no cross-file reachability) and pass
+  // the test that pins the line exists — the blind-spot shape
+  // .claude/rules/frontend.md warns about. Both pick reads carry the column
+  // now, so requiring it costs nothing and makes the omission a type error.
+  | 'condition_status'
+>;
 
 export interface ModelThreshold {
   min_prob: number;
@@ -480,8 +483,10 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // picks, which is the one thing §1b says they must never do. The publishers
   // now apply the same exclusion in SQL.
   //
-  // ONLY 'VOID'. NCAAF writes 'OK' / 'GONE' in this column for ordinary live
-  // display states, and those rows are real picks.
+  // ONLY 'VOID'. The NFL pick monitor (scripts/nfl_pick_monitor.py) writes
+  // 'OK' / 'DEGRADED' / 'GONE' in this column — health states on real, standing
+  // picks, which stay bettable and stay counted. NCAAF does not write this
+  // column at all; a downgraded NCAAF row carries `downgrade_reason`.
   if (p.condition_status === 'VOID') return false;
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.

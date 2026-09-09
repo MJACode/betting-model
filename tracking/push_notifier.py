@@ -125,8 +125,9 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
               -- is kept as evidence of a model that fired where it should not
               -- have, and it stops counting. Mirrored by the app's
               -- passesActionFilter, which added the same exclusion the same
-              -- day. Only 'VOID' -- NCAAF's 'OK' / 'GONE' are live states on
-              -- real picks.
+              -- day. Only 'VOID': scripts/nfl_pick_monitor.py writes
+              -- 'OK' / 'DEGRADED' / 'GONE' here as health states on real,
+              -- STANDING picks, which must keep publishing.
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob

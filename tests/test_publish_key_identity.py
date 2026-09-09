@@ -192,8 +192,10 @@ def test_no_publisher_announces_a_voided_pick():
     BETs on the 09-13 board. Both halves of the fix are pinned: this one, and
     `passesActionFilter` in mobile/src/lib/thresholds.ts.
 
-    Only 'VOID'. NCAAF writes 'OK' / 'GONE' here on real picks, and excluding
-    those would empty its board.
+    Only 'VOID'. scripts/nfl_pick_monitor.py writes 'OK' / 'DEGRADED' / 'GONE'
+    in the same column as health states on real, STANDING picks (NCAAF does not
+    use it at all — a downgraded NCAAF row carries `downgrade_reason`), so
+    filtering on anything but 'VOID' would withdraw live bets.
     """
     for sql in (_sql(dn._new_signals, "2026-09-09"),
                 _sql(dn._locked_signals, "2026-09-09"),
@@ -202,19 +204,59 @@ def test_no_publisher_announces_a_voided_pick():
                 in sql)
         # Compared against, not merely mentioned — the comment above the clause
         # names both of NCAAF's states on purpose.
-        assert "condition_status <> 'GONE'" not in sql
-        assert "condition_status = 'OK'" not in sql
+        for healthy in ("'GONE'", "'DEGRADED'", "'OK'"):
+            assert f"condition_status <> {healthy}" not in sql
+            assert f"condition_status = {healthy}" not in sql
+
+
+def _mobile(path: str) -> str:
+    src = __file__.rsplit("tests", 1)[0] + "mobile/src/" + path
+    with open(src, encoding="utf-8") as fh:      # §7: explicit encoding
+        return fh.read()
 
 
 def test_the_app_refuses_a_voided_pick_too():
     """The app is the other half. A server-side exclusion alone would just
     reverse which surface shows the extra rows."""
-    src = (__file__.rsplit("tests", 1)[0]
-           + "mobile/src/lib/thresholds.ts")
-    with open(src, encoding="utf-8") as fh:      # §7: explicit encoding
-        text = fh.read()
-    body = text[text.index("export function passesActionFilter"):]
+    body = _mobile("lib/thresholds.ts")
+    body = body[body.index("export function passesActionFilter"):]
     body = body[:body.index("\n}")]
     assert re.search(r"condition_status\s*===\s*'VOID'", body), (
         "passesActionFilter must refuse a VOIDED row, or the app shows picks "
         "Discord does not")
+
+
+def test_the_app_excludes_a_voided_pick_AT_THE_SOURCE():
+    """A SEPARATE test from the one above, and the one that matters.
+
+    passesActionFilter is called by five of the app's surfaces and NOT by the
+    others. Found by the UX review on this branch's first draft: with only the
+    filter fixed, the Today segment, both model screens, the Stats odds pill and
+    the betslip hand-off all still drew the six voided wind picks as green,
+    stakeable BET cards, while the header count directly above them excluded
+    them. That is the retired-model bug of 2026-09-02 exactly, and
+    `useTodayPicks` already carries its fix and the comment explaining it.
+
+    This is `.claude/rules/frontend.md`'s blind-spot rule in miniature: the
+    filter-only test above passed the whole time the board was wrong. So pin the
+    SOURCE filter — the one every consumer inherits — not just the helper.
+    """
+    hook = _mobile("hooks/useTodayPicks.ts")
+    body = hook[hook.index("const all = ["):]
+    body = body[:body.index(");")]
+    assert "condition_status !== 'VOID'" in body, (
+        "the VOID exclusion must sit beside isModelRetired in useTodayPicks, "
+        "or every consumer that does not call passesActionFilter still renders "
+        "a voided pick as a live BET")
+    assert "isModelRetired" in body, "the retired guard must survive beside it"
+
+
+def test_the_live_board_excludes_a_voided_pick_too():
+    """`scripts/void_picks.py` takes any --model and the publishers' exclusion
+    is unconditional across sports, so a voided LIVE pick would drop out of
+    Discord and stay on the Live tab. The live read never calls
+    passesActionFilter at all — it filters in SQL."""
+    q = _mobile("lib/queries.ts")
+    body = q[q.index("export async function fetchLivePicks("):]
+    body = body[:body.index("\n}")]
+    assert "condition_status.neq.VOID" in body

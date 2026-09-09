@@ -90,8 +90,20 @@ export function useTodayPicks(date?: string) {
       // agreement — before this, the board drew a retired BET as a green,
       // stakeable card while the header count excluded it. The rows stay in
       // the DB as the record of what was published (§1c).
+      //
+      // A VOIDED pick is dropped here for exactly the same reason, and it has
+      // to be HERE rather than only in passesActionFilter (2026-09-09). Five
+      // surfaces read this hook without ever calling that filter — the Today
+      // segment itself, the built-in and custom model screens, the Stats odds
+      // pill and the betslip hand-off — so a filter-only fix left all six
+      // voided wind picks rendering as green, stakeable BET cards while the
+      // header count above them excluded them. That is the retired-model bug
+      // this comment already describes, one row down. Both guards stay: this
+      // one for the board, passesActionFilter for the settled/server paths.
       const all = [...rows, ...ufcRows, ...nflRows, ...ncaafRows].filter(
-        (d) => !isGameOver(d.game, d.pick.sport) && !isModelRetired(d.pick.model_id),
+        (d) => !isGameOver(d.game, d.pick.sport)
+          && !isModelRetired(d.pick.model_id)
+          && d.pick.condition_status !== 'VOID',
       );
       setData(all);
       setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
