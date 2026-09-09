@@ -1046,7 +1046,16 @@ PAUSED_MODELS: set = {
     # Unpause only after our per-game tackle counts are reconciled against a
     # gamebook source and this gap closes. It is the sport's best signal
     # (§2c: 16.5% MAE lift) measured against the wrong ruler.
-    "nfl_prop_tackles_assists",
+    #
+    # UNPAUSED 2026-09-09 (mike). The condition above was met that day: the
+    # book grades the box-score TOTAL, which is nflverse solo + with_assist +
+    # assists, and the game log had never ingested with_assist. Corrected, the
+    # stat matches ESPN's TOT on 100.0% / 99.2% of two full game days and our
+    # over-rate is 47.8% against the book's 50.2% -- the same -2.4pp the book
+    # runs on rush_yds above. Backtest on the retrained artifact
+    # (v20260909_160911), live cut, 2023-25: +53.03u over 340 bets, +15.6%,
+    # CI (+6.4, +24.8), positive every season, placebo +0.6%.
+    # docs/nfl_prop_profitability_search.md §4.
     # ── The four re-paused on 2026-09-07 were UNPAUSED the same day ───────
     #
     # They were paused on the gap between our P(over) and DraftKings' de-vigged

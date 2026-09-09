@@ -87,8 +87,16 @@ def test_the_twelve_distributional_models_score_off_the_ticks_own_fetch(monkeypa
     assert labels.index("nfl-prop-card") < labels.index("nfl-prop-scoring")
 
 
-def test_eleven_are_live_and_only_tackles_is_paused():
-    """The pause set, and why it is one model rather than five.
+def test_twelve_are_live_and_none_is_paused():
+    """The pause set, and why it is empty rather than one or five.
+
+    tackles_assists was UNPAUSED on 2026-09-09 (mike) once the condition its
+    pause named was met: the stat is now the box-score total the book grades
+    (nflverse solo + with_assist + assists, matching ESPN on 100.0% / 99.2%
+    of two full game days), and on it the model backtests to +53.03u over
+    340 bets with every season positive and the placebo at +0.6%
+    (docs/nfl_prop_profitability_search.md §4). The history below is why it
+    was paused, kept because the defect it describes is the kind that returns.
 
     Four were re-paused on 2026-09-07 on the gap between our P(over) and
     DraftKings' de-vigged number (<= -6pp), then unpaused the same day when the
@@ -113,16 +121,16 @@ def test_eleven_are_live_and_only_tackles_is_paused():
     import config
 
     paused = {m for m in config.PAUSED_MODELS if m.startswith("nfl_prop")}
-    assert paused == {"nfl_prop_tackles_assists"}, f"pause set changed: {sorted(paused)}"
+    assert paused == set(), f"pause set changed: {sorted(paused)}"
 
     live = {m for m in config.ACTION_THRESHOLDS
             if m.startswith("nfl_prop_")
             and m not in config.PAUSED_MODELS
             and m != "nfl_prop_market"}
-    assert len(live) == 11, sorted(live)
+    assert len(live) == 12, sorted(live)
 
 
-def test_the_live_eleven_are_not_a_clean_bill_of_health():
+def test_the_live_ten_are_not_a_clean_bill_of_health():
     """Stated so the empty pause list does not read as "these all work". On the
     2025 re-grade every interval straddles zero: the pooled number excluding
     tackles is -1.18% over 564 bets, CI (-7.7, +5.3). They are unpaused because
