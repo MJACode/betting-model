@@ -68,6 +68,9 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
           <Text style={styles.note}>
             {name} can&apos;t accept a whole parlay from a link. Open {name}, then add each leg
             below to your betslip and place the parlay there.
+            {book !== MODEL_BOOK
+              ? ` Prices below are ${name}'s — the models still score at ${bookName(MODEL_BOOK)}.`
+              : ''}
           </Text>
 
           <Pressable
