@@ -1201,10 +1201,14 @@ through it, and the one thing that survived.
 
 ### 17.1 The CV fix is real, and it is not the whole fix
 
-| honest fit | features | RMSE | MAE | count cal err | Optuna CV NLL | 2025 holdout NLL | gap |
-|---|---|---|---|---|---|---|---|
-| baseline18 | 18 | 3.3565 | 2.4898 | 0.0507 | 2.5369 | 2.5732 | **+0.036** |
-| B13 | 13 | **3.3252** | **2.4771** | 0.0662 | 2.5166 | 2.5578 | **+0.041** |
+| honest fit | features | RMSE | MAE | holdout NLL | fixed-ref gap | band n |
+|---|---|---|---|---|---|---|
+| baseline18 | 18 | 3.3565 | 2.4898 | 2.5732 | +0.0682 | 65,457 |
+| B13 | 13 | **3.3252** | 2.4771 | **2.5578** | +0.0586 | 62,838 |
+| A19 | 19 | 3.3268 | **2.4724** | 2.5591 | **+0.0569** | 62,712 |
+
+Optuna CV vs 2025 holdout NLL: baseline18 2.5369 / 2.5732 (**+0.036**),
+B13 2.5166 / 2.5578 (**+0.041**). Count calibration error 0.0507 and 0.0662.
 
 Against the leaky fits (§16.1): RMSE 3.5801 -> 3.3565, count calibration error
 0.5383 -> 0.0507, and the CV/holdout gap **0.82 -> 0.04**. The three
@@ -1223,10 +1227,26 @@ Two of three. Saying so is the point of stating them first.
 
 **`pregame_total_line` is B13's 4th most important feature**, and B13 carries
 FIVE FEWER features than today's model while beating it on RMSE, MAE and
-qualifying volume. The six season-to-date stats are not merely noisy — once
-the fit is honest, dropping them makes the model better.
+qualifying volume.
 
-That is the change mike approved, and it stands on its own evidence.
+**And B13 and A19 are the same model.** A19 keeps all six season-to-date stats
+AND adds the line; B13 keeps only the line. Across RMSE, MAE, holdout NLL and
+the calibration gap they separate in the fourth decimal, in both directions —
+B13 takes RMSE and NLL, A19 takes MAE and the gap. That is noise, not a
+ranking.
+
+So the six stats **add nothing once the line is present and the CV is honest.**
+Not that they were harmful: the line supplies whatever run-environment signal
+they were carrying, and carries it better. Both beat baseline18, so the line
+does add signal that the stats alone did not.
+
+This is why two fits were run instead of one. A single retrain would have shown
+B13 beating today's model and left it ambiguous whether the gain came from
+ADDING the line or from REMOVING the stats. It is the line. The removal is free,
+and it buys six fewer features and one fewer way for the model to be moved by
+inputs that drift by hundredths a day (§14).
+
+That is exactly the change mike approved, and it stands on its own evidence.
 
 ### 17.3 The third defect: the Poisson tail really is too tight
 
