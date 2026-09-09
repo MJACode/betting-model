@@ -83,6 +83,8 @@ When I ask "what are today's picks?" or similar:
      p.pick_id, p.pick_label, p.model_id, p.pick_side,
      p.model_probability, p.dk_implied_prob, p.edge,
      p.dk_odds AS scored_dk_odds, p.scored_line,
+     -- The price the pick was DECIDED at (2026-09-09); NULL = DraftKings.
+     p.decision_book, p.decision_odds, p.decision_edge,
      p.kelly_fraction, p.confidence_tier,
      p.injury_flag, p.injury_detail,
      p.public_bet_pct, p.public_money_pct,

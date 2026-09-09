@@ -439,6 +439,17 @@ function PreviewFooter({
           Add a bet type above to see what it would have matched.
         </Text>
       )}
+      {/* Four dashes and a zero read as a broken builder, not as a new market.
+          The picker lists every live bet type, and twelve NFL prop markets were
+          unpaused on 2026-09-09 with no graded history behind them, so this is
+          now a state a user reaches by picking a perfectly good market (UX
+          review). Deliberately NOT the go-live-gate wording — that is banned
+          from the app as copy AND as a constant (.claude/rules/frontend.md). */}
+      {hasRules && !allRetired && !loading && backtest?.picks === 0 ? (
+        <Text style={styles.previewEmpty}>
+          New market — no settled picks yet, so there is no record to show.
+        </Text>
+      ) : null}
       {loading && hasRules ? (
         <ActivityIndicator style={styles.previewLoading} size="small" />
       ) : null}
@@ -631,7 +642,15 @@ function PickerField({
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHead}>
               <Text style={styles.sheetTitle}>{title}</Text>
-              <Pressable onPress={() => setOpen(false)} hitSlop={10}>
+              {/* Icon-only, so it is silent for VoiceOver without a label.
+                  Pre-existing (a5079b5); fixed in passing because ux_scan
+                  reports it as a BLOCKER on any change that touches this file. */}
+              <Pressable
+                onPress={() => setOpen(false)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={`Close ${title.toLowerCase()} picker`}
+              >
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </Pressable>
             </View>

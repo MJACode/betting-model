@@ -131,7 +131,11 @@ def test_best_odds_never_reaches_the_qualifying_gate():
     # The SQL only. A first version sliced to the end of the function and
     # tripped on the row dict, where "best_odds" is a legitimate output key —
     # a test that fails on correct code teaches people to delete tests.
-    sql_start = fn.index('conn.execute("""') + len('conn.execute("""')
+    # `conn.execute(f"""` since 2026-09-09 — the key expression is interpolated
+    # from tracking.publish_keys. Matched loosely so the slice does not break
+    # again the next time the statement gains or loses an f prefix.
+    opener = re.search(r'conn\.execute\(f?"""', fn)
+    sql_start = opener.end()
     sql = fn[sql_start:fn.index('"""', sql_start)]
     where = sql[sql.index("WHERE"):]
     assert "best_odds" not in where, (

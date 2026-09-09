@@ -54,6 +54,7 @@ function mkPick(over: Partial<Pick> = {}): Pick {
     injury_detail: null,
     signal_type: 'BET',
     confidence_tier: 'HIGH',
+    condition_status: null,
     result: null,
     profit_flat: null,
     profit_kelly: null,

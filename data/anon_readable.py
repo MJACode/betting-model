@@ -69,6 +69,13 @@ ANON_READABLE: tuple[str, ...] = (
     "v_opening_vs_live",
     "v_player_season_totals_mlb",
     "v_player_season_totals_nba",
+    # The two football boards, missing here until 2026-09-09 only because
+    # fetchSeasonTotals reached them through a `view` variable and the tripwire
+    # only sees a literal relation name. Both already hold anon SELECT from the
+    # default grant, so declaring them is what KEEPS it once the default is
+    # revoked -- and the call site is now two literals so the guard can see it.
+    "v_player_season_totals_ncaaf",
+    "v_player_season_totals_nfl",
     "v_player_season_totals_wnba",
     "v_public_track_record",
     "v_public_track_record_daily",

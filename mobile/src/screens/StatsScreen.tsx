@@ -43,6 +43,7 @@ import {
   fetchRecentGames,
   fetchSeasonStatValues,
   fetchSlateGames,
+  fetchTeamStats,
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
@@ -70,7 +71,17 @@ import {
   type HitMode,
 } from '@/lib/hitMode';
 import { supportsPlayerDetail } from '@/lib/playerLog';
-import { buildMatchupMap, gradeMatchup, gradeSpoken, type MatchupInfo } from '@/lib/matchup';
+import {
+  buildMatchupMap,
+  defenceMetricSpoken,
+  gradeColorDiscriminates,
+  gradeMatchup,
+  gradeOpponentDefence,
+  gradeSpoken,
+  gradesOnDefence,
+  type MatchupGrade,
+  type MatchupInfo,
+} from '@/lib/matchup';
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import {
   EMPTY_SLATE,
@@ -84,6 +95,7 @@ import {
   isStatParticipant,
   slateGameFor,
   slateSubline,
+  slateTeams,
   sublineSpoken,
   sortLabel,
   sortOptionsFor,
@@ -112,6 +124,8 @@ import type {
   RecentGameRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
+  TeamSeasonStats,
+  TeamStatsRow,
   TonightMatchupRow,
   RootStackParamList,
   TabParamList,
@@ -174,6 +188,46 @@ const SEASON = new Date().getUTCFullYear();
 // printing "S. Gray 5.90 ERA". Still 12pt narrower than the old SPOT column.
 const MATCHUP_W = 64;
 const ODDS_W = 62;
+
+/**
+ * How long the board waits for the slate before reading the whole league.
+ *
+ * One `games` read over a 7-day window — 118 rows on the widest sport measured
+ * 2026-09-09 — so the normal case is far inside this and the user sees one
+ * continuous spinner rather than a second one. The bound is for the case that
+ * never returns at all (see the slate effect).
+ */
+const SLATE_GATE_MS = 4000;
+
+/** Stable identity, so swapping to "no rows" cannot itself re-render the list. */
+const EMPTY_ROWS: never[] = [];
+
+/**
+ * Row-shaped placeholders, in place of a bare spinner.
+ *
+ * The board's loads are no longer instant — turning the slate chip off re-reads
+ * the whole league — and the rows that were on screen belong to the question
+ * the user just changed, so they must not be left up as if they were the
+ * answer. Rows rather than a centred spinner because that is what is arriving,
+ * and because a spinner at the top of a scrolled list is invisible to anyone
+ * who has scrolled into the board.
+ */
+function BoardSkeleton() {
+  return (
+    <View accessible accessibilityLabel="Loading players" style={styles.skeletonWrap}>
+      {Array.from({ length: 8 }, (_, i) => (
+        <View key={i} style={styles.skeletonRow}>
+          <View style={[styles.skeletonBlock, { width: 22 }]} />
+          <View style={{ flex: 1, gap: 6 }}>
+            <View style={[styles.skeletonBlock, { width: '55%' }]} />
+            <View style={[styles.skeletonBlock, { width: '35%', height: 8 }]} />
+          </View>
+          <View style={[styles.skeletonBlock, { width: ODDS_W - 10 }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   { value: 3, label: 'L3' },
@@ -307,6 +361,25 @@ export function StatsScreen() {
   // the matchup views above this works for every sport.
   const [tonightOnly, setTonightOnly] = useState<boolean>(() => defaultTonightOnly(sport));
   const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
+  // The leaderboard read is NARROWED to the slate's teams when the board is
+  // filtered to it (statsBoard.slateTeams), so it has to wait for the slate to
+  // land — otherwise the first load reads the whole league (54,687 rows on a
+  // college Saturday) and is thrown away a moment later. Settled, not
+  // successful: a slate we could not reach still releases the board.
+  // WHICH SPORT the slate belongs to, not whether one arrived. As a boolean it
+  // was read stale on a sport switch: `setSlateReady(false)` and the load effect
+  // land in the same commit, so the effect's closure still saw `true` and fired
+  // a read narrowed by the OUTGOING sport's teams — NCAAF school names sent at
+  // an NFL read, or the whole-league 12,850-row one this gate exists to avoid
+  // (UX review, 2026-09-09). The stamping below means no wrong rows were ever
+  // painted; the cost was a wasted multi-page request and a slower first paint.
+  const [slateFor, setSlateFor] = useState<string | null>(null);
+  // The opponent's DEFENCE, for the sports with no matchup view. MLB and WNBA
+  // grade a spot off the probable starter or the lineup; every other sport had
+  // a column of dashes, so a toughness filter over it would have filtered
+  // nothing (Matt, 2026-09-09). Failure-tolerant: no team stats is an ungraded
+  // column, never a wrong one.
+  const [teamStats, setTeamStats] = useState<TeamSeasonStats>({ season: null, rows: [] });
   // The slate's raw games. The prop-odds view has no sport column and
   // `player_points` is both an NBA and a WNBA market, so the odds read is
   // bounded to these game ids rather than to a date alone.
@@ -362,6 +435,17 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     const from = todayET();
+    // BOUNDED, because .finally() is not a guarantee that anything happens.
+    // The supabase client is created with no fetch timeout, so a request that
+    // hangs never settles: no `.finally`, no `error` to render the Retry banner
+    // with, and the tab sits on a spinner it cannot leave (pull-to-refresh
+    // bypasses the gate, but is undiscoverable under a spinner). Before this
+    // gate existed that user got a board. Releasing early fails OPEN —
+    // slateTeams() returns null for an empty slate, so the read is the
+    // whole-league one, which is exactly master's behaviour.
+    const release = setTimeout(() => {
+      if (!cancelled) setSlateFor(sport);
+    }, SLATE_GATE_MS);
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
         if (cancelled) return;
@@ -372,6 +456,30 @@ export function StatsScreen() {
         if (cancelled) return;
         setSlate(EMPTY_SLATE);
         setSlateGames([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSlateFor(sport);
+      });
+    return () => {
+      cancelled = true;
+      clearTimeout(release);
+    };
+  }, [sport]);
+
+  // Team stats for the defence grade. Only fetched where it is actually used,
+  // so the sports that already grade off a matchup view pay nothing for it.
+  useEffect(() => {
+    if (!gradesOnDefence(sport)) {
+      setTeamStats({ season: null, rows: [] });
+      return;
+    }
+    let cancelled = false;
+    fetchTeamStats(sport, SEASON)
+      .then((res) => {
+        if (!cancelled) setTeamStats(res);
+      })
+      .catch(() => {
+        if (!cancelled) setTeamStats({ season: null, rows: [] });
       });
     return () => {
       cancelled = true;
@@ -379,6 +487,13 @@ export function StatsScreen() {
   }, [sport]);
 
   const matchupByTeam = useMemo(() => buildMatchupMap(matchups), [matchups]);
+  const defenceByTeam = useMemo(() => {
+    const m = new Map<string, TeamStatsRow>();
+    for (const r of teamStats.rows) if (r.team) m.set(r.team, r);
+    return m;
+  }, [teamStats]);
+  /** The season the defence grade is computed from — named on screen, never assumed. */
+  const defenceSeason = teamStats.season;
   // Only filter when there is actually a slate — a stale toggle on an off day
   // (or after switching sports) must not empty the list.
   const hasSlate = slate.keys.size > 0;
@@ -394,7 +509,36 @@ export function StatsScreen() {
   const seasonStatKey =
     effectiveMode === 'hitRate' && timeWindow === 'season' ? String(stat?.key) : null;
 
+  // The teams the server should narrow the read to — null when the board is
+  // showing the whole league, or when the sport's slate keys are not teams
+  // (UFC). Client-side `isOnSlate` still runs over what comes back, so the two
+  // can never disagree about what is on screen; this only bounds what travels.
+  const readTeams = useMemo(
+    () => slateTeams(sport, slate, tonightActive),
+    [sport, slate, tonightActive],
+  );
+  // Array identity changes on every slate render; the loader keys on the
+  // CONTENT so an unchanged slate does not refetch the board. JSON and not a
+  // join: an NCAAF team id is a school NAME, and a separator that can occur
+  // inside one collapses two different slates onto the same key.
+  const readTeamsKey = readTeams ? JSON.stringify(readTeams.slice().sort()) : '';
+
+  // WHAT THE ROWS ON SCREEN ARE AN ANSWER TO. A read is now up to several
+  // sequential requests instead of one, so the window in which a stale response
+  // can land on a board the user has already left is 10-50x wider than it was.
+  // Two things key on this: `load` drops every setState whose stamp is no longer
+  // current (so NCAAF rows cannot be painted under NFL stat labels, and an error
+  // banner cannot appear for a sport the user left), and the list shows a
+  // placeholder rather than rows it knows belong to a different question.
+  const readKey = `${sport}|${playerType ?? ''}|${timeWindow}|${effectiveMode}|${seasonStatKey ?? ''}|${readTeamsKey}`;
+  const inFlight = useRef<string | null>(null);
+  const [shownKey, setShownKey] = useState<string | null>(null);
+  /** The rows on screen answer a question the user has since changed. */
+  const rowsAreStale = shownKey !== null && shownKey !== readKey;
+
   const load = useCallback(async () => {
+    const stamp = readKey;
+    inFlight.current = stamp;
     setLoading(true);
     setError(null);
     try {
@@ -404,30 +548,39 @@ export function StatsScreen() {
         setSeasonValues({ statKey: '', rows: [] });
         return;
       }
+      const teams = readTeams;
       if (effectiveMode === 'hitRate') {
         if (timeWindow === 'season') {
           const key = String(stat.key);
-          const data = await fetchSeasonStatValues(sport, SEASON, key, playerType);
+          const data = await fetchSeasonStatValues(sport, SEASON, key, playerType, teams);
+          if (inFlight.current !== stamp) return;
           setSeasonValues({ statKey: key, rows: data });
         } else {
-          const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType);
+          const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType, teams);
+          if (inFlight.current !== stamp) return;
           setRecentRows(data);
         }
       } else {
         const win = timeWindow === 'season' ? null : timeWindow;
-        const data = await fetchWindowTotals(sport, SEASON, win, playerType);
+        const data = await fetchWindowTotals(sport, SEASON, win, playerType, teams);
+        if (inFlight.current !== stamp) return;
         setRows(data);
       }
+      setShownKey(stamp);
     } catch (e: unknown) {
+      if (inFlight.current !== stamp) return;
       setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (inFlight.current === stamp) setLoading(false);
     }
-  }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey]);
+    // `readTeamsKey` and not `readTeams`: see above. `readKey` carries the rest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey]);
 
   useEffect(() => {
+    if (slateFor !== sport) return; // the read is narrowed by THIS sport's slate
     void load();
-  }, [load]);
+  }, [load, slateFor, sport]);
 
   const toggleBasis = (next: Basis) => setBasis(next);
 
@@ -725,6 +878,68 @@ export function StatsScreen() {
     [slateGameIndex, startedTeams, showOdds],
   );
 
+  /**
+   * How tough this row's spot is, whichever way the sport can answer it.
+   *
+   * MLB and WNBA have a matchup view (the probable starter, the opposing
+   * lineup) and it stays the better answer where it exists. Everything else
+   * grades the OPPONENT'S DEFENCE off the Teams-board read — before this the
+   * column was a dash for every sport but those two, which is what made a
+   * toughness filter meaningless on the board Matt was looking at.
+   *
+   * Null means "this sport cannot answer", and the column hides entirely.
+   * A null GRADE inside a returned MatchupInfo means "this row cannot be
+   * answered" — an unknown defence is a dash, never a C.
+   */
+  const matchupFor = useCallback(
+    (row: { team?: string | null; player_name?: string | null }): MatchupInfo | null => {
+      const m = row.team ? matchupByTeam.get(row.team) : undefined;
+      if (m) return gradeMatchup(sport, playerType, m);
+      if (!gradesOnDefence(sport)) return null;
+      const match = slateGameFor(row, slateGameIndex);
+      const opponent = match?.game.opponent ?? null;
+      const opp = opponent ? defenceByTeam.get(opponent) ?? null : null;
+      return gradeOpponentDefence(
+        sport,
+        opp as unknown as Record<string, unknown> | null,
+        opponent,
+        defenceSeason,
+      );
+    },
+    [matchupByTeam, sport, playerType, slateGameIndex, defenceByTeam, defenceSeason],
+  );
+
+  /** Does the column have anything to say for this sport at all? */
+  const showMatchupCol = matchupByTeam.size > 0 || (gradesOnDefence(sport) && defenceByTeam.size > 0);
+
+  /**
+   * The GRADE column's legend, per sport and naming the season it graded on.
+   *
+   * It has to be per sport because the column now answers the same question
+   * three different ways, and it has to name the season because the football
+   * grade reads from LAST season until the new one has games in it — a
+   * tooltip asserting "this season" over 2025 numbers is the column lying in
+   * the one place it explains itself.
+   */
+  const matchupTooltip = useMemo(() => {
+    const seasonWords = defenceSeason != null ? `the ${defenceSeason} season` : 'the season so far';
+    const head =
+      'How hard tonight\u2019s spot is for this player, graded against the rest of ' +
+      'the league. A+ is the easiest matchup on the board and F the hardest.';
+    const how = gradesOnDefence(sport)
+      ? `Graded on ${defenceMetricSpoken(sport)} for the team this player faces, over ${seasonWords}.`
+      : 'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
+        'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
+        'opposing defence\u2019s rating.';
+    const dash = gradesOnDefence(sport)
+      ? 'A dash means we have no matchup data for this row yet \u2014 no game ' +
+        'tonight, or nothing on file for the opponent. An unknown matchup is ' +
+        'never graded as average.'
+      : 'A dash means the starter isn\u2019t confirmed yet \u2014 an unknown matchup ' +
+        'is never graded as average.';
+    return `${head}\n\n${how}\n\n${dash}`;
+  }, [sport, defenceSeason]);
+
   // The column has nothing honest to show — say why, once, in words. Three
   // reasons look identical as an empty column and are not: NO BOOK PRICES THIS
   // STAT at all (nothing to wait for — six of the eighteen football columns,
@@ -903,6 +1118,22 @@ export function StatsScreen() {
   // a verdict on the bet rather than a ranking of players. Computed over what
   // is actually on screen, so the board never colours what it cannot
   // distinguish.
+  /**
+   * Does the GRADE column span more than one colour on what is rendered?
+   *
+   * Computed here, over the visible rows, for the same reason `colorful` is:
+   * on a two-team NFL slate whose defences were both elite, every row grades
+   * D- and the column paints one red block beside a live price. The letter
+   * stays — it is true — and only the ramp goes quiet.
+   */
+  const gradesColorful = useMemo(() => {
+    const rowsOnScreen: { team?: string | null; player_name?: string | null }[] =
+      effectiveMode === 'hitRate' ? hitRatePlayers : ranked.map((r) => r.row);
+    return gradeColorDiscriminates(
+      rowsOnScreen.slice(0, 60).map((r) => matchupFor(r)?.grade ?? null),
+    );
+  }, [effectiveMode, hitRatePlayers, ranked, matchupFor]);
+
   const colorful = useMemo(
     () => hitRateColorDiscriminates(hitRatePlayers.map((p) => p.pct)),
     [hitRatePlayers],
@@ -926,10 +1157,9 @@ export function StatsScreen() {
   const playerDetail = supportsPlayerDetail(sport);
 
   /** The board's matchup for a team, as the two params the detail screen takes. */
-  const matchupParams = (team?: string | null) => {
-    const m = team ? matchupByTeam.get(team) : undefined;
-    if (!m) return {};
-    const graded = gradeMatchup(sport, playerType, m);
+  const matchupParams = (row: { team?: string | null; player_name?: string | null }) => {
+    const graded = matchupFor(row);
+    if (!graded || !graded.text) return {};
     return { matchupText: graded.text, matchupGrade: graded.grade ?? undefined };
   };
 
@@ -954,7 +1184,7 @@ export function StatsScreen() {
       fromParlay: fromParlay || undefined,
       // The matchup FACT rides along, because the board's column is now just
       // the grade (MatchupCell). Computed here rather than refetched there.
-      ...matchupParams(p.team),
+      ...matchupParams(p),
     });
   };
 
@@ -1295,10 +1525,25 @@ export function StatsScreen() {
         {hasSlate ? (
           <>
             <View style={styles.rowDivider} />
+            {/* This chip re-READS the board now (the server is narrowed to the
+                slate's teams), so it is the one chip on the row whose tap is
+                not instant. Two consequences, both handled here rather than
+                left to the list: a second impatient tap must not queue a
+                second whole-league read, and VoiceOver has to be told that
+                something is happening — focus stays on the chip while the
+                rows underneath it change silently. */}
             <FilterChip
               label={slateLabel}
               icon="flame-outline"
               active={tonightActive}
+              busy={loading}
+              accessibilityLabel={
+                loading
+                  ? `${slateLabel}, loading`
+                  : tonightActive
+                    ? `${slateLabel}, on. Turn off to show every player`
+                    : `${slateLabel}, off`
+              }
               onPress={() => setTonightOnly((v) => !v)}
             />
           </>
@@ -1417,23 +1662,24 @@ export function StatsScreen() {
           // On an off day the slate — and so the lines — belong to a FUTURE
           // date. An undated header would read as "now" (UX_REVIEW §3).
           oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}
-          showMatchup={matchupByTeam.size > 0}
+          showMatchup={showMatchupCol}
+          matchupTooltip={matchupTooltip}
         />
       ) : null}
 
       {effectiveMode === 'hitRate' ? (
         <FlatList
-          data={hitRatePlayers}
+          data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
-            const mu = item.team ? matchupByTeam.get(item.team) : undefined;
             const quote = quoteFor(item);
             return (
               <HitRateRow
                 rank={index + 1}
                 player={item}
-                matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
-                showMatchup={matchupByTeam.size > 0}
+                matchup={matchupFor(item)}
+                showMatchup={showMatchupCol}
+                gradeColorful={gradesColorful}
                 subline={sublineFor(item)}
                 quote={quote}
                 started={item.team ? startedTeams.get(item.team) ?? null : null}
@@ -1449,7 +1695,7 @@ export function StatsScreen() {
           }}
           ListEmptyComponent={
             loading ? (
-              <ActivityIndicator style={styles.loading} />
+              <BoardSkeleton />
             ) : (
               <EmptyState
                 title={error ? 'Couldn’t load players' : 'No players'}
@@ -1469,10 +1715,9 @@ export function StatsScreen() {
         />
       ) : (
         <FlatList
-          data={ranked}
+          data={rowsAreStale ? EMPTY_ROWS : ranked}
           keyExtractor={(item) => item.row.player_id}
           renderItem={({ item, index }) => {
-            const mu = item.row.team ? matchupByTeam.get(item.row.team) : undefined;
             const quote = quoteFor(item.row);
             return (
               <LeaderRow
@@ -1481,8 +1726,9 @@ export function StatsScreen() {
                 value={item.value}
                 gp={item.gp}
                 basis={basis}
-                matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
-                showMatchup={matchupByTeam.size > 0}
+                matchup={matchupFor(item.row)}
+                showMatchup={showMatchupCol}
+                gradeColorful={gradesColorful}
                 subline={sublineFor(item.row)}
                 quote={quote}
                 started={item.row.team ? startedTeams.get(item.row.team) ?? null : null}
@@ -1497,7 +1743,7 @@ export function StatsScreen() {
           }}
           ListEmptyComponent={
             loading ? (
-              <ActivityIndicator style={styles.loading} />
+              <BoardSkeleton />
             ) : (
               <EmptyState
                 title={error ? 'Couldn’t load players' : 'No players'}
@@ -2011,7 +2257,19 @@ function OddsCell({
  * An ungraded matchup is a DASH, never a C: grading a starter we do not know
  * as average invents the one fact this column exists to report.
  */
-function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
+function MatchupCell({
+  matchup,
+  colorful = true,
+}: {
+  matchup: MatchupInfo | null;
+  /**
+   * False when every visible row lands in the same colour band — the letter is
+   * still right, but a whole column of one colour beside a live price reads as
+   * a verdict on the bet rather than a ranking of players (the same rule
+   * `colorful` applies to the hit-rate column).
+   */
+  colorful?: boolean;
+}) {
   if (!matchup?.grade) {
     return (
       <View
@@ -2029,7 +2287,13 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
       accessible
       accessibilityLabel={`Matchup grade ${gradeSpoken(matchup.grade)}${matchup.fact ? `, ${matchup.fact}` : ''}`}
     >
-      <Text style={[styles.matchupGrade, { color: gradeColor(matchup.grade) }]} numberOfLines={1}>
+      <Text
+        style={[
+          styles.matchupGrade,
+          { color: colorful ? gradeColor(matchup.grade) : colors.textPrimary },
+        ]}
+        numberOfLines={1}
+      >
         {matchup.grade}
       </Text>
     </View>
@@ -2043,6 +2307,7 @@ function ColumnHeader({
   oddsLabel,
   oddsDateLabel,
   showMatchup,
+  matchupTooltip,
 }: {
   rightLabel: string;
   showOdds: boolean;
@@ -2051,6 +2316,7 @@ function ColumnHeader({
   /** Weekday of the slate the prices are for, when it is not today. */
   oddsDateLabel?: string | null;
   showMatchup: boolean;
+  matchupTooltip: string;
 }) {
   return (
     <View style={styles.colHeader}>
@@ -2069,18 +2335,15 @@ function ColumnHeader({
           <Text style={styles.colHeaderRight} numberOfLines={1}>
             GRADE
           </Text>
+          {/* The column's only legend, so it has to describe the grade the
+              reader is ACTUALLY looking at. It named the two baseball answers
+              alone and asserted "this season" -- both wrong for the three
+              sports now graded on defence, whose numbers come from the season
+              this text names, which on opening night is LAST season (UX
+              review, 2026-09-09). */}
           <InfoTooltip
             title="Matchup grade"
-            body={
-              'How hard tonight\u2019s spot is for this player, graded against the ' +
-              'rest of the league this season. A+ is the easiest matchup on the ' +
-              'board and F the hardest.\n\n' +
-              'Batters are graded on the opposing starter\u2019s ERA, pitchers on the ' +
-              'opposing lineup\u2019s wOBA and strikeout rate, and WNBA players on the ' +
-              'opposing defence\u2019s rating.\n\n' +
-              'A dash means the starter isn\u2019t confirmed yet — an unknown matchup ' +
-              'is never graded as average.'
-            }
+            body={matchupTooltip}
             accessibilityLabel="What the matchup grade means"
           />
         </View>
@@ -2097,6 +2360,7 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
+  gradeColorful,
   subline,
   quote,
   started,
@@ -2114,6 +2378,8 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** False when every visible grade lands in one colour band. */
+  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -2172,7 +2438,7 @@ function LeaderRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -2197,6 +2463,7 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
+  gradeColorful,
   subline,
   quote,
   started,
@@ -2212,6 +2479,8 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
+  /** False when every visible grade lands in one colour band. */
+  gradeColorful?: boolean;
   /** "9:40 PM ET · @ SEA" under the name; null when the row has no game. */
   subline: string | null;
   quote: StatsOddsQuote | null;
@@ -2278,7 +2547,7 @@ function HitRateRow({
           onPress={onOddsPress}
         />
       ) : null}
-      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} colorful={gradeColorful} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -2778,6 +3047,19 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
+  skeletonWrap: { paddingTop: spacing.xs },
+  skeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  skeletonBlock: {
+    height: 10,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+  },
   retryBtn: {
     paddingHorizontal: spacing.md,
     paddingVertical: 4,

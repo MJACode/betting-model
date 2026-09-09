@@ -1445,9 +1445,10 @@ def test_the_restate_producer_keeps_the_first_bet_only():
     """1c: `picks` can hold more than one BET per identity from before the lock
     was general, so the earliest created_at is the bet of record -- the same row
     _new_signals picks, or a restatement would correct a pick nobody was given."""
+    from tracking.publish_keys import key_partition_sql, lock_key_sql
     sql = _sql_for("_locked_signals")
-    assert "DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))" in sql
-    assert "|| ':' || p.model_id" in sql, "lock_key must be synthesised as capture minted it"
+    assert f"DISTINCT ON ({key_partition_sql()})" in sql
+    assert lock_key_sql() in sql, "lock_key must be synthesised as capture minted it"
 
 
 def test_the_restate_producer_has_no_started_game_guard():
@@ -1517,3 +1518,107 @@ def test_todays_slate_is_posted_before_tomorrows(monkeypatch):
 
     titles = [p["embeds"][0]["title"] for p in seen]
     assert ("Sep 06" in titles[0] or "Sep 6" in titles[0]), titles
+
+
+# ── Live picks go to their SPORT'S live channel (mike, 2026-09-09) ───────────
+# "Push picks to discord in live games to their live channels": #nfl-live,
+# #mlb-live, #ncaaf-live. One DISCORD_WEBHOOK_LIVE_{SPORT} each; the shared
+# DISCORD_WEBHOOK_LIVE is the fallback, and the sport's pre-game channel the
+# fallback after that.
+
+def _live_row(sport, game_id="G1", model="x_live", commence="2026-08-29T16:00:00Z"):
+    # _new_live_signals' SELECT order (see tests/test_discord_live_field.py);
+    # the lock_key is projected by the query, last.
+    return (game_id, model, "over", f"{sport} Over 50.5 (live)", sport,
+            0.662, 0.138, -110.0, 0.02, None, None, "HOME", "AWAY",
+            commence, "2026-08-29T16:14:38+00:00", 0.08, None,
+            f"live:{game_id}:{model}:over")
+
+
+def _live_setup(monkeypatch, *, live=None, shared="", sport=None):
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS_LIVE", live or {})
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_LIVE", shared)
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", sport or {})
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_DEFAULT", "")
+    monkeypatch.setattr(dn.config, "DISCORD_MAX_EMBEDS_PER_RUN", 20)
+    monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+    posts = []
+    monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "m1")
+    return posts
+
+
+def test_each_sport_s_live_picks_post_to_its_own_live_channel(monkeypatch):
+    posts = _live_setup(monkeypatch,
+                        live={"NFL": "http://nfl-live", "MLB": "http://mlb-live",
+                              "NCAAF": "http://ncaaf-live"},
+                        shared="http://shared-live",
+                        sport={"NFL": "http://nfl", "MLB": "http://mlb",
+                               "NCAAF": "http://ncaaf"})
+    conn = _FakeConn([_live_row("NFL", "G1"), _live_row("MLB", "G2"),
+                      _live_row("NCAAF", "G3")])
+    assert dn._post_new_live_signals(conn, "2026-08-29", dry_run=False) == 3
+    by_url = {url: p["embeds"][0]["title"] for url, p in posts}
+    assert set(by_url) == {"http://nfl-live", "http://mlb-live", "http://ncaaf-live"}, \
+        "a live pick must never land in the shared or pre-game channel once its sport has a live channel"
+    assert "NFL" in by_url["http://nfl-live"] and "LIVE" in by_url["http://nfl-live"]
+    assert [p[0] for p in conn.inserts] == ["live:G1:x_live:over", "live:G2:x_live:over",
+                                            "live:G3:x_live:over"]
+
+
+def test_a_sport_without_a_live_channel_falls_back_to_the_shared_then_its_own(monkeypatch):
+    """The fallback chain, one link at a time. The last link is deliberate: a
+    sport with a live loop and no live channel still posts where its members
+    read, and the ledger stops it re-posting when the channel is added."""
+    posts = _live_setup(monkeypatch, live={"NFL": "http://nfl-live"},
+                        shared="http://shared-live", sport={"MLB": "http://mlb"})
+    conn = _FakeConn([_live_row("MLB", "G2")])
+    assert dn._post_new_live_signals(conn, "2026-08-29", dry_run=False) == 1
+    assert posts[0][0] == "http://shared-live"
+
+    posts = _live_setup(monkeypatch, live={"NFL": "http://nfl-live"},
+                        shared="", sport={"MLB": "http://mlb"})
+    conn = _FakeConn([_live_row("MLB", "G2")])
+    assert dn._post_new_live_signals(conn, "2026-08-29", dry_run=False) == 1
+    assert posts[0][0] == "http://mlb"
+
+
+def test_the_sport_s_live_channel_beats_the_shared_one(monkeypatch):
+    """The whole point of the rule: with a shared channel ALSO set, the
+    sport's own live channel still wins."""
+    posts = _live_setup(monkeypatch, live={"NFL": "http://nfl-live"},
+                        shared="http://shared-live", sport={"NFL": "http://nfl"})
+    conn = _FakeConn([_live_row("NFL", "G1")])
+    assert dn._post_new_live_signals(conn, "2026-08-29", dry_run=False) == 1
+    assert posts[0][0] == "http://nfl-live"
+
+
+def test_only_live_channels_configured_still_counts_as_configured(monkeypatch):
+    """notify_discord_live short-circuits on _configured(); a deployment that
+    sets ONLY the three live webhooks must not be read as 'Discord is off'."""
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS", {})
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS_LIVE", {"NFL": "http://nfl-live"})
+    for attr in ("DISCORD_WEBHOOK_DEFAULT", "DISCORD_WEBHOOK_LIVE",
+                 "DISCORD_WEBHOOK_RESULTS"):
+        monkeypatch.setattr(dn.config, attr, "")
+    assert dn._configured()
+
+
+def test_live_webhook_map_reads_the_per_sport_env_vars(monkeypatch):
+    """The variable NAME is the contract with Railway: DISCORD_WEBHOOK_LIVE_{SPORT}."""
+    import importlib
+    import config as cfg
+    monkeypatch.setenv("DISCORD_WEBHOOK_LIVE_NFL", " http://nfl-live ")
+    monkeypatch.setenv("DISCORD_WEBHOOK_LIVE_MLB", "http://mlb-live")
+    monkeypatch.setenv("DISCORD_WEBHOOK_LIVE_NCAAF", "http://ncaaf-live")
+    monkeypatch.delenv("DISCORD_WEBHOOK_LIVE_NBA", raising=False)
+    try:
+        importlib.reload(cfg)
+        assert cfg.DISCORD_WEBHOOKS_LIVE == {"NFL": "http://nfl-live",
+                                            "MLB": "http://mlb-live",
+                                            "NCAAF": "http://ncaaf-live"}
+        assert set(cfg.DISCORD_WEBHOOKS_LIVE) <= set(cfg.DISCORD_SPORTS)
+    finally:
+        for k in ("DISCORD_WEBHOOK_LIVE_NFL", "DISCORD_WEBHOOK_LIVE_MLB",
+                  "DISCORD_WEBHOOK_LIVE_NCAAF"):
+            monkeypatch.delenv(k, raising=False)
+        importlib.reload(cfg)

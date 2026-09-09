@@ -480,10 +480,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
+  // WRAPS, because the model chip is a label of unbounded length and the three
+  // things beside it (signal badge, confidence chip, SharpScorePill) are not
+  // optional. The longest chip in the app is an NFL prop's — at an
+  // accessibility text size on a 375pt screen a non-wrapping row pushed the
+  // sharp pill off the right edge with no way to reach it (UX review,
+  // 2026-09-09). Apple HIG: a Dynamic Type layout adapts, it does not clip.
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: spacing.sm,
+    rowGap: spacing.xs,
     marginBottom: spacing.md,
   },
   modelChip: {

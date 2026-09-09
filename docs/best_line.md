@@ -284,6 +284,17 @@ unchanged at the better price, which is 0.68pp looser on average and 3.61pp at
 the extreme by the 09-02 measurement. Re-run the sweep weekly; move a cut only
 on the section-7 standards.
 
+What that loosening would have drawn in, measured before the PR merged (query
+in session 273: pre-game rows since 2026-08-28 with a stamped `best_odds`,
+NONE or AVOID at DraftKings, passing their model's `min_prob` / `min_edge` /
+`min_odds` on `best_edge` / `best_odds`, graded through
+`mv_scored_pick_outcomes` and paid at the best price; excludes rows with no
+stamp and games over `MAX_EDGE_CAP`, which have no row): **17 rows would have
+become BETs beside the 323 pre-game BETs actually written — 16 graded, 11-5,
++5.1 units.** Seven models, five of them MLB props; no model contributes more
+than 5. That is the population the flip reaches, and it is too small to be
+evidence either way — it is reported so the first weekly sweep has a baseline.
+
 What shipped, in one change:
 
 - **`picks.decision_book / decision_odds / decision_implied_prob /

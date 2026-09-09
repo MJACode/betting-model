@@ -7,8 +7,10 @@ Three producers, each independently enabled by whether its webhook is configured
     it clears the action thresholds (the same cut the app's Signals tab and the
     §16 mobile query use). Reads the LOCKED opening_signals row, so what posts is
     the bet of record, not a mid-refresh flicker.
-  • notify_discord_live    — in-play BET signals from the live loop, to the
-    dedicated live channel (or the sport's channel if none is set).
+  • notify_discord_live    — in-play BET signals from the live loops (MLB,
+    NCAAF, and the NFL in-play worker), to the SPORT'S live channel
+    (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
+    channel, else the sport's pre-game channel.
   • notify_discord_results — one morning recap after settlement: yesterday's
     record, P&L and ROI, overall and by sport.
 
@@ -48,6 +50,8 @@ from data.db import get_connection
 from tracking.publish_lock import (
     DISCORD_LIVE_LOCK, DISCORD_SIGNALS_LOCK, publish_lock,
 )
+from tracking.publish_keys import live_lock_key_sql
+from tracking.publish_keys import key_partition_sql, lock_key_sql
 
 ET = ZoneInfo("America/New_York")
 
@@ -529,8 +533,23 @@ def _webhook_for_sport(sport: str) -> str | None:
     return config.DISCORD_WEBHOOKS.get(sport) or config.DISCORD_WEBHOOK_DEFAULT or None
 
 
+def _live_webhook_for_sport(sport: str) -> str | None:
+    """Where an IN-PLAY signal for `sport` posts.
+
+    The sport's own live channel first (mike, 2026-09-09: live picks go to
+    #nfl-live / #mlb-live / #ncaaf-live), then the shared live channel, then
+    the sport's pre-game channel. The last fallback is deliberate: a sport that
+    has a live loop and no live channel yet still posts SOMEWHERE its members
+    read, and the ledger keeps it from re-posting once the channel is added.
+    """
+    return (config.DISCORD_WEBHOOKS_LIVE.get(sport)
+            or config.DISCORD_WEBHOOK_LIVE
+            or _webhook_for_sport(sport))
+
+
 def _configured() -> bool:
     return bool(config.DISCORD_WEBHOOKS
+                or config.DISCORD_WEBHOOKS_LIVE
                 or config.DISCORD_WEBHOOK_DEFAULT
                 or config.DISCORD_WEBHOOK_LIVE
                 or config.DISCORD_WEBHOOK_RESULTS)
@@ -609,11 +628,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     the key capture minted (`game:model[:player]`), so the push_sent ledger
     carries over and nothing already posted posts twice.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         WITH bet AS (
-            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
-                   p.game_id || ':' || p.model_id
-                       || COALESCE(':' || p.player_id, '') AS lock_key,
+            SELECT DISTINCT ON ({key_partition_sql()})
+                   {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
@@ -640,6 +658,14 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               -- game with a real commence_time in the future needs no bound.
               AND (g.commence_time IS NOT NULL OR p.game_date >= %s)
               -- The app's passesActionFilter, in SQL, off the same row.
+              -- A VOIDED pick is not publishable (CLAUDE.md §1c): the row
+              -- is kept as evidence of a model that fired where it should not
+              -- have, and it stops counting. Mirrored by the app's
+              -- passesActionFilter, which added the same exclusion the same
+              -- day. Only 'VOID': scripts/nfl_pick_monitor.py writes
+              -- 'OK' / 'DEGRADED' / 'GONE' here as health states on real,
+              -- STANDING picks, which must keep publishing.
+              AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
               -- The cut is applied at the price the pick was DECIDED at
@@ -648,8 +674,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
                    OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
-            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
-                     p.created_at
+            ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
         WHERE NOT EXISTS (
@@ -718,11 +743,10 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
     identity ordered by created_at, so a pre-#311 side flip collapses to the
     one bet of record rather than restating both halves of it.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         WITH bet AS (
-            SELECT DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))
-                   p.game_id || ':' || p.model_id
-                       || COALESCE(':' || p.player_id, '') AS lock_key,
+            SELECT DISTINCT ON ({key_partition_sql()})
+                   {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
@@ -741,6 +765,14 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
               -- character for character the cut _new_signals applies, because
               -- a restatement that selected differently from the slate it
               -- corrects would be a third board.
+              -- A VOIDED pick is not publishable (CLAUDE.md §1c): the row
+              -- is kept as evidence of a model that fired where it should not
+              -- have, and it stops counting. Mirrored by the app's
+              -- passesActionFilter, which added the same exclusion the same
+              -- day. Only 'VOID': scripts/nfl_pick_monitor.py writes
+              -- 'OK' / 'DEGRADED' / 'GONE' here as health states on real,
+              -- STANDING picks, which must keep publishing.
+              AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
               -- The cut is applied at the price the pick was DECIDED at
@@ -749,8 +781,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
-            ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),
-                     p.created_at
+            ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet ORDER BY created_at
     """, (target_date,)).fetchall()
@@ -1006,12 +1037,11 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
     if not url:
         return 0
     try:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT DISTINCT ps.message_id
               FROM push_sent ps
               JOIN picks p
-                ON ps.lock_key = p.game_id || ':' || p.model_id
-                                 || COALESCE(':' || p.player_id, '')
+                ON ps.lock_key = {lock_key_sql()}
              WHERE ps.kind = %s
                AND ps.message_id IS NOT NULL
                AND p.game_date = %s
@@ -1268,13 +1298,16 @@ def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
 # ── Live (in-play) signals ───────────────────────────────────────────────────
 
 def _new_live_signals(conn, target_date: str) -> list[dict]:
-    """In-play BET picks not yet posted. Deduped per (game, model, side) so the
-    live board — delete-and-rescored every pass — can't re-post the same signal."""
-    rows = conn.execute("""
+    """In-play BET picks not yet posted. Deduped on the live lock_key
+    (tracking/publish_keys.live_lock_key_sql: game, model, side AND the player
+    columns) so the live board — delete-and-rescored every pass — can't re-post
+    the same signal, and two players' props in one game are two signals."""
+    rows = conn.execute(f"""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
-               g.commence_time, p.created_at, t.min_edge, t.min_odds
+               g.commence_time, p.created_at, t.min_edge, t.min_odds,
+               {live_lock_key_sql()} AS lock_key
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -1287,13 +1320,13 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
           AND p.result IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM push_sent s
-              WHERE s.lock_key = 'live:' || p.game_id || ':' || p.model_id || ':' || p.pick_side
+              WHERE s.lock_key = {live_lock_key_sql()}
                 AND s.kind = 'discord_live'
           )
         ORDER BY p.game_id
     """, (target_date,)).fetchall()
     return [{
-        "lock_key": f"live:{r[0]}:{r[1]}:{r[2]}",
+        "lock_key": r[17],
         "label": r[3], "sport": r[4], "model_id": r[1],
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
@@ -1303,9 +1336,10 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
 
 
 def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -> int:
-    """Post new in-play BET signals to the live channel (falling back to the
-    sport's channel when DISCORD_WEBHOOK_LIVE isn't set). Called at the end of
-    each live-scorer pass. Returns the number posted."""
+    """Post new in-play BET signals to the sport's live channel (see
+    _live_webhook_for_sport for the fallback chain). Called at the end of each
+    MLB and NCAAF live pass, and by the NFL in-play worker after every live
+    BET it writes. Returns the number posted."""
     if target_date is None:
         target_date = date.today().isoformat()
     if not _configured():
@@ -1332,7 +1366,7 @@ def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
 
     by_url: dict[tuple[str, str], list[dict]] = {}
     for s in signals:
-        url = config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(s["sport"])
+        url = _live_webhook_for_sport(s["sport"])
         if url:
             by_url.setdefault((url, s["sport"]), []).append(s)
     if not by_url:

@@ -84,6 +84,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # seq-scanned 137k open non-BET rows every pass. Created on production
     # CONCURRENTLY the same night; this is the recoverable copy (IF NOT EXISTS).
     "picks_open_nonbet_index_2026_09_08.sql",
+    # 2026-09-09: player_recent_games_* gain p_teams so the Stats board can ask
+    # for one slate's players instead of the league (54,687 NCAAF rows against a
+    # 1,000-row cap). Filters on the rn=1 team, which is what the board groups
+    # to -- a request-level team filter would filter GAMES and truncate a traded
+    # player's window. Applied to production the same evening; this is the
+    # recoverable copy, and it guards on its own property so it runs once.
+    "player_recent_games_slate_teams.sql",
 ]
 
 

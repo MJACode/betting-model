@@ -17,6 +17,13 @@ import type { Pick as PickRow } from '@/types';
 export type ActionFilterable = Pick<
   PickRow,
   'model_id' | 'model_probability' | 'edge' | 'dk_odds' | 'signal_type'
+  // REQUIRED, not optional (2026-09-09). The guard is only as good as the
+  // SELECT that feeds it: a new query picking a column subset and forgetting
+  // this one would compile, pass ux_scan (no cross-file reachability) and pass
+  // the test that pins the line exists — the blind-spot shape
+  // .claude/rules/frontend.md warns about. Both pick reads carry the column
+  // now, so requiring it costs nothing and makes the omission a type error.
+  | 'condition_status'
 > & {
   // The price the pick was DECIDED at (2026-09-09). Optional so the slimmer
   // row shapes that predate the columns still type-check; absent = DraftKings.
@@ -474,6 +481,25 @@ export function isUnlockedPreview(
 
 export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
+  // A VOIDED pick is not an action either (CLAUDE.md §1c). It is a row the
+  // model should never have produced — fired outside its validated window, or
+  // on a game that was never eligible — kept deliberately, because deleting it
+  // would destroy the evidence of the bug that is usually how it was found.
+  //
+  // WHY THIS IS A PARITY FIX, not a display tweak (2026-09-09). The six Week 1
+  // `nfl_wind_totals` picks were voided on 09-07 and REMOVED FROM DISCORD by
+  // hand ("I deleted older wind picks from the discord and they should not be
+  // stored as official picks"). Nothing carried that to the app, which has no
+  // concept of condition_status at all, so all six were still drawing as green,
+  // stakeable BETs for the 09-13 slate — the app and Discord showing different
+  // picks, which is the one thing §1b says they must never do. The publishers
+  // now apply the same exclusion in SQL.
+  //
+  // ONLY 'VOID'. The NFL pick monitor (scripts/nfl_pick_monitor.py) writes
+  // 'OK' / 'DEGRADED' / 'GONE' in this column — health states on real, standing
+  // picks, which stay bettable and stay counted. NCAAF does not write this
+  // column at all; a downgraded NCAAF row carries `downgrade_reason`.
+  if (p.condition_status === 'VOID') return false;
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.
   if (RETIRED_MODELS.has(p.model_id)) return false;

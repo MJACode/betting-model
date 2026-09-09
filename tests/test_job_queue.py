@@ -704,3 +704,34 @@ def test_teams_refresh_reingests_then_probes_the_resolver(monkeypatch):
     assert out == {"season": 2026, "rows": 7,
                    "probe": {"Indiana State Sycamores": "Indiana State"}}
     assert order == ["ingest", "reset", "probe"]
+
+
+def test_the_publish_key_backfill_is_registered_and_applies():
+    """The session's Supabase MCP is read-only, so a key-component change needs
+    the worker to run scripts/backfill_publish_keys.py --apply. mike,
+    2026-09-09: "Fix it now"."""
+    import scripts.backfill_publish_keys as bpk
+    assert "backfill_publish_keys" in q.JOBS
+    fn, validate = q.JOBS["backfill_publish_keys"]
+    assert validate({}) == {}
+    seen = []
+    orig = bpk.run
+    bpk.run = lambda apply=False: seen.append(apply) or (1, 0)
+    try:
+        assert fn() == {"push_sent_added": 1, "opening_signals_rekeyed": 0}
+    finally:
+        bpk.run = orig
+    assert seen == [True], "the job must APPLY, a dry run on the worker helps nobody"
+
+
+def test_the_publish_key_backfill_never_rekeys_onto_a_taken_key():
+    """Job 47297 (2026-09-09) failed 3/3: capture had already written the
+    NEW-key opening_signals row for seven propositions whose OLD-key row was
+    still there, so the re-key UPDATE hit UNIQUE(lock_key) and rolled the
+    whole run back, live-key ledger row included. Both the report query and
+    the UPDATE must guard on the new key being free."""
+    from pathlib import Path
+    src = (Path(__file__).parent.parent / "scripts" / "backfill_publish_keys.py").read_text(encoding="utf-8")
+    update = src[src.index("UPDATE opening_signals os"):]
+    update = update[:update.index('"""')]
+    assert "NOT EXISTS" in update and "n.lock_key = o.new_key" in update

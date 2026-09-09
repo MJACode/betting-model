@@ -36,6 +36,17 @@ export interface Pick {
   injury_detail: string | null;
   signal_type: SignalType;
   confidence_tier: ConfidenceTier;
+  /** Server-side display state, NOT a settlement. 'VOID' means the row is a
+   *  pick the model should never have PRODUCED — fired outside its validated
+   *  window, or on a game that was never eligible — retired by
+   *  scripts/void_picks.py (CLAUDE.md §1c). The row survives as the evidence
+   *  the bug happened, and must never be drawn as a standing bet.
+   *
+   *  Also written by the NFL pick monitor (scripts/nfl_pick_monitor.py) as
+   *  'OK' / 'DEGRADED' / 'GONE' — health states on real, STANDING picks, which
+   *  is why only 'VOID' is filtered anywhere. NCAAF does not use this column at
+   *  all; a downgraded NCAAF row carries `downgrade_reason` instead. */
+  condition_status: string | null;
   result: PickResult;
   profit_flat: number | null;
   profit_kelly: number | null;
@@ -116,6 +127,7 @@ export type SettledPickKey =
   | 'scored_line'
   | 'signal_type'
   | 'confidence_tier'
+  | 'condition_status'
   | 'result'
   | 'profit_flat'
   | 'player_id'
@@ -826,6 +838,22 @@ export interface SeasonStatValuesRow {
  * RPC; every metric column is optional because the set varies by sport (a
  * baseball row has no offensive rating, a hockey row has no wRC+).
  */
+/**
+ * A team-stats read, WITH the season it came from.
+ *
+ * Football labels a season by the year it starts, so on opening night the
+ * current label has no rows and the read falls back one year. The season has to
+ * travel with the rows because two surfaces write it down — the Teams board's
+ * "TEAM · 2025" header and the Stats tab's matchup tooltip — and a fallback
+ * whose result is silent is how last season's numbers end up under this
+ * season's name.
+ */
+export interface TeamSeasonStats {
+  /** The season the rows are from, or null when there were none. */
+  season: number | null;
+  rows: TeamStatsRow[];
+}
+
 export interface TeamStatsRow {
   team: string;
   conference: string | null; // NCAAF only

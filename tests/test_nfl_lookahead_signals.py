@@ -34,6 +34,7 @@ shadow track (docs/opening_signals.md) and no longer gates display.
 import config
 from tracking import discord_notifier as dn
 from tracking import push_notifier as pn
+from tracking.publish_keys import key_partition_sql, lock_key_sql
 
 
 class _Conn:
@@ -150,26 +151,27 @@ def test_the_first_bet_is_the_one_published():
     """
     for producer in (dn._new_signals, pn._new_bet_signals):
         sql = _sql_for(producer).sql
-        assert "DISTINCT ON (p.game_id, p.model_id, COALESCE(p.player_id, ''))" in sql
+        assert f"DISTINCT ON ({key_partition_sql()})" in sql
         order = sql[sql.index("ORDER BY p.game_id"):]
-        assert order.startswith(
-            "ORDER BY p.game_id, p.model_id, COALESCE(p.player_id, ''),\n"
-            "                     p.created_at"), (
+        assert order.startswith(f"ORDER BY {key_partition_sql()}, p.created_at"), (
             f"{producer.__name__} must break the DISTINCT ON tie by created_at")
 
 
 def test_the_ledger_key_matches_the_one_capture_minted():
     """Nothing already published may publish twice.
 
-    `push_sent` rows were written against `opening_signals.lock_key`
-    (`game:model[:player]`). Reading `picks` has to synthesise the identical
-    key, or every pick ever posted looks new on the first run after deploy.
+    `push_sent` rows were written against `opening_signals.lock_key`. Reading
+    `picks` has to synthesise the identical key, or every pick ever posted looks
+    new on the first run after deploy.
+
+    The expression lives in `tracking.publish_keys` (2026-09-09) so the three
+    producers and capture cannot drift apart; the identity property it carries
+    is pinned in tests/test_publish_key_identity.py.
     """
     for producer, kind in ((dn._new_signals, "discord_signal"),
                            (pn._new_bet_signals, "new_bet")):
         sql = _sql_for(producer).sql
-        assert ("p.game_id || ':' || p.model_id\n"
-                "                       || COALESCE(':' || p.player_id, '') AS lock_key") in sql
+        assert f"{lock_key_sql()} AS lock_key" in sql
         assert f"s.kind = '{kind}'" in sql
 
 
@@ -235,4 +237,7 @@ def test_the_early_suffix_is_retired_not_merely_unused():
 
     src = inspect.getsource(osig.capture_opening_signals)
     assert "THEN ':early'" not in src, "the suffix must not still be minted"
-    assert "COALESCE(':' || p.player_id, '')," in src, "plain key expression"
+    # The plain key expression, now built by tracking.publish_keys so capture
+    # and the publishers cannot drift (2026-09-09). Interpolated at import, so
+    # the source carries the f-string placeholder.
+    assert "{lock_key_sql()}," in src, "plain key expression"
