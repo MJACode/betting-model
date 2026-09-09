@@ -231,7 +231,106 @@ parameters. Refreshed from the active artifacts this session and pinned by
 `tests/test_nfl_prop_params_match_artifacts.py`; the eleven re-graded on the
 deployed parameters are in the session log.
 
-## 6. What this settles
+## 7. The second pass: every remaining DraftKings data set, graded
+
+*mike, after the first pass: "the ten other prop models actually do have
+plenty of DraftKings data -- did you look hard enough, what is missing?"*
+What had not been used: DK's earlier snapshots, DK's own alternate ladders,
+DK's line movement as a target, and a nonlinear learner over the market
+features. Each is now graded.
+
+### 7a. The earlier snapshots: t72, t48, t24
+
+`nfl_prop_backtest --all --seasons 2023 2024 2025 --snapshot <type>`, the
+models unchanged, live cuts, DK price at that snapshot:
+
+| snapshot | rows with bets | best market | worst market | any interval excluding zero on the positive side |
+|---|---|---|---|---|
+| t72 (3 days out) | 8 markets | receptions +3.2% (322) | rec_yards −9.2% (189) | none |
+| t48 | 9 markets | receptions +3.6% (471) | pass_yards −12.0% (128) | none |
+| t24 (2024-25 only) | 8 markets | receptions +1.2% (199) | pass_yards −23.5% (32) | none |
+
+Earlier lines are not softer for these models.
+
+### 7b. The model does predict where DraftKings will move its line
+
+Correlation between (projection − t72 line) and (game-day line − t72 line),
+lines that moved, per season:
+
+| market | n | corr | 2023 | 2024 | 2025 | when the model sits above the t72 line, DK raises it |
+|---|---|---|---|---|---|---|
+| receptions | 364 | +0.66 | +0.73 | +0.64 | +0.62 | 93% |
+| pass_completions | 293 | +0.31 | +0.45 | +0.13 | +0.34 | 83% |
+| pass_attempts | 354 | +0.25 | +0.24 | +0.25 | +0.25 | 70% |
+| pass_yards | 1,031 | +0.21 | +0.23 | +0.17 | +0.28 | 64% |
+| rec_yards | 2,577 | +0.12 | +0.14 | +0.12 | +0.10 | 63% |
+
+That is real, stable information about the market's own next move. It does
+not pay: betting the model's direction at the t72 price wins 51.8% on rec
+yards (needs 53.5% at −115), fading it wins 48.2%, and the mean move captured
+is +0.4 yards on rec yards, +1.1 on pass yards, +0.12 on receptions --
+smaller than the vig on every market. The model and the book read the same
+public statistics; the book reads them a day later and moves a little.
+
+### 7c. DraftKings' own alternate ladders
+
+DK's standard line is flat but its alternate ladder (over 40.5 at −250 …
+over 80.5 at +400) is where its prices vary, and a distributional model
+claims exactly that tail. `scripts/nfl_prop_dk_alt_ladder` prices every DK
+alternate strike quoted at or before the row's snapshot with the model's
+fitted tail (574,525 DK alternate rows, 21,153 propositions, 2023-25; the
+ladder is over-only from 2024).
+
+**Calibration across the ladder, all markets: the models' far tail is too
+fat and their near tail too thin.** Pass yards at 1.5× the line and beyond:
+model 5.8%, realised 3.5%, DK 4.5%. Rec yards: 11.5% / 9.9% / 12.5%.
+Receptions: 8.3% / 6.2% / 9.0%. At 0.6-0.85× the line the models sit 4-14pp
+UNDER realised on every market.
+
+**Graded as bets**, one per (proposition, strike) at first: rec_yards,
+receptions, rush_yards, rush_rec_yards, pass_completions all negative with
+intervals excluding zero in 2025. Pass yards looked like the exception
+(+20% / +9% at 5%, +26% / +17% at 8%, both seasons' intervals excluding zero
+at 8%). It is not: **one bet per proposition** (the best-edge strike, which
+is what a bettor can actually place without stacking correlated strikes on
+one quarterback) gives
+
+| cut | 2024 | 2025 |
+|---|---|---|
+| 5% | +16.7% (414, CI −4.4 to +38.6) | −1.4% (163) |
+| 8% | +22.7% (354, CI −0.6 to +46.7) | −1.8% (102) |
+| 12% | +42.3% (201, CI +9.4 to +76.6) | −0.8% (45) |
+
+at average odds of +580. At the selected bets the model says 28.6% and
+realised is 18.4% (2024), 38.3% vs 26.5% (2025): the model's tail is wrong by
+ten points in its own favour. The 2024 result exists because DK's 2024
+ladder implied 15.7% where 18.4% landed -- a book error the naive rolling-8
+projection also collected (+13.8% at 8%) -- and in 2025 DK's implied (25.6%)
+matches realised (26.5%). A one-season mispricing by the book, since fixed,
+not a model edge.
+
+### 7d. A nonlinear market-anchored classifier
+
+`scripts/nfl_prop_dk_boost`: a small gradient-boosted classifier on the
+market features and the projection, early-stopped on the training season's
+own tail, graded at the DK price. On eight of ten markets early stopping
+chooses 0-1 trees (nothing to learn); where it grows trees it memorises
+(pass_yards 2025: train Brier 0.2209, test 0.2548 against the book's 0.2501).
+On the corrected tackles rows it does not beat the eleven's own model
+(Brier 0.2512 / 0.2479 vs the book's 0.2492 / 0.2477).
+
+### 7e. What is left that this repo holds
+
+Nothing. `player_prop_odds` holds **zero** NFL rows with
+`snapshot_type='in_play'`, in production and in the cache, so the live-prop
+programme CLAUDE.md names as the priority has no recorded history to build
+on either; that is a recording gap, not a feature for these ten. Every
+DraftKings prop data set this repo holds -- the main line at four pre-game
+snapshots, the alternate ladder, the line's own movement, the other books'
+prices around it -- has now been graded against these models across three
+seasons.
+
+## 8. What this settles
 
 - **A DraftKings-decided distributional model has no information to work
   with on ten of eleven markets.** Player features, sharp lines, consensus,
@@ -244,6 +343,9 @@ deployed parameters are in the session log.
 - **The only edge in the wider data is other books' prices**, which the
   shipped rule already takes, and which a learned stack may take better on
   pass attempts.
+- **Second pass (§7): DraftKings is efficient against these models at every
+  snapshot we hold and on its alternate ladder.** The models predict DK's
+  own next move, and the move is worth less than the vig.
 
 Reproduce:
 
