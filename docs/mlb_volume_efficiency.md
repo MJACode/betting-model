@@ -1288,3 +1288,28 @@ qualify rather than the ones at the bottom of an arbitrary ranking.
   overshoot into under-confidence.
 - **The cut must be re-swept.** 0.70 / 0.14 / 0.32 were swept on the leaked
   probabilities. ~70 settled BETs cannot re-sweep them.
+
+### 17.6 The original gate, and why it is the weakest number here
+
+The gate proposed when this work started was §14's probe: the median swing in
+`p_over` across three daily stats snapshots had to collapse from 0.1281.
+Measured on honest B13, 60 live BETs:
+
+    median swing 0.0000   mean 0.0000   p90 0.0000   max 0.0000
+    swing > 2%: 0 / 60
+
+**This proves nothing, and it is recorded here so nobody cites it.** B13
+carries no season-to-date stats, so varying which day's stats snapshot feeds
+the row changes no input at all. A swing of exactly zero is the DEFINITION of
+the candidate, not evidence about it. `scripts/live_feature_sensitivity.py`
+now says so in its own docstring.
+
+What the probe genuinely established was the DIAGNOSIS (§14) — a real
+instability in the model that shipped. Its disappearance is a tautology once
+the features it measured are gone.
+
+The numbers that actually rank these candidates are the two that cannot be
+satisfied by construction: the **CV/holdout NLL gap** (0.82 -> 0.041), which
+says the tuner is no longer scoring a lookup, and the **fixed-reference
+calibration gap** (+0.1112 -> -0.0095), which says the probability the model
+bets means what it claims.
