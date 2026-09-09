@@ -23,6 +23,7 @@ import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
+import { decisionOdds } from '@/lib/decisionPrice';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Tab = 'builtin' | 'custom';
@@ -399,7 +400,7 @@ function CustomModelRow({
                   {ep.pick.pick_label}
                 </Text>
                 <Text style={styles.betOdds}>
-                  {ep.pick.dk_odds == null ? '—' : formatAmerican(ep.pick.dk_odds)}
+                  {decisionOdds(ep.pick) == null ? '—' : formatAmerican(decisionOdds(ep.pick))}
                 </Text>
               </View>
             ))}

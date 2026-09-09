@@ -1,13 +1,15 @@
 """
-Best-line shopping: the price we tell the bettor to take.
+Best-line shopping: the price we tell the bettor to take -- and, since
+2026-09-09, the price that DECIDES.
 
 Every scored pick records the best price across config.BEST_LINE_BOOKMAKERS and
-which book had it. The load-bearing property is that this is DISPLAY + BET
-information only — it must never reach the BET/AVOID decision, the edge, the
-Kelly stake, settlement or CLV, all of which still measure against DraftKings.
-Best-of-N pricing runs ~2pp cheaper in implied probability than DraftKings
-(measured 2026-08-28 over 92 MLB games), so letting it qualify picks would
-loosen every threshold in section 17 by that much without anyone deciding to.
+which book had it. Until 2026-09-09 that was display-only and the BET/AVOID
+call, the stake and settlement measured against DraftKings; mike ("we should
+remove DK only - we want best lines for us regardless") flipped it: the pick is
+re-decided at the best bettable price (models.scorer._requalify_at_best) and
+that price is stored as decision_*. The selection rules below are unchanged;
+the isolation tests are the INVERSE of what they were, and
+tests/test_decide_on_best_price.py carries the requalification itself.
 
 Pure-function / static-source tests — no network, no DB.
 """
@@ -190,34 +192,38 @@ def test_tag_prop_survives_a_none_pick():
     assert _tag_prop(None, ("g", "p", "m")) is None
 
 
-# ── isolation: best price must never decide a bet ────────────────────────────
+# ── the best price DECIDES (2026-09-09), through one code path ───────────────
 
-def test_the_deciding_functions_never_see_a_best_price():
+def test_the_builders_decide_at_draftkings_and_the_stamp_requalifies():
     """
-    _make_pick and _make_prop_pick classify BET/AVOID/NONE and size the stake.
-    Neither takes best-price data, and the stamping happens after they return —
-    which is what keeps the pick set identical to the DK-calibrated thresholds.
+    _make_pick and _make_prop_pick decide at the DraftKings quote through
+    _decide / _size, and the stamping step that follows them re-runs THE SAME
+    two functions at the best bettable price. A second copy of the rules is how
+    the two prices would drift apart.
     """
     src = _source("models/scorer.py")
     for fn in ("def _make_pick(", "def _make_prop_pick("):
         start = src.index(fn)
         body = src[start:src.index("\ndef ", start + 1)]
-        assert "best_" not in body, (
-            f"{fn} references a best-price field — the BET/AVOID call, edge and "
-            "Kelly stake must stay measured against DraftKings"
-        )
+        assert "_decide(" in body and "_size(" in body, fn
+        assert "_decision_fields(ODDS_API_BOOKMAKER" in body, (
+            f"{fn} must record DraftKings as the deciding price until the "
+            "best-price stamp says otherwise")
+    for fn in ("def _stamp_best_game_prices(", "def _tag_prop("):
+        start = src.index(fn)
+        body = src[start:src.index("\ndef ", start + 1)]
+        assert "_requalify_at_best(" in body, fn
 
 
-def test_settlement_and_clv_never_read_a_best_price():
-    """Settlement grades at the price the pick was measured at. If P&L ever
-    moves to the best price, edge and thresholds must move with it."""
-    assert "best_odds" not in _source("tracking/paper_tracker.py")
-
-
-def test_draftkings_is_in_the_best_line_book_set():
-    """DraftKings must always be a candidate, or a pick could be stamped with a
-    price strictly worse than the one it was scored against."""
-    assert config.ODDS_API_BOOKMAKER in config.BEST_LINE_BOOKMAKERS
+def test_settlement_reads_the_deciding_price():
+    """Settlement grades at the price the pick was DECIDED at: the decision
+    price since the flip, DraftKings (decision_odds NULL) before it. CLV stays
+    DraftKings-to-DraftKings."""
+    src = _source("tracking/paper_tracker.py")
+    assert src.count("COALESCE(p.decision_odds, p.dk_odds)") == 4, (
+        "every settle path (props, UFC, golf, game) grades at the decision price")
+    assert "best_odds" not in src, "the settlement price is decision_odds, not the display stamp"
+    assert "closing_dk_odds" in src
 
 
 # ── The price has to be one the bettor can actually take ─────────────────────

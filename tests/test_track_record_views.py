@@ -85,7 +85,9 @@ def test_thresholds_are_still_joined_live():
         assert "JOIN model_action_thresholds" in body, view
         # `o.` is the matview alias, so these can only be satisfied by the
         # full-outcome branch - the `other` branch's own cut does not count.
-        for clause in ("o.model_probability >= ", "o.edge >= COALESCE(", "o.dk_odds >= "):
+        # At the price the pick was DECIDED at (2026-09-09): the matview's
+        # decision_* columns, DraftKings for every row from before the flip.
+        for clause in ("o.model_probability >= ", "o.decision_edge >= COALESCE(", "o.decision_odds >= "):
             assert clause in body, f"{view}: cut clause {clause!r} missing from the matview branch"
 
 

@@ -267,12 +267,63 @@ so their time split becomes credible in roughly two to three weeks; game models
 add 15–20 a day and need a month or more. **Earliest credible flip: the
 high-volume props, mid-to-late September.**
 
+### The flip, 2026-09-09
+
+> **mike: "we should remove DK only - we want best lines for us regardless."**
+> That is the instruction that lifted the re-sweep gate above. Shipped the same
+> day, `Updated-By: mike`.
+
+What the sweep said the morning it shipped (`scripts/best_line_threshold_sweep`,
+12 days of best-price history, 25+ settled rows per cell): **no cut is
+shippable on best-price edge** — every candidate fails the time split or the
+volume gate, and the models with thousands of graded rows return no profitable
+cut at all. The same picks paid at the best price gain **0 to +7.8pp of ROI,
+typically under a point** (pitcher_outs +2.3pp on 39 bets, runline +3.2pp on
+6, wnba rebounds +7.8pp on 6). So **no cut moved**: every cut is applied
+unchanged at the better price, which is 0.68pp looser on average and 3.61pp at
+the extreme by the 09-02 measurement. Re-run the sweep weekly; move a cut only
+on the section-7 standards.
+
+What shipped, in one change:
+
+- **`picks.decision_book / decision_odds / decision_implied_prob /
+  decision_edge`** — the price the pick was DECIDED at. Rows from before the
+  flip carry NULL and every reader `COALESCE`s to `dk_*`, which is exact (they
+  were decided at DraftKings). `edge` and `dk_*` keep their DraftKings meaning.
+  Mirrored on `picks_log` and copied by the audit trigger, so a first-signal
+  restore keeps the deciding price.
+- **The scorer** builds each pick at the DraftKings quote through one pair of
+  rule functions (`_decide` / `_size`), then `_requalify_at_best` re-runs the
+  same two at the best bettable price the moment the pick is shopped —
+  `_stamp_best_game_prices` for game markets (now including NHL 3-way),
+  `_tag_prop(pick, ctx, conn)` for every prop lane — BEFORE dedupe, the daily
+  caps and the first-signal lock read `signal_type`. The best-price lookups
+  are bounded at the pre-game cutoff like the DraftKings reads, exclude in-play
+  rows, and drop a book whose newest quote lags the shop by more than
+  `BEST_LINE_MAX_LAG_MIN` (30; measured max 4.3 minutes on 2026-09-09).
+- **Settlement** grades at `COALESCE(decision_odds, dk_odds)` on all four
+  settle paths; `mv_scored_pick_outcomes` carries `decision_*` and grades
+  `profit_units` there; the record views, the custom-model RPCs, the Discord
+  and push producers, the emitted action-filter SQL and the app's
+  `passesActionFilter` all cut on the decision columns
+  (`data/migrations/decide_on_best_price_2026_09_09.sql`, applied to
+  production before the code deployed; the two active view files re-applied
+  once).
+- **What stays DraftKings:** the LINE a pick is scored at (a game or prop DK
+  does not list still produces no pick), training features, CLV
+  (`closing_dk_odds` vs `dk_odds`), the line-movement monitor, the
+  opening-signal shadow track, and the live lanes (his 2026-09-02 fence, "only
+  for pregame picks for now"). `MAX_EDGE_CAP` is judged on the DraftKings edge
+  in the builders and not re-applied at the best price.
+- **Flag:** `DECIDE_ON_BEST_PRICE=0` restores DraftKings as the deciding price.
+
 **The order, when the evidence arrives.**
 
 1. Re-sweep each pre-game model's cut on best-implied edge — **per model, never
    copied across** (§1b), with the plateau/CI/time-split standards of §7.
 2. Flip qualification, Kelly and settlement to the best price in ONE change,
-   `Updated-By: mike`. `tests/test_multi_book_odds.py` and
+   `Updated-By: mike`. **Done 2026-09-09, ahead of step 1, on mike's
+   "regardless" — see above.** `tests/test_multi_book_odds.py` and
    `tests/test_best_line.py` will fail — they are the tripwires being
    deliberately retired, and that failure is how you know it is the intended
    change rather than a leak.

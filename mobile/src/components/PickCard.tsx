@@ -29,6 +29,7 @@ import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
+import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 
 interface Props {
   item: EnrichedPick;
@@ -75,7 +76,8 @@ export function PickCard({
     : pick.signal_type === 'AVOID'
       ? colors.avoid
       : colors.textSecondary;
-  const ev = expectedValue(pick.model_probability, pick.dk_odds);
+  // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
+  const ev = expectedValue(pick.model_probability, decisionOdds(pick));
   const evColor =
     ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
@@ -110,7 +112,7 @@ export function PickCard({
   // the card actually shows, which is now always the modeled DraftKings number
   // — so the stake beside an edge is derived from the same price the edge was,
   // which §6 requires and the old per-book quote quietly broke.
-  const stake = stakeFor(pick.kelly_fraction, quote?.price ?? pick.dk_odds, kelly);
+  const stake = stakeFor(pick.kelly_fraction, quote?.price ?? decisionOdds(pick), kelly);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
@@ -216,7 +218,7 @@ export function PickCard({
 
       <View style={styles.statsRow}>
         <Stat label="Model" value={formatPct(pick.model_probability)} />
-        <Stat label="Edge" value={formatPctSigned(pick.edge)} color={edgeColor} />
+        <Stat label="Edge" value={formatPctSigned(decisionEdge(pick))} color={edgeColor} />
         <Stat label="EV" value={ev == null ? '—' : formatPctSigned(ev)} color={evColor} />
         <Stat
           label={bookLabel(quote?.bookmaker ?? MODEL_BOOK)}

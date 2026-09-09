@@ -1,4 +1,13 @@
--- live_record_start_views_2026_09_01 (2026-09-04)
+-- live_record_start_views_2026_09_01 (2026-09-04; decision-price cut 2026-09-09)
+--
+-- 2026-09-09 (mike, "remove DK only"): the cut reads COALESCE(decision_x, dk_x)
+-- -- the price the pick was DECIDED at (decide_on_best_price_2026_09_09.sql):
+-- the best bettable price at the DraftKings line from that date, DraftKings
+-- itself before it. The `p.dk_odds IS NOT NULL` priced gates are kept verbatim:
+-- a scorer pick only exists when DraftKings quoted the line, so the DK price is
+-- present on every decision-priced row, and require_price_for_published_units
+-- .sql pins that exact expression every pass. The guard checks for both
+-- properties so the definitions re-apply exactly once over the pre-flip ones.
 --
 -- THE SECOND HALF OF live_record_start_2026_09_01.sql, MADE SELF-HEALING.
 --
@@ -47,8 +56,8 @@ DECLARE
 BEGIN
   -- ── v_public_track_record ────────────────────────────────────────────────
   d := pg_get_viewdef('public.v_public_track_record'::regclass, true);
-  IF position('2026-09-01' in d) > 0 THEN
-    RAISE NOTICE 'v_public_track_record already starts at the live date - skipping';
+  IF position('2026-09-01' in d) > 0 AND position('decision_edge' in d) > 0 THEN
+    RAISE NOTICE 'v_public_track_record already starts at the live date and cuts at the decision price - skipping';
   ELSE
     EXECUTE $v$
       CREATE OR REPLACE VIEW public.v_public_track_record WITH (security_invoker = on) AS
@@ -82,8 +91,9 @@ BEGIN
          AND t.paused IS NOT TRUE
          AND p.game_date >= '2026-09-01'
          AND p.model_probability >= t.min_prob
-         AND (t.prob_only OR p.edge >= t.min_edge)
-         AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
+         AND (t.prob_only OR COALESCE(p.decision_edge, p.edge) >= t.min_edge)
+         AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+              OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
        GROUP BY p.sport, p.model_id
     $v$;
     GRANT SELECT ON public.v_public_track_record TO anon, authenticated;
@@ -94,8 +104,8 @@ BEGIN
   -- The same population, grouped by day instead of by model: the equity curve
   -- must total to the hero card, or the screen contradicts itself.
   d := pg_get_viewdef('public.v_public_track_record_daily'::regclass, true);
-  IF position('2026-09-01' in d) > 0 THEN
-    RAISE NOTICE 'v_public_track_record_daily already starts at the live date - skipping';
+  IF position('2026-09-01' in d) > 0 AND position('decision_edge' in d) > 0 THEN
+    RAISE NOTICE 'v_public_track_record_daily already starts at the live date and cuts at the decision price - skipping';
   ELSE
     EXECUTE $v$
       CREATE OR REPLACE VIEW public.v_public_track_record_daily WITH (security_invoker = on) AS
@@ -118,8 +128,9 @@ BEGIN
          AND t.paused IS NOT TRUE
          AND p.game_date >= '2026-09-01'
          AND p.model_probability >= t.min_prob
-         AND (t.prob_only OR p.edge >= t.min_edge)
-         AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
+         AND (t.prob_only OR COALESCE(p.decision_edge, p.edge) >= t.min_edge)
+         AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+              OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
        GROUP BY p.game_date, p.sport
       HAVING count(*) FILTER (WHERE p.result = ANY (ARRAY['WIN','LOSS','PUSH'])) > 0
     $v$;

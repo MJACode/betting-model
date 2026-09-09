@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 269 - DK-only removed (mike): a pre-game pick is decided, sized and settled at the best bettable price at the DraftKings line, recorded as picks.decision_*; no cut moved (the best-price sweep found none shippable, so each is 0.68pp looser); scorer, settlement, matview, record views, RPCs, Discord, push, the app and the prompt SQL all cut at the decision price; migration applied to production first |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 268 - tackles unpaused (#623, #624); the second pass over every DraftKings prop data set: earlier snapshots, the alternate ladders, the line's own movement (which the models predict, worth less than the vig) and a boosted stack -- DK is efficient against the ten at every snapshot and on its ladder |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 267 - the profitable NFL prop model was tackles all along, grading the wrong stat: solo+with_assist+assists matches the box score, and on it the model is +50.24u over 363 bets, positive all three seasons; at DraftKings nothing else beats a line the book prices flat; pass attempts at the soft books is a two-of-three lead |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 267 - the live cut re-swept on the new model over 47 slates: 0.70 -> 0.72, ~1.9 bets a slate, the centre of a plateau; scripts/live_cut_sweep.py; a shared-checkout collision recorded |

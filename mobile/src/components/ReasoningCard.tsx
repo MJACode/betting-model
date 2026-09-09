@@ -18,6 +18,8 @@ import {
 } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
+import { bookLabel } from '@/lib/markets';
+import { decisionBook, decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 
 interface Props {
   pick: Pick;
@@ -26,7 +28,14 @@ interface Props {
 }
 
 export function ReasoningCard({ pick, bankroll, kelly }: Props) {
-  const stake = stakeFor(pick.kelly_fraction, pick.dk_odds, kelly);
+  // Everything here is at the price the pick was DECIDED at (2026-09-09):
+  // the best bettable price at the DraftKings line, DraftKings itself on
+  // rows from before the flip.
+  const odds = decisionOdds(pick);
+  const edge = decisionEdge(pick);
+  const book = bookLabel(decisionBook(pick) ?? 'draftkings');
+  const implied = pick.decision_implied_prob ?? pick.dk_implied_prob;
+  const stake = stakeFor(pick.kelly_fraction, odds, kelly);
   // isProbOnlyModel, not the strict config mirror: a retired prob-only model's
   // pick must keep being explained the way it was made.
   const isProbOnly = isProbOnlyModel(pick.model_id);
@@ -44,11 +53,11 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
         sub="What our model says is the chance this side hits."
       />
 
-      {pick.dk_odds != null ? (
+      {odds != null ? (
         <Row
-          label={`DK ${formatAmerican(pick.dk_odds)} implied`}
-          value={formatPct(pick.dk_implied_prob)}
-          sub="What DraftKings' odds imply about that chance (1 / decimal odds)."
+          label={`${book} ${formatAmerican(odds)} implied`}
+          value={formatPct(implied)}
+          sub={`What ${book}'s odds imply about that chance (1 / decimal odds) — the price this pick was decided at.`}
         />
       ) : (
         <Row
@@ -61,9 +70,9 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
       {!isProbOnly ? (
         <Row
           label="Edge"
-          value={formatPctSigned(pick.edge)}
-          tint={pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : undefined}
-          sub={`= model ${formatPct(pick.model_probability)} − DK ${formatPct(pick.dk_implied_prob)}. Positive means we think the side is mispriced in our favor.`}
+          value={formatPctSigned(edge)}
+          tint={edge >= 0.05 ? colors.bet : edge <= -0.05 ? colors.avoid : undefined}
+          sub={`= model ${formatPct(pick.model_probability)} − ${book} ${formatPct(implied)}. Positive means we think the side is mispriced in our favor.`}
         />
       ) : (
         <Row
@@ -83,7 +92,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
           }
           sub={
             (stake.priced
-              ? `A ${formatUnits(stake.conviction)} play means ${formatUnits(stake.conviction)} to WIN, so at ${formatAmerican(pick.dk_odds)} you lay ${formatUnits(stake.risk)}. `
+              ? `A ${formatUnits(stake.conviction)} play means ${formatUnits(stake.conviction)} to WIN, so at ${formatAmerican(odds)} you lay ${formatUnits(stake.risk)}. `
               : `No book price on this market, so there's nothing to gross the stake up against — this is the bare conviction. `) +
             (stake.capped
               ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `

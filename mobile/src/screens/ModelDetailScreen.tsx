@@ -25,6 +25,7 @@ import { isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
+import { decisionOdds } from '@/lib/decisionPrice';
 
 /**
  * The minimums a rule actually carries. Every floor is optional — a rule with
@@ -191,7 +192,7 @@ export function ModelDetailScreen() {
                       </View>
                     </View>
                   </View>
-                  <Text style={styles.upcomingOdds}>{formatAmerican(ep.pick.dk_odds)}</Text>
+                  <Text style={styles.upcomingOdds}>{formatAmerican(decisionOdds(ep.pick))}</Text>
                 </Pressable>
               ))
             )}

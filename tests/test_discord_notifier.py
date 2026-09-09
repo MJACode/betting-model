@@ -622,7 +622,8 @@ class _FakeConn:
 
 def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00",
          best_book=None, best_odds=None, min_edge=0.10, min_odds=None,
-         commence="2099-08-23T18:36:00+00:00", game_date="2026-08-23"):
+         commence="2099-08-23T18:36:00+00:00", game_date="2026-08-23",
+         decision_odds=None):
     # Column order must match _new_signals' SELECT list. The middle four come
     # from the picks LATERAL: the betslip link, WHEN the pick row was written,
     # and the best price across books with the book that offered it. The last
@@ -638,7 +639,12 @@ def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00",
             # The pick's OWN date (2026-09-06). A pass can now carry more than
             # one day's picks, and the embed header is grouped on this rather
             # than on the run date.
-            game_date)
+            game_date,
+            # The price the pick was DECIDED at (2026-09-09): the best bettable
+            # price when one beat DraftKings, DraftKings otherwise. The card's
+            # "good to" is bounded from it.
+            decision_odds if decision_odds is not None
+            else (best_odds if best_odds is not None else -150.0))
 
 
 def _setup(monkeypatch, conn, webhooks=None):
@@ -1429,8 +1435,9 @@ def test_the_restate_producer_applies_the_apps_action_filter():
     sql = _sql_for("_locked_signals")
     for clause in ("model_action_thresholds", "t.paused = FALSE",
                    "p.model_probability >= t.min_prob",
-                   "t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0)",
-                   "p.dk_odds >= t.min_odds"):
+                   # At the price the pick was DECIDED at (2026-09-09).
+                   "OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
+                   "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds"):
         assert clause in sql, clause
 
 

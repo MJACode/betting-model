@@ -81,6 +81,14 @@ export interface Pick {
   best_implied_prob: number | null;
   best_edge: number | null;
   best_bet_link: string | null;
+  // The price the pick was DECIDED at (2026-09-09, "remove DK only"): the best
+  // bettable price at the DraftKings line. NULL on rows from before the flip,
+  // which were decided at DraftKings -- read them through lib/decisionPrice.ts,
+  // never the columns, so the fallback to dk_odds / edge is in one place.
+  decision_book: string | null;
+  decision_odds: number | null;
+  decision_implied_prob: number | null;
+  decision_edge: number | null;
 }
 
 /**
@@ -113,7 +121,10 @@ export type SettledPickKey =
   | 'player_id'
   | 'public_bet_pct'
   | 'injury_flag'
-  | 'clv_pct';
+  | 'clv_pct'
+  | 'decision_book'
+  | 'decision_odds'
+  | 'decision_edge';
 
 // A mapped type rather than Pick<Pick, …> because the `Pick` interface above
 // shadows TypeScript's built-in Pick<> utility inside this module. It stays

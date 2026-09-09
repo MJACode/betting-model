@@ -12,6 +12,7 @@
 import { americanImplied, americanToDecimal, formatStampET } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, OddsByBookRow, Pick, PickSide } from '@/types';
+import { decisionBook, decisionOdds } from '@/lib/decisionPrice';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -396,6 +397,11 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
  * An unrecognised abbrev is returned as-is rather than guessed at.
  */
 export function storedQuoteBook(pick: Pick): string {
+  // Since 2026-09-09 the row says which book DECIDED it; only rows from
+  // before the flip (and the NFL cards, which name their book in the label)
+  // fall through to the rules below.
+  const decided = decisionBook(pick);
+  if (decided) return decided;
   if (!(pick.model_id ?? '').startsWith('nfl_')) return MODEL_BOOK;
   const m = /\(([^()]*?),\s*([A-Za-z]{2,5})\)/.exec(pick.pick_label ?? '');
   if (!m) return MODEL_BOOK;
@@ -536,7 +542,7 @@ export function displayQuoteForPick(
 ): DisplayQuote | null {
   const storedBook = storedQuoteBook(pick);
   const storedQuote = (): DisplayQuote | null => {
-    const stored = numOrNull(pick.dk_odds);
+    const stored = decisionOdds(pick);
     if (stored == null) return null;
     const isPreferred = storedBook === book;
     return {
@@ -616,9 +622,10 @@ export function allBookPrices(
 
 /** One chip on a pick's "Betting lines" row. */
 export interface LineQuote extends BookQuote {
-  /** The price the pick was GIVEN at — `dk_odds` at the stored book (DK, or
-   *  the NFL card's soft book). It is the bet of record (§1c), so it is always
-   *  a chip, at the stored price rather than a fresher snapshot. */
+  /** The price the pick was GIVEN at — the deciding price at the deciding
+   *  book (decision_*; `dk_odds` at DraftKings or the NFL card's soft book on
+   *  rows from before 2026-09-09). It is the bet of record (§1c), so it is
+   *  always a chip, at the stored price rather than a fresher snapshot. */
   isRecord: boolean;
 }
 
@@ -644,7 +651,7 @@ export interface LineQuote extends BookQuote {
  */
 export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
   const recordBook = storedQuoteBook(pick);
-  const recordPrice = numOrNull(pick.dk_odds);
+  const recordPrice = decisionOdds(pick);
   const scoredLine = numOrNull(pick.scored_line);
   const record: Omit<LineQuote, 'isBest'> | null =
     recordPrice == null

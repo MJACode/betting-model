@@ -6,6 +6,7 @@
  * config.MODEL_MIN_ODDS. Prior: only pitcher_k / batter_rbi / batter_walks / runs).
  */
 
+import { decisionEdge, decisionOdds } from './decisionPrice';
 import { todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
@@ -16,7 +17,12 @@ import type { Pick as PickRow } from '@/types';
 export type ActionFilterable = Pick<
   PickRow,
   'model_id' | 'model_probability' | 'edge' | 'dk_odds' | 'signal_type'
->;
+> & {
+  // The price the pick was DECIDED at (2026-09-09). Optional so the slimmer
+  // row shapes that predate the columns still type-check; absent = DraftKings.
+  decision_odds?: number | null;
+  decision_edge?: number | null;
+};
 
 export interface ModelThreshold {
   min_prob: number;
@@ -339,11 +345,17 @@ export const RECORD_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
 // unpriced picks and showed Total Rounds +13.0% on the same 8-5 the Record tab
 // printed at -26.6%. config.REQUIRE_DK_PRICE stops new unpriced BETs; this
 // covers the ones that already exist.
-export function flatPnl(p: { dk_odds: number | null; profit_flat: number | null }): {
+export function flatPnl(p: {
+  dk_odds: number | null;
+  profit_flat: number | null;
+  decision_odds?: number | null;
+}): {
   profit: number;
   staked: number;
 } {
-  if (p.dk_odds == null) return { profit: 0, staked: 0 };
+  // "Priced" means a price the pick was decided at; settlement fabricates
+  // -110 only when there was none (decision_odds AND dk_odds both NULL).
+  if (p.decision_odds == null && p.dk_odds == null) return { profit: 0, staked: 0 };
   return { profit: Number(p.profit_flat ?? 0), staked: 100 };
 }
 
@@ -468,22 +480,27 @@ export function passesActionFilter(p: ActionFilterable): boolean {
 
   // Prefer the server-fed thresholds (model_action_thresholds, synced from
   // config.py); fall back to the bundled constants when not yet loaded / offline.
+  // The cut is applied at the price the pick was DECIDED at (2026-09-09):
+  // decision_* since the flip, DraftKings before it. Same clause the scorer,
+  // the Discord and push producers and the record views apply.
+  const odds = decisionOdds(p);
+  const edge = decisionEdge(p);
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
     if (sv.paused) return false;
     if (p.model_probability < sv.min_prob) return false;
-    if (!passesMinOdds(p.dk_odds, sv.min_odds)) return false;
+    if (!passesMinOdds(odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
-    return p.edge >= sv.min_edge;
+    return edge >= sv.min_edge;
   }
 
   if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
   if (p.model_probability < t.min_prob) return false;
-  if (!passesMinOdds(p.dk_odds, t.min_odds)) return false;
+  if (!passesMinOdds(odds, t.min_odds)) return false;
   if (PROB_ONLY_MODELS.has(p.model_id)) return true;
-  return p.edge >= t.min_edge;
+  return edge >= t.min_edge;
 }
 
 /** Effective fraction of bankroll after applying multiplier + user cap. */

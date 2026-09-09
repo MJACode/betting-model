@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { getDeviceId } from './useDeviceId';
 import { trackBet, untrackBet } from '@/lib/queries';
 import type { Pick } from '@/types';
+import { decisionOdds } from '@/lib/decisionPrice';
 
 /**
  * Track-a-bet state.
@@ -58,7 +59,8 @@ function snapshotFromPick(pick: Pick): LiveTrackSnapshot {
     pick_label: pick.pick_label,
     sport: pick.sport,
     game_date: pick.game_date,
-    dk_odds: pick.dk_odds,
+    // The price the pick was DECIDED at (2026-09-09) -- what the user tracks.
+    dk_odds: decisionOdds(pick),
     scored_line: pick.scored_line,
     tracked_at: new Date().toISOString(),
   };

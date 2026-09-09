@@ -521,28 +521,36 @@ overwrites it from `config.py` on master. To change a cut permanently, edit
 before the next 6am run.
 
 **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` drives the
-Odds API `bookmakers` param; the param counts as ONE region, so extra books cost
-zero extra credits.
+Odds API `bookmakers` param (the `us2` books cost a second region — measured,
+`docs/best_line.md` §2); `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED
+at, and it excludes the books a member cannot bet.
 
 ### Two invariants that must not be broken
 
-- **The models only ever DECIDE on DraftKings.** `edge`, the BET/AVOID call, the
-  Kelly stake, settled P&L and CLV all measure against DK, because every
-  threshold was swept on DK-implied edge and best-of-N pricing runs ~2pp cheaper
-  in implied probability — adopting it as the qualifying price would loosen every
-  cut by that much with nobody deciding to. `scorer._get_dk_odds` /
-  `_get_prop_dk_odds`, `paper_tracker._closing_dk_odds` and every feature engine
-  hard-filter to DK; `tests/test_multi_book_odds.py` is the tripwire.
-  `picks.best_*` records the best price across all books for DISPLAY and for the
-  betslip hand-off only (`tests/test_best_line.py` asserts the decision path
-  never sees it).
-- **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO DK PRICE.** (2026-09-03.)
-  A win with `dk_odds IS NULL` is stored as +$90.91 on a $100 stake — exactly
-  the payout of -110 — so `profit_flat` is NOT a safe units source on its own.
-  **Any read of `profit_flat` must be gated on `dk_odds IS NOT NULL`.**
-  `mv_scored_pick_outcomes.profit_units` is correctly NULL for these. This is
-  §6's DK-only invariant in its P&L form. Evidence, and the 261 affected BETs:
-  `docs/rules_evidence.md`.
+- **A PICK IS DECIDED, SIZED AND SETTLED AT THE BEST BETTABLE PRICE AT THE
+  DRAFTKINGS LINE, AND THE ROW SAYS WHICH PRICE THAT WAS.** (mike, 2026-09-09:
+  *"we should remove DK only - we want best lines for us regardless."*) Since
+  that day `edge`-style decisions on pre-game picks run at the best price across
+  `config.BEST_LINE_BOOKMAKERS`, stored as `picks.decision_book / decision_odds
+  / decision_implied_prob / decision_edge`; settlement, the record views, the
+  custom-model RPCs, Discord, push and the app's action filter all read those
+  columns with `COALESCE(decision_x, dk_x)` (rows from before the flip were
+  decided at DraftKings, so the fallback is exact). **DraftKings stays the
+  REFERENCE, not the decider:** the LINE a pick is scored at is DK's (no DK
+  quote, no pick), training features and CLV (`closing_dk_odds` vs `dk_odds`)
+  are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings meaning. Live lanes
+  still decide on the in-play DraftKings price (his 2026-09-02 fence). No cut
+  moved with the flip — the sweep found none shippable — so every cut is
+  0.68pp looser on average at the better price (`docs/best_line.md` §4).
+  `scorer._decide` / `_size` are the ONE code path both prices run through;
+  `tests/test_decide_on_best_price.py` is the tripwire.
+- **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO PRICE.** (2026-09-03.)
+  A win with `dk_odds IS NULL` (and, since 2026-09-09, `decision_odds IS NULL`)
+  is stored as +$90.91 on a $100 stake — exactly the payout of -110 — so
+  `profit_flat` is NOT a safe units source on its own. **Any read of
+  `profit_flat` must be gated on `dk_odds IS NOT NULL`.**
+  `mv_scored_pick_outcomes.profit_units` is correctly NULL for these. Evidence,
+  and the 261 affected BETs: `docs/rules_evidence.md`.
 
 - **ACCESS IS DECIDED IN ONE PLACE, AND IT IS NOT THE SUBSCRIPTIONS TABLE.**
   (2026-08-30, Matt.) A membership bought on Discord (Whop) entitles the app,

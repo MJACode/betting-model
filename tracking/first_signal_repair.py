@@ -59,6 +59,10 @@ _COPY_COLS = (
     "scored_line", "kelly_fraction", "recommended_bet", "bankroll_at_pick",
     "injury_flag", "injury_detail", "signal_type", "confidence_tier",
     "created_at",
+    # The price the pick was DECIDED at (2026-09-09). picks_log carries it
+    # (decide_on_best_price_2026_09_09.sql), so a restored first signal keeps
+    # the price that qualified it rather than falling back to DraftKings.
+    "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
 )
 
 

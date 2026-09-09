@@ -11,12 +11,13 @@ to act on behind the number the MODEL happens to decide on, and on the
 2026-09-02 slate it did that on half the card. The best bettable price is now
 the headline; DraftKings appears only when it is the best.
 
-THE DISTINCTION THIS FILE EXISTS TO PROTECT, UNCHANGED. The models DECIDE on
-DraftKings (CLAUDE.md §6): every threshold was swept on DK-implied edge, and a
-best-of-N price is systematically cheaper in implied probability, so adopting it
-as the QUALIFYING price would loosen every cut with nobody deciding to. This
-changes where a reader PLACES the bet, never whether the bet exists — and a
-future edit that quietly starts gating on best_odds is the regression to catch.
+SINCE 2026-09-09 THE PUBLISHED PRICE IS ALSO THE DECIDING ONE (mike: "remove DK
+only - we want best lines for us regardless"). The scorer re-decides every
+pre-game pick at the best bettable price and stores it as decision_*; the
+producers cut on it (tests/test_nfl_lookahead_signals.py) and the card's
+"good to" is bounded from it. publish_price is unchanged: the best price is
+the headline when it beats DraftKings, DraftKings when nothing does -- which is
+exactly the decision price in both cases.
 """
 
 from __future__ import annotations

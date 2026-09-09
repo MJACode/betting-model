@@ -72,6 +72,8 @@ from config import (
     PROP_MARKETS_NFL,
     today_et,
     DECIDE_ON_CALIBRATED_PROB,
+    DECIDE_ON_BEST_PRICE,
+    BEST_LINE_MAX_LAG_MIN,
 )
 from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
@@ -848,6 +850,9 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
         if pick:
             picks.append(pick)
 
+    # The best bettable price on each side, and the decision re-made there
+    # (2026-09-09) -- the same step the two-way game path takes.
+    _stamp_best_game_prices(conn, picks, "h2h_3way")
     for p in picks:
         p.update(_get_public_betting(conn, game_id, "h2h_3way", p["pick_side"]))
         p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
@@ -1087,6 +1092,150 @@ def _missing_price(dk_odds: float | None) -> bool:
     return REQUIRE_DK_PRICE and dk_odds is None
 
 
+def _decide(model_id: str, model_prob: float, implied_prob: float | None,
+            edge: float | None, odds: float | None, *, is_prop: bool) -> str:
+    """BET / AVOID / NONE at ONE quote. The rules both pick builders apply, in
+    one place, so the same rules run at the DraftKings price and again at the
+    best bettable price (_requalify_at_best) without a second copy to drift.
+
+    `implied_prob` / `edge` / `odds` may be None only for a prob-only prop
+    model whose market the book does not list; a game pick always has a price.
+    """
+    no_price = implied_prob is None
+    bet_thresh   = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+    avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
+    prob_thresh  = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+
+    # THE DECISION IS MADE ON THE CALIBRATED PROBABILITY (config, mike
+    # 2026-08-31). The RAW numbers are what gets stored; the calibrated number
+    # travels beside them in picks.model_probability_cal. A model with no
+    # promoted map calibrates to itself, so only an endorsed map bites.
+    decision_prob, decision_edge = model_prob, edge
+    if DECIDE_ON_CALIBRATED_PROB:
+        cal = _calibrated(model_id, model_prob)
+        if cal is not None:
+            decision_prob = cal
+            if not no_price:
+                decision_edge = cal - implied_prob
+
+    if is_prop and model_id in PROB_ONLY_MODELS and no_price:
+        # No real price. Historically these still fired on model_prob alone;
+        # under config.REQUIRE_DK_PRICE they no longer can -- an unplaceable
+        # bet is not a bet. The row is still written as NONE so the model keeps
+        # accruing a tracked record. Over-only, so never AVOID.
+        signal_type = ("NONE" if REQUIRE_DK_PRICE
+                       else ("BET" if decision_prob >= prob_thresh else "NONE"))
+    elif is_prop and model_id in PROB_ONLY_MODELS:
+        # A real price IS available -- the +EV edge filter applies (HR overs at
+        # +250..+500 only when the model beats the price). Never AVOID.
+        signal_type = ("BET" if (decision_edge >= bet_thresh
+                                 and decision_prob >= prob_thresh) else "NONE")
+    elif decision_edge >= bet_thresh and decision_prob >= prob_thresh:
+        signal_type = "BET"
+    elif decision_edge <= -avoid_thresh:
+        signal_type = "AVOID"
+    else:
+        signal_type = "NONE"
+
+    # Price too juicy for this model (config.MODEL_MIN_ODDS) -- no bet. A NULL
+    # price (prob-only fallback) is never blocked here; _missing_price is.
+    if signal_type == "BET" and _blocked_by_min_odds(model_id, odds):
+        logger.debug(f"  {model_id}: {odds:+.0f} below the "
+                     f"{config.min_odds_for(model_id)} price floor — BET → NONE")
+        signal_type = "NONE"
+
+    # No price, no bet. A BET must be placeable somewhere.
+    if signal_type == "BET" and _missing_price(odds):
+        signal_type = "NONE"
+
+    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
+    if _is_paused(model_id) and signal_type == "BET":
+        signal_type = "NONE"
+    return signal_type
+
+
+def _size(model_id: str, model_prob: float, implied_prob: float | None,
+          bankroll: float, signal_type: str, *, is_prop: bool) -> tuple[float, float]:
+    """The stake at ONE quote: (kelly_fraction, recommended_bet)."""
+    if signal_type == "NONE" or implied_prob is None:
+        return 0.0, 0.0
+    kelly_frac, rec_bet = quarter_kelly(model_prob, implied_prob, bankroll)
+    if is_prop:
+        # Per-model stake dial-down for high-variance markets (e.g. HR longshots).
+        _mult = MODEL_BET_SIZE_MULTIPLIER.get(model_id, 1.0)
+        if _mult != 1.0:
+            kelly_frac *= _mult
+            rec_bet    *= _mult
+    return kelly_frac, rec_bet
+
+
+def _decision_fields(book: str | None, odds: float | None,
+                     implied_prob: float | None, edge: float | None) -> dict:
+    """The four columns that say which price DECIDED a pick."""
+    return {
+        "decision_book":         book if odds is not None else None,
+        "decision_odds":         odds,
+        "decision_implied_prob": None if implied_prob is None else round(implied_prob, 4),
+        "decision_edge":         None if edge is None else round(edge, 4),
+    }
+
+
+def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
+    """Re-decide a pick at the best bettable price, in place.
+
+    mike, 2026-09-09: "we should remove DK only - we want best lines for us
+    regardless." Stage 2 of docs/best_line.md. The pick was built at the
+    DraftKings price (which is one of the shopped books, so the best price is
+    never worse); this runs THE SAME rules (_decide / _size) at the better
+    quote and records it as the deciding price. `edge`, `dk_implied_prob` and
+    `dk_odds` keep their DraftKings meaning beside it.
+
+    Left as decided at DraftKings, with decision_* = the DK price, when:
+      * DECIDE_ON_BEST_PRICE is off;
+      * no bettable book priced the same line (best is None);
+      * the pick carries no DK price at all (prob-only fallback: nothing to
+        shop, nothing to requalify);
+      * the pick was already downgraded with a reason (a capped or declined
+        row is not resurrected by a cheaper price);
+      * the pick is a live one -- live lanes decide on the in-play DraftKings
+        price (mike, 2026-09-02, "only for pregame picks for now").
+
+    MAX_EDGE_CAP is NOT re-applied at the best price. The cap guards against
+    the model's disagreement with the reference book being noise, and that
+    disagreement is measured at DraftKings in the builders; a few extra points
+    of edge from a cheaper book are the price difference, not model noise.
+    """
+    if not pick:
+        return pick
+    if (not DECIDE_ON_BEST_PRICE or not best or best.get("odds") is None
+            or pick.get("dk_odds") is None or pick.get("downgrade_reason")
+            or pick.get("is_live")):
+        return pick
+    odds = float(best["odds"])
+    implied = american_to_implied_prob(odds)
+    if not implied:
+        return pick
+    model_prob = float(pick["model_probability"])
+    edge = model_prob - implied
+    model_id = pick["model_id"]
+    was = pick["signal_type"]
+    signal_type = _decide(model_id, model_prob, implied, edge, odds, is_prop=is_prop)
+    kelly_frac, rec_bet = _size(model_id, model_prob, implied,
+                                float(pick.get("bankroll_at_pick") or 0.0),
+                                signal_type, is_prop=is_prop)
+    if signal_type != was:
+        logger.info(f"  {pick.get('pick_label')}: {was} at DK {pick['dk_odds']:+.0f} "
+                    f"→ {signal_type} at {best['book']} {odds:+.0f} "
+                    f"(edge {pick['edge']*100:+.1f}% → {edge*100:+.1f}%)")
+    pick.update({
+        "signal_type":     signal_type,
+        "kelly_fraction":  kelly_frac,
+        "recommended_bet": rec_bet,
+        **_decision_fields(best["book"], odds, implied, edge),
+    })
+    return pick
+
+
 def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
@@ -1101,61 +1250,21 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         logger.debug(f"  Edge {edge*100:+.1f}% exceeds cap — skipping (likely model noise)")
         return None
 
-    bet_thresh   = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
-    avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
-
-    # THE DECISION IS MADE ON THE CALIBRATED PROBABILITY (config, mike
-    # 2026-08-31). A model's probability is a separate claim from its point
-    # estimate and needs its own gate: twelve models publish probabilities
-    # 6-16pp above what they deliver, and the error is worst exactly where a
-    # bet against a heavy price has to come from.
+    # The rules live in _decide / _size so the same ones run again at the best
+    # bettable price (_requalify_at_best, called by _stamp_best_game_prices
+    # after this returns). Here the pick is decided at DraftKings, which is one
+    # of the shopped books, and the decision_* columns record that; the
+    # requalification overwrites them when another book prices it better.
     #
-    # The RAW numbers are still what gets STORED -- picks.edge and
-    # picks.model_probability keep their meaning, so every historical
-    # comparison and every past threshold sweep stays readable, and the
-    # calibrated number travels beside them in picks.model_probability_cal.
-    # A reader recovers the decision edge as model_probability_cal minus
-    # dk_implied_prob.
-    #
-    # A model with no PROMOTED map calibrates to itself, so decision_prob is
-    # decision_edge is a no-op for it. That is what keeps this from silently
-    # re-cutting every model at once: only an endorsed map bites.
-    decision_prob, decision_edge = model_prob, edge
-    if DECIDE_ON_CALIBRATED_PROB and dk_implied_prob is not None:
-        cal = _calibrated(model_id, model_prob)
-        if cal is not None:
-            decision_prob = cal
-            decision_edge = cal - dk_implied_prob
-
-    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    if decision_edge >= bet_thresh and decision_prob >= prob_thresh:
-        signal_type = "BET"
-    elif decision_edge <= -avoid_thresh:
-        signal_type = "AVOID"
-    else:
-        signal_type = "NONE"
-
-    # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet.
-    if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
-        logger.debug(f"  {pick_label}: DK {dk_odds:+.0f} below the "
-                     f"{config.min_odds_for(model_id)} price floor — BET → NONE")
-        signal_type = "NONE"
-
-    # No price, no bet. A BET must be placeable somewhere.
-    if signal_type == "BET" and _missing_price(dk_odds):
-        logger.debug(f"  {pick_label}: no book price — BET → NONE")
-        signal_type = "NONE"
-
-    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if _is_paused(model_id) and signal_type == "BET":
-        signal_type = "NONE"
+    # The RAW numbers are what gets STORED -- picks.edge and
+    # picks.model_probability keep their DraftKings meaning, so every
+    # historical comparison and every past threshold sweep stays readable.
+    signal_type = _decide(model_id, model_prob, dk_implied_prob, edge, dk_odds,
+                          is_prop=False)
+    kelly_frac, rec_bet = _size(model_id, model_prob, dk_implied_prob, bankroll,
+                                signal_type, is_prop=False)
 
     sport_from_model = MODELS[model_id][0]
-    if signal_type == "NONE":
-        kelly_frac, rec_bet = 0.0, 0.0
-    else:
-        kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
-
     inj_flag, inj_detail = _build_injury_flag(features, sport_from_model, pick_side)
     conf_tier = _confidence_tier(edge)
 
@@ -1179,6 +1288,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "signal_type":       signal_type,
         "confidence_tier":   conf_tier,
         "game_time":         commence_time,
+        **_decision_fields(ODDS_API_BOOKMAKER, dk_odds, dk_implied_prob, edge),
     }
 
 
@@ -1400,13 +1510,67 @@ def _best_of(quotes: list[dict]) -> dict | None:
     return best[1] if best else None
 
 
+def _fresh_quotes(quotes: list[dict]) -> list[dict]:
+    """Drop quotes that lag the newest quote in the shop by more than
+    config.BEST_LINE_MAX_LAG_MIN minutes.
+
+    Since 2026-09-09 the best price DECIDES the pick, so a book that stopped
+    pricing an hour ago must not qualify it on a number it no longer offers.
+    Every book is fetched in one call (measured 2026-09-09: at most 4.3 minutes
+    behind DraftKings across 13 books), so on a live board nothing is dropped;
+    this bites only when a book has genuinely gone quiet. Quotes with no
+    parseable stamp are kept -- failing open, like every guard here.
+    """
+    stamps = []
+    for q in quotes:
+        ts = _parse_snapshot(q.get("snapshot_at"))
+        q["_ts"] = ts
+        if ts is not None:
+            stamps.append(ts)
+    if not stamps:
+        for q in quotes:
+            q.pop("_ts", None)
+        return quotes
+    newest = max(stamps)
+    limit = BEST_LINE_MAX_LAG_MIN * 60.0
+    kept = []
+    for q in quotes:
+        ts = q.pop("_ts", None)
+        if ts is None or (newest - ts).total_seconds() <= limit:
+            kept.append(q)
+    return kept
+
+
+def _parse_snapshot(value) -> "datetime | None":
+    """The mixed-shape TEXT timestamps these tables carry, as an aware UTC
+    datetime; None when absent or unparseable."""
+    if not value:
+        return None
+    try:
+        raw = str(value).replace("Z", "+00:00")
+        ts = datetime.fromisoformat(raw)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts
+    except Exception:                          # noqa: BLE001 - fail open
+        return None
+
+
 def _best_game_price(conn: DBConnection, game_id: str, market: str,
-                     pick_side: str, scored_line: float | None) -> dict | None:
+                     pick_side: str, scored_line: float | None,
+                     cutoff: str | None = None) -> dict | None:
     """
     Best price on one side of a game market across BEST_LINE_BOOKMAKERS.
 
     Only quotes at the SAME line count (totals/spreads), and only pre-game
     snapshots — an in-play price is a different proposition entirely.
+
+    BOUNDED AT THE PRE-GAME CUTOFF when `cutoff` (the 19-char UTC prefix
+    _pregame_cutoff returns) is given, exactly as _get_dk_odds bounds the
+    DraftKings read: since 2026-09-09 this price DECIDES the pick, and the
+    evening refresh keeps writing `open` rows after first pitch, so an
+    unbounded "newest per book" would hand a pre-game model an in-play price
+    through whichever book it came from. Fails open on a missing cutoff.
 
     UFC fights are looked up on BOTH orientations, for the same reason
     `_get_dk_odds` does it: the same fight exists as two `games` rows with
@@ -1417,7 +1581,7 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     five books had priced — and it was invisible, because a fight with no
     quotes and a fight with no better price both stamp NULL.
     """
-    best = _best_game_price_one(conn, game_id, market, pick_side, scored_line)
+    best = _best_game_price_one(conn, game_id, market, pick_side, scored_line, cutoff)
     if best is not None:
         return best
     sibling = _sibling_ufc_game_id(game_id)
@@ -1427,11 +1591,12 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
     # "home" on this row is "away" on the sibling.
     side = pick_side if market.startswith("totals") else _OPPOSITE_SIDE.get(
         pick_side, pick_side)
-    return _best_game_price_one(conn, sibling, market, side, scored_line)
+    return _best_game_price_one(conn, sibling, market, side, scored_line, cutoff)
 
 
 def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
-                         pick_side: str, scored_line: float | None) -> dict | None:
+                         pick_side: str, scored_line: float | None,
+                         cutoff: str | None = None) -> dict | None:
     """One orientation's best pre-game price. See _best_game_price."""
     price_col = _SIDE_PRICE_COLUMN.get(pick_side)
     if not price_col or not BEST_LINE_BOOKMAKERS:
@@ -1441,14 +1606,19 @@ def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
         "spread_home" if market.startswith("spreads") else None)
 
     placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
+    # The same 19-character-prefix bound _get_dk_odds uses (its docstring
+    # carries the measurement that makes the prefix compare safe).
+    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
+    params = (game_id, market, *BEST_LINE_BOOKMAKERS) + ((cutoff,) if cutoff else ())
     rows = conn.execute(f"""
         SELECT bookmaker, {price_col}, {link_col}, total_line, spread_home, snapshot_at
         FROM odds
         WHERE game_id = ? AND market = ?
           AND snapshot_type != 'in_play'
           AND bookmaker IN ({placeholders})
+          {pregame_filter}
         ORDER BY snapshot_at DESC
-    """, (game_id, market, *BEST_LINE_BOOKMAKERS)).fetchall()
+    """, params).fetchall()
 
     # Latest snapshot per book (rows already newest-first).
     latest: dict[str, tuple] = {}
@@ -1464,27 +1634,42 @@ def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
             book_line = r[3] if line_col == "total_line" else r[4]
             if not _same_line(book_line, scored_line):
                 continue
-        quotes.append({"book": book, "odds": r[1], "link": r[2]})
-    return _best_of(quotes)
+        quotes.append({"book": book, "odds": r[1], "link": r[2],
+                       "snapshot_at": r[5] if len(r) > 5 else None})
+    return _best_of(_fresh_quotes(quotes))
 
 
 def _best_prop_price(conn: DBConnection, game_id: str, player_name: str,
                      market: str, pick_side: str,
-                     line: float | None) -> dict | None:
-    """Best price on one side of a player prop, at the same line."""
+                     line: float | None, cutoff: str | None = None) -> dict | None:
+    """Best price on one side of a player prop, at the same line.
+
+    Pre-game rows only, bounded at the pre-game cutoff when given -- the same
+    bound _latest_dk_prop_row applies to the DraftKings read, and for the same
+    reason: the prop ingestor keeps snapshotting after first pitch and labels
+    those rows 'open'. Since 2026-09-09 this price decides the pick, so the
+    leak that cost 46 batter_hits BETs through the DK read (its docstring)
+    would otherwise return through any other book. Timestamps are cast, never
+    string-compared (mixed shapes). Fails open on a missing cutoff.
+    """
     if pick_side not in ("over", "under") or not BEST_LINE_BOOKMAKERS:
         return None
     price_col = "over_price" if pick_side == "over" else "under_price"
     link_col  = "over_link"  if pick_side == "over" else "under_link"
 
     placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
+    pregame_filter = "AND snapshot_at::timestamptz <= ?::timestamptz" if cutoff else ""
+    params = (game_id, player_name, market, *BEST_LINE_BOOKMAKERS) + (
+        (cutoff,) if cutoff else ())
     rows = conn.execute(f"""
-        SELECT bookmaker, {price_col}, {link_col}, line
+        SELECT bookmaker, {price_col}, {link_col}, line, snapshot_at
         FROM player_prop_odds
         WHERE game_id = ? AND player_name = ? AND market = ?
           AND bookmaker IN ({placeholders})
-        ORDER BY snapshot_at DESC
-    """, (game_id, player_name, market, *BEST_LINE_BOOKMAKERS)).fetchall()
+          AND (snapshot_type IS NULL OR snapshot_type != 'in_play')
+          {pregame_filter}
+        ORDER BY snapshot_at::timestamptz DESC
+    """, params).fetchall()
 
     latest: dict[str, tuple] = {}
     for r in rows:
@@ -1495,8 +1680,9 @@ def _best_prop_price(conn: DBConnection, game_id: str, player_name: str,
         r = latest.get(book)
         if r is None or not _same_line(r[3], line):
             continue
-        quotes.append({"book": book, "odds": r[1], "link": r[2]})
-    return _best_of(quotes)
+        quotes.append({"book": book, "odds": r[1], "link": r[2],
+                       "snapshot_at": r[4] if len(r) > 4 else None})
+    return _best_of(_fresh_quotes(quotes))
 
 
 def _live_quote_is_on_offer(snapshot_at, now=None) -> bool:
@@ -1607,23 +1793,56 @@ def _best_fields(best: dict | None, model_prob: float) -> dict:
 
 def _stamp_best_game_prices(conn: DBConnection, picks: list[dict],
                             market: str) -> None:
-    """Add the best-price columns to game-market picks, in place."""
+    """Add the best-price columns to game-market picks, in place, and re-decide
+    each pick at that price (_requalify_at_best).
+
+    Runs right after the picks are built and BEFORE the first-run lock and any
+    dedupe sees their signal_type, so a NONE that becomes a BET at the better
+    price is locked and counted as the BET it is.
+    """
+    cutoff = None
+    if picks:
+        try:
+            cutoff = _pregame_cutoff(conn, picks[0]["game_id"])
+        except Exception as exc:               # noqa: BLE001 - fail open (no bound)
+            logger.debug(f"  pre-game cutoff lookup failed for {picks[0]['game_id']}: {exc}")
     for p in picks:
         try:
             best = _best_game_price(conn, p["game_id"], market,
-                                    p["pick_side"], p.get("scored_line"))
+                                    p["pick_side"], p.get("scored_line"), cutoff)
         except Exception as exc:               # never let line shopping kill scoring
             logger.debug(f"  best-price lookup failed for {p.get('pick_label')}: {exc}")
             best = None
         p.update(_best_fields(best, float(p["model_probability"])))
+        _requalify_at_best(p, best, is_prop=False)
 
 
-def _tag_prop(pick: dict, ctx: tuple) -> dict:
-    """Carry (game_id, player_name, market) on a prop pick so _insert_picks can
-    look up its best price. Private key — stripped before the INSERT."""
-    if pick is not None:
+def _tag_prop(pick: dict, ctx: tuple, conn: DBConnection | None = None) -> dict:
+    """Give a prop pick its best price, and re-decide it there.
+
+    `ctx` is (game_id, player_name, market) or, since 2026-09-09,
+    (game_id, player_name, market, pregame_cutoff). With `conn` the best price
+    is resolved HERE -- before dedupe_player_props, the daily caps and the
+    first-signal lock see the pick's signal_type -- and the pick is requalified
+    at it (_requalify_at_best). Without `conn` (older callers, tests) the
+    context is carried as a private key for _insert_picks to resolve, which
+    stamps the best price for display but cannot move the decision.
+    """
+    if pick is None:
+        return pick
+    if conn is None:
         pick["_best_ctx"] = ctx
-    return pick
+        return pick
+    game_id, player_name, market = ctx[0], ctx[1], ctx[2]
+    cutoff = ctx[3] if len(ctx) > 3 else None
+    try:
+        best = _best_prop_price(conn, game_id, player_name, market,
+                                pick["pick_side"], pick.get("scored_line"), cutoff)
+    except Exception as exc:                   # line shopping never blocks a pick
+        logger.debug(f"  best-price lookup failed for {pick.get('pick_label')}: {exc}")
+        best = None
+    pick.update(_best_fields(best, float(pick["model_probability"])))
+    return _requalify_at_best(pick, best, is_prop=True)
 
 
 def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
@@ -1972,7 +2191,8 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             game_time, player_id, pitcher_throw_hand,
             public_bet_pct, public_money_pct, dk_bet_link, model_probability_cal,
             best_book, best_odds, best_implied_prob, best_edge, best_bet_link,
-            is_live, inning_at_pick, score_diff_at_pick, downgrade_reason
+            is_live, inning_at_pick, score_diff_at_pick, downgrade_reason,
+            decision_book, decision_odds, decision_implied_prob, decision_edge
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
@@ -1984,7 +2204,9 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             %(best_book)s, %(best_odds)s, %(best_implied_prob)s, %(best_edge)s,
             %(best_bet_link)s,
             %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s,
-            %(downgrade_reason)s
+            %(downgrade_reason)s,
+            %(decision_book)s, %(decision_odds)s, %(decision_implied_prob)s,
+            %(decision_edge)s
         )
         -- One row per pick (uq_picks_one_row_per_pick, migration
         -- picks_one_row_per_pick.sql). A second copy of a pick that already
@@ -2049,13 +2271,22 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             # (section 1c: timing is data).
             "model_probability_cal": _calibrated(p.get("model_id"),
                                                  p.get("model_probability")),
-            # Best available price across books — display/bet only, absent on
-            # paths with no multi-book feed (golf, live, prob-only fallbacks).
+            # Best available price across books; absent on paths with no
+            # multi-book feed (golf, live, prob-only fallbacks).
             "best_book":          p.get("best_book"),
             "best_odds":          p.get("best_odds"),
             "best_implied_prob":  p.get("best_implied_prob"),
             "best_edge":          p.get("best_edge"),
             "best_bet_link":      p.get("best_bet_link"),
+            # The price the pick was DECIDED at (2026-09-09). The builders and
+            # _requalify_at_best set these on every pre-game pick; a path that
+            # never sets them (live lanes, the prob-only fallbacks) was decided
+            # at DraftKings, and says so.
+            "decision_book":         p.get("decision_book",
+                                           ODDS_API_BOOKMAKER if p.get("dk_odds") is not None else None),
+            "decision_odds":         p.get("decision_odds", p.get("dk_odds")),
+            "decision_implied_prob": p.get("decision_implied_prob", p.get("dk_implied_prob")),
+            "decision_edge":         p.get("decision_edge", p.get("edge")),
             "is_live":            p.get("is_live", False),
             "inning_at_pick":     p.get("inning_at_pick"),
             "score_diff_at_pick": p.get("score_diff_at_pick"),
@@ -3095,7 +3326,9 @@ def _claimed_ev(pick: dict) -> float:
     is most overconfident. A model with no promoted map calibrates to itself, so
     for those this is the raw number and nothing changes.
     """
-    odds = pick.get("dk_odds")
+    # At the price the pick was DECIDED at (2026-09-09): the best bettable
+    # quote when one beat DraftKings, DraftKings otherwise.
+    odds = pick.get("decision_odds", pick.get("dk_odds"))
     if odds in (None, 0):
         return float("-inf")          # unpriced never outranks priced
     payout = odds / 100.0 if odds > 0 else 100.0 / abs(odds)
@@ -3251,83 +3484,32 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     if not no_dk_price and abs(edge) > MAX_EDGE_CAP:
         return None
 
-    bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
-    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-
     # THE DECISION IS MADE ON THE CALIBRATED PROBABILITY -- the same rule
     # classify_edge has carried since 2026-08-31, arriving here on 2026-09-07
-    # (mike). It was missing for six days, and props were the models it was
-    # written for: every model with a promoted calibration map is a prop, and
-    # every prop is built here rather than in classify_edge, so the flag was on
-    # by default and could not bite anything. Meanwhile the cuts shipped on
-    # 2026-08-31 -- including this file's own pitcher_k 0.58/0.08 and
-    # pitcher_hits 0.54/0.08 -- were swept on CALIBRATED probabilities and were
-    # being applied to raw ones. 56 of 57 MLB prop BETs written while a map was
-    # live fail their own cut on the calibrated number the pick already stores.
-    # docs/mlb_volume_efficiency.md section 2.
+    # (mike): every model with a promoted calibration map is a prop, and every
+    # prop is built here. The cuts shipped on 2026-08-31 were swept on
+    # CALIBRATED probabilities; 56 of 57 MLB prop BETs written while a map was
+    # live had failed their own cut on the calibrated number the pick already
+    # stores (docs/mlb_volume_efficiency.md section 2).
+    #
+    # The rules themselves live in _decide / _size so the same ones run again
+    # at the best bettable price (_requalify_at_best, called from _tag_prop
+    # once the pick's best price is known). Here the pick is decided at
+    # DraftKings, one of the shopped books, and decision_* records that.
     #
     # The RAW numbers are still what gets STORED, exactly as in classify_edge:
-    # picks.edge and picks.model_probability keep their meaning and the
-    # calibrated number travels beside them in picks.model_probability_cal.
-    decision_prob, decision_edge = model_prob, edge
-    if DECIDE_ON_CALIBRATED_PROB:
-        cal = _calibrated(model_id, model_prob)
-        if cal is not None:
-            decision_prob = cal
-            # A prob-only model with no DK price has no edge to recompute; its
-            # decision is the probability alone, so leave `edge` as it was.
-            if not no_dk_price:
-                decision_edge = cal - dk_implied_prob
-
-    if model_id in PROB_ONLY_MODELS and no_dk_price:
-        # No real DK price. Historically these still fired on model_prob alone;
-        # under config.REQUIRE_DK_PRICE they no longer can — an unplaceable bet
-        # is not a bet. The row is still written as NONE so the model keeps
-        # accruing a tracked record. AVOID is meaningless for these over-only
-        # markets, so we never emit AVOID.
-        signal_type = ("NONE" if REQUIRE_DK_PRICE
-                       else ("BET" if decision_prob >= prob_thresh else "NONE"))
-    elif model_id in PROB_ONLY_MODELS:
-        # A real DK price IS available — apply the +EV edge filter to maximize
-        # ROI (e.g. HR overs at +250..+500: only bet when the model beats DK's
-        # implied price). Over-only, so never AVOID.
-        signal_type = ("BET" if (decision_edge >= bet_thresh
-                                 and decision_prob >= prob_thresh) else "NONE")
-    elif decision_edge >= bet_thresh and decision_prob >= prob_thresh:
-        signal_type = "BET"
-    elif decision_edge <= -bet_thresh:
-        signal_type = "AVOID"
-    else:
-        signal_type = "NONE"
-
-    # No price, no bet. A BET must be placeable somewhere.
-    if signal_type == "BET" and _missing_price(dk_odds):
+    # picks.edge and picks.model_probability keep their DraftKings meaning and
+    # the calibrated number travels beside them in picks.model_probability_cal.
+    signal_type = _decide(model_id, model_prob, dk_implied_prob, edge, dk_odds,
+                          is_prop=True)
+    if signal_type == "NONE" and _missing_price(dk_odds):
         logger.debug(f"  {player_name}: no book price — BET → NONE")
-        signal_type = "NONE"
-
-    # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet. NULL
-    # dk_odds (prob-only fallback) is never blocked.
-    if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
-        logger.debug(f"  {player_name}: DK {dk_odds:+.0f} below the "
-                     f"{config.min_odds_for(model_id)} price floor — BET → NONE")
-        signal_type = "NONE"
-
-    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if _is_paused(model_id) and signal_type == "BET":
-        signal_type = "NONE"
 
     direction = "Over" if pick_side == "over" else "Under"
     pick_label = f"{player_name} {direction} {line} {stat_label}"
-    if signal_type == "NONE" or no_dk_price:
-        # Kelly needs a real DK implied prob to size; without it, surface as $0.
-        kelly_frac, rec_bet = 0.0, 0.0
-    else:
-        kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
-        # Per-model stake dial-down for high-variance markets (e.g. HR longshots).
-        _mult = MODEL_BET_SIZE_MULTIPLIER.get(model_id, 1.0)
-        if _mult != 1.0:
-            kelly_frac *= _mult
-            rec_bet    *= _mult
+    # Kelly needs a real implied prob to size; without it, surface as $0.
+    kelly_frac, rec_bet = _size(model_id, model_prob, dk_implied_prob, bankroll,
+                                signal_type, is_prop=True)
 
     if dk_odds is not None and dk_odds > 0:
         dk_odds_str = f"+{int(dk_odds)}"
@@ -3358,6 +3540,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "edge":                round(edge, 4) if edge is not None else 0.0,
         "dk_odds":             dk_odds,
         "scored_line":         line,
+        **_decision_fields(ODDS_API_BOOKMAKER, dk_odds, dk_implied_prob, edge),
         "player_id":           player_id,
         "pitcher_throw_hand":  pitcher_throw_hand,
         "kelly_fraction":    kelly_frac,
@@ -3589,7 +3772,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                                               cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
-                             market)
+                             market, cut_map.get(game_id))
                 if prop_odds is None or prop_odds.get("line") is None:
                     if not is_prob_only:
                         logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
@@ -3648,7 +3831,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
                 elif is_prob_only:
                     # No DK price — still emit a prob-only over pick so the
                     # model's HR favorites surface in the picks table.
@@ -3665,7 +3848,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                         commence_time=ct_map.get(game_id),
                     )
                     if pick:
-                        model_picks.append(_tag_prop(pick, _best_ctx))
+                        model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
                 # ── Score under ───────────────────────────────────────────────
                 if under_price is not None and not over_only:
@@ -3685,7 +3868,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(
@@ -3803,7 +3986,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                                               cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
-                             market)
+                             market, cut_map.get(game_id))
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
                 line        = float(prop_odds["line"])
@@ -3839,7 +4022,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
                 if under_price is not None:
                     dk_ip_under = american_to_implied_prob(under_price)
                     if dk_ip_under:
@@ -3856,7 +4039,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(
@@ -3987,7 +4170,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                                               cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
-                             market)
+                             market, cut_map.get(game_id))
                 if prop_odds is None or prop_odds.get("line") is None:
                     if not is_prob_only:
                         continue
@@ -4028,7 +4211,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
                 elif is_prob_only:
                     pick = _make_prop_pick(
                         game_id=game_id, model_id=model_id,
@@ -4042,7 +4225,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         commence_time=ct_map.get(game_id),
                     )
                     if pick:
-                        model_picks.append(_tag_prop(pick, _best_ctx))
+                        model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
                 # ── Score under ───────────────────────────────────────────────
                 if under_price is not None and not over_only:
@@ -4061,7 +4244,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(
@@ -4328,7 +4511,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                                               cutoffs.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
-                             market)
+                             market, cutoffs.get(game_id))
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
                 # See `claimed` above. norm_player_name is the same key the
@@ -4363,7 +4546,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         commence_time=kickoffs.get(game_id),
                     )
                     if pick:
-                        model_picks.append(_tag_prop(pick, _best_ctx))
+                        model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} "
@@ -4770,7 +4953,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                                               cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
-                             market)
+                             market, cut_map.get(game_id))
                 if prop_odds is None or prop_odds.get("line") is None:
                     logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
                     continue
@@ -4805,7 +4988,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
                 if under_price is not None:
                     dk_ip_under = american_to_implied_prob(under_price)
@@ -4823,7 +5006,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(_tag_prop(pick, _best_ctx))
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
 
             slate_picks.extend(model_picks)
 

@@ -25,6 +25,7 @@ import { stakeFor, effectiveKellyFraction, KELLY_MULTIPLIER,
 import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
+import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 
 /** Best across-book price for a leg's side (line shopping). Present only when a
  * non-DK book strictly beats DK for this side (game markets only — props aren't
@@ -143,7 +144,9 @@ export function slipKeyForPick(p: Pick): string {
  */
 export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
   const p = ep.pick;
-  if (p.dk_odds == null) return null; // prob-only — no payout
+  // The leg's price is the price the pick was DECIDED at (2026-09-09).
+  const odds = decisionOdds(p);
+  if (odds == null) return null; // prob-only — no payout
   // bestOdds is already the best non-DK price that STRICTLY beats DK for this
   // side (game markets only — prop picks carry no bestOdds).
   const best = ep.bestOdds ?? null;
@@ -177,12 +180,12 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     modelId: p.model_id,
     isGameLine: isGameLineModel(p.model_id),
     isLive: p.is_live === true,
-    isFavorite: p.dk_odds < 0,
+    isFavorite: odds < 0,
     label: p.pick_label,
     modelProb: p.model_probability,
-    decimalOdds: americanToDecimal(p.dk_odds),
-    americanOdds: p.dk_odds,
-    legEdge: p.edge,
+    decimalOdds: americanToDecimal(odds),
+    americanOdds: odds,
+    legEdge: decisionEdge(p),
     bestBook,
     bookPrices,
     pick: p,

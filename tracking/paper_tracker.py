@@ -7,6 +7,14 @@ Runs each morning after games complete to:
   2. Look up final scores from the games table
   3. Compute WIN / LOSS / PUSH for each pick
   4. Update profit_flat, profit_kelly, result, settled_at in the picks table
+
+SETTLEMENT PRICE (2026-09-09, mike: "remove DK only"). Every settle path grades
+at COALESCE(picks.decision_odds, picks.dk_odds) -- the price the pick was
+DECIDED at: the best bettable price at the DraftKings line since the flip,
+DraftKings itself before it (decision_odds NULL). The variable is still
+called dk_odds below because every formula is unchanged; only the price
+feeding it moved. CLV stays DraftKings-to-DraftKings (closing_dk_odds vs
+dk_odds): there is no best-price closing history to measure against.
   5. Log performance summary
 
 Usage:
@@ -550,7 +558,7 @@ def _settle_prop_picks(
     """
     prop_picks = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side,
-               p.dk_odds, p.recommended_bet, p.scored_line,
+               COALESCE(p.decision_odds, p.dk_odds), p.recommended_bet, p.scored_line,
                p.player_id, p.pick_label, p.prop_market, p.player_key
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
@@ -797,7 +805,7 @@ def _settle_ufc_picks(
 
     picks = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
-               p.dk_odds, p.recommended_bet, p.scored_line,
+               COALESCE(p.decision_odds, p.dk_odds), p.recommended_bet, p.scored_line,
                g.home_win, g.home_team, g.away_team, p.game_date
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
@@ -998,7 +1006,7 @@ def _settle_golf_picks(
 
     picks = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
-               p.player_id, p.dk_odds, p.recommended_bet
+               p.player_id, COALESCE(p.decision_odds, p.dk_odds), p.recommended_bet
         FROM picks p
         JOIN golf_tournaments t ON t.game_id = p.game_id
         WHERE p.game_date BETWEEN %s AND %s
@@ -1985,7 +1993,7 @@ def _settle_game_picks(
     # correct for both full-game and F5 picks.
     picks = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side,
-               p.dk_odds, p.recommended_bet,
+               COALESCE(p.decision_odds, p.dk_odds), p.recommended_bet,
                g.home_score, g.away_score,
                g.home_win, g.home_win_reg, g.went_to_ot,
                p.scored_line,

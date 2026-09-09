@@ -1,5 +1,17 @@
 # Learning framework — thresholds, reviews, model adjustments
 
+> **2026-09-09 — every cut below is applied at the DECISION price, not the
+> DraftKings price.** (mike: *"we should remove DK only - we want best lines
+> for us regardless."*) A pre-game pick is decided, sized and settled at the
+> best bettable price at the DraftKings line (`picks.decision_*`;
+> `docs/best_line.md` §4). No cut moved with the flip: the best-price sweep
+> (`scripts/best_line_threshold_sweep.py`, 12 days of history) found nothing
+> shippable, so each cut is simply 0.68pp looser on average (3.61pp at the
+> extreme) at the better price. Every number in this file was swept on
+> DK-implied edge; a re-sweep on `decision_edge` is the standing weekly task,
+> and a cut moves only on the section-7 standards.
+
+
 > Moved out of CLAUDE.md on 2026-08-30 (that file had reached 909 KB and was
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
