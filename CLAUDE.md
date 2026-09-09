@@ -445,6 +445,14 @@ Regulation market often has better value since casual bettors underweight it.
 ## 4. Conventions
 - Dates: always ISO format `YYYY-MM-DD`
 - Profit: positive = win, negative = loss
+- **RESULTS ARE ALWAYS IN UNITS. NEVER DOLLARS.** (mike, 2026-09-08: *"why are
+  you expressing results in dollars, I have hard coded units everywhere, I want
+  that a global rule."*) One unit = one flat bet. A record is "-206.7 units over
+  3,201 bets", never "-$20,670 at $100 flat" — the dollar figure invents a stake
+  size nobody chose, changes meaning the moment the bankroll does, and cannot be
+  compared against any other number in this repo. This governs EVERY surface:
+  replies, docs, commit messages, the dashboard, Discord, the app. `profit_flat`
+  is stored as dollars-per-$100 stake, so divide by 100 to report it.
 - Edge: always expressed as decimal (0.05 = 5%), not percentage
 - `home_win = 1` means home team won the full game
 - `home_win_reg = 1` means home team won in regulation (NHL only)
@@ -694,6 +702,10 @@ to be known BEFORE deciding which file to open.
 | **The historical team-stats leak** | `docs/team_stats_leak.md` |
 | Rebuilding the team-stats tables (scope) | `docs/team_stats_rebuild_scope.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
+| **Who has beaten player props, how, and with what data** | `docs/prop_market_research.md` |
+| **Odds providers: what exists, what it costs, what it adds** | `docs/odds_sources.md` |
+| **The eleven NFL prop models hold no information the line lacks** | `docs/nfl_prop_information_test.md` |
+| **The search for a profitable NFL prop model: tackles was the wrong stat, DK is flat** | `docs/nfl_prop_profitability_search.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —

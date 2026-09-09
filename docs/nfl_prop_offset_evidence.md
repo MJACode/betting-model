@@ -72,6 +72,63 @@ The honest summary is that ONE offset clears every bar — `open` — and the sh
 between 24 h and 72 h is not resolved. Anyone tempted to build a lead-time curve
 out of these four rows should get more offsets first, not interpolate these.
 
+## What shipped (2026-09-08, mike: "do it")
+
+A CEILING on how early a prop pick may be written, separate from the window that
+governs how far ahead the board is bought:
+
+| constant | value | governs |
+|---|---|---|
+| `NFL_PROP_WINDOW_HOURS` | 240 | how far ahead we **buy** the board |
+| `NFL_PROP_MAX_LEAD_HOURS` | **24** | how close to kickoff a pick may be **written** |
+
+Buying early is free information; betting early is not. The card had a
+started-game FLOOR and no ceiling, which is why every NFL prop BET in the 21
+days to 2026-09-08 was taken past 48h and `nfl_prop_market`'s three at
+137.6-179.8h — five to seven days out, against a record measured entirely
+inside 36h. A game beyond the ceiling is SKIPPED, never dropped: it returns on a
+later hourly tick, and no pick is deleted or re-priced, so the §1c lock is
+untouched.
+
+**24 rather than 36**: 36.1h is the measured *maximum* of the `open` series, and
+gating there would put the first-signal lock in the tail rather than near the
+mass (median ~7h). 12 would be closer to the median and cost volume; that trade
+wants its own measurement rather than a guess.
+
+**Assessed against the other models** (§1b), and deliberately NOT applied to
+them: the eleven distributional `nfl_prop_*` models score off the same board and
+are also writing bets 133-150h out, but their problem is not lead time — they
+return "NOT BEATABLE, CI includes zero" at every offset, so a ceiling would
+change the volume of a losing lane rather than fix it. Their record is in the
+table below.
+
+## The eleven distributional models, for comparison
+
+Backtested 2023-25 at each model's own live cut, one flat unit per bet:
+
+| model | bets | ROI | units | verdict |
+|---|---|---|---|---|
+| nfl_prop_anytime_td | 12 | −17.90% | −2.15 | not beatable |
+| nfl_prop_pass_yards | 145 | −14.90% | −21.60 | not beatable |
+| nfl_prop_pass_completions | 199 | −5.29% | −10.53 | not beatable |
+| nfl_prop_rush_yards | 176 | −4.80% | −8.44 | not beatable |
+| nfl_prop_pass_attempts | 82 | −2.91% | −2.39 | not beatable |
+| nfl_prop_rush_rec_yards | 280 | −1.56% | −4.37 | not beatable |
+| nfl_prop_receptions | 553 | −1.12% | −6.21 | not beatable |
+| nfl_prop_rec_yards | 348 | +0.57% | +2.00 | not beatable |
+| nfl_prop_rush_attempts | 225 | +3.61% | +8.12 | not beatable |
+| nfl_prop_sacks | 102 | +3.63% | +3.70 | not beatable |
+| nfl_prop_pass_tds | 11 | +12.22% | +1.34 | not beatable |
+| **total** | **2,133** | **−1.90%** | **−40.53u** | ≈ −13.5u/season |
+
+Every one carries a confidence interval spanning zero. `nfl_prop_tackles_assists`
+is excluded and paused: it shows +24.89% and +197.38u, and the backtest itself
+rejects it — *"our actual lands over the line 41.5% of the time, the book's own
+de-vigged price says 50.2%. That −8.7pp gap is a different stat, not an edge."*
+
+Against all of that, `nfl_prop_market` returns **+63.7u over 648 bets (+9.83%)**,
+≈ +21u/season — the only NFL prop model whose interval excludes zero.
+
 ## What it does NOT say
 
 - **It does not support a smooth decay argument about the 240-hour window.**

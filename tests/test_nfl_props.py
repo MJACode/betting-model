@@ -481,10 +481,14 @@ class TestPlaceboCannotSilentlyNotHappen:
     def test_derived_targets_build_from_components(self):
         import pandas as pd
         from models.nfl_prop_backtest import _naive_projection
+        # Three components, not two: the box-score total the book grades is
+        # solo + with_assist + assists. A placebo built from two of them
+        # projects low and hands the model a win it did not earn.
         te = pd.DataFrame({"def_tackles_solo_r8": [3.0, 4.0],
+                           "def_tackles_with_assist_r8": [0.5, 0.0],
                            "def_tackle_assists_r8": [2.0, 1.0]})
         got = _naive_projection("nfl_prop_tackles_assists", te, 5.0)
-        assert list(got) == [5.0, 5.0]
+        assert list(got) == [5.5, 5.0]
 
     def test_unbuildable_placebo_raises_rather_than_passing_through(self):
         import pandas as pd
@@ -987,7 +991,12 @@ class TestMarketCard:
         import scripts.nfl_prop_market_card as card_mod
         import models.nfl_prop_market as mkt
 
-        future = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        # INSIDE the lead ceiling (config.NFL_PROP_MAX_LEAD_HOURS, 24h).
+        # This was two days out and stopped being priced at all when the
+        # ceiling shipped on 2026-09-08 -- the fixture encoded the old
+        # "price anything in the window" behaviour, not this test's subject,
+        # which is one-bet-per-proposition.
+        future = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
         rows = [("NFL_2025_01_KC_BUF", future, "BUF", "KC", True, "2025-09-07"),
                 ("NFL_2025_01_KC_BUF", future, "KC", "BUF", False, "2025-09-07")]
 
@@ -1269,21 +1278,36 @@ class TestCardReplay:
                             lambda conn, gids, markets=None, before=None, **k:
                             (seen.update(before=before) or {}))
 
-        future = datetime.now(timezone.utc) + timedelta(days=2)
+        # EACH ARM NEEDS ITS OWN SLATE, because a game is only priced when its
+        # kickoff sits between now and the lead ceiling (24h) -- and the two
+        # arms have different "now"s. One shared slate cannot be inside both:
+        # pinned to the replay clock it is 30 days stale for the live arm, and
+        # pinned to the wall clock it is a month early for the replay arm.
+        # Either way the quote loader is never called and `seen` keeps the
+        # PREVIOUS arm's value, so the assertion reads a stale fact rather than
+        # failing honestly.
         past_now = datetime.now(timezone.utc) - timedelta(days=30)
-        rows = [("G", future.isoformat(), "BUF", "KC", True, "2025-09-07"),
-                ("G", future.isoformat(), "KC", "BUF", False, "2025-09-07")]
+
+        def _slate(anchor):
+            ko = (anchor + timedelta(hours=6)).isoformat()
+            return [("G", ko, "BUF", "KC", True, "2025-09-07"),
+                    ("G", ko, "KC", "BUF", False, "2025-09-07")]
 
         class Conn:
+            def __init__(self, rows): self.rows = rows
             def execute(self, sql, params=None):
+                rows = self.rows
                 class R:
                     def fetchall(s_): return rows
                 return R()
 
-        c.card(Conn(), "2025-09-07", "2025-09-15", now=past_now)
-        assert seen["before"] is not None, "a replay must not read later quotes"
+        seen.clear()
+        c.card(Conn(_slate(past_now)), "2025-09-07", "2025-09-15", now=past_now)
+        assert seen.get("before") is not None, "a replay must not read later quotes"
 
-        c.card(Conn(), "2025-09-07", "2025-09-15")
+        seen.clear()
+        c.card(Conn(_slate(datetime.now(timezone.utc))), "2025-09-07", "2025-09-15")
+        assert "before" in seen, "the live arm never reached the quote loader"
         assert seen["before"] is None, "a live run takes the newest quote"
 
     def test_replay_refuses_to_publish(self):
@@ -1481,8 +1505,21 @@ def test_the_count_objective_has_its_own_fold_count():
     assert trainer.COUNT_CV_FOLDS == 3
     assert trainer.CV_FOLDS == 5, "the game-model CV was not part of the measurement"
 
-    count_src = inspect.getsource(trainer._poisson_objective)
-    assert "n_splits=COUNT_CV_FOLDS" in count_src, count_src
+    # The count folds moved into _count_cv_splits on 2026-09-08, when the live
+    # path needed a grouped, time-ordered variant and the tuning objective and
+    # the dispersion fit had to split identically. The pin follows them: BOTH
+    # branches of the shared splitter must size on COUNT_CV_FOLDS, and neither
+    # it nor the objective may reach for CV_FOLDS, which is what would silently
+    # re-tune the game models this test exists to protect.
+    count_src = inspect.getsource(trainer._count_cv_splits)
+    assert count_src.count("n_splits=COUNT_CV_FOLDS") == 2, count_src
+    assert "CV_FOLDS)" not in count_src.replace("COUNT_CV_FOLDS)", ""), count_src
+
+    obj_src = inspect.getsource(trainer._poisson_objective)
+    assert "_count_cv_splits(" in obj_src, obj_src
+    assert "n_splits=" not in obj_src, (
+        "the objective grew its own splitter again — it must delegate, or the "
+        "dispersion fit and the tuning score stop sharing folds")
 
     time_src = inspect.getsource(trainer._time_ordered_cv)
     assert "n_splits=CV_FOLDS" in time_src, time_src
@@ -1503,14 +1540,27 @@ def test_the_soft_book_set_is_the_one_the_sweep_endorses():
     Both positive, both excluding zero. The trade is total units against
     risk-adjusted return, not whether breadth works, and mike took the volume
     side with those numbers in front of him.
+
+    espnbet LEFT the set on 2026-09-08, and that is not a reversal of the above.
+    mike removed it from the bettable list on 2026-09-03 ("remove william hill
+    and espn bet (shut down last year)"); it was dropped from
+    BEST_LINE_BOOKMAKERS and left here, so the rule kept naming it as the book
+    to bet at. Honouring the instruction cost -0.24 units over three seasons and
+    IMPROVED ROI +9.83% -> +10.19%. The statistical criteria never rejected it;
+    bettability did, which is clause zero of the sweep.
     """
+    import config
     import models.nfl_prop_market as mkt
 
     assert set(mkt.SOFT_BOOKS) == {
-        "draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
+        "draftkings", "fanduel", "betmgm", "williamhill_us",
         "betrivers", "fliff", "hardrockbet",
     }, mkt.SOFT_BOOKS
     assert mkt.SHARP_BOOK not in mkt.SOFT_BOOKS
+    assert "espnbet" not in mkt.SOFT_BOOKS, (
+        "espnbet is excluded from BEST_LINE_BOOKMAKERS on mike's instruction; a "
+        "soft book IS the side we take, so it cannot be named here")
+    assert all(b in config.BEST_LINE_BOOKMAKERS for b in mkt.SOFT_BOOKS)
 
 
 def test_fliff_is_fetched_or_it_contributes_nothing():

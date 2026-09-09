@@ -111,7 +111,7 @@ import config
 from data.db import get_connection
 from features.live_game_features import build_live_state_row
 from models.live_scorer import (
-    _poisson_over_prob,
+    _count_over_prob,
     classify_live_signal,
     expected_value,
 )
@@ -221,7 +221,7 @@ def _signals(artifact, game: dict, pregame: dict,
         rest_line = float(price["total_line"]) - row["total_runs"]
         if rest_line < 0:
             continue
-        p_over = _poisson_over_prob(lam, rest_line)
+        p_over = _count_over_prob(lam, rest_line, artifact.get("dispersion"))
         for side, prob, odds in (("over", p_over, price["over_price"]),
                                  ("under", 1.0 - p_over, price["under_price"])):
             if odds is None:
@@ -284,10 +284,16 @@ def replay(since: str, gates: list[int]) -> dict:
             if not prices:
                 dropped[gid] = "no DK in_play totals rows"
                 continue
+            # Both markets, as production's _pregame_features does: h2h for
+            # the moneyline context, totals for `pregame_total_line`. Passing
+            # only h2h replays the post-2026-09-08 artifact with its anchor
+            # NaN, which is the map/artifact mismatch the scorer's guard
+            # refuses -- so the replay must not quietly do it either.
             pregame = build_mlb_game_features(
                 conn, gid, game["game_date"], game["home_team"],
                 game["away_team"], game["season"],
-                odds_row=_get_dk_odds(conn, gid, "h2h"))
+                odds_row=_get_dk_odds(conn, gid, "h2h"),
+                totals_row=_get_dk_odds(conn, gid, "totals"))
             if not pregame:
                 dropped[gid] = "pre-game features unavailable"
                 continue

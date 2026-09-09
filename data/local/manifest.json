@@ -1,6 +1,6 @@
 {
  "nfl_player_game_log": {
-  "bytes": 2899866,
+  "bytes": 2912618,
   "columns": [
    "player_id",
    "player_name",
@@ -35,11 +35,12 @@
    "def_tackles_solo",
    "def_tackle_assists",
    "def_sacks",
-   "def_qb_hits"
+   "def_qb_hits",
+   "def_tackles_with_assist"
   ],
   "format": "parquet",
-  "pulled_at": "2026-08-23T17:12:07+00:00",
-  "rows": 166955,
+  "pulled_at": "2026-09-09T19:17:24+00:00",
+  "rows": 166960,
   "seasons": [
    2015,
    2016,
@@ -51,12 +52,11 @@
    2022,
    2023,
    2024,
-   2025,
-   2026
+   2025
   ]
  },
  "nfl_prop_odds": {
-  "bytes": 12549173,
+  "bytes": 22033503,
   "columns": [
    "game_id",
    "game_date",
@@ -71,8 +71,8 @@
    "season"
   ],
   "format": "parquet",
-  "pulled_at": "2026-09-08T05:52:56+00:00",
-  "rows": 3453848,
+  "pulled_at": "2026-09-09T20:38:48+00:00",
+  "rows": 6494635,
   "seasons": [
    2023,
    2024,

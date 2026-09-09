@@ -741,10 +741,119 @@ def _register_model(model_id: str, version: str,
 
 # ── Poisson Prop Trainer ──────────────────────────────────────────────────────
 
-def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> float:
+def _count_cv_splits(X: np.ndarray, groups: np.ndarray | None):
+    """The fold generator for count models. ONE definition, two callers.
+
+    The Optuna objective and the dispersion fit must split the SAME way, or
+    the tail is estimated against folds the hyperparameters were never scored
+    on. Sharing the function is what makes that true rather than intended.
+
+    groups=None keeps KFold(shuffle=True) — props and game models, one row per
+    subject, unchanged. Given groups, rows are sorted by group (game ids sort
+    by date, see test_game_ids_sort_chronologically) and split with
+    TimeSeriesSplit: folds are time-ordered AND no group straddles a boundary.
+    """
+    if groups is None:
+        return KFold(n_splits=COUNT_CV_FOLDS, shuffle=True,
+                     random_state=RANDOM_STATE).split(X)
+    order = np.argsort(groups, kind="stable")
+    return [(order[tr], order[va])
+            for tr, va in TimeSeriesSplit(n_splits=COUNT_CV_FOLDS).split(order)]
+
+
+def _nb1_dispersion(params: dict, X: np.ndarray, y: np.ndarray,
+                    groups: np.ndarray | None) -> dict | None:
+    """Fit NB1 dispersion on OUT-OF-FOLD predictions. Never in-sample.
+
+    A Poisson head asserts Var(y|lambda) == lambda. The live totals target does
+    not: with an honestly-fit model the ratio is ~2.15 in-sample and ~2.41 on
+    holdout — consistent across both, so a real property of the count. A
+    Poisson tail on it is ~2.2x too tight, and a too-tight tail is systematic
+    overconfidence at exactly the band a model bets.
+
+    OUT-OF-FOLD, for the reason _oof_predictions already states: "a fitted
+    model's own residuals are too small, which would make every predictive
+    distribution too tight and every P(over) overconfident" — which is the very
+    failure being corrected, so estimating alpha from in-sample residuals would
+    reintroduce a smaller version of it. Same folds as the tuning objective.
+
+    Returns None when it cannot be fit, and None means Poisson downstream.
+    """
+    from scipy.stats import nbinom
+    from scipy.optimize import minimize_scalar
+
+    oof_mu, oof_y = [], []
+    for tr, va in _count_cv_splits(X, groups):
+        m = XGBRegressor(**params, objective="count:poisson",
+                         eval_metric="poisson-nloglik",
+                         random_state=RANDOM_STATE, n_jobs=-1, verbosity=0)
+        m.fit(X[tr], y[tr])
+        oof_mu.append(np.clip(m.predict(X[va]), 1e-6, None))
+        oof_y.append(y[va])
+    if not oof_mu:
+        return None
+    mu = np.concatenate(oof_mu)
+    yy = np.concatenate(oof_y)
+
+    def nll(t):
+        a = float(np.exp(t))
+        n = np.maximum(mu / a, 1e-9)
+        v = nbinom.logpmf(yy, n, 1.0 / (1.0 + a))
+        return -float(np.mean(v[np.isfinite(v)]))
+
+    pois = -float(np.mean(scipy_stats.poisson.logpmf(yy.astype(int), mu)))
+    res = minimize_scalar(nll, bounds=(np.log(0.02), np.log(50.0)),
+                          method="bounded")
+    alpha, nb_nll = float(np.exp(res.x)), float(res.fun)
+
+    if nb_nll >= pois:
+        logger.info(f"  dispersion: Poisson fits the OOF residuals at least as "
+                    f"well (NLL {pois:.5f} vs NB1 {nb_nll:.5f}) — staying Poisson")
+        return None
+    logger.success(
+        f"  dispersion: NB1 alpha={alpha:.4f} (var/mean {1 + alpha:.3f}) on "
+        f"{len(yy):,} out-of-fold rows | OOF NLL Poisson {pois:.5f} -> "
+        f"NB1 {nb_nll:.5f}")
+    return {"family": "nb1", "alpha": round(alpha, 6),
+            "fit_on": "oof_grouped", "n_oof": int(len(yy)),
+            "oof_nll_poisson": round(pois, 6), "oof_nll_nb1": round(nb_nll, 6)}
+
+
+def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
+                       groups: np.ndarray | None = None) -> float:
     """
     Optuna objective for Poisson regression: minimize mean Poisson NLL across CV folds.
     Uses KFold (not stratified — target is a count, not a class).
+
+    PASS `groups` FOR ANY ROW SET WHERE THE LABEL IS SHARED. Without it this
+    uses KFold(shuffle=True), and on grouped rows that is not cross-validation,
+    it is a lookup. The live models are the case that proved it: one MLB game
+    becomes ~64 play rows carrying the SAME game-level label (runs remaining is
+    a function of the final score), and the pre-game context columns are
+    constant within a game and continuous to four decimals — a fingerprint. A
+    shuffled fold puts a game's own plays on both sides of the split, so the
+    validation score is partly recall, and 25 Optuna trials optimise toward
+    whichever hyperparameters memorise hardest.
+
+    Measured on mlb_live_total_runs, 866,136 play rows over 2019-2024:
+
+        Optuna's best CV NLL   1.9200      (what the tuner believed)
+        2025 holdout NLL       2.7422      (what it actually was)
+
+        Var(y | lambda) / mean, in-sample     0.63 - 0.76   (memorised)
+        Var(y | lambda) / mean, holdout       2.5  - 2.7
+
+    An in-sample dispersion BELOW Poisson is the fingerprint showing: the model
+    is more certain about training rows than the count distribution allows. Out
+    of sample the tail is 2.6x too tight, which is the model's documented ~10pp
+    overconfidence at the band it bets, and it is why claimed ~73% delivers
+    ~54% in production. No feature change touches this — it is the fit.
+
+    `_time_ordered_cv` fixed exactly this for the PRE-GAME models on
+    2026-09-03; the live Poisson path was never brought across. Here the folds
+    must be both time-ordered AND group-clean, so rows are sorted by group and
+    split with TimeSeriesSplit: every validation fold is later than its
+    training fold, and a game's plays stay contiguous.
     """
     params = {
         "n_estimators":     trial.suggest_int("n_estimators", 100, 800),
@@ -763,10 +872,11 @@ def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> flo
         "verbosity":        0,
     }
 
-    kf = KFold(n_splits=COUNT_CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    splits = _count_cv_splits(X, groups)
+
     scores = []
 
-    for train_idx, val_idx in kf.split(X):
+    for train_idx, val_idx in splits:
         X_tr, X_val = X[train_idx], X[val_idx]
         y_tr, y_val = y[train_idx], y[val_idx]
 
@@ -820,7 +930,8 @@ def _poisson_calibration_error(y_true: np.ndarray, mu: np.ndarray,
 
 
 def poisson_probability_metrics(model_id: str, y_true: np.ndarray,
-                                mu: np.ndarray) -> dict:
+                                mu: np.ndarray,
+                                dispersion: dict | None = None) -> dict:
     """Calibration of the probability a Poisson model actually BETS.
 
     `_poisson_calibration_error` checks the COUNT fit — bin by predicted lambda,
@@ -838,12 +949,24 @@ def poisson_probability_metrics(model_id: str, y_true: np.ndarray,
     expectation, so a natural range of claimed probabilities appears rather than
     the ~50% a fair line alone would give.
     """
-    from scipy.stats import poisson as _poisson
+    from scipy.stats import poisson as _poisson, nbinom as _nbinom
+
+    def _tail(line):
+        """Price with the tail the ARTIFACT will ship with.
+
+        Measuring a Poisson tail while the scorer bets an NB one is the #606
+        shape: a gate that checks a layer other than the one that runs.
+        """
+        if dispersion and dispersion.get("family") == "nb1":
+            a = float(dispersion["alpha"])
+            return 1.0 - _nbinom.cdf(np.floor(line),
+                                     np.maximum(mu / a, 1e-9), 1.0 / (1.0 + a))
+        return 1.0 - _poisson.cdf(np.floor(line), mu)
 
     ps, ws = [], []
     for off in (-3.5, -2.5, -1.5, 1.5, 2.5, 3.5):
         line = np.maximum(0.5, np.round((mu + off) * 2) / 2)
-        p_over = 1.0 - _poisson.cdf(np.floor(line), mu)
+        p_over = _tail(line)
         won_over = y_true > line
         prefer_over = p_over >= 0.5
         ps.append(np.where(prefer_over, p_over, 1 - p_over))
@@ -1460,6 +1583,7 @@ def train_live_model(model_id: str,
         idx = np.arange(len(X_train))
 
     holdout_metrics: dict = {}
+    dispersion: dict | None = None      # count models only; None => Poisson
     version = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if model_type == "binary":
@@ -1518,8 +1642,13 @@ def train_live_model(model_id: str,
         logger.info(f"Tuning hyperparameters ({trials} trials, Poisson)...")
         study = optuna.create_study(direction="minimize",
                                     sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        # GROUPS ARE NOT OPTIONAL HERE. One game is ~64 play rows sharing one
+        # game-level label; without them the CV is a lookup. See
+        # _poisson_objective's docstring for the measured size of the leak.
+        groups_train = df_train["game_id"].values[idx]
         study.optimize(
-            lambda t: _poisson_objective(t, X_train[idx], y_train[idx]),
+            lambda t: _poisson_objective(t, X_train[idx], y_train[idx],
+                                         groups=groups_train),
             n_trials=trials, show_progress_bar=False)
         best_params = study.best_params
         logger.success(f"Best CV Poisson NLL: {study.best_value:.4f}")
@@ -1529,6 +1658,11 @@ def train_live_model(model_id: str,
             eval_metric="poisson-nloglik",
             random_state=RANDOM_STATE, n_jobs=-1, verbosity=0)
         final_model.fit(X_train, y_train)
+
+        # The tail this model will BE BET WITH, fit out-of-fold on the same
+        # folds the hyperparameters were scored on. None => Poisson.
+        dispersion = _nb1_dispersion(best_params, X_train[idx], y_train[idx],
+                                     groups_train)
 
         if X_hold is not None and len(X_hold) > 0:
             y_hold  = df_hold["target"].values.astype(float)
@@ -1540,7 +1674,8 @@ def train_live_model(model_id: str,
             # probability -- the Poisson tail the scorer prices against the live
             # line -- because that layer was never evaluated at training time and
             # is where this model's 9-10pp overconfidence lived (2026-08-30).
-            prob_cal = poisson_probability_metrics(model_id, y_hold, mu_hold)
+            prob_cal = poisson_probability_metrics(model_id, y_hold, mu_hold,
+                                                   dispersion=dispersion)
 
             holdout_metrics = {
                 "holdout_season": int(holdout_season),
@@ -1582,6 +1717,10 @@ def train_live_model(model_id: str,
         "feature_cols":        feature_cols,
         "model":               final_model,
         "best_params":         best_params,
+        # The tail the scorer must price with. Absent on every artifact
+        # trained before 2026-09-08, and absent means Poisson — see
+        # scorer._count_over_prob.
+        "dispersion":          dispersion,
         "train_seasons":       train_seasons,
         "holdout_metrics":     holdout_metrics,
         "feature_importances": importances,

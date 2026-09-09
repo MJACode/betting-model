@@ -82,7 +82,12 @@ _M = "mlb_live_total_runs"
 
 
 def test_live_signal_bet():
-    assert classify_live_signal(_M, 0.70, 0.15) == "BET"
+    # AT the model's configured floor, not a literal: this read 0.70 until the
+    # cut moved to 0.72 on 2026-09-09 (docs/thresholds.md) and the test broke
+    # for encoding the number instead of the rule it exists to check.
+    from config import MODEL_PROB_THRESHOLDS
+    floor = MODEL_PROB_THRESHOLDS[_M]
+    assert classify_live_signal(_M, floor, 0.15) == "BET"
 
 
 def test_live_signal_requires_prob_floor():

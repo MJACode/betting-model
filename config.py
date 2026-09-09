@@ -308,7 +308,7 @@ ACTION_THRESHOLDS: dict = {
     # of these can: the failure is calibration, not a cut, so more NONE rows at
     # the same overconfidence buy nothing. No thresholds because there is no
     # model left to threshold.
-    "mlb_live_total_runs": {"min_prob": 0.7, "min_edge": 0.14},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "mlb_live_total_runs": {"min_prob": 0.72, "min_edge": 0.14},  # 2026-09-09 mike: 0.70 -> 0.72 on the 47-slate replay of the v20260908_230751 artifact — docs/thresholds.md "mlb_live_total_runs cut, 2026-09-09"
     # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
     # are the sharpest market we touch, so the game models run a higher edge gate
     # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
@@ -1046,7 +1046,16 @@ PAUSED_MODELS: set = {
     # Unpause only after our per-game tackle counts are reconciled against a
     # gamebook source and this gap closes. It is the sport's best signal
     # (§2c: 16.5% MAE lift) measured against the wrong ruler.
-    "nfl_prop_tackles_assists",
+    #
+    # UNPAUSED 2026-09-09 (mike). The condition above was met that day: the
+    # book grades the box-score TOTAL, which is nflverse solo + with_assist +
+    # assists, and the game log had never ingested with_assist. Corrected, the
+    # stat matches ESPN's TOT on 100.0% / 99.2% of two full game days and our
+    # over-rate is 47.8% against the book's 50.2% -- the same -2.4pp the book
+    # runs on rush_yds above. Backtest on the retrained artifact
+    # (v20260909_160911), live cut, 2023-25: +53.03u over 340 bets, +15.6%,
+    # CI (+6.4, +24.8), positive every season, placebo +0.6%.
+    # docs/nfl_prop_profitability_search.md §4.
     # ── The four re-paused on 2026-09-07 were UNPAUSED the same day ───────
     #
     # They were paused on the gap between our P(over) and DraftKings' de-vigged
@@ -1533,7 +1542,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # GOLF RETIRED 2026-09-08 (mike). See RETIRED_MODELS.
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
     # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
-    "mlb_live_total_runs": 0.7,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md. Re-sweep at n=150 settled since 2026-08-31 (70 at 2026-09-08): docs/thresholds.md "Dated review criteria". There is NO live CLV — docs/live_betting.md has the measurement.
+    "mlb_live_total_runs": 0.72,  # 2026-09-09 mike: 0.70 -> 0.72. Swept on the 520-game / 47-slate replay of the NEW artifact (v20260908_230751), out-of-sample, both time halves clear breakeven; 0.74 fails its early half. Re-sweep at n=75 settled since 2026-09-09 (~40 slates at 1.9/slate): docs/thresholds.md "mlb_live_total_runs cut, 2026-09-09". There is NO live CLV — docs/live_betting.md has the measurement.
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
@@ -1962,6 +1971,39 @@ ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchang
 # every day without NFL games. Widened to 240h in #532 for the card; this is
 # the same number, now shared, so widening one cannot silently leave the other.
 NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "240"))
+
+# THE CEILING ON HOW EARLY A PROP PICK MAY BE TAKEN, in hours before kickoff.
+# Distinct from the window above, and the distinction is the whole point:
+# NFL_PROP_WINDOW_HOURS says how far ahead we BUY the board, this says how close
+# to kickoff a pick may be WRITTEN. Buying early is free information; betting
+# early is not.
+#
+# WHY IT EXISTS (2026-09-08, mike). models/nfl_prop_market is the one construction
+# in this repo with a placebo-validated positive record -- +9.83%, 648 bets, CI
+# (+3.6, +16.0), positive in all three seasons. That record was measured on the
+# `open` backfill series, which is a SINGLE snapshot per game at 13:55 UTC on
+# game day: min 0.6h before kickoff, p10 3.1h, median ~7h, p90 31.2h, max 36.1h.
+#
+# Production was not there. With the window at 240h and no ceiling, every NFL
+# prop BET written in the 21 days to 2026-09-08 was taken past 48h, and
+# nfl_prop_market's three at 137.6-179.8h -- five to seven days out, against a
+# measured envelope that ends at 36. Under the §1c first-signal lock those picks
+# are permanent, so the lane was locking its bets at a lead time where nothing
+# has ever been measured positive. The graded numbers at the offsets we DO have:
+# ~7h +10.75%, 24h +5.01%, 48h +0.65%, 72h +4.54% (paired, 5pp cut).
+#
+# 24 rather than 36: 36 is the measured MAXIMUM, and gating there would let the
+# lock happen in the tail of the distribution rather than near its mass. 24 sits
+# inside the envelope, is a natural "game day" boundary, and is a tenth of what
+# the lane was doing. A tighter value (12) is closer to the measured median and
+# costs volume; that trade wants its own measurement, not a guess.
+#
+# NOT MONOTONE, so do not read this as "earlier is always worse": T-72h beats
+# T-48h. What is established is that the ~7h board is the only offset positive
+# in all three seasons with an interval excluding zero, and this keeps the lane
+# near it. Evidence: docs/nfl_prop_offset_evidence.md.
+NFL_PROP_MAX_LEAD_HOURS: float = float(
+    os.environ.get("NFL_PROP_MAX_LEAD_HOURS", "24"))
 
 
 LINE_SHOP_BOOKMAKERS = [

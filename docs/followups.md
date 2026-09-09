@@ -1420,3 +1420,80 @@ as **not eligible** until the state is known (the model loses nothing — a
 genuinely open roof re-qualifies once the state lands); or source the roof
 state pre-game rather than from the schedule file. Do NOT default blank to
 `outdoors`, which is what happens today by omission.
+
+---
+
+## [ ] Historical `sbr_consensus` odds ties are broken arbitrarily (2026-09-08)
+
+**Not urgent, and deliberately not fixed inside the `pregame_total_line` work
+that found it** — the fix rewrites training data for every MLB model, which is
+a wider change than that PR was measuring.
+
+Historical `sbr_consensus` rows carry a **date-only** `snapshot_at`
+(`2025-10-13`, not a timestamp). A game therefore has two rows tying exactly on
+`snapshot_at` — one `open`, one `close` — and every "latest pre-game price"
+read picks between them arbitrarily:
+
+| game | `_build_bulk_mlb_lookups` (training) | `_get_dk_odds` (serving) |
+|---|---|---|
+| MLB_2025-10-13_SEA_TOR | 7.0 (`close`) | 8.0 (`open`) |
+| MLB_2025-10-09_PHI_LAD | 8.5 | 7.5 |
+| MLB_2025-10-08_MIL_CHC | 6.5 | 7.0 |
+
+8 of 40 sampled 2025 games disagree. DK-priced games are unaffected — they
+carry full timestamps, and the same comparison on 60 2026 games is 60/60
+identical — so this is historical training data only, never a live decision.
+
+The fix is one ORDER BY term in both readers, applied together:
+`snapshot_at DESC, CASE snapshot_type WHEN 'close' THEN 0 WHEN 'open' THEN 1
+ELSE 2 END`. `close` is the right pre-game number on a tie.
+
+**Before doing it, measure what moves.** It changes `total_line` and
+`spread_home` for pre-2024 games in the training set of every MLB model, so it
+is a retrain-scope change, not a cleanup.
+
+---
+
+## [ ] Two more shuffled-fold splitters, neither fixed here (2026-09-08)
+
+Found while fixing the live Poisson CV leak
+(`docs/mlb_volume_efficiency.md` §16). Both are the same shape — `KFold(shuffle=True)`
+on rows that are not independent — and neither is as severe, so neither was
+changed in that PR.
+
+**1. The live BINARY branch tunes on randomly permuted rows.**
+`train_live_model`'s binary path calls
+`_xgb_objective(t, X_train[idx], y_train[idx], 1.0)`, where `idx` is
+`rng.choice(...)` — a random subsample. `_xgb_objective` uses
+`_time_ordered_cv`, whose own docstring warns: *"Requires the rows to be in
+DATE ORDER... Without that sort this split is just an arbitrary partition
+wearing a better name."* A random permutation is exactly that. It also carries
+the play-row group leak, since it never sees `game_id`.
+
+Not fixed because **both binary live models are retired** —
+`mlb_live_win_prob` and `mlb_live_runline`, dropped 2026-08-30 as "badly
+overconfident in production", which is the same symptom the Poisson model had
+and now has a measured cause. If either is ever revived, fix this first: their
+overconfidence was probably never about their features either.
+
+The pre-game path is FINE and was checked, not assumed: `train_model` does
+`df_train.sort_values("game_date", kind="mergesort")` at models/trainer.py:262
+and passes the full `X_train` with no subsample, so its `_time_ordered_cv`
+folds really are time-ordered.
+
+**2. `_oof_predictions` estimates prop dispersion on shuffled folds.**
+models/trainer.py:895, `KFold(n_splits=folds, shuffle=True)`, and its own
+comment is about honesty: *"Dispersion is estimated from OUT-OF-FOLD
+predictions, never from in-sample residuals: a fitted model's own residuals are
+too small, which would make every predictive distribution too tight and every
+P(over) overconfident."* That is precisely the failure the live model turned
+out to have — and a shuffled fold is a weaker version of an in-sample residual.
+
+Much less severe than the live case: a prop row is one player-game, so rows do
+NOT share a label the way 64 plays of one game do. What they share is the
+game's context columns, so the leak is real but small.
+
+**Measure before changing it.** The size is knowable: compare each prop
+model's OOF dispersion under shuffled vs group/time-ordered folds. If the
+dispersion is materially larger under honest folds, every prop model's tail is
+too tight and the fix is a retrain across all of them — not a one-line change.

@@ -98,7 +98,8 @@ MIN_COVERAGE = 0.50
 
 
 def soft_verdict(s: dict, coverage: float, min_bets: int,
-                 pooled_with: float, pooled_without: float) -> tuple[bool, str]:
+                 pooled_with: float, pooled_without: float,
+                 book: str | None = None) -> tuple[bool, str]:
     """INCLUDE / EXCLUDE for one CANDIDATE soft book, and the clause that decided.
 
     Applied to books being ADDED, never to prune the incumbents. The +10.33%
@@ -106,6 +107,29 @@ def soft_verdict(s: dict, coverage: float, min_bets: int,
     written afterwards would quietly change the strategy away from the one that
     was validated end to end. Incumbents are reported for information.
     """
+    # CLAUSE ZERO: CAN THE BET ACTUALLY BE PLACED? Asked first, because a book
+    # that fails it cannot be rescued by any amount of edge.
+    #
+    # Added 2026-09-08, when this sweep's only INCLUDE was `bovada`: it clears
+    # all four statistical clauses on 2,172 bets and is offshore, absent from
+    # config.BEST_LINE_BOOKMAKERS, and therefore a book mike has already ruled
+    # out -- "no can't bet on these remove them" (§1b, after the opener card put
+    # seven qualifying Week-1 bets at books with no US licence). The sweep had
+    # no way to know that, so its recommendation was to name bets nobody could
+    # take, and the only thing standing between that and production was somebody
+    # remembering. That is not a control.
+    #
+    # BEST_LINE_BOOKMAKERS is the curated "can walk up to it" list, which is
+    # exactly the question here -- distinct from LINE_SHOP_BOOKMAKERS (what we
+    # FETCH, which is broader on purpose: an unbettable book is still a fine
+    # price signal, it just cannot be the side we take).
+    # The book is passed EXPLICITLY, not read off `s`: the stats dict has no
+    # such key, so `s.get("book")` is always None and this clause would have
+    # been dead code that still printed a reassuring verdict.
+    from config import BEST_LINE_BOOKMAKERS
+    if book is not None and book not in BEST_LINE_BOOKMAKERS:
+        return False, "not bettable (absent from BEST_LINE_BOOKMAKERS)"
+
     bets = s.get("bets") or 0
     if bets < min_bets:
         return False, f"only {bets} bets"
@@ -238,7 +262,8 @@ def main() -> None:
                        [b for b in soft_all if b != bk], a.min_edge)
         pooled_wo = mk.summarise(g_wo, draws=2000).get("roi_pct") or 0.0
         cover = cov.get(bk, 0) / total_games if total_games else 0.0
-        ok, why = soft_verdict(s_one, cover, a.min_bets, pooled_all, pooled_wo)
+        ok, why = soft_verdict(s_one, cover, a.min_bets, pooled_all, pooled_wo,
+                               book=bk)
         if bk in incumbent:
             # Validated already; the criteria are for candidates.
             keep.append(bk)

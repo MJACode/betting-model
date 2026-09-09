@@ -1632,9 +1632,24 @@ def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
     None means "do not bound" — a game with no commence_time keeps the old
     behaviour rather than losing every price, which is the fail-open direction
     the WNBA leak taught us (.claude/rules/data-integrity.md).
+
+    ACTUAL first pitch, not the scheduled start. This shipped in #606 reading
+    `commence_time` alone, which is the permissive direction and therefore the
+    dangerous one: measured over 415 MLB games, the first `Live` state lands a
+    mean 18.7 minutes BEFORE the scheduled time, so a commence_time bound calls
+    a quarter-hour of in-play quotes pre-game. `pregame_cutoff_sql` is the same
+    bound `_pregame_cutoff_map`, the odds ingestor and market_movement already
+    use, and the SQL twin of the `_is_pregame_snapshot` guard on the TRAINING
+    side — which is how the divergence was found. Building
+    `pregame_total_line` for 40 completed 2025 games down both paths gave 7
+    different numbers (MLB_2025-10-16_MIL_LAD: 8.0 training, 7.5 serving);
+    same bound, same number. It COALESCEs to commence_time, so games with no
+    first_pitch_at (everything before 2026-07-22, and every sport but MLB) are
+    unchanged.
     """
     row = conn.execute(
-        "SELECT commence_time FROM games WHERE game_id = ?", (game_id,)
+        f"SELECT {pregame_cutoff_sql('games')} FROM games WHERE game_id = ?",
+        (game_id,),
     ).fetchone()
     ct = row[0] if row else None
     return str(ct)[:19] if ct else None
@@ -2840,6 +2855,58 @@ def _poisson_over_prob(lam: float, line: float) -> float:
     DK K props use half-point lines (e.g. 5.5), so P(K > 5.5) = P(K >= 6).
     """
     return float(1.0 - scipy_stats.poisson.cdf(int(np.floor(line)), lam))
+
+
+def _nb1_over_prob(lam: float, line: float, alpha: float) -> float:
+    """P(count > line) under NB1: mean lam, variance lam * (1 + alpha).
+
+    NB1 rather than NB2 because the measured var/mean ratio is FLAT across
+    lambda (2.15 - 2.41 from lambda 1 to 10), which is what NB1 asserts; NB2's
+    ratio rises with the mean. Fitting both on 866k training rows agreed:
+    NB1 train NLL 2.3193 against NB2's 2.3461.
+
+    scipy's nbinom is (n successes, p), so NB1's (lam, alpha) maps to
+    n = lam/alpha and p = 1/(1+alpha), which gives mean lam and variance
+    lam*(1+alpha).
+    """
+    n = max(lam / alpha, 1e-9)
+    return float(1.0 - scipy_stats.nbinom.cdf(int(np.floor(line)),
+                                              n, 1.0 / (1.0 + alpha)))
+
+
+def _count_over_prob(lam: float, line: float,
+                     dispersion: dict | None = None) -> float:
+    """The over probability for a count model, priced with ITS OWN tail.
+
+    Every caller that turns a predicted mean into a bettable probability goes
+    through here, so production, the replays and the trainer's own gate all
+    price the same way. They did not before: the trainer measured a Poisson
+    tail while the scorer bet one too, and both were wrong together.
+
+    WHY A MODEL CARRIES ITS TAIL. A Poisson head asserts Var(y|lam) == lam.
+    mlb_live_total_runs' remaining-runs target does not: with an honestly-fit
+    model the ratio is 2.15 in-sample and 2.41 on holdout — consistent, so a
+    real property of the count rather than an artefact of the fit. A Poisson
+    tail on that data is ~2.2x too tight, which pushes every probability toward
+    its extreme and is systematic overconfidence at exactly the >=0.70 band the
+    model bets. Measured on the 2025 holdout, claimed vs realised at >=0.70:
+    +0.0586 under Poisson, -0.0095 under NB1.
+
+    `dispersion` is absent from every artifact trained before 2026-09-08, and
+    absent means Poisson — so the prop models and any un-retrained model keep
+    the exact behaviour they had.
+    """
+    if not dispersion:
+        return _poisson_over_prob(lam, line)
+    family = dispersion.get("family")
+    if family == "nb1":
+        alpha = dispersion.get("alpha")
+        if alpha is None or float(alpha) <= 0:
+            raise ValueError(f"nb1 dispersion with unusable alpha: {alpha!r}")
+        return _nb1_over_prob(lam, line, float(alpha))
+    # NOT a fallback to Poisson. An artifact asking for a tail this code does
+    # not implement must stop the pick, not quietly get a different one.
+    raise ValueError(f"unknown dispersion family {family!r} — refusing to price")
 
 
 def _latest_dk_prop_row(conn: DBConnection, game_id: str,
