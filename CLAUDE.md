@@ -282,6 +282,16 @@ A surface with an extra GATE can only lose rows, and does it silently —
   `worker` both publish, so this is live.
 - **A new surface is a line in the parity tests**, not a copied query:
   `tests/test_{nfl_lookahead_signals,publisher_lock}.py`.
+- **LIVE PICKS POST TO THEIR SPORT'S LIVE CHANNEL.** (mike, 2026-09-09: *"Push
+  picks to discord in live games to their live channels."*) `#nfl-live`,
+  `#mlb-live`, `#ncaaf-live` via `DISCORD_WEBHOOK_LIVE_{SPORT}` on Railway
+  (both services), resolved by `discord_notifier._live_webhook_for_sport`; the
+  shared `DISCORD_WEBHOOK_LIVE` and the pre-game channel are fallbacks only.
+  **Every live lane announces its BETs** — the MLB and NCAAF loops at the end of
+  a pass, the NFL in-play worker per committed BET — and a new live lane that
+  writes `is_live` picks without calling `notify_discord_live` is the NFL bug
+  of 2026-09-05→09-09 again. Webhook URLs are credentials: Railway variables,
+  never the repo.
 
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
