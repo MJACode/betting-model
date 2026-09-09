@@ -741,10 +741,41 @@ def _register_model(model_id: str, version: str,
 
 # ── Poisson Prop Trainer ──────────────────────────────────────────────────────
 
-def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> float:
+def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
+                       groups: np.ndarray | None = None) -> float:
     """
     Optuna objective for Poisson regression: minimize mean Poisson NLL across CV folds.
     Uses KFold (not stratified — target is a count, not a class).
+
+    PASS `groups` FOR ANY ROW SET WHERE THE LABEL IS SHARED. Without it this
+    uses KFold(shuffle=True), and on grouped rows that is not cross-validation,
+    it is a lookup. The live models are the case that proved it: one MLB game
+    becomes ~64 play rows carrying the SAME game-level label (runs remaining is
+    a function of the final score), and the pre-game context columns are
+    constant within a game and continuous to four decimals — a fingerprint. A
+    shuffled fold puts a game's own plays on both sides of the split, so the
+    validation score is partly recall, and 25 Optuna trials optimise toward
+    whichever hyperparameters memorise hardest.
+
+    Measured on mlb_live_total_runs, 866,136 play rows over 2019-2024:
+
+        Optuna's best CV NLL   1.9200      (what the tuner believed)
+        2025 holdout NLL       2.7422      (what it actually was)
+
+        Var(y | lambda) / mean, in-sample     0.63 - 0.76   (memorised)
+        Var(y | lambda) / mean, holdout       2.5  - 2.7
+
+    An in-sample dispersion BELOW Poisson is the fingerprint showing: the model
+    is more certain about training rows than the count distribution allows. Out
+    of sample the tail is 2.6x too tight, which is the model's documented ~10pp
+    overconfidence at the band it bets, and it is why claimed ~73% delivers
+    ~54% in production. No feature change touches this — it is the fit.
+
+    `_time_ordered_cv` fixed exactly this for the PRE-GAME models on
+    2026-09-03; the live Poisson path was never brought across. Here the folds
+    must be both time-ordered AND group-clean, so rows are sorted by group and
+    split with TimeSeriesSplit: every validation fold is later than its
+    training fold, and a game's plays stay contiguous.
     """
     params = {
         "n_estimators":     trial.suggest_int("n_estimators", 100, 800),
@@ -763,10 +794,21 @@ def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> flo
         "verbosity":        0,
     }
 
-    kf = KFold(n_splits=COUNT_CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    if groups is None:
+        splits = KFold(n_splits=COUNT_CV_FOLDS, shuffle=True,
+                       random_state=RANDOM_STATE).split(X)
+    else:
+        # Sort by group so each group's rows are contiguous, then split by
+        # position: folds are time-ordered (groups are game ids, which sort by
+        # date) and no group straddles a boundary except at most one per fold.
+        order = np.argsort(groups, kind="stable")
+        splits = ((order[tr], order[va])
+                  for tr, va in TimeSeriesSplit(
+                      n_splits=COUNT_CV_FOLDS).split(order))
+
     scores = []
 
-    for train_idx, val_idx in kf.split(X):
+    for train_idx, val_idx in splits:
         X_tr, X_val = X[train_idx], X[val_idx]
         y_tr, y_val = y[train_idx], y[val_idx]
 
@@ -1518,8 +1560,13 @@ def train_live_model(model_id: str,
         logger.info(f"Tuning hyperparameters ({trials} trials, Poisson)...")
         study = optuna.create_study(direction="minimize",
                                     sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        # GROUPS ARE NOT OPTIONAL HERE. One game is ~64 play rows sharing one
+        # game-level label; without them the CV is a lookup. See
+        # _poisson_objective's docstring for the measured size of the leak.
+        groups_train = df_train["game_id"].values[idx]
         study.optimize(
-            lambda t: _poisson_objective(t, X_train[idx], y_train[idx]),
+            lambda t: _poisson_objective(t, X_train[idx], y_train[idx],
+                                         groups=groups_train),
             n_trials=trials, show_progress_bar=False)
         best_params = study.best_params
         logger.success(f"Best CV Poisson NLL: {study.best_value:.4f}")

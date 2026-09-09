@@ -1070,3 +1070,124 @@ ties, which is why 2026 is clean. It was left alone deliberately: preferring
 `close` on a tie would rewrite `total_line` in **every** MLB model's training
 set, which is a far wider change than this one and belongs to whoever measures
 that. Logged in `docs/followups.md`.
+
+---
+
+## 16. The model was memorising its training games (2026-09-08, mike)
+
+§15 gave the model the market anchor it never had. It did not fix the
+calibration, and chasing why produced the actual cause of **claims ~73%,
+delivers ~54%**.
+
+### 16.1 The feature change was not the fix, and the numbers say so
+
+Three matched fits on the same cached frames, same trainer, 2025 holdout:
+
+| candidate | features | RMSE | MAE | prob cal error (actionable) | fixed-ref gap | band n |
+|---|---|---|---|---|---|---|
+| baseline18 | 18 (today's) | 3.5801 | 2.5919 | **0.0985** | +0.1182 | 73,702 |
+| A19 | 18 + pre-game line | 3.5271 | 2.5609 | **0.0976** | +0.1117 | 72,455 |
+| B13 | state + weather + line | 3.5422 | 2.6038 | **0.0971** | +0.1112 | 69,857 |
+
+`pregame_total_line` is a top-5 feature in both models that carry it, and it
+improves the COUNT fit. It moves the calibration error by 0.9 of one
+percentage point. All three remain ~10pp overconfident and fail the 5% gate.
+
+A feature that matters this much to the fit and this little to the calibration
+means the calibration error is not in the features.
+
+### 16.2 The Poisson tail looked wrong, and that was a symptom
+
+Conditional on the model's own lambda, the 2025 holdout is badly overdispersed
+— `Var(y|lambda) / mean` of 2.5-2.7 in every bin, where a Poisson head asserts
+exactly 1.0. The obvious reading is that the tail is too tight and the head
+should be negative binomial.
+
+**Fitting the dispersion on the TRAINING rows killed that reading.** The MLE
+collapses to the Poisson boundary (NB1 alpha -> 0.05, NB2 r -> 200) and plain
+Poisson has the lowest train NLL. The two halves side by side:
+
+| lambda bin | in-sample var/mean | holdout var/mean |
+|---|---|---|
+| [1,2) | 1.10 | 2.75 |
+| [3,4) | 0.83 | 2.71 |
+| [5,6) | 0.69 | 2.65 |
+| [7,8) | 0.65 | 2.37 |
+
+**An in-sample dispersion BELOW Poisson is not a count property. It is a
+model that is more certain about its training rows than the count
+distribution allows** — the signature of memorisation. A negative-binomial
+head would have widened the tail of a model that should never have been that
+confident: right symptom, wrong layer.
+
+### 16.3 The cause: the cross-validation was a lookup
+
+`mlb_live_total_runs` trains on PLAY rows. One game becomes ~64 of them, every
+one carrying the same game-level label (runs remaining is a function of the
+final score). The pre-game context columns are constant within a game and
+continuous to four decimals — a fingerprint. `_poisson_objective` split those
+rows with `KFold(shuffle=True)`, so a game's own plays sat on both sides of
+every fold.
+
+The validation score was therefore partly recall, and 25 Optuna trials
+optimised toward whichever hyperparameters memorised hardest.
+
+| | |
+|---|---|
+| Optuna's best CV NLL | **1.9200** — what the tuner believed |
+| 2025 holdout NLL | **2.7422** — what it actually was |
+
+Cross-validation exists to estimate out-of-sample error. It was off by 43%.
+
+On a synthetic fixture built to contain **no signal at all** — a per-game
+fingerprint drawn independently of the label — the shuffled split scores
+NLL 1.52 and an honest grouped, time-ordered split scores 4.89. The entire
+3.38-nat gap is lookup. (`tests/test_live_cv_grouping.py`.)
+
+### 16.4 What this explains, and what it costs
+
+- the ~10pp overconfidence at the band the model bets, on every candidate
+- **claims ~73%, delivers ~54%** (§11.2)
+- **§14's 12.8-point swing on a stats snapshot.** §14 called it "the model
+  amplifying noise" and left the mechanism open. This is the mechanism:
+  changing the stats snapshot changes the fingerprint, which moves the model to
+  a different memorised game. Amplification via recall.
+
+**The production artifact has been fit this way since 2026-06-14.**
+
+`_time_ordered_cv` fixed this same class of bug for the PRE-GAME models on
+2026-09-03 — its docstring already makes the argument: *"the tuner was scoring
+a different task: interpolating between games it had already seen."* The live
+path was never brought across. CLAUDE.md §1b asks whether a change to one
+model's mechanics wants to reach the others; that assessment was made and this
+lane was missed.
+
+### 16.5 The fix, and what it must be checked against
+
+`_poisson_objective` takes an optional `groups`. Given it, rows are sorted by
+group and split with `TimeSeriesSplit`: folds are time-ordered AND no game
+straddles a boundary. `train_live_model` passes `game_id`. Ungrouped callers —
+props, game models — default to `None` and keep `KFold`, unchanged.
+
+Sorting by `game_id` gives time order only because an MLB id is
+`MLB_<ISO date>_<away>_<home>`, so lexicographic order is date order. That
+precondition is pinned (`test_game_ids_sort_chronologically`), for the same
+reason `_time_ordered_cv` pins its own.
+
+**Stated before the honest refits ran, so they could fail:** CV NLL within
+~0.05 of the 2025 holdout NLL; in-sample var/mean near 1; fixed-reference gap
+in the 0.70-0.80 band under ~0.03. A gap still near 0.10 under a clean CV means
+something else is wrong.
+
+### 16.6 What this does NOT settle
+
+- **Every threshold on this model was swept on the leaked probabilities.**
+  0.70 / 0.14 / 0.32 mean something different on an honestly-fit model and need
+  re-sweeping. The ~70 settled live BETs cannot do it.
+- **A separate mean bias, not dispersion.** At lambda ~0.59 the holdout mean is
+  0.95. `half_innings_left` clamps to 1, so extra innings arrive under the same
+  state as a settled 9th. Flagged, not fixed.
+- **Not measured on the other MLB models.** They are per-game rows, not play
+  rows, so they do not share this exact leak — but `_oof_predictions` shuffles
+  folds for prop dispersion, which is the same shape and unmeasured
+  (`docs/followups.md`).
