@@ -243,17 +243,48 @@ def _already_loaded(conn: DBConnection, game_id: str) -> bool:
     return row is not None
 
 
+# Four franchises live under TWO game_ids in `games`. The odds ingestor, the
+# Stats API map and every `live` row say ARI / CWS / OAK / WSH; the SBR CSV
+# import files the same games as AZ / CHW / ATH / WAS, and the SCORES landed
+# on the SBR twin while the live row stayed unscored. Measured 2026-09-10:
+# 534 of the 2025 games priced by the in-play history had no plays because
+# this lookup saw the unscored live row and skipped the game -- and the 2024
+# corpus has no CWS or WSH game for the same reason (81 unscored live rows
+# each). The label is read from whichever twin carries the final.
+_SBR_TWIN = {"ARI": "AZ", "CWS": "CHW", "OAK": "ATH", "WSH": "WAS"}
+
+
+def sbr_twin_id(game_id: str) -> Optional[str]:
+    """The SBR-abbreviated id of a canonical MLB game_id, or None if no team differs."""
+    parts = game_id.split("_")
+    if len(parts) != 4:
+        return None
+    _, d, away, home = parts
+    twin = f"MLB_{d}_{_SBR_TWIN.get(away, away)}_{_SBR_TWIN.get(home, home)}"
+    return twin if twin != game_id else None
+
+
+def mlb_game_final(conn: DBConnection, game_id: str) -> Optional[tuple]:
+    """(home_score, away_score, home_win) from the canonical row, else from its
+    SBR twin; None when neither carries a score. home_win is derived from the
+    scores when the row left it NULL."""
+    for gid in (game_id, sbr_twin_id(game_id)):
+        if gid is None:
+            continue
+        row = conn.execute(
+            "SELECT home_score, away_score, home_win FROM games WHERE game_id = %s",
+            (gid,)).fetchone()
+        if row and row[0] is not None and row[1] is not None:
+            hs, as_, hw = row
+            if hw is None:
+                hw = 1 if float(hs) > float(as_) else 0
+            return hs, as_, int(hw)
+    return None
+
+
 def _lookup_home_won(conn: DBConnection, game_id: str) -> Optional[int]:
-    row = conn.execute(
-        "SELECT home_win, home_score FROM games WHERE game_id = %s", (game_id,)
-    ).fetchone()
-    if not row:
-        return None
-    home_win, home_score = row
-    # If the game isn't actually complete (no score), we cannot label.
-    if home_score is None:
-        return None
-    return int(home_win) if home_win is not None else None
+    final = mlb_game_final(conn, game_id)
+    return None if final is None else final[2]
 
 
 # ── Per-game ingest ───────────────────────────────────────────────────────────

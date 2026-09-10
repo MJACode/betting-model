@@ -41,6 +41,7 @@ from features.live_game_features import build_live_state_row
 from models.live_scorer import expected_value
 from models.scorer import _count_over_prob
 from models.trainer import load_model
+from data.ingestors.mlb_pbp_ingestor import mlb_game_final
 from scripts import live_cut_sweep as sweep
 from scripts.inplay_state_align import GameClock
 from scripts.live_inning_gate_replay import MODEL_ID, _grade, _implied
@@ -64,15 +65,26 @@ def build_cache(season: int, cache: Path) -> list[dict]:
     art = load_model(MODEL_ID)
     cols, clf, disp = art["feature_cols"], art["model"], art.get("dispersion")
     try:
-        games = conn.execute("""
+        # Canonical ids only (the odds ingestor's abbreviations). A game whose
+        # live row is unscored takes its final from the SBR twin -- see
+        # mlb_pbp_ingestor._SBR_TWIN for the four-franchise split.
+        raw = conn.execute("""
             SELECT game_id, game_date, season, home_team, away_team,
                    home_score, away_score
             FROM games WHERE sport = 'MLB' AND season = %s
-              AND home_score IS NOT NULL AND away_score IS NOT NULL
+              AND data_source <> 'sbr_csv'
             ORDER BY game_date, game_id""", (season,)).fetchall()
         gcols = ["game_id", "game_date", "season", "home_team", "away_team",
                  "home_score", "away_score"]
-        games = [dict(zip(gcols, r)) for r in games]
+        games = []
+        for r in raw:
+            g = dict(zip(gcols, r))
+            if g["home_score"] is None or g["away_score"] is None:
+                final = mlb_game_final(conn, g["game_id"])
+                if final is None:
+                    continue
+                g["home_score"], g["away_score"] = final[0], final[1]
+            games.append(g)
         print(f"{len(games)} completed {season} games", flush=True)
 
         quotes = defaultdict(list)
