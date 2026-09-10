@@ -45,3 +45,11 @@ def test_missing_last_update_reads_back_as_none():
 def test_planned_calls_counts_every_five_minute_step_inclusive():
     lo = datetime(2025, 6, 17, 22, 35, tzinfo=timezone.utc)
     assert planned_calls([("2025-06-17", lo, lo + 3 * STEP)]) == 4
+
+
+def test_event_missing_from_games_is_counted_not_written():
+    skipped = {}
+    rows = rows_for([_event("2025-06-17T22:41:00Z")], "2025-06-18T01:05:00Z", SERVED,
+                    known_games={"MLB_2025-06-17_XXX_YYY"}, skipped=skipped)
+    assert rows == []
+    assert skipped == {"MLB_2025-06-17_PIT_DET": 1}

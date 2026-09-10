@@ -130,7 +130,13 @@ def _get(params: dict):
     return None
 
 
-def rows_for(events: list[dict], requested: str, served: datetime) -> list[dict]:
+def rows_for(events: list[dict], requested: str, served: datetime,
+             known_games: set[str] | None = None, skipped: dict | None = None) -> list[dict]:
+    """`known_games`: game_ids present in `games`. odds.game_id is a foreign
+    key, so an event whose id is not there (a postponement the schedule never
+    filed, a name the normaliser does not know) cannot be written; it is
+    counted in `skipped` rather than crashing a paid run -- shard 0 of the 2025
+    pull died on MLB_2025-06-12_LAA_BAL after 24,710 credits."""
     rows = []
     for ev in events:
         ct = ev.get("commence_time")
@@ -148,8 +154,13 @@ def rows_for(events: list[dict], requested: str, served: datetime) -> list[dict]
         game_date = _ts(ct).astimezone(_ET).strftime("%Y-%m-%d")
         home = _normalize_team(ev.get("home_team", ""), "MLB")
         away = _normalize_team(ev.get("away_team", ""), "MLB")
+        game_id = _build_game_id("MLB", game_date, away, home)
+        if known_games is not None and game_id not in known_games:
+            if skipped is not None:
+                skipped[game_id] = skipped.get(game_id, 0) + 1
+            continue
         rows.append({
-            "game_id": _build_game_id("MLB", game_date, away, home),
+            "game_id": game_id,
             "sport": "MLB", "market": "totals", "bookmaker": "draftkings",
             "snapshot_type": "in_play", "snapshot_at": _iso(served),
             "home_price": None, "away_price": None, "draw_price": None,
@@ -168,8 +179,9 @@ def rows_for(events: list[dict], requested: str, served: datetime) -> list[dict]
 
 
 def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
-             budget: dict) -> None:
+             budget: dict, known_games: set[str]) -> None:
     have = _served_already(conn, lo, hi)
+    skipped: dict = {}
     t = lo
     if have:
         t = max(_ts(s) for s in have) + STEP
@@ -204,7 +216,7 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
         served = _ts(served_s) if served_s else t
         nxt = body.get("next_timestamp")
         if _iso(served) not in have:
-            rows = rows_for(body.get("data") or [], requested, served)
+            rows = rows_for(body.get("data") or [], requested, served, known_games, skipped)
             if rows:
                 _insert_odds(conn, rows)
                 conn.commit()
@@ -219,6 +231,9 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
         else:
             t += STEP
         time.sleep(0.25)
+    if skipped:
+        logger.warning(f"{day}: not in games, skipped: "
+                       + ", ".join(f"{g} x{n}" for g, n in sorted(skipped.items())))
     logger.info(f"{day}: {calls} calls, {wrote} rows, spent so far {budget['spent']}")
 
 
@@ -254,8 +269,11 @@ def main() -> None:
     budget = {"spent": 0, "max": args.max_credits, "stop": False}
     conn = get_connection()
     try:
+        known = {r[0] for r in conn.execute(
+            "SELECT game_id FROM games WHERE sport = 'MLB' AND season = %s",
+            (args.season,)).fetchall()}
         for day, lo, hi in mine:
-            pull_day(conn, day, lo, hi, args.floor, budget)
+            pull_day(conn, day, lo, hi, args.floor, budget, known)
             if budget["stop"]:
                 break
     finally:
