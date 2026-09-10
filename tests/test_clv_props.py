@@ -76,8 +76,11 @@ def test_every_prop_model_maps_to_a_dk_market():
                 and getattr(n.targets[0], "id", "") == "_PROP_MARKET_FOR_MODEL")
     mapped = set(ast.literal_eval(node.value))
 
-    prop_models = {m for m in cfg.PROP_MODELS
-                   if not m.startswith(("nfl_prop", "golf_"))}
+    # Every prop model, NFL included. Until 2026-09-10 this line excluded
+    # "nfl_prop", so the twelve NFL prop models and the market-relative rule
+    # were never in the map and the first settled NFL props (09-09) carried
+    # no CLV while 256k closing quotes sat in player_prop_odds.
+    prop_models = {m for m in cfg.PROP_MODELS if not m.startswith("golf_")}
     missing = prop_models - mapped
     assert not missing, f"prop models with no DK market for CLV: {sorted(missing)}"
 
@@ -90,7 +93,10 @@ def test_the_closing_prop_lookup_is_bounded_at_first_pitch():
     assert "snapshot_at::timestamptz <= %s::timestamptz" in src
     assert "ORDER BY snapshot_at::timestamptz DESC" in src, (
         "text ordering on a mixed-format timestamp column is not chronological")
-    assert "bookmaker = 'draftkings'" in src
+    # DraftKings by DEFAULT: the market-relative rules pass their own book
+    # (tests/test_nfl_prop_clv.py), so the literal became a parameter.
+    assert 'bookmaker: str = "draftkings"' in src
+    assert "AND bookmaker = %s" in src
 
 
 def test_the_prop_lookup_joins_on_name_not_id():
