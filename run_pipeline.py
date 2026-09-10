@@ -495,30 +495,62 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
-def step_weather(run_date: str, max_age_min: int | None = None) -> bool:
-    """Fetch and store weather data for today's games from Open-Meteo.
+def step_weather(run_date: str, max_age_min: int | None = None,
+                 ahead_days: int | None = None) -> bool:
+    """Fetch and store weather for run_date AND the look-ahead window, from
+    Open-Meteo, at each game's own start hour.
 
-    `max_age_min` skips when today's rows are already fresher than that. A
-    forecast does not update faster than hourly, and Open-Meteo has rate-limited
-    us before during backfills."""
-    if max_age_min is not None and _is_fresh(
-            "Weather", "SELECT MAX(fetched_at) FROM game_weather WHERE game_date = %s",
-            (run_date,), max_age_min):
-        return True
-    try:
-        from data.ingestors.weather_ingestor import fetch_and_store_weather_for_date
-        from data.db import get_connection
-        conn = get_connection()
+    THE WINDOW IS THE SCORER'S (config.GAME_SCORE_AHEAD_DAYS). Until
+    2026-09-10 this fetched run_date only while step_prop_scoring priced
+    tomorrow too, so tomorrow's game had no weather row, the scorer filled
+    the gap with 0.0, and two picks went out priced for a 0°F game (session
+    276). A game the scorer prices with no weather row is now a game it does
+    not price (models.scorer.prop_feature_matrix), so the forecast has to
+    land FIRST -- and a forecast a day or two out is what makes the evening
+    look-ahead pick possible at all.
+
+    `max_age_min` is checked PER DATE: tomorrow being fresh must not skip
+    today. A forecast does not update faster than hourly, and Open-Meteo has
+    rate-limited us before during backfills; `games` holds MLB rows only a
+    day or two ahead, so a non-fresh pass is ~15-30 calls, not 7 x 15."""
+    from datetime import date as _date, timedelta as _td
+
+    if ahead_days is None:
         try:
-            result = fetch_and_store_weather_for_date(run_date, conn)
-            conn.commit()
-            logger.success(f"✓ Weather: {result}")
-            return True
-        finally:
-            conn.close()
+            from config import GAME_SCORE_AHEAD_DAYS
+            ahead_days = GAME_SCORE_AHEAD_DAYS
+        except Exception:                                     # noqa: BLE001
+            ahead_days = 1
+    dates = [(_date.fromisoformat(run_date) + _td(days=k)).isoformat()
+             for k in range(0, max(0, ahead_days) + 1)]
+
+    from data.ingestors import weather_ingestor
+    from data.db import get_connection
+    ok = True
+    try:
+        conn = get_connection()
     except Exception as exc:
         logger.error(f"✗ Weather failed: {exc}")
         return False
+    try:
+        for d in dates:
+            if max_age_min is not None and _is_fresh(
+                    f"Weather {d}",
+                    "SELECT MAX(fetched_at) FROM game_weather WHERE game_date = %s",
+                    (d,), max_age_min):
+                continue
+            try:
+                result = weather_ingestor.fetch_and_store_weather_for_date(d, conn)
+                conn.commit()
+                logger.success(f"✓ Weather {d}: {result}")
+            except Exception as exc:
+                # One date failing must not cost the others -- today's board
+                # is the one about to be priced.
+                logger.error(f"✗ Weather failed for {d}: {exc}")
+                ok = False
+    finally:
+        conn.close()
+    return ok
 
 
 def step_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:

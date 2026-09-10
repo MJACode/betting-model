@@ -96,7 +96,9 @@ PROP_PITCHER_K_FEATURES = [
     # Ballpark / environment
     "is_dome_game",       # 1 = dome (neutralises wind/temp effects)
     "temp_f",             # game-time temperature (cold suppresses velocity/movement)
-    # Umpire
+    # Umpire. Unknown before MLB posts it (usually mid-day): the scorer imputes
+    # 0.0 = a league-average umpire, BY NAME (models.scorer.PROP_IMPUTED_FEATURES).
+    # Every other feature here is required -- a row missing one is not scored.
     "ump_k_plus_minus",   # HP umpire career avg starter Ks minus league avg (Ks/game delta)
 ]
 

@@ -103,6 +103,11 @@ par lineups
 # mean fetching 42 times: ESPN has IP-blocked this worker twice.
 par injuries-refresh
 par weather-refresh
+# The home-plate umpire. MLB posts it during the day, after the 6am run, so a
+# 6am-only fetch left every pre-game prop row without one (the scorer imputes
+# a league-average umpire until it lands -- models.scorer.PROP_IMPUTED_FEATURES).
+# Self-healing and one schedule call per unfilled date; no max-age guard needed.
+par umpires
 # The news behind the number, for the prop screens' Recent News sheet.
 # Same self-limiting max-age guard as the two above
 # (config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN), so sharing a group with the
