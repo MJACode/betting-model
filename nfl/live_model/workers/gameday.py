@@ -319,12 +319,26 @@ class GamedayWorker:
 
     def _poll_for(self, eid: str, hunting: bool, why: str, tr: "GameTracker",
                   now: float, summary: dict) -> None:
+        # THE BOOK'S EVENT ID, NOT ESPN'S. `eid` is ESPN's; the per-event odds
+        # endpoint wants The Odds API's own id, and the two are unrelated
+        # strings. Passing ESPN's answered 422 INVALID_EVENT_ID on every prop
+        # poll of the first live regular-season game (NE @ SEA, 2026-09-09):
+        # anchor matched, state built, and not one prop quote ever came back,
+        # so the lane could not reach a decision. Same resolution the anchor
+        # uses -- who is playing -- and the anchor row carries the book's id.
+        # No match means no poll: a call that cannot succeed is a credit spent
+        # on nothing, and the skip is visible on the tick line.
+        book_eid = self._book_event_id(eid)
+        if book_eid is None:
+            summary.setdefault("prop_skips", []).append("no_book_event_id")
+            return
+
         # The derivative lane is NOT deployed, so it stays hunt gated: its
         # premise is a quote that has failed to keep up with a repriced main
         # line, which is a hunt state by definition.
         if hunting and tr.due("deriv", now):
             self._safe_poll(
-                lambda: self.odds.fetch_event_markets(eid, DERIVATIVE_MARKETS),
+                lambda: self.odds.fetch_event_markets(book_eid, DERIVATIVE_MARKETS),
                 summary, "deriv_polls")
             tr.last_deriv = now
 
@@ -343,7 +357,7 @@ class GamedayWorker:
         triggered = why == "script_trigger"
         if tr.due("prop", now, triggered):
             quotes = self._safe_poll(
-                lambda: self.odds.fetch_event_markets(eid, self.prop_markets),
+                lambda: self.odds.fetch_event_markets(book_eid, self.prop_markets),
                 summary, "prop_polls")
             tr.last_prop = now
             # Fetching and discarding is what this used to do. A poll that
@@ -379,6 +393,29 @@ class GamedayWorker:
         except Exception as e:                          # noqa: BLE001
             log.warning("state build failed for %s: %s", eid, e)
             return None
+
+    def _book_event_id(self, eid: str) -> str | None:
+        """
+        The Odds API's event id for this ESPN event, or None if the slate
+        anchor holds no row for this matchup.
+
+        Resolved exactly as _anchor_value resolves a line: on (home, away)
+        abbreviations, never on an id comparison, because the two feeds share
+        nothing but who is playing. The anchor's Quote.game_id IS the book's
+        event id (odds_live.parse_events takes it from the event's `id`).
+        """
+        tr = self.trackers.get(eid)
+        if tr is None:
+            return None
+        want = (_abbrev(tr.home), _abbrev(tr.away))
+        if None in want:
+            return None
+        for q in getattr(self, "_anchor_quotes", None) or []:
+            if not getattr(q, "game_id", None):
+                continue
+            if (_abbrev(q.home_team), _abbrev(q.away_team)) == want:
+                return str(q.game_id)
+        return None
 
     def _anchor_value(self, eid: str, market: str) -> float | None:
         """
