@@ -1294,28 +1294,36 @@ def test_a_six_column_row_still_tallies():
     assert t["w"] == 1 and t["live"] == 0
 
 
-# ── Restating a recap (2026-08-30) ───────────────────────────────────────────
+# ── Restating a recap (2026-08-30; automatic since 2026-09-10) ───────────────
+# The full contract is tests/test_recap_restatement.py. What stays here is
+# the boundary with the SLATE restatement above.
 
-def test_a_restate_only_fires_for_a_listed_date():
-    """Self-limiting, like the slate restatement: an unlisted date is a no-op
-    however many times settle runs."""
+def test_a_restate_with_nothing_settled_late_is_a_no_op():
+    """No webhook configured in the test env, so this returns before the
+    database; the point pinned is the signature -- restate=True is accepted
+    and resolves to 'nothing to correct' rather than raising."""
     assert dn.notify_discord_results(game_date="2026-01-01", restate=True) == 0
 
 
-def test_the_restate_set_and_the_slate_set_are_separate():
-    """One restates a RECORD, the other a SLATE. Sharing a set would re-post a
+def test_the_record_restatement_and_the_slate_restatement_are_separate():
+    """One restates a RECORD (its own ledger kind, keyed per correction), the
+    other a SLATE (a hard-coded date set). Sharing a trigger would re-post a
     day's picks every time its numbers were corrected, and vice versa."""
-    assert dn.DISCORD_RESULTS_RESTATE_DATES != dn.DISCORD_RESTATE_DATES
+    assert "discord_results_restate" in dn.restate_lock_key(
+        "discord_results_restate", "2026-09-09", "2026-09-10T10:02:22+00:00")
+    assert dn.DISCORD_RESTATE_DATES, "the slate set still exists on its own"
+    assert not hasattr(dn, "DISCORD_RESULTS_RESTATE_DATES"), (
+        "the record restatement no longer runs off a hard-coded date list")
 
 
 def test_a_restated_recap_is_labelled_and_says_why():
     """A correction that looks identical to the original is worse than none —
     a reader has no way to tell which number is current."""
-    n = dn._RESULTS_RESTATE_NOTE.lower()
-    assert "restated" in n
-    assert "in-play" in n, "must say WHAT changed"
+    n = dn.results_restate_note(3, 7, 10).lower()
+    assert n.startswith("restated")
+    assert "settled after" in n, "must say WHAT changed"
     assert "same picks" in n, "must say what did NOT change"
-    assert "close" in n, "must state that CLV stays pre-game only"
+    assert "7 settled then, 10 now" in n, "must carry both counts"
 
 
 # ── Live (in-play) bets count toward the recap (2026-08-30) ──────────────────
