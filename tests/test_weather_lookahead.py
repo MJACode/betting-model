@@ -250,4 +250,12 @@ class TestTheWeatherStepWalksTheWindow:
 class TestTheUmpireLandsOnEveryPass:
     def test_the_refresh_pass_runs_the_umpire_step(self):
         src = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
-        assert "par umpires" in src
+        assert "step umpires" in src.splitlines()
+
+    def test_but_not_in_the_parallel_group(self):
+        """run_umpire_ingestor opens its own connection; group 1 is already
+        nine concurrent ones against a session pool of fifteen, which is
+        exactly how probables-refresh failed twice on 2026-09-06."""
+        src = (ROOT / "scripts" / "refresh_pass.sh").read_text(encoding="utf-8")
+        assert "par umpires" not in src
+        assert src.index("step probables-refresh") < src.index("step umpires")
