@@ -1460,6 +1460,23 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["ncaaf_results"] = step_ncaaf_results(run_date)
     time.sleep(1)
 
+    # ── Step 0h: NFL player box scores via nflverse (MUST precede settlement) ─
+    # NFL prop picks settle off nfl_player_game_log, and BOTH of these steps
+    # fill it (4b the leaderboard columns, 4c the modelling columns; they parse
+    # the same weekly CSV). Until 2026-09-10 they ran as Steps 4b/4c, AFTER
+    # settle: the 6am run posted the 2026-09-09 recap at 06:02 with MLB only,
+    # 4c wrote the NE @ SEA box scores at 06:11, and the 07:17 refresh pass
+    # settled the three NFL BETs at 07:24 -- an hour after the recap was
+    # ledgered. Same rule as 0d/0e/0f/0g: a sport's box scores land before the
+    # settle that grades them, or its picks lag a pass and the recap ships
+    # without the sport. Self-healing (first run backfills 3 seasons); the
+    # off-season is a clean no-op; 4c also writes the SCHEDULED-game rows the
+    # prop scorer needs, which is why it runs even with no finals pending.
+    logger.info("Step 0h: NFL player box scores from nflverse (pre-settle)...")
+    results["nfl_player_stats"] = step_nfl_player_stats(run_date)
+    results["nfl_props_data"] = step_nfl_props_data(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -1538,25 +1555,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
 
-    # ── Step 4b: NFL player stats (nflverse weekly CSV) ──────────────────────
-    # Mobile Stats tab leaderboard only — self-healing (first run backfills the
-    # last 3 seasons), off-season no-op (unpublished season CSV 404s).
-    logger.info("Step 4b: NFL player stats (nflverse)...")
-    results["nfl_player_stats"] = step_nfl_player_stats(run_date)
-    time.sleep(1)
-
     # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
     logger.info("Step 4b2: NCAAF stats (CFBD)...")
     results["ncaaf_stats"] = step_ncaaf_stats(run_date)
     results["ncaaf_weather"] = step_ncaaf_weather(run_date)
-    time.sleep(1)
-
-    # ── Step 4c: NFL prop modelling data (nflverse) ──────────────────────────
-    # Team-game context + snap share + the modelling columns on the player log.
-    # Runs even off-season: it is what writes the SCHEDULED-game rows the prop
-    # scorer needs, and before week 1 those are the only rows that exist.
-    logger.info("Step 4c: NFL prop modelling data (nflverse)...")
-    results["nfl_props_data"] = step_nfl_props_data(run_date)
     time.sleep(1)
 
     # NOTE: wnba_stats/wnba_game_log AND nba_stats/nba_game_log are intentionally

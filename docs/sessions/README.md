@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-10 | [2026-09](./2026-09.md) | 2026-09-10, session 273 - the 2026-09-09 recap posted MLB-only to Discord and X: NFL box scores were ingested after settle, so the three NFL BETs settled at 07:24, an hour after the recap was ledgered. Steps 4b/4c moved before settle (Step 0h); new publish_results worker job re-posts both surfaces; same shape measured on 09-04 (NCAAF) and 09-05 (NCAAF + UFC) |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 268 - the Stats board's leaderboard reads were never paged and every one is over the 1,000-row cap (NFL last-10 is 12,850 rows, NCAAF 54,687), so the NFL board - which opens filtered to the slate - had 6 of tonight's players and no quarterback; paged and narrowed to the slate's teams server-side. Separately: NFL game lines are DK spreads only, because odds_ingestor.SPORT_KEYS has no NFL entry |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 266 - the live cut re-swept on the new model over 47 slates: 0.70 -> 0.72, ~1.9 bets a slate, chosen as the centre of a plateau; scripts/live_cut_sweep.py |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 272 - the Picks market filter offered MLB's Pitcher/Batter markets on every sport's board; scoped to the picks on screen, and the thirteen unlabelled NFL models (twelve prop + nfl_live_prop) that were rendering their raw model_id AND skipping the category cut entirely now carry labels and a derived category |

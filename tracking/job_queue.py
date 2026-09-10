@@ -451,6 +451,51 @@ def _job_publish_x_results(**kw):
         conn.close()
 
 
+def _job_publish_results(**kw):
+    """Re-post one settled day's recap to BOTH surfaces, Discord and X.
+
+    WHY THIS EXISTS. On 2026-09-10 the 6am run settled 2026-09-09 at 06:02 ET
+    and posted the recap seconds later: MLB 3-4, nothing else. The three NFL
+    prop BETs could not settle yet -- the steps that fill nfl_player_game_log
+    ran after settle (fixed the same day: Step 0h) -- and the 07:17 refresh
+    pass settled them at 07:24, an hour after both ledger rows were written.
+    mike deleted the two partial posts by hand; this job posts the full day.
+
+    Both surfaces in ONE job, seconds apart, off the same query (mike,
+    2026-09-02: "needs to be the same and fired at the same time"). Discord
+    goes first, as it does in step_settle. The day-is-over guards in both
+    notifiers are NOT bypassed: the job clears the two ledger rows and calls
+    the ordinary paths, so a date that is not over still posts nothing. The
+    results_snapshots row for the date is overwritten by the Discord post
+    (ON CONFLICT ... DO UPDATE), so the stored receipt matches the re-post.
+    """
+    from data.db import get_connection
+    from tracking.discord_notifier import notify_discord_results
+    from tracking.x_publisher import notify_x_results
+
+    game_date = kw["game_date"]
+    keys = [f"discord_results:{game_date}", f"x_results:{game_date}"]
+    conn = get_connection()
+    try:
+        # COUNT then DELETE -- data.db._CursorResult has no .rowcount (see
+        # _job_publish_x_results, which died on it in production).
+        removed = int(conn.execute(
+            "SELECT count(*) FROM push_sent "
+            "WHERE lock_key = ANY(%s) AND kind IN ('discord_results', 'x_results')",
+            (keys,)).fetchone()[0])
+        conn.execute(
+            "DELETE FROM push_sent "
+            "WHERE lock_key = ANY(%s) AND kind IN ('discord_results', 'x_results')",
+            (keys,))
+        conn.commit()
+    finally:
+        conn.close()
+    discord_posted = notify_discord_results(game_date)
+    x_posted = notify_x_results(game_date)
+    return {"game_date": game_date, "ledger_rows_cleared": removed,
+            "discord_posted": discord_posted, "x_posted": x_posted}
+
+
 def _job_publish_discord_signals(**kw):
     """Run the ordinary Discord signals producer NOW, instead of at :17.
 
@@ -701,6 +746,9 @@ JOBS = {
     "health_check":    (_job_health_check,     _validate_health_check),
     "ncaaf_teams_refresh": (_job_ncaaf_teams_refresh, _validate_ncaaf_teams_refresh),
     "publish_x_results": (_job_publish_x_results, _validate_publish_x_results),
+    # Both surfaces, one job: the 2026-09-09 recovery. Same validator as the
+    # X-only job; the argument is the same one field.
+    "publish_results": (_job_publish_results, _validate_publish_x_results),
     "publish_discord_signals": (_job_publish_discord_signals,
                                 _validate_publish_discord_signals),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
