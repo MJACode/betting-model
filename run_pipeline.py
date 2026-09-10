@@ -1353,17 +1353,8 @@ def step_settle(settle_date: str) -> bool:
     # scripts/refresh_pass.sh posts exactly one recap per day. Never fails the
     # settle step — the grading is what matters.
     try:
-        from tracking.discord_notifier import (
-            DISCORD_RESULTS_RESTATE_DATES,
-            notify_discord_results,
-        )
+        from tracking.discord_notifier import notify_discord_results
         notify_discord_results(game_date=settle_date)
-        # A recap published over an incomplete pick universe gets posted once
-        # more, corrected. Gated on DISCORD_RESULTS_RESTATE_DATES and ledgered
-        # under its own kind, so this is a no-op on every other date and on
-        # every pass after the first.
-        for d in sorted(DISCORD_RESULTS_RESTATE_DATES):
-            notify_discord_results(game_date=d, restate=True)
     except Exception as exc:
         logger.error(f"✗ Discord results recap failed (settlement succeeded): {exc}")
 
@@ -1376,6 +1367,18 @@ def step_settle(settle_date: str) -> bool:
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ X results post failed (settlement + Discord "
                      f"unaffected): {exc}")
+
+    # A recap published before one of its picks settled is corrected here, on
+    # every pass, both surfaces (2026-09-10: the 09-09 recap went out MLB-only
+    # and the NFL settled an hour later against a ledgered date). Ledgered per
+    # correction, so a pass that finds nothing new posts nothing.
+    try:
+        from tracking.discord_notifier import restate_published_recaps
+        n = restate_published_recaps()
+        if n:
+            logger.info(f"Results restated: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
     return True
 
 

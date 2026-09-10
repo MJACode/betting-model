@@ -44,6 +44,7 @@ import argparse
 import csv
 import io
 import sys
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -171,13 +172,38 @@ def _fetch_game_dates() -> dict[str, str]:
     return out
 
 
+# The nflverse release asset answered 403 once on 2026-09-10 at 06:06 ET and
+# 200 to the same URL four minutes later (the prop-data step fetched it). One
+# transient refusal cost the whole step. Retried on a network error or a
+# 403/429/5xx; a 404 is an answer (season not published) and returns at once.
+_FETCH_ATTEMPTS = 3
+_FETCH_BACKOFF_S = (5, 15)
+_RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
+
+
 def _fetch_season_csv(season: int) -> str | None:
     """The season's weekly stats CSV text, or None when not published (404)."""
     url = config.NFLVERSE_PLAYER_STATS_URL_TMPL.format(season=season)
-    resp = requests.get(url, timeout=120, allow_redirects=True)
-    if resp.status_code == 404:
-        logger.info(f"NFL player stats: season {season} CSV not published yet — skipping")
-        return None
+    resp = None
+    for attempt in range(_FETCH_ATTEMPTS):
+        try:
+            resp = requests.get(url, timeout=120, allow_redirects=True)
+        except requests.RequestException as exc:
+            if attempt == _FETCH_ATTEMPTS - 1:
+                raise
+            logger.warning(f"NFL player stats: {type(exc).__name__} fetching "
+                           f"season {season} — retrying")
+            time.sleep(_FETCH_BACKOFF_S[attempt])
+            continue
+        if resp.status_code == 404:
+            logger.info(f"NFL player stats: season {season} CSV not published yet — skipping")
+            return None
+        if resp.status_code in _RETRY_STATUSES and attempt < _FETCH_ATTEMPTS - 1:
+            logger.warning(f"NFL player stats: HTTP {resp.status_code} for season "
+                           f"{season} — retrying in {_FETCH_BACKOFF_S[attempt]}s")
+            time.sleep(_FETCH_BACKOFF_S[attempt])
+            continue
+        break
     resp.raise_for_status()
     return resp.text
 
