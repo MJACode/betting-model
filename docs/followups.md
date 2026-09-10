@@ -24,9 +24,9 @@
 ## The live price log discards DK's `last_update`, so production cannot tell a fresh quote from a stale one
 
 The 2025 in-play backtest (`docs/thresholds.md`, 2026-09-10) shows the
-shipped cut delivers 65.1% when stale quotes count and 60.9% when only quotes
-whose score has not moved since DK's own `last_update` count; the 38 stale
-bets went 29-9. The live loop pairs on fetch-start time
+shipped cut delivers 66.4% when stale quotes count and 60.9% when only quotes
+whose score has not moved since DK's own `last_update` count; the 37 stale
+bets among the 128 went 30-7. The live loop pairs on fetch-start time
 (`data/ingestors/live_odds_ingestor.py`) and drops the market's `last_update`,
 which is the one field a "score moved since the book repriced" guard needs.
 Add the column to the in-play write (the shared `live_price_log` shape, per
@@ -36,8 +36,9 @@ update; the guard that USES it is.
 
 ## [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 
-Claimed 0.70–0.75 delivers 66%, 0.75–0.80 65%, over 152k out-of-sample
-candidate sides (`docs/thresholds.md`, 2026-09-10). The prob floor cannot fix
+Claimed 0.70–0.75 delivers 67%, 0.75–0.80 66%, over 2,386 out-of-sample
+games (911 and 340 of them contributing to those bands;
+`docs/thresholds.md`, 2026-09-10). The prob floor cannot fix
 a shifted number; a map can. Fitting one and re-sweeping the EV floor on the
 calibrated probability is a model update — mike's call, `Updated-By` on the
 commit. `python -m scripts.inplay_history_backtest --season 2025` reproduces

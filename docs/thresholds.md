@@ -461,7 +461,7 @@ there are thousands of data points"* — then *"yes spend it, run the 2025
 backtest."* The Odds API's historical endpoint stores a snapshot every ~5
 minutes back to 2022 and an in-progress game's DK total is in it.
 `data/ingestors/mlb_inplay_history.py` bought every 5-minute DK in-play totals
-snapshot of 2025 (**260,190 credits** by the puller's own count, 213 slate
+snapshot of 2025 (**260,190 credits** by the puller's own count, 210 slate
 days, 22,178 served snapshots, 86,194 rows, 2,450 games), `plays` gained the
 Stats API's per-play clock (`start_time` / `end_time`), and
 `scripts/inplay_history_backtest.py` pairs each quote with the plate
@@ -471,9 +471,16 @@ decision — the same `decide()` as the cut sweep — over the season. The activ
 artifact was trained through 2024, so **2025 is out of sample**, and at 2,386
 games / 183 slates it is four and a half times the 47-slate sweep.
 
-Alignment check: at the true clock DK's live total sits above the runs already
-scored on 99.6% of quotes and (line − runs) tracks half-innings-left at r =
-0.96; shifting the clock ±10 min degrades both, ±30 min more so.
+Two checks before reading a number. **Alignment:** over all 78,047 aligned
+quotes, at the true clock DK's live total sits above the runs already scored
+on 99.68% and (line − runs) tracks half-innings-left at r = 0.949; the clock
+shifted −10 / +10 / ±30 min gives r = 0.876 / 0.882 / 0.708 and, shifted
+forward, line-below-runs on 5.3% / 11.3%. **Grading (§7):** the plays' own
+final (the last play's after-score) disagrees with the `games` row on 31 of
+2,386 games — doubleheaders share one game_id so the row can hold game two's
+score, and a make-up can overwrite a postponement — so every game is graded on
+the plays' final, which is the game the quotes were aligned to. The bought
+rows are `bookmaker='draftkings'`, which `data/prune_odds.py` never deletes.
 
 **Two grids, because a quote can be stale.** Every DK market carries its own
 `last_update`. When the score moved between that update and the snapshot the
@@ -484,30 +491,34 @@ the live loop pairs today.
 
 | shipped cut 0.72 / 0.14 / 0.32 | bets | W-L | units | delivers (90% CI) | breakeven | early / late (split 07-01) |
 |---|---|---|---|---|---|---|
-| all quotes | 129 | 84-45 | +22.30 (+17.3%) | 65.1% [58–72] | 55.6% | 64.9% [56–73] / 65.4% [54–75] |
+| all quotes | 128 | 85-43 | +25.10 (+19.6%) | 66.4% [59–73] | 55.6% | 67.1% [58–75] / 65.4% [54–75] |
 | **fresh quotes only** | 92 | 56-36 | +8.71 (+9.5%) | **60.9% [52–69]** | 55.6% | 60.7% [50–71] / 61.1% [47–73] |
 
-The 38 stale bets went 29-9 (+14.4u) and carry the all-quotes number. 108 of
-the 129 are overs. Median price −125, median edge 0.191, spread evenly over
-innings 1–9.
+Of the 128, 91 were fresh (55-36, +7.9u) and 37 stale (30-7, +17.2u): the
+stale ones carry the all-quotes number. (The fresh-only row's 92 is the first
+FRESH qualifier per game, so it is a different first bet in some games, not
+the 91 fresh among the 128.) 107 of the 128 are overs. Median price −125,
+median edge 0.191; 39 / 49 / 40 bets in innings 1–3 / 4–6 / 7+.
 
 **The grid is flat where the 47-slate sweep rose.** Prob floor 0.70 / 0.72 /
-0.74 / 0.76 delivers 64 / 65 / 66 / 65% on all quotes (185 / 129 / 67 / 31
-bets) and 62 / 61 / 64 / 67% fresh (128 / 92 / 45 / 21). Tightening the floor
+0.74 / 0.76 delivers 66 / 66 / 68 / 65% on all quotes (183 / 128 / 66 / 31
+bets) and 62 / 61 / 64 / 67% fresh (127 / 92 / 45 / 21). Tightening the floor
 buys volume loss, not accuracy. The edge floor changes nothing at 0.16 and
 little at 0.18; 0.20 empties every cell (the cap).
 
 **Why: the probability is over-confident by ~8 points in the band the cut
-lives in.** Calibration over all 152,124 candidate sides (fresh: 147,728),
-claimed → delivered: 0.65–0.70 → 60.8%, **0.70–0.75 → 66.1%**, 0.75–0.80 →
-65.5%, 0.80–0.85 → 88.1% (n = 168); symmetric on the low side (0.25–0.30 →
-33.9%). A claimed 0.72 is a delivered ~0.64. That is why every floor delivers
+lives in.** Calibration over the 147,728 fresh candidate sides, claimed →
+delivered: 0.65–0.70 → 60.7%, **0.70–0.75 → 66.8%**, 0.75–0.80 → 66.2%,
+0.80–0.85 → 89.1%; symmetric on the low side (0.25–0.30 → 33.2%). The rows
+are quotes, not independent trials — a game contributes ~30 correlated
+quotes — so the honest n is games contributing per band: 1,708 / 911 / 340 /
+165 for the four bands above. A claimed 0.72 is a delivered ~0.64. That is why every floor delivers
 the same rate: the floor selects on a number that is shifted, not sharpened.
 
-**The 0.20 cap on this grid.** Uncapped, all quotes: 505 bets, 65.3% [62–69],
-+111u — the over-cap edges deliver as well as the under-cap ones *when stale
-quotes are allowed to count*. Fresh only, uncapped: 264 bets, **56.8%
-[52–62]** against 53.6% breakeven, +15u. The cap stays: the wide edges are
+**The 0.20 cap on this grid.** Uncapped, all quotes: 505 bets, 65.7% [62–69],
++115u — the over-cap edges deliver as well as the under-cap ones *when stale
+quotes are allowed to count*. Fresh only, uncapped: 265 bets, **57.4%
+[52–62]** against 53.6% breakeven, +18u. The cap stays: the wide edges are
 mostly phantoms, and the ones that are not are thin.
 
 **What this settles and what it does not.**
@@ -517,13 +528,15 @@ mostly phantoms, and the ones that are not are thin.
   not the 73.5% the 47 slates showed — that was the top of this interval.
 - **Volume is not comparable across feeds.** The 5-minute grid sees ~30
   quotes a game; the live loop sees ~800. More quotes mean more first-qualifier
-  chances, so per-slate here (0.5 fresh / 0.7 all) is not production's 1.9 —
-  and production's extra chances are extra draws on a noisy number, so its
-  delivered rate should be expected at or below the grid's, not above.
+  chances, so per-slate here (0.5 fresh / 0.7 all) is not production's 1.9.
+  This test says nothing about the delivered rate on the dense feed; the
+  47-slate replay is the only measurement of that, and it sits at the top of
+  this interval.
 - **Bettability is unverified.** The historical snapshot holds the price DK
   posted; whether the market was open at that instant is not in the data.
 - **The next model update is a calibration map, not a cut** — fit on these
-  152k out-of-sample sides, then re-sweep EV on the calibrated probability.
+  out-of-sample sides (2,386 games), then re-sweep EV on the calibrated
+  probability.
   That is a model update and needs mike's call (`docs/followups.md`).
 - **Production cannot enforce fresh-only yet**: the live price log stamps
   fetch-start and discards DK's `last_update`. One column fixes that

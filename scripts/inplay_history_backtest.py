@@ -108,16 +108,34 @@ def build_cache(season: int, cache: Path) -> list[dict]:
             plays[r[0]].append(dict(zip(PLAY_COLS, r[1:])))
         print(f"timed plays for {len(plays)} games", flush=True)
 
+        # THE GRADE COMES FROM THE PLAYS, NOT THE GAMES ROW. The quotes were
+        # aligned to these plays, so their final is the final of the game that
+        # was priced. `games` disagreed on 31 of 2,386 games (2026-09-10):
+        # doubleheaders share one game_id, so plays hold game one and the
+        # row's score can be game two's; a postponed game's row can carry the
+        # make-up. Grading those on the row would score the wrong game.
+        finals = {}
+        for r in conn.execute("""
+            SELECT DISTINCT ON (game_id) game_id, score_home_after, score_away_after
+            FROM plays WHERE game_id LIKE %s
+            ORDER BY game_id, play_index DESC""", (f"MLB_{season}-%",)).fetchall():
+            if r[1] is not None and r[2] is not None:
+                finals[r[0]] = (float(r[1]), float(r[2]))
+
         bulk = _build_bulk_mlb_lookups(conn, [season])
     finally:
         conn.close()
 
     out = []
     rows, meta = [], []
+    regraded = 0
     for g in games:
         gid = g["game_id"]
-        if gid not in quotes or gid not in plays:
+        if gid not in quotes or gid not in plays or gid not in finals:
             continue
+        if (float(g["home_score"]), float(g["away_score"])) != finals[gid]:
+            regraded += 1
+        g = {**g, "home_score": finals[gid][0], "away_score": finals[gid][1]}
         pre = _build_mlb_features_from_bulk(
             bulk, gid, g["game_date"], g["home_team"], g["away_team"], g["season"],
             bulk["odds"].get((gid, "h2h")), totals_row=bulk["odds"].get((gid, "totals")))
@@ -141,7 +159,9 @@ def build_cache(season: int, cache: Path) -> list[dict]:
                                   - int(st_lu["home_score"]) - int(st_lu["away_score"]))
             rows.append([np.nan if row.get(c) is None else float(row[c]) for c in cols])
             meta.append((gi, q, row["total_runs"], st.get("inning"), runs_moved))
-    print(f"{len(rows)} priced states over {len(out)} games; predicting", flush=True)
+    print(f"{len(rows)} priced states over {len(out)} games "
+          f"({regraded} graded on the plays' final where the games row disagreed); predicting",
+          flush=True)
 
     lam_all = np.clip(clf.predict(np.array(rows, dtype=float)), 1e-6, None)
     for lam, (gi, q, total_runs, inning, runs_moved) in zip(lam_all, meta):
