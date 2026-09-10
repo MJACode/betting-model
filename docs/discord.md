@@ -271,6 +271,13 @@ publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
   6am pipeline settles **yesterday**. `notify_discord_results` therefore refuses
   any `game_date >= today ET` — without that guard a partial mid-slate record
   would post and be ledgered, and the real end-of-day recap could never fire.
+- **The recap can only count what has settled, so every sport's box scores
+  land BEFORE Step 0 settle.** On 2026-09-10 the NFL player log was filled
+  after settle (Steps 4b/4c); the 6am recap for 09-09 went out MLB-only and
+  the three NFL BETs settled an hour later, against an already-ledgered date.
+  Now Step 0h. Re-posting a date that was published incomplete is a worker
+  job: `publish_results` with `{"game_date": ...}` clears both ledger rows and
+  posts Discord then X through the ordinary paths (guards intact). Session 273.
 - **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
   toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
   and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
