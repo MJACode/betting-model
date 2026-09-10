@@ -459,7 +459,8 @@ def _job_publish_results(**kw):
     prop BETs could not settle yet -- the steps that fill nfl_player_game_log
     ran after settle (fixed the same day: Step 0h) -- and the 07:17 refresh
     pass settled them at 07:24, an hour after both ledger rows were written.
-    mike deleted the two partial posts by hand; this job posts the full day.
+    mike is deleting the two partial posts by hand; this job posts the full
+    day, and does not depend on those deletions happening first.
 
     Both surfaces in ONE job, seconds apart, off the same query (mike,
     2026-09-02: "needs to be the same and fired at the same time"). Discord

@@ -80,9 +80,9 @@ def test_a_malformed_date_is_refused_before_anything_runs(bad):
 
 def test_the_job_posts_both_surfaces_through_the_ordinary_paths():
     """mike, 2026-09-02: the two surfaces "need to be the same and fired at
-    the same time." One job, both notifiers, Discord first (its ledger row is
-    the one X's free pick reads back), and neither guard bypassed: a date that
-    is not over still posts nothing."""
+    the same time." One job, both notifiers, Discord first -- the order
+    step_settle uses, so the two paths cannot drift -- and neither guard
+    bypassed: a date that is not over still posts nothing."""
     body = _job_body()
     assert "notify_discord_results(game_date)" in body
     assert "notify_x_results(game_date)" in body
