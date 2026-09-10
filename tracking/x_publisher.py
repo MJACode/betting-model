@@ -344,6 +344,13 @@ def render_results(recap: dict, game_date: str) -> str:
     else:
         tally = f"{rec}, record only"
     lines = [f"\U0001F4CA {pretty} results: {tally}"]
+    # The day's closing-line figure, exactly as the embed states it -- share
+    # of graded bets that beat the close, WITH its denominator (discord_notifier
+    # .clv_line renders both surfaces). Added 2026-09-10: the tweet carried no
+    # CLV, so when the 09-09 recap was re-posted with the NFL CLV that had
+    # been missing, X refused the tweet as duplicate content -- byte-identical
+    # to the one before it. An empty string when nothing was graded.
+    clv = (recap.get("clv") or "").strip()
     by_sport = recap.get("by_sport") or []
     if by_sport:
         parts = [f"{s['sport']} {s['wins']}-{s['losses']}"
@@ -356,7 +363,8 @@ def render_results(recap: dict, game_date: str) -> str:
         # characters genuinely run out, and then it says how many (mike,
         # 2026-09-02, choosing the embed's ordering over most-bets-first).
         tags = hashtags_for(None)
-        room = MAX_TWEET - len(lines[0]) - len(tags) - 2      # two newlines
+        room = (MAX_TWEET - len(lines[0]) - len(tags) - 2      # two newlines
+                - (len(clv) + 1 if clv else 0))                 # its newline
         split = ""
         for k in range(len(parts), 0, -1):
             dropped = len(parts) - k
@@ -364,6 +372,8 @@ def render_results(recap: dict, game_date: str) -> str:
             if len(split) <= room:
                 break
         lines.append(split)
+    if clv:
+        lines.append(clv)
     lines.append(hashtags_for(None))
     text = "\n".join(x for x in lines if x)
     _assert_no_link(text)
@@ -576,7 +586,7 @@ def notify_x_results(game_date: str, dry_run: bool = False) -> int:
     if game_date >= datetime.now(ET).date().isoformat():
         return 0
     from data.db import get_connection
-    from tracking.discord_notifier import _settled_rows, _tally
+    from tracking.discord_notifier import _settled_rows, _tally, clv_line
 
     lock = f"x_results:{game_date}"
     conn = get_connection()
@@ -601,6 +611,8 @@ def notify_x_results(game_date: str, dry_run: bool = False) -> int:
         recap = {
             "wins": t["w"], "losses": t["l"], "pushes": t["p"],
             "units": t["units"], "risked": t["risked"],
+            # The same string the embed's headline carries.
+            "clv": clv_line(t),
             "by_sport": [
                 {"sport": sport, "wins": g["w"], "losses": g["l"],
                  "pushes": g["p"]}
