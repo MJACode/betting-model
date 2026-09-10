@@ -161,6 +161,8 @@ def parse_play(
         "score_home_after":  score_home_after,
         "score_away_after":  score_away_after,
         "home_won":          home_won,
+        "start_time":        about.get("startTime"),
+        "end_time":          about.get("endTime"),
     }
 
 
@@ -224,16 +226,102 @@ INSERT INTO plays (
     batter_id, pitcher_id, bat_side, pitch_hand,
     event_type, description, runs_on_play, outs_added,
     outs_after, bases_after, score_home_after, score_away_after,
-    home_won
+    home_won, start_time, end_time
 ) VALUES (
     %(game_id)s, %(season)s, %(play_index)s, %(inning)s, %(half_inning)s,
     %(outs_before)s, %(bases_before)s, %(score_home_before)s, %(score_away_before)s,
     %(batter_id)s, %(pitcher_id)s, %(bat_side)s, %(pitch_hand)s,
     %(event_type)s, %(description)s, %(runs_on_play)s, %(outs_added)s,
     %(outs_after)s, %(bases_after)s, %(score_home_after)s, %(score_away_after)s,
-    %(home_won)s
+    %(home_won)s, %(start_time)s, %(end_time)s
 )
 """
+
+_FILL_TIMES_SQL = """
+UPDATE plays SET start_time = %(start_time)s, end_time = %(end_time)s
+WHERE game_id = %(game_id)s AND play_index = %(play_index)s
+"""
+
+
+def fill_play_times(start_year: int, end_year: int) -> dict:
+    """Stamp start_time/end_time onto plays rows that predate the columns.
+
+    An UPDATE keyed on (game_id, play_index), never a re-insert: `force`
+    re-inserts and there is no unique key on plays, so it would duplicate the
+    training corpus. Before writing, the refetched play's inning/half_inning
+    must match the stored row -- a mismatch means the feed re-ordered plays
+    since the original ingest, and stamping that row would put the wrong
+    clock time on the wrong plate appearance. Mismatched games are counted and
+    skipped, not silently written.
+    """
+    conn = get_connection()
+    totals = {"games": 0, "updated": 0, "skipped_loaded": 0,
+              "mismatched_games": 0, "errors": 0}
+    try:
+        for season in range(start_year, end_year + 1):
+            d = date(season, 3, 1)
+            end = date(season, 11, 30)
+            while d <= end:
+                target_date = d.isoformat()
+                try:
+                    games = statsapi.schedule(date=target_date, sportId=1)
+                except Exception as exc:
+                    logger.warning(f"  schedule failed for {target_date}: {exc}")
+                    games = []
+                for g in games:
+                    game_id = _game_id_from_schedule(g, target_date)
+                    if not game_id:
+                        continue
+                    stored = conn.execute(
+                        "SELECT play_index, inning, half_inning, start_time "
+                        "FROM plays WHERE game_id = %s ORDER BY play_index",
+                        (game_id,)).fetchall()
+                    if not stored:
+                        continue
+                    totals["games"] += 1
+                    if all(r[3] for r in stored):
+                        totals["skipped_loaded"] += 1
+                        continue
+                    feed = _fetch_pbp(g["game_id"])
+                    if not feed:
+                        totals["errors"] += 1
+                        continue
+                    all_plays = (feed.get("liveData") or {}).get("plays", {}).get("allPlays") or []
+                    by_idx = {i: p for i, p in enumerate(all_plays)}
+                    rows, bad = [], 0
+                    for play_index, inning, half, _ in stored:
+                        p = by_idx.get(play_index)
+                        about = (p or {}).get("about") or {}
+                        feed_half = "top" if about.get("isTopInning") else "bottom"
+                        if p is None or about.get("inning") != inning or feed_half != half:
+                            bad += 1
+                            continue
+                        rows.append({"game_id": game_id, "play_index": play_index,
+                                     "start_time": about.get("startTime"),
+                                     "end_time": about.get("endTime")})
+                    if bad:
+                        totals["mismatched_games"] += 1
+                        logger.warning(f"  {game_id}: {bad}/{len(stored)} plays do not "
+                                       f"match the feed -- game skipped, not stamped")
+                        continue
+                    try:
+                        conn.executemany(_FILL_TIMES_SQL, rows)
+                        conn.commit()
+                        totals["updated"] += len(rows)
+                    except Exception as exc:
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        totals["errors"] += 1
+                        logger.warning(f"  {game_id} update error: {exc}")
+                    time.sleep(_API_SLEEP_SEC)
+                d += timedelta(days=1)
+            logger.success(f"Season {season} times filled: {totals}")
+    finally:
+        conn.close()
+    return totals
+
 
 
 def _already_loaded(conn: DBConnection, game_id: str) -> bool:
@@ -453,6 +541,9 @@ def ingest_pbp_for_game_id(game_id: str, force: bool = False) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Backfill MLB play-by-play data into `plays`")
+    parser.add_argument("--fill-times", nargs=2, type=int, metavar=("START_YEAR", "END_YEAR"),
+                        help="UPDATE start_time/end_time onto existing plays rows "
+                             "(no re-insert); games whose plays no longer match the feed are skipped")
     parser.add_argument("--backfill", nargs=2, type=int, metavar=("START_YEAR", "END_YEAR"),
                         help="Backfill seasons START_YEAR..END_YEAR (inclusive)")
     parser.add_argument("--game-id", default=None,
@@ -467,5 +558,8 @@ if __name__ == "__main__":
     elif args.backfill:
         start, end = args.backfill
         backfill_pbp(start, end, force=args.force)
+    elif args.fill_times:
+        start, end = args.fill_times
+        logger.success(f"fill-times done: {fill_play_times(start, end)}")
     else:
         parser.print_help()
