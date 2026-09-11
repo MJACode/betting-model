@@ -538,13 +538,14 @@ def promote_external(conn, model_id: str, a: float, b: float, *, n: int,
     fit never touches: "<source> n=<n> a=<a> b=<b>".
     """
     ensure_schema(conn)
-    try:
-        conn.execute("ALTER TABLE model_calibration ADD COLUMN IF NOT EXISTS promoted_source TEXT")
-    except Exception:  # noqa: BLE001 -- sqlite lacks IF NOT EXISTS on some versions
+    if not schema_is_current(conn, "model_calibration", columns=("promoted_source",)):
         try:
-            conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
+            conn.execute("ALTER TABLE model_calibration ADD COLUMN IF NOT EXISTS promoted_source TEXT")
+        except Exception:  # noqa: BLE001 -- sqlite lacks IF NOT EXISTS on some versions
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
     if not (helps and transfers):
         raise ValueError(f"{model_id}: a map that does not help AND transfer is not promoted "
                          f"(helps={helps}, transfers={transfers})")

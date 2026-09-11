@@ -372,6 +372,12 @@ are ONE decision, never two.
 
 ## `mlb_live_total_runs` cut, 2026-09-09 (mike): 0.70 → 0.72
 
+> **Superseded 2026-09-10.** The replay this was swept on paired quotes
+> without production's stale-quote guard (in `_get_live_dk_odds` since
+> 2026-09-03, #458). On the quotes production can take, the table below is
+> 20 bets 12-8, not 34 bets 25-9 — see "The forward check on fresh quotes"
+> further down. The cut itself is unchanged pending mike's decision.
+
 mike: *"go with 0.72 and land it."* Chosen from a backtest, not from a settled
 record — his instruction, and the right one: the replay is the instrument.
 
@@ -525,13 +531,14 @@ mostly phantoms, and the ones that are not are thin.
 - The shipped cut is positive on 2025 in both halves on all quotes, and
   positive but with an interval that **does not clear breakeven** fresh-only.
   It is not moved (no cell does better; §7 says do not ship a peak), and it is
-  not the 73.5% the 47 slates showed — that was the top of this interval.
+  not the 73.5% the 47 slates showed — that number was carried by stale
+  quotes production declines (the forward check below).
 - **Volume is not comparable across feeds.** The 5-minute grid sees ~30
   quotes a game; the live loop sees ~800. More quotes mean more first-qualifier
   chances, so per-slate here (0.5 fresh / 0.7 all) is not production's 1.9.
   This test says nothing about the delivered rate on the dense feed; the
-  47-slate replay is the only measurement of that, and it sits at the top of
-  this interval.
+  47-slate replay measured that WITHOUT the stale guard, and with it the
+  dense feed's fresh record at this cut is 20 bets 12-8 (below).
 - **Bettability is unverified.** The historical snapshot holds the price DK
   posted; whether the market was open at that instant is not in the data.
 - **The next model update is a calibration map, not a cut** — fit on these
@@ -560,11 +567,16 @@ flag applied to the rebuilt 2026 cache (538 games, 49 slates, dense feed):
 | shipped cut 0.72 / 0.14 / 0.32, 2026 | bets | W-L | units | delivers (90% CI) | breakeven |
 |---|---|---|---|---|---|
 | all quotes (what the sweep counted) | 38 | 28-10 | +12.18 | 73.7% [61–84] | 55.7% |
-| **fresh only (what production can take)** | **21** | **12-9** | **+0.77** | **57.1% [40–73]** | 55.3% |
+| of which stale (`runs_moved` > 0) | 18 | 16-2 | +10.41 | | |
+| of which fresh | 20 | 12-8 | +1.77 | | |
+| **first FRESH qualifier per game (what production can take)** | **21** | **12-9** | **+0.77** | **57.1% [40–73]** | 55.3% |
 
-The 17 stale bets went 16-1. On production-faithful quotes the model's 2026
-record at this cut is 21 bets at +3.7%, and 2025's is 92 bets at +9.5% with
-an interval [52–69] against a 55.6% breakeven. The 73.5% never existed.
+Measured directly on the 38, not by subtraction; the fresh-only row is a
+different first bet in some games. On production-faithful quotes the model's
+2026 record at this cut is 21 bets at +3.7%, and 2025's is 92 bets at +9.5%
+with an interval [52–69] against a 55.6% breakeven. The 73.5% never existed.
+The guard landed 2026-09-03 (#458), so the old artifact's production record
+08-29..09-02 was made without it and 09-03..09-08 with it.
 
 **The calibration map** (`scripts/live_calibration_sweep.py`): the repo's
 two-parameter Platt fitted on 73,854 fresh 2025 preferred-side quotes,
@@ -592,8 +604,10 @@ cell positive in every split is the loosest, 0.62 / 0.10 / 0.15, at +5.5% and
 +9.6% — thin, and its 2025 early half is −1.3%.
 
 **The cut that reproduces today's decisions on the calibrated number** is
-prob 0.675 / edge 0.08 / EV 0.24: 125 of 2025's 128 raw-cut bets and 36 of
-2026's 38, 11 and 4 differing at the boundary. Promoting the map with that
+prob 0.675 / edge 0.10 / EV 0.24 (searched edge 0.08–0.13 × EV 0.18–0.26):
+125 of 2025's 128 raw-cut bets and 36 of 2026's 38, 11 and 4 differing at
+the boundary — the map's shift is not constant across probabilities, so no
+constant floors reproduce the set exactly. Promoting the map with that
 cut changes the published probability to the honest one and (almost) nothing
 else. The options are in the session's reply; the choice is mike's.
 

@@ -25,6 +25,7 @@ class _Conn:
 
 def test_external_promotion_writes_only_the_promoted_columns(monkeypatch):
     monkeypatch.setattr(pc, "ensure_schema", lambda conn: None)
+    monkeypatch.setattr(pc, "schema_is_current", lambda *a, **k: True)
     conn = _Conn()
     pc.promote_external(conn, "mlb_live_total_runs", 0.8578, -0.0787, n=73854,
                         source="inplay_history_2025", helps=True, transfers=True)
