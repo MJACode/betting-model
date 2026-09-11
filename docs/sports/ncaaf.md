@@ -238,5 +238,10 @@ session needs to know:
 - **Issued forecasts exist for 2024-2025** (`game_weather_issued`, leads
   1/3/5, `scripts/ncaaf_weather_issued_backfill.py`), the train/serve repair
   for the three `wx_*` features. `scripts/ncaaf_search/totals_weather_source.py`
-  measures the four arms (reanalysis / served / issued / none); its result is
-  in the session entry.
+  measures the four arms (reanalysis / served / issued / none). At the 8-pt
+  gate the deployed arm (train on reanalysis, serve the lead-3 forecast) reads
+  53.8% in both 2024 and 2025 against reanalysis's 62.0% / 52.9%, every
+  interval overlapping; training on one season of issued forecasts gives
+  47.6%; no weather at all is worst (51.7% / 44.8%). The forecast haircut is
+  real in one season of two and not separable at ~90 bets a season. Artifact
+  unchanged; the issued series accrues for a two-season refit.
