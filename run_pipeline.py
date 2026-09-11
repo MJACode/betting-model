@@ -504,7 +504,7 @@ def step_weather(run_date: str, max_age_min: int | None = None,
     2026-09-10 this fetched run_date only while step_prop_scoring priced
     tomorrow too, so tomorrow's game had no weather row, the scorer filled
     the gap with 0.0, and two picks went out priced for a 0°F game (session
-    276). A game the scorer prices with no weather row is now a game it does
+    278). A game the scorer prices with no weather row is now a game it does
     not price (models.scorer.prop_feature_matrix), so the forecast has to
     land FIRST -- and a forecast a day or two out is what makes the evening
     look-ahead pick possible at all.
