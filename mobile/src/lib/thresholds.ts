@@ -1,9 +1,21 @@
 /**
- * Mirror of config.py — ACTION_THRESHOLDS, PROB_ONLY_MODELS, KELLY constants.
+ * Mirror of config.py — ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS, KELLY.
  *
- * UPDATE THIS FILE whenever the Python config.py thresholds change.
- * Last synced: 2026-07-22 (-140 price floor now on EVERY MLB + WNBA player prop —
- * config.MODEL_MIN_ODDS. Prior: only pitcher_k / batter_rbi / batter_walks / runs).
+ * PINNED BY tests/test_mobile_threshold_parity.py, which fails until this file
+ * equals config.py. "UPDATE THIS FILE whenever config.py changes" was the whole
+ * mechanism until 2026-09-11 and it did not hold: nothing tested it, so by then
+ * one live model was absent outright, 16 were paused here and live in config, 3
+ * were live here and paused in config, 24 cuts disagreed, and 40 carried no
+ * price floor where config resolves one. A comment is not a guard.
+ *
+ * WHY IT MATTERS even though the server store wins: `thresholdFor` and
+ * `isModelPaused` consult `model_action_thresholds` PER MODEL ID and fall
+ * through to these constants whenever it has not been fetched yet or has no row
+ * for that id — so every cold start renders its first board from this file.
+ *
+ * `min_odds` is the RESOLVED floor (config.min_odds_for: the model's own, else
+ * DEFAULT_MIN_ODDS −200), which is what threshold_sync writes to the server.
+ * Last synced: 2026-09-11.
  */
 
 import { decisionEdge, decisionOdds } from './decisionPrice';
@@ -42,22 +54,22 @@ export interface ModelThreshold {
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
-  mlb_moneyline: { min_prob: 0.72, min_edge: 0.11 }, // 2026-07-04: reverted to v20260413 model; 21-6 +29.5% live at this cut
-  mlb_over_under: { min_prob: 0.59, min_edge: 0.07 }, // 2026-07-11 tightened (fewer picks): 203 bets 60.4% +16.3% on 2025 OOS
-  mlb_runline: { min_prob: 0.68, min_edge: 0.11 }, // 2026-07-02 CORRECTION: 06-28 "+14.9%" was a view sign bug (actually -20.6%); corrected optimum 13-6 +20.0%
-  mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
+  mlb_moneyline: { min_prob: 0.72, min_edge: 0.11, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  mlb_over_under: { min_prob: 0.5, min_edge: 0.04, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  mlb_runline: { min_prob: 0.68, min_edge: 0.11, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  mlb_f5_moneyline: { min_prob: 0.58, min_edge: 0.02, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // LIVE MLB, re-cut 2026-08-29 from the settled live record: total_runs is the
   // only profitable live model (0.68/0.14 = 17 bets 12-5 +27.9%). The two binary
   // models were negative at every cut and are RETIRED (see RETIRED_MODELS).
-  mlb_live_total_runs: { min_prob: 0.7, min_edge: 0.14 },   // 2026-08-30 live volume cut
+  mlb_live_total_runs: { min_prob: 0.72, min_edge: 0.14, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
   // min_odds -140: every MLB + WNBA prop now carries a -140 price floor (2026-07-22,
   // Matt: "don't recommend prop picks with a betting line over -140"). A prop priced
   // juicier than -140 scores NONE, not BET. See config.MODEL_MIN_ODDS.
-  mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06, min_odds: -140 },
-  mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12, min_odds: -140 },
+  mlb_prop_pitcher_k: { min_prob: 0.58, min_edge: 0.08, min_odds: -140 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  mlb_prop_pitcher_hits: { min_prob: 0.54, min_edge: 0.08, min_odds: -140 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   mlb_prop_pitcher_er: { min_prob: 0.61, min_edge: 0.08, min_odds: -140 }, // 2026-06-21 ≥10% target: +11.1%/81
   mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12, min_odds: -140 },
   mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08, min_odds: -140 },
@@ -66,49 +78,49 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17, min_odds: -140 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17, min_odds: -140 },
   // mlb_prop_batter_hr + mlb_prop_batter_rbi RETIRED 2026-09-02 — see RETIRED_MODELS.
-  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // UNPAUSED 2026-08-09; with the floor this cut grades +24.6%/40
+  mlb_prop_batter_runs: { min_prob: 0.62, min_edge: 0.1, min_odds: -140 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10, min_odds: -140 },
   mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14, min_odds: -140 }, // 2026-06-21 RE-SWEEP: +5.3%/65
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
-  wnba_moneyline: { min_prob: 0.64, min_edge: 0.04 }, // 2026-07-02 sweep: 17 bets 14-3 +31.9% (old placeholder fired 3 bets)
-  wnba_over_under: { min_prob: 0.60, min_edge: 0.06 }, // 2026-07-19 first real cut — 2026 OOS vs real DK lines: 23 bets 60.9% +14.5%
-  wnba_spread: { min_prob: 0.60, min_edge: 0.10 }, // 2026-07-19 first real cut — 2026 OOS: 34 bets 64.7% +22.6%
+  wnba_moneyline: { min_prob: 0.5, min_edge: 0.06, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  wnba_over_under: { min_prob: 0.6, min_edge: 0.06, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  wnba_spread: { min_prob: 0.6, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress); -140 floor 2026-07-22
   wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17, min_odds: -140 }, // PAUSED 2026-07-11 — no positive cut on the 2x sample
-  wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
-  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+  wnba_prop_player_rebounds: { min_prob: 0.62, min_edge: 0, min_odds: -140 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  wnba_prop_player_assists: { min_prob: 0.5, min_edge: 0.1, min_odds: -140 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   wnba_prop_market: { min_prob: 0.0, min_edge: 0.05, min_odds: -140 }, // market-relative rule (Pinnacle de-vig); edge IS the signal — NFL precedent
-  wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
-  wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
+  wnba_prop_player_threes: { min_prob: 0.706, min_edge: 0.026, min_odds: -140 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  wnba_prop_player_pra: { min_prob: 0.68, min_edge: 0.16, min_odds: -140 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // NBA — placeholder thresholds; tune after live odds accumulate.
   // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
-  nba_moneyline: { min_prob: 0.66, min_edge: 0.12 },
-  nba_over_under: { min_prob: 0.66, min_edge: 0.12 },
-  nba_spread: { min_prob: 0.66, min_edge: 0.12 },
-  nba_prop_player_points: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_rebounds: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_assists: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_threes: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_pra: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_blocks: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_steals: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_turnovers: { min_prob: 0.60, min_edge: 0.08 },
-  nba_prop_player_dd: { min_prob: 0.55, min_edge: 0.0 }, // prob-only
+  nba_moneyline: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_over_under: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_spread: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_points: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_rebounds: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_assists: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_threes: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_pra: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_blocks: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_steals: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_turnovers: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nba_prop_player_dd: { min_prob: 0.55, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // UFC — placeholder thresholds; tune after 50+ settled picks.
   // ufc_method_of_victory is prob-only (no DK method odds via The Odds API).
-  ufc_moneyline: { min_prob: 0.65, min_edge: 0.08 },
-  ufc_total_rounds: { min_prob: 0.62, min_edge: 0.08 },
-  ufc_method_of_victory: { min_prob: 0.65, min_edge: 0.0 }, // prob-only
+  ufc_moneyline: { min_prob: 0.65, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  ufc_total_rounds: { min_prob: 0.62, min_edge: 0.08, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  ufc_method_of_victory: { min_prob: 0.65, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // NHL — placeholder thresholds; tune after 50+ settled picks.
   // moneyline_regulation is a 3-way market (lower per-side prob).
-  nhl_moneyline: { min_prob: 0.55, min_edge: 0.05 },
-  nhl_moneyline_regulation: { min_prob: 0.40, min_edge: 0.05 },
-  nhl_over_under: { min_prob: 0.55, min_edge: 0.05 },
-  nhl_puckline: { min_prob: 0.55, min_edge: 0.05 },
+  nhl_moneyline: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nhl_moneyline_regulation: { min_prob: 0.4, min_edge: 0.05, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nhl_over_under: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nhl_puckline: { min_prob: 0.55, min_edge: 0.05, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // NCAAF — ncaaf_spread is a MARGIN-REGRESSION model. min_prob is the
   // out-of-sample residual-ECDF probability at the validated +/-5.5-point
@@ -117,49 +129,56 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // PAPER ONLY until 50+ settled picks clear the go-live gate.
   // 0.55 floors the opener rule's flat validated prob (0.5810); the real
   // filter is the |dev| >= 1.0 gate enforced server-side.
-  ncaaf_spread: { min_prob: 0.55, min_edge: 0.0 },
+  ncaaf_spread: { min_prob: 0.55, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Premium opener band [2.5, inf): 344 bets, 60.5%, +15.4% (2023-25,
   // positive every season). Disjoint from ncaaf_spread by construction.
-  ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0.0 },
+  ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // NCAAF live lanes (calibration set — no in-play edge measured yet)
-  ncaaf_live_win_prob: { min_prob: 0.66, min_edge: 0.1 },   // 2026-08-30 live volume cut
-  ncaaf_live_total: { min_prob: 0.66, min_edge: 0.12 },     // 2026-08-30 live volume cut
+  ncaaf_live_win_prob: { min_prob: 0.66, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  ncaaf_live_total: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
-  ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
+  ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
   // symmetric gate itself, so this floor is a backstop rather than the rule.
-  ncaaf_over_under: { min_prob: 0.65, min_edge: 0.0 },
+  ncaaf_over_under: { min_prob: 0.65, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // NFL — the standalone wind-totals card (§28). The card itself is the real
   // gate (forecast wind >= 11mph + >= 3% edge after de-vig); these floors just
   // mirror it so a card-qualified pick can never be hidden by the filter.
-  nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03 },
+  nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Opener: model_prob is the pooled validated ATS (0.5818) — 0.52 floors it;
   // edge >= 0 drops bets whose quoted juice eats the whole edge.
-  nfl_opener_spread: { min_prob: 0.52, min_edge: 0.0 },
+  nfl_opener_spread: { min_prob: 0.52, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // NFL props — trained 2026-08-23, ALL PAUSED (see PAUSED_MODELS below).
   // Listed anyway so the offline / first-launch fallback knows their cuts.
   // A model ABSENT from this map is invisible to passesActionFilter, so if
   // one were unpaused server-side it would stay hidden in the app until
   // model_action_thresholds had been fetched.
-  nfl_prop_anytime_td: { min_prob: 0.3, min_edge: 0.05 },
-  nfl_prop_pass_attempts: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_pass_completions: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_pass_tds: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_pass_yards: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_rec_yards: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_receptions: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_rush_attempts: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_rush_rec_yards: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_rush_yards: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_sacks: { min_prob: 0.55, min_edge: 0.05 },
-  nfl_prop_tackles_assists: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_anytime_td: { min_prob: 0.37, min_edge: 0.16, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_pass_attempts: { min_prob: 0.73, min_edge: 0.19, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_pass_completions: { min_prob: 0.68, min_edge: 0.16, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_pass_tds: { min_prob: 0.78, min_edge: 0.17, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_pass_yards: { min_prob: 0.68, min_edge: 0.15, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_rec_yards: { min_prob: 0.69, min_edge: 0.16, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_receptions: { min_prob: 0.63, min_edge: 0.16, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_rush_attempts: { min_prob: 0.76, min_edge: 0.2, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_rush_rec_yards: { min_prob: 0.68, min_edge: 0.15, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_rush_yards: { min_prob: 0.71, min_edge: 0.19, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_sacks: { min_prob: 0.7, min_edge: 0.15, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  nfl_prop_tackles_assists: { min_prob: 0.7, min_edge: 0.15, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Market-relative props: model_prob is Pinnacle's DE-VIGGED number, which is
   // near 0.5 by construction, so a probability floor would cut the rule's core.
   // The edge is the whole signal, and 5pp is pre-committed (6pp wins in
   // training and returns -0.46% blind). See docs/nfl_props_model.md §5c.
-  nfl_prop_market: { min_prob: 0.0, min_edge: 0.05 },
+  // The in-play NFL prop lane (nfl/live_model). LIVE since 2026-09-05 with
+  // the §2 go-live gate deliberately not met (Matt's call), and announcing on
+  // Discord since #629 -- but it had NO row here at all, so before the server
+  // store is fetched `thresholdFor` returned null and passesActionFilter
+  // refused every one of its BETs. The real cut is EV, in
+  // nfl/live_model/config.EV_THRESHOLDS; 0/0 mirrors config.
+  nfl_live_prop: { min_prob: 0, min_edge: 0, min_odds: -140 },
+  nfl_prop_market: { min_prob: 0, min_edge: 0.05, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
 
   // GOLF RETIRED 2026-09-08 — see RETIRED_MODELS below.
 };
@@ -187,78 +206,31 @@ export function isProbOnlyModel(modelId: string): boolean {
 // Mirror of config.py PAUSED_MODELS — models that never fire a BET (paused for
 // poor performance). Excluded from the action filter so they don't appear as
 // actionable picks anywhere in the app.
+// A STRICT MIRROR of config.PAUSED_MODELS, pinned by
+// tests/test_mobile_threshold_parity.py. The server store
+// (model_action_thresholds.paused) is authoritative once fetched; this list is
+// what every COLD START renders its first board from, so a stale entry here
+// either hides a live model's picks or draws a stakeable BET for one the
+// platform has withdrawn.
+//
+// The per-model reasoning lives in config.py beside each id and is NOT copied
+// here -- it had drifted out of agreement with this very list (the old comment
+// said mlb_prop_batter_hits was unpaused while config had paused it), and a
+// comment that contradicts its own data is worse than no comment.
 export const PAUSED_MODELS = new Set<string>([
-  // mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 and
-  // RETIRED 2026-08-30 — see RETIRED_MODELS below.
-  // 2026-06-28 full-outcome re-sweep: only these 4 have NO positive cut at real
-  // volume (retrain candidates). The other 4 (pitcher_walks/batter_walks/
-  // batter_hits/batter_runs) had genuine positive combos and were UNPAUSED.
-  // Server store (model_action_thresholds.paused) is authoritative; this bundled
-  // list is the offline fallback. Still score as NONE for forward tracking.
-  'mlb_prop_pitcher_hits',
-  'mlb_prop_pitcher_outs',
-  // 2026-07-11 PAUSED (Matt) — pitcher ER + walks removed from display/consideration for now.
+  'mlb_over_under',
+  'mlb_prop_batter_hits',
+  'mlb_prop_batter_sb',
+  'mlb_prop_batter_tb',
   'mlb_prop_pitcher_er',
   'mlb_prop_pitcher_walks',
-  'mlb_prop_batter_tb',
-  'mlb_prop_batter_sb',
-  // mlb_prop_batter_runs UNPAUSED 2026-08-09 — 0.47/0.16 + -140 floor grades +24.6%/40
-  // WNBA points/threes/PRA PAUSED 2026-07-11 — no positive cut at volume on the doubled
-  // sample (-11.8u combined drag).
-  // NCAAF 2026-08-24: the binary classifiers held out at AUC ~0.49-0.50 on a
-  // healthy 6,000+-row matrix, and the margin-regression harness also FAILED
-  // for totals. Their registry rows may still carry active classifier
-  // artifacts, so pause both — only ncaaf_spread (margin regression) is live.
+  'mlb_runline',
   'ncaaf_moneyline',
-  // ncaaf_over_under UNPAUSED 2026-08-25 — now a total-regression rule
-  // (>= 8.0 pts of disagreement with DK's total), walk-forward 295/528 55.9%
-  // +6.7% with that gate best in all four test seasons. CI does not clear
-  // breakeven; sized small deliberately.
-  // ncaaf_spread UNPAUSED 2026-08-26 — replaced with a CROSS-BOOK OPENER rule
-  // (back the side Bovada's opener favours, at DK's stale number). Backtest
-  // 1,050 bets 58.1% +10.9%, CLV 0.694. The server enforces simultaneity of
-  // the two openers and that DK is still on its opening number, so the rule
-  // self-disables when it would be untradeable.
+  'ufc_total_rounds',
+  'wnba_over_under',
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
-  'wnba_prop_player_pra',
-  // wnba_prop_player_rebounds PAUSED 2026-07-29 — decayed to -13.9%/54 bets at the
-  // live 0.69/0.08 cut and EVERY cell of the prob x edge sweep is negative
-  // (-9.1% to -23.7%). Side-structural: overs -44%..-53%, unders ~flat. Needs
-  // opponent-defense / minutes features, not a re-cut. Assists stays live.
-  'wnba_prop_player_rebounds',
-  // wnba_over_under + wnba_spread PAUSED 2026-07-29 — UNVALIDATED, not proven bad.
-  // Their launch cuts came from a 2026 sweep whose bulk odds loader took the latest
-  // snapshot with no pre-tipoff cutoff, so 67% of games were featurized with a line
-  // that had already drifted toward the final score (avg leak 8.2 pts on totals).
-  // With honest pre-game lines the O/U model never reaches its own 0.60 bar (0 BETs
-  // in 17 games) and the spread is 2-2/-3.7%. Leak fixed in feature_engine; unpause
-  // only after scripts/wnba_line_sweep.py re-derives cuts on clean lines.
-  'wnba_over_under',
   'wnba_spread',
-  // mlb_over_under RE-PAUSED 2026-07-14 (Matt: "total runs model is 3-8"). The
-  // under-skew watch item materialized — honest-era live record 3-8/-529u, and the
-  // model's mean P(over) 0.454 vs a realized 0.500 / 9.32-run summer environment
-  // (active model never trained on July data). Retraining w/ settled July games;
-  // paused meanwhile. UNPAUSE after retrain + a fresh 2025 OOS threshold sweep.
-  'mlb_over_under',
-  // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
-  // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
-  // Kept live + +EV-filtered when priced.
-
-  // NFL props: trained 2026-08-23, none live.
-  'nfl_prop_anytime_td',
-  'nfl_prop_pass_attempts',
-  'nfl_prop_pass_completions',
-  'nfl_prop_pass_tds',
-  'nfl_prop_pass_yards',
-  'nfl_prop_rec_yards',
-  'nfl_prop_receptions',
-  'nfl_prop_rush_attempts',
-  'nfl_prop_rush_rec_yards',
-  'nfl_prop_rush_yards',
-  'nfl_prop_sacks',
-  'nfl_prop_tackles_assists',
 ]);
 
 // Retired models — removed from config.LIVE_MODELS / MODELS entirely, so they

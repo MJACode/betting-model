@@ -99,9 +99,9 @@ for (const sport of ['UFC', 'GOLF', 'NFL', 'MLB'] as const) {
 
 // A UFC card priced days out and the same card on fight day are BOTH signals.
 const ufcBoard: EnrichedPick[] = [
-  ep({ sport: 'UFC', model_id: 'ufc_total_rounds', model_probability: 0.70,
+  ep({ sport: 'UFC', model_id: 'ufc_moneyline', model_probability: 0.70,
        edge: 0.15, game_date: future }),   // locked at first cross — still a signal
-  ep({ sport: 'UFC', model_id: 'ufc_total_rounds', model_probability: 0.70,
+  ep({ sport: 'UFC', model_id: 'ufc_moneyline', model_probability: 0.70,
        edge: 0.15, game_date: today }),    // fight day
 ];
 const ufcCounts = signalCountsBySport(ufcBoard);
