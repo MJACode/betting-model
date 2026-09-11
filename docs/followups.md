@@ -21,7 +21,7 @@
 
 ---
 
-## The replay and the cut grid pair quotes without production's stale-quote guard
+## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
 
 Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
 in-play quote whose `snapshot_at` (the market's own `last_update`) predates
@@ -35,7 +35,7 @@ the price's snapshot_at vs the candidate state), and a sweep read for
 production is the FRESH-only grid. `_pair` itself should apply the same rule
 so the two never diverge again; a test that a stale pair is dropped.
 
-## [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
+## [ ] [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 
 Claimed 0.70–0.75 delivers 67%, 0.75–0.80 66%, over 2,386 out-of-sample
 games (911 and 340 of them contributing to those bands;
@@ -45,7 +45,7 @@ calibrated probability is a model update — mike's call, `Updated-By` on the
 commit. `python -m scripts.inplay_history_backtest --season 2025` reproduces
 the bands.
 
-## Four franchises are filed twice in `games`, and the scores sit on the SBR twin
+## [ ] Four franchises are filed twice in `games`, and the scores sit on the SBR twin
 
 ARI/AZ, CWS/CHW, OAK/ATH, WSH/WAS: the odds ingestor, the Stats API map and
 every `live` row use the first form; the SBR CSV import files the same game
