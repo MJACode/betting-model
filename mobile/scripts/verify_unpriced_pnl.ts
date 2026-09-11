@@ -19,7 +19,7 @@
  */
 import { computeDailyResults } from '../src/lib/dailyResults';
 import { computeBuiltInModelStats, computeCustomModelStats } from '../src/lib/customModelBacktest';
-import { flatPnl, isModelPaused } from '../src/lib/thresholds';
+import { flatPnl, isModelPaused, setServerThresholds } from '../src/lib/thresholds';
 import type { CustomModel, Pick } from '../src/types';
 
 let failures = 0;
@@ -126,7 +126,22 @@ const ML: Pick[] = [
 const SETTLED = [...ROUNDS, ...METHOD, ...ML];
 
 // Guard: the fixture assumes the three UFC models are live. A pause would turn
-// every assertion below red on arithmetic that was never wrong.
+// every assertion below red on arithmetic that was never wrong -- and on
+// 2026-09-11 it did: ufc_total_rounds is PAUSED in config.py and has been in
+// production since, while the bundled mirror still called it live. Syncing the
+// mirror made that real and took seven assertions with it.
+//
+// So the fixture now DECLARES its own world instead of borrowing the live one.
+// What is under test is flatPnl's arithmetic -- an unpriced settled pick keeps
+// its W-L and contributes no money -- which has nothing to do with whether the
+// model is currently offered. Reaching for a still-live model instead would
+// have moved the subject onto its own priced control and silently collapsed
+// the two populations this file exists to keep apart.
+setServerThresholds({
+  ufc_total_rounds: { min_prob: 0.62, min_edge: 0.08, min_odds: -200, prob_only: false, paused: false },
+  ufc_moneyline: { min_prob: 0.65, min_edge: 0.08, min_odds: -200, prob_only: false, paused: false },
+  ufc_method_of_victory: { min_prob: 0.65, min_edge: 0, min_odds: -200, prob_only: true, paused: false },
+});
 for (const m of ['ufc_total_rounds', 'ufc_method_of_victory', 'ufc_moneyline']) {
   check(`fixture precondition: ${m} is not paused`, !isModelPaused(m));
 }
