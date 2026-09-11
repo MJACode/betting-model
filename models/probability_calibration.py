@@ -522,6 +522,50 @@ def promote(conn, model_ids: list[str] | None = None) -> list[str]:
     return done
 
 
+def promote_external(conn, model_id: str, a: float, b: float, *, n: int,
+                     source: str, helps: bool, transfers: bool) -> None:
+    """Promote a map fitted OUTSIDE the nightly candidate path. A model update.
+
+    The nightly fit reads a lane's settled BETs, which for a live lane is one
+    narrow band above its own floor (fetch_graded); a map fitted on a bought
+    season of in-play history covers the whole range and is the better map,
+    but it has no candidate row to be promoted from -- and `promote()` copies
+    from the candidate columns, which the 6am fit rewrites. This writes the
+    promoted_* columns directly, with the verdicts the caller measured on its
+    own date split, and leaves the candidate columns to the nightly fit.
+
+    Provenance lives in `promoted_source` (added here), a column the nightly
+    fit never touches: "<source> n=<n> a=<a> b=<b>".
+    """
+    ensure_schema(conn)
+    if not schema_is_current(conn, "model_calibration", columns=("promoted_source",)):
+        try:
+            conn.execute("ALTER TABLE model_calibration ADD COLUMN IF NOT EXISTS promoted_source TEXT")
+        except Exception:  # noqa: BLE001 -- sqlite lacks IF NOT EXISTS on some versions
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+    if not (helps and transfers):
+        raise ValueError(f"{model_id}: a map that does not help AND transfer is not promoted "
+                         f"(helps={helps}, transfers={transfers})")
+    now = datetime.now().astimezone().isoformat()
+    conn.execute("""
+        INSERT INTO model_calibration (model_id, fitted_at, n, applied, payload,
+                                       promoted, promoted_a, promoted_b, promoted_at,
+                                       promoted_method, promoted_helps, promoted_transfers,
+                                       promoted_source)
+        VALUES (%(m)s, %(at)s, 0, FALSE, '{}',
+                TRUE, %(a)s, %(b)s, %(at)s, 'platt', TRUE, TRUE, %(src)s)
+        ON CONFLICT (model_id) DO UPDATE SET
+            promoted = TRUE, promoted_a = EXCLUDED.promoted_a,
+            promoted_b = EXCLUDED.promoted_b, promoted_at = EXCLUDED.promoted_at,
+            promoted_method = 'platt', promoted_helps = TRUE, promoted_transfers = TRUE,
+            promoted_source = EXCLUDED.promoted_source
+    """, {"m": model_id, "at": now, "a": a, "b": b,
+          "src": f"{source} n={n} a={a:.6f} b={b:.6f}"})
+
+
 def demote(conn, model_ids: list[str]) -> list[str]:
     """Take a map back out of the decision path. The inverse of promote().
 
@@ -581,8 +625,24 @@ def main() -> None:
                          "a model update.")
     ap.add_argument("--models", metavar="MODEL_ID", nargs="+",
                     help="restrict --promote to these model_ids")
+    ap.add_argument("--promote-external", metavar=("MODEL_ID", "A", "B", "N", "SOURCE"),
+                    nargs=5, help="promote a map fitted outside the nightly path "
+                                  "(its own date-split verdicts must be helps AND "
+                                  "transfers; state them with --verdict). A model update.")
+    ap.add_argument("--verdict", metavar=("HELPS", "TRANSFERS"), nargs=2, default=None)
     args = ap.parse_args()
     conn = get_connection()
+    if args.promote_external:
+        m, a, b, n, src = args.promote_external
+        helps, transfers = [v.lower() == "true" for v in (args.verdict or ("false", "false"))]
+        try:
+            promote_external(conn, m, float(a), float(b), n=int(n), source=src,
+                             helps=helps, transfers=transfers)
+            conn.commit()
+            print(f"PROMOTED (external) {m}: a={float(a):.6f} b={float(b):.6f} from {src}")
+        finally:
+            conn.close()
+        return
     if args.demote:
         try:
             done = demote(conn, list(args.demote))

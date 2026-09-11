@@ -998,6 +998,15 @@ CREATE TABLE IF NOT EXISTS plays (
     bases_after        TEXT,
     score_home_after   SMALLINT,
     score_away_after   SMALLINT,
+    -- Clock time of the plate appearance (MLB Stats API about.startTime /
+    -- endTime, ISO UTC). Added 2026-09-09 so a play can be aligned to a priced
+    -- moment: the historical in-play backtest pairs each DK quote with the
+    -- last play STARTED at or before the quote and uses that play's BEFORE
+    -- state. NULL for rows ingested before the column existed until
+    -- `--fill-times` runs.
+    start_time         TEXT,
+    end_time           TEXT,
+
     -- Eventual game outcome (the label)
     home_won           INTEGER,            -- 1 if home team won game, else 0; NULL if incomplete
     created_at         TEXT DEFAULT (datetime('now')),

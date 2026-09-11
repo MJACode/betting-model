@@ -136,7 +136,7 @@ Every one of these is a way a number can be wrong while looking right.
   incomplete training row, so no prop model has ever seen a null; a scorer
   that fills one with 0.0 is handing the trees a VALUE — a 0°F game, a 0%
   strikeout rate, a 0 mph fastball. On 2026-09-10 a game with no weather row
-  priced two picks at 0°F (session 276). `models.scorer.prop_feature_matrix`
+  priced two picks at 0°F (session 278). `models.scorer.prop_feature_matrix`
   drops the row for this pass instead and logs who and why; the only imputed
   features are the ones named in `PROP_IMPUTED_FEATURES`, each with a reason.
   A new prop scorer goes through that helper, not its own fill.

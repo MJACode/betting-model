@@ -3378,7 +3378,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
 # ever seen an incomplete row. The four prop loops below used to fill every
 # null with 0.0 before predicting, and 0.0 is not "unknown" -- it is a value
 # the trees read: a 0°F game, a pitcher with a 0% strikeout rate at 0 mph.
-# Measured 2026-09-10 on the live pitcher-K artifact (session 276): a game
+# Measured 2026-09-10 on the live pitcher-K artifact (session 278): a game
 # with no weather row was priced as 0°F, lambda fell 5.91 -> 5.17 and the
 # under probability rose 0.621 -> 0.736, reproduced to four decimals against
 # the stored pick.

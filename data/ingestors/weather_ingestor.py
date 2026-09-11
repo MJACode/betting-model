@@ -174,7 +174,7 @@ def _fetch_open_meteo(lat: float, lon: float, game_date: str,
     for tomorrow's game, and a recent past date asked for a forecast window
     that starts today; the matcher then took the last hour at or before the
     target and stored yesterday evening's weather, or today's midnight, as the
-    game's. Measured live in session 276.
+    game's. Measured live in session 278.
     """
     today      = date.today()
     target     = date.fromisoformat(game_date)

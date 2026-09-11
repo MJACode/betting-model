@@ -1,6 +1,6 @@
 """The umpire features leave the pitcher-K and walks models at their next retrain.
 
-Decided 2026-09-10 (session 276, mike: "ship a fix ... and any other bugs like
+Decided 2026-09-10 (session 278, mike: "ship a fix ... and any other bugs like
 the umpire one"). The evidence:
 
 - A BET locks at its first signal, and the first signal is the evening

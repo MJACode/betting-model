@@ -1,6 +1,6 @@
 """Weather lands for every date the prop scorer prices, at the game's own hour.
 
-Three things were wrong on 2026-09-10 (docs/sessions/2026-09.md, session 276):
+Three things were wrong on 2026-09-10 (docs/sessions/2026-09.md, session 278):
 
 1. ``step_weather`` fetched ``run_date`` only, while ``step_prop_scoring``
    priced ``run_date`` through ``GAME_SCORE_AHEAD_DAYS``. Tomorrow's game had

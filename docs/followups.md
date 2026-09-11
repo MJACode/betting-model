@@ -21,6 +21,52 @@
 
 ---
 
+## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
+
+Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
+in-play quote whose `snapshot_at` (the market's own `last_update`) predates
+the first sight of the game's current score (`_score_changed_at`,
+`data/live_quote_guard.quote_predates_score`, tolerance 0). The REPLAY and
+the cut sweep (`scripts/live_inning_gate_replay._pair`) pair the newest price
+at or before each state with only the age bound, so their "all quotes" grids
+count bets production would have declined -- on 2025, 37 of the shipped
+cut's 128 bets, 30-7. The sweep cache now carries `runs_moved` (the state at
+the price's snapshot_at vs the candidate state), and a sweep read for
+production is the FRESH-only grid. `_pair` itself should apply the same rule
+so the two never diverge again; a test that a stale pair is dropped.
+
+## [ ] [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
+
+Fitted and measured 2026-09-10 (`scripts/live_calibration_sweep.py`,
+`docs/thresholds.md` "The forward check on fresh quotes"): a = 0.8578,
+b = −0.0787, helps and transfers on the 2025 date split. The re-sweep on the
+calibrated probability finds NO cell that clears breakeven in both halves of
+both seasons on fresh quotes; the shipped cut's own fresh record is 92 bets
+at +9.5% (2025) and 21 at +3.7% (2026). `promote_external` is in place; the
+cut to promote it with is mike's call (the three options are in the
+2026-09-10 session entry). Landing order: promote the map first (the lane
+goes quiet at 0.675 < 0.72), then the config change; a running loop picks
+the map up at its next start (`_CAL_CACHE` is per process, the supervisor
+restarts it every 10 minutes); the app's action filter compares the RAW
+probability against `min_prob`, which is looser than the decision path when
+the cut is on the calibrated scale, so no BET is hidden.
+
+## [ ] Four franchises are filed twice in `games`, and the scores sit on the SBR twin
+
+ARI/AZ, CWS/CHW, OAK/ATH, WSH/WAS: the odds ingestor, the Stats API map and
+every `live` row use the first form; the SBR CSV import files the same game
+under the second, with the final score, while the live row stays unscored
+(2025: 656 unscored live rows, 673 SBR rows). Consequences measured
+2026-09-10: the PBP ingestor skipped every one of their games — **no CWS or
+WSH game in the 2024 training corpus (81 unscored live rows each), 534 of the
+priced 2025 games without plays** — fixed at the read
+(`mlb_pbp_ingestor.mlb_game_final` reads the twin) and the 2025 corpus
+backfilled (613 games, 46,595 plays). NOT fixed: the duplicate rows
+themselves, whatever settles picks on those games, and whether the 2019–2024
+PBP corpora are missing those teams' games too (`--backfill` is idempotent;
+run it per season and count). Retraining on a corpus that now includes them
+is a model update.
+
 ## [x] The calibrated decision never reaches player props — FIXED 2026-09-07
 
 `DECIDE_ON_CALIBRATED_PROB` is on by default and is a **no-op in production**.
@@ -103,9 +149,9 @@ other 16 of 43 name only the home team) once, whole-word. Verified on the
 worker's 22:30 UTC pass: 27 corrected, 0 still wrong. The Discord and
 app posts that already went out under the wrong name are not rewritten.
 
-## [x] MLB prop scorers price a game with no weather row as a 0°F game — FIXED 2026-09-10 (session 276; mike: the two picks stand, not voided)
+## [x] MLB prop scorers price a game with no weather row as a 0°F game — FIXED 2026-09-10 (session 278; mike: the two picks stand, not voided)
 
-Found 2026-09-10 (session 276) on the Gilbert / deGrom Under 6.5 K picks:
+Found 2026-09-10 (session 278) on the Gilbert / deGrom Under 6.5 K picks:
 `build_pitcher_scoring_rows` leaves `temp_f` None when `game_weather` has no
 row, and the scorer's `np.nan_to_num(..., nan=0.0)` turns that into a literal
 0°F. Training rows 2019-2025 all carry weather (p01 ≈ 21-39°F), so the trees

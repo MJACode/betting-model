@@ -5,7 +5,7 @@ Every prop trainer drops a training row with ANY null feature
 has ever seen an incomplete row. The scorers nevertheless filled every null
 with 0.0 before predicting -- and 0.0 is not "unknown", it is a value the
 trees read. Measured 2026-09-10 on the live pitcher-K artifact
-(docs/sessions/2026-09.md, session 276): a game with no weather row was priced
+(docs/sessions/2026-09.md, session 278): a game with no weather row was priced
 as a 0°F game, lambda fell from 5.91 to 5.17, and P(under 6.5) rose from
 0.621 to 0.736 -- reproduced to four decimals against the stored pick. A
 pitcher with no Savant row was priced as a 0% strikeout rate at 0 mph.

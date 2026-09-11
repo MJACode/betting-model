@@ -556,7 +556,7 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 18 features: k_last3/5/10_avg, k_rate_last3/5, ip_last3/5_avg, season_k_avg, k_trend, savant_k_pct, savant_whiff_pct, savant_bb_pct, savant_xera, savant_avg_velocity, opp_team_k_pct, is_dome_game, temp_f, ump_k_plus_minus. Prior-season fallback for season_k_avg when current-season logs unavailable.
 
-**A row missing a feature is not scored (2026-09-10, session 276).** The
+**A row missing a feature is not scored (2026-09-10, session 278).** The
 trainer drops every incomplete training row, so the model has never seen a
 null; the scorer used to fill one with 0.0, which priced a game with no
 weather row as a 0°F game (Gilbert / deGrom Under 6.5 Ks, both stored at the
