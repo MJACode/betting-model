@@ -17,7 +17,7 @@ weekly routine).
 | Strategy | Result | Notes |
 |---|---|---|
 | **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
-| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
+| **Opener strategy** | **NOT proven profitable.** On the books you can actually bet at, 2020-2025: |dev| 1.0 = 728 bets, -0.03%; |dev| 2.0 (deployed since 2026-09-11) = 125 bets, +3.97%, CI [-11.8, +19.1] | The +6.98% [-0.6, +14.5] that stood here until 2026-09-11 was 2023-2025 only, all 35 books, exchange included. Adding 2020-2022 took it to +1.34% (2026-08-23, kept by Matt's call); restricting to bettable books (mike, 2026-09-06) took it to flat. Each step is in `nfl/models/opener_spread.py` and `docs/thresholds.md`. It runs as a forward test, not a proven edge |
 | **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
 
 **Critical data rules:**
