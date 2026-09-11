@@ -18,6 +18,7 @@
 
 import { MODEL_META } from './modelMeta';
 import { isModelRetired } from './thresholds';
+import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import type {
   BetKind,
   ConfidenceTier,
@@ -39,6 +40,8 @@ export type FilterablePick = Pick<
   | 'pick_side'
   | 'signal_type'
   | 'dk_odds'
+  | 'decision_odds'
+  | 'decision_edge'
   | 'scored_line'
   | 'game_date'
   | 'game_time'
@@ -118,9 +121,13 @@ export function timeSlotOf(pick: Pick<FilterablePick, 'game_time'>): TimeSlot | 
  * price (prob-only markets), which a price filter then excludes.
  * Even money (+100) counts as a dog — it is plus money and pays over 1:1.
  */
-export function priceSideOf(pick: Pick<FilterablePick, 'dk_odds'>): PriceSide | null {
-  if (pick.dk_odds == null) return null;
-  return Number(pick.dk_odds) < 0 ? 'fav' : 'dog';
+export function priceSideOf(
+  pick: Pick<FilterablePick, 'dk_odds' | 'decision_odds'> & { edge?: number },
+): PriceSide | null {
+  // At the price the pick was DECIDED at (2026-09-09).
+  const odds = decisionOdds({ dk_odds: pick.dk_odds, edge: 0, decision_odds: pick.decision_odds });
+  if (odds == null) return null;
+  return odds < 0 ? 'fav' : 'dog';
 }
 
 /** Game market vs player prop, from the model registry (falls back to player_id). */
@@ -198,11 +205,14 @@ export function pickMatchesFilters(
     if (!tier || !filters.tiers.includes(tier)) return false;
   }
 
+  // Price bounds at the price the pick was DECIDED at (2026-09-09); the
+  // server half (custom_model_backtest) reads the same decision_odds.
+  const odds = decisionOdds(pick);
   if (filters.minOdds != null) {
-    if (pick.dk_odds == null || Number(pick.dk_odds) < filters.minOdds) return false;
+    if (odds == null || odds < filters.minOdds) return false;
   }
   if (filters.maxOdds != null) {
-    if (pick.dk_odds == null || Number(pick.dk_odds) > filters.maxOdds) return false;
+    if (odds == null || odds > filters.maxOdds) return false;
   }
 
   // Line value — the total/spread/prop line the pick was priced at. Moneyline
@@ -480,9 +490,9 @@ export function pickMatchesModel(
     // An absent floor is "Any" — the builder leaves every field blank, so a
     // rule can qualify on bet type alone.
     if (r.min_prob != null && pick.model_probability < r.min_prob) return false;
-    if (r.min_edge != null && pick.edge < r.min_edge) return false;
+    if (r.min_edge != null && decisionEdge(pick) < r.min_edge) return false;
     if (r.min_ev != null) {
-      const ev = evOf(pick.model_probability, pick.dk_odds);
+      const ev = evOf(pick.model_probability, decisionOdds(pick));
       if (ev == null || ev < r.min_ev) return false;
     }
     return true;

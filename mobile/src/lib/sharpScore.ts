@@ -14,6 +14,7 @@
 
 import { isModelRetired, thresholdFor } from '@/lib/thresholds';
 import type { Pick } from '@/types';
+import { decisionEdge } from '@/lib/decisionPrice';
 
 // ── Model CLV pedigree store ────────────────────────────────────────────────
 export interface ModelClv {
@@ -146,7 +147,8 @@ export function sharpScore(pick: Pick): SharpScore | null {
   } else {
     const bar = t?.min_edge ?? 0.05;
     // edge == bar → 0; edge == 3×bar → full.
-    edge = EDGE_MAX * clamp01((pick.edge - bar) / Math.max(2 * bar, 0.04));
+    // At the price the pick was DECIDED at (2026-09-09).
+    edge = EDGE_MAX * clamp01((decisionEdge(pick) - bar) / Math.max(2 * bar, 0.04));
   }
 
   // CLV pedigree component.

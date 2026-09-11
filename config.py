@@ -186,6 +186,11 @@ DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN
 # confidence_tier -- so a method pick showed "+33.0% edge / HIGH" for a bet that
 # could not be placed at any price.
 #
+# Since 2026-09-09 the price a BET needs is the DECIDING price -- the best
+# bettable quote at the DraftKings line (DECIDE_ON_BEST_PRICE) -- so the name
+# is historical: a pick with no DraftKings quote has no line to shop and still
+# gets no BET.
+#
 # Set REQUIRE_DK_PRICE=0 to restore the old prob-only behaviour.
 REQUIRE_DK_PRICE: bool = os.environ.get("REQUIRE_DK_PRICE", "1") not in ("0", "false", "False")
 
@@ -1958,13 +1963,14 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 # Pinnacle — the market-making book whose de-vigged price is the benchmark the
 # §28 opener model already trades against — is only served in "eu".
 ODDS_API_REGIONS = os.environ.get("ODDS_API_REGIONS") or "us"
-ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchanged)
+ODDS_API_BOOKMAKER = "draftkings"   # the REFERENCE book: the line a pick is scored at, training, CLV
 
-# Line shopping: the top-5 US books fetched for GAME markets (h2h / spreads /
-# totals / F5 ML) AND player props, so the app can show the price at whichever
-# book the user actually bets. The model still scores against ODDS_API_BOOKMAKER
-# — every other book here is DISPLAY-ONLY (see the scorer/feature-engine reads,
-# which all hard-filter to draftkings).
+# Line shopping: the US books fetched for GAME markets (h2h / spreads / totals
+# / F5 ML) AND player props. Since 2026-09-09 the best bettable price among
+# them (BEST_LINE_BOOKMAKERS, below) is the price a pre-game pick is DECIDED,
+# sized and settled at. The model still scores at ODDS_API_BOOKMAKER's LINE,
+# trains on its lines and measures CLV against its close (the feature-engine
+# reads still hard-filter to draftkings).
 #
 # The Odds API counts the `bookmakers` param as ONE region, so adding books here
 # does NOT increase credit cost — on either the bulk game call or the per-event
@@ -2177,22 +2183,43 @@ BETTABLE_BOOKS = [
 # best book beat DK at close?") — pruned rows are gone permanently.
 PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
 
-# ── Best-line shopping (what the bettor actually gets) ────────────────────────
-# The books considered when stamping the BEST available price on a pick.
+# ── Best-line shopping (what the bettor actually gets, and what DECIDES) ──────
+# The books considered when finding the BEST available price on a pick.
 #
-# This is DISPLAY + BET information, deliberately separate from scoring: a
-# pick's `edge`, its BET/AVOID decision, its Kelly stake, its settled P&L and
-# its CLV all still measure against DraftKings (ODDS_API_BOOKMAKER). That is
-# not timidity — every threshold in section 17 was swept on DK-implied edge,
-# and best-of-N pricing lowers the implied probability by ~2pp on average
-# (measured 2026-08-28 over 92 MLB games), which would silently loosen every
-# cut by that much. Keeping qualification on DK holds the pick set identical
-# to the calibrated system while the bettor still takes the better number.
+# THE BEST BETTABLE PRICE IS THE DECIDING PRICE (mike, 2026-09-09: "we should
+# remove DK only - we want best lines for us regardless"; Stage 2 of
+# docs/best_line.md, authorised "stage 2 go" on 2026-09-03). A pre-game pick's
+# BET/AVOID call, its Kelly stake and its settled P&L are measured at the best
+# price across these books AT THE DRAFTKINGS LINE, and that price is stored on
+# the pick as decision_book / decision_odds / decision_implied_prob /
+# decision_edge. DraftKings is still the reference: the line a pick is scored
+# at is DK's, the models are trained against DK's lines, `edge` / `dk_odds`
+# keep their DraftKings meaning, and CLV is measured DK-to-DK.
 #
-# Every scored pick now records best_book/best_odds/best_edge, so in a month
-# there is real best-price history on the picks table itself to re-sweep the
-# thresholds against — at which point qualification can flip over deliberately,
-# with evidence, in one change.
+# What it costs, measured rather than assumed: every cut in ACTION_THRESHOLDS
+# was swept on DK-implied edge. The best price is cheaper in implied
+# probability by 0.68pp on average and 3.61pp at the extreme (69 clean-window
+# bets, 2026-09-02), so every cut is that much looser at the decision price.
+# scripts/best_line_threshold_sweep.py on 2026-09-09 (12 days of best-price
+# history) found NO cut shippable on best-price edge -- every candidate fails
+# the time split or the volume gate -- so no cut moved with the flip; the same
+# picks paid at the best price gain 0 to +7.8pp of ROI, typically under a point.
+# Re-run the sweep weekly; move a cut only on the section-7 standards.
+#
+# DECIDE_ON_BEST_PRICE=0 restores DraftKings as the deciding price (the pick set
+# of 2026-09-08). Live lanes are unaffected either way: they decide on the
+# in-play DraftKings price (mike, 2026-09-02, "only for pregame picks for now").
+DECIDE_ON_BEST_PRICE: bool = (
+    os.environ.get("DECIDE_ON_BEST_PRICE", "1").strip() not in ("0", "false", "False")
+)
+
+# A non-DraftKings quote may decide only while it is FRESH. Every book is
+# fetched in the same call, so on 2026-09-09's slate the newest quote per book
+# lagged DraftKings' by a median of 0.0-1.5 minutes and at most 4.3 minutes
+# (31 game-markets, 13 books); a quote older than this many minutes behind the
+# newest quote in the shop is a book that stopped pricing, not a better number.
+BEST_LINE_MAX_LAG_MIN: float = float(os.environ.get("BEST_LINE_MAX_LAG_MIN", "30"))
+
 # Books that are REFERENCE ONLY — never offered as a price to take.
 #
 # BEST_LINE_BOOKMAKERS answers one question: "where should the bettor actually

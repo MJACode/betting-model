@@ -7,6 +7,7 @@
 
 import { sharpScore } from '@/lib/sharpScore';
 import type { Pick } from '@/types';
+import { decisionEdge } from '@/lib/decisionPrice';
 
 export type SortKey = 'edge' | 'sharp' | 'time' | 'public';
 
@@ -51,14 +52,14 @@ export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[]
   const arr = [...items];
   switch (key) {
     case 'sharp':
-      arr.sort((a, b) => sharpOf(b) - sharpOf(a) || b.pick.edge - a.pick.edge);
+      arr.sort((a, b) => sharpOf(b) - sharpOf(a) || decisionEdge(b.pick) - decisionEdge(a.pick));
       break;
     case 'time':
       arr.sort((a, b) => {
         const ta = a.game?.commence_time ?? '';
         const tb = b.game?.commence_time ?? '';
         if (ta !== tb) return ta.localeCompare(tb);
-        return b.pick.edge - a.pick.edge;
+        return decisionEdge(b.pick) - decisionEdge(a.pick);
       });
       break;
     case 'public':
@@ -66,12 +67,12 @@ export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[]
         const pa = publicOf(a);
         const pb = publicOf(b);
         if (pa !== pb) return pb - pa;
-        return b.pick.edge - a.pick.edge;
+        return decisionEdge(b.pick) - decisionEdge(a.pick);
       });
       break;
     case 'edge':
     default:
-      arr.sort((a, b) => b.pick.edge - a.pick.edge);
+      arr.sort((a, b) => decisionEdge(b.pick) - decisionEdge(a.pick));
       break;
   }
   return arr;

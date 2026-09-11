@@ -128,9 +128,14 @@ def test_the_prop_builder_reads_the_flag_at_all():
     behavioural test on a mapped model would not notice if someone deleted the
     map instead."""
     src = (REPO / "models" / "scorer.py").read_text(encoding="utf-8")
+    # Since 2026-09-09 the rules live in scorer._decide, which the prop
+    # builder calls at the DraftKings quote and _requalify_at_best calls
+    # again at the best bettable price; the flag is read there.
+    rules = src.split("def _decide(")[1].split("\ndef ")[0]
+    assert "DECIDE_ON_CALIBRATED_PROB" in rules
+    assert "_calibrated(" in rules
     body = src.split("def _make_prop_pick(")[1].split("\ndef ")[0]
-    assert "DECIDE_ON_CALIBRATED_PROB" in body
-    assert "_calibrated(" in body
+    assert "_decide(" in body, "the prop builder no longer routes through _decide"
 
 
 # ── one bet per player ───────────────────────────────────────────────────────

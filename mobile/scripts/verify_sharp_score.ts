@@ -79,6 +79,10 @@ function mkPick(over: Partial<Pick> = {}): Pick {
     best_implied_prob: null,
     best_edge: null,
     best_bet_link: null,
+    decision_book: null,
+    decision_odds: null,
+    decision_implied_prob: null,
+    decision_edge: null,
     ...over,
   };
 }

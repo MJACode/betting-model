@@ -61,7 +61,9 @@ class _Conn:
             cols = fsr._COPY_COLS + ("logged_at",)
             src = (self._siblings if "l.pick_side <> " in self._last
                    else self._first_bets)
-            return [tuple(b[c] for c in cols) for b in src]
+            # .get: a picks_log row from before 2026-09-09 has NULL in the
+            # decision_* columns _COPY_COLS now carries.
+            return [tuple(b.get(c) for c in cols) for b in src]
         return []
 
     def fetchone(self):

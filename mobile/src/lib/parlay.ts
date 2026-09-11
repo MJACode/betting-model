@@ -25,6 +25,7 @@ import { stakeFor, effectiveKellyFraction, KELLY_MULTIPLIER,
 import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
+import { decisionEdge } from '@/lib/decisionPrice';
 
 /** Best across-book price for a leg's side (line shopping). Present only when a
  * non-DK book strictly beats DK for this side (game markets only — props aren't
@@ -143,7 +144,14 @@ export function slipKeyForPick(p: Pick): string {
  */
 export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
   const p = ep.pick;
-  if (p.dk_odds == null) return null; // prob-only — no payout
+  // A parlay is a DRAFTKINGS hand-off ("Every leg is priced at DraftKings",
+  // legPriceAtBook, the "Bet on DraftKings" button), so the leg stays at the
+  // DraftKings price even though the pick itself is decided at the best
+  // bettable price since 2026-09-09 -- a slip DK cannot price is worse than
+  // a slip at DK's own number. Only the pool ranking (legEdge) reads the
+  // decision edge. UX review, 2026-09-09.
+  const odds = p.dk_odds == null ? null : Number(p.dk_odds);
+  if (odds == null) return null; // prob-only — no payout
   // bestOdds is already the best non-DK price that STRICTLY beats DK for this
   // side (game markets only — prop picks carry no bestOdds).
   const best = ep.bestOdds ?? null;
@@ -177,12 +185,12 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     modelId: p.model_id,
     isGameLine: isGameLineModel(p.model_id),
     isLive: p.is_live === true,
-    isFavorite: p.dk_odds < 0,
+    isFavorite: odds < 0,
     label: p.pick_label,
     modelProb: p.model_probability,
-    decimalOdds: americanToDecimal(p.dk_odds),
-    americanOdds: p.dk_odds,
-    legEdge: p.edge,
+    decimalOdds: americanToDecimal(odds),
+    americanOdds: odds,
+    legEdge: decisionEdge(p),
     bestBook,
     bookPrices,
     pick: p,

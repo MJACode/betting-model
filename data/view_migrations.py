@@ -47,6 +47,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # settled history reaches back only to 2026 preseason, so every week without
     # this is a week of evidence that cannot be recovered afterwards.
     "add_kalshi_prop_ladders.sql",
+    # 2026-09-09 (mike: "remove DK only - we want best lines for us
+    # regardless"): picks carry the price each pick was DECIDED at
+    # (decision_*); the graded matview, the record views and the custom-model
+    # RPCs cut and grade there. Runs BEFORE the two view files below, which now
+    # cut on those columns. Applied to production by hand the same day, before
+    # the code that writes the columns deployed; every guard then no-ops.
+    "decide_on_best_price_2026_09_09.sql",
     # 2026-09-02: the record views read the graded matview instead of
     # re-grading 126k picks per read (the Record tab was timing out at 8s).
     # Its daily-view branch was removed on 2026-09-04 -- see below.

@@ -20,6 +20,7 @@
  * states — is relative to THAT, not to the four-category universe.
  */
 
+import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 import { expectedValue } from '@/lib/format';
 import { modelCategory, type ModelCategory } from '@/lib/modelMeta';
 import type { SignalType } from '@/types';
@@ -149,6 +150,9 @@ interface FilterablePick {
   model_probability: number;
   edge: number;
   dk_odds: number | null;
+  // The price the pick was DECIDED at (2026-09-09); absent = DraftKings.
+  decision_odds?: number | null;
+  decision_edge?: number | null;
 }
 
 export function applyFilter<T extends { pick: FilterablePick }>(
@@ -162,9 +166,10 @@ export function applyFilter<T extends { pick: FilterablePick }>(
     // its category from its id and is cut like any other. See modelCategory.
     if (!state.categories.has(modelCategory(p.model_id))) return false;
     if (state.minProb != null && p.model_probability < state.minProb) return false;
-    if (state.minEdge != null && p.edge < state.minEdge) return false;
+    // Edge and EV at the price the pick was decided at.
+    if (state.minEdge != null && decisionEdge(p) < state.minEdge) return false;
     if (state.minEV != null) {
-      const ev = expectedValue(p.model_probability, p.dk_odds);
+      const ev = expectedValue(p.model_probability, decisionOdds(p));
       // null EV (prob-only markets with no payout) is excluded when minEV is set.
       if (ev == null || ev < state.minEV) return false;
     }

@@ -58,6 +58,10 @@ function snapshotFromPick(pick: Pick): LiveTrackSnapshot {
     pick_label: pick.pick_label,
     sport: pick.sport,
     game_date: pick.game_date,
+    // The DraftKings price, deliberately: tracked_bets.locked_odds is what the
+    // line-change alert compares DK-to-DK against (push_notifier), so the
+    // tracked number stays on the same basis. The pick's deciding price is on
+    // the pick row (decision_*). UX review, 2026-09-09.
     dk_odds: pick.dk_odds,
     scored_line: pick.scored_line,
     tracked_at: new Date().toISOString(),

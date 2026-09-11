@@ -86,8 +86,11 @@ def test_the_two_views_select_the_same_population():
         "t.paused IS NOT TRUE",
         "p.game_date >= '2026-09-01'",
         "p.model_probability >= t.min_prob",
-        "(t.prob_only OR p.edge >= t.min_edge)",
-        "(t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)",
+        # The cut at the price the pick was DECIDED at (2026-09-09): decision_*
+        # since the flip, DraftKings before it.
+        "(t.prob_only OR COALESCE(p.decision_edge, p.edge) >= t.min_edge)",
+        "(t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL\n"
+        "              OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)",
         "JOIN model_action_thresholds t ON t.model_id = p.model_id",
     ]
     for view in VIEWS:
@@ -123,8 +126,12 @@ def test_the_guard_is_the_live_date_not_the_view_shape():
     """The lesson from the revert. A guard asking "does the view still look like
     my output?" is a lock: it cannot tell "never applied" from "deliberately
     superseded". This one asks whether the live-date gate is present."""
-    guards = re.findall(r"IF position\('([^']+)' in d\) > 0 THEN", CODE)
-    assert guards == ["2026-09-01", "2026-09-01"], guards
+    guards = re.findall(
+        r"IF position\('([^']+)' in d\) > 0 AND position\('([^']+)' in d\) > 0 THEN", CODE)
+    # Two properties since 2026-09-09: the live-date gate this file exists for,
+    # and the decision-price cut it gained -- so the definitions re-applied
+    # exactly once over the DraftKings-cut ones and never over themselves.
+    assert guards == [("2026-09-01", "decision_edge")] * 2, guards
 
 
 def test_no_ddl_outside_the_guarded_branches():

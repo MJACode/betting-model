@@ -25,6 +25,8 @@ import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { decisionOdds } from '@/lib/decisionPrice';
+import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -403,7 +405,9 @@ function TrackedBetsCard({
                 <Text style={styles.manualSub} numberOfLines={1}>
                   {[
                     formatGameDate(row.pick.game_date),
-                    row.pick.dk_odds != null ? formatAmerican(row.pick.dk_odds) : null,
+                    decisionOdds(row.pick) != null
+                      ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
+                      : null,
                     stakeMode === 'kelly' ? `${formatCurrency(row.stake)} stake` : null,
                   ]
                     .filter(Boolean)

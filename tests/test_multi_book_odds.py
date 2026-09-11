@@ -5,11 +5,12 @@ Two things are covered here:
 
 1. The player-prop parser is book-aware — the same player/market priced at two
    books produces two independent rows whose prices never merge.
-2. The DraftKings isolation guarantee: every model-facing read of odds still
-   hard-filters to draftkings. Extra books are DISPLAY-ONLY. If someone ever
-   refactors one of those queries and drops the filter, a FanDuel/BetMGM price
-   could silently reach scoring, training, or CLV — these tests fail loudly
-   instead.
+2. The DraftKings REFERENCE guarantee: the line a pick is scored at, the
+   training features and CLV still read draftkings. Since 2026-09-09 the
+   PRICE that decides a pre-game pick is the best bettable one
+   (tests/test_decide_on_best_price.py), but it is found only through the
+   best-line helpers, at the DraftKings line; a FanDuel/BetMGM LINE must never
+   reach scoring, training or CLV — these tests fail loudly instead.
 
 Pure-function / static-source tests — no network, no DB.
 """
@@ -160,13 +161,14 @@ def test_feature_engines_whitelist_draftkings():
 
 def test_line_shop_books_are_not_referenced_by_scoring_code():
     """
-    LINE_SHOP_BOOKMAKERS is a display concern, and settlement must never see a
-    non-DK price: P&L grades at the price the pick was measured at.
+    Settlement grades at the price the pick was DECIDED at, which it reads
+    from picks.decision_odds (DraftKings when NULL) -- never by shopping the
+    books itself at settlement time. A book list in paper_tracker would mean a
+    settlement price the pick was not decided at.
 
-    The scorer IS allowed to read other books, but only through the best-line
-    helpers, which stamp best_book/best_odds AFTER the pick is decided — see
-    tests/test_best_line.py, which guards that the deciding functions never
-    touch them.
+    The scorer reads other books only through the best-line helpers, which
+    since 2026-09-09 both stamp best_* and requalify the pick at that price
+    (tests/test_best_line.py, tests/test_decide_on_best_price.py).
     """
     assert "LINE_SHOP_BOOKMAKERS" not in _source("tracking/paper_tracker.py"), (
         "tracking/paper_tracker.py references LINE_SHOP_BOOKMAKERS — "

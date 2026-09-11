@@ -636,7 +636,8 @@ def _new_signals(conn, target_date: str) -> list[dict]:
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
-                   t.min_edge, t.min_odds, p.game_date
+                   t.min_edge, t.min_odds, p.game_date,
+                   COALESCE(p.decision_odds, p.dk_odds) AS decision_odds
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -667,9 +668,12 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
-              AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
-              AND (t.min_odds IS NULL OR p.dk_odds IS NULL
-                   OR p.dk_odds >= t.min_odds)
+              -- The cut is applied at the price the pick was DECIDED at
+              -- (2026-09-09): decision_* since the flip, DraftKings before.
+              AND (t.prob_only = TRUE
+                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+                   OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet
@@ -690,7 +694,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         # model_action_thresholds row the scorer's cut comes from, so the
         # published range and the applied cut cannot drift apart. mike,
         # 2026-09-03: "for bonus, post a good to xx odds".
-        "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
+        # Bounded from the DECIDING price (r[19]), which is also the one
+        # publish_price puts on the card.
+        "good_to": price_bound(r[4], r[3], r[16], r[17], r[19]),
+        "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
         # (2026-09-06) a pass can post picks for more than one day, and the
         # embed header used to say whatever day the pass ran -- so tomorrow's
@@ -744,7 +751,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
-                   t.min_edge, t.min_odds, p.game_date
+                   t.min_edge, t.min_odds, p.game_date,
+                   COALESCE(p.decision_odds, p.dk_odds) AS decision_odds
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -767,9 +775,12 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
-              AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
-              AND (t.min_odds IS NULL OR p.dk_odds IS NULL
-                   OR p.dk_odds >= t.min_odds)
+              -- The cut is applied at the price the pick was DECIDED at
+              -- (2026-09-09): decision_* since the flip, DraftKings before.
+              AND (t.prob_only = TRUE
+                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+                   OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT * FROM bet ORDER BY created_at
@@ -785,7 +796,10 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # model_action_thresholds row the scorer's cut comes from, so the
         # published range and the applied cut cannot drift apart. mike,
         # 2026-09-03: "for bonus, post a good to xx odds".
-        "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
+        # Bounded from the DECIDING price (r[19]), which is also the one
+        # publish_price puts on the card.
+        "good_to": price_bound(r[4], r[3], r[16], r[17], r[19]),
+        "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
         # (2026-09-06) a pass can post picks for more than one day, and the
         # embed header used to say whatever day the pass ran -- so tomorrow's
@@ -1699,8 +1713,11 @@ _SETTLED_SQL = r"""
           AND p.result IN ('WIN', 'LOSS', 'PUSH')
           AND t.paused = FALSE
           AND p.model_probability >= t.min_prob
-          AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
-          AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
+          -- The cut at the price the pick was DECIDED at (2026-09-09).
+          AND (t.prob_only = TRUE
+               OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+          AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+               OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
 """
 
 

@@ -699,6 +699,13 @@ CREATE TABLE IF NOT EXISTS picks (
     best_implied_prob  NUMERIC,            -- implied probability of best_odds
     best_edge          NUMERIC,            -- model_probability - best_implied_prob (informational; `edge` still qualifies)
     best_bet_link      TEXT,               -- betslip deep link at best_book, when the feed carries one
+    -- The price the pick was DECIDED at (2026-09-09): the best bettable price
+    -- at the DraftKings line. `edge` / `dk_odds` stay DraftKings (the reference
+    -- line, and the CLV basis); every reader COALESCEs decision_x to dk_x.
+    decision_book         TEXT,
+    decision_odds         NUMERIC,
+    decision_implied_prob NUMERIC,
+    decision_edge         NUMERIC,
     result             TEXT,
     profit_flat        REAL,
     profit_kelly       REAL,
@@ -1422,13 +1429,23 @@ _MIGRATIONS = [
     # 2026-05-13 for four months without anything noticing.
     ("player_savant_stats", "as_of_date", "TEXT"),
     # Best available price across config.BEST_LINE_BOOKMAKERS at score time.
-    # Display/bet only: `edge`, the BET/AVOID call, Kelly and settlement all
-    # still measure against DraftKings (see config.BEST_LINE_BOOKMAKERS).
     ("picks", "best_book", "TEXT"),
     ("picks", "best_odds", "NUMERIC"),
     ("picks", "best_implied_prob", "NUMERIC"),
     ("picks", "best_edge", "NUMERIC"),
     ("picks", "best_bet_link", "TEXT"),
+    # The price the pick was DECIDED at (2026-09-09, mike: "remove DK only"):
+    # the best bettable price at the DraftKings line from that date, DraftKings
+    # itself before it (NULL, and every reader COALESCEs to dk_*). Mirrored on
+    # picks_log so a first-signal restore carries the deciding price with it.
+    ("picks", "decision_book", "TEXT"),
+    ("picks", "decision_odds", "NUMERIC"),
+    ("picks", "decision_implied_prob", "NUMERIC"),
+    ("picks", "decision_edge", "NUMERIC"),
+    ("picks_log", "decision_book", "TEXT"),
+    ("picks_log", "decision_odds", "NUMERIC"),
+    ("picks_log", "decision_implied_prob", "NUMERIC"),
+    ("picks_log", "decision_edge", "NUMERIC"),
     # NFL locked-pick condition tracking. The pick is immutable once locked;
     # these say whether the conditions that justified it still hold, so a
     # collapsed forecast or a line that ran away is surfaced loudly instead of

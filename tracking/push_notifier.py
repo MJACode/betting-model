@@ -131,9 +131,13 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
               AND p.model_probability >= t.min_prob
-              AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
-              AND (t.min_odds IS NULL OR p.dk_odds IS NULL
-                   OR p.dk_odds >= t.min_odds)
+              -- The cut at the price the pick was DECIDED at (2026-09-09):
+              -- decision_* since the flip, DraftKings before. Same clause as
+              -- the Discord producer and the app (test_nfl_lookahead_signals).
+              AND (t.prob_only = TRUE
+                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+                   OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
         )
         SELECT lock_key, pick_label, sport, pick_id FROM bet
