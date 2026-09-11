@@ -90,6 +90,16 @@ inside 36h. A game beyond the ceiling is SKIPPED, never dropped: it returns on a
 later hourly tick, and no pick is deleted or re-priced, so the §1c lock is
 untouched.
 
+**The scorer path got the same ceiling on 2026-09-11** (mike: "we revised
+prop models or should have, that was my earlier guidance"). #610 put it on
+`scripts/nfl_prop_market_card.py` only; the eleven `nfl_prop_*` models are
+written by `models/scorer.run_nfl_prop_scorer`, which kept the floor and no
+ceiling and wrote seventeen Week-1 picks five to six days out on 2026-09-07.
+`scorer._nfl_prop_too_early` now reads the SAME constant, sits between the
+started-game floor and the price read, and skips rather than deletes.
+`tests/test_nfl_prop_scorer_lead_ceiling.py` pins the constant, the boundary
+and the wiring.
+
 **24 rather than 36**: 36.1h is the measured *maximum* of the `open` series, and
 gating there would put the first-signal lock in the tail rather than near the
 mass (median ~7h). 12 would be closer to the median and cost volume; that trade

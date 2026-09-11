@@ -69,6 +69,7 @@ from config import (
     GAME_SCORE_AHEAD_DAYS,
     GAME_SCORE_AHEAD_SPORTS,
     NCAAF_TOTALS_MAX_LEAD_DAYS,
+    NFL_PROP_MAX_LEAD_HOURS,
     PROP_MARKETS_NFL,
     today_et,
     DECIDE_ON_CALIBRATED_PROB,
@@ -4413,6 +4414,38 @@ def _push_adjusted(p_side: float, p_push: float) -> float:
     return float(p_side / denom) if denom > 1e-9 else 0.0
 
 
+def _nfl_prop_too_early(kickoff: str | None, now: datetime | None = None) -> bool:
+    """True if an NFL kickoff is further out than NFL_PROP_MAX_LEAD_HOURS.
+
+    THE CEILING, for the eleven nfl_prop_* models. #610 put it on the market
+    card only; the scorer kept the started-game floor and no ceiling, so on
+    2026-09-07 it wrote seventeen Week-1 prop picks five to six days before
+    kickoff -- at a lead where nothing has ever measured positive
+    (docs/nfl_prop_offset_evidence.md) -- and under the first-signal lock they
+    were permanent. Deleted 2026-09-11 (mike); this stops the next tick
+    writing them back. Same constant as the card, on purpose.
+
+    A game beyond the ceiling is SKIPPED, never dropped: it comes back into
+    range on a later tick. Inclusive at the ceiling, like the card. Unknown or
+    unparseable kickoff -> False, the same fail-open the floor uses, so a slate
+    whose kickoffs have not been ingested is not silently blocked. The past is
+    the floor's business, not this one's.
+    """
+    if not kickoff:
+        return False
+    ts = str(kickoff).strip()
+    try:
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    now = now or datetime.now(ZoneInfo("UTC"))
+    return (dt - now).total_seconds() / 3600.0 > NFL_PROP_MAX_LEAD_HOURS
+
+
 def _nfl_kickoff_map(conn: DBConnection, game_date: str) -> dict[str, str]:
     """{game_id: SCHEDULED kickoff ISO} for a slate, from nfl_team_game_stats.
 
@@ -4562,6 +4595,8 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue
                 if _game_started(cutoffs.get(game_id)):
                     continue   # kicked off — any quote now is an in-play price
+                if _nfl_prop_too_early(kickoffs.get(game_id)):
+                    continue   # > NFL_PROP_MAX_LEAD_HOURS out — waits for a later tick
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
                                               cutoffs.get(game_id))

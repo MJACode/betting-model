@@ -306,10 +306,13 @@ ACTION_THRESHOLDS: dict = {
     "nfl_wind_totals":          {"min_prob": 0.52, "min_edge": 0.03},
     # NFL opener-spread (§28) — the sharp-vs-soft stale-line rule, published by
     # scripts/nfl_wind_publisher.py --opener. The card is the real gate
-    # (|soft − Pinnacle| >= 1.0 in the T-7..T-2 window); model_prob is the
-    # pooled validated ATS (0.5818), so 0.55 floors it and edge >= 0 filters
-    # bets whose quoted juice already eats the whole edge.
-    "nfl_opener_spread":        {"min_prob": 0.52, "min_edge": 0.00},
+    # (|soft − Pinnacle| >= 2.0, nfl/models/opener_spread.DEPLOY_THRESHOLD);
+    # 0.55 MIRRORS it: model_prob_for_dev(2.0) = 0.5557 clears, the 0.5470 a
+    # 1-point deviation carries does not. 2026-09-11 (mike): the 1-point rule
+    # measured -0.03% over 728 bets on bettable books, |dev| >= 2.0 is +3.97%
+    # on 125 (CI spans zero — see the model file). edge >= 0 drops quotes
+    # whose juice already eats the edge.
+    "nfl_opener_spread":        {"min_prob": 0.55, "min_edge": 0.00},
     # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
     # LIVE MLB, re-cut 2026-08-29 (mike) from the settled live record (70 BETs).
     # Sweep over every settled live BET, real DK prices, flat $100:
@@ -1519,9 +1522,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
-    "nfl_opener_spread":        0.52,   # ~breakeven at -110, a sanity floor like wind's. Was 0.55, which
-                                    # was set against a FLAT 0.5818 model prob; once the card began
-                                    # pricing per deviation it silently became an edge filter (§28)
+    "nfl_opener_spread":        0.55,   # mirrors the card's |dev| >= 2.0 (2026-09-11, mike): 0.5557 at
+                                    # 2.0 clears, 0.5470 at 1.0 does not. Was lowered to 0.52 on
+                                    # 2026-08-22, which let the 1-point picks through (§28)
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.58,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
     "mlb_prop_pitcher_hits":     0.54,  # 2026-08-31 (mike): UNPAUSED at 0.54/0.08 on the calibrated sweep = 49-46 +11.0%

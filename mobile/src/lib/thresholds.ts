@@ -148,7 +148,12 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Opener: model_prob is the pooled validated ATS (0.5818) — 0.52 floors it;
   // edge >= 0 drops bets whose quoted juice eats the whole edge.
-  nfl_opener_spread: { min_prob: 0.52, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  // 0.55 mirrors the card's |dev| >= 2.0 gate (#651, 2026-09-11, mike):
+  // model_prob_for_dev(2.0) = 0.5557 clears it, the 0.5470 a 1-point
+  // deviation carries does not. Raised from 0.52 with config in the same
+  // breath -- test_mobile_threshold_parity caught the drift the day it
+  // appeared, which is the whole point of it.
+  nfl_opener_spread: { min_prob: 0.55, min_edge: 0.0, min_odds: -200 },
 
   // NFL props — trained 2026-08-23, ALL PAUSED (see PAUSED_MODELS below).
   // Listed anyway so the offline / first-launch fallback knows their cuts.
