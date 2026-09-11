@@ -1088,20 +1088,29 @@ DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
 # A count trigger would have restated eight days for nothing. settled_at >
 # published_at is the only thing that means "this recap missed a pick".
 #
-# Forward-looking only: recaps published before RESULTS_RESTATE_FROM are not
-# restated automatically (2026-09-04 and 09-05 each carry late NCAAF / UFC
-# picks and remain a manual `publish_results` job, mike's call).
-RESULTS_RESTATE_FROM = "2026-09-10"
+# Recaps published before RESULTS_RESTATE_FROM are never restated
+# automatically. Set to 2026-09-04 (mike, 2026-09-10: "ensure what's there is
+# accurate"): the 09-04 and 09-05 recaps each carry picks that settled after
+# they posted (2 NCAAF; 4 NCAAF + 2 UFC) and are corrected in place, labelled.
+RESULTS_RESTATE_FROM = "2026-09-04"
 RESULTS_RESTATE_LOOKBACK_DAYS = 7
 
 
 def results_restate_note(late: int, prev_settled: int, now_settled: int) -> str:
-    """The correction, stated: what settled late, and what the two counts are."""
+    """The correction, stated: what settled late, and what the two counts are.
+
+    When the two counts differ by more than the late picks, the rest is the
+    action cuts having moved since the recap first posted (the recap query
+    applies the CURRENT cuts) -- and the note says so, because "2 settled
+    late, 56 then, 33 now" without that sentence reads as a contradiction."""
     picks = "pick" if late == 1 else "picks"
-    return (f"Restated. {late} {picks} settled after this recap was first "
-            f"posted ({prev_settled} settled then, {now_settled} now). Same "
-            f"picks, same results \u2014 this is the full day as the record "
-            f"stands now.")
+    note = (f"Restated. {late} {picks} settled after this recap was first "
+            f"posted ({prev_settled} settled then, {now_settled} now).")
+    if now_settled - prev_settled != late:
+        note += (" The rest of the difference is the action cuts, which have "
+                 "moved since; this is the day under the current cuts.")
+    return note + (" Same picks, same results \u2014 this is the full day as "
+                   "the record stands now.")
 
 
 def recaps_needing_restatement(conn, through: str | None = None,

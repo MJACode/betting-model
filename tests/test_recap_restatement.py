@@ -117,7 +117,21 @@ def test_the_note_says_what_settled_late_and_both_counts():
     assert "3 picks settled after" in n
     assert "7 settled then, 10 now" in n
     assert "Same picks, same results" in n
+    assert "action cuts" not in n, "counts that add up need no cut caveat"
     assert "1 pick settled" in dn.results_restate_note(1, 7, 8)
+
+
+def test_the_note_explains_a_count_change_the_late_picks_do_not_account_for():
+    """2026-09-04: 2 picks settled late, but the recap query returns 33 rows
+    today against 56 published, because the cuts moved. Without a sentence
+    for that the note is a contradiction."""
+    n = dn.results_restate_note(2, 56, 33)
+    assert "2 picks settled after" in n and "56 settled then, 33 now" in n
+    assert "action cuts, which have moved since" in n
+
+
+def test_the_floor_covers_the_two_dates_being_corrected():
+    assert dn.RESULTS_RESTATE_FROM <= "2026-09-04"
 
 
 # ── the notifiers ────────────────────────────────────────────────────────────
