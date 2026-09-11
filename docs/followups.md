@@ -21,6 +21,45 @@
 
 ---
 
+## The live price log discards DK's `last_update`, so production cannot tell a fresh quote from a stale one
+
+The 2025 in-play backtest (`docs/thresholds.md`, 2026-09-10) shows the
+shipped cut delivers 66.4% when stale quotes count and 60.9% when only quotes
+whose score has not moved since DK's own `last_update` count; the 37 stale
+bets among the 128 went 30-7. The live loop pairs on fetch-start time
+(`data/ingestors/live_odds_ingestor.py`) and drops the market's `last_update`,
+which is the one field a "score moved since the book repriced" guard needs.
+Add the column to the in-play write (the shared `live_price_log` shape, per
+§1b "assessed against all"), then the guard is a one-line rule and the
+accumulating feed has the same shape as the bought history. Not a model
+update; the guard that USES it is.
+
+## [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
+
+Claimed 0.70–0.75 delivers 67%, 0.75–0.80 66%, over 2,386 out-of-sample
+games (911 and 340 of them contributing to those bands;
+`docs/thresholds.md`, 2026-09-10). The prob floor cannot fix
+a shifted number; a map can. Fitting one and re-sweeping the EV floor on the
+calibrated probability is a model update — mike's call, `Updated-By` on the
+commit. `python -m scripts.inplay_history_backtest --season 2025` reproduces
+the bands.
+
+## Four franchises are filed twice in `games`, and the scores sit on the SBR twin
+
+ARI/AZ, CWS/CHW, OAK/ATH, WSH/WAS: the odds ingestor, the Stats API map and
+every `live` row use the first form; the SBR CSV import files the same game
+under the second, with the final score, while the live row stays unscored
+(2025: 656 unscored live rows, 673 SBR rows). Consequences measured
+2026-09-10: the PBP ingestor skipped every one of their games — **no CWS or
+WSH game in the 2024 training corpus (81 unscored live rows each), 534 of the
+priced 2025 games without plays** — fixed at the read
+(`mlb_pbp_ingestor.mlb_game_final` reads the twin) and the 2025 corpus
+backfilled (613 games, 46,595 plays). NOT fixed: the duplicate rows
+themselves, whatever settles picks on those games, and whether the 2019–2024
+PBP corpora are missing those teams' games too (`--backfill` is idempotent;
+run it per season and count). Retraining on a corpus that now includes them
+is a model update.
+
 ## [x] The calibrated decision never reaches player props — FIXED 2026-09-07
 
 `DECIDE_ON_CALIBRATED_PROB` is on by default and is a **no-op in production**.
