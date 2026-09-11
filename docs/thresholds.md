@@ -538,9 +538,11 @@ mostly phantoms, and the ones that are not are thin.
   out-of-sample sides (2,386 games), then re-sweep EV on the calibrated
   probability.
   That is a model update and needs mike's call (`docs/followups.md`).
-- **Production cannot enforce fresh-only yet**: the live price log stamps
-  fetch-start and discards DK's `last_update`. One column fixes that
-  (`docs/followups.md`).
+- **Production can enforce fresh-only today, and does not.** The MLB
+  in-play rows' `snapshot_at` is already the market's `last_update`
+  (`odds_ingestor._process_events`), so the guard is "skip a candidate whose
+  game state changed after the price's snapshot_at". It is a model-mechanics
+  change, assessed against every live lane (`docs/followups.md`).
 
 Rerun: `python -m scripts.inplay_history_backtest --season 2025 --rebuild`
 (the candidate cache lives in the temp dir; ~8 minutes). Another season is

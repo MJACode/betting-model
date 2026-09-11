@@ -21,18 +21,20 @@
 
 ---
 
-## The live price log discards DK's `last_update`, so production cannot tell a fresh quote from a stale one
+## The live lanes bet on stale quotes: a "score moved since the book repriced" guard
 
 The 2025 in-play backtest (`docs/thresholds.md`, 2026-09-10) shows the
 shipped cut delivers 66.4% when stale quotes count and 60.9% when only quotes
 whose score has not moved since DK's own `last_update` count; the 37 stale
-bets among the 128 went 30-7. The live loop pairs on fetch-start time
-(`data/ingestors/live_odds_ingestor.py`) and drops the market's `last_update`,
-which is the one field a "score moved since the book repriced" guard needs.
-Add the column to the in-play write (the shared `live_price_log` shape, per
-§1b "assessed against all"), then the guard is a one-line rule and the
-accumulating feed has the same shape as the bought history. Not a model
-update; the guard that USES it is.
+bets among the 128 went 30-7 -- the run itself, priced twice. Production has
+what it needs: the MLB in-play rows' `snapshot_at` IS the market's
+`last_update` (`odds_ingestor._process_events`), and the NCAAF/NFL live logs
+stamp the book's timestamp the same way (`live_price_log.rows_from_quote`).
+The guard: when the paired price's `snapshot_at` predates the last change of
+the game's score (from `live_game_state`), skip the candidate. Measured in
+production on 2026-09-09 (the cap test in `docs/thresholds.md`): 57 of 101
+cap-removed candidates were exactly this. A model-mechanics change, one
+shared helper for every live lane, `Updated-By` on the commit.
 
 ## [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 
