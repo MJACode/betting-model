@@ -612,4 +612,6 @@ cut changes the published probability to the honest one and (almost) nothing
 else. The options are in the session's reply; the choice is mike's.
 
 Production's own record on the new artifact (`picks`, BETs graded) is the
-number that supersedes all of this as it accrues.
+number that supersedes all of this as it accrues. Two slates in it is 0
+BETs, with the loop alive (a scorer pass every ~7 s, AVOIDs emitted, the
+quote declined as stale on most passes -- pollers logs, 2026-09-11 01:25Z).
