@@ -3,6 +3,90 @@
 *Measured 2026-09-08. The rule is `models/nfl_prop_market`; the grader is
 `scripts/nfl_prop_two_sharps.py`.*
 
+> **CORRECTED 2026-09-11 — the grader behind every table below was dropping
+> the near-kickoff quotes it claimed to measure.** `scripts/nfl_prop_two_sharps.py`
+> bounded pre-game quotes with `str(snapshot_at) > str(kickoff)`: the snapshot is
+> an ISO string with a `T` separator, the kickoff a pandas Timestamp whose `str()`
+> has a space, and `'T'` sorts after `' '`. So every quote taken on the SAME UTC
+> DATE as the kickoff read as post-kickoff and was silently excluded — which is
+> every Sunday-afternoon game read on Sunday morning, the whole 3-7h band the
+> `open` series is described by. Measured before the fix: **zero** selected bets
+> under 8h, against a series whose lead p10 is 3.1h at every one of 15 books. What
+> the tables below had actually measured as "near kickoff" was night games at ~10h
+> and Sunday games read on **Saturday** at 28-36h. The fix compares timestamps.
+> Corrected numbers are in the section directly below; the original tables are
+> kept underneath, struck through in spirit — read them as "what the buggy
+> grader saw".
+
+## The corrected finding (2026-09-11)
+
+Same rule, same 5pp cut, same one-bet-per-proposition grading, same soft books,
+with the pre-game bound fixed. Session 281.
+
+**Headline, `open` series 2023-25, all games** (`--snapshot open`):
+
+| selection | bets | win% | units | ROI | 90% CI | by season |
+|---|---|---|---|---|---|---|
+| pinnacle | 1,425 | 56.4% | +109.8 | +7.70% | (+3.5, +11.8) | +8.5 / +5.3 / +8.4 |
+| betonlineag | 756 | 55.8% | +73.1 | +9.67% | (+3.7, +15.6) | +2.1 / +11.0 / +17.3 |
+| **either** | **1,990** | **56.0%** | **+155.9** | **+7.84%** | **(+4.3, +11.4)** | **+6.4 / +8.2 / +10.1** |
+| BOTH | 184 | 57.1% | +21.2 | +11.50% | (−0.4, +23.4) | +5.1 / +3.9 / +29.2 |
+| placebo: draftkings + fanduel as the references | 1,086 | 51.6% | +14.7 | +1.35% | (−3.6, +6.3) | −3.6 / −1.0 / +8.1 |
+
+Three times the bets the buggy grader saw (623 → 1,990), a lower ROI (+10.19%
+→ +7.84%), a tighter interval that still excludes zero, every season positive,
+and a retail placebo that fails as it should. **The edge survives the fix and is
+better evidenced than before.** The +9.83% / 648 and +10.75% / 586 figures below
+should not be quoted again.
+
+**The same `open` bets split by the bet's own lead** (`--by-lead`, `either`):
+
+| lead band | which games these are | bets | ROI | 90% CI | seasons |
+|---|---|---|---|---|---|
+| 0-4 h | Sunday 1 pm ET games read Sunday 9:55 am ET | 450 | +2.96% | (−4.6, +10.6) | +5.0 / **−4.5** / +5.7 |
+| **4-8 h** | Sunday 4 pm ET games read Sunday morning | **971** | **+9.30%** | **(+4.2, +14.3)** | **+8.2 / +7.5 / +13.9** |
+| 8-12 h | Thursday / Sunday / Monday night games read that morning | 394 | +5.60% | (−2.4, +13.6) | +1.8 / +13.6 / +2.2 |
+| 12-24 h | — | 2 | thin | | |
+| **24-48 h** | Sunday games read **Saturday** morning; Monday night read Sunday | **173** | **+17.45%** | **(+5.5, +29.2)** | **+9.6 / +26.1 / +23.4** |
+
+The band is a kickoff-slot label as much as a lead-time label, because the
+2023-25 series is one snapshot per game at 13:55 UTC; read it as both.
+
+**The paired offset table, corrected** (`--only-games-with t72`, `either`):
+
+| board | median lead | bets | ROI | 90% CI | seasons |
+|---|---|---|---|---|---|
+| **`open`** | 3-36 h (mass at 3-11 h) | **1,915** | **+7.61%** | **(+3.9, +11.2)** | **+6.0 / +7.7 / +10.5** |
+| `t24` | 24 h | 187 | +2.12% | (−9.9, +14.1) | — / −4.3 / +7.7 |
+| `t48` | 48 h | 1,629 | −0.51% | (−4.4, +3.5) | −5.9 / +0.2 / +6.5 |
+| `t72` | 72 h | 1,030 | +4.52% | (−0.5, +9.5) | +5.1 / +0.2 / +6.5 |
+
+### What it says about the ceiling (mike, 2026-09-11: "Market model window should be tighter then, closer to kickoff to where the real edge lives")
+
+The data does not support tightening. Read the lead bands:
+
+- **The last four hours are the WEAKEST band** — +2.96%, interval spanning zero,
+  2024 negative. By Sunday morning the soft books have caught up to Pinnacle on
+  the 1 pm games; there is less staleness left to sell.
+- **4-8 h is the best-evidenced band** (971 bets, +9.30%, CI clear of zero,
+  every season positive). A 12 h ceiling would keep it; a 4 h ceiling would
+  throw it away and keep the weakest band.
+- **The Saturday-morning read of Sunday games is the strongest band of all**
+  (+17.45% on 173, CI clear of zero, every season positive), and the current
+  24 h ceiling EXCLUDES it. Against that, the separate `t24` series (a backfill
+  at ~24.1 h, i.e. Saturday ~1 pm ET) is only +2.12% on 187 bets across two
+  seasons, and `t48` is flat. So between 24 h and 48 h the evidence is: strong at
+  28-31 h, weak at 24 h, nothing at 48 h — adjacent readings that disagree, on
+  173 and 187 bets. Not resolved.
+
+What this licenses: **do not tighten below 24 h.** Whether to *widen* to 36 h to
+capture the Saturday-morning band is a real question with real evidence on both
+sides, and under the first-signal lock with hourly polling a 36 h ceiling would
+lock Sunday games on Saturday morning, exactly where the +17.45% was measured.
+That is mike's call; nothing was changed.
+
+---
+
 ## The finding
 
 The market-relative rule's edge is **near kickoff**, and the near-kickoff board

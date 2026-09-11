@@ -2016,19 +2016,25 @@ NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "24
 # nfl_prop_market's three at 137.6-179.8h -- five to seven days out, against a
 # measured envelope that ends at 36. Under the §1c first-signal lock those picks
 # are permanent, so the lane was locking its bets at a lead time where nothing
-# has ever been measured positive. The graded numbers at the offsets we DO have:
-# ~7h +10.75%, 24h +5.01%, 48h +0.65%, 72h +4.54% (paired, 5pp cut).
+# has ever been measured positive.
 #
-# 24 rather than 36: 36 is the measured MAXIMUM, and gating there would let the
-# lock happen in the tail of the distribution rather than near its mass. 24 sits
-# inside the envelope, is a natural "game day" boundary, and is a tenth of what
-# the lane was doing. A tighter value (12) is closer to the measured median and
-# costs volume; that trade wants its own measurement, not a guess.
-#
-# NOT MONOTONE, so do not read this as "earlier is always worse": T-72h beats
-# T-48h. What is established is that the ~7h board is the only offset positive
-# in all three seasons with an interval excluding zero, and this keeps the lane
-# near it. Evidence: docs/nfl_prop_offset_evidence.md.
+# CORRECTED 2026-09-11. The offset table this comment used to quote (~7h
+# +10.75%, 24h +5.01%, 48h +0.65%, 72h +4.54%) came from a grader that dropped
+# every quote taken on the kickoff's UTC date -- a 'T' > ' ' string compare --
+# so it had never seen the Sunday-morning reads it described. Re-graded with
+# the bound fixed (either sharp reference, 5pp, one bet per proposition):
+#   open, all games   1,990 bets  +7.84%  (+4.3, +11.4)  3/3 seasons
+#   by the bet's own lead:  0-4h   450  +2.96%  (spans zero, 2024 -4.5%)
+#                           4-8h   971  +9.30%  (+4.2, +14.3) 3/3
+#                           8-12h  394  +5.60%  (spans zero)
+#                          24-48h  173 +17.45%  (+5.5, +29.2) 3/3
+#   paired offsets: open +7.61% / t24 +2.12% / t48 -0.51% / t72 +4.52%
+# The LAST FOUR HOURS ARE THE WEAKEST BAND, and the Saturday-morning read of
+# Sunday games (28-31h) the strongest. So: do not tighten below 24. Whether to
+# widen to 36 to reach the Saturday read is mike's call and is open -- the
+# separate t24 series (Saturday ~1pm ET) reads only +2.12% on 187, so the
+# 24-36h region is not resolved. Evidence: docs/nfl_prop_offset_evidence.md,
+# the correction banner at the top.
 NFL_PROP_MAX_LEAD_HOURS: float = float(
     os.environ.get("NFL_PROP_MAX_LEAD_HOURS", "24"))
 
