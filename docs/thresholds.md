@@ -549,3 +549,53 @@ Rerun: `python -m scripts.inplay_history_backtest --season 2025 --rebuild`
 (the candidate cache lives in the temp dir; ~8 minutes). Another season is
 `mlb_inplay_history --season N --dry-run` first — 2024 would cost about the
 same — then `--fill-times N N`.
+
+### The forward check on fresh quotes, and the calibration map (2026-09-10, mike: "yes to all")
+
+**The 47-slate sweep above was carried by stale quotes.** Production declines
+a quote that predates the current score (`_get_live_dk_odds`,
+`quote_predates_score`); the replay and the sweep never did. With the same
+flag applied to the rebuilt 2026 cache (538 games, 49 slates, dense feed):
+
+| shipped cut 0.72 / 0.14 / 0.32, 2026 | bets | W-L | units | delivers (90% CI) | breakeven |
+|---|---|---|---|---|---|
+| all quotes (what the sweep counted) | 38 | 28-10 | +12.18 | 73.7% [61–84] | 55.7% |
+| **fresh only (what production can take)** | **21** | **12-9** | **+0.77** | **57.1% [40–73]** | 55.3% |
+
+The 17 stale bets went 16-1. On production-faithful quotes the model's 2026
+record at this cut is 21 bets at +3.7%, and 2025's is 92 bets at +9.5% with
+an interval [52–69] against a 55.6% breakeven. The 73.5% never existed.
+
+**The calibration map** (`scripts/live_calibration_sweep.py`): the repo's
+two-parameter Platt fitted on 73,854 fresh 2025 preferred-side quotes,
+a = 0.8578, b = −0.0787; 0.72 → 0.675, 0.80 → 0.752. Fitted on the older
+half it takes the newer half's gap from +2.74pp to −0.19pp: helps AND
+transfers, the two bars `promote()` sets. It has no candidate row (the
+nightly fit sees 0 graded picks for this lane); `promote_external` writes it
+to the promoted columns with its provenance.
+
+**The re-sweep on the calibrated probability, fresh quotes, both seasons**
+(cells with their breakeven; 2025 split 07-01, 2026 split 08-16):
+
+| calibrated cut prob / edge / EV | 2025 fresh | early / late | 2026 fresh (forward) | early / late |
+|---|---|---|---|---|
+| 0.62 / 0.10 / 0.15 | 491 bets, 57.4% [54–61], +5.5%, breakeven 54.5% | 53.6% / 61.8% | 95 bets, 60.0% [52–68], +9.6% | 59.3% / 60.3% |
+| 0.66 / 0.08 / 0.15 | 385 bets, 61.8% [58–66], +8.2%, breakeven 57.1% | 57.7% / 66.9% | 82 bets, 58.5% [49–67], +1.6% | 58.3% / 58.6% |
+| 0.68 / 0.10 / 0.15 | 220 bets, 63.6% [58–69], +9.5%, breakeven 58.2% | 59.3% / 69.1% | 53 bets, 60.4% [49–71], +4.4% | 52.9% / 63.9% |
+| 0.70 / 0.10 / 0.15 | 118 bets, 68.6% [61–75], +15.2%, breakeven 59.8% | 63.8% / 75.5% | 31 bets, 54.8% [40–69], −8.8% | 50.0% / 57.9% |
+| 0.70 / 0.12 / 0.20 | 77 bets, 71.4% [62–79], +22.1%, breakeven 58.6% | 67.4% / 76.5% | 20 bets, 45.0% [28–63], −22.5% | 42.9% / 46.2% |
+
+**No cell is a plateau that clears breakeven in both halves of both seasons.**
+The 2025 early half sits at or under breakeven at every floor below 0.68; the
+tighter cells that look best on 2025 are negative on 2026 at n ≤ 31. The one
+cell positive in every split is the loosest, 0.62 / 0.10 / 0.15, at +5.5% and
++9.6% — thin, and its 2025 early half is −1.3%.
+
+**The cut that reproduces today's decisions on the calibrated number** is
+prob 0.675 / edge 0.08 / EV 0.24: 125 of 2025's 128 raw-cut bets and 36 of
+2026's 38, 11 and 4 differing at the boundary. Promoting the map with that
+cut changes the published probability to the honest one and (almost) nothing
+else. The options are in the session's reply; the choice is mike's.
+
+Production's own record on the new artifact (`picks`, BETs graded) is the
+number that supersedes all of this as it accrues.

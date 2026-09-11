@@ -142,20 +142,40 @@ def main() -> None:
           probs, edges, evs)
     table(cal_all, "=== 2025, ALL quotes, CALIBRATED probability ===", probs, edges, evs)
 
+    # The cells the cut is chosen from: 2025 FRESH, calibrated, with the
+    # breakeven, the interval and the time split summarise() prints -- short()
+    # hides all three, and at edge floors of 0.06-0.10 the admitted bets are
+    # heavier favourites with a higher breakeven.
+    CELLS = ((0.62, 0.10, 0.15), (0.64, 0.10, 0.15), (0.66, 0.08, 0.15),
+             (0.66, 0.10, 0.15), (0.68, 0.10, 0.15), (0.70, 0.10, 0.15),
+             (0.70, 0.12, 0.20))
+    print("\n=== 2025 FRESH, calibrated: candidate cells (all / early / late) ===")
+    for p_, e_, ev_ in CELLS:
+        r = sweep.cell(cal_fresh, p_, e_, ev_)
+        print(f"  {p_:.2f}/{e_:.2f}/{ev_:.2f}")
+        for k in ("all", "early", "late"):
+            print(f"      {k:5s} {sweep.summarise(r[k])}")
+
     if args.cache_2026:
         d26 = pickle.load(open(args.cache_2026, "rb"))
         g26 = d26["games"]
-        print(f"\n2026 cache: artifact {d26.get('artifact_version')}, {len(g26)} games (dense feed, out of sample for the map)")
+        has_flag = any("runs_moved" in c for g in g26 for c in g["cands"][:1])
+        print(f"\n2026 cache: artifact {d26.get('artifact_version')}, {len(g26)} games, "
+              f"{len({g['game']['game_date'] for g in g26})} slates (dense feed, out of sample "
+              f"for the map); stale flag {'present' if has_flag else 'ABSENT'}")
         sweep.SPLIT = "2026-08-16"
+        fresh26 = [{**g, "cands": [c for c in g["cands"] if c.get("runs_moved") == 0]} for g in g26]
         print("raw, shipped cut 0.72/0.14/0.32:")
-        for k, v in sweep.cell(g26, 0.72, 0.14, 0.32).items():
-            print(f"  {k:5s} {sweep.summarise(v)}")
-        cal26 = recalibrate(g26, params)
-        table(cal26, "=== 2026 (47 slates), CALIBRATED probability, 2025 map ===", probs, edges, evs)
-        print("\n2026 calibrated, selected cells, early/late:")
-        for p, e, ev in ((0.62, 0.10, 0.15), (0.64, 0.10, 0.15), (0.64, 0.12, 0.15), (0.66, 0.10, 0.15), (0.66, 0.12, 0.20)):
-            r = sweep.cell(cal26, p, e, ev)
-            print(f"  {p:.2f}/{e:.2f}/{ev:.2f}: " + " | ".join(f"{k} {sweep.summarise(r[k])}" for k in ("all", "early", "late")))
+        for label, gs in (("all quotes", g26), ("fresh only", fresh26)):
+            r = sweep.cell(gs, 0.72, 0.14, 0.32)
+            print(f"  {label}: " + " | ".join(f"{k} {sweep.summarise(r[k])}" for k in ("all", "early", "late")))
+        cal26 = recalibrate(fresh26, params)
+        print("\n=== 2026 FRESH, calibrated with the 2025 map: the same cells (forward check) ===")
+        for p_, e_, ev_ in CELLS:
+            r = sweep.cell(cal26, p_, e_, ev_)
+            print(f"  {p_:.2f}/{e_:.2f}/{ev_:.2f}")
+            for k in ("all", "early", "late"):
+                print(f"      {k:5s} {sweep.summarise(r[k])}")
 
 
 if __name__ == "__main__":

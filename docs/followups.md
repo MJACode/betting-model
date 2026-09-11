@@ -37,13 +37,19 @@ so the two never diverge again; a test that a stale pair is dropped.
 
 ## [ ] [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 
-Claimed 0.70–0.75 delivers 67%, 0.75–0.80 66%, over 2,386 out-of-sample
-games (911 and 340 of them contributing to those bands;
-`docs/thresholds.md`, 2026-09-10). The prob floor cannot fix
-a shifted number; a map can. Fitting one and re-sweeping the EV floor on the
-calibrated probability is a model update — mike's call, `Updated-By` on the
-commit. `python -m scripts.inplay_history_backtest --season 2025` reproduces
-the bands.
+Fitted and measured 2026-09-10 (`scripts/live_calibration_sweep.py`,
+`docs/thresholds.md` "The forward check on fresh quotes"): a = 0.8578,
+b = −0.0787, helps and transfers on the 2025 date split. The re-sweep on the
+calibrated probability finds NO cell that clears breakeven in both halves of
+both seasons on fresh quotes; the shipped cut's own fresh record is 92 bets
+at +9.5% (2025) and 21 at +3.7% (2026). `promote_external` is in place; the
+cut to promote it with is mike's call (the three options are in the
+2026-09-10 session entry). Landing order: promote the map first (the lane
+goes quiet at 0.675 < 0.72), then the config change; a running loop picks
+the map up at its next start (`_CAL_CACHE` is per process, the supervisor
+restarts it every 10 minutes); the app's action filter compares the RAW
+probability against `min_prob`, which is looser than the decision path when
+the cut is on the calibrated scale, so no BET is hidden.
 
 ## [ ] Four franchises are filed twice in `games`, and the scores sit on the SBR twin
 
