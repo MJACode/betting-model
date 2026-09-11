@@ -21,20 +21,19 @@
 
 ---
 
-## The live lanes bet on stale quotes: a "score moved since the book repriced" guard
+## The replay and the cut sweep pair quotes without production's stale-quote guard
 
-The 2025 in-play backtest (`docs/thresholds.md`, 2026-09-10) shows the
-shipped cut delivers 66.4% when stale quotes count and 60.9% when only quotes
-whose score has not moved since DK's own `last_update` count; the 37 stale
-bets among the 128 went 30-7 -- the run itself, priced twice. Production has
-what it needs: the MLB in-play rows' `snapshot_at` IS the market's
-`last_update` (`odds_ingestor._process_events`), and the NCAAF/NFL live logs
-stamp the book's timestamp the same way (`live_price_log.rows_from_quote`).
-The guard: when the paired price's `snapshot_at` predates the last change of
-the game's score (from `live_game_state`), skip the candidate. Measured in
-production on 2026-09-09 (the cap test in `docs/thresholds.md`): 57 of 101
-cap-removed candidates were exactly this. A model-mechanics change, one
-shared helper for every live lane, `Updated-By` on the commit.
+Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
+in-play quote whose `snapshot_at` (the market's own `last_update`) predates
+the first sight of the game's current score (`_score_changed_at`,
+`data/live_quote_guard.quote_predates_score`, tolerance 0). The REPLAY and
+the cut sweep (`scripts/live_inning_gate_replay._pair`) pair the newest price
+at or before each state with only the age bound, so their "all quotes" grids
+count bets production would have declined -- on 2025, 37 of the shipped
+cut's 128 bets, 30-7. The sweep cache now carries `runs_moved` (the state at
+the price's snapshot_at vs the candidate state), and a sweep read for
+production is the FRESH-only grid. `_pair` itself should apply the same rule
+so the two never diverge again; a test that a stale pair is dropped.
 
 ## [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 

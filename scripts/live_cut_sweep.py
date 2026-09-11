@@ -46,6 +46,12 @@ from models.trainer import load_model
 from scripts.live_inning_gate_replay import (
     MODEL_ID, _games, _states, _prices, _pair, _implied, _grade)
 
+def _ts(v) -> float:
+    from datetime import datetime, timezone
+    d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
+
+
 SINCE = "2026-08-29"
 SPLIT = "2026-09-04"      # early / late halves, per CLAUDE.md 7
 # tempdir, NOT data/local: that directory is committed, and a 500-game
@@ -77,6 +83,21 @@ def build_cache():
                 row = build_live_state_row(state, pre, MODEL_ID)
                 if row is None:
                     continue
+                # Stale-quote flag, the shape cap_stale_test measured: the
+                # state nearest (at or before) the price's snapshot_at vs the
+                # candidate state. runs_moved > 0 means the book had not
+                # repriced a run the state already shows.
+                t_price = _ts(price["snapshot_at"])
+                at_price = None
+                for s_ in states:
+                    if _ts(s_["snapshot_at"]) <= t_price:
+                        at_price = s_
+                    else:
+                        break
+                runs_moved = None
+                if at_price is not None:
+                    runs_moved = (int(state["home_score"]) + int(state["away_score"])
+                                  - int(at_price["home_score"]) - int(at_price["away_score"]))
                 x = np.array([[np.nan if row.get(c) is None else float(row[c])
                                for c in cols]], dtype=float)
                 lam = float(np.clip(clf.predict(x)[0], 1e-6, None))
@@ -95,7 +116,8 @@ def build_cache():
                                   "edge": prob - imp, "ev": expected_value(prob, odds),
                                   "line": float(price["total_line"]),
                                   "inning": state.get("inning"),
-                                  "snapshot_at": str(state["snapshot_at"])})
+                                  "snapshot_at": str(state["snapshot_at"]),
+                                  "runs_moved": runs_moved})
             games.append({"game": g, "cands": cands})
             if len(games) % 20 == 0:
                 print(f"  cached {len(games)} games", flush=True)
@@ -107,9 +129,15 @@ def build_cache():
 
 
 def decide(cands, min_prob, min_edge, min_ev):
-    """First candidate that production would call BET, in time order."""
+    """First candidate that production would call BET, in time order.
+
+    The cap is applied to the RAW edge, as classify_live_signal does (it caps
+    before it maps): a recalibrated candidate carries `raw_edge` beside the
+    edge the floors read. Without that, a calibrated sweep admits raw edges up
+    to ~0.245 that production drops.
+    """
     for c in cands:
-        if abs(c["edge"]) > LIVE_MAX_EDGE_CAP:
+        if abs(c.get("raw_edge", c["edge"])) > LIVE_MAX_EDGE_CAP:
             continue
         if c["edge"] >= min_edge and c["prob"] >= min_prob:
             if c["ev"] is not None and c["ev"] < min_ev:
