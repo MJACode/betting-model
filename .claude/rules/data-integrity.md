@@ -132,6 +132,14 @@ Every one of these is a way a number can be wrong while looking right.
   `_mean_calibration_error` averages bins unweighted and across the whole
   probability range, so a 10pp error in the small band that gets bet is diluted
   by the large well-calibrated band near 0.5. Use `cal_error_actionable`.
+- **A MISSING FEATURE AT SCORE TIME IS NOT 0.0.** The prop trainers drop every
+  incomplete training row, so no prop model has ever seen a null; a scorer
+  that fills one with 0.0 is handing the trees a VALUE — a 0°F game, a 0%
+  strikeout rate, a 0 mph fastball. On 2026-09-10 a game with no weather row
+  priced two picks at 0°F (session 278). `models.scorer.prop_feature_matrix`
+  drops the row for this pass instead and logs who and why; the only imputed
+  features are the ones named in `PROP_IMPUTED_FEATURES`, each with a reason.
+  A new prop scorer goes through that helper, not its own fill.
 - **A stat that is always NULL deletes the training matrix.** One sparse column
   plus `dropna` silently drops most rows. Check population before adding a
   feature.

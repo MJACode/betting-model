@@ -1145,7 +1145,10 @@ def train_prop_model(model_id: str,
         feature_cols     = NFL_PROP_FEATURE_MAP[model_id]
         _build_prop_data = build_nfl_prop_training_dataset
     else:
-        feature_cols     = PROP_FEATURE_MAP[model_id]
+        # PROP_FEATURE_MAP minus PENDING_RETRAIN_DROP_FEATURES: the artifact
+        # this run writes must not list a feature the training matrix lacks.
+        from features.prop_feature_engine import training_feature_cols
+        feature_cols     = training_feature_cols(model_id)
         _build_prop_data = build_prop_training_dataset
 
     train_seasons  = train_seasons  or sport_cfg["train_seasons"]

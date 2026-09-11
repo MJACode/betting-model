@@ -149,6 +149,36 @@ other 16 of 43 name only the home team) once, whole-word. Verified on the
 worker's 22:30 UTC pass: 27 corrected, 0 still wrong. The Discord and
 app posts that already went out under the wrong name are not rewritten.
 
+## [x] MLB prop scorers price a game with no weather row as a 0°F game — FIXED 2026-09-10 (session 278; mike: the two picks stand, not voided)
+
+Found 2026-09-10 (session 278) on the Gilbert / deGrom Under 6.5 K picks:
+`build_pitcher_scoring_rows` leaves `temp_f` None when `game_weather` has no
+row, and the scorer's `np.nan_to_num(..., nan=0.0)` turns that into a literal
+0°F. Training rows 2019-2025 all carry weather (p01 ≈ 21-39°F), so the trees
+read 0 as the coldest game ever seen and cut ~0.8 K off lambda. Reproduced to
+four decimals. Two ways a game arrives with no row:
+
+1. **The look-ahead pass** (`step_prop_scoring`, `GAME_SCORE_AHEAD_DAYS=7`)
+   scores tomorrow, but `step_weather` fetches `run_date` only. The
+   first-signal lock then keeps the evening pick over the 6am re-score.
+2. **Same-day games that never get a row:** 814 of 3,971 2026 starts, skewed
+   to OAK, LAA, ARI, MIL, SEA, KC, SF, COL, SD, HOU, LAD, MIN home games
+   (West Coast / late starts). 72 pitcher-K BETs sit on those games. Cause
+   not diagnosed.
+
+The same builder and fill feed `pitcher_hits`, `pitcher_er`, `batter_tb`,
+`batter_hr`; not measured.
+
+**Fix shape, three parts:** (a) fetch forecast weather for every look-ahead
+date, correcting `_fetch_open_meteo`'s `forecast_days = min(days_old + 2, 16)`
+(tested: `forecast_days=1` returns only today for a future date; 3 covers
+tomorrow); (b) SKIP a pitcher / batter whose game has no weather row rather
+than zero-fill, and log it; (c) diagnose why late-start venues get no row.
+Decision needed: whether the 09-10 Gilbert / deGrom picks are VOIDed under
+§1c (deGrom is a dead-zone NONE at the real temperature; Gilbert stays a BET
+at 0.62 / edge 0.0801). `void_picks.py` refuses a graded pick, so the option
+closes at the next settle pass.
+
 ## [ ] Three phantom MLB `games` rows from April (RELABELLED 2026-09-07), and one unscored real one
 
 Session 253 (2026-09-07). `MLB_2026-04-16_NYM_LAD`, `MLB_2026-04-17_SEA_SD`

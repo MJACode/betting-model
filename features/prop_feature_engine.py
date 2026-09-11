@@ -96,7 +96,9 @@ PROP_PITCHER_K_FEATURES = [
     # Ballpark / environment
     "is_dome_game",       # 1 = dome (neutralises wind/temp effects)
     "temp_f",             # game-time temperature (cold suppresses velocity/movement)
-    # Umpire
+    # Umpire. Unknown before MLB posts it (usually mid-day): the scorer imputes
+    # 0.0 = a league-average umpire, BY NAME (models.scorer.PROP_IMPUTED_FEATURES).
+    # Every other feature here is required -- a row missing one is not scored.
     "ump_k_plus_minus",   # HP umpire career avg starter Ks minus league avg (Ks/game delta)
 ]
 
@@ -338,6 +340,33 @@ PENDING_RETRAIN_FEATURES: dict[str, list[str]] = {
     "mlb_prop_batter_runs":  ["opp_starter_k_pct", "opp_starter_xera"],
     "mlb_prop_batter_walks": ["opp_starter_bb_pct", "opp_starter_whiff_pct"],
 }
+
+# Features that LEAVE a model at its next retrain. Decided 2026-09-10 (session
+# 276, mike). A BET locks at its first signal -- the evening look-ahead pass or
+# the first same-day pass -- and both run before MLB posts the home-plate
+# umpire, so at the moment a bet is made the umpire feature is ALWAYS the
+# imputed league-average 0.0 (models.scorer.PROP_IMPUTED_FEATURES), while
+# every training row carried the real value. Making training match production
+# would mean imputing 0.0 for every training row, which is dropping it. It
+# never carried signal either: 3.6% importance on the live artifact, and the
+# v2 note in docs/sports/mlb.md ("did NOT appear in top features").
+#
+# Training-path only. The live artifacts still list these columns and the
+# scorer reads feature_cols from the artifact, so PROP_FEATURE_MAP (which the
+# SCORING row builder filters on) keeps them until the retrained .pkl is
+# committed. `python -m models.trainer --model <id>` picks the drop up by
+# itself; the retrain is a model update: Updated-By: <person>.
+PENDING_RETRAIN_DROP_FEATURES: dict[str, list[str]] = {
+    "mlb_prop_pitcher_k":     ["ump_k_plus_minus"],
+    "mlb_prop_pitcher_walks": ["ump_bb_plus_minus"],
+}
+
+
+def training_feature_cols(model_id: str) -> list[str]:
+    """The feature list a RETRAIN uses: PROP_FEATURE_MAP minus the pending drops."""
+    drop = set(PENDING_RETRAIN_DROP_FEATURES.get(model_id, []))
+    return [c for c in PROP_FEATURE_MAP[model_id] if c not in drop]
+
 
 PROP_FEATURE_MAP: dict[str, list[str]] = {
     "mlb_prop_pitcher_k":     PROP_PITCHER_K_FEATURES,
@@ -895,7 +924,11 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
     if model_id not in PROP_FEATURE_MAP:
         raise NotImplementedError(f"No feature map defined for {model_id}")
 
-    feature_cols = PROP_FEATURE_MAP[model_id]
+    feature_cols = training_feature_cols(model_id)
+    dropped_cols = [c for c in PROP_FEATURE_MAP[model_id] if c not in feature_cols]
+    if dropped_cols:
+        logger.info(f"  {model_id}: training WITHOUT {dropped_cols} "
+                    f"(PENDING_RETRAIN_DROP_FEATURES)")
 
     _PITCHER_MODELS = (
         'mlb_prop_pitcher_k', 'mlb_prop_pitcher_hits', 'mlb_prop_pitcher_er',
