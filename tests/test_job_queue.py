@@ -722,3 +722,16 @@ def test_the_publish_key_backfill_is_registered_and_applies():
     finally:
         bpk.run = orig
     assert seen == [True], "the job must APPLY, a dry run on the worker helps nobody"
+
+
+def test_the_publish_key_backfill_never_rekeys_onto_a_taken_key():
+    """Job 47297 (2026-09-09) failed 3/3: capture had already written the
+    NEW-key opening_signals row for seven propositions whose OLD-key row was
+    still there, so the re-key UPDATE hit UNIQUE(lock_key) and rolled the
+    whole run back, live-key ledger row included. Both the report query and
+    the UPDATE must guard on the new key being free."""
+    from pathlib import Path
+    src = (Path(__file__).parent.parent / "scripts" / "backfill_publish_keys.py").read_text(encoding="utf-8")
+    update = src[src.index("UPDATE opening_signals os"):]
+    update = update[:update.index('"""')]
+    assert "NOT EXISTS" in update and "n.lock_key = o.new_key" in update

@@ -219,11 +219,16 @@ def test_config_pauses_still_work_through_the_same_helper():
 
 
 def test_every_pause_check_in_the_scorer_goes_through_the_helper():
-    """Three call sites downgrade BET -> NONE. One left reading PAUSED_MODELS
+    """Two call sites downgrade BET -> NONE: scorer._decide, which both
+    pre-game builders route through since 2026-09-09 (it was one site per
+    builder before), and the live path. One left reading PAUSED_MODELS
     directly is a lane the auto-pause silently does not cover."""
     src = (config.ROOT / "models" / "scorer.py").read_text(encoding="utf-8")
     assert 'model_id in PAUSED_MODELS and signal_type' not in src
-    assert src.count('_is_paused(model_id) and signal_type == "BET"') == 3
+    assert src.count('_is_paused(model_id) and signal_type == "BET"') == 2
+    for fn in ("def _make_pick(", "def _make_prop_pick("):
+        body = src.split(fn)[1].split("\ndef ")[0]
+        assert "_decide(" in body, f"{fn} no longer routes through _decide"
 
 
 def test_an_unreadable_pause_table_fails_open():

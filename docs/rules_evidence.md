@@ -861,3 +861,38 @@ After applying, `v_public_track_record` showed `nfl_wind_totals` at **0 picks,
 **The line the tool will not cross:** `scripts/void_picks.py` refuses a pick
 already graded WIN / LOSS / PUSH. Voiding one of those is rewriting a settled
 result, not correcting a bug, and nothing in §1c permits it.
+
+## The best bettable price decides (2026-09-09)
+
+**Rule (CLAUDE.md §6):** a pre-game pick is decided, sized and settled at the
+best bettable price at the DraftKings line, recorded as `picks.decision_*`;
+DraftKings stays the reference (the line, training, CLV).
+
+**The instruction.** mike, 2026-09-09: *"we should remove DK only - we want
+best lines for us regardless."* Stage 2 of `docs/best_line.md` had been
+authorised on 2026-09-03 ("stage 2 go") behind a re-sweep gate; the
+"regardless" lifted the gate.
+
+**What was measured before the flip.**
+
+| measurement | query / script | result |
+|---|---|---|
+| how much cheaper the best price is | 69 clean-window BETs since 08-31 (2026-09-02) | 0.68pp implied on average, 3.61pp at most |
+| any cut shippable on best-price edge | `scripts/best_line_threshold_sweep.py`, 2026-09-09, 12 days, 25+ settled per cell | none: every candidate fails the time split or the volume gate |
+| the same picks paid at the best price | same sweep, `same @best` column | 0 to +7.8pp of ROI, typically under a point |
+| how far the books lag DraftKings | 31 game-markets, 13 books, 2026-09-09 slate | median 0.0–1.5 min, max 4.3 min (`BEST_LINE_MAX_LAG_MIN` = 30) |
+| BETs whose best price was not DraftKings | 377 BETs since 08-28 with a best price | 192 |
+
+**What it changed and did not.** No cut moved. The DraftKings columns keep
+their meaning; every reader `COALESCE`s `decision_x` to `dk_x`, exact for the
+161,781 pre-flip rows (no backfill: the audit trigger fires on UPDATE). The
+matview rebuild with decision columns changed nothing numerically:
+`v_model_full_outcome_record` was identical row for row before and after the
+migration (20 rows, 0 differing), because every existing row was decided at
+DraftKings.
+
+**The leak this reopened, and closed.** The best-price lookups had no pre-game
+cutoff bound and the prop one did not exclude in-play rows — harmless while the
+price was display-only, and the exact 46-BET / -11.18u leak of
+`_latest_dk_prop_row`'s docstring the moment that price decides. Both are
+bounded now, like the DraftKings reads (`tests/test_decide_on_best_price.py`).

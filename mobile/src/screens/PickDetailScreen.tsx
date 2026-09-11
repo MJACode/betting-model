@@ -54,6 +54,7 @@ import { isModelRetired, isProbOnlyModel, type KellySizingOpts, isUnlockedPrevie
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
+import { decisionOdds } from '@/lib/decisionPrice';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -173,17 +174,16 @@ function PickDetailContent({
             quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
               ? ` (line ${quote.line})`
               : ''
-          } · the price this pick was modeled at`;
+          } · the price this pick was decided at`;
 
   // The best price we found across every book the odds feed carries, recorded
-  // on the pick when it was scored. Shown only when it genuinely beats the
-  // price the pick was measured at — otherwise it just restates the header.
-  // This is where the bettor should place it; the BET/AVOID call, the edge and
-  // the stake are still measured against DraftKings (see config.BEST_LINE_BOOKMAKERS).
+  // on the pick when it was scored. Since 2026-09-09 that price is also the one
+  // the pick was DECIDED at, so this line only appears on rows from before the
+  // flip, where the header still shows the DraftKings price the pick was cut on.
   const bestLine =
     pick.best_book != null &&
     pick.best_odds != null &&
-    (pick.dk_odds == null || Number(pick.best_odds) !== Number(pick.dk_odds))
+    (decisionOdds(pick) == null || Number(pick.best_odds) !== Number(decisionOdds(pick)))
       ? `Best price ${formatAmerican(Number(pick.best_odds))} at ${bookName(pick.best_book)}` +
         (pick.best_edge != null ? ` · ${formatPctSigned(Number(pick.best_edge))} edge there` : '')
       : null;
@@ -525,7 +525,7 @@ function ClvCard({ pick }: { pick: Pick }) {
 
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Signal line</Text>
+          <Text style={styles.clvRowLabel}>Signal line (DK)</Text>
           <Text style={styles.clvRowValue}>
             {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.dk_odds)}
@@ -534,7 +534,7 @@ function ClvCard({ pick }: { pick: Pick }) {
       ) : null}
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Closing line</Text>
+          <Text style={styles.clvRowLabel}>Closing line (DK)</Text>
           <Text style={styles.clvRowValue}>
             {formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.closing_dk_odds)}
@@ -542,7 +542,7 @@ function ClvCard({ pick }: { pick: Pick }) {
         </View>
       ) : (
         <Text style={styles.infoBody}>
-          Bet {formatAmerican(pick.dk_odds)} → Close {formatAmerican(pick.closing_dk_odds)}
+          DK {formatAmerican(pick.dk_odds)} at signal → DK {formatAmerican(pick.closing_dk_odds)} at close
         </Text>
       )}
 

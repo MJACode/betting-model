@@ -575,6 +575,36 @@ def test_the_date_renders_on_this_machine():
          "by_sport": []}, "2026-09-02").startswith("\U0001F4CA Sep 2 results:")
 
 
+def test_the_tweet_carries_the_days_clv_line_like_the_embed():
+    """2026-09-10: the 09-09 recap was re-posted once the missing NFL CLV had
+    been captured. Discord's embed changed (it shows CLV); the tweet did not,
+    and X refused it: 403 "duplicate content". The tweet now states the
+    day's beat-the-close share with its denominator, the embed's exact string."""
+    text = xp.render_results(
+        {"wins": 5, "losses": 5, "pushes": 0, "units": -0.537, "risked": 11.16,
+         "clv": "38% beat close (3/8)",
+         "by_sport": [{"sport": "MLB", "wins": 3, "losses": 4, "pushes": 0},
+                      {"sport": "NFL", "wins": 2, "losses": 1, "pushes": 0}]},
+        "2026-09-09")
+    assert "38% beat close (3/8)" in text
+    assert text.index("NFL 2-1") < text.index("38% beat close") < text.index("#")
+    assert len(text) <= xp.MAX_TWEET
+
+
+def test_a_day_with_nothing_graded_carries_no_clv_line():
+    text = xp.render_results(
+        {"wins": 1, "losses": 0, "pushes": 0, "units": 1.0, "risked": 1.1,
+         "clv": "", "by_sport": []}, "2026-09-02")
+    assert "beat close" not in text
+    assert "\n\n" not in text, "an empty CLV must not leave a blank line"
+
+
+def test_notify_x_results_passes_the_embeds_clv_string():
+    import inspect
+    src = inspect.getsource(xp.notify_x_results)
+    assert '"clv": clv_line(t)' in src
+
+
 def test_the_per_sport_split_is_not_permanently_empty():
     """`by_sport` was passed [] on every call, so this branch was dead code."""
     import inspect

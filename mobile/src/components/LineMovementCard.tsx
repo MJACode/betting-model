@@ -1,20 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican, formatGameTimeET } from '@/lib/format';
-import {
-  computeMovement,
-  formatSideLine,
-  gameMarketForModel,
-  isNflLineOnly,
-  lineForSide,
-  lineFromSnapshot,
-  priceForSide,
-  propMarketForModel,
-  type PricedSnapshot,
-} from '@/lib/markets';
+import { computeMovement, formatSideLine, gameMarketForModel, isNflLineOnly, lineForSide, lineFromSnapshot, priceForSide, propMarketForModel, type PricedSnapshot, MODEL_BOOK, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
+import { decisionOdds } from '@/lib/decisionPrice';
 
 interface Props {
   pick: Pick;
@@ -143,7 +134,8 @@ export function LineMovementCard({ pick, playerName }: Props) {
             `${formatAmerican(pick.dk_odds)} (the book is named in the pick). The table shows ` +
             `DraftKings' line since, as the market reference. It doesn't change the pick or how ` +
             `it settles.`
-          : `Your pick is locked at the price we scored it — ${formatAmerican(pick.dk_odds)}` +
+          : `Your pick was scored against DraftKings at ${formatAmerican(pick.dk_odds)}` +
+            `${storedQuoteBook(pick) !== MODEL_BOOK ? ` and decided at ${bookName(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` : ''}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
             `This just shows how DK's line has moved since, for or against you. It doesn't ` +
             `change the pick or how it settles.`}

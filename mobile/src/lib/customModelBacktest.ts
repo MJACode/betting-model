@@ -64,6 +64,11 @@ export interface CustomBacktestPickRow {
   dk_odds: number | null;
   result: 'WIN' | 'LOSS' | 'PUSH';
   profit_units: number | null;
+  // The price the pick was DECIDED at (2026-09-09): the RPC cuts, filters
+  // and grades at it (decide_on_best_price_2026_09_09.sql).
+  decision_book: string | null;
+  decision_odds: number | null;
+  decision_edge: number | null;
 }
 
 /** One graded pick for display, whichever half it came from. profit_flat is at

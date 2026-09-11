@@ -315,7 +315,7 @@ def _publish_price(pick: dict) -> tuple[float | None, str | None]:
     return best, _BOOK_DISPLAY.get(book, book)
 
 
-def render_results(recap: dict, game_date: str) -> str:
+def render_results(recap: dict, game_date: str, restate: bool = False) -> str:
     """The settled day, in one tweet. Numbers only — the record is the pitch.
 
     THE HEADLINE MUST MATCH THE DISCORD RECAP EXACTLY. mike, 2026-09-02:
@@ -343,7 +343,17 @@ def render_results(recap: dict, game_date: str) -> str:
         tally = f"{rec}, {units:+.2f}u, {units / risked * 100:+.1f}% ROI"
     else:
         tally = f"{rec}, record only"
-    lines = [f"\U0001F4CA {pretty} results: {tally}"]
+    # "(restated)" when a late settlement invalidated the tweet before it --
+    # the embed says "restated" in its title; the two must agree.
+    head = f"{pretty} results (restated)" if restate else f"{pretty} results"
+    lines = [f"\U0001F4CA {head}: {tally}"]
+    # The day's closing-line figure, exactly as the embed states it -- share
+    # of graded bets that beat the close, WITH its denominator (discord_notifier
+    # .clv_line renders both surfaces). Added 2026-09-10: the tweet carried no
+    # CLV, so when the 09-09 recap was re-posted with the NFL CLV that had
+    # been missing, X refused the tweet as duplicate content -- byte-identical
+    # to the one before it. An empty string when nothing was graded.
+    clv = (recap.get("clv") or "").strip()
     by_sport = recap.get("by_sport") or []
     if by_sport:
         parts = [f"{s['sport']} {s['wins']}-{s['losses']}"
@@ -356,7 +366,8 @@ def render_results(recap: dict, game_date: str) -> str:
         # characters genuinely run out, and then it says how many (mike,
         # 2026-09-02, choosing the embed's ordering over most-bets-first).
         tags = hashtags_for(None)
-        room = MAX_TWEET - len(lines[0]) - len(tags) - 2      # two newlines
+        room = (MAX_TWEET - len(lines[0]) - len(tags) - 2      # two newlines
+                - (len(clv) + 1 if clv else 0))                 # its newline
         split = ""
         for k in range(len(parts), 0, -1):
             dropped = len(parts) - k
@@ -364,6 +375,8 @@ def render_results(recap: dict, game_date: str) -> str:
             if len(split) <= room:
                 break
         lines.append(split)
+    if clv:
+        lines.append(clv)
     lines.append(hashtags_for(None))
     text = "\n".join(x for x in lines if x)
     _assert_no_link(text)
@@ -544,7 +557,8 @@ def notify_x_free_pick(target_date: str | None = None,
         conn.close()
 
 
-def notify_x_results(game_date: str, dry_run: bool = False) -> int:
+def notify_x_results(game_date: str, dry_run: bool = False,
+                     restate: dict | None = None) -> int:
     """Tweet the settled day. Ledgered per date, and ONLY for a day that is over.
 
     THE DAY-IS-OVER GUARD IS THE WHOLE POINT OF THIS FUNCTION'S TIMING, and it
@@ -576,12 +590,18 @@ def notify_x_results(game_date: str, dry_run: bool = False) -> int:
     if game_date >= datetime.now(ET).date().isoformat():
         return 0
     from data.db import get_connection
-    from tracking.discord_notifier import _settled_rows, _tally
+    from tracking.discord_notifier import (_settled_rows, _tally, clv_line,
+                                           restate_lock_key)
 
-    lock = f"x_results:{game_date}"
+    # A restatement (recaps_needing_restatement's dict) rides its own ledger
+    # kind, keyed on the published_at of the recap it corrects -- the same
+    # key shape Discord uses, so the two surfaces fire on the same batch.
+    kind = "x_results_restate" if restate else "x_results"
+    lock = (restate_lock_key(kind, game_date, restate["published_at"])
+            if restate else f"x_results:{game_date}")
     conn = get_connection()
     try:
-        if _already_sent(conn, lock, "x_results"):
+        if _already_sent(conn, lock, kind):
             return 0
         rows = _settled_rows(conn, game_date)
         if not rows:
@@ -601,6 +621,8 @@ def notify_x_results(game_date: str, dry_run: bool = False) -> int:
         recap = {
             "wins": t["w"], "losses": t["l"], "pushes": t["p"],
             "units": t["units"], "risked": t["risked"],
+            # The same string the embed's headline carries.
+            "clv": clv_line(t),
             "by_sport": [
                 {"sport": sport, "wins": g["w"], "losses": g["l"],
                  "pushes": g["p"]}
@@ -608,11 +630,13 @@ def notify_x_results(game_date: str, dry_run: bool = False) -> int:
                 for g in (_tally(group),)
             ],
         }
-        tweet_id = post_tweet(render_results(recap, game_date), dry_run=dry_run)
+        tweet_id = post_tweet(render_results(recap, game_date,
+                                             restate=bool(restate)),
+                              dry_run=dry_run)
         if not tweet_id:
             return 0
         if not dry_run:
-            _ledger(conn, lock, "x_results", tweet_id)
+            _ledger(conn, lock, kind, tweet_id)
         logger.info(f"X: results tweeted ({tweet_id})")
         return 1
     except Exception as exc:                                  # noqa: BLE001

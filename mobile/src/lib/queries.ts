@@ -437,7 +437,8 @@ const PICK_COLUMNS =
   'public_bet_pct, public_money_pct, ' +
   'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
   'clv_captured_at, dk_bet_link, ' +
-  'best_book, best_odds, best_implied_prob, best_edge, best_bet_link';
+  'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, ' +
+  'decision_book, decision_odds, decision_implied_prob, decision_edge';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
 // with SettledPickKey — and bump the cache key in settledPickCache.ts when it
@@ -446,7 +447,7 @@ const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
-  'public_bet_pct, injury_flag, clv_pct';
+  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -1565,6 +1566,11 @@ export interface FullOutcomePickRow {
   scored_line: number | null;
   result: 'WIN' | 'LOSS' | 'PUSH';
   profit_units: number | null;
+  // The price the pick was DECIDED at (2026-09-09); the view appends them
+  // after profit_units and grades profit_units at that price.
+  decision_book: string | null;
+  decision_odds: number | null;
+  decision_edge: number | null;
 }
 
 export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullOutcomePickRow[]> {

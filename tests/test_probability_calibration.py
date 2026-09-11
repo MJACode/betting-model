@@ -214,10 +214,16 @@ def test_the_decision_path_reads_the_calibrated_number():
     every past sweep was on raw edge."""
     import inspect
     from models import scorer
+    # Since 2026-09-09 the rules live in scorer._decide, which both pre-game
+    # builders call -- at the DraftKings quote and again at the best bettable
+    # price -- so the calibrated gate is asserted there, and the builders are
+    # asserted to route through it.
+    rules = inspect.getsource(scorer._decide)
+    assert "_calibrated(" in rules, "the decision path must consult the map"
+    assert "decision_edge >= bet_thresh" in rules, "BET must gate on the calibrated edge"
+    assert "decision_prob >= prob_thresh" in rules, "the prob floor must too"
     body = inspect.getsource(scorer._make_pick)
-    assert "_calibrated(" in body, "the decision path must consult the map"
-    assert "decision_edge >= bet_thresh" in body, "BET must gate on the calibrated edge"
-    assert "decision_prob >= prob_thresh" in body, "the prob floor must too"
+    assert "_decide(" in body, "the game builder must route through _decide"
     assert '"edge":              round(edge, 4)' in body, (
         "the STORED edge must stay the raw number so history stays comparable")
 

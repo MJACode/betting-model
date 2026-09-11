@@ -495,30 +495,62 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
-def step_weather(run_date: str, max_age_min: int | None = None) -> bool:
-    """Fetch and store weather data for today's games from Open-Meteo.
+def step_weather(run_date: str, max_age_min: int | None = None,
+                 ahead_days: int | None = None) -> bool:
+    """Fetch and store weather for run_date AND the look-ahead window, from
+    Open-Meteo, at each game's own start hour.
 
-    `max_age_min` skips when today's rows are already fresher than that. A
-    forecast does not update faster than hourly, and Open-Meteo has rate-limited
-    us before during backfills."""
-    if max_age_min is not None and _is_fresh(
-            "Weather", "SELECT MAX(fetched_at) FROM game_weather WHERE game_date = %s",
-            (run_date,), max_age_min):
-        return True
-    try:
-        from data.ingestors.weather_ingestor import fetch_and_store_weather_for_date
-        from data.db import get_connection
-        conn = get_connection()
+    THE WINDOW IS THE SCORER'S (config.GAME_SCORE_AHEAD_DAYS). Until
+    2026-09-10 this fetched run_date only while step_prop_scoring priced
+    tomorrow too, so tomorrow's game had no weather row, the scorer filled
+    the gap with 0.0, and two picks went out priced for a 0°F game (session
+    278). A game the scorer prices with no weather row is now a game it does
+    not price (models.scorer.prop_feature_matrix), so the forecast has to
+    land FIRST -- and a forecast a day or two out is what makes the evening
+    look-ahead pick possible at all.
+
+    `max_age_min` is checked PER DATE: tomorrow being fresh must not skip
+    today. A forecast does not update faster than hourly, and Open-Meteo has
+    rate-limited us before during backfills; `games` holds MLB rows only a
+    day or two ahead, so a non-fresh pass is ~15-30 calls, not 7 x 15."""
+    from datetime import date as _date, timedelta as _td
+
+    if ahead_days is None:
         try:
-            result = fetch_and_store_weather_for_date(run_date, conn)
-            conn.commit()
-            logger.success(f"✓ Weather: {result}")
-            return True
-        finally:
-            conn.close()
+            from config import GAME_SCORE_AHEAD_DAYS
+            ahead_days = GAME_SCORE_AHEAD_DAYS
+        except Exception:                                     # noqa: BLE001
+            ahead_days = 1
+    dates = [(_date.fromisoformat(run_date) + _td(days=k)).isoformat()
+             for k in range(0, max(0, ahead_days) + 1)]
+
+    from data.ingestors import weather_ingestor
+    from data.db import get_connection
+    ok = True
+    try:
+        conn = get_connection()
     except Exception as exc:
         logger.error(f"✗ Weather failed: {exc}")
         return False
+    try:
+        for d in dates:
+            if max_age_min is not None and _is_fresh(
+                    f"Weather {d}",
+                    "SELECT MAX(fetched_at) FROM game_weather WHERE game_date = %s",
+                    (d,), max_age_min):
+                continue
+            try:
+                result = weather_ingestor.fetch_and_store_weather_for_date(d, conn)
+                conn.commit()
+                logger.success(f"✓ Weather {d}: {result}")
+            except Exception as exc:
+                # One date failing must not cost the others -- today's board
+                # is the one about to be priced.
+                logger.error(f"✗ Weather failed for {d}: {exc}")
+                ok = False
+    finally:
+        conn.close()
+    return ok
 
 
 def step_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:
@@ -1353,17 +1385,8 @@ def step_settle(settle_date: str) -> bool:
     # scripts/refresh_pass.sh posts exactly one recap per day. Never fails the
     # settle step — the grading is what matters.
     try:
-        from tracking.discord_notifier import (
-            DISCORD_RESULTS_RESTATE_DATES,
-            notify_discord_results,
-        )
+        from tracking.discord_notifier import notify_discord_results
         notify_discord_results(game_date=settle_date)
-        # A recap published over an incomplete pick universe gets posted once
-        # more, corrected. Gated on DISCORD_RESULTS_RESTATE_DATES and ledgered
-        # under its own kind, so this is a no-op on every other date and on
-        # every pass after the first.
-        for d in sorted(DISCORD_RESULTS_RESTATE_DATES):
-            notify_discord_results(game_date=d, restate=True)
     except Exception as exc:
         logger.error(f"✗ Discord results recap failed (settlement succeeded): {exc}")
 
@@ -1376,6 +1399,18 @@ def step_settle(settle_date: str) -> bool:
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"✗ X results post failed (settlement + Discord "
                      f"unaffected): {exc}")
+
+    # A recap published before one of its picks settled is corrected here, on
+    # every pass, both surfaces (2026-09-10: the 09-09 recap went out MLB-only
+    # and the NFL settled an hour later against a ledgered date). Ledgered per
+    # correction, so a pass that finds nothing new posts nothing.
+    try:
+        from tracking.discord_notifier import restate_published_recaps
+        n = restate_published_recaps()
+        if n:
+            logger.info(f"Results restated: {n} post(s)")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ Results restatement failed (settlement unaffected): {exc}")
     return True
 
 
@@ -1460,6 +1495,23 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["ncaaf_results"] = step_ncaaf_results(run_date)
     time.sleep(1)
 
+    # ── Step 0h: NFL player box scores via nflverse (MUST precede settlement) ─
+    # NFL prop picks settle off nfl_player_game_log, and BOTH of these steps
+    # fill it (4b the leaderboard columns, 4c the modelling columns; they parse
+    # the same weekly CSV). Until 2026-09-10 they ran as Steps 4b/4c, AFTER
+    # settle: the 6am run posted the 2026-09-09 recap at 06:02 with MLB only,
+    # 4c wrote the NE @ SEA box scores at 06:11, and the 07:17 refresh pass
+    # settled the three NFL BETs at 07:24 -- an hour after the recap was
+    # ledgered. Same rule as 0d/0e/0f/0g: a sport's box scores land before the
+    # settle that grades them, or its picks lag a pass and the recap ships
+    # without the sport. Self-healing (first run backfills 3 seasons); the
+    # off-season is a clean no-op; 4c also writes the SCHEDULED-game rows the
+    # prop scorer needs, which is why it runs even with no finals pending.
+    logger.info("Step 0h: NFL player box scores from nflverse (pre-settle)...")
+    results["nfl_player_stats"] = step_nfl_player_stats(run_date)
+    results["nfl_props_data"] = step_nfl_props_data(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -1538,25 +1590,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
 
-    # ── Step 4b: NFL player stats (nflverse weekly CSV) ──────────────────────
-    # Mobile Stats tab leaderboard only — self-healing (first run backfills the
-    # last 3 seasons), off-season no-op (unpublished season CSV 404s).
-    logger.info("Step 4b: NFL player stats (nflverse)...")
-    results["nfl_player_stats"] = step_nfl_player_stats(run_date)
-    time.sleep(1)
-
     # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
     logger.info("Step 4b2: NCAAF stats (CFBD)...")
     results["ncaaf_stats"] = step_ncaaf_stats(run_date)
     results["ncaaf_weather"] = step_ncaaf_weather(run_date)
-    time.sleep(1)
-
-    # ── Step 4c: NFL prop modelling data (nflverse) ──────────────────────────
-    # Team-game context + snap share + the modelling columns on the player log.
-    # Runs even off-season: it is what writes the SCHEDULED-game rows the prop
-    # scorer needs, and before week 1 those are the only rows that exist.
-    logger.info("Step 4c: NFL prop modelling data (nflverse)...")
-    results["nfl_props_data"] = step_nfl_props_data(run_date)
     time.sleep(1)
 
     # NOTE: wnba_stats/wnba_game_log AND nba_stats/nba_game_log are intentionally

@@ -27,6 +27,8 @@ import { isUnlockedPreview, passesActionFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -407,14 +409,14 @@ function TodayPickRow({
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
             {timeLabel ? <Text style={styles.pickMetaText}>{timeLabel}</Text> : null}
-            <Text style={styles.pickMetaText}>· DK {formatAmerican(pick.dk_odds)}</Text>
+            <Text style={styles.pickMetaText}>· {bookLabelShort(storedQuoteBook(pick))} {formatAmerican(decisionOdds(pick))}</Text>
           </View>
         </View>
       </View>
       <View style={styles.pickStats}>
         <Text style={styles.pickProb}>{formatPct(pick.model_probability)}</Text>
-        <Text style={[styles.pickEdge, edgeColorStyle(pick.edge)]}>
-          {formatPctSigned(pick.edge)}
+        <Text style={[styles.pickEdge, edgeColorStyle(decisionEdge(pick))]}>
+          {formatPctSigned(decisionEdge(pick))}
         </Text>
       </View>
     </Pressable>
@@ -450,7 +452,7 @@ function FullOutcomeHistoryRow({
           </Text>
           <View style={styles.pickMeta}>
             <Text style={styles.pickMetaText}>{row.game_date}</Text>
-            <Text style={styles.pickMetaText}>· DK {formatAmerican(row.dk_odds)}</Text>
+            <Text style={styles.pickMetaText}>· {bookLabelShort(storedQuoteBook(row))} {formatAmerican(decisionOdds(row))}</Text>
             <Text style={styles.pickMetaText}>· {formatPct(row.model_probability)}</Text>
           </View>
         </View>
@@ -479,7 +481,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       style={styles.pickRow}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${pick.pick_label}, ${pick.result}${pick.dk_odds == null ? ', unpriced' : ''}`}
+      accessibilityLabel={`${pick.pick_label}, ${pick.result}${decisionOdds(pick) == null ? ', unpriced' : ''}`}
     >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
@@ -489,7 +491,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
             <Text style={styles.pickMetaText}>{pick.game_date}</Text>
-            <Text style={styles.pickMetaText}>· DK {formatAmerican(pick.dk_odds)}</Text>
+            <Text style={styles.pickMetaText}>· {bookLabelShort(storedQuoteBook(pick))} {formatAmerican(decisionOdds(pick))}</Text>
           </View>
         </View>
       </View>
@@ -498,7 +500,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
         <Text style={[styles.historyProfit, { color: resultColor }]}>
           {/* No price, no money — the row's total excludes this pick, so the
               list must not show the -110 that settlement invented for it. */}
-          {pick.dk_odds == null ? '—' : formatCurrencySigned(pick.profit_flat)}
+          {decisionOdds(pick) == null ? '—' : formatCurrencySigned(pick.profit_flat)}
         </Text>
       </View>
     </Pressable>

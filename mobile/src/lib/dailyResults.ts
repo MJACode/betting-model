@@ -17,6 +17,7 @@ import {
 import type { GameRow, Pick } from '@/types';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
+import { decisionEdge } from '@/lib/decisionPrice';
 
 export interface ModelDayStats extends CustomModelStats {
   modelId: string;
@@ -356,7 +357,7 @@ export function computeDailyResults(
       Number(b.profit_flat ?? 0) - Number(a.profit_flat ?? 0),
   );
   pendingPicks.sort(
-    (a, b) => bySportOrder(a.sport, b.sport) || Number(b.edge ?? 0) - Number(a.edge ?? 0),
+    (a, b) => bySportOrder(a.sport, b.sport) || decisionEdge(b) - decisionEdge(a),
   );
 
   // Every game the models scored that day (≥1 pick row of any signal).

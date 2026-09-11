@@ -556,6 +556,27 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 18 features: k_last3/5/10_avg, k_rate_last3/5, ip_last3/5_avg, season_k_avg, k_trend, savant_k_pct, savant_whiff_pct, savant_bb_pct, savant_xera, savant_avg_velocity, opp_team_k_pct, is_dome_game, temp_f, ump_k_plus_minus. Prior-season fallback for season_k_avg when current-season logs unavailable.
 
+**A row missing a feature is not scored (2026-09-10, session 278).** The
+trainer drops every incomplete training row, so the model has never seen a
+null; the scorer used to fill one with 0.0, which priced a game with no
+weather row as a 0°F game (Gilbert / deGrom Under 6.5 Ks, both stored at the
+0°F probability, reproduced to four decimals). `models.scorer.prop_feature_matrix`
+now drops the row for that pass and logs the player and the feature; it is
+rebuilt next pass and scores once the input lands. The one exception is the
+umpire pair (`PROP_IMPUTED_FEATURES`): MLB posts the umpire mid-day, so it is
+imputed 0.0 = league average until `umpires` (now on every refresh pass)
+writes it. Weather is fetched for `run_date .. + GAME_SCORE_AHEAD_DAYS` at
+each game's `commence_time` hour, so the evening look-ahead pass prices
+tomorrow on a real forecast. Same helper and rules for every MLB batter,
+WNBA and NBA prop loop.
+
+**`ump_k_plus_minus` leaves this model at its next retrain** (2026-09-10,
+`PENDING_RETRAIN_DROP_FEATURES` in the feature engine; `ump_bb_plus_minus`
+leaves the walks model the same way). A BET locks before MLB posts the
+umpire, so at decision time the feature is always the imputed 0.0. The
+training path already excludes it; the live artifact keeps it until the
+retrained `.pkl` is committed.
+
 **v2 retrain results (2026-05-14, version 20260514_090858):**
 - 11,115 training rows (2019-2023), 3,091 holdout (2024)
 - 13,447 umpire assignments loaded, 138 unique umpires

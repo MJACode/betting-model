@@ -44,15 +44,21 @@ def emit(prefix: str = "", include_paused_comments: bool = True,
                 lines.append(f"-- {model_id} PAUSED (cut kept {cut['min_prob']}/{cut['min_edge']})")
             continue
         clause = f"({prefix}model_id = {quoted} AND {prefix}model_probability >= {cut['min_prob']}"
+        # The cut is applied at the price the pick was DECIDED at (2026-09-09,
+        # mike: "remove DK only"): decision_* since the flip, DraftKings before
+        # it (NULL, so COALESCE is exact). Same clause as the Discord and push
+        # producers and the app's passesActionFilter.
+        edge_col = f"COALESCE({prefix}decision_edge, {prefix}edge)"
+        odds_col = f"COALESCE({prefix}decision_odds, {prefix}dk_odds)"
         # Prob-only models ignore edge entirely (config.PROB_ONLY_MODELS).
         if model_id not in config.PROB_ONLY_MODELS:
-            clause += f" AND {prefix}edge >= {cut['min_edge']}"
+            clause += f" AND {edge_col} >= {cut['min_edge']}"
         # min_odds_for, not MODEL_MIN_ODDS.get: this SQL is the app's action
         # filter, and a model whose floor was left out here would show picks the
         # scorer refuses to bet -- the two must not disagree about juice.
         floor = config.min_odds_for(model_id)
         if floor is not None:
-            clause += f" AND ({prefix}dk_odds IS NULL OR {prefix}dk_odds >= {floor})"
+            clause += f" AND ({odds_col} IS NULL OR {odds_col} >= {floor})"
         clause += ")"
         lines.append(clause)
 

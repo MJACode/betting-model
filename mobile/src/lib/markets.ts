@@ -12,6 +12,7 @@
 import { americanImplied, americanToDecimal, formatStampET } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, OddsByBookRow, Pick, PickSide } from '@/types';
+import { decisionBook, decisionOdds } from '@/lib/decisionPrice';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -385,6 +386,20 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
 };
 
 /**
+ * The betslip link for the RECORD chip: DraftKings' link when DraftKings
+ * decided the pick, the scorer's best-price link when the deciding book is the
+ * one it stamped, and none otherwise. A chip is an invitation to bet, and the
+ * DK link opens DraftKings' slip whatever the chip is labelled
+ * (sportsbookLinks.openBookBetslip), so a FanDuel-priced chip must never carry
+ * it (UX review, 2026-09-09).
+ */
+function recordLink(pick: Pick, recordBook: string): string | null {
+  if (recordBook === MODEL_BOOK) return pick.dk_bet_link ?? null;
+  const stampBook = (pick.best_book ?? '').trim().toLowerCase();
+  return stampBook === recordBook ? (pick.best_bet_link ?? null) : null;
+}
+
+/**
  * Which book the price STORED on a pick came from.
  *
  * Everywhere except NFL that's DraftKings — the book the models score against.
@@ -395,7 +410,14 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
  * Labeling that "DK" tells the user a price they cannot get at the book named.
  * An unrecognised abbrev is returned as-is rather than guessed at.
  */
-export function storedQuoteBook(pick: Pick): string {
+export function storedQuoteBook(
+  pick: { model_id: string; pick_label?: string | null; decision_book?: string | null },
+): string {
+  // Since 2026-09-09 the row says which book DECIDED it; only rows from
+  // before the flip (and the NFL cards, which name their book in the label)
+  // fall through to the rules below.
+  const decided = decisionBook(pick);
+  if (decided) return decided;
   if (!(pick.model_id ?? '').startsWith('nfl_')) return MODEL_BOOK;
   const m = /\(([^()]*?),\s*([A-Za-z]{2,5})\)/.exec(pick.pick_label ?? '');
   if (!m) return MODEL_BOOK;
@@ -536,13 +558,13 @@ export function displayQuoteForPick(
 ): DisplayQuote | null {
   const storedBook = storedQuoteBook(pick);
   const storedQuote = (): DisplayQuote | null => {
-    const stored = numOrNull(pick.dk_odds);
+    const stored = decisionOdds(pick);
     if (stored == null) return null;
     const isPreferred = storedBook === book;
     return {
       bookmaker: storedBook,
       price: stored,
-      link: pick.dk_bet_link ?? null,
+      link: recordLink(pick, storedBook),
       line: numOrNull(pick.scored_line),
       isPreferred,
       isFallback: !isPreferred,
@@ -616,9 +638,10 @@ export function allBookPrices(
 
 /** One chip on a pick's "Betting lines" row. */
 export interface LineQuote extends BookQuote {
-  /** The price the pick was GIVEN at — `dk_odds` at the stored book (DK, or
-   *  the NFL card's soft book). It is the bet of record (§1c), so it is always
-   *  a chip, at the stored price rather than a fresher snapshot. */
+  /** The price the pick was GIVEN at — the deciding price at the deciding
+   *  book (decision_*; `dk_odds` at DraftKings or the NFL card's soft book on
+   *  rows from before 2026-09-09). It is the bet of record (§1c), so it is
+   *  always a chip, at the stored price rather than a fresher snapshot. */
   isRecord: boolean;
 }
 
@@ -644,7 +667,7 @@ export interface LineQuote extends BookQuote {
  */
 export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
   const recordBook = storedQuoteBook(pick);
-  const recordPrice = numOrNull(pick.dk_odds);
+  const recordPrice = decisionOdds(pick);
   const scoredLine = numOrNull(pick.scored_line);
   const record: Omit<LineQuote, 'isBest'> | null =
     recordPrice == null
@@ -652,7 +675,7 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
       : {
           bookmaker: recordBook,
           price: recordPrice,
-          link: pick.dk_bet_link ?? null,
+          link: recordLink(pick, recordBook),
           line: scoredLine,
           isRecord: true,
         };

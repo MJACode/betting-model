@@ -1,4 +1,11 @@
--- track_record_reads_graded_matview (applied 2026-09-02)
+-- track_record_reads_graded_matview (applied 2026-09-02; decision-price cut 2026-09-09)
+--
+-- 2026-09-09 (mike, "remove DK only"): the cut and the priced count read the
+-- matview's decision_* columns -- the price the pick was DECIDED at, which is
+-- the best bettable price at the DraftKings line from that date and DraftKings
+-- itself before it (decide_on_best_price_2026_09_09.sql, which runs first in
+-- the active list and rebuilds the matview with those columns). The guard
+-- checks for both properties so this re-applies exactly once.
 --
 -- THE RECORD TAB WAS EMPTY. v_public_track_record took 14.3s and
 -- v_public_track_record_daily 12.3s (EXPLAIN ANALYZE as `authenticated`,
@@ -60,21 +67,24 @@ DECLARE
 BEGIN
   -- ── v_model_full_outcome_record ──────────────────────────────────────────
   d := pg_get_viewdef('public.v_model_full_outcome_record'::regclass, true);
-  IF position('mv_scored_pick_outcomes' in d) > 0 THEN
-    RAISE NOTICE 'v_model_full_outcome_record already reads the matview - skipping';
+  -- Both properties: the 2026-09-02 one (reads the matview) and the
+  -- 2026-09-09 one (cuts at the decision price), so the definition below
+  -- re-applies exactly once over the pre-flip one and never over itself.
+  IF position('mv_scored_pick_outcomes' in d) > 0 AND position('decision_edge' in d) > 0 THEN
+    RAISE NOTICE 'v_model_full_outcome_record already reads the matview at the decision price - skipping';
   ELSE
     EXECUTE $v$
       CREATE OR REPLACE VIEW public.v_model_full_outcome_record WITH (security_invoker = on) AS
       WITH graded AS (
         SELECT o.model_id,
                CASE o.result WHEN 'WIN' THEN 'W' WHEN 'LOSS' THEN 'L' ELSE 'P' END AS res,
-               o.dk_odds,
+               o.decision_odds,
                m.paused,
                m.prob_only,
                o.profit_units AS profit,
                (o.model_probability >= m.min_prob
-                AND (m.prob_only OR o.edge >= COALESCE(m.min_edge, 0::numeric))
-                AND (m.min_odds IS NULL OR o.dk_odds IS NULL OR o.dk_odds >= m.min_odds)) AS passes
+                AND (m.prob_only OR o.decision_edge >= COALESCE(m.min_edge, 0::numeric))
+                AND (m.min_odds IS NULL OR o.decision_odds IS NULL OR o.decision_odds >= m.min_odds)) AS passes
         FROM mv_scored_pick_outcomes o
         JOIN model_action_thresholds m ON m.model_id = o.model_id
       )
@@ -85,18 +95,18 @@ BEGIN
              count(*) FILTER (WHERE passes AND res = 'W') AS wins,
              count(*) FILTER (WHERE passes AND res = 'L') AS losses,
              count(*) FILTER (WHERE passes AND res = 'P') AS pushes,
-             count(*) FILTER (WHERE passes AND res = ANY (ARRAY['W','L','P']) AND dk_odds IS NOT NULL) AS priced_bets,
+             count(*) FILTER (WHERE passes AND res = ANY (ARRAY['W','L','P']) AND decision_odds IS NOT NULL) AS priced_bets,
              CASE WHEN model_id = 'mlb_prop_batter_hr' THEN 0::numeric
                   ELSE round(COALESCE(sum(profit) FILTER (WHERE passes), 0::numeric), 6) END AS units,
              CASE WHEN model_id = 'mlb_prop_batter_hr' THEN NULL::numeric
                   ELSE round(sum(profit) FILTER (WHERE passes)
-                             / NULLIF(count(*) FILTER (WHERE passes AND res = ANY (ARRAY['W','L','P']) AND dk_odds IS NOT NULL), 0)::numeric
+                             / NULLIF(count(*) FILTER (WHERE passes AND res = ANY (ARRAY['W','L','P']) AND decision_odds IS NOT NULL), 0)::numeric
                              * 100::numeric, 1) END AS roi_pct
       FROM graded
       GROUP BY model_id
     $v$;
     GRANT SELECT ON public.v_model_full_outcome_record TO anon, authenticated;
-    RAISE NOTICE 'v_model_full_outcome_record now reads mv_scored_pick_outcomes';
+    RAISE NOTICE 'v_model_full_outcome_record now reads mv_scored_pick_outcomes at the decision price';
   END IF;
 
   -- ── v_public_track_record_daily: REMOVED 2026-09-04 ──────────────────────

@@ -303,3 +303,21 @@ class TestLoadToDb:
         games[1]["away_team"] = "LAD"
         games_n, _ = load_to_db(games, loader_conn)
         assert games_n == 2
+
+
+def test_sbr_abbreviations_are_canonicalised_for_mlb_only():
+    from data.ingestors.sbr_loader import canonical_abbrev
+    assert canonical_abbrev("az", "MLB") == "ARI"
+    assert canonical_abbrev("CHW", "MLB") == "CWS"
+    assert canonical_abbrev("ATH", "MLB") == "OAK"
+    assert canonical_abbrev("WAS", "MLB") == "WSH"
+    assert canonical_abbrev("NYY", "MLB") == "NYY"
+    assert canonical_abbrev("WAS", "NHL") == "WAS"
+
+
+def test_the_games_upsert_never_nulls_a_settled_score():
+    import inspect
+    from data.ingestors import sbr_loader
+    src = inspect.getsource(sbr_loader.load_to_db)
+    assert "COALESCE(EXCLUDED.home_score, games.home_score)" in src
+    assert "COALESCE(EXCLUDED.home_win, games.home_win)" in src

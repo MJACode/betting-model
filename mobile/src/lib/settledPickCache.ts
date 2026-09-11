@@ -32,7 +32,10 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // v4 (2026-09-09): SETTLED_PICK_COLUMNS gained `condition_status`. A v3
 // envelope has no such field, so every cached row would read `undefined` and
 // slip past the VOID guard — the exact shape of bug the bump exists for.
-const KEY = 'settledPicks.v4';
+// v5 (2026-09-09): SETTLED_PICK_COLUMNS gained decision_book / decision_odds /
+// decision_edge, the price each pick was decided at. A v4 envelope would read
+// them as undefined and fall back to the DraftKings price on every row.
+const KEY = 'settledPicks.v5';
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day

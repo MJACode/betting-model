@@ -139,23 +139,57 @@ def _celsius_to_f(c: float) -> float:
     return round(c * 9 / 5 + 32, 1)
 
 
-def _fetch_open_meteo(lat: float, lon: float, game_date: str) -> dict | None:
+def _target_hour_utc(lon: float, game_date: str, commence_time: str | None) -> str:
+    """The hour string Open-Meteo labels the game's start with, "YYYY-MM-DDTHH:00".
+
+    From the game's own start when the caller has it (games.commence_time,
+    rounded to the nearest hour, in UTC -- which for a 7:10pm Pacific start is
+    02:00 on the NEXT calendar day), else 7pm local by longitude on game_date.
     """
-    Fetch hourly weather for game_date from Open-Meteo.
+    if commence_time:
+        try:
+            dt = datetime.fromisoformat(str(commence_time).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.astimezone(timezone.utc)
+            if dt.minute >= 30:
+                dt += timedelta(hours=1)
+            return dt.strftime("%Y-%m-%dT%H:00")
+        except ValueError:
+            logger.warning(f"unparseable commence_time {commence_time!r} — using the 7pm-local default")
+    rough_utc_hour = (_DEFAULT_GAME_HOUR_LOCAL - _utc_offset_from_lon(lon)) % 24
+    return f"{game_date}T{rough_utc_hour:02d}:00"
+
+
+def _fetch_open_meteo(lat: float, lon: float, game_date: str,
+                      commence_time: str | None = None) -> dict | None:
+    """
+    Fetch hourly weather for game_date from Open-Meteo, at the game's hour.
     Returns a dict with temp_f, wind_mph, wind_dir_deg, precip_mm for game time,
-    or None on failure.
+    or None on failure -- and None, never another day's hour, when the series
+    the API returned does not contain the game's hour.
+
+    The request is shaped so that it DOES contain it. Until 2026-09-10 a
+    future date asked for forecast_days = days_old + 2, which is one day (today)
+    for tomorrow's game, and a recent past date asked for a forecast window
+    that starts today; the matcher then took the last hour at or before the
+    target and stored yesterday evening's weather, or today's midnight, as the
+    game's. Measured live in session 278.
     """
     today      = date.today()
     target     = date.fromisoformat(game_date)
     days_old   = (today - target).days
+    target_time = _target_hour_utc(lon, game_date, commence_time)
 
     if days_old > _ARCHIVE_CUTOFF_DAYS:
         base_url = _HISTORICAL_API
+        # One extra day: a late West Coast start lands on the next UTC date.
+        end_date = (target + timedelta(days=1)).isoformat()
         params   = {
             "latitude":   lat,
             "longitude":  lon,
             "start_date": game_date,
-            "end_date":   game_date,
+            "end_date":   end_date,
             "hourly":     "temperature_2m,windspeed_10m,winddirection_10m,precipitation",
             "windspeed_unit": "mph",
             "timezone":   "UTC",
@@ -168,7 +202,10 @@ def _fetch_open_meteo(lat: float, lon: float, game_date: str) -> dict | None:
             "hourly":     "temperature_2m,windspeed_10m,winddirection_10m,precipitation",
             "windspeed_unit": "mph",
             "timezone":   "UTC",
-            "forecast_days": min(days_old + 2, 16),
+            # The forecast window starts TODAY. Reach back for a recent past
+            # game, and far enough forward to cover a future game's UTC roll.
+            "past_days":     max(days_old, 0),
+            "forecast_days": min(max(-days_old, 0) + 2, 16),
         }
 
     try:
@@ -189,17 +226,13 @@ def _fetch_open_meteo(lat: float, lon: float, game_date: str) -> dict | None:
     if not times:
         return None
 
-    # Find the hour closest to game time in UTC
-    # Build a rough game_hour_utc from the lon-based offset
-    # We target the hour string: f"{game_date}T{hour:02d}:00"
-    rough_utc_hour = (_DEFAULT_GAME_HOUR_LOCAL - _utc_offset_from_lon(lon)) % 24
-    target_time    = f"{game_date}T{rough_utc_hour:02d}:00"
-
-    # Pick closest available hour
-    best_idx = 0
-    for idx, t in enumerate(times):
-        if t <= target_time:
-            best_idx = idx
+    # The game's hour, or nothing. A neighbouring day is not a fallback.
+    try:
+        best_idx = times.index(target_time)
+    except ValueError:
+        logger.warning(f"Open-Meteo series for {game_date} ({times[0]}..{times[-1]}) "
+                       f"does not contain game hour {target_time} — no weather stored")
+        return None
 
     temp_c     = temps[best_idx]  if best_idx < len(temps)  else None
     wind_mph   = winds[best_idx]  if best_idx < len(winds)  else None
@@ -219,34 +252,45 @@ def _fetch_open_meteo(lat: float, lon: float, game_date: str) -> dict | None:
 
 # ── Main Functions ────────────────────────────────────────────────────────────
 
-def fetch_and_store_weather_for_date(game_date: str, conn=None) -> int:
+def fetch_and_store_weather_for_date(game_date: str, conn=None,
+                                     only_missing: bool = False) -> int:
     """
-    Fetch weather for all MLB games on game_date and upsert into game_weather.
-    Returns number of rows written.
+    Fetch weather for all MLB games on game_date and upsert into game_weather,
+    at each game's own start hour (games.commence_time). Returns rows written.
+
+    game_date may be in the future: the look-ahead prop scorer prices
+    tomorrow, and a game it prices with no weather row is a game it cannot
+    price at all (models.scorer.prop_feature_matrix). `only_missing` restricts
+    the pass to games that have no row yet -- the backfill's mode, so it never
+    overwrites a stored value with a re-fetch.
     """
     close_conn = conn is None
     if conn is None:
         conn = get_connection()
 
+    missing_clause = "AND w.game_id IS NULL" if only_missing else ""
     try:
-        games = conn.execute("""
-            SELECT game_id, home_team, away_team
-            FROM games
-            WHERE sport = 'MLB' AND game_date = %s
+        games = conn.execute(f"""
+            SELECT g.game_id, g.home_team, g.away_team, g.commence_time
+            FROM games g
+            LEFT JOIN game_weather w ON w.game_id = g.game_id
+            WHERE g.sport = 'MLB' AND g.game_date = %s
+              {missing_clause}
         """, (game_date,)).fetchall()
 
         if not games:
-            logger.debug(f"No MLB games found for {game_date}")
+            logger.debug(f"No MLB games {'without weather ' if only_missing else ''}found for {game_date}")
             return 0
 
         written = 0
-        for game_id, home_team, away_team in games:
+        for game_id, home_team, away_team, commence_time in games:
             stadium = STADIUMS.get(home_team)
             if not stadium:
                 logger.warning(f"No stadium data for {home_team} — skipping weather")
                 continue
 
-            wx = _fetch_open_meteo(stadium["lat"], stadium["lon"], game_date)
+            wx = _fetch_open_meteo(stadium["lat"], stadium["lon"], game_date,
+                                   commence_time=commence_time)
             if not wx:
                 continue
 
@@ -314,7 +358,7 @@ def backfill_weather(start_season: int, end_season: int) -> None:
 
         total = 0
         for i, d in enumerate(dates, 1):
-            n = fetch_and_store_weather_for_date(d, conn=conn)
+            n = fetch_and_store_weather_for_date(d, conn=conn, only_missing=True)
             conn.commit()
             total += n
             if i % 50 == 0:
