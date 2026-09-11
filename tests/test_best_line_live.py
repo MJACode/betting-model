@@ -342,11 +342,17 @@ def test_the_live_discord_card_headlines_the_deciding_price():
     assert '"good_to": price_bound(r[5], r[1], r[15], r[16], r[21])' in body
 
 
-def test_the_tag_happens_after_the_decision():
-    """Tagging inside the scoring loop would put a cross-book price in scope
-    while the BET/AVOID call is still being made."""
+def test_the_tag_is_the_insert_path_fallback_not_the_decision():
+    """Until 2026-09-10 this pinned that the tag came AFTER the decision so no
+    cross-book price could reach the BET/AVOID call. The decision now takes
+    the best quote deliberately, inside the builder; the tag remains only as
+    the insert-path fallback for a pick that arrives without a stamp, so it
+    still sits after the builder and the insert must still skip its lookup
+    when the row already carries best_book."""
     src = (ROOT / "models/live_scorer.py").read_text(encoding="utf-8")
     assert src.index("_tag_live(p, (game_id, market))") > src.index("picks.append(pick)")
+    scorer = (ROOT / "models/scorer.py").read_text(encoding="utf-8")
+    assert 'if live_ctx is not None and "best_book" not in p:' in scorer
 
 
 # -- the NCAAF lane: its own feed, the same rule --------------------------------
