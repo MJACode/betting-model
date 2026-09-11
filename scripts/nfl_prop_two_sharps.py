@@ -85,10 +85,23 @@ def build(min_edge: float, snapshot: str | None = None,
     local_store.activate()
     odds = local_store.read_table("nfl_prop_odds")
     act = _actuals(local_store.read_table("nfl_player_game_log"))
-    ko = {r.game_id: r.commence_time for r in
+    # KICKOFFS AS TIMESTAMPS, COMPARED AS TIMESTAMPS (2026-09-11). Until today
+    # the pre-game guard below was `str(snapshot_at) > str(kickoff)`: the
+    # snapshot is an ISO string with a 'T' separator, the kickoff a pandas
+    # Timestamp whose str() has a SPACE, and 'T' sorts after ' '. So every quote
+    # taken on the SAME UTC DATE as the kickoff read as post-kickoff and was
+    # dropped -- which is every Sunday-afternoon game read on Sunday morning,
+    # i.e. the whole 3-7h band the `open` series is described by. What this
+    # grader had actually been measuring as "near kickoff" was night games at
+    # ~10h and Sunday games read on SATURDAY at 28-36h. Measured before the fix:
+    # zero selected bets under 8h against a series whose lead p10 is 3.1h at
+    # every book. The fix is to compare times, not strings.
+    import pandas as pd
+    ko = {r.game_id: pd.Timestamp(r.commence_time) for r in
           local_store.read_table("nfl_team_game_stats",
                                  columns=["game_id", "commence_time"])
           .dropna(subset=["commence_time"]).itertuples(index=False)}
+    ko = {g: (t.tz_localize("UTC") if t.tzinfo is None else t) for g, t in ko.items()}
 
     # newest PRE-GAME quote per (game, player, market, book, line)
     # PAIRING. Comparing two offsets across all games compares two different
@@ -106,8 +119,12 @@ def build(min_edge: float, snapshot: str | None = None,
         if snapshot is not None and r.snapshot_type != snapshot:
             continue
         k_off = ko.get(r.game_id)
-        if k_off is not None and str(r.snapshot_at) > str(k_off):
-            continue
+        if k_off is not None:
+            snap = pd.Timestamp(r.snapshot_at)
+            if snap.tzinfo is None:
+                snap = snap.tz_localize("UTC")
+            if snap > k_off:
+                continue
         key = (r.game_id, norm_player_name(r.player_name), r.market,
                float(r.line), r.bookmaker)
         prev = latest.get(key)
@@ -179,13 +196,40 @@ def build(min_edge: float, snapshot: str | None = None,
                         continue
                     prev = staged[name].get(prop)
                     if prev is None or best_edge > prev[0]:
-                        staged[name][prop] = (best_edge, season, p)
+                        staged[name][prop] = (best_edge, season, p,
+                                              _lead_hours(q.snapshot_at, ko.get(gid)))
 
     sel = defaultdict(list)
     for name, props in staged.items():
-        for _edge, season, p in props.values():
-            sel[name].append((season, p))
+        for _edge, season, p, lead in props.values():
+            sel[name].append((season, p, lead))
     return sel, diag
+
+
+def _lead_hours(snapshot_at, kickoff) -> float | None:
+    """Hours between the SOFT quote taken and kickoff. The bet's own lead."""
+    if snapshot_at is None or kickoff is None:
+        return None
+    try:
+        import pandas as pd
+        s = pd.Timestamp(snapshot_at)
+        k = pd.Timestamp(kickoff)
+        if s.tzinfo is None:
+            s = s.tz_localize("UTC")
+        if k.tzinfo is None:
+            k = k.tz_localize("UTC")
+        return float((k - s).total_seconds() / 3600.0)
+    except Exception:                                           # noqa: BLE001
+        return None
+
+
+# Lead-hour buckets for --by-lead. The `open` series (2023-25) is ONE snapshot
+# per game at 13:55 UTC, so a game's lead is set by its kickoff slot: ~3h for
+# the 1pm ET window, ~6.5h for 4pm, ~10h for night games, 24-36h for a Monday
+# game read on Sunday morning. That is what makes a within-series split
+# possible at all -- and also why it is a kickoff-slot split wearing a
+# lead-time label. Read it as both.
+LEAD_BUCKETS = ((0.0, 4.0), (4.0, 8.0), (8.0, 12.0), (12.0, 24.0), (24.0, 48.0))
 
 
 def main() -> None:
@@ -200,6 +244,9 @@ def main() -> None:
                     help="override the bettable set (comma separated)")
     ap.add_argument("--refs", default=f"{REF_A},{REF_B}",
                     help="the two reference books (the placebo swaps in retail)")
+    ap.add_argument("--by-lead", action="store_true",
+                    help="split each selection by the bet's own lead hours "
+                         "(soft quote taken -> kickoff), LEAD_BUCKETS")
     a = ap.parse_args()
     rng = np.random.default_rng(42)
     refs = tuple(x.strip() for x in a.refs.split(","))
@@ -216,18 +263,32 @@ def main() -> None:
         if len(rows) < 40:
             print(f"{name:16s} {len(rows):>6}   (thin)")
             continue
-        prof = np.array([p for _s, p in rows])
-        idx = rng.integers(0, len(prof), (20000, len(prof)))
-        roi = 100 * prof[idx].mean(axis=1)
-        lo, hi = np.percentile(roi, 5), np.percentile(roi, 95)
-        w = int((prof > 0).sum())
-        per = []
-        for s in sorted({s for s, _p in rows}):
-            sub = [p for ss, p in rows if ss == s]
-            per.append(f"{s}:{100*np.mean(sub):+.1f}%({len(sub)})")
-        print(f"{name:16s} {len(prof):>6} {100*w/len(prof):>5.1f}% "
-              f"{prof.sum():>+9.2f} {100*prof.mean():>+7.2f}% "
-              f"{'('+format(lo,'+.1f')+', '+format(hi,'+.1f')+')':>18}  {' '.join(per)}")
+        _report(name, rows, rng)
+        if a.by_lead:
+            for lo_h, hi_h in LEAD_BUCKETS:
+                sub = [r for r in rows if r[2] is not None and lo_h <= r[2] < hi_h]
+                _report(f"  {lo_h:>4.0f}-{hi_h:<4.0f}h", sub, rng, thin=20)
+            unk = [r for r in rows if r[2] is None]
+            if unk:
+                print(f"  (no lead: {len(unk)})")
+
+
+def _report(name, rows, rng, thin: int = 40) -> None:
+    if len(rows) < thin:
+        print(f"{name:16s} {len(rows):>6}   (thin)")
+        return
+    prof = np.array([r[1] for r in rows])
+    idx = rng.integers(0, len(prof), (20000, len(prof)))
+    roi = 100 * prof[idx].mean(axis=1)
+    lo, hi = np.percentile(roi, 5), np.percentile(roi, 95)
+    w = int((prof > 0).sum())
+    per = []
+    for s in sorted({r[0] for r in rows}):
+        sub = [r[1] for r in rows if r[0] == s]
+        per.append(f"{s}:{100*np.mean(sub):+.1f}%({len(sub)})")
+    print(f"{name:16s} {len(prof):>6} {100*w/len(prof):>5.1f}% "
+          f"{prof.sum():>+9.2f} {100*prof.mean():>+7.2f}% "
+          f"{'('+format(lo,'+.1f')+', '+format(hi,'+.1f')+')':>18}  {' '.join(per)}")
 
 
 if __name__ == "__main__":
