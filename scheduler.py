@@ -814,8 +814,9 @@ def run_nfl_prop_card() -> None:
 def run_nfl_opener_card() -> None:
     """One opener tick: fetch the board, fire what qualifies, publish it.
 
-    THE OPENER RULE: wherever a bettable book's spread deviates >= 1.0 pt from
-    Pinnacle's, bet the side Pinnacle favours at the stale number. The edge IS
+    THE OPENER RULE: wherever a bettable book's spread deviates >= 2.0 pts from
+    Pinnacle's (opener_spread.DEPLOY_THRESHOLD; was 1.0 until 2026-09-11), bet
+    the side Pinnacle favours at the stale number. The edge IS
     the staleness, so the pick is insert-once — later ticks can only ADD games,
     never re-price one.
 

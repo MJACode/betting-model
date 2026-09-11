@@ -107,7 +107,7 @@ in-week during the season.
 - **The OPENER rule is also live (2026-08-16, `nfl_opener_spread`):** NEW
   `nfl/scripts/daily_opener_card.py` deploys the corrected backtest_opener rule —
   in the T-7..T-2 window, wherever a clean soft book's HOME spread deviates
-  ≥ 1.0 pts from Pinnacle's (regions `us,eu`, 2 credits/run), bet the side
+  **≥ 2.0 pts** from Pinnacle's (regions `us,eu`, 2 credits/run), bet the side
   Pinnacle favours at the soft book's stale number; one bet per game, largest
   |dev| at the first qualifying daily run. `scheduler.py` runs it daily 9:30am ET
   (same `RUN_NFL_WIND_CARD` kill switch), then `nfl_wind_publisher --opener`.
@@ -120,6 +120,18 @@ in-week during the season.
   excluded (commission-gross prices). Evidence: +5.78pp ATS excess
   [CI +1.8, +9.6] but ROI +6.98% [CI −0.6, +14.5] grazes zero — treat as
   PAPER-FIRST; wind stays the only `docs/sports/nfl.md` rule its own docs clear for live money.
+  **The floor is 2.0 points since 2026-09-11 (mike: "way too many picks, I
+  need statistical profitability"), was 1.0.** Measured on the selection the
+  card actually runs — bettable books only, Kelly-skipped — over 2020-2025
+  (`nfl/scripts/opener_cut_sweep.py`): |dev| ≥ 1.0 is 728 bets at −0.03%,
+  ≥ 1.5 is 268 at −5.09%, ≥ 2.0 is 125 at +3.97% (5 of 6 seasons positive,
+  CI [−11.8, +19.1]), ≥ 2.5 is 76 at −11.00%. No cell in the sweep has an
+  interval excluding zero, so 2.0 is the strictest defensible cut, not a
+  proven edge. `config` gate restored to 0.55 the same day (0.5557 at |dev|
+  2.0 clears, 0.5470 at 1.0 does not — the calibration's original intent,
+  lowered to 0.52 on 2026-08-22). The seven open Week-1 picks under 2.0 were
+  VOIDED, not deleted (`scripts/void_picks.py`); BUF @ HOU at |dev| 2.0
+  stands. Full table: `docs/thresholds.md`.
 - **DK line snapshots + pick-timing display (2026-08-19, session 121):** every
   LIVE card run also dumps DraftKings' totals/spreads for every game within 8
   days (`nfl/data_ingest/line_snapshots.py`, reusing the payload the card
