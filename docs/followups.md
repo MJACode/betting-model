@@ -21,7 +21,7 @@
 
 ---
 
-## The replay and the cut sweep pair quotes without production's stale-quote guard
+## The replay and the cut grid pair quotes without production's stale-quote guard
 
 Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
 in-play quote whose `snapshot_at` (the market's own `last_update`) predates

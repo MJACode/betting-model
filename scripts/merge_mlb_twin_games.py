@@ -38,6 +38,7 @@ from datetime import date
 from loguru import logger
 
 from data.db import get_connection
+from data.ddl_guard import schema_is_current
 
 CANON = {"AZ": "ARI", "CHW": "CWS", "ATH": "OAK", "WAS": "WSH"}
 TOKEN = re.compile(r"^(MLB_\d{4}-\d{2}-\d{2})_([A-Z]+)_([A-Z]+)$")
@@ -137,8 +138,11 @@ def main() -> None:
             logger.info("dry run -- nothing written")
             return
         backup = f"games_sbr_twins_{date.today().strftime('%Y%m%d')}"
-        conn.execute(f"CREATE TABLE IF NOT EXISTS {backup} (LIKE games INCLUDING ALL)")
-        conn.commit()
+        # Lock-taking DDL only when the backup table is not there yet
+        # (data/ddl_guard: every CREATE forces a PostgREST schema reload).
+        if not schema_is_current(conn, backup):
+            conn.execute(f"CREATE TABLE {backup} (LIKE games INCLUDING ALL)")
+            conn.commit()
         for season in sorted(by_season):
             batch = [g for g in todo if g["season"] == season]
             for g in batch:
