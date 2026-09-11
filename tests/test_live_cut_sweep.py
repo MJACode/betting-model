@@ -53,3 +53,26 @@ def test_first_signal_lock_takes_the_earliest_qualifier():
     assert decide([weak, strong, fine], 0.70, 0.14, 0.32) is weak
     # `strong` is over the 0.20 cap and must be skipped, not taken
     assert decide([strong, fine], 0.70, 0.14, 0.32) is fine
+
+
+def test_decide_caps_on_the_raw_edge_when_a_map_is_promoted(monkeypatch):
+    """classify_live_signal caps BEFORE it maps; a recalibrated candidate must
+    be capped on its raw edge, not the calibrated one."""
+    from models.probability_calibration import apply_calibration
+    params = {"method": "platt", "a": 0.8578, "b": -0.0787}   # the 2025 map
+    monkeypatch.setitem(ls.MODEL_PROB_THRESHOLDS, MODEL, 0.62)
+    monkeypatch.setitem(ls.MODEL_EDGE_THRESHOLDS, MODEL, 0.10)
+    monkeypatch.setitem(ls.MODEL_MIN_EV, MODEL, 0.15)
+    monkeypatch.setattr(ls, "_calibrated", lambda model_id, p: apply_calibration(p, params))
+    monkeypatch.setattr(ls, "DECIDE_ON_CALIBRATED_PROB", True)
+
+    for prob, odds in itertools.product(PROBS + [0.84, 0.88], ODDS + [-200, 150]):
+        implied = ls.american_to_implied_prob(odds)
+        raw_edge = prob - implied
+        cal = apply_calibration(prob, params)
+        cand = {"prob": cal, "odds": float(odds), "edge": cal - implied,
+                "ev": ls.expected_value(cal, odds), "raw_edge": raw_edge, "raw_prob": prob,
+                "side": "over", "line": 8.5, "inning": 5, "snapshot_at": "t"}
+        prod = ls.classify_live_signal(MODEL, prob, raw_edge, odds) == "BET"
+        mine = decide([cand], 0.62, 0.10, 0.15) is not None
+        assert prod == mine, f"prob={prob} odds={odds} raw_edge={raw_edge:+.3f} cal={cal:.3f}"

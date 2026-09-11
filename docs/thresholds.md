@@ -372,6 +372,12 @@ are ONE decision, never two.
 
 ## `mlb_live_total_runs` cut, 2026-09-09 (mike): 0.70 → 0.72
 
+> **Superseded 2026-09-10.** The replay this was swept on paired quotes
+> without production's stale-quote guard (in `_get_live_dk_odds` since
+> 2026-09-03, #458). On the quotes production can take, the table below is
+> 20 bets 12-8, not 34 bets 25-9 — see "The forward check on fresh quotes"
+> further down. The cut itself is unchanged pending mike's decision.
+
 mike: *"go with 0.72 and land it."* Chosen from a backtest, not from a settled
 record — his instruction, and the right one: the replay is the instrument.
 
@@ -525,24 +531,87 @@ mostly phantoms, and the ones that are not are thin.
 - The shipped cut is positive on 2025 in both halves on all quotes, and
   positive but with an interval that **does not clear breakeven** fresh-only.
   It is not moved (no cell does better; §7 says do not ship a peak), and it is
-  not the 73.5% the 47 slates showed — that was the top of this interval.
+  not the 73.5% the 47 slates showed — that number was carried by stale
+  quotes production declines (the forward check below).
 - **Volume is not comparable across feeds.** The 5-minute grid sees ~30
   quotes a game; the live loop sees ~800. More quotes mean more first-qualifier
   chances, so per-slate here (0.5 fresh / 0.7 all) is not production's 1.9.
   This test says nothing about the delivered rate on the dense feed; the
-  47-slate replay is the only measurement of that, and it sits at the top of
-  this interval.
+  47-slate replay measured that WITHOUT the stale guard, and with it the
+  dense feed's fresh record at this cut is 20 bets 12-8 (below).
 - **Bettability is unverified.** The historical snapshot holds the price DK
   posted; whether the market was open at that instant is not in the data.
 - **The next model update is a calibration map, not a cut** — fit on these
   out-of-sample sides (2,386 games), then re-sweep EV on the calibrated
   probability.
   That is a model update and needs mike's call (`docs/followups.md`).
-- **Production cannot enforce fresh-only yet**: the live price log stamps
-  fetch-start and discards DK's `last_update`. One column fixes that
+- **Production already enforces fresh-only.** `_get_live_dk_odds` declines a
+  quote whose `snapshot_at` (the market's `last_update`) predates the first
+  sight of the current score (`quote_predates_score`). The replay and the
+  sweep pair without that guard, so the FRESH row above is the
+  production-faithful one and the all-quotes row overstates
   (`docs/followups.md`).
 
 Rerun: `python -m scripts.inplay_history_backtest --season 2025 --rebuild`
 (the candidate cache lives in the temp dir; ~8 minutes). Another season is
 `mlb_inplay_history --season N --dry-run` first — 2024 would cost about the
 same — then `--fill-times N N`.
+
+### The forward check on fresh quotes, and the calibration map (2026-09-10, mike: "yes to all")
+
+**The 47-slate sweep above was carried by stale quotes.** Production declines
+a quote that predates the current score (`_get_live_dk_odds`,
+`quote_predates_score`); the replay and the sweep never did. With the same
+flag applied to the rebuilt 2026 cache (538 games, 49 slates, dense feed):
+
+| shipped cut 0.72 / 0.14 / 0.32, 2026 | bets | W-L | units | delivers (90% CI) | breakeven |
+|---|---|---|---|---|---|
+| all quotes (what the sweep counted) | 38 | 28-10 | +12.18 | 73.7% [61–84] | 55.7% |
+| of which stale (`runs_moved` > 0) | 18 | 16-2 | +10.41 | | |
+| of which fresh | 20 | 12-8 | +1.77 | | |
+| **first FRESH qualifier per game (what production can take)** | **21** | **12-9** | **+0.77** | **57.1% [40–73]** | 55.3% |
+
+Measured directly on the 38, not by subtraction; the fresh-only row is a
+different first bet in some games. On production-faithful quotes the model's
+2026 record at this cut is 21 bets at +3.7%, and 2025's is 92 bets at +9.5%
+with an interval [52–69] against a 55.6% breakeven. The 73.5% never existed.
+The guard landed 2026-09-03 (#458), so the old artifact's production record
+08-29..09-02 was made without it and 09-03..09-08 with it.
+
+**The calibration map** (`scripts/live_calibration_sweep.py`): the repo's
+two-parameter Platt fitted on 73,854 fresh 2025 preferred-side quotes,
+a = 0.8578, b = −0.0787; 0.72 → 0.675, 0.80 → 0.752. Fitted on the older
+half it takes the newer half's gap from +2.74pp to −0.19pp: helps AND
+transfers, the two bars `promote()` sets. It has no candidate row (the
+nightly fit sees 0 graded picks for this lane); `promote_external` writes it
+to the promoted columns with its provenance.
+
+**The re-sweep on the calibrated probability, fresh quotes, both seasons**
+(cells with their breakeven; 2025 split 07-01, 2026 split 08-16):
+
+| calibrated cut prob / edge / EV | 2025 fresh | early / late | 2026 fresh (forward) | early / late |
+|---|---|---|---|---|
+| 0.62 / 0.10 / 0.15 | 491 bets, 57.4% [54–61], +5.5%, breakeven 54.5% | 53.6% / 61.8% | 95 bets, 60.0% [52–68], +9.6% | 59.3% / 60.3% |
+| 0.66 / 0.08 / 0.15 | 385 bets, 61.8% [58–66], +8.2%, breakeven 57.1% | 57.7% / 66.9% | 82 bets, 58.5% [49–67], +1.6% | 58.3% / 58.6% |
+| 0.68 / 0.10 / 0.15 | 220 bets, 63.6% [58–69], +9.5%, breakeven 58.2% | 59.3% / 69.1% | 53 bets, 60.4% [49–71], +4.4% | 52.9% / 63.9% |
+| 0.70 / 0.10 / 0.15 | 118 bets, 68.6% [61–75], +15.2%, breakeven 59.8% | 63.8% / 75.5% | 31 bets, 54.8% [40–69], −8.8% | 50.0% / 57.9% |
+| 0.70 / 0.12 / 0.20 | 77 bets, 71.4% [62–79], +22.1%, breakeven 58.6% | 67.4% / 76.5% | 20 bets, 45.0% [28–63], −22.5% | 42.9% / 46.2% |
+
+**No cell is a plateau that clears breakeven in both halves of both seasons.**
+The 2025 early half sits at or under breakeven at every floor below 0.68; the
+tighter cells that look best on 2025 are negative on 2026 at n ≤ 31. The one
+cell positive in every split is the loosest, 0.62 / 0.10 / 0.15, at +5.5% and
++9.6% — thin, and its 2025 early half is −1.3%.
+
+**The cut that reproduces today's decisions on the calibrated number** is
+prob 0.675 / edge 0.10 / EV 0.24 (searched edge 0.08–0.13 × EV 0.18–0.26):
+125 of 2025's 128 raw-cut bets and 36 of 2026's 38, 11 and 4 differing at
+the boundary — the map's shift is not constant across probabilities, so no
+constant floors reproduce the set exactly. Promoting the map with that
+cut changes the published probability to the honest one and (almost) nothing
+else. The options are in the session's reply; the choice is mike's.
+
+Production's own record on the new artifact (`picks`, BETs graded) is the
+number that supersedes all of this as it accrues. Two slates in it is 0
+BETs, with the loop alive (a scorer pass every ~7 s, AVOIDs emitted, the
+quote declined as stale on most passes -- pollers logs, 2026-09-11 01:25Z).

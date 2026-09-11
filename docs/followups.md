@@ -21,30 +21,37 @@
 
 ---
 
-## The live price log discards DK's `last_update`, so production cannot tell a fresh quote from a stale one
+## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
 
-The 2025 in-play backtest (`docs/thresholds.md`, 2026-09-10) shows the
-shipped cut delivers 66.4% when stale quotes count and 60.9% when only quotes
-whose score has not moved since DK's own `last_update` count; the 37 stale
-bets among the 128 went 30-7. The live loop pairs on fetch-start time
-(`data/ingestors/live_odds_ingestor.py`) and drops the market's `last_update`,
-which is the one field a "score moved since the book repriced" guard needs.
-Add the column to the in-play write (the shared `live_price_log` shape, per
-§1b "assessed against all"), then the guard is a one-line rule and the
-accumulating feed has the same shape as the bought history. Not a model
-update; the guard that USES it is.
+Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
+in-play quote whose `snapshot_at` (the market's own `last_update`) predates
+the first sight of the game's current score (`_score_changed_at`,
+`data/live_quote_guard.quote_predates_score`, tolerance 0). The REPLAY and
+the cut sweep (`scripts/live_inning_gate_replay._pair`) pair the newest price
+at or before each state with only the age bound, so their "all quotes" grids
+count bets production would have declined -- on 2025, 37 of the shipped
+cut's 128 bets, 30-7. The sweep cache now carries `runs_moved` (the state at
+the price's snapshot_at vs the candidate state), and a sweep read for
+production is the FRESH-only grid. `_pair` itself should apply the same rule
+so the two never diverge again; a test that a stale pair is dropped.
 
-## [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
+## [ ] [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 
-Claimed 0.70–0.75 delivers 67%, 0.75–0.80 66%, over 2,386 out-of-sample
-games (911 and 340 of them contributing to those bands;
-`docs/thresholds.md`, 2026-09-10). The prob floor cannot fix
-a shifted number; a map can. Fitting one and re-sweeping the EV floor on the
-calibrated probability is a model update — mike's call, `Updated-By` on the
-commit. `python -m scripts.inplay_history_backtest --season 2025` reproduces
-the bands.
+Fitted and measured 2026-09-10 (`scripts/live_calibration_sweep.py`,
+`docs/thresholds.md` "The forward check on fresh quotes"): a = 0.8578,
+b = −0.0787, helps and transfers on the 2025 date split. The re-sweep on the
+calibrated probability finds NO cell that clears breakeven in both halves of
+both seasons on fresh quotes; the shipped cut's own fresh record is 92 bets
+at +9.5% (2025) and 21 at +3.7% (2026). `promote_external` is in place; the
+cut to promote it with is mike's call (the three options are in the
+2026-09-10 session entry). Landing order: promote the map first (the lane
+goes quiet at 0.675 < 0.72), then the config change; a running loop picks
+the map up at its next start (`_CAL_CACHE` is per process, the supervisor
+restarts it every 10 minutes); the app's action filter compares the RAW
+probability against `min_prob`, which is looser than the decision path when
+the cut is on the calibrated scale, so no BET is hidden.
 
-## Four franchises are filed twice in `games`, and the scores sit on the SBR twin
+## [ ] Four franchises are filed twice in `games`, and the scores sit on the SBR twin
 
 ARI/AZ, CWS/CHW, OAK/ATH, WSH/WAS: the odds ingestor, the Stats API map and
 every `live` row use the first form; the SBR CSV import files the same game
