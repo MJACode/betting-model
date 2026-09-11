@@ -570,6 +570,13 @@ each game's `commence_time` hour, so the evening look-ahead pass prices
 tomorrow on a real forecast. Same helper and rules for every MLB batter,
 WNBA and NBA prop loop.
 
+**`ump_k_plus_minus` leaves this model at its next retrain** (2026-09-10,
+`PENDING_RETRAIN_DROP_FEATURES` in the feature engine; `ump_bb_plus_minus`
+leaves the walks model the same way). A BET locks before MLB posts the
+umpire, so at decision time the feature is always the imputed 0.0. The
+training path already excludes it; the live artifact keeps it until the
+retrained `.pkl` is committed.
+
 **v2 retrain results (2026-05-14, version 20260514_090858):**
 - 11,115 training rows (2019-2023), 3,091 holdout (2024)
 - 13,447 umpire assignments loaded, 138 unique umpires
