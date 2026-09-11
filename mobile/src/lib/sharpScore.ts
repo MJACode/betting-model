@@ -146,6 +146,23 @@ export function sharpScore(pick: Pick): SharpScore | null {
     edge = EDGE_MAX * clamp01((pick.model_probability - floor) / Math.max(1 - floor, 0.01));
   } else {
     const bar = t?.min_edge ?? 0.05;
+    // NO BAR AT ALL — neither a probability floor nor an edge one — means
+    // there is nothing for "how far past the model's own bar" to measure, and
+    // the arithmetic below answers anyway: with bar 0 the denominator floors at
+    // 0.04, so ANY edge of 4pp or more scores a full 40/40, the same as an
+    // mlb_moneyline pick 33pp past its 11pp bar. The pill is what users rank
+    // cards by, so that is a flattering number rather than a missing one.
+    // nfl_live_prop is the case (0/0): its cut is EV, in
+    // nfl/live_model/config.EV_THRESHOLDS, and it is now in the bundle.
+    //
+    // NOT a fix for the wider degenerate case, deliberately. Five live models
+    // carry min_edge 0 with a real PROBABILITY floor — ncaaf_spread,
+    // ncaaf_spread_premium, ncaaf_over_under, nfl_opener_spread and
+    // wnba_prop_player_rebounds — and they score off that same 4pp scale today,
+    // on master. Scoring them off their prob floor instead would take an
+    // ncaaf_spread pick at 0.58 from 40/40 to 3/40, which is a large visible
+    // change to a ranking number and wants its own PR. See the PR body.
+    if (t && t.min_edge === 0 && t.min_prob === 0) return null;
     // edge == bar → 0; edge == 3×bar → full.
     // At the price the pick was DECIDED at (2026-09-09).
     edge = EDGE_MAX * clamp01((decisionEdge(pick) - bar) / Math.max(2 * bar, 0.04));

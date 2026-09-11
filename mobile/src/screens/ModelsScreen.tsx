@@ -279,6 +279,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
         (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (stats.picks === 0 ? ', no settled bets yet' : '') +
         (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced` : '')
       }
@@ -296,7 +297,16 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
             {stats.picks} pick{stats.picks === 1 ? '' : 's'}
             {decided > 0 ? ` · ${stats.wins}–${stats.losses}${stats.pushes > 0 ? `–${stats.pushes}` : ''}` : ''}
           </Text>
-          {thin && stats.picks > 0 ? (
+          {stats.picks === 0 ? (
+            // "0 picks · — · —" with no explanation is indistinguishable from a
+            // failed fetch — the rule this file already states at the list's
+            // EmptyState, which only fires when EVERY model is at zero and so
+            // says nothing about one row among many. NOT thinNote: "Too few to
+            // judge yet" implies there are some. Newly common on the NFL tab,
+            // which lists twelve prop models unpaused on 2026-09-06/09 with no
+            // settled record inside the published window (UX review).
+            <Text style={styles.subtle}>No settled bets yet</Text>
+          ) : thin ? (
             <Text style={styles.subtle}>{thinNote}</Text>
           ) : null}
           {unpriced > 0 ? (

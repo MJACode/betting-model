@@ -78,9 +78,13 @@ check('a retired model carries no bundled threshold',
   RETIRED.every((m) => ACTION_THRESHOLDS[m] === undefined));
 // 2026-08-30 (mike): the prob floor went 0.68 -> 0.70 with the live volume cut
 // (config.MODEL_PROB_THRESHOLDS). This assertion still pinned 0.68 and had been
-// failing since, which is how a red harness stops being read.
+// failing since, which is how a red harness stops being read. It went 0.70 ->
+// 0.72 in config and rotted the same way, silently, because a literal copied
+// out of config.py has no way to notice config.py moving.
+// tests/test_mobile_threshold_parity.py now compares EVERY cut against config
+// itself, so this literal is a convenience rather than the guard.
 check('mlb_live_total_runs carries its current cut',
-  ACTION_THRESHOLDS['mlb_live_total_runs']?.min_prob === 0.70 &&
+  ACTION_THRESHOLDS['mlb_live_total_runs']?.min_prob === 0.72 &&
   ACTION_THRESHOLDS['mlb_live_total_runs']?.min_edge === 0.14);
 
 // ── The pre-game retirements (2026-09-02) ───────────────────────────────────
@@ -141,7 +145,9 @@ check('offline: a retired model BET is not actionable however good it looks',
   RETIRED.every((m) => !passesActionFilter(pick({ model_id: m }))));
 check('offline: the live model that remains is still actionable at its cut',
   passesActionFilter(pick({
-    model_id: 'mlb_live_total_runs', model_probability: 0.70, edge: 0.15,
+    // Above the bundled 0.72 floor — 0.70 sat exactly on the OLD one, so the
+    // fixture only ever passed while the mirror was stale.
+    model_id: 'mlb_live_total_runs', model_probability: 0.75, edge: 0.15,
   })));
 check('offline: a retired model has no resolvable threshold',
   RETIRED.every((m) => thresholdFor(m) === null));
