@@ -72,9 +72,11 @@ in-week during the season.
   (0.5489 at 7 days → 0.5671 at 3 → 0.5735 at 1). Since the pick is insert-once,
   firing early bought the worse number permanently.
   Pinned by `tests/test_nfl_wind_fire_window.py`.
-- **The five Week 1 picks written before the gate STAY** (CLAUDE.md §1c). They
-  were picks; the line moving under them — or the window tightening over them —
-  does not retract them.
+- **The six Week 1 picks written before the gate were VOIDED on 2026-09-07 and
+  DELETED on 2026-09-11**, both on mike's instruction (the second overriding,
+  for those rows, his own §1c "voided, never deleted" corollary — the rule
+  stands). `picks_log` holds all six; see `docs/sessions/2026-09.md`,
+  session 281.
 - 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
 - First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
   shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.
