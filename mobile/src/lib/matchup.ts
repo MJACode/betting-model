@@ -160,23 +160,34 @@ export function gradeColorDiscriminates(grades: (MatchupGrade | null)[]): boolea
 }
 
 /**
- * The grades a "B or better" style floor can be set to, best first.
+ * The four grades a floor can be set to, best first.
  *
- * The FULL scale is thirteen letters and a filter row of thirteen chips is a
- * wall; these are the five people actually reach for. The floor is compared on
- * the percentile, never on the letter, so a cut between them still behaves.
+ * The full scale is thirteen letters and a row of thirteen chips is a wall;
+ * these are the four people reach for. Comparison is on GRADE_ORDER below, so
+ * a row graded between two of them still cuts correctly.
  */
 export const GRADE_FLOORS: MatchupGrade[] = ['A', 'B', 'C', 'D'];
 
-/** Is this grade at or above the floor? Ungraded rows never pass a floor. */
+/**
+ * Is this grade at or above the floor?
+ *
+ * `includeUngraded` DEFAULTS TO TRUE, and that default is a correction. A dash
+ * means we hold no rating for that defence, not that the spot is bad — and on
+ * an NCAAF Saturday the ungraded rows are the FCS visitors, i.e. the softest
+ * spots on the board. Hiding them by default made a filter whose stated
+ * question is "show me the easy matchups" delete the easiest ones first, and
+ * it did it silently: the pill just said "B or better" and the list was
+ * shorter (UX review, 2026-09-09). The switch is there for anyone who wants
+ * only rows we can actually vouch for.
+ */
 export function meetsGradeFloor(
   grade: MatchupGrade | null | undefined,
   floor: MatchupGrade | null,
+  includeUngraded = true,
 ): boolean {
   if (!floor) return true;
-  if (!grade) return false; // a dash is not "good enough"; it is unknown
-  const rank = (g: MatchupGrade) => GRADE_ORDER.indexOf(g);
-  return rank(grade) <= rank(floor);
+  if (!grade) return includeUngraded;
+  return GRADE_ORDER.indexOf(grade) <= GRADE_ORDER.indexOf(floor);
 }
 
 /** Best to worst. The index IS the ordering, so nothing sorts on a letter. */

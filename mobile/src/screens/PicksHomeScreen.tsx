@@ -75,7 +75,7 @@ import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
-import { isGameSelected, pruneSelection, selectableGames } from '@/lib/gameFilter';
+import { isGameSelected, selectableGames } from '@/lib/gameFilter';
 import { slipKeyForPick } from '@/lib/parlay';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -262,14 +262,18 @@ export function PicksHomeScreen() {
       ),
     [activeItems, sport],
   );
-  // Same pruning as the Stats board, for the same reason: an id that has left
-  // the slate filters this list to nothing while the sheet still shows a game
-  // ticked.
-  useEffect(() => {
-    if (pickableGames.length === 0) return;
-    const pruned = pruneSelection(gamePicker.selected, pickableGames);
-    if (pruned !== gamePicker.selected) gamePicker.replace(pruned);
-  }, [pickableGames, gamePicker]);
+  // THIS SCREEN DOES NOT PRUNE, AND MUST NOT. Pruning belongs to the one read
+  // that sees the whole forward window — the Stats tab's slate read. The list
+  // here is only the games with picks IN THIS VIEW (`activeItems` swaps with
+  // Today / Signals / Live), so pruning against it would intersect the shared
+  // selection down to nothing: Picks mounts at launch and never unmounts, so a
+  // game picked on the Stats board for Sunday would be dropped immediately by
+  // a screen that has never heard of it, and the Stats board would silently
+  // widen back to the whole league. Tapping Today -> Signals did the same thing
+  // inside this screen alone (UX review, 2026-09-09).
+  //
+  // A picked game with no picks in this view is a legitimate empty list, and
+  // the existing "no picks match your filter" state is the honest answer.
 
   const filtered = useMemo(
     () =>

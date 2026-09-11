@@ -27,6 +27,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { meetsGradeFloor } from '../src/lib/matchup';
 import {
   gameFilterSummary,
   isGameSelected,
@@ -129,6 +130,7 @@ function main() {
   const picks = read('src/screens/PicksHomeScreen.tsx');
   const pf = read('src/components/filters/PickFilters.tsx');
   const hook = read('src/hooks/useGameSelection.ts');
+  const gfs = read('src/components/filters/GameFilterSection.tsx');
 
   check('both tabs read the SAME selection', /useGameSelection\(sport\)/.test(stats) && /useGameSelection\(sport\)/.test(picks));
   check('and both render the same section',
@@ -137,17 +139,52 @@ function main() {
   check('Picks narrows its bets by the picked game', /isGameSelected\(d\.pick\.game_id, gamePicker\.selected\)/.test(picks));
   check('a picked game is also the SERVER narrowing, not just a client filter',
     /gameTeams \?\? slateTeams\(sport, slate, tonightActive\)/.test(stats));
-  // The CALL, not the import — each file names it twice.
-  check('both tabs prune a stale selection',
-    (stats + picks).match(/pruneSelection\(gamePicker\.selected, pickableGames\)/g)?.length === 2);
+  // ONE PRUNER, and it is the slate read. The guard that shipped asserted
+  // "both tabs prune", which was the bug: Picks' list is only the games with
+  // picks IN THE CURRENT VIEW, and Picks mounts at launch and never unmounts,
+  // so it pruned away every id the Stats board had picked for a later day and
+  // the selection died on the way between tabs (UX review, 2026-09-09).
+  check('the slate read is the only pruner', /pruneSelection\(selectedGameIds, pickableGames\)/.test(stats));
+  check('and the Picks tab does not prune at all', !/pruneSelection/.test(picks));
+  check('it depends on values, not on the hook object, so it cannot re-run every render',
+    /\}, \[pickableGames, selectedGameIds, replaceGames\]\)/.test(stats));
 
   // The selection is NOT persisted, and that is deliberate: a stored game id
   // filters tonight's board by last night's games, silently.
   check('the selection is never written to storage', !/AsyncStorage/.test(hook));
   check('and a sport switch clears it', /selectionSport !== sport && selected\.size > 0/.test(hook));
 
+  // THE CASE THE FIRST GUARD COULD NOT SEE: two lists that disagree. It fed one
+  // list to one selection, which is exactly the case that already worked.
+  {
+    const slateWide = games;                                    // what Stats sees
+    const picksNarrow = games.filter((x) => x.gameId === 'NFL_2026_01_GB_MIN'); // one game has picks
+    const picked = new Set(['NFL_2026_01_NE_SEA']);             // the user picked the other
+    check('pruning against the narrow list would have destroyed the selection',
+      pruneSelection(picked, picksNarrow).size === 0);
+    check('pruning against the slate keeps it',
+      pruneSelection(picked, slateWide).size === 1);
+  }
+
   // The grade floor is the other half of the ask.
   check('the board can be cut by matchup grade', /meetsGradeFloor\(matchupFor\(/.test(stats));
+  check('and ungraded rows are INCLUDED by default',
+    meetsGradeFloor(null, 'B') && !meetsGradeFloor(null, 'B', false));
+  check('a graded row is still cut on its letter either way',
+    meetsGradeFloor('A', 'B') && !meetsGradeFloor('C', 'B') && !meetsGradeFloor('C', 'B', false));
+  check('the switch is only offered once a floor is set', /\{minGrade \? \(\s*\n\s*<View style=\{styles\.ungradedRow\}/.test(stats));
+  check('the chip, the summary and the pill name the setting the same way',
+    /label=\{g\}/.test(stats) && /\$\{minGrade\} or better/.test(stats) && !/label=\{`\$\{g\}\+`\}/.test(stats));
+  check('the slate chip stands down while a specific game is picked',
+    /disabled=\{gamesPicked\}/.test(stats) && /gamesPicked \|\| isOnSlate/.test(stats));
+  check('the game cut is visible in the Picks bar, not just its sheet',
+    /key: 'games'/.test(pf) && /\+ \(gamesNarrowed \? 1 : 0\)/.test(pf));
+  check('and Clear all on that bar clears it too', /onChange\(freshFilter\(\)\);\s*\n\s*onClearGames\?\.\(\);/.test(pf));
+  check('the games list is grouped by day and searchable when long',
+    /dayLabel\(group\.day\)/.test(gfs) && /SEARCHABLE_AT/.test(gfs));
+  check('its rows truncate rather than wrap', (gfs.match(/numberOfLines=\{1\}/g) ?? []).length >= 2);
+  check('the "All games" checkbox row is gone, replaced by a section Clear',
+    !/All games<\/Text>/.test(gfs) && /onClear\?: \(\) => void;/.test(read('src/components/filters/FilterSheet.tsx')));
   check('and only where the sport can grade one', /showMatchupCol \? \(\s*\n\s*<FilterSection\s*\n\s*title="Matchup grade"/.test(stats));
 
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);

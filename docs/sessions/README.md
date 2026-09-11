@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-11 | [2026-09](./2026-09.md) | 2026-09-11, session 273 - the Games filter on Picks and Stats (one shared selection, not persisted because a game_id is one fixture on one date) plus a matchup-grade floor; the review's blocker was that BOTH screens pruned the shared selection against their own games list, and Picks - which never unmounts - pruned away every id picked on the other tab |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 268 - the Stats board's leaderboard reads were never paged and every one is over the 1,000-row cap (NFL last-10 is 12,850 rows, NCAAF 54,687), so the NFL board - which opens filtered to the slate - had 6 of tonight's players and no quarterback; paged and narrowed to the slate's teams server-side. Separately: NFL game lines are DK spreads only, because odds_ingestor.SPORT_KEYS has no NFL entry |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 266 - the live cut re-swept on the new model over 47 slates: 0.70 -> 0.72, ~1.9 bets a slate, chosen as the centre of a plateau; scripts/live_cut_sweep.py |
 | 2026-09-09 | [2026-09](./2026-09.md) | 2026-09-09, session 272 - the Picks market filter offered MLB's Pitcher/Batter markets on every sport's board; scoped to the picks on screen, and the thirteen unlabelled NFL models (twelve prop + nfl_live_prop) that were rendering their raw model_id AND skipping the category cut entirely now carry labels and a derived category |

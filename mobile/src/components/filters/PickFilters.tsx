@@ -191,12 +191,26 @@ export function PickFilters({
   const marketIsNarrowed = categoriesAreNarrowed(state, presentCategories);
   const marketCutBites = presentCategories.length > 1 || marketIsNarrowed;
 
-  const pills = useMemo(
-    () => buildPills(state, onChange, presentCategories),
-    [state, onChange, presentCategories],
-  );
+  // THE GAME CUT IS IN THE BAR, NOT JUST THE SHEET. It lives outside
+  // PicksFilterState (it is shared with the Stats tab), and leaving it out of
+  // the pills and the count meant a user could filter to one game, close the
+  // sheet, and see a shorter board with no badge, no removable pill and no
+  // Clear all — the exact blindness the pill row was added to end. It also made
+  // Reset look like it cleared something that had never been shown as set.
+  const gamesNarrowed = selectedGames.size > 0;
+  const pills = useMemo(() => {
+    const out = buildPills(state, onChange, presentCategories);
+    if (gamesNarrowed && onClearGames) {
+      out.push({
+        key: 'games',
+        label: gameFilterSummary(games, selectedGames),
+        onRemove: onClearGames,
+      });
+    }
+    return out;
+  }, [state, onChange, presentCategories, gamesNarrowed, games, selectedGames, onClearGames]);
 
-  const count = activeFilterCount(state, presentCategories);
+  const count = activeFilterCount(state, presentCategories) + (gamesNarrowed ? 1 : 0);
 
   // Collapsed-row summaries. "All" rather than an exhaustive list when nothing
   // is excluded — the row exists to say what is NARROWING the board.
@@ -224,7 +238,14 @@ export function PickFilters({
         onOpenFilters={() => setOpen(true)}
         activeCount={count}
         pills={pills}
-        onClearAll={count > 0 ? () => onChange(freshFilter()) : undefined}
+        onClearAll={
+          count > 0
+            ? () => {
+                onChange(freshFilter());
+                onClearGames?.();
+              }
+            : undefined
+        }
         countLabel={totalShown === totalAll ? undefined : `${totalShown}/${totalAll}`}
       >
         <ScrollView
@@ -286,12 +307,12 @@ export function PickFilters({
             title="Games"
             summary={gameFilterSummary(games, selectedGames)}
             defaultOpen={selectedGames.size > 0}
+            onClear={gamesNarrowed ? onClearGames : undefined}
           >
             <GameFilterSection
               games={games}
               selected={selectedGames}
               onToggle={onToggleGame}
-              onClear={() => onClearGames?.()}
               emptyNote="No games on this board."
             />
           </FilterSection>

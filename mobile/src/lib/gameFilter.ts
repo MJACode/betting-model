@@ -22,7 +22,7 @@
  * whenever the sport changes for the same reason.
  */
 
-import { formatGameTimeET, weekdayShortET } from './format';
+import { formatGameTimeET, liveSlateDatesET, todayET, weekdayShortET } from './format';
 import type { GameRow } from '@/types';
 
 export interface SelectableGame {
@@ -57,8 +57,16 @@ export function selectableGames(
   today: string,
 ): SelectableGame[] {
   if (NO_FIXTURE_SPORTS.has(sport)) return [];
+  // A GAME KEEPS ITS KICKOFF'S DATE, so a 20:25 Sunday kickoff still running at
+  // 00:30 ET is filed under yesterday — and a bare `>= today` drops it from the
+  // list while the Live view is still showing its in-play picks. The floor is
+  // the live window's earliest date, which is exactly what CLAUDE.md §1b and
+  // tests/test_live_slate_midnight.py exist to enforce.
+  const window = liveSlateDatesET();
+  const floor = window.length > 0 ? window[window.length - 1]! : today;
+  const from = floor < today ? floor : today;
   return games
-    .filter((g) => g.sport === sport && !!g.game_date && g.game_date >= today)
+    .filter((g) => g.sport === sport && !!g.game_date && g.game_date >= from)
     .map((g) => ({
       gameId: g.game_id,
       matchup: g.away_team && g.home_team ? `${g.away_team} @ ${g.home_team}` : g.game_id,
@@ -82,8 +90,12 @@ export function selectableGames(
  */
 function gameWhen(g: GameRow): string {
   const time = g.commence_time ? formatGameTimeET(g.commence_time) : '';
-  const day = weekdayShortET(g.commence_time);
-  if (!time) return day ?? 'Today';
+  // The DAY falls back to `game_date` when the feed has not written a kickoff
+  // yet. Deriving it from `commence_time` alone returned null there, and the
+  // `?? 'Today'` fallback then labelled a Sunday fixture "Today" — a wrong fact
+  // in the one control whose job is telling a multi-day slate apart.
+  const day = weekdayShortET(g.commence_time) ?? weekdayShortET(`${g.game_date}T12:00:00Z`);
+  if (!time) return day ?? (g.game_date === todayET() ? 'Today' : g.game_date);
   return day ? `${day} ${time}` : time;
 }
 
@@ -125,7 +137,10 @@ export function gameFilterSummary(
   if (selected.size === 0) return 'All games';
   if (selected.size === 1) {
     const one = games.find((g) => selected.has(g.gameId));
-    return one ? one.matchup : '1 game';
+    if (!one) return '1 game';
+    // Bounded: this string becomes a pill label, and an NCAAF matchup is two
+    // CFBD school names ("Louisiana-Monroe @ Northwestern State").
+    return one.matchup.length > 24 ? '1 game' : one.matchup;
   }
   return `${selected.size} games`;
 }
