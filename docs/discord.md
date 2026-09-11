@@ -119,6 +119,29 @@ side flip is one bet of record). The seven already-posted picks were re-ledgered
 under their new keys by `scripts/backfill_publish_keys.py` **before** the code
 shipped — run it in that order or every posted pick republishes.
 
+**A key migration leaves a duplicate in the SHADOW TRACK, and clearing it is the
+second half of the job** (2026-09-11). `opening_signals` is UNIQUE on
+`lock_key`, so a proposition can end up holding two rows: the original under the
+old shape, and one `capture_opening_signals` wrote under the new one.
+`backfill_publish_keys` deliberately REFUSES to re-key into an occupied slot
+(#633, after job 47297 rolled back three times on
+`opening_signals_lock_key_key`) and logs the pair instead.
+
+Measured: **15 `nfl_prop_market` shadow rows for 8 propositions.** Every one of
+the seven duplicates carried the SAME `locked_at` — `2026-09-09 18:31:09.415888`
+— one re-capture pass, not seven crossings. So the CLV track was double-counting
+them, and the duplicate reported a signal time that was never a signal.
+
+**`scripts/dedupe_opening_signals.py`** clears them, keeping the row locked
+EARLIER (§1c: timing is data — the later row is a re-capture stamped with the
+clock of the pass that re-read it). Four gates, and it deletes nothing that
+fails any: the partner must be the same key plus a suffix; the two rows must
+agree on label, side, `dk_odds`, `scored_line`, `model_probability` and `edge`;
+neither may carry a graded `WIN`/`LOSS`/`PUSH`; neither may carry a computed
+`clv_pct`. Anything else is reported and left for a person. Applied
+2026-09-11: 15 → 8 rows, and `opening_signals` now holds **no** row whose key is
+a prefix of another's.
+
 **2. A VOIDED pick was still a green BET in the app.** The six Week 1
 `nfl_wind_totals` picks were voided on 09-07 and mike removed them from Discord
 by hand. Nothing carried that to the app, which had no concept of
