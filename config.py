@@ -2275,6 +2275,29 @@ BEST_LINE_BOOKMAKERS = [
     if b not in BEST_LINE_EXCLUDE_BOOKMAKERS
 ]
 
+# The books a LIVE feed that polls ONE region can add at zero extra credits.
+# The Odds API bills markets x REGIONS, and the `bookmakers` param counts as
+# one region only while every book named is in the same region -- the five
+# us2 books (betrivers, hardrockbet, ballybet, betparx, rebet; fliff too) would
+# add a second region to every in-play poll, and the NCAAF loop polls every
+# pass on a Saturday (~4,700 fetches). So its feed asks for the BETTABLE books
+# that share DraftKings' region and nothing else. Measured 2026-09-11 against
+# the live endpoint: `draftkings` alone and these five together both cost
+# x-requests-last = 2 on the NCAAF h2h+totals pull.
+#
+# ncaaf_live/config.py carries the same default by design (it imports nothing
+# from here; see its header) -- tests/test_best_line_live.py pins the two.
+_US2_BOOKMAKERS = {"betrivers", "hardrockbet", "ballybet", "betparx", "rebet", "fliff"}
+LIVE_FEED_BOOKMAKERS = [
+    b for b in (
+        b.strip().lower()
+        for b in (os.environ.get("LIVE_FEED_BOOKMAKERS")
+                  or ",".join(b for b in BEST_LINE_BOOKMAKERS
+                              if b not in _US2_BOOKMAKERS)).split(",")
+        if b.strip()
+    )
+]
+
 # ── Action Network (Public Betting Splits) ────────────────────────────────────
 # Unofficial JSON scoreboard endpoint — the same data that powers
 # actionnetwork.com/mlb/public-betting. No API key required. The ingestor is

@@ -1417,7 +1417,14 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
                g.commence_time, p.created_at, t.min_edge, t.min_odds,
-               {live_lock_key_sql()} AS lock_key
+               {live_lock_key_sql()} AS lock_key,
+               -- The price the live pick was DECIDED at (2026-09-10): the
+               -- best bettable in-play quote, DraftKings before the flip and
+               -- for the NFL in-play lane (DK-only feed). Published as the
+               -- headline through publish_price, like the pre-game cards.
+               p.best_book, p.best_odds, p.best_bet_link,
+               COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
+               p.decision_book
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -1441,7 +1448,11 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
         "commence": r[13], "posted_at": r[14], "live": True,
-        "good_to": price_bound(r[5], r[1], r[15], r[16], r[7]),
+        "best_book": r[18], "best_odds": r[19], "best_bet_link": r[20],
+        "decision_odds": r[21], "decision_book": r[22],
+        # "good to" from the deciding price, the same way the pre-game
+        # producers bound theirs.
+        "good_to": price_bound(r[5], r[1], r[15], r[16], r[21]),
     } for r in rows]
 
 

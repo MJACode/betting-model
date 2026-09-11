@@ -39,6 +39,7 @@ from scipy import stats as scipy_stats
 import config
 from config import (
     LIVE_ODDS_MAX_AGE_SEC,
+    LIVE_SCORE_LAG_TOLERANCE_SEC,
     BANKROLL,
     BEST_LINE_BOOKMAKERS,
     BET_EDGE_THRESHOLD,
@@ -75,6 +76,7 @@ from config import (
     DECIDE_ON_BEST_PRICE,
     BEST_LINE_MAX_LAG_MIN,
 )
+from data.live_quote_guard import quote_predates_score
 from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
 from data.name_match import resolve_feed_name
@@ -1197,8 +1199,11 @@ def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
         shop, nothing to requalify);
       * the pick was already downgraded with a reason (a capped or declined
         row is not resurrected by a cheaper price);
-      * the pick is a live one -- live lanes decide on the in-play DraftKings
-        price (mike, 2026-09-02, "only for pregame picks for now").
+      * the pick is a live one -- a live pick is decided at its best in-play
+        price by its OWN lane (live_scorer._make_live_pick via
+        _live_decision_quote, since 2026-09-10), because the live rules
+        (classify_live_signal: the live edge cap, the EV floor) are not
+        _decide. This helper is the pre-game path only.
 
     MAX_EDGE_CAP is NOT re-applied at the best price. The cap guards against
     the model's disagreement with the reference book being noise, and that
@@ -1707,60 +1712,122 @@ def _live_quote_is_on_offer(snapshot_at, now=None) -> bool:
     return (now - ts).total_seconds() <= LIVE_ODDS_MAX_AGE_SEC
 
 
-def _best_live_price(conn: DBConnection, game_id: str, market: str,
-                     pick_side: str, scored_line: float | None) -> dict | None:
-    """Best IN-PLAY price on one side, across books, at the same line.
+def _live_book_quotes(conn: DBConnection, game_id: str, market: str,
+                      score_seen_at=None) -> list[dict]:
+    """The newest IN-PLAY row per bettable book for one game market, keeping
+    only the quotes a bettor could take right now.
 
-    The pre-game sibling (_best_game_price) deliberately excludes in-play rows,
-    because for a pre-game pick an in-play price is a different proposition. For
-    a LIVE pick it is the only relevant one -- and we already pay for it: all
-    seven books arrive in the same in-play poll, so this reads data that was
-    being collected and thrown away (measured 2026-08-30: 0 of 107 live BETs in
-    August carried a best price, while six non-DK books had in-play rows for
-    the same games).
+    One read per (game, market) per pass, not one per side: the live scorer
+    prices two sides of up to three markets every five seconds, and the
+    previous shape (every in-play row for the game, sorted in memory) measured
+    951 ms on a finished game's 11,204 rows. This is a LATERAL top-1 per book
+    over idx_odds_book_snap -- 41 ms on the same game -- so the cost scales
+    with the number of books, not with how long the game has been running.
 
-    Same-line only, same as pre-game: under the pick rule a better price on
-    Over 9.0 is not a better price on Over 8.5, it is a different bet. And each
-    book must have published recently enough to still be on offer -- a frozen
-    book would otherwise win the comparison precisely BECAUSE it stopped
-    updating, which is the one way line shopping could make a pick worse.
+    Two freshness gates, both of which the DraftKings live read already
+    applies (live_scorer._get_live_dk_odds), so a book cannot win the
+    comparison by having stopped updating:
+      * age: `_live_quote_is_on_offer`, the LIVE_ODDS_MAX_AGE_SEC bound;
+      * the score: a quote the book stamped BEFORE we first saw the current
+        score has not accounted for it, however young it is
+        (`quote_predates_score`, the 2026-09-03 Wake Forest total). Passed in
+        by the caller, which has it from the state feed; None means no score
+        change seen yet, and leaves age as the only gate, as before.
     """
+    if not BEST_LINE_BOOKMAKERS:
+        return []
+    rows = conn.execute("""
+        SELECT b.book, o.home_price, o.away_price, o.over_price, o.under_price,
+               o.home_link, o.away_link, o.over_link, o.under_link,
+               o.total_line, o.spread_home, o.snapshot_at
+        FROM unnest(?::text[]) AS b(book)
+        CROSS JOIN LATERAL (
+            SELECT home_price, away_price, over_price, under_price,
+                   home_link, away_link, over_link, under_link,
+                   total_line, spread_home, snapshot_at
+            FROM odds
+            WHERE game_id = ? AND market = ? AND bookmaker = b.book
+              AND snapshot_type = 'in_play'
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        ) o
+    """, (list(BEST_LINE_BOOKMAKERS), game_id, market)).fetchall()
+    cols = ("book", "home_price", "away_price", "over_price", "under_price",
+            "home_link", "away_link", "over_link", "under_link",
+            "total_line", "spread_home", "snapshot_at")
+    quotes = []
+    for r in rows:
+        q = dict(zip(cols, r))
+        if not _live_quote_is_on_offer(q["snapshot_at"]):
+            continue
+        if score_seen_at is not None and quote_predates_score(
+                q["snapshot_at"], score_seen_at, LIVE_SCORE_LAG_TOLERANCE_SEC):
+            continue
+        quotes.append(q)
+    return quotes
+
+
+def _best_live_side(quotes: list[dict], pick_side: str, market: str,
+                    scored_line: float | None) -> dict | None:
+    """The best bettable quote on one side, at the same line, from the rows
+    `_live_book_quotes` kept. Same-line only, same as pre-game: under the pick
+    rule a better price on Over 9.0 is not a better price on Over 8.5, it is a
+    different bet. Ties keep DraftKings (config order)."""
     price_col = _SIDE_PRICE_COLUMN.get(pick_side)
     if not price_col or not BEST_LINE_BOOKMAKERS:
         return None
     link_col = _SIDE_LINK_COLUMN[pick_side]
     line_col = "total_line" if market.startswith("totals") else (
         "spread_home" if market.startswith("spreads") else None)
-
-    placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
-    rows = conn.execute(f"""
-        SELECT bookmaker, {price_col}, {link_col}, total_line, spread_home,
-               snapshot_at
-        FROM odds
-        WHERE game_id = ? AND market = ?
-          AND snapshot_type = 'in_play'
-          AND bookmaker IN ({placeholders})
-        ORDER BY snapshot_at DESC
-    """, (game_id, market, *BEST_LINE_BOOKMAKERS)).fetchall()
-
-    latest: dict[str, tuple] = {}
-    for r in rows:
-        latest.setdefault(r[0], r)
-
-    quotes = []
+    by_book = {q["book"]: q for q in quotes}
+    out = []
     for book in BEST_LINE_BOOKMAKERS:          # config order breaks ties
-        r = latest.get(book)
-        if r is None or r[1] is None:
+        q = by_book.get(book)
+        if q is None or q.get(price_col) is None:
             continue
-        if not _live_quote_is_on_offer(r[5]):
+        if line_col is not None and not _same_line(q.get(line_col), scored_line):
             continue
-        if line_col is not None:
-            book_line = r[3] if line_col == "total_line" else r[4]
-            if not _same_line(book_line, scored_line):
-                continue
-        quotes.append({"book": book, "odds": r[1], "link": r[2]})
-    return _best_of(quotes)
+        out.append({"book": book, "odds": q[price_col], "link": q.get(link_col)})
+    return _best_of(out)
 
+
+def _best_live_price(conn: DBConnection, game_id: str, market: str,
+                     pick_side: str, scored_line: float | None,
+                     score_seen_at=None) -> dict | None:
+    """Best IN-PLAY price on one side, across books, at the same line.
+
+    The pre-game sibling (_best_game_price) deliberately excludes in-play rows,
+    because for a pre-game pick an in-play price is a different proposition. For
+    a LIVE pick it is the only relevant one -- and we already pay for it: every
+    shopped book arrives in the same in-play poll (13 books since 08-28), so
+    this reads data that was being collected and thrown away (measured
+    2026-08-30: 0 of 107 live BETs in August carried a best price, while six
+    non-DK books had in-play rows for the same games).
+
+    Since 2026-09-10 (mike, "yes do everything", widening the 2026-09-09 flip
+    to the live lanes) this is also the price a live pick is DECIDED at --
+    live_scorer._make_live_pick takes it through the live classifier, the
+    same way _requalify_at_best takes a pre-game pick through _decide. The
+    freshness gates live in _live_book_quotes; the side/line selection in
+    _best_live_side; this is their composition, kept for the insert-path
+    fallback (a live pick that arrives untagged with a best price) and for
+    the tests.
+    """
+    return _best_live_side(_live_book_quotes(conn, game_id, market, score_seen_at),
+                           pick_side, market, scored_line)
+
+
+def _live_decision_quote(dk_odds, best: dict | None) -> tuple[str, float]:
+    """(book, odds) a LIVE pick is decided at: the best bettable in-play quote
+    when it beats DraftKings, else DraftKings. DK is listed first so a tie
+    keeps the modelled book, exactly as _best_of does pre-game."""
+    if (not DECIDE_ON_BEST_PRICE or not best or best.get("odds") is None
+            or dk_odds is None):
+        return ODDS_API_BOOKMAKER, dk_odds
+    chosen = _best_of([{"book": ODDS_API_BOOKMAKER, "odds": dk_odds}, best])
+    if chosen is None:
+        return ODDS_API_BOOKMAKER, dk_odds
+    return chosen["book"], float(chosen["odds"])
 
 def _tag_live(pick: dict, ctx: tuple) -> dict:
     """Carry (game_id, market) on a LIVE game-market pick so _insert_picks can

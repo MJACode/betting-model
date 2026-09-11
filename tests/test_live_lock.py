@@ -37,7 +37,7 @@ class FakeConn:
     def __init__(self, locked=(), existing=()):
         self.locked = list(locked)
         # Rows already stored for the game, as
-        # (model_id, pick_side, signal_type, scored_line, dk_odds). Default
+        # (model_id, pick_side, signal_type, scored_line, dk_odds[, decision_odds]). Default
         # empty = nothing stored, so every lane reads as changed and the
         # delete-and-replace behaviour these tests assert on is unaffected.
         self.existing = list(existing)
@@ -50,7 +50,9 @@ class FakeConn:
         if s.startswith("SELECT DISTINCT model_id"):
             return _Rows([(m,) for m in self.locked])
         if s.startswith("SELECT model_id, pick_side, signal_type"):
-            return _Rows(self.existing)
+            # The SELECT gained COALESCE(decision_odds, dk_odds) on 2026-09-10;
+            # a five-column fixture row is a pick decided at DraftKings.
+            return _Rows([r if len(r) == 6 else (*r, r[4]) for r in self.existing])
         if s.startswith("DELETE FROM picks"):
             self.deletes.append(params)
             return _Rows([])

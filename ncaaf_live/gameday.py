@@ -589,8 +589,14 @@ def main() -> int:
                 # loop has always written its in-play snapshots to `odds`;
                 # this puts NCAAF on the same footing, through the same table.
                 if quote:
-                    priced_this_pass.extend(rows_from_quote(
-                        ctx.game_id, "NCAAF", quote, SNAPSHOT_BOOK, priced_at))
+                    # Every book the poll returned (2026-09-10), not only
+                    # DraftKings: the lanes now decide at the best of them, so
+                    # the audit has to show the price that decided. A payload
+                    # from before the per-book parser carries no "books".
+                    per_book = quote.get("books") or {SNAPSHOT_BOOK: quote}
+                    for book, q in per_book.items():
+                        priced_this_pass.extend(rows_from_quote(
+                            ctx.game_id, "NCAAF", q, book, priced_at))
                 picks = engine.price(state, ctx, quote,
                                      score_seen_at=score_seen_at)
                 if conn is None and not a.dry_run:

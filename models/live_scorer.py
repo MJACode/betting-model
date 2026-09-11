@@ -41,6 +41,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
+    DECIDE_ON_BEST_PRICE,
     DECIDE_ON_CALIBRATED_PROB,
     LIVE_MODELS,
     LIVE_ODDS_MAX_AGE_SEC,
@@ -53,13 +54,19 @@ from config import (
     live_slate_dates,
     PAUSED_MODELS,
     MODEL_PROB_THRESHOLDS,
+    ODDS_API_BOOKMAKER,
     today_et,
 )
 from data.db import get_connection, DBConnection
 from data.live_quote_guard import quote_predates_score
 from features.live_game_features import build_live_state_row
 from models.scorer import (
+    _best_fields,
+    _best_live_side,
     _calibrated,
+    _decision_fields,
+    _live_book_quotes,
+    _live_decision_quote,
     _tag_live,
     _build_pick_label,
     _confidence_tier,
@@ -212,16 +219,25 @@ def expected_value(model_prob: float, dk_odds) -> Optional[float]:
 
 
 def classify_live_signal(model_id: str, model_prob: float,
-                         edge: float, dk_odds=None) -> Optional[str]:
+                         edge: float, dk_odds=None, *,
+                         cap_edge: Optional[float] = None) -> Optional[str]:
     """
     BET / AVOID / None for live picks. NONE-zone picks return None (not
     written) — pure so it can be unit-tested.
+
+    `edge` and `dk_odds` are the DECIDING price's (since 2026-09-10 the best
+    bettable in-play quote, see _make_live_pick). `cap_edge` is the edge the
+    stale-line cap is judged on -- the DraftKings edge, when the two differ --
+    for the same reason the pre-game path keeps MAX_EDGE_CAP on the DK edge:
+    the cap guards the model's disagreement with the REFERENCE book being
+    noise, and a few extra points from a cheaper book are the price
+    difference, not model noise. None means "same as edge".
     """
     # The LIVE cap, not the pre-game one. A live price is at most ~45s old by
     # construction (The Odds API's in-play cache), so an implausible edge here
     # usually means our snapshot is behind the book rather than that we found
     # value. See config.LIVE_MAX_EDGE_CAP for why the two are separate.
-    if abs(edge) > LIVE_MAX_EDGE_CAP:
+    if abs(edge if cap_edge is None else cap_edge) > LIVE_MAX_EDGE_CAP:
         return None
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, 0.10)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, 0.65)
@@ -284,18 +300,44 @@ def _make_live_pick(game_id: str, model_id: str, game_date: str,
                     scored_line: Optional[float],
                     bankroll: float, state: dict,
                     commence_time: Optional[str],
-                    dk_bet_link: Optional[str]) -> Optional[dict]:
-    """Build a live pick dict, or None when the signal is in the dead zone."""
+                    dk_bet_link: Optional[str],
+                    best: Optional[dict] = None) -> Optional[dict]:
+    """Build a live pick dict, or None when the signal is in the dead zone.
+
+    DECIDED AT THE BEST BETTABLE IN-PLAY PRICE (2026-09-10, mike: "yes do
+    everything", widening the 2026-09-09 pre-game flip to the live lanes).
+    `dk_odds` is the DraftKings in-play quote the model was scored against and
+    stays the reference (`edge`, `dk_implied_prob`, `dk_odds` keep their DK
+    meaning; the line is DK's). `best` is the best bettable quote at the same
+    line from _best_live_side, already freshness- and score-gated. The
+    signal, the stake and the four decision_* columns come from whichever of
+    the two pays more (_live_decision_quote; a tie keeps DK), through the
+    SAME classifier the DK-only lane used -- so the pre-game invariant holds
+    here too: one rule path, two prices. The stale-line cap stays on the DK
+    edge (see classify_live_signal.cap_edge).
+
+    Unlike pre-game there is no NONE row to requalify: a dead-zone live pick
+    is never written, so the decision has to be made HERE, before the
+    builder returns None, or a pick that is a BET only at the better price
+    would never exist.
+    """
     implied = american_to_implied_prob(dk_odds)
     if implied is None:
         return None
     edge = model_prob - implied
 
-    signal = classify_live_signal(model_id, model_prob, edge, dk_odds)
+    book, odds = _live_decision_quote(dk_odds, best)
+    d_implied = implied if odds == dk_odds else american_to_implied_prob(odds)
+    if d_implied is None:
+        book, odds, d_implied = ODDS_API_BOOKMAKER, dk_odds, implied
+    d_edge = model_prob - d_implied
+
+    signal = classify_live_signal(model_id, model_prob, d_edge, odds,
+                                  cap_edge=edge)
     if signal is None:
         return None
 
-    kelly_frac, rec_bet = (quarter_kelly(model_prob, implied, bankroll)
+    kelly_frac, rec_bet = (quarter_kelly(model_prob, d_implied, bankroll)
                            if signal == "BET" else (0.0, 0.0))
 
     score_diff = None
@@ -326,6 +368,8 @@ def _make_live_pick(game_id: str, model_id: str, game_date: str,
         "is_live":            True,
         "inning_at_pick":     state.get("inning"),
         "score_diff_at_pick": score_diff,
+        **_decision_fields(book, odds, d_implied, d_edge),
+        **_best_fields(best, model_prob),
     }
 
 
@@ -343,6 +387,19 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
     odds = _get_live_dk_odds(conn, game_id, market)
     if not odds:
         return []
+
+    # The other books' in-play quotes, one read per (game, market), gated on
+    # the same age and score-change clocks the DK read above just passed.
+    # Line shopping never blocks a pick: on any failure the lane decides at
+    # DraftKings exactly as before.
+    quotes: list[dict] = []
+    if DECIDE_ON_BEST_PRICE:
+        try:
+            quotes = _live_book_quotes(conn, game_id, market,
+                                       _score_changed_at(conn, game_id))
+        except Exception as exc:               # noqa: BLE001
+            logger.debug(f"  {game_id}/{market}: best live price read failed: {exc}")
+            quotes = []
 
     row = build_live_state_row(state, pregame, model_id)
     if row is None:
@@ -396,7 +453,8 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
             pick = _make_live_pick(
                 game_id, model_id, game["game_date"], side, label,
                 prob, price, odds.get("spread_home"), bankroll, state,
-                game.get("commence_time"), _link_for_side(odds, side))
+                game.get("commence_time"), _link_for_side(odds, side),
+                best=_best_live_side(quotes, side, market, odds.get("spread_home")))
             if pick:
                 picks.append(pick)
 
@@ -428,7 +486,8 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
             pick = _make_live_pick(
                 game_id, model_id, game["game_date"], side, label,
                 prob, price, line, bankroll, state,
-                game.get("commence_time"), _link_for_side(odds, side))
+                game.get("commence_time"), _link_for_side(odds, side),
+                best=_best_live_side(quotes, side, market, line))
             if pick:
                 # Carried for live_pick_features, not for `picks`.
                 # `_insert_picks` binds named parameters, so extra keys are
@@ -439,10 +498,10 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
                 picks.append(pick)
 
     # Tag with (game_id, market) so _insert_picks can look up the best IN-PLAY
-    # price across books. All seven books arrive in the same in-play poll, so
-    # this costs nothing new -- before this, 0 of 107 August live BETs carried a
-    # best price while six non-DK books had rows for the same games. Tagged
-    # AFTER the decision, so it can never influence the BET/AVOID call.
+    # price across books for any pick that arrives without one. The builder
+    # stamps best_* itself since 2026-09-10 (the price now DECIDES, so it has
+    # to be known before the signal is), and the insert skips its lookup when
+    # best_book is already on the row; this is the fallback.
     return [_tag_live(p, (game_id, market)) for p in picks]
 
 
@@ -490,25 +549,30 @@ def _lane_signature(picks: list[dict]) -> tuple:
     while the bet on offer is unchanged, and rewriting a row for that is churn
     with no reader. Rounded because a float round-trip through NUMERIC must not
     read as a change."""
+    def _num(v):
+        return None if v is None else round(float(v), 2)
     return tuple(sorted(
-        (p["pick_side"], p["signal_type"],
-         None if p.get("scored_line") is None else round(float(p["scored_line"]), 2),
-         None if p.get("dk_odds") is None else round(float(p["dk_odds"]), 2))
+        (p["pick_side"], p["signal_type"], _num(p.get("scored_line")),
+         _num(p.get("dk_odds")),
+         # The DECIDING price (2026-09-10): a lane whose best book moved is a
+         # different bet on offer even when DraftKings did not move.
+         _num(p.get("decision_odds", p.get("dk_odds"))))
         for p in picks))
 
 
 def _existing_live_lanes(conn: DBConnection, game_id: str) -> dict[str, tuple]:
     """Signature of the unsettled live rows already stored, per model."""
     rows = conn.execute("""
-        SELECT model_id, pick_side, signal_type, scored_line, dk_odds
+        SELECT model_id, pick_side, signal_type, scored_line, dk_odds,
+               COALESCE(decision_odds, dk_odds)
         FROM picks
         WHERE game_id = %s AND result IS NULL AND is_live = TRUE
     """, (game_id,)).fetchall()
     by_model: dict[str, list[dict]] = {}
-    for model_id, side, signal, line, odds in rows:
+    for model_id, side, signal, line, odds, d_odds in rows:
         by_model.setdefault(model_id, []).append({
             "pick_side": side, "signal_type": signal,
-            "scored_line": line, "dk_odds": odds})
+            "scored_line": line, "dk_odds": odds, "decision_odds": d_odds})
     return {m: _lane_signature(v) for m, v in by_model.items()}
 
 
@@ -771,6 +835,8 @@ def run_live_scorer(target_date: Optional[str] = None,
                 logger.info(
                     f"  [LIVE {p['signal_type']}] {p['pick_label']} | "
                     f"inning {p['inning_at_pick']} | DK={p['dk_odds']:+.0f} | "
+                    f"decided {p.get('decision_book')} "
+                    f"{(p['dk_odds'] if p.get('decision_odds') is None else p['decision_odds']):+.0f} | "
                     f"model={p['model_probability']:.3f} | "
                     f"edge={p['edge']*100:+.1f}% | bet=${p['recommended_bet']:.0f}")
             all_picks.extend(game_picks)
