@@ -159,6 +159,42 @@ export function gradeColorDiscriminates(grades: (MatchupGrade | null)[]): boolea
   return bands.some((b) => b !== bands[0]);
 }
 
+/**
+ * The four grades a floor can be set to, best first.
+ *
+ * The full scale is thirteen letters and a row of thirteen chips is a wall;
+ * these are the four people reach for. Comparison is on GRADE_ORDER below, so
+ * a row graded between two of them still cuts correctly.
+ */
+export const GRADE_FLOORS: MatchupGrade[] = ['A', 'B', 'C', 'D'];
+
+/**
+ * Is this grade at or above the floor?
+ *
+ * `includeUngraded` DEFAULTS TO TRUE, and that default is a correction. A dash
+ * means we hold no rating for that defence, not that the spot is bad — and on
+ * an NCAAF Saturday the ungraded rows are the FCS visitors, i.e. the softest
+ * spots on the board. Hiding them by default made a filter whose stated
+ * question is "show me the easy matchups" delete the easiest ones first, and
+ * it did it silently: the pill just said "B or better" and the list was
+ * shorter (UX review, 2026-09-09). The switch is there for anyone who wants
+ * only rows we can actually vouch for.
+ */
+export function meetsGradeFloor(
+  grade: MatchupGrade | null | undefined,
+  floor: MatchupGrade | null,
+  includeUngraded = true,
+): boolean {
+  if (!floor) return true;
+  if (!grade) return includeUngraded;
+  return GRADE_ORDER.indexOf(grade) <= GRADE_ORDER.indexOf(floor);
+}
+
+/** Best to worst. The index IS the ordering, so nothing sorts on a letter. */
+const GRADE_ORDER: MatchupGrade[] = [
+  'A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F',
+];
+
 /** A favourability percentile → its letter. */
 export function gradeFor(score: number | null): MatchupGrade | null {
   if (score == null || !Number.isFinite(score)) return null;
