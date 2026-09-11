@@ -465,7 +465,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
                   "calibration_watch",
-                  "kalshi_ladders"}
+                  "kalshi_ladders", "kalshi_game_markets"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -765,6 +765,26 @@ def run_kalshi_ladder_record() -> None:
     except Exception as exc:                                   # noqa: BLE001
         # Never let a research recorder break a scheduler pass.
         log.warning("kalshi ladder record failed: %s: %s",
+                    type(exc).__name__, exc)
+
+
+def run_kalshi_game_record() -> None:
+    """Snapshot Kalshi's NCAAF game markets (winner, total and spread ladders).
+    RECORDING ONLY -- nothing scores off it (session 280, 2026-09-10).
+
+    The 13-book NCAAF search found one number across every bookmaker; an
+    exchange price is the one kind of college number that record has never
+    held, and it cannot be graded until it has been recorded through a season.
+    Free, keyless, and never on the betting path: a failure is a warning.
+    """
+    from data.ingestors.kalshi_game_ingestor import record_game_markets
+
+    try:
+        got = record_game_markets()
+        log.info("kalshi game markets: %s contracts, %s events",
+                 got.get("contracts"), got.get("events"))
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("kalshi game market record failed: %s: %s",
                     type(exc).__name__, exc)
 
 
@@ -1445,6 +1465,14 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute=40, timezone=TIMEZONE),
         id="kalshi_ladders",
         name="Kalshi NFL prop ladders (record only)",
+    )
+    # Minute 45, same reasoning: the NCAAF game markets (winner / total /
+    # spread ladders) are a research record, never on the betting path.
+    sched.add_job(
+        run_kalshi_game_record,
+        CronTrigger(minute=45, timezone=TIMEZONE),
+        id="kalshi_game_markets",
+        name="Kalshi NCAAF game markets (record only)",
     )
 
     if RUN_NCAAF_PROP_ODDS:

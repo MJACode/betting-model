@@ -219,13 +219,17 @@ def test_config_pauses_still_work_through_the_same_helper():
 
 
 def test_every_pause_check_in_the_scorer_goes_through_the_helper():
-    """Two call sites downgrade BET -> NONE: scorer._decide, which both
+    """Two call sites downgrade a signal to NONE: scorer._decide, which both
     pre-game builders route through since 2026-09-09 (it was one site per
-    builder before), and the live path. One left reading PAUSED_MODELS
-    directly is a lane the auto-pause silently does not cover."""
+    builder before), and the UFC method path. Since 2026-09-10 both go through
+    `_paused_signal`, which pauses BOTH sides (a paused model used to keep
+    writing AVOID rows) and hands back the persisted reason. One left reading
+    PAUSED_MODELS directly is a lane the auto-pause silently does not cover."""
     src = (config.ROOT / "models" / "scorer.py").read_text(encoding="utf-8")
     assert 'model_id in PAUSED_MODELS and signal_type' not in src
-    assert src.count('_is_paused(model_id) and signal_type == "BET"') == 2
+    assert '_is_paused(model_id) and signal_type == "BET"' not in src, (
+        "a BET-only pause check is back: it leaves the AVOID side live")
+    assert src.count("_paused_signal(model_id, signal_type)") == 2
     for fn in ("def _make_pick(", "def _make_prop_pick("):
         body = src.split(fn)[1].split("\ndef ")[0]
         assert "_decide(" in body, f"{fn} no longer routes through _decide"
