@@ -203,20 +203,25 @@ export function isProbOnlyModel(modelId: string): boolean {
   return PROB_ONLY_MODELS.has(modelId) || RETIRED_PROB_ONLY_MODELS.has(modelId);
 }
 
-// Mirror of config.py PAUSED_MODELS — models that never fire a BET (paused for
-// poor performance). Excluded from the action filter so they don't appear as
-// actionable picks anywhere in the app.
-// A STRICT MIRROR of config.PAUSED_MODELS, pinned by
-// tests/test_mobile_threshold_parity.py. The server store
+// A STRICT MIRROR of config.PAUSED_MODELS — models that never fire a BET —
+// pinned by tests/test_mobile_threshold_parity.py. The server store
 // (model_action_thresholds.paused) is authoritative once fetched; this list is
 // what every COLD START renders its first board from, so a stale entry here
 // either hides a live model's picks or draws a stakeable BET for one the
 // platform has withdrawn.
 //
+// A PAUSED MODEL STILL SCORES NONE ROWS, so its cards keep drawing on the Today
+// board and its market keeps a chip in the filter (useTodayPicks drops retired
+// and VOID rows at the source, paused ones deliberately not). What it can never
+// be is a BET.
+//
 // The per-model reasoning lives in config.py beside each id and is NOT copied
 // here -- it had drifted out of agreement with this very list (the old comment
 // said mlb_prop_batter_hits was unpaused while config had paused it), and a
-// comment that contradicts its own data is worse than no comment.
+// comment that contradicts its own data is worse than no comment. "Paused for
+// poor performance" went with it and was not replaced: it is wrong for three of
+// the thirteen — config calls wnba_over_under and wnba_spread "UNVALIDATED, not
+// proven bad" and mlb_runline dormant rather than broken.
 export const PAUSED_MODELS = new Set<string>([
   'mlb_over_under',
   'mlb_prop_batter_hits',

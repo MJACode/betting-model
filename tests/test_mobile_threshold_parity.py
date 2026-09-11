@@ -175,3 +175,27 @@ def test_the_price_floors_match_config():
         "price floor differs between config.MODEL_MIN_ODDS and the app mirror "
         f"(config, app): {wrong}"
     )
+
+
+def test_the_prob_only_set_matches_config():
+    """The remaining field of ResolvedThreshold, and it is load-bearing.
+
+    A prob-only model SKIPS the min_edge check entirely (`passesActionFilter`)
+    and takes a different branch of the Sharp Score, so a drifted entry changes
+    whether a pick is actionable at all. The two sets agree today -- this closes
+    the guard gap before they do not, and stops this file's own header from
+    claiming more than it pins (UX review, 2026-09-11).
+    """
+    block = _block(_src(), "export const PROB_ONLY_MODELS = new Set<string>([", "\n]);")
+    app = set(re.findall(r"^\s*'([a-z0-9_]+)',", block, re.M))
+    canon = set(config.PROB_ONLY_MODELS) - set(config.RETIRED_MODELS)
+    retired_app = set(
+        re.findall(
+            r"^\s*'([a-z0-9_]+)',",
+            _block(_src(), "export const RETIRED_PROB_ONLY_MODELS = new Set<string>([", "]);"),
+            re.M,
+        )
+    )
+    assert (app - retired_app) == canon, (
+        f"prob-only drift -- app: {sorted(app - retired_app)}, config: {sorted(canon)}"
+    )
