@@ -3555,6 +3555,67 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     }
 
 
+# ── Missing features at score time ────────────────────────────────────────────
+# Every prop trainer drops a training row with ANY null feature
+# (build_*_training_dataset: df.dropna(subset=num_cols)), so no prop model has
+# ever seen an incomplete row. The four prop loops below used to fill every
+# null with 0.0 before predicting, and 0.0 is not "unknown" -- it is a value
+# the trees read: a 0°F game, a pitcher with a 0% strikeout rate at 0 mph.
+# Measured 2026-09-10 on the live pitcher-K artifact (session 278): a game
+# with no weather row was priced as 0°F, lambda fell 5.91 -> 5.17 and the
+# under probability rose 0.621 -> 0.736, reproduced to four decimals against
+# the stored pick.
+#
+# The rule now: a row missing a feature is NOT SCORED THIS PASS. That is not a
+# pick lost -- the row is rebuilt on the next pass and scores once the input
+# lands (the forecast, the lineup). The first-signal lock applies only to a
+# pick that exists. Who was dropped, and on which feature, goes to the log at
+# WARNING, so a board that shrinks says why.
+#
+# The ONE declared exception is the umpire pair. MLB posts the home-plate
+# umpire during the day, after the look-ahead and the early same-day passes,
+# so a pre-game row can never carry it -- while every training row did (the
+# rows without one were dropped). 0.0 is the league-average umpire by
+# construction (both features are umpire minus league), imputed HERE, by
+# name, rather than by a fill that applies to everything. `umpires` runs on
+# every refresh pass so the real value replaces it as soon as MLB posts.
+PROP_IMPUTED_FEATURES: dict[str, float] = {
+    "ump_k_plus_minus":  0.0,
+    "ump_bb_plus_minus": 0.0,
+}
+
+
+def prop_feature_matrix(df, feature_cols: list[str], model_id: str):
+    """Rows the model may score this pass, and their feature matrix.
+
+    Adds any feature column the frame lacks as null, imputes the declared
+    exceptions, and DROPS every row still carrying a null. Returns (df, X)
+    with a fresh RangeIndex so the loops' positional `lambdas[i]` and the
+    frame's `iterrows()` agree after the drop.
+    """
+    df = df.copy()
+    for c in feature_cols:
+        if c not in df.columns:
+            df[c] = np.nan
+    for c, v in PROP_IMPUTED_FEATURES.items():
+        if c in feature_cols:
+            df[c] = df[c].astype(float).fillna(v)
+    X = df[feature_cols].values.astype(float)
+    missing = np.isnan(X)
+    keep = ~missing.any(axis=1)
+    if not keep.all():
+        names = (df["player_name"].astype(str) if "player_name" in df.columns
+                 else df.index.astype(str).to_series())
+        for i in np.flatnonzero(~keep):
+            cols = [feature_cols[j] for j in np.flatnonzero(missing[i])]
+            logger.warning(f"  {model_id}: {names.iloc[i]} not scored this pass -- "
+                           f"missing {cols}")
+        logger.warning(f"  {model_id}: {int((~keep).sum())} of {len(df)} rows not scored "
+                       f"(missing features; rebuilt next pass)")
+    df = df.loc[keep].reset_index(drop=True)
+    return df, X[keep]
+
+
 # ── Pitcher Prop Config ───────────────────────────────────────────────────────
 
 # Per-model: DK market name and stat label for pick label generation.
@@ -3734,17 +3795,10 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 continue
 
             # ── Predict ───────────────────────────────────────────────────────
-            missing_cols = [c for c in feature_cols if c not in df.columns]
-            for c in missing_cols:
-                df[c] = np.nan
-
-            X_raw = df[feature_cols].values.astype(float)
-            X     = np.nan_to_num(X_raw, nan=0.0)
-
-            had_nulls = np.isnan(X_raw).any(axis=1)
-            if had_nulls.any():
-                null_players = df.loc[had_nulls, "player_name"].tolist()
-                logger.debug(f"  {model_id}: filled nulls for {null_players}")
+            df, X = prop_feature_matrix(df, feature_cols, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: every row is missing a feature -- nothing scored this pass")
+                continue
 
             if model_type == "logistic":
                 # CalibratedClassifierCV → predict_proba → P(outcome >= 1)
@@ -3967,9 +4021,10 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 logger.info(f"  {model_id}: no scoring rows for {target_date}")
                 continue
 
-            for c in [c for c in feature_cols if c not in df.columns]:
-                df[c] = np.nan
-            X = np.nan_to_num(df[feature_cols].values.astype(float), nan=0.0)
+            df, X = prop_feature_matrix(df, feature_cols, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: every row is missing a feature -- nothing scored this pass")
+                continue
             lambdas = np.clip(model_obj.predict(X), 1e-6, None)
 
             model_picks = []
@@ -4144,9 +4199,10 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 logger.info(f"  {model_id}: no scoring rows for {target_date}")
                 continue
 
-            for c in [c for c in feature_cols if c not in df.columns]:
-                df[c] = np.nan
-            X = np.nan_to_num(df[feature_cols].values.astype(float), nan=0.0)
+            df, X = prop_feature_matrix(df, feature_cols, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: every row is missing a feature -- nothing scored this pass")
+                continue
             if model_type == "logistic":
                 probs_over = model_obj.predict_proba(X)[:, 1]
                 lambdas    = None
@@ -4924,17 +4980,10 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 logger.info(f"  {model_id}: no scoring rows built")
                 continue
 
-            missing_cols = [c for c in feature_cols if c not in df.columns]
-            for c in missing_cols:
-                df[c] = np.nan
-
-            X_raw = df[feature_cols].values.astype(float)
-            X     = np.nan_to_num(X_raw, nan=0.0)
-
-            had_nulls = np.isnan(X_raw).any(axis=1)
-            if had_nulls.any():
-                null_pitchers = df.loc[had_nulls, 'player_name'].tolist()
-                logger.debug(f"  {model_id}: filled nulls for {null_pitchers}")
+            df, X = prop_feature_matrix(df, feature_cols, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: every row is missing a feature -- nothing scored this pass")
+                continue
 
             lambdas = np.clip(regressor.predict(X), 1e-6, None)
 

@@ -111,6 +111,23 @@ NHL_NAME_MAP = {
 }
 
 
+# The SBR CSVs abbreviate four MLB franchises differently from everything
+# else in this repo (the odds ingestor, the Stats API map, every `live` row):
+# AZ / CHW / ATH / WAS against ARI / CWS / OAK / WSH. Loading them raw filed
+# those games TWICE -- 5,723 rows by 2026-09-10, the SBR copy holding the
+# score and the live copy unscored -- which silently kept the PBP ingestor
+# and the feature engine's sbr_consensus lookups away from those teams'
+# games. scripts/merge_mlb_twin_games.py merged the existing rows; this
+# keeps the next import from recreating them.
+SBR_ABBREV_CANON = {"AZ": "ARI", "CHW": "CWS", "ATH": "OAK", "WAS": "WSH"}
+
+
+def canonical_abbrev(team: str, sport: str) -> str:
+    """The repo's abbreviation for an SBR CSV abbreviation (MLB only differs)."""
+    t = str(team).strip().upper()
+    return SBR_ABBREV_CANON.get(t, t) if sport == "MLB" else t
+
+
 def normalize_team(name: str, sport: str) -> str:
     """Map SBR team name to standard 2-3 letter abbreviation."""
     name_map = MLB_NAME_MAP if sport == "MLB" else NHL_NAME_MAP
@@ -312,9 +329,11 @@ def load_to_db(games: list[dict], conn: DBConnection) -> tuple[int, int]:
              home_score, away_score, home_win, data_source, updated_at)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT(game_id) DO UPDATE SET
-            home_score  = EXCLUDED.home_score,
-            away_score  = EXCLUDED.away_score,
-            home_win    = EXCLUDED.home_win,
+            -- COALESCE: with canonical ids an SBR row now lands ON the live
+            -- row, and an unscored CSV line must not null a settled score.
+            home_score  = COALESCE(EXCLUDED.home_score, games.home_score),
+            away_score  = COALESCE(EXCLUDED.away_score, games.away_score),
+            home_win    = COALESCE(EXCLUDED.home_win, games.home_win),
             updated_at  = EXCLUDED.updated_at
     """, game_rows, page_size=500)
     games_n = len(game_rows)
@@ -420,8 +439,8 @@ def parse_csv_file(filepath: Path, sport: str) -> list[dict]:
             logger.warning(f"Unexpected date format: '{raw_date}'")
             continue
 
-        away_team  = str(row.get("away team", "")).strip().upper()
-        home_team  = str(row.get("home team", "")).strip().upper()
+        away_team  = canonical_abbrev(row.get("away team", ""), sport)
+        home_team  = canonical_abbrev(row.get("home team", ""), sport)
         away_score = _safe_float(row.get("away score"))
         home_score = _safe_float(row.get("home score"))
 

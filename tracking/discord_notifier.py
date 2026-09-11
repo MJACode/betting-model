@@ -1078,20 +1078,130 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
 # published.
 DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
 
-# Dates whose RESULTS recap was published over an incomplete pick universe and
-# should be posted again, corrected. Separate from DISCORD_RESTATE_DATES above:
-# that one restates a SLATE (what to bet), this one restates a RECORD (what
-# happened). A date restates once -- its own ledger kind blocks the rest.
-DISCORD_RESULTS_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-29"})
+# ── Restating a published recap ──────────────────────────────────────────────
+#
+# A recap can only count what has settled when it posts. A sport that settles
+# LATER -- UFC results the next afternoon, an NCAAF score that lands two days
+# on, the NFL props of 2026-09-09 that graded an hour after the 6am post --
+# leaves a published number that is wrong and stays wrong, because the date is
+# ledgered. Until 2026-09-10 the only remedy was a hand-run job (or, for
+# 2026-08-29, a date hard-coded here).
+#
+# Now every settle pass asks: for each recap published in the last week, did
+# any pick in its universe settle AFTER it was published? If so, both surfaces
+# re-post the date labelled "restated", and the Discord post overwrites the
+# snapshot (new published_at), so the same late batch never fires twice. The
+# ledger key carries the published_at of the recap being corrected, so a
+# SECOND late batch (new published_at) restates again, and a repeat pass over
+# the same batch does not.
+#
+# THE TRIGGER IS LATE SETTLEMENT, NOT A COUNT DIFFERENCE. Measured 2026-09-10:
+# every daily snapshot from 09-01 to 09-08 disagrees with the count the recap
+# query returns today (09-01: 56 then, 33 now), because the query applies the
+# CURRENT action cuts and those moved (the live cut re-sweep of 09-09, pauses).
+# A count trigger would have restated eight days for nothing. settled_at >
+# published_at is the only thing that means "this recap missed a pick".
+#
+# Recaps published before RESULTS_RESTATE_FROM are never restated
+# automatically. Set to 2026-09-04 (mike, 2026-09-10: "ensure what's there is
+# accurate"): the 09-04 and 09-05 recaps each carry picks that settled after
+# they posted (2 NCAAF; 4 NCAAF + 2 UFC) and are corrected in place, labelled.
+RESULTS_RESTATE_FROM = "2026-09-04"
+RESULTS_RESTATE_LOOKBACK_DAYS = 7
 
-_RESULTS_RESTATE_NOTE = (
-    "Restated. The original recap counted PRE-GAME picks only \u2014 in-play "
-    "picks were excluded from the record while the live board still re-priced "
-    "every pass. They lock at first signal now, so they are the bet of record "
-    "and they count. Same picks, same results; this is the full day.\n"
-    "Closing-line value stays pre-game only: an in-play price has no "
-    "meaningful close to be measured against."
-)
+
+def results_restate_note(late: int, prev_settled: int, now_settled: int) -> str:
+    """The correction, stated: what settled late, and what the two counts are.
+
+    When the two counts differ by more than the late picks, the rest is the
+    action cuts having moved since the recap first posted (the recap query
+    applies the CURRENT cuts) -- and the note says so, because "2 settled
+    late, 56 then, 33 now" without that sentence reads as a contradiction."""
+    picks = "pick" if late == 1 else "picks"
+    note = (f"Restated. {late} {picks} settled after this recap was first "
+            f"posted ({prev_settled} settled then, {now_settled} now).")
+    if now_settled - prev_settled != late:
+        note += (" The rest of the difference is the action cuts, which have "
+                 "moved since; this is the day under the current cuts.")
+    return note + (" Same picks, same results \u2014 this is the full day as "
+                   "the record stands now.")
+
+
+def recaps_needing_restatement(conn, through: str | None = None,
+                               lookback_days: int = RESULTS_RESTATE_LOOKBACK_DAYS,
+                               game_date: str | None = None) -> list[dict]:
+    """Published recaps with a pick that settled after they were posted.
+
+    One dict per date: game_date, published_at (of the snapshot being
+    corrected -- the ledger key), settled (what it published), late (how many
+    of the CURRENT universe settled after that). Dates < `through` (today ET)
+    only, so a day still in play is never touched; bounded below by the
+    lookback and by RESULTS_RESTATE_FROM."""
+    if through is None:
+        through = datetime.now(ET).date().isoformat()
+    floor = max(RESULTS_RESTATE_FROM,
+                (datetime.fromisoformat(through).date()
+                 - timedelta(days=lookback_days)).isoformat())
+    params: list = [through, floor]
+    date_clause = ""
+    if game_date is not None:
+        date_clause = " AND game_date = %s"
+        params.append(game_date)
+    snaps = conn.execute(f"""
+        SELECT game_date, published_at, settled
+        FROM results_snapshots
+        WHERE scope = 'daily' AND sport IS NULL
+          AND game_date < %s AND game_date >= %s{date_clause}
+        ORDER BY game_date
+    """, tuple(params)).fetchall()
+    out = []
+    for d, published_at, settled in snaps:
+        d = str(d)
+        late = conn.execute(
+            _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
+            (d, published_at)).fetchall()
+        if late:
+            out.append({"game_date": d, "published_at": published_at,
+                        "settled": int(settled or 0), "late": len(late)})
+    return out
+
+
+def restate_published_recaps(through: str | None = None,
+                             dry_run: bool = False) -> int:
+    """Re-post every recap a late settlement has invalidated, both surfaces.
+
+    Called at the end of every settle pass. Discord first, then X, off the
+    same scan result, so the two carry the same correction and the same key.
+    Returns the number of posts made."""
+    conn = get_connection()
+    try:
+        due = recaps_needing_restatement(conn, through)
+    finally:
+        conn.close()
+    if not due:
+        return 0
+    from tracking.x_publisher import notify_x_results
+    posted = 0
+    for item in due:
+        try:
+            posted += notify_discord_results(item["game_date"], dry_run=dry_run,
+                                             restate=item)
+        except Exception as exc:                          # noqa: BLE001
+            logger.error(f"Discord restate {item['game_date']} failed: {exc}")
+        try:
+            posted += notify_x_results(item["game_date"], dry_run=dry_run,
+                                       restate=item)
+        except Exception as exc:                          # noqa: BLE001
+            logger.error(f"X restate {item['game_date']} failed: {exc}")
+    return posted
+
+
+def restate_lock_key(kind: str, game_date: str, published_at) -> str:
+    """`{kind}:{date}:{published_at of the recap being corrected}` -- one key
+    per correction generation, shared in shape by both surfaces."""
+    stamp = published_at.isoformat() if hasattr(published_at, "isoformat") else str(published_at)
+    return f"{kind}:{game_date}:{stamp}"
+
 
 _RESTATE_NOTE = (
     "Unit sizing was updated after this slate first posted. Same picks, same "
@@ -1785,22 +1895,22 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
-                           restate: bool = False) -> int:
+                           restate=None) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
     per-sport breakdown. Ledgered per date so re-running settle can't repost,
     and refuses any date that is not already over. Returns 1 if posted, else 0.
 
-    `restate` re-posts a date whose original recap was computed over an
-    incomplete pick universe, under its own ledger kind so it fires exactly
-    once and cannot collide with the original. The original is left in place:
-    a channel that quietly loses a number people saw is worse than one carrying
-    a visible correction. Renders through the SAME path as a normal recap, so a
-    restated figure cannot drift from what tomorrow's recap would publish.
+    `restate` re-posts a date whose published recap a later settlement has
+    invalidated (recaps_needing_restatement): pass the scan's dict, or True
+    to resolve it here. Its own ledger kind, keyed on the published_at of the
+    recap being corrected, so one late batch fires exactly once and cannot
+    collide with the original. The original is left in place: a channel that
+    quietly loses a number people saw is worse than one carrying a visible
+    correction. Renders through the SAME path as a normal recap, so a restated
+    figure cannot drift from what tomorrow's recap would publish.
     """
     if game_date is None:
         game_date = (datetime.now(ET).date() - timedelta(days=1)).isoformat()
-    if restate and game_date not in DISCORD_RESULTS_RESTATE_DATES:
-        return 0
 
     url = config.DISCORD_WEBHOOK_RESULTS or config.DISCORD_WEBHOOK_DEFAULT
     if not url:
@@ -1816,8 +1926,14 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
 
     conn = get_connection()
     try:
+        if restate is True:
+            found = recaps_needing_restatement(conn, game_date=game_date)
+            restate = found[0] if found else None
+            if restate is None:
+                return 0                  # nothing settled late: no correction
         kind = "discord_results_restate" if restate else "discord_results"
-        lock_key = f"{kind}:{game_date}" if restate else f"discord_results:{game_date}"
+        lock_key = (restate_lock_key(kind, game_date, restate["published_at"])
+                    if restate else f"discord_results:{game_date}")
         if conn.execute(
             "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
             (lock_key, kind),
@@ -1871,7 +1987,8 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
             "title": (f"\U0001F4CA Results — {pretty}"
                       + ("  ·  restated" if restate else "")),
             "description": (
-                (_RESULTS_RESTATE_NOTE + "\n\n") if restate else ""
+                (results_restate_note(restate["late"], restate["settled"],
+                                      len(rows)) + "\n\n") if restate else ""
             ) + f"**{_tally_line(overall, with_clv=True)}**  ·  "
                 f"{len(rows)} settled",
             "color": color,

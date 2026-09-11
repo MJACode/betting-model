@@ -1233,7 +1233,47 @@ _PROP_MARKET_FOR_MODEL = {
     "nba_prop_player_steals": "player_steals",
     "nba_prop_player_turnovers": "player_turnovers",
     "nba_prop_player_dd": "player_double_double",
+    # NFL (2026-09-10). Absent until the first settled NFL props -- 09-09,
+    # NE @ SEA -- published with no CLV while 256k closing quotes for the game
+    # sat in player_prop_odds: with no entry here a pick fell through to the
+    # game-odds lookup, which has no NFL rows, and was skipped in silence. The
+    # market keys mirror models.scorer._NFL_PROP_CONFIG; tests pin the two.
+    "nfl_prop_pass_yards":       "player_pass_yds",
+    "nfl_prop_pass_attempts":    "player_pass_attempts",
+    "nfl_prop_pass_completions": "player_pass_completions",
+    "nfl_prop_pass_tds":         "player_pass_tds",
+    "nfl_prop_rush_yards":       "player_rush_yds",
+    "nfl_prop_rush_attempts":    "player_rush_attempts",
+    "nfl_prop_rec_yards":        "player_reception_yds",
+    "nfl_prop_receptions":       "player_receptions",
+    "nfl_prop_rush_rec_yards":   "player_rush_reception_yds",
+    "nfl_prop_anytime_td":       "player_anytime_td",
+    "nfl_prop_tackles_assists":  "player_tackles_assists",
+    "nfl_prop_sacks":            "player_sacks",
+    # The market-relative rules span many markets under one id, so the market
+    # travels on picks.prop_market (the same sentinel settlement uses).
+    "nfl_prop_market":  "FROM_PROP_MARKET",
+    "wnba_prop_market": "FROM_PROP_MARKET",
 }
+
+# The market-relative cards write the SOFT book's price into dk_odds and name
+# the book only in the label suffix -- "Jadarian Price Over 1.5 Rec (FD)" --
+# so their close has to be read at THAT book: an FD open against a DK close is
+# arithmetic on two different books. One inverse of the cards' _BOOK map,
+# pinned against both cards by test. A book outside the map is written raw
+# ("(fliff)"), so a raw key is accepted too; no suffix means DraftKings.
+_LABEL_BOOK = {"DK": "draftkings", "FD": "fanduel", "MGM": "betmgm",
+               "CZR": "williamhill_us", "ESPN": "espnbet", "PIN": "pinnacle"}
+_LABEL_BOOK_RE = re.compile(r"\(([A-Za-z_]+)\)\s*$")
+
+
+def _book_from_label(pick_label: str | None) -> str:
+    """The book a market-relative pick was priced at, from its label suffix."""
+    m = _LABEL_BOOK_RE.search(pick_label or "")
+    if not m:
+        return "draftkings"
+    token = m.group(1)
+    return _LABEL_BOOK.get(token.upper(), token.lower())
 
 
 # How far back the self-healing CLV backfill walks on each settle. Bounded so a
@@ -1362,8 +1402,14 @@ def _line_clv_pts(market: str, prop_market, pick_side: str,
 
 
 def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
-                       market: str, commence_time: str) -> dict | None:
-    """Closing DK price for one player prop: the newest pre-game snapshot.
+                       market: str, commence_time: str,
+                       bookmaker: str = "draftkings") -> dict | None:
+    """Closing price for one player prop: the newest pre-game snapshot.
+
+    DraftKings by default. A market-relative pick (nfl_prop_market,
+    wnba_prop_market) is priced at the soft book named in its label, so its
+    close is read at that book -- closing_dk_odds then holds the pick's own
+    book's close, exactly as dk_odds already holds its open.
 
     Keyed on player_NAME, not player_id: player_prop_odds has no id column at
     all (it stores the book's own name string), which is the same join
@@ -1378,11 +1424,11 @@ def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
         SELECT over_price, under_price, line
         FROM player_prop_odds
         WHERE game_id = %s AND player_name = %s AND market = %s
-          AND bookmaker = 'draftkings'
+          AND bookmaker = %s
           AND snapshot_at::timestamptz <= %s::timestamptz
         ORDER BY snapshot_at::timestamptz DESC
         LIMIT 1
-    """, (game_id, player_name, market, commence_time)).fetchone()
+    """, (game_id, player_name, market, bookmaker, commence_time)).fetchone()
     if not row:
         return None
     return {"over_price": row[0], "under_price": row[1], "line": row[2]}
@@ -1428,7 +1474,8 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     rows = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.dk_odds,
-               g.commence_time, p.pick_label, p.scored_line, p.created_at
+               g.commence_time, p.pick_label, p.scored_line, p.created_at,
+               p.prop_market
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
@@ -1445,7 +1492,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     now_utc = datetime.now(timezone.utc)
     updated = 0
     for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
-         pick_label, scored_line, created_at) in rows:
+         pick_label, scored_line, created_at, row_prop_market) in rows:
         # The game must have STARTED. _closing_dk_odds takes the newest snapshot
         # at or before kickoff, so capturing while a game is still hours away
         # records that hour's price as "the close" — and since the fill is
@@ -1493,6 +1540,14 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             continue
 
         prop_market = _PROP_MARKET_FOR_MODEL.get(model_id)
+        bookmaker = "draftkings"
+        if prop_market == "FROM_PROP_MARKET":
+            # A market-relative pick: the market is on the row, the price on
+            # the row is the soft book's, and the book is in the label.
+            prop_market = row_prop_market
+            bookmaker = _book_from_label(pick_label)
+            if not prop_market:
+                continue                 # no market on the row, nothing to close
         if prop_market:
             # player_prop_odds keys on the book's name string, so the name is
             # recovered from the pick label the same way settlement does.
@@ -1502,7 +1557,8 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
                 continue                 # can't find the prop without the player
             market = prop_market
             closing = _closing_prop_odds(conn, game_id, player_name,
-                                         prop_market, commence_time)
+                                         prop_market, commence_time,
+                                         bookmaker=bookmaker)
             closing_price = (closing or {}).get(
                 "over_price" if pick_side == "over" else "under_price")
         else:

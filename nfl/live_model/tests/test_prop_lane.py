@@ -370,3 +370,51 @@ def test_one_miss_does_not_trigger_the_backoff(monkeypatch):
     w = _core_worker(monkeypatch, odds=_FakeOdds(), event=FIRST_QUARTER)
     w._anchor_misses = 1
     assert w._anchor_misses < gd.ANCHOR_MISS_LIMIT
+
+
+# ── The prop poll asks the BOOK for the BOOK's event id (2026-09-09) ─────────
+# First live regular-season game, NE @ SEA: anchor matched, state built, and
+# every prop poll answered 422 INVALID_EVENT_ID, because the worker passed
+# ESPN's event id to The Odds API's per-event endpoint. dec=0 for the whole
+# game. The fakes above never caught it because they ignore the id argument.
+
+class _IdRecordingOdds(_FakeOdds):
+    def fetch_event_markets(self, eid, markets):
+        self.event_ids = getattr(self, "event_ids", []) + [eid]
+        return super().fetch_event_markets(eid, markets)
+
+
+def test_the_prop_poll_uses_the_books_event_id_not_espns(monkeypatch):
+    odds = _IdRecordingOdds()
+    w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
+    summary = w.tick()
+    assert summary["prop_polls"] == 1
+    assert odds.event_ids == ["bk_7f3a91c"], \
+        f"the per-event call must carry the book's id, got {odds.event_ids}"
+    assert "e1" not in odds.event_ids, "ESPN's id is not a book event id"
+
+
+def test_no_anchor_row_for_the_matchup_means_no_prop_poll(monkeypatch):
+    """A call that cannot succeed is a credit spent on nothing; skip it and
+    say so on the tick line rather than paying for a 422 every minute."""
+    class _OtherGame(_IdRecordingOdds):
+        def fetch_anchor(self):
+            return [_Q("spreads", "home", -3.5, game_id="bk_other",
+                       home_team="Dallas Cowboys", away_team="New York Giants"),
+                    _Q("totals", "over", 44.5, game_id="bk_other",
+                       home_team="Dallas Cowboys", away_team="New York Giants")]
+
+    odds = _OtherGame()
+    w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
+    summary = w.tick()
+    assert getattr(odds, "event_ids", []) == [], "must not call the book with a guessed id"
+    assert summary["prop_polls"] == 0
+    assert "no_book_event_id" in summary.get("prop_skips", [])
+
+
+def test_the_hunt_gated_derivative_poll_uses_the_books_id_too(monkeypatch):
+    odds = _IdRecordingOdds()
+    w = _core_worker(monkeypatch, odds=odds)          # CORE_EVENT is halftime
+    summary = w.tick()
+    assert summary["hunting"] == 1
+    assert set(odds.event_ids) == {"bk_7f3a91c"}

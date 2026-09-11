@@ -285,7 +285,7 @@ the extreme by the 09-02 measurement. Re-run the sweep weekly; move a cut only
 on the section-7 standards.
 
 What that loosening would have drawn in, measured before the PR merged (query
-in session 273: pre-game rows since 2026-08-28 with a stamped `best_odds`,
+in session 279: pre-game rows since 2026-08-28 with a stamped `best_odds`,
 NONE or AVOID at DraftKings, passing their model's `min_prob` / `min_edge` /
 `min_odds` on `best_edge` / `best_odds`, graded through
 `mv_scored_pick_outcomes` and paid at the best price; excludes rows with no
