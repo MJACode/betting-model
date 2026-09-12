@@ -188,3 +188,22 @@ def test_the_declared_job_names_a_real_type_and_valid_args():
     job = next(j for j in jobs if j["key"] == "ncaaf-pbp-2025-for-the-inplay-replay")
     assert job["job_type"] in JOB_REGISTRY
     JOB_REGISTRY[job["job_type"]][1](job["args"])
+
+
+# ── a partial corpus must not wear the full corpus's name ────────────────────
+
+def test_a_one_season_build_gets_its_own_filename():
+    """train_engine fits on states_all.parquet. A one-season file at that path
+    would train the engine on a corpus nobody chose while every diagnostic the
+    builder prints still read fine -- the same failure load_pbp refuses on the
+    way in."""
+    from ncaaf_live.backtest.build_states import out_path
+    from ncaaf_live.backtest.train_engine import STATES_PATH
+    from ncaaf_live.config import ALL_SEASONS
+
+    assert out_path(None) == STATES_PATH
+    assert out_path(list(ALL_SEASONS)) == STATES_PATH
+    assert out_path([2025]) != STATES_PATH
+    assert out_path([2025]).name == "states_2025.parquet"
+    assert out_path([2024, 2025]).name == "states_2024-2025.parquet"
+    assert out_path([2025], "/tmp/x.parquet").name == "x.parquet"
