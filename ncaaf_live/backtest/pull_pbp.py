@@ -129,6 +129,39 @@ def pull_season(season: int, force: bool = False) -> Path | None:
     return out
 
 
+# Postgres does not name the column in `NumericValueOutOfRange: integer out of
+# range`, so the first run of this job (2026-09-12) failed with no way to tell
+# WHICH value did not fit. This check runs before the INSERT and names it. The
+# columns are BIGINT now (data/migrations/widen_ncaaf_plays_ints.sql), so a
+# value that trips this is genuinely wrong -- a parse gone sideways or a feed
+# change -- rather than merely large, and the run SHOULD stop rather than store
+# it.
+NUMERIC_COLUMNS = (
+    "play_number", "period", "clock_minutes", "clock_seconds",
+    "offense_score", "defense_score", "offense_timeouts", "defense_timeouts",
+    "down", "distance", "yards_to_goal", "yards_gained", "season", "week",
+)
+BIGINT_MAX = 2 ** 63 - 1
+
+
+def _check_ranges(out, season: int) -> None:
+    """Raise naming the column and the offending value, before Postgres can
+    raise without naming either."""
+    for col in NUMERIC_COLUMNS:
+        if col not in out.columns:
+            continue
+        vals = pd.to_numeric(out[col], errors="coerce")
+        vals = vals[vals.notna()]
+        if vals.empty:
+            continue
+        lo, hi = float(vals.min()), float(vals.max())
+        if hi > BIGINT_MAX or lo < -BIGINT_MAX:
+            bad = out.loc[vals.abs().idxmax()]
+            raise ValueError(
+                f"{season}: {col} out of range at play {bad.get('play_id')!r} "
+                f"(game {bad.get('game_id_cfbd')!r}): min {lo:,.0f} max {hi:,.0f}")
+
+
 def store_season(conn, season: int, df=None) -> dict:
     """Upsert a season's plays into `ncaaf_plays`.
 
@@ -150,6 +183,7 @@ def store_season(conn, season: int, df=None) -> dict:
     for c in ("play_id", "game_id_cfbd", "drive_id"):
         if c in out.columns:
             out[c] = out[c].astype(str)
+    _check_ranges(out, season)
     names = list(out.columns)
     placeholders = ", ".join(f"%({c})s" for c in names)
     updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in names if c != "play_id")
@@ -159,8 +193,15 @@ def store_season(conn, season: int, df=None) -> dict:
     rows = out.where(pd.notna(out), None).to_dict("records")
     conn.executemany(sql, rows)
     conn.commit()
+    widest = {}
+    for col in NUMERIC_COLUMNS:
+        if col in out.columns:
+            v = pd.to_numeric(out[col], errors="coerce")
+            if v.notna().any():
+                widest[col] = [int(v.min()), int(v.max())]
     return {"season": season, "plays": len(rows),
-            "games": int(out["game_id_cfbd"].nunique())}
+            "games": int(out["game_id_cfbd"].nunique()),
+            "ranges": widest}
 
 
 def load_season_from_db(conn, season: int):
