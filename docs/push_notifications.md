@@ -34,26 +34,20 @@ This file is the precise enablement guide.
 - **Pipeline**: runs last as Step 11; `python run_pipeline.py --step push-notifications`
   (supports `--dry-run`). No-op when there are no devices or no new/dropped signals.
 
-## Status, measured — NO PUSH HAS EVER REACHED A PHONE (2026-09-06)
+## Status, measured — NO PUSH HAS EVER REACHED A PHONE (re-measured 2026-09-12)
 
-`push_sent` looks like a working notifier and is not one. Counts on 2026-09-06:
-**1,158 `new_bet`, 578 `live_signal`**, running right up to that morning — and
-**`device_push_tokens` held ZERO rows**.
+`push_sent` looks like a working notifier and is not one. On 2026-09-12:
+
+```
+device_push_tokens:  0 rows (enabled or not), last_seen NULL
+push_sent:           1,736 rows  (1,158 new_bet, 578 live_signal)
+```
 
 The producers ledger *regardless of token count* (the comment in
 `notify_signal_changes` says so explicitly: "so a signal with zero devices
 online isn't re-detected forever"). So with no tokens, `messages` is `[]`,
 `_expo_send` is never called, and every lock_key is still written. **A row in
 `push_sent` means "this signal was considered", not "a phone was notified."**
-This is the `.claude/rules/operations.md` rule — *check `push_sent` before
-believing a notifier ever worked* — landing one step further along than it
-reads: the kinds are not empty, and the notifier still never delivered.
-
-What is missing is only the REGISTRATION half below: a native build carrying
-`expo-notifications`, APNs/FCM credentials, and a user who opts in
-(`usePushOptIn`). Until one token exists, every producer is a no-op and the
-routing added on 2026-09-06 (`mobile/src/lib/pushRoute.ts`,
-`usePushDeepLink`) cannot be exercised end to end.
 
 **Re-check with one query before believing otherwise:**
 
@@ -63,6 +57,99 @@ select (select count(*) from device_push_tokens where enabled) as devices,
 ```
 
 Zero devices means the ledger is bookkeeping, whatever its counts say.
+
+### Why zero, when the app has shipped push code since 2026-09-08
+
+`expo-notifications` and the registration hook landed in `27cfe34`
+(2026-09-08). TestFlight build **12201** (run #69, 2026-09-11, commit
+`3e05350`) is a descendant of it, so the binary on the phone carries the
+module. The registration still cannot succeed, and **the EAS build log for
+that run says why**:
+
+```
+Project Credentials Configuration
+Distribution Certificate   Updated  3 months ago
+Provisioning Profile       Updated  2 months ago
+All credentials are ready to build @mjacode/betting-picks
+```
+
+The profile was last touched ~2026-07-11 — **two months before push existed in
+this project**. A push-capable iOS binary needs the `aps-environment`
+entitlement, which comes from the provisioning profile, and
+`eas build --non-interactive` REUSES the profile it already holds rather than
+regenerating one for a newly added capability. Nothing in the build, the
+submit, or the app said a word about it.
+
+> **Not yet measured directly:** the entitlement has not been read out of the
+> IPA — the sandbox cannot reach `expo.dev` artifacts and the xcode log URL
+> expires in 15 minutes. The build workflow now performs that read on every
+> run (below), so the next build answers it definitively rather than by
+> inference.
+
+## The enablement, in the order it has to happen (2026-09-12)
+
+1. **Add an APNs push key to EAS** — only Matt can, it needs the Apple account:
+
+   ```bash
+   cd mobile
+   eas credentials       # iOS → production → Push Notifications → set up a Push Key
+   ```
+
+   Let Expo manage the key. This also enables the Push Notifications capability
+   on the App ID, which is what makes the regenerated profile carry
+   `aps-environment`.
+
+2. **Cut a new TestFlight build** — Actions → *Mobile TestFlight build* → Run
+   workflow. It now **downloads the finished IPA, reads `aps-environment` out
+   of the embedded provisioning profile, and refuses to submit a build that
+   lacks it** (override with the `allow_missing_push_entitlement` input). A
+   push-less build can no longer reach TestFlight unnoticed.
+
+3. **On the phone:** install the build, Settings → **Notifications** ON, accept
+   the OS prompt. The card now says which of these happened:
+
+   | what you see | what it means |
+   |---|---|
+   | "This device is registered" | a row exists in `device_push_tokens` |
+   | "This build is not registered for Apple push" | step 1 or 2 was skipped |
+   | "Notifications are turned off for Signalbase" | the OS prompt was declined — the card offers to open iOS Settings |
+   | "…could not be saved" | Apple issued a token, the database write failed |
+
+4. **Prove it end to end:** tap **Send a test notification** in the same card.
+   The app posts to the keyless Expo push API with its own token and reads the
+   ticket back, so it covers the entitlement, the token, Expo, the OS
+   presenting it, and the deep link. No slate and no worker run needed.
+
+5. **Then the producers:** `python -m tracking.push_notifier [--line-changes | --live]`.
+
+## What 2026-09-12 changed in the code
+
+The registration half existed and could not report. Four silent failures, all
+closed:
+
+- **`usePushNotifications` swallowed everything** into one `console.warn`, and
+  never read `.upsert()`'s `{ error }`. It now resolves to a state —
+  `idle / registering / registered / failed` — with a typed diagnosis
+  (`lib/pushDiagnosis.ts`), rendered by `components/NotificationsCard.tsx`.
+- **Opt-OUT was never implemented.** The toggle wrote an AsyncStorage boolean
+  and nothing else, so turning notifications off left `enabled = true` and the
+  worker would have kept sending forever. `unregisterForPush` now flips the row
+  (and the last token is persisted, so it works after a restart).
+- **No `setNotificationHandler`, so a push arriving while the app was OPEN was
+  never displayed.** The first thing anyone would do to check that push works
+  was guaranteed to show nothing. `lib/pushPresentation.ts`, installed at
+  App.tsx module scope.
+- **`_expo_send` counted a 200 as a delivery.** Expo returns one ticket per
+  message and a ticket can say `DeviceNotRegistered` or `InvalidCredentials`;
+  the worker read none of it, so a message Apple refused was logged as sent.
+  `_read_tickets` now pairs tickets to messages positionally, counts only
+  accepted ones, disables retired tokens, and logs a credentials refusal as its
+  own line. A reply it cannot pair counts nothing and disables nothing —
+  guessing which token an error belongs to is worse than not acting.
+
+Guards: `tests/test_push_tickets.py` (12, watched failing under three
+mutations) and `mobile/scripts/verify_push.ts` (37, watched failing under
+four).
 
 ## Where a tap LANDS (added 2026-09-06)
 
@@ -92,94 +179,18 @@ python -m tracking.push_notifier --dry-run            # prints intended pushes
 python run_pipeline.py --step push-notifications --dry-run
 ```
 
-## Mobile enablement (Matt's machine)
+## Mobile enablement — SUPERSEDED (kept as history)
 
-### 1. Install the native module + rebuild
+This section used to be the guide: install `expo-notifications`, paste a
+registration hook, add a Settings toggle. **All three shipped on 2026-09-08 and
+2026-09-12.** The hook it told you to paste is not the hook in the repo — the
+pasted one swallowed every error, which is the bug that cost this feature a
+week. Following it now would be a regression.
 
-```bash
-cd mobile
-npx expo install expo-notifications
-# expo-notifications is a NATIVE module — an OTA update can't add it. Cut a new
-# dev/prod build so the binary contains it:
-eas build --profile preview --platform ios      # (and/or android)
-```
-
-### 2. Configure push credentials
-
-- **iOS**: an APNs key in your Apple Developer account, registered with EAS:
-  `eas credentials` → iOS → Push Notifications → set up a Push Key. (Expo can
-  manage this for you.)
-- **Android**: an FCM V1 service-account key uploaded to EAS
-  (`eas credentials` → Android → FCM V1).
-- Expo routes through these automatically once set; the backend sends to
-  `exp.host/--/api/v2/push/send` with no key.
-
-### 3. Add the registration hook (ready to paste)
-
-`mobile/src/hooks/usePushNotifications.ts`:
-
-```ts
-import { useEffect } from 'react';
-import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
-import { supabase } from '@/lib/supabase';
-import { getDeviceId } from '@/hooks/useDeviceId';   // stable per-install id (track-a-bet)
-import { usePushOptIn } from '@/hooks/usePushOptIn'; // tiny AsyncStorage boolean store
-
-/** Registers for push + upserts the Expo token when the user has opted in.
- *  All native calls are guarded so a binary without the module just no-ops. */
-export function usePushNotifications(): void {
-  const { enabled } = usePushOptIn();
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const perm = await Notifications.requestPermissionsAsync();
-        if (perm.status !== 'granted') return;
-        const projectId = '0e16eb4b-190b-4356-be61-5b7a6b1da5ee';
-        const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-        if (cancelled || !token) return;
-        const deviceId = await getDeviceId();   // ← needed so Track-a-bet line-change
-                                                //   alerts can resolve THIS device's token
-        await supabase
-          .from('device_push_tokens')
-          .upsert(
-            { token, device_id: deviceId, platform: Platform.OS, enabled: true,
-              last_seen: new Date().toISOString() },
-            { onConflict: 'token' },
-          );
-      } catch (err) {
-        // No native module (pre-rebuild) or permission denied → silently skip.
-        console.warn('[push] registration skipped', err);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [enabled]);
-}
-```
-
-Mount it once in `App.tsx` next to `useActionThresholds()`. Add a
-`usePushOptIn` store (mirror `useOnboarding`) and a **Settings** toggle row
-("Signal alerts") that flips it; on disable, set `enabled = false` on the token
-row so the backend stops sending:
-
-```ts
-await supabase.from('device_push_tokens')
-  .update({ enabled: false }).eq('token', token);
-```
-
-> Because `expo-notifications` is only imported in this hook, don't add it to the
-> JS bundle until the dep is installed (step 1) — otherwise Metro can't resolve it
-> and the EAS preview build fails. Add the dep + hook together in the rebuild PR.
-
-### 4. Verify end-to-end
-
-1. Install the new build on a device, toggle Settings → Signal alerts on, accept
-   the permission prompt. Confirm a row lands in `device_push_tokens`.
-2. Trigger a send: `python -m tracking.push_notifier` (or wait for the next
-   pipeline run). You should get a summary notification for the day's new signals.
-3. Re-run it — no duplicate (the `push_sent` ledger blocks it).
+The live guide is **"The enablement, in the order it has to happen"** above.
+What survives from here is the one step that was always the real blocker and is
+still outstanding: the **APNs push key** (`eas credentials`), which is step 1
+there.
 
 ## Tuning knobs (later)
 
@@ -191,66 +202,9 @@ await supabase.from('device_push_tokens')
 
 ---
 
-## One-time enablement checklist (moved from CLAUDE.md §26, 2026-08-30)
+## One-time enablement checklist — SUPERSEDED (kept as history)
 
-All four notification producers are **built, wired, and ledgered** (sessions 73, 79–81):
-`tracking/push_notifier.py` has `notify_signal_changes` (new/dropped BET signals),
-`notify_line_changes` (Track-a-bet big DK line moves), and `notify_live_signals`
-(in-play BET signals). They send via the keyless Expo Push API to every row in
-`device_push_tokens`. **The ONLY thing left is the one-time native push setup on
-your machine** — until a device token exists, every alert is computed and ledgered
-but has nowhere to deliver. Full guide: `docs/push_notifications.md`. Quick path:
-
-### 1. Native module + registration hook (mobile/)
-```bash
-cd mobile
-npx expo install expo-notifications
-```
-- Create `src/hooks/usePushOptIn.ts` — AsyncStorage boolean store (mirror `useOnboarding`).
-- Create `src/hooks/usePushNotifications.ts` — paste from `docs/push_notifications.md`,
-  **but add `device_id` to the upsert** (import `getDeviceId` from `useDeviceId`) so
-  Track-a-bet line-change alerts can resolve THIS device's token:
-  ```ts
-  const deviceId = await getDeviceId();
-  await supabase.from('device_push_tokens').upsert(
-    { token, device_id: deviceId, platform: Platform.OS, enabled: true,
-      last_seen: new Date().toISOString() },
-    { onConflict: 'token' });
-  ```
-- Mount `usePushNotifications()` in `App.tsx` next to `useActionThresholds()`.
-- Add a **Settings → "Notifications"** toggle wired to `usePushOptIn` (on disable,
-  set `enabled = false` on the token row so the backend stops sending).
-- Add the dep + hook **together** in this rebuild (don't import `expo-notifications`
-  in the JS bundle before installing it, or the EAS preview build fails).
-
-### 2. EAS push credentials
-```bash
-cd mobile
-eas credentials      # iOS → Push Notifications → set up an APNs key (let Expo manage)
-eas credentials      # Android → FCM V1 → upload the service-account key
-```
-
-### 3. Native build (push is a NATIVE module — OTA/Expo Update can't add it)
-```bash
-cd mobile
-eas build --profile preview --platform ios      # and/or android
-# install the resulting build on your phone
-```
-
-### 4. Turn it on + test each producer
-- Open the app → **Settings → Notifications ON** → accept the OS permission prompt.
-  Confirm a row appears in `device_push_tokens` (with your `device_id`).
-- Fire each producer from a terminal (each supports `--dry-run` to preview):
-  ```bash
-  python -m tracking.push_notifier                 # new/dropped signal alerts
-  python -m tracking.push_notifier --line-changes  # track-a-bet (needs a tracked bet whose line moved)
-  python -m tracking.push_notifier --live          # live in-play signals
-  ```
-  Signal-flip + line-change also fire automatically every hourly refresh
-  (`--step push-notifications`); live alerts fire from the live loop.
-- Re-run → no duplicate (the `push_sent` ledger blocks it).
-
-Once a token exists, **everything built in P1–P4 starts delivering with zero further
-code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track threshold.
-
----
+Moved here from CLAUDE.md §26 on 2026-08-30 and correct for its moment: at the
+time nothing mobile existed. Its steps 1 and 3 are done. Its step 2 — the EAS
+push credentials — is the one still open, and is step 1 of the live guide
+above. Do not work this list; work that one.

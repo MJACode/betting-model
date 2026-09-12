@@ -23,8 +23,12 @@ import type { PicksView } from '@/types';
  * `type` this build has never heard of simply falls through.
  */
 
-/** Mirrors PUSH_ROUTE_VERSION in tracking/push_notifier.py. */
-export const PUSH_ROUTE_VERSION = 1;
+// Defined in its own module so non-React-Native callers (pushTest.ts, and the
+// verify script that runs it under tsx) can read the version without dragging
+// this file's useSportFilter import along. Re-exported so every existing
+// importer of pushRoute keeps working unchanged.
+export { PUSH_ROUTE_VERSION } from '@/lib/pushRouteVersion';
+import { PUSH_ROUTE_VERSION } from '@/lib/pushRouteVersion';
 
 export type PushRoute =
   /** Open one pick's detail screen. */
