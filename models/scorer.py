@@ -2297,8 +2297,8 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             game_time, player_id, pitcher_throw_hand,
             public_bet_pct, public_money_pct, dk_bet_link, model_probability_cal,
             best_book, best_odds, best_implied_prob, best_edge, best_bet_link,
-            is_live, inning_at_pick, score_diff_at_pick, downgrade_reason,
             line_book,
+            is_live, inning_at_pick, score_diff_at_pick, downgrade_reason,
             decision_book, decision_odds, decision_implied_prob, decision_edge
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
