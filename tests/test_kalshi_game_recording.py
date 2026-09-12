@@ -81,3 +81,42 @@ def test_the_recorder_keeps_raw_contracts(monkeypatch):
 def test_the_migration_is_registered():
     from data.view_migrations import ACTIVE_MIGRATIONS
     assert "add_kalshi_game_markets.sql" in ACTIVE_MIGRATIONS
+    assert "add_kalshi_ncaaf_events.sql" in ACTIVE_MIGRATIONS
+
+
+# ── the join to our games rows ───────────────────────────────────────────────
+
+def test_event_code_is_shared_across_series():
+    """The total and spread ladders carry the winner series' event code, which
+    is what lets the winner contracts' team names resolve all three."""
+    assert kgi.event_code("KXNCAAFTOTAL-26SEP12ARKUTAH") == "26SEP12ARKUTAH"
+    assert kgi.event_code("KXNCAAFGAME-26SEP12ARKUTAH") == "26SEP12ARKUTAH"
+    assert kgi.event_code("KXNCAAFSPREAD-26SEP12ARKUTAH") == "26SEP12ARKUTAH"
+
+
+def test_kalshi_labels_expand_st_and_use_the_explicit_map(monkeypatch):
+    """'St.' is Kalshi's 'State'; the one-offs the resolver would get wrong
+    are pinned by name. Measured 2026-09-11: with these, every FBS-vs-FBS event
+    on the first snapshot resolved (152 of 239 events, 0 FBS-vs-FBS gaps)."""
+    seen = []
+
+    def _resolve(name, conn=None):
+        seen.append(name)
+        return name
+
+    monkeypatch.setattr("data.ingestors.cfbd_ingestor.resolve_odds_api_school", _resolve)
+    assert kgi.kalshi_school("Ohio St.") == "Ohio State"
+    assert kgi.kalshi_school("Miami (FL)") == "Miami"
+    assert kgi.kalshi_school("North Carolina St.") == "NC State"
+    assert kgi.kalshi_school("Louisiana-Monroe") == "UL Monroe"
+    assert kgi.kalshi_school("FAU") == "Florida Atlantic"
+    assert kgi.kalshi_school("Boise St.") == "Boise State"
+    assert "Miami (FL)" not in seen, "an explicit mapping must not reach the resolver"
+
+
+def test_resolution_runs_after_every_snapshot(monkeypatch):
+    calls = []
+    monkeypatch.setattr(kgi, "record_game_markets", lambda: calls.append("record") or {})
+    monkeypatch.setattr(kgi, "resolve_events", lambda: calls.append("resolve") or {})
+    scheduler.run_kalshi_game_record()
+    assert calls == ["record", "resolve"]

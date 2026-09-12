@@ -52,6 +52,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # number across every bookmaker; an exchange price is the one kind of
     # college number that record has never held.
     "add_kalshi_game_markets.sql",
+    # 2026-09-11 (session 280): the event-code -> games-row join for the table
+    # above, refreshed by the recorder after every snapshot.
+    "add_kalshi_ncaaf_events.sql",
     # 2026-09-10 (session 280, mike): point-in-time ISSUED weather forecasts
     # for NCAAF games, the train/serve repair for the totals model's wx_*
     # features (it trained on reanalysis and is served a forecast).

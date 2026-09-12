@@ -144,6 +144,109 @@ def record_game_markets(conn=None, status: str = "open",
             conn.close()
 
 
+# ── the join to our games rows ────────────────────────────────────────────────
+# Kalshi's labels differ from CFBD's school names in one systematic way ("St."
+# for State) and a few one-offs. Explicit where the resolver's prefix rule
+# would land on the wrong school or nothing; everything else goes through
+# resolve_odds_api_school after the "St." expansion. FCS labels that fail to
+# resolve are fine: those games are never on our board.
+KALSHI_TEAM_MAP = {
+    "Miami (FL)": "Miami",
+    "North Carolina St.": "NC State",
+    "Louisiana-Monroe": "UL Monroe",
+    "Pitt": "Pittsburgh",
+    "FIU": "Florida International",
+    "FAU": "Florida Atlantic",
+    "UMass": "Massachusetts",
+    "Hawaii": "Hawai'i",
+    "San Jose St.": "San José State",
+}
+
+_ST = re.compile(r"\bSt\.$")
+
+
+def kalshi_school(label: str, conn=None) -> str:
+    """A Kalshi team label -> the CFBD school name, or the label unchanged."""
+    from data.ingestors.cfbd_ingestor import resolve_odds_api_school
+
+    if not label:
+        return label
+    if label in KALSHI_TEAM_MAP:
+        return KALSHI_TEAM_MAP[label]
+    return resolve_odds_api_school(_ST.sub("State", label), conn)
+
+
+def event_code(event_ticker: str) -> str:
+    """'KXNCAAFTOTAL-26SEP12ARKUTAH' -> '26SEP12ARKUTAH' (shared across series)."""
+    return (event_ticker or "").split("-", 1)[-1]
+
+
+def resolve_events(conn=None) -> dict:
+    """Map every event code seen in the winner series to a games row.
+
+    The winner series is the only one that names the teams; the total and
+    spread ladders share its event code. Unordered pair on purpose (Kalshi does
+    not say who is home); ±1 day on the date because a night game carries two
+    ids (docs/sports/ncaaf.md). Prefers the odds-feed row (data_source='live')
+    because picks attach to it. Upserts `kalshi_ncaaf_events`; an unresolved
+    code is written with game_id NULL so the gap is visible and the map can be
+    extended from the labels.
+    """
+    from datetime import datetime, timezone
+
+    from data.db import get_connection
+
+    owns = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT event_ticker, game_date, side_label
+            FROM kalshi_game_markets
+            WHERE kind = 'winner' AND side_label IS NOT NULL
+        """).fetchall()
+        by_code: dict[str, dict] = {}
+        for ticker, gdate, label in rows:
+            code = event_code(ticker)
+            e = by_code.setdefault(code, {"date": str(gdate)[:10], "labels": []})
+            if label not in e["labels"]:
+                e["labels"].append(label)
+
+        resolved = unresolved = 0
+        now = datetime.now(timezone.utc)
+        for code, e in sorted(by_code.items()):
+            labels = sorted(e["labels"])[:2]
+            if len(labels) < 2:
+                continue
+            a, b = (kalshi_school(x, conn) for x in labels)
+            row = conn.execute("""
+                SELECT game_id FROM games
+                WHERE sport = 'NCAAF'
+                  AND game_date::date BETWEEN %s::date - 1 AND %s::date + 1
+                  AND ((home_team = %s AND away_team = %s) OR (home_team = %s AND away_team = %s))
+                ORDER BY CASE WHEN data_source = 'live' THEN 0 ELSE 1 END, game_date
+                LIMIT 1
+            """, (e["date"], e["date"], a, b, b, a)).fetchone()
+            gid = row[0] if row else None
+            resolved += bool(gid)
+            unresolved += not gid
+            conn.execute("""
+                INSERT INTO kalshi_ncaaf_events
+                    (event_code, game_date, label_a, label_b, school_a, school_b, game_id, resolved_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (event_code) DO UPDATE SET
+                    school_a = EXCLUDED.school_a, school_b = EXCLUDED.school_b,
+                    game_id = COALESCE(EXCLUDED.game_id, kalshi_ncaaf_events.game_id),
+                    resolved_at = EXCLUDED.resolved_at
+            """, (code, e["date"], labels[0], labels[1], a, b, gid, now))
+        conn.commit()
+        out = {"events": len(by_code), "resolved": resolved, "unresolved": unresolved}
+        logger.info(f"kalshi ncaaf events resolved: {out}")
+        return out
+    finally:
+        if owns:
+            conn.close()
+
+
 def probe(status: str = "open") -> dict:
     """Counts per series, no database. What a snapshot would record."""
     out = {}
@@ -159,10 +262,14 @@ def probe(status: str = "open") -> dict:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--probe", action="store_true", help="counts only, write nothing")
+    ap.add_argument("--resolve", action="store_true", help="map event codes to games rows only")
     ap.add_argument("--status", default="open")
     args = ap.parse_args()
     if args.probe:
         for k, v in probe(args.status).items():
             print(k, v)
+    elif args.resolve:
+        print(resolve_events())
     else:
         print(record_game_markets(status=args.status))
+        print(resolve_events())

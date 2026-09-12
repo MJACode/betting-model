@@ -233,8 +233,12 @@ session needs to know:
 - **Kalshi lists NCAAF game markets and is now recorded** every hour at :45
   (`data/ingestors/kalshi_game_ingestor.py` → `kalshi_game_markets`): 478
   winner contracts on 239 events, 2,008 total-ladder and 2,541 spread-ladder
-  contracts on 120 events at the first snapshot. Research only; the join to
-  our game ids is by date and Kalshi team code and is not built.
+  contracts on 120 events at the first snapshot. Research only. The join to
+  our game ids is `kalshi_ncaaf_events` (event code → `game_id`), refreshed
+  after every snapshot from the winner contracts' team names: 154 of 239
+  events resolved on 2026-09-11 and every FBS-vs-FBS event among them; the
+  unresolved remainder are FCS games. Extend `KALSHI_TEAM_MAP` in
+  `data/ingestors/kalshi_game_ingestor.py` when a label fails to resolve.
 - **Issued forecasts exist for 2024-2025** (`game_weather_issued`, leads
   1/3/5, `scripts/ncaaf_weather_issued_backfill.py`), the train/serve repair
   for the three `wx_*` features. `scripts/ncaaf_search/totals_weather_source.py`
