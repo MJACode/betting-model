@@ -21,6 +21,32 @@
 
 ---
 
+## [ ] Re-measure the `nfl_prop_market` over cut on 2026 settled bets
+
+Shipped 2026-09-12 (mike): the over side is held to 6pp, the under to 5pp
+(`config.NFL_PROP_MARKET_SIDE_EDGE`, `docs/nfl_prop_over_lean.md`). The
+MECHANISM is measured on 27,976 propositions and replicates in three seasons and
+at three snapshot offsets; the NUMBER 6 is fitted on the same 2023-25 grid it is
+quoted on, and one cell argues against it -- 2025 overs at 6pp are -4.2% on 73
+bets against +2.1% on 283 at 5pp. 2026 is the first season graded out of sample
+on it. Re-run `nfl_prop_two_sharps --min-edge 0.05 --over-edge 0.06 --by-side`
+with 2026 settled and check: is the over curve still monotone in the cut, and is
+the under side still the stronger one? If the over side reverts, the fallback is
+a single 5pp floor -- the pre-committed number -- which costs ~3pp of ROI.
+
+## [ ] Does the over-lean exist in the OTHER sports' prop markets?
+
+The NFL lean is measured (`docs/nfl_prop_over_lean.md`). The same
+market-relative rule is ported to WNBA (`models/wnba_prop_market`, live), MLB
+(`models/mlb_prop_market`, never wired) and NCAAF. If recreational over-shading
+is market structure rather than an NFL quirk, the same side split should appear
+there -- and CLAUDE.md §1b requires the question be asked either way. It was NOT
+answered here: the per-side floor is opt-in and those ports pass nothing, so
+they are untouched until someone measures them.
+`scripts/mlb_prop_market_sweep.py` already carries `side` in its graded tuples,
+so the MLB arm is a small change; MLB Pinnacle prop coverage starts 2026-08-27,
+so the window is thin.
+
 ## [ ] Re-measure the NFL prop lead curve inside 24 h on the 2026 hourly polls (October)
 
 mike, 2026-09-11: the ceiling STAYS at 24 h (`config.NFL_PROP_MAX_LEAD_HOURS`)

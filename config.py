@@ -2065,6 +2065,42 @@ NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "24
 NFL_PROP_MAX_LEAD_HOURS: float = float(
     os.environ.get("NFL_PROP_MAX_LEAD_HOURS", "24"))
 
+# THE TWO SIDES OF models/nfl_prop_market ARE NOT HELD TO THE SAME FLOOR.
+# (2026-09-12, mike: "find evidence for stat models any way you can.")
+#
+# NFL prop LINES lean over. Measured with no model in the loop, across 27,976
+# propositions 2023-25 graded at the best bettable price
+# (scripts/nfl_prop_over_lean.py): blind unders -1.3%, blind overs -7.9%, and
+# the under hit rate rises with how prominent and widely quoted the proposition
+# is (49.7% / 52.2% / 52.6% by tercile, against a 52.4% break-even at -110) in
+# EVERY one of the three seasons. The gap survives at a FLAT -110, so it is a
+# lean in the line, not an artifact of shopping.
+#
+# The rule's own record splits the same way at the shipped 5pp:
+#   unders   898 bets  +12.36%  CI (+7.2, +17.5)  2023 +12.6 / 2024 +4.9 / 2025 +21.1
+#   overs  1,092 bets   +4.11%  CI (-0.8,  +9.0)  spans zero
+# and the over curve climbs monotonically with the cut (5pp +4.1%, 6pp +15.8%,
+# 7pp +20.5%) while the under curve is flat (+12.4 / +13.5 / +12.2) -- exactly
+# what the lean predicts, since an over has to overcome it and an under is
+# helped by it. Replicated in direction at three independent snapshot offsets
+# (open +8.3pp, t48 +5.2pp, t72 +2.2pp in favour of unders).
+#
+# PAIRED, over 2023-25: 1,248 bets, +166.3u, +13.3%, positive in all three
+# seasons -- against 1,990 bets / +155.9u / +7.8% on a single floor. MORE
+# PROFIT FROM FEWER BETS, which is why this is not simply a volume trade.
+#
+# WHAT IS FITTED AND WHAT IS NOT. The MECHANISM was measured first, on a
+# different population, and predicted the direction before the rule's record
+# was split. The NUMBER 6 is chosen off this grid and is in-sample in the sense
+# §7 warns about; the bound on being wrong is that overs revert to their 5pp
+# behaviour (+4.11%), which still leaves the pairing ahead of one floor on ROI.
+# 2025 overs at 6pp are -4.2% on 73 bets, the one cell that argues against.
+# Re-measure with 2026 settled. Evidence: docs/nfl_prop_over_lean.md.
+NFL_PROP_MARKET_SIDE_EDGE: dict = {
+    "over":  float(os.environ.get("NFL_PROP_MARKET_OVER_EDGE", "0.06")),
+    "under": float(os.environ.get("NFL_PROP_MARKET_UNDER_EDGE", "0.05")),
+}
+
 
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()
