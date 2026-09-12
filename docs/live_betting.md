@@ -13,7 +13,7 @@ live_game_state_poller (15s, free MLB API)
       → live_trigger_orchestrator (debounce + credit cap)
          → live_odds_ingestor (bulk DK fetch, snapshot_type='in_play', ~3 credits)
             → live_scorer (LIVE_MODELS) → picks with is_live=true
-               → mobile Picks tab, Live segment (fetchLivePicks polls every 30s)
+               → mobile Picks tab, Live Signals segment (fetchLivePicks polls every 30s)
 ```
 
 One process runs the whole loop: `python -m data.ingestors.live_trigger_orchestrator --loop`.
@@ -159,15 +159,29 @@ board. `modelMeta.ts` renders LIVE ML / LIVE O/U / LIVE RL chips; `thresholds.ts
 65%/10% placeholders.
 
 **It stopped being its own bottom tab on 2026-09-06 (matt)** and became a third segment on the
-Picks screen — `Today | Signals | Live` — rendered ONLY when the selected sport has an in-play
-pick standing. It was the same PickCard over the same sport filter (both screens already called
-`useSportFilter`) in a lossy copy of the Picks header, and it was empty most of the time:
-measured over the 30 days to 2026-09-06, 175 live BETs on 25 of 31 days, ~5.3h of board
-occupancy per active day — empty ~81% of the clock, and empty 100% of it for NBA, NHL, NFL, UFC
-and GOLF (the only sports firing were MLB 123, NCAAF 51, WNBA 1). Which sport is live is carried
-by a red dot on the sport chips (`SportToggle` `liveSports`), which the tab never said. The poll
-is 30s while the segment is open and 120s elsewhere, since the Picks screen is open for most of
-a session. `tests/test_mobile_live_segment.py` pins the properties with silent failure modes.
+Picks screen — rendered ONLY when the selected sport had an in-play pick standing. It was the
+same PickCard over the same sport filter (both screens already called `useSportFilter`) in a
+lossy copy of the Picks header, and it was empty most of the time: measured over the 30 days to
+2026-09-06, 175 live BETs on 25 of 31 days, ~5.3h of board occupancy per active day — empty
+~81% of the clock, and empty 100% of it for NBA, NHL, NFL, UFC and GOLF (the only sports firing
+were MLB 123, NCAAF 51, WNBA 1). The poll is 30s while the segment is open and 120s elsewhere,
+since the Picks screen is open for most of a session.
+
+**The segment is ALWAYS ON and is called Live Signals, from 2026-09-12** — matt: *"I want it to
+always show for each sport but only populates with live signal bets. And let's call it live
+signals."* So the control reads `Today | Signals | Live Signals` on every sport, whether or not
+anything is in play. The measurement above is the accepted cost; what the conditional version
+could not do is be FOUND when nothing was live, so "is anything live?" had nowhere to be asked
+and the missing segment read as a missing feature. The live indicator moved into the segment's own count and dot
+(`(0)` with no dot = nothing in play), alongside the red dot on the sport chips
+(`SportToggle` `liveSports`). Two auto-redirects went with it: neither a sport switch nor the last
+game ending moves the reader off the board any more (a toast says the games finished).
+
+Because the board is now permanent on sports that have no in-play model at all, its empty state
+distinguishes them: `mobile/src/lib/liveSports.ts` carries which sports have a live lane (MLB,
+NCAAF, NFL today) and is pinned to `config.LIVE_MODELS` + `nfl/live_model/config.MODEL_IDS` by
+`tests/test_mobile_live_segment.py`, which also pins the properties with silent failure modes.
+**Add a sport there when its live lane ships.**
 
 **Live picks are addable to the betslip as of 2026-09-06 (matt).** `useResolvedSlip` therefore
 resolves against pre-game **and** live picks: `fetchPicksForDate` excludes `is_live` rows by

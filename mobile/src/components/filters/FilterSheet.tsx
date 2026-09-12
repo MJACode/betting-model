@@ -132,7 +132,7 @@ export function FilterSheet({
 
 /**
  * One row of the sheet. Pass `summary` to make it collapsible: the row then
- * reads as `Sort by            Hit rate  ⌄` until it is tapped.
+ * reads as `Hit rate            60–80%  ⌄` until it is tapped.
  *
  * `summary` is what the filter is set to right now, in the same words the row
  * uses once open — that is the whole reason a collapsed row is still useful.
