@@ -47,6 +47,12 @@ def _thresholds(monkeypatch):
     monkeypatch.setattr(scorer, "MODEL_EDGE_THRESHOLDS", config.MODEL_EDGE_THRESHOLDS)
     monkeypatch.setattr(scorer, "MODEL_PROB_THRESHOLDS", config.MODEL_PROB_THRESHOLDS)
     monkeypatch.setattr(scorer, "PAUSED_MODELS", set())
+    # ALSO the automatic pauses (2026-09-10, _paused_signal): _is_paused reads
+    # model_auto_pauses through _auto_paused_models, so stubbing only the
+    # config constant left this test reading PRODUCTION state -- it passed on a
+    # machine with no DATABASE_URL (the lookup fails open) and failed on one
+    # with it the day the review auto-paused mlb_prop_pitcher_k.
+    monkeypatch.setattr(scorer, "_auto_paused_models", lambda: set())
     monkeypatch.setattr(scorer, "REQUIRE_DK_PRICE", False)
 
 
