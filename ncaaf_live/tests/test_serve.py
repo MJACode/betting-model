@@ -367,3 +367,54 @@ def test_the_cap_applies_to_the_avoid_side_too():
     from ncaaf_live.serve import LiveEngine as _E
     assert _E._decide(0.05, -0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None
     assert _E._decide(0.20, -0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "AVOID"
+
+
+# ── the pause ─────────────────────────────────────────────────────────────────
+
+def _wide_open(monkeypatch):
+    """Floors low enough that both lanes fire on the fixture state, so the
+    pause is the ONLY thing standing between the engine and a BET."""
+    import ncaaf_live.serve as serve
+    for name in ("TOTAL_MIN_PROB", "ML_MIN_PROB"):
+        monkeypatch.setattr(serve, name, 0.0)
+    for name in ("TOTAL_MIN_EDGE", "ML_MIN_EDGE"):
+        monkeypatch.setattr(serve, name, -1.0)
+    for name in ("TOTAL_MIN_EV", "ML_MIN_EV"):
+        monkeypatch.setattr(serve, name, None)
+
+
+def test_the_fixture_fires_when_wide_open(engine, monkeypatch):
+    """The control for the pause test: without a pause, BETs come out."""
+    _wide_open(monkeypatch)
+    import config as platform_config
+    monkeypatch.setattr(platform_config, "PAUSED_MODELS", set())
+    picks = engine.price(_state(), _ctx(), _ODDS)
+    assert {p["model_id"] for p in picks if p["signal_type"] == "BET"} == {
+        "ncaaf_live_win_prob", "ncaaf_live_total"}
+
+
+def test_a_paused_lane_never_writes_a_bet(engine, monkeypatch):
+    """config.PAUSED_MODELS has to reach THIS loop.
+
+    Until 2026-09-11 only the pre-game scorer and the MLB live loop read it:
+    pausing an NCAAF live lane in config was a silent no-op, and the loop went
+    on writing (and announcing) BETs. A paused lane writes nothing for its
+    would-be BET -- the forward record is replayed from the stored in-play
+    quotes, not from churned NONE rows. AVOIDs are informational and stay.
+    """
+    _wide_open(monkeypatch)
+    import config as platform_config
+    monkeypatch.setattr(platform_config, "PAUSED_MODELS",
+                        {"ncaaf_live_win_prob", "ncaaf_live_total"})
+    picks = engine.price(_state(), _ctx(), _ODDS)
+    assert [p for p in picks if p["signal_type"] == "BET"] == []
+
+
+def test_the_pause_is_per_lane(engine, monkeypatch):
+    """Pausing the totals lane must not silence the moneyline lane."""
+    _wide_open(monkeypatch)
+    import config as platform_config
+    monkeypatch.setattr(platform_config, "PAUSED_MODELS", {"ncaaf_live_total"})
+    picks = engine.price(_state(), _ctx(), _ODDS)
+    bets = {p["model_id"] for p in picks if p["signal_type"] == "BET"}
+    assert bets == {"ncaaf_live_win_prob"}
