@@ -670,12 +670,13 @@ mostly phantoms, and the ones that are not are thin.
   out-of-sample sides (2,386 games), then re-sweep EV on the calibrated
   probability.
   That is a model update and needs mike's call (`docs/followups.md`).
-- **Production already enforces fresh-only.** `_get_live_dk_odds` declines a
-  quote whose `snapshot_at` (the market's `last_update`) predates the first
-  sight of the current score (`quote_predates_score`). The replay and the
-  sweep pair without that guard, so the FRESH row above is the
-  production-faithful one and the all-quotes row overstates
-  (`docs/followups.md`).
+- **Production enforces fresh-only, and since 2026-09-12 so does the replay.**
+  `_get_live_dk_odds` declines a quote whose `snapshot_at` (the market's
+  `last_update`) predates the first sight of the current score
+  (`quote_predates_score`); `live_inning_gate_replay._pair` now calls the same
+  helper, so a newly built grid needs no separate fresh-only reading. The
+  tables on this page were computed BEFORE that change: read their fresh rows,
+  and rebuild any cached grid (`--rebuild`) before quoting a new one.
 
 Rerun: `python -m scripts.inplay_history_backtest --season 2025 --rebuild`
 (the candidate cache lives in the temp dir; ~8 minutes). Another season is

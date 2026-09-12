@@ -55,13 +55,29 @@ def canonical(game_id: str) -> str | None:
     return c if c != game_id else None
 
 
-def counts(conn) -> dict:
+def counts(conn, scope: list[str] | None = None) -> dict:  # noqa: D401
+    """Row counts before/after. `scope` is the game_ids this run can touch --
+    every SBR id and its canonical twin.
+
+    COUNTING THE WHOLE TABLE DOES NOT WORK HERE and reported a false FAILED on
+    the 2026-09-12 run: `odds` grew by 34,134 rows during the 54 minutes the
+    merge took, all of them written by the live loop for TODAY'S games, none
+    of them anything to do with this. The merge only ever UPDATEs odds, which
+    cannot change a row count, so the honest invariant is that the count over
+    the AFFECTED ids is unchanged -- those are all past seasons, which nothing
+    else writes.
+    """
     out = {}
     out["games_total"] = conn.execute("SELECT count(*) FROM games WHERE sport='MLB'").fetchone()[0]
     out["games_noncanon"] = conn.execute(f"SELECT count(*) FROM games WHERE sport='MLB' AND {NONCANON_SQL}").fetchone()[0]
     for t in DEPENDENTS:
-        out[f"{t}_total"] = conn.execute(f"SELECT count(*) FROM {t} WHERE game_id LIKE 'MLB_%%'").fetchone()[0]
         out[f"{t}_noncanon"] = conn.execute(f"SELECT count(*) FROM {t} WHERE {NONCANON_SQL}").fetchone()[0]
+        # `scope or []` and not `if scope`: an empty plan is the NO-OP re-run
+        # (everything already merged), and it must verify clean rather than
+        # crash on a None count.
+        out[f"{t}_scoped"] = conn.execute(
+            f"SELECT count(*) FROM {t} WHERE game_id = ANY(%s)",
+            (list(scope or []),)).fetchone()[0]
     return out
 
 
@@ -121,8 +137,9 @@ def main() -> None:
     args = ap.parse_args()
     conn = get_connection()
     try:
-        before = counts(conn)
         todo = plan(conn)
+        scope = [g["game_id"] for g in todo] + [g["canonical"] for g in todo]
+        before = counts(conn, scope)
         twins = sum(1 for g in todo if g["twin"] is not None)
         scored_twins = sum(1 for g in todo if g["twin"] is not None and g["twin"][0] is None
                            and g["home_score"] is not None)
@@ -149,18 +166,19 @@ def main() -> None:
                 apply_one(conn, g, backup)
             conn.commit()
             logger.info(f"  season {season}: {len(batch)} merged")
-        after = counts(conn)
+        after = counts(conn, scope)
         logger.info(f"after: {after}")
         ok = (after["games_noncanon"] == 0
               and all(after[f"{t}_noncanon"] == 0 for t in DEPENDENTS)
-              and after["odds_total"] == before["odds_total"]
+              and after["odds_scoped"] == before["odds_scoped"]
               and after["games_total"] == before["games_total"] - twins)
-        weather_dropped = before["game_weather_total"] - after["game_weather_total"]
+        weather_dropped = before["game_weather_scoped"] - after["game_weather_scoped"]
         logger.info(f"weather rows dropped as duplicates of a canonical row: {weather_dropped}")
         (logger.success if ok else logger.error)(
             f"verification {'PASSED' if ok else 'FAILED'}: non-canonical left "
             f"games={after['games_noncanon']} odds={after['odds_noncanon']} "
-            f"weather={after['game_weather_noncanon']}; odds {before['odds_total']}->{after['odds_total']}; "
+            f"weather={after['game_weather_noncanon']}; odds on the affected ids "
+            f"{before['odds_scoped']}->{after['odds_scoped']}; "
             f"games {before['games_total']}->{after['games_total']} (twins {twins})")
     finally:
         conn.close()

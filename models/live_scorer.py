@@ -684,6 +684,7 @@ def _write_live_picks(conn: DBConnection, game_id: str,
     actually written."""
     locked = _locked_live_lanes(conn, game_id, LIVE_MODELS.keys())
     kept = [p for p in game_picks if p["model_id"] not in locked]
+    n_locked = len(game_picks) - len(kept)
 
     # Rewrite a lane only when the PROPOSITION changed.
     #
@@ -726,10 +727,19 @@ def _write_live_picks(conn: DBConnection, game_id: str,
     if kept:
         _insert_picks(conn, kept)
         _record_live_features(conn, kept)
-    if len(kept) < len(game_picks):
-        logger.info(f"  {game_id}: {len(game_picks) - len(kept)} live pick(s) "
-                    f"skipped — lane locked at first BET signal "
-                    f"({', '.join(sorted(locked))})")
+    # TWO REASONS, NAMED SEPARATELY. This logged every drop as "lane locked at
+    # first BET signal ()" -- empty parens and all -- when most drops are the
+    # unchanged-proposition filter below it, which is the loop working as
+    # designed at a 5s cadence. A message that reports the rare case while
+    # describing the common one is a message that gets ignored, and it was:
+    # seen on 2026-09-11 on a lane with nothing locked at all.
+    if n_locked:
+        logger.info(f"  {game_id}: {n_locked} live pick(s) skipped — lane "
+                    f"locked at first BET signal ({', '.join(sorted(locked))})")
+    n_unchanged = len(game_picks) - n_locked - len(kept)
+    if n_unchanged:
+        logger.debug(f"  {game_id}: {n_unchanged} live pick(s) not rewritten — "
+                     f"same side/signal/line/price as the standing row")
     return kept
 
 

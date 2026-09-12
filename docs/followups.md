@@ -21,6 +21,27 @@
 
 ---
 
+## [ ] The live model's play corpus includes SPRING TRAINING games
+
+Measured 2026-09-12 while backfilling 2019–2020: of 290 March 2019 games
+carrying rows in `plays`, **178 are dated before the season opener** (2019
+opened 03-20 in Japan, 03-28 domestically), so they are exhibition games.
+260 of the 290 predate today's backfill — this is long-standing, not new.
+`mlb_pbp_ingestor.backfill_pbp` walks `statsapi.schedule` from March 1 and
+loads any game that resolves to a scored `games` row, and the SBR CSVs carry
+spring training, so both halves let them in.
+
+`features.live_game_features.build_live_training_dataset` selects games by
+`season`, so every one of these is a training row for `mlb_live_total_runs`.
+Spring training is a different run environment played by different players
+in games that can end in a tie, which is exactly the thing a
+runs-remaining model should not be learning from. Measure first — refit with
+them excluded and compare on the 2025 in-play history
+(`scripts/inplay_history_backtest.py`) — then decide whether the filter
+belongs in the ingest (`game_type == 'R'` and the postseason codes, as
+`data/ingestors/mlb_inplay_history.GAME_TYPES` already lists) or only in the
+training select. A retrain is a model update either way.
+
 ## [ ] Re-measure the `nfl_prop_market` over cut on 2026 settled bets
 
 Shipped 2026-09-12 (mike): the over side is held to 6pp, the under to 5pp
@@ -85,19 +106,26 @@ The ~1.7k historical DK in-play rows already in `odds` for 2023-25
 (`source='odds_api_historical'`) are one pull per slate day and do not carry
 `last_update`; they are not a substitute.
 
-## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
+## [x] The replay and the cut grid paired quotes without production's stale-quote guard — FIXED 2026-09-12
 
 Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
 in-play quote whose `snapshot_at` (the market's own `last_update`) predates
 the first sight of the game's current score (`_score_changed_at`,
 `data/live_quote_guard.quote_predates_score`, tolerance 0). The REPLAY and
-the cut sweep (`scripts/live_inning_gate_replay._pair`) pair the newest price
-at or before each state with only the age bound, so their "all quotes" grids
-count bets production would have declined -- on 2025, 37 of the shipped
-cut's 128 bets, 30-7. The sweep cache now carries `runs_moved` (the state at
-the price's snapshot_at vs the candidate state), and a sweep read for
-production is the FRESH-only grid. `_pair` itself should apply the same rule
-so the two never diverge again; a test that a stale pair is dropped.
+the cut sweep (`scripts/live_inning_gate_replay._pair`) paired on the age
+bound alone, so their grids counted bets production would have declined: on
+the 47-slate 2026 replay that set the 0.72 cut, 18 of 38 qualifying bets,
+and those 18 went 16-2.
+
+**Done 2026-09-12.** `_pair` calls production's own `quote_predates_score`
+against a per-state "when did we first see this score" walk — the offline
+twin of `_score_changed_at`. Every cell the replay and `live_cut_sweep`
+print is now production-faithful by construction, so the separate
+fresh-only reading of a cached grid is no longer needed; the cache's
+`runs_moved` stays as a diagnostic (it asks a slightly different question:
+did the score move between the price snapshot and the state). **Any grid
+cached before 2026-09-12 was built without the guard — rebuild with
+`--rebuild` before reading it.**
 
 ## [ ] [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 
@@ -115,7 +143,7 @@ restarts it every 10 minutes); the app's action filter compares the RAW
 probability against `min_prob`, which is looser than the decision path when
 the cut is on the calibrated scale, so no BET is hidden.
 
-## [ ] Four franchises are filed twice in `games`, and the scores sit on the SBR twin
+## [x] Four franchises are filed twice in `games`, and the scores sit on the SBR twin — FIXED 2026-09-12
 
 ARI/AZ, CWS/CHW, OAK/ATH, WSH/WAS: the odds ingestor, the Stats API map and
 every `live` row use the first form; the SBR CSV import files the same game
@@ -125,11 +153,26 @@ under the second, with the final score, while the live row stays unscored
 WSH game in the 2024 training corpus (81 unscored live rows each), 534 of the
 priced 2025 games without plays** — fixed at the read
 (`mlb_pbp_ingestor.mlb_game_final` reads the twin) and the 2025 corpus
-backfilled (613 games, 46,595 plays). NOT fixed: the duplicate rows
-themselves, whatever settles picks on those games, and whether the 2019–2024
-PBP corpora are missing those teams' games too (`--backfill` is idempotent;
-run it per season and count). Retraining on a corpus that now includes them
-is a model update.
+backfilled (613 games, 46,595 plays).
+
+**Done 2026-09-12** (`scripts/merge_mlb_twin_games.py --apply`, mike: "yes to
+all"). 5,723 SBR rows merged onto the canonical ids — 1,877 with a twin,
+every one supplying the score the canonical row lacked, and 3,846 orphans
+from the 2009–2020 SBR-only era inserted under canonical ids. 26,000 `odds`
+and 2,524 `game_weather` rows re-pointed, no weather collisions; `games`
+42,824 rows, zero non-canonical ids left in games, odds or weather; SBR rows
+backed up to `games_sbr_twins_20260912`. The 2021–2024 PBP backfill then
+loaded 1,201 games / 91,052 plays that had been skipped (2021 went 2,086 →
+2,323 games, 2024 1,985 → 2,429). `sbr_loader` now canonicalises the four
+abbreviations and COALESCEs its upsert, so an import cannot recreate the
+split. **A first run's verification line said FAILED on a whole-table `odds`
+count — the live loop wrote 34,134 rows during the 54 minutes it took. The
+check is now scoped to the affected ids and a clean re-run says PASSED.**
+
+NOT done: **2019–2020 have no canonical rows to backfill against until now**,
+so `python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2020` is worth
+a run; and retraining on the fuller corpus is a model update nobody has
+asked for.
 
 ## [x] The calibrated decision never reaches player props — FIXED 2026-09-07
 
