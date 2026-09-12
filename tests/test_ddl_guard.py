@@ -172,8 +172,11 @@ SITES = [
     # worker-only tables that carry RLS as a second lock behind the revoke, so
     # ensure_schema's guard now asks for it and an "already current" schema has
     # it on. It was False here while the table had no RLS.
+    # run_after joined dedupe_key on 2026-09-11 (session 280): a job may name
+    # the earliest instant it can be claimed, so the guard asks for both.
     ("tracking.job_queue", _job_queue,
-     (True, ["dedupe_key"], ["worker_jobs_pending_idx", "worker_jobs_dedupe_idx"], 0)),
+     (True, ["dedupe_key", "run_after"],
+      ["worker_jobs_pending_idx", "worker_jobs_dedupe_idx"], 0)),
     ("data.ingestors.dk_direct_feed", _dk_direct_feed,
      (False, ["source"], ["idx_odds_source_inplay"], 0)),
 ]
