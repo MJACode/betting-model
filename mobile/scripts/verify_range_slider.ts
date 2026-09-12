@@ -1,0 +1,145 @@
+/**
+ * Standalone verification for the two-thumb range slider's math
+ * (src/lib/rangeSlider.ts). Run with:
+ *
+ *   npx tsx scripts/verify_range_slider.ts
+ *
+ * The slider replaced the hit-rate band's two numeric fields (2026-09-12), so
+ * these are the guards on what a finger can now produce: a value off the
+ * scale, a thumb through its partner, a band that collapses and cannot be
+ * reopened, or a touch read against the wrong origin.
+ */
+
+import {
+  applyBound,
+  grabTarget,
+  readIntent,
+  TAP_SLOP,
+  resolveTie,
+  snapTo,
+  tapTarget,
+  valueAtX,
+  type Scale,
+} from '../src/lib/rangeSlider';
+import { HIT_RATE_MAX, HIT_RATE_MIN, HIT_RATE_PRESETS, HIT_RATE_STEP } from '../src/lib/statsBoard';
+
+let failures = 0;
+function check(name: string, cond: boolean, detail = '') {
+  if (!cond) failures++;
+  console.log(`[${cond ? 'PASS' : 'FAIL'}] ${name}${detail ? ` — ${detail}` : ''}`);
+}
+
+// The scale the Stats sheet actually ships, so these run on the real numbers.
+const S: Scale = { min: HIT_RATE_MIN, max: HIT_RATE_MAX, step: HIT_RATE_STEP };
+
+// ── 1. Snapping ──
+
+check('snaps to the nearest stop', snapTo(62, S) === 60 && snapTo(63, S) === 65);
+check('a stop is left alone', snapTo(60, S) === 60);
+check('never leaves the scale', snapTo(-40, S) === 0 && snapTo(140, S) === 100);
+check('garbage is the floor, not NaN', snapTo(Number.NaN, S) === 0);
+check('every stop is a multiple of the step',
+  Array.from({ length: 21 }, (_, i) => snapTo(i * 5, S)).every((v) => v % HIT_RATE_STEP === 0));
+
+// ── 2. Touch → value ──
+// A 300pt track whose left edge sits 40pt into the window.
+const W = 300;
+const X0 = 40;
+const at = (pageX: number) => valueAtX(pageX, X0, W, S);
+
+check('the left edge is the floor', at(X0) === 0);
+check('the right edge is the ceiling', at(X0 + W) === 100);
+check('the middle is the middle', at(X0 + W / 2) === 50);
+check('a touch past either end is clamped, not extrapolated',
+  at(X0 - 500) === 0 && at(X0 + W + 500) === 100);
+// The origin is the TRACK's, not the window's: reading a touch against 0 when
+// the track starts at 40 shifts every value on the scale.
+check('the track origin is subtracted', at(X0 + 150) !== valueAtX(X0 + 150, 0, W, S));
+check('a track with no width yet reads as the floor (no divide by zero)',
+  valueAtX(X0 + 150, X0, 0, S) === 0 && Number.isFinite(valueAtX(X0, X0, 0, S)));
+
+// ── 3. Bounds — the thumbs meet, they never cross ──
+
+check('min moves freely below max', applyBound('low', 40, 20, 80).low === 40);
+check('max moves freely above min', applyBound('high', 90, 20, 80).high === 90);
+const crossed = applyBound('low', 95, 20, 80);
+check('min dragged past max pins AT max', crossed.low === 80 && crossed.high === 80);
+const crossedHigh = applyBound('high', 5, 20, 80);
+check('max dragged below min pins AT min', crossedHigh.low === 20 && crossedHigh.high === 20);
+check('moving one end never moves the other',
+  applyBound('low', 30, 20, 80).high === 80 && applyBound('high', 70, 20, 80).low === 20);
+
+// ── 4. The collapsed band is not a dead end ──
+
+check('coincident thumbs defer the grab', grabTarget(60, 60, 60) === 'tie');
+check('a deferred grab waits for a real movement', resolveTie(1) === null);
+check('dragging right off a collapsed band takes the MAX thumb', resolveTie(12) === 'high');
+check('dragging left off a collapsed band takes the MIN thumb', resolveTie(-12) === 'low');
+// End to end: the band collapses at 60 and reopens upward on the next drag.
+const collapsed = applyBound('low', 95, 60, 60);
+const reopened = applyBound(resolveTie(20) ?? 'high', 80, collapsed.low, collapsed.high);
+check('a collapsed band reopens', reopened.low === 60 && reopened.high === 80,
+  JSON.stringify(reopened));
+
+// ── 5. Grab picks the nearer thumb ──
+
+check('a touch near the min takes the min', grabTarget(25, 20, 80) === 'low');
+check('a touch near the max takes the max', grabTarget(75, 20, 80) === 'high');
+check('a touch dead centre takes the min (the tie goes left, deterministically)',
+  grabTarget(50, 20, 80) === 'low');
+check('a touch outside the band takes the end it is outside of',
+  grabTarget(5, 20, 80) === 'low' && grabTarget(99, 20, 80) === 'high');
+
+// ── 6. Gesture intent — the slider lives inside a scrolling sheet ──
+// The first version claimed every touch on contact AND committed on grant, so
+// a finger put down to flick the sheet moved a thumb instead (UX review).
+
+check('a touch that has barely moved commits to nothing',
+  readIntent(0, 0) === 'idle' && readIntent(3, 2) === 'idle');
+check('a horizontal drag is the slider\'s', readIntent(40, 6) === 'drag');
+check('a vertical flick belongs to the sheet', readIntent(6, 40) === 'scroll');
+check('a long vertical drag is never the slider\'s, however far it travels',
+  readIntent(10, 400) === 'scroll');
+// The slop is what keeps a TAP from being read as a drag: a tap wobbles a few
+// points, and every one of those points would otherwise move a thumb.
+check('the slop holds in both axes', readIntent(5, 5) === 'idle' && readIntent(7, 0) === 'drag');
+
+// A TIE goes to the sheet. iOS does not block the native scroll view under a
+// JS responder, so a ~45° flick that the slider claims can move a thumb AND
+// scroll the sheet before the terminate arrives — the one outcome with no
+// right answer for the user.
+check('an exact diagonal is the sheet\'s, not the slider\'s', readIntent(30, 30) === 'scroll');
+check('a barely-horizontal diagonal is still the sheet\'s', readIntent(31, 30) === 'scroll');
+check('a decisively horizontal drag is the slider\'s', readIntent(40, 30) === 'drag');
+
+// Release is judged at a WIDER slop than a drag claim: an ordinary tap wobbles
+// further than the 6pt that means "this finger meant to drag", and a tap that
+// fails both tests does nothing at all on a sheet too short to scroll.
+check('a tap that drifts vertically is still a tap at release',
+  readIntent(2, 7, TAP_SLOP) === 'idle');
+check('the same drift WOULD have been read as a scroll at the drag slop',
+  readIntent(2, 7) === 'scroll');
+check('a real drag is not a tap, even at the wider slop',
+  readIntent(2, 14, TAP_SLOP) === 'scroll' && readIntent(30, 2, TAP_SLOP) === 'drag');
+
+// ── 7. Taps — the one case that cannot be deferred to a direction ──
+
+check('a tap picks the nearer end', tapTarget(25, 20, 80) === 'low' && tapTarget(75, 20, 80) === 'high');
+check('a tap above a collapsed band opens it upward', tapTarget(80, 60, 60) === 'high');
+check('a tap below a collapsed band opens it downward', tapTarget(40, 60, 60) === 'low');
+check('a tap never returns the deferred answer',
+  ([tapTarget(60, 60, 60), tapTarget(0, 0, 0), tapTarget(100, 100, 100)] as string[])
+    .every((t) => t === 'low' || t === 'high'));
+// End to end: a collapsed band at 60 reopens on a tap at 80.
+const tapped = applyBound(tapTarget(80, 60, 60), 80, 60, 60);
+check('a tap reopens a collapsed band', tapped.low === 60 && tapped.high === 80,
+  JSON.stringify(tapped));
+
+// ── 8. Every preset chip is a position the finger can reach ──
+// The chips set the band directly, so a preset off the stop grid would leave
+// the slider unable to reproduce what the chip above it just set.
+check('every preset round-trips through the slider',
+  HIT_RATE_PRESETS.every((p) => snapTo(p, S) === p), HIT_RATE_PRESETS.join(', '));
+
+console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
+process.exit(failures === 0 ? 0 : 1);

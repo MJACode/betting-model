@@ -33,8 +33,8 @@ import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
-import { FilterField } from '@/components/filters/FilterField';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
+import { RangeSlider } from '@/components/filters/RangeSlider';
 import { GameFilterSection } from '@/components/filters/GameFilterSection';
 import type { ActivePill } from '@/components/filters/FilterBar';
 import { useNow } from '@/hooks/useNow';
@@ -97,7 +97,10 @@ import {
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import {
   EMPTY_SLATE,
+  HIT_RATE_MAX,
+  HIT_RATE_MIN,
   HIT_RATE_PRESETS,
+  HIT_RATE_STEP,
   buildSlateGameIndex,
   buildTonightSlate,
   compareRows,
@@ -109,9 +112,6 @@ import {
   slateSubline,
   slateTeams,
   sublineSpoken,
-  sortLabel,
-  sortOptionsFor,
-  type SortKey,
   type TonightSlate,
 } from '@/lib/statsBoard';
 import {
@@ -340,7 +340,6 @@ export function StatsScreen() {
   const [basis, setBasis] = useState<Basis>('perGame');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
   const [query, setQuery] = useState<string>('');
-  const [sortKey, setSortKey] = useState<SortKey>('default');
   // Hit Rate controls (front page): a ruler, plus which side of it the bet is
   // on. `lineN` is the ruler's STOP INDEX, not the number on its face — the
   // face is the stop drawn in the active mode's idiom (whole in At Least,
@@ -361,8 +360,10 @@ export function StatsScreen() {
   // visitors — the softest spots on the board. Excluding them by default made
   // the filter delete the answer to its own question (UX review).
   const [includeUngraded, setIncludeUngraded] = useState<boolean>(true);
-  const [minHitRate, setMinHitRate] = useState<string>('');
-  const [maxHitRate, setMaxHitRate] = useState<string>('');
+  // The hit-rate band, as whole percents, straight off the sheet's slider.
+  // 0-100 is "Any" — the band only narrows the board once an end has moved.
+  const [hitLow, setHitLow] = useState<number>(HIT_RATE_MIN);
+  const [hitHigh, setHitHigh] = useState<number>(HIT_RATE_MAX);
 
   const [rows, setRows] = useState<SeasonTotalsRow[]>([]); // totals mode
   const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode, last-N
@@ -1076,7 +1077,7 @@ export function StatsScreen() {
     [lineSheet, slateGames],
   );
 
-  const band = useMemo(() => hitRateBand(minHitRate, maxHitRate), [minHitRate, maxHitRate]);
+  const band = useMemo(() => hitRateBand(hitLow, hitHigh), [hitLow, hitHigh]);
 
   // ── Averages / Totals mode ranking ──
   const ranked = useMemo(() => {
@@ -1095,19 +1096,21 @@ export function StatsScreen() {
         return { row: r, value, total, gp };
       })
       .sort((a, b) =>
-        compareRows(
-          { primary: a.value, games: a.gp, avg: a.gp > 0 ? a.total / a.gp : 0 },
-          { primary: b.value, games: b.gp, avg: b.gp > 0 ? b.total / b.gp : 0 },
-          sortKey,
-        ),
+        compareRows({ primary: a.value, games: a.gp }, { primary: b.value, games: b.gp }),
       );
-  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
   // arrays from player_season_stat_values_* (values newest-first, nulls already
   // excluded server-side), so the line ruler stays instant either way. ──
-  const hitRatePlayers = useMemo<HitRatePlayer[]>(() => {
+  // Split in two ON PURPOSE (UX review, 2026-09-12). Everything expensive —
+  // grouping every fetched game row by player, computing hit rates, and the
+  // sort — is keyed on everything EXCEPT the band, because the band is now
+  // dragged: a single gesture steps it up to twenty times, and these boards
+  // run to tens of thousands of rows. The band is a filter over the finished,
+  // already-sorted list (a filter preserves order), so a drag costs one pass.
+  const hitRateBase = useMemo<HitRatePlayer[]>(() => {
     if (!stat || effectiveMode !== 'hitRate') return [];
     const out: HitRatePlayer[] = [];
     if (timeWindow === 'season') {
@@ -1160,19 +1163,19 @@ export function StatsScreen() {
     const q = query.trim().toLowerCase();
     return out
       .filter((p) => isStatParticipant(sport, p.values))
-      .filter((p) => inHitRateBand(p.pct, band))
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
       .filter((p) => !minGrade || meetsGradeFloor(matchupFor(p)?.grade, minGrade, includeUngraded))
       .filter((p) => !q || p.player_name.toLowerCase().includes(q))
       .sort((a, b) =>
-        compareRows(
-          { primary: a.pct, games: a.total, avg: a.avg },
-          { primary: b.pct, games: b.total, avg: b.avg },
-          sortKey,
-        ),
+        compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+
+  const hitRatePlayers = useMemo<HitRatePlayer[]>(
+    () => hitRateBase.filter((p) => inHitRateBand(p.pct, band)),
+    [hitRateBase, band],
+  );
 
   // Does the hit-rate column span more than one colour band? A rare-event
   // column (Doubles, Triples, Home Runs) does not — every player lands in the
@@ -1268,11 +1271,27 @@ export function StatsScreen() {
   const bandSummary = useMemo(() => {
     const lo = Math.round(band.lo * 100);
     const hi = Math.round(band.hi * 100);
+    // The thumbs are allowed to MEET, and the slider makes that a one-drag
+    // routine where typing 60 into both fields never was. "60–60%" reads as a
+    // rendering bug on all three surfaces this feeds. Phrased as "60% only"
+    // rather than "Exactly 60%" because the pill composes `hit ${summary}`,
+    // and a capital mid-phrase is the one thing this string cannot carry
+    // (UX review, 2026-09-12).
+    if (lo === hi) return `${lo}% only`;
     if (band.lo > 0 && band.hi < 1) return `${lo}–${hi}%`;
     if (band.hi < 1) return `≤ ${hi}%`;
     if (band.lo > 0) return `${lo}%+`;
     return 'Any';
   }, [band]);
+
+  /** Is the hit-rate band narrowing the board right now? */
+  const bandActive = band.lo > 0 || band.hi < 1;
+
+  /** Back to "Any". The pill, the section's own Clear and the reset all use it. */
+  const clearBand = useCallback(() => {
+    setHitLow(HIT_RATE_MIN);
+    setHitHigh(HIT_RATE_MAX);
+  }, []);
 
   // Count filters the user has changed away from defaults, for the trigger badge.
   // Only counts what still lives in the modal — the front-page controls are visible.
@@ -1282,14 +1301,13 @@ export function StatsScreen() {
     if (minGrade) n += 1;
     if (minGrade && !includeUngraded) n += 1;
     if (query.trim()) n += 1;
-    if (sortKey !== 'default') n += 1;
     if (effectiveMode === 'hitRate') {
-      if (band.lo > 0 || band.hi < 1) n += 1;
+      if (bandActive) n += 1;
     } else if (basis !== 'perGame') {
       n += 1;
     }
     return n;
-  }, [gamePicker.selected, minGrade, includeUngraded, query, sortKey, effectiveMode, band, basis]);
+  }, [gamePicker.selected, minGrade, includeUngraded, query, effectiveMode, bandActive, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -1300,14 +1318,12 @@ export function StatsScreen() {
   const resetFilters = useCallback(() => {
     setBasis('perGame');
     setQuery('');
-    setMinHitRate('');
-    setMaxHitRate('');
-    setSortKey('default');
+    clearBand();
     setTonightOnly(false);
     setMinGrade(null);
     setIncludeUngraded(true);
     gamePicker.clear();
-  }, [gamePicker]);
+  }, [gamePicker, clearBand]);
 
   // Removable chips for whatever is narrowing the board right now. Before this,
   // the only hint that a filter was on was a number badge on the Filters button.
@@ -1336,30 +1352,16 @@ export function StatsScreen() {
     if (tonightActive && !gamesPicked) {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
     }
-    if (sortKey !== 'default') {
-      out.push({
-        key: 'sort',
-        label: `by ${sortLabel(sortKey, effectiveMode).toLowerCase()}`,
-        onRemove: () => setSortKey('default'),
-      });
-    }
     if (effectiveMode === 'hitRate') {
-      if (band.lo > 0 || band.hi < 1) {
-        out.push({
-          key: 'hitBand',
-          label: `hit ${bandSummary}`,
-          onRemove: () => {
-            setMinHitRate('');
-            setMaxHitRate('');
-          },
-        });
+      if (bandActive) {
+        out.push({ key: 'hitBand', label: `hit ${bandSummary}`, onRemove: clearBand });
       }
     } else if (basis !== 'perGame') {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [query, tonightActive, gamesPicked, slateLabel, sortKey, effectiveMode, band, bandSummary, basis,
-      gamePicker, pickableGames, minGrade, includeUngraded]);
+  }, [query, tonightActive, gamesPicked, slateLabel, effectiveMode, bandActive, bandSummary, basis,
+      clearBand, gamePicker, pickableGames, minGrade, includeUngraded]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
   // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
@@ -1993,63 +1995,56 @@ export function StatsScreen() {
           </FilterSection>
         ) : null}
 
-        <FilterSection
-          title="Sort by"
-          subtitle="Ties break on sample size, so regulars come first."
-          summary={sortLabel(sortKey, effectiveMode)}
-        >
-          <View style={styles.chipWrap}>
-            {sortOptionsFor(effectiveMode).map((o) => (
-              <FilterChip
-                key={o.key}
-                label={o.label}
-                active={sortKey === o.key}
-                onPress={() => setSortKey(o.key)}
-              />
-            ))}
-          </View>
-        </FilterSection>
-
         {/* Hit-rate band — the reason someone opens this sheet is usually
-            "show me the 70%+ guys", so the presets come before the fields. */}
+            "show me the 70%+ guys", so the presets come before the slider. */}
         {effectiveMode === 'hitRate' ? (
           <FilterSection
             title="Hit rate"
             subtitle="Only show players inside this band."
             summary={bandSummary}
+            // Every other narrowing section on this sheet carries its own
+            // Clear. The band needs it MORE than they do now the fields are
+            // gone: emptying two text boxes used to be the way back to "Any",
+            // and "Clear all" also wipes Games, Matchup, Search and Team.
+            onClear={bandActive ? clearBand : undefined}
+            // A sheet that opens collapsed hides the control that produced the
+            // band the row is reporting (UX review, 2026-09-12).
+            defaultOpen={bandActive}
           >
             <View style={styles.chipWrap}>
               {HIT_RATE_PRESETS.map((p) => {
-                const on = (parseFloat(minHitRate) || 0) === p && maxHitRate.trim() === '';
+                const on = hitLow === p && hitHigh === HIT_RATE_MAX;
                 return (
                   <FilterChip
                     key={p}
                     label={`${p}%+`}
                     active={on}
                     onPress={() => {
-                      setMinHitRate(on ? '' : String(p));
-                      setMaxHitRate('');
+                      setHitLow(on ? HIT_RATE_MIN : p);
+                      setHitHigh(HIT_RATE_MAX);
                     }}
                   />
                 );
               })}
             </View>
-            <View style={styles.fieldRow}>
-              <FilterField
-                label="Min hit rate"
-                value={minHitRate}
-                onChange={setMinHitRate}
-                placeholder="0"
-                suffix="%"
-                maxLength={3}
-              />
-              <FilterField
-                label="Max hit rate"
-                value={maxHitRate}
-                onChange={setMaxHitRate}
-                placeholder="100"
-                suffix="%"
-                maxLength={3}
+            {/* The band is DRAGGED, not typed (Matt, 2026-09-12). The two
+                number fields this replaced raised the keyboard over the
+                sheet's own result count — the feedback the whole live-editing
+                sheet is built on — to answer a question that is one gesture. */}
+            <View style={styles.sliderWrap}>
+              <RangeSlider
+                min={HIT_RATE_MIN}
+                max={HIT_RATE_MAX}
+                step={HIT_RATE_STEP}
+                low={hitLow}
+                high={hitHigh}
+                onChange={(lo, hi) => {
+                  setHitLow(lo);
+                  setHitHigh(hi);
+                }}
+                format={(v) => `${v}%`}
+                lowLabel="Minimum hit rate"
+                highLabel="Maximum hit rate"
               />
             </View>
           </FilterSection>
@@ -2453,9 +2448,26 @@ function ColumnHeader({
     <View style={styles.colHeader}>
       <Text style={styles.colHeaderRank}>RK</Text>
       <Text style={styles.colHeaderName}>PLAYER</Text>
-      <Text style={styles.colHeaderRight} numberOfLines={1}>
-        {rightLabel.toUpperCase()}
-      </Text>
+      {/* The arrow is the board's only statement of its own order now the
+          sort picker is gone — the removable "by games played" pill used to be
+          the one place it was written down (UX review, 2026-09-12). It is an
+          indicator, not a control: the order is fixed.
+
+          It is a SIBLING of the label, not part of its string: the cell is a
+          fixed 48pt box with `numberOfLines={1}`, so an arrow appended inside
+          it is the first glyph the ellipsis eats — and `rightLabel` in
+          Averages mode is the stat's own name ("PASSING YARDS"), which
+          overflows that box on its own. The label shrinks; the arrow does
+          not. */}
+      <View
+        style={styles.colHeaderSorted}
+        accessibilityLabel={`${rightLabel}, sorted highest first`}
+      >
+        <Text style={[styles.colHeaderRight, styles.colHeaderSortLabel]} numberOfLines={1}>
+          {rightLabel.toUpperCase()}
+        </Text>
+        <Ionicons name="arrow-down" size={9} color={colors.textTertiary} />
+      </View>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
           {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
@@ -2755,9 +2767,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  fieldRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
+  // Breathing room under the preset chips; the slider brings its own
+  // read-out and end labels.
+  sliderWrap: {
+    marginTop: spacing.md,
   },
   // Separates the time-window chips from the tonight toggle in the same row.
   rowDivider: {
@@ -3024,6 +3037,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
+  // The sorted column: label + a fixed arrow, in one 48pt cell.
+  colHeaderSorted: {
+    width: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+  },
+  // Inside the row the label gives up its own fixed width and shrinks instead,
+  // so the arrow beside it can never be truncated away.
+  colHeaderSortLabel: { width: undefined, flexShrink: 1 },
   // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
   // where a column of dashes would otherwise read as a broken screen.
   noLinesRow: {
