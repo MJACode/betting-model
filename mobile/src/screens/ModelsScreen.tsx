@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { TagChip } from '@/components/TagChip';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -74,18 +75,25 @@ export function ModelsScreen() {
     [models, statsById, sport, todayPicks],
   );
 
-  // Hide paused models (no honest >=10% cut) — they never surface as picks, so
-  // they shouldn't appear in the Models list either. Retired models are hidden
-  // for the stronger reason that they no longer exist: nothing will ever score
-  // another pick for them, so listing one as a model to follow is a lie.
+  // PAUSED MODELS ARE LISTED, NOT HIDDEN (mike, 2026-09-12: "Don't hide detail
+  // of paused models unless I say so"). A pause says the model is not producing
+  // new picks; it does not unsay the bets it already made, and those bets are in
+  // the published record the Record tab shows. Hiding the model here meant the
+  // Record tab counted a model this tab did not list, and its detail screen —
+  // the only route to which is this list — was unreachable. Each row carries a
+  // "Paused" chip so the state is legible rather than implied.
+  // Retired models ARE still hidden, for the stronger reason that they no longer
+  // exist: nothing will ever score another pick for them, so listing one as a
+  // model to follow is a lie.
   const builtInWithStats = useMemo(
     () =>
       BUILTIN_MODEL_IDS.filter(
         (modelId) =>
-          sportOf(modelId) === sport &&
-          !isModelPaused(modelId) &&
-          !isModelRetired(modelId),
-      ).map((modelId) => ({
+          sportOf(modelId) === sport && !isModelRetired(modelId),
+      )
+        // Live models first; a paused one still appears, just below them.
+        .sort((a, b) => Number(isModelPaused(a)) - Number(isModelPaused(b)))
+        .map((modelId) => ({
         modelId,
         // The PUBLISHED record (v_public_track_record — the same rows Retool
         // reads) when the model has one; otherwise fall back to the on-device
@@ -183,7 +191,7 @@ export function ModelsScreen() {
             ) : (
               <EmptyState
                 title={`No models listed for ${sport}`}
-                subtitle="Every model for this sport is paused right now. Paused models don’t produce picks; they come back here when they’re unpaused."
+                subtitle="No built-in models cover this sport yet."
               />
             )
           }
@@ -256,6 +264,7 @@ interface BuiltInRowProps {
 }
 
 function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
+  const paused = isModelPaused(modelId);
   const decided = stats.wins + stats.losses;
   // Picks settled with no book price: in the W-L, not in the money (flatPnl).
   // Named on the row so an 8-5 next to a negative ROI reads as "six of those
@@ -279,6 +288,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
         (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
         (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (paused ? ', paused, not producing new picks' : '') +
         (stats.picks === 0 ? ', no settled bets yet' : '') +
         (thin && stats.picks > 0 ? `, ${thinNote}` : '') +
         (unpriced > 0 ? `, ${unpriced} unpriced` : '')
@@ -290,9 +300,12 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
           <Text style={styles.modelChipText}>{modelShort(modelId)}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.modelName} numberOfLines={1}>
-            {modelLong(modelId)}
-          </Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.modelName} numberOfLines={1}>
+              {modelLong(modelId)}
+            </Text>
+            {paused ? <TagChip label="Paused" /> : null}
+          </View>
           <Text style={styles.subtle}>
             {stats.picks} pick{stats.picks === 1 ? '' : 's'}
             {decided > 0 ? ` · ${stats.wins}–${stats.losses}${stats.pushes > 0 ? `–${stats.pushes}` : ''}` : ''}
@@ -601,6 +614,15 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+    // Shrinks rather than pushing the Paused chip off the row.
+    flexShrink: 1,
+  },
+  // The name and its state chip share a line; spacing.xs keeps the chip read as
+  // part of the title rather than as a separate column.
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   ruleCount: {
     fontSize: font.size.footnote,

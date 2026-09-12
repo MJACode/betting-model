@@ -1,7 +1,9 @@
 /**
  * Aggregation helpers for the public track record (v_public_track_record).
- * The view already applies the current action criteria per model; here we just
- * roll the per-model rows up to overall and per-sport summaries for display.
+ * The view reports every settled pick AS POSTED — it does not re-apply today's
+ * cut or paused flag to a bet already made (CLAUDE.md 1c) — so a paused model's
+ * past bets are included and its row can appear here. We just roll the
+ * per-model rows up to overall and per-sport summaries for display.
  */
 
 import { isModelRetired } from '@/lib/thresholds';

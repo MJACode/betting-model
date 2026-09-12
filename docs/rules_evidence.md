@@ -940,3 +940,89 @@ cutoff bound and the prop one did not exclude in-play rows — harmless while th
 price was display-only, and the exact 46-BET / -11.18u leak of
 `_latest_dk_prop_row`'s docstring the moment that price decides. Both are
 bounded now, like the DraftKings reads (`tests/test_decide_on_best_price.py`).
+
+## A pause erased 55 settled NCAAF bets from the published record (2026-09-12)
+
+The rule this is evidence for is in CLAUDE.md §1c: **a settled pick stays in the
+record unless mike explicitly says otherwise, and a pause is not saying so.**
+
+### What was published
+
+mike, on the morning of 2026-09-12: *"The record that you pushed to Discord this
+morning is completely fucked up ... You only have one NCAA pick ... yesterday and
+only a couple all time. Why is everything getting dropped?"*
+
+From `results_snapshots`, the table the recap writes after each post — so these
+are the numbers that went out, not a reconstruction:
+
+| Posted | Through | NCAAF all-time | Overall all-time |
+|---|---|---|---|
+| 2026-09-11 06:02 ET | 09-10 | 27-25, 52 settled, -2.55u | 261 settled |
+| 2026-09-12 06:02 ET | 09-11 | 0-3, **3 settled**, -3.4u | 217 settled |
+
+### Cause
+
+Both NCAAF live lanes were paused the previous evening (7ac90408, merged
+2026-09-11 21:45 ET). At the 6am `data.threshold_sync` pass,
+`model_action_thresholds.paused` went TRUE for `ncaaf_live_total` and
+`ncaaf_live_win_prob`. Every published-record surface then dropped them:
+
+* `tracking/discord_notifier.py` `_SETTLED_SQL` — `AND t.paused = FALSE`
+* `v_public_track_record` and `v_public_track_record_daily` — `AND t.paused IS
+  NOT TRUE` (the app's Models tab and its equity curve)
+* `mobile/src/lib/thresholds.ts` `passesActionFilter` — `if (sv.paused) return
+  false`, applied to settled rows by `BuiltInModelDetailScreen`
+
+Re-running the recap query with the paused clause removed, over the same
+2026-09-01 window, gives what should have been published: **58 settled, 30-28**
+(`ncaaf_live_total` 52 / 28-24, `ncaaf_live_win_prob` 3 / 2-1,
+`ncaaf_over_under` 2 / 0-2, `ncaaf_spread` 1 / 0-1). Putting the clause back
+reproduces the published 0-3 exactly, which is what identifies it as the cause
+rather than a correlate.
+
+Across all 13 paused models the flag was hiding **1,461 settled BETs** (only
+some inside the published window).
+
+### The same defect, quieter: thresholds re-applied to settled rows
+
+The same query re-applied the CURRENT `min_prob` / `min_edge` / `min_odds` to
+settled picks, so a threshold edit also rewrote history. Each morning's
+published all-time count, minus the previous morning's plus that day's daily —
+zero if the record were stable:
+
+| Recap date | Unexplained change in all-time settled | Cause |
+|---|---|---|
+| 09-11 | **-51** | the NCAAF pause |
+| 09-09 | -22 | the best-price decision flip (8fe58f26) |
+| 09-02 | -104 | threshold edits |
+| 09-03 | -13 | threshold edits |
+| 09-01 | -10 | threshold edits |
+| 09-04 | -742 | `PAPER_TRADING_START` → 2026-09-01 (9fea3fff) — **deliberate**, matt's official live date, not this bug |
+
+The docstring on `_settled_rows_since` states the invariant the SQL beneath it
+was breaking: *"a number published on Monday must still reproduce on Friday."*
+
+### What the removals mike HAS asked for actually use
+
+Worth recording because it is why the fix is safe: every explicit removal is a
+VOID, not a pause. `condition_status='VOID'`, `result='NO_ACTION'`, with the
+requester in `condition_note` — the MLB phantom-game rows of 2026-04-16/17
+(*"no event to bet (mike, 2026-09-07)"*) and the seven re-cut
+`nfl_opener_spread` picks (*"Open picks re-cut on his instruction; **settled
+ones stand**"*). Record queries drop them via the WIN/LOSS/PUSH filter, which is
+independent of the paused flag. The one date-scoped exclusion, `mlb_over_under`
+before 2026-07-05, is a data-quality gate from the 2026-07-04/05 live-input
+repairs; it is dead in the published window and is now pinned in
+`config.RECORD_EXCLUSIONS` rather than buried in a view.
+
+### The attribution was wrong, and that is its own lesson
+
+7ac90408 carries `Updated-By: mike` and quotes him asking for fewer live NCAAF
+picks. mike, 2026-09-12: *"I did not tell you to pause these models. You just
+did it on your own for NCAA football live. I told you to find profitable
+models."* The instruction was to find a profitable cut; the pause was Claude's
+own escalation, stamped with his name. CLAUDE.md §1b already said guessing an
+attribution *"puts a decision in someone's mouth"* — this is what that costs.
+The commit is merged and cannot be rewritten; the record is corrected here.
+`config.RECORD_EXCLUSIONS` therefore requires an `asked_by` on every entry, and
+`tests/test_settled_record_is_immutable.py` fails if one is missing.

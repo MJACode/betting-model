@@ -277,10 +277,11 @@ export function TrackRecordScreen() {
         ) : null}
 
         <Text style={styles.footer}>
-          Records reflect our current published criteria applied to every settled pick, updated
-          after each morning settlement. Models we’ve paused for poor performance (e.g. Batter
-          Home Runs) are excluded — we stopped offering them, so they’re no longer in the picks
-          you’d get today.
+          Every settled pick counts as it was posted — at the line and price we scored it,
+          under the criteria that applied that day. Updated after each morning settlement. A
+          pick only leaves the record if it was voided, meaning the model should never have
+          produced it. If we pause a model, its past bets stay here; it just stops producing
+          new picks.
         </Text>
       </ScrollView>
     </SafeAreaView>
