@@ -327,6 +327,9 @@ def main() -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--season", type=int, required=True)
     ap.add_argument("--rebuild", action="store_true")
+    ap.add_argument("--states", default=None,
+                    help="states parquet (default: the season's own build, "
+                         "then the full corpus)")
     ap.add_argument("--max-age-sec", type=float, default=None)
     args = ap.parse_args()
 
@@ -335,10 +338,25 @@ def main() -> None:
         cands = pickle.loads(cache.read_bytes())
         print(f"loaded {len(cands):,} cached candidates from {cache}")
     else:
+        import pandas as _pd
         from data.db import get_connection
-        from ncaaf_live.backtest.train_engine import load_states
+        from ncaaf_live.backtest.build_states import out_path
+        from ncaaf_live.backtest.train_engine import STATES_PATH, load_states
         from ncaaf_live.serve import LiveEngine
-        states = load_states()
+        scoped = _pd.io.common.stringify_path(
+            args.states or out_path([args.season]))
+        if Path(scoped).exists():
+            states = _pd.read_parquet(scoped)
+            print(f"states: {scoped}")
+        elif STATES_PATH.exists():
+            states = load_states()
+            print(f"states: {STATES_PATH}")
+        else:
+            raise SystemExit(
+                f"no states parquet at {scoped} or {STATES_PATH} -- run "
+                f"`python -m ncaaf_live.backtest.build_states --seasons "
+                f"{args.season}` (plays come from ncaaf_plays, no CFBD key "
+                f"needed)")
         states = states[states["season"] == args.season]
         if states.empty:
             raise SystemExit(f"no states for {args.season} -- run ncaaf_live.backtest.build_states")
