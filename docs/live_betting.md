@@ -92,6 +92,15 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
   the guard in MLB is fillability, not outcome: a price stamped before the run
   is one DraftKings has already moved off by the time anyone acts.
 
+- **A live pick is DECIDED at the best bettable in-play price at DraftKings' line
+  (2026-09-10, mike).** `dk_odds` stays the reference quote the model scored
+  against; `decision_book / decision_odds / decision_edge` say which price the
+  BET/AVOID call, the stake and settlement used. MLB: `_make_live_pick(best=)`
+  through `classify_live_signal`; NCAAF: `serve.LiveEngine._deciding` through
+  `_decide`. Every candidate quote passes the same age and score-change gates as
+  the DK quote (a young quote stamped before the score we saw is extinct, on
+  any book). `nfl_live_prop` stays DK-only (its feed carries no other book).
+  Full story and the measured table: `docs/best_line.md`, "The live lanes join".
 - **`snapshot_type='in_play'` isolation:** the pre-game `_get_dk_odds`, the training bulk odds
   lookup (`_build_bulk_mlb_lookups`), and CLV close capture (`_closing_dk_odds`) all EXCLUDE
   in-play rows. In-play prices must never leak into pre-game scoring, training features, or

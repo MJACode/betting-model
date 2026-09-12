@@ -40,6 +40,11 @@ _ROW = (
     0.08,                                    # t.min_edge  (the model's gate)
     None,                                    # t.min_odds
     "live:NCAAF_2026-08-29_north-carolina_tcu:ncaaf_live_total:over",  # lock_key
+    None,                                    # best_book       (2026-09-10)
+    None,                                    # best_odds
+    None,                                    # best_bet_link
+    -110.0,                                  # decision_odds = COALESCE(decision, dk)
+    None,                                    # decision_book
 )
 
 
@@ -103,6 +108,7 @@ def test_unpriced_live_signal_still_renders():
     row = list(_ROW)
     row[7] = None                            # dk_odds
     row[8] = None                            # kelly_fraction
+    row[21] = None                           # decision_odds (COALESCE of the two)
     s = dn._new_live_signals(_FakeConn([tuple(row)]), "2026-08-29")[0]
     assert "N/A" in dn._signal_field(s)["value"]
 

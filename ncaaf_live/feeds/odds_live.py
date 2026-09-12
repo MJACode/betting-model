@@ -18,7 +18,7 @@ import requests
 
 from ..config import (LIVE_ODDS_MAX_AGE_SEC, LIVE_ODDS_SESSION_CREDIT_CAP,
                       ODDS_API_KEY, ODDS_SPORT_KEY, POLL_ODDS_SEC,
-                      SNAPSHOT_BOOK)
+                      SNAPSHOT_BOOK, SNAPSHOT_BOOKS)
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class LiveOddsFeed:
             r = requests.get(ODDS_URL, params={
                 "apiKey": ODDS_API_KEY, "regions": "us",
                 "markets": "h2h,totals", "oddsFormat": "american",
-                "bookmakers": SNAPSHOT_BOOK,
+                "bookmakers": ",".join(SNAPSHOT_BOOKS),
             }, timeout=30)
             r.raise_for_status()
             used = r.headers.get("x-requests-last")
@@ -88,11 +88,48 @@ class LiveOddsFeed:
             return self._cached()
 
 
+def _parse_book_markets(bk: dict, home: str, away: str) -> dict:
+    """{h2h: {home, away, ts} | None, total: {line, over, under, ts} | None}
+    for ONE bookmaker entry of an event."""
+    rec = {"h2h": None, "total": None}
+    book_ts = bk.get("last_update")
+    for m in bk.get("markets", []) or []:
+        ts = m.get("last_update") or book_ts
+        if m.get("key") == "h2h":
+            prices = {}
+            for o in m.get("outcomes", []) or []:
+                if o.get("name") == home:
+                    prices["home"] = o.get("price")
+                elif o.get("name") == away:
+                    prices["away"] = o.get("price")
+            if len(prices) == 2:
+                prices["ts"] = ts
+                rec["h2h"] = prices
+        elif m.get("key") == "totals":
+            line = over = under = None
+            for o in m.get("outcomes", []) or []:
+                if o.get("name") == "Over":
+                    line, over = o.get("point"), o.get("price")
+                elif o.get("name") == "Under":
+                    under = o.get("price")
+            if line is not None:
+                rec["total"] = {"line": line, "over": over,
+                                "under": under, "ts": ts}
+    return rec
+
+
 def parse_event_odds(events: list) -> dict:
     """
     {(home_team, away_team): {h2h: {home, away, ts}, total: {line, over,
-     under, ts}, commence_time}} - keys are The Odds API's own team names; the
-    caller maps them to school identity.
+     under, ts}, commence_time, books: {bookmaker: {h2h, total}}}} - keys are
+    The Odds API's own team names; the caller maps them to school identity.
+
+    The top-level `h2h` / `total` are DRAFTKINGS' (SNAPSHOT_BOOK): the
+    reference line and price every lane is scored against, exactly as before
+    2026-09-10. `books` carries every book the poll returned, each in the
+    same shape, so the engine can decide at the best bettable price at the
+    same line (serve.LiveEngine.price) and gameday can log every book's
+    in-play quote to `odds`.
 
     `ts` IS THE BOOK'S OWN last_update, and carrying it is the whole point of
     this function's signature. The first port of this feed dropped it, which
@@ -106,7 +143,7 @@ def parse_event_odds(events: list) -> dict:
 
     Per MARKET, not per event: DraftKings suspends and re-opens the total and
     the moneyline independently, so one can be minutes stale while the other is
-    current.
+    current. The same holds per book.
     """
     out = {}
     for ev in events or []:
@@ -114,30 +151,14 @@ def parse_event_odds(events: list) -> dict:
         if not home or not away:
             continue
         rec = {"commence_time": ev.get("commence_time"),
-               "h2h": None, "total": None}
+               "h2h": None, "total": None, "books": {}}
         for bk in ev.get("bookmakers", []) or []:
-            book_ts = bk.get("last_update")
-            for m in bk.get("markets", []) or []:
-                ts = m.get("last_update") or book_ts
-                if m.get("key") == "h2h":
-                    prices = {}
-                    for o in m.get("outcomes", []) or []:
-                        if o.get("name") == home:
-                            prices["home"] = o.get("price")
-                        elif o.get("name") == away:
-                            prices["away"] = o.get("price")
-                    if len(prices) == 2:
-                        prices["ts"] = ts
-                        rec["h2h"] = prices
-                elif m.get("key") == "totals":
-                    line = over = under = None
-                    for o in m.get("outcomes", []) or []:
-                        if o.get("name") == "Over":
-                            line, over = o.get("point"), o.get("price")
-                        elif o.get("name") == "Under":
-                            under = o.get("price")
-                    if line is not None:
-                        rec["total"] = {"line": line, "over": over,
-                                        "under": under, "ts": ts}
+            book = (bk.get("key") or "").strip().lower()
+            if not book:
+                continue
+            parsed = _parse_book_markets(bk, home, away)
+            rec["books"][book] = parsed
+            if book == SNAPSHOT_BOOK:
+                rec["h2h"], rec["total"] = parsed["h2h"], parsed["total"]
         out[(home, away)] = rec
     return out

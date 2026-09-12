@@ -561,12 +561,18 @@ at, and it excludes the books a member cannot bet.
   decided at DraftKings, so the fallback is exact). **DraftKings stays the
   REFERENCE, not the decider:** the LINE a pick is scored at is DK's (no DK
   quote, no pick), training features and CLV (`closing_dk_odds` vs `dk_odds`)
-  are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings meaning. Live lanes
-  still decide on the in-play DraftKings price (his 2026-09-02 fence). No cut
-  moved with the flip — the sweep found none shippable — so every cut is
-  0.68pp looser on average at the better price (`docs/best_line.md` §4).
-  `scorer._decide` / `_size` are the ONE code path both prices run through;
-  `tests/test_decide_on_best_price.py` is the tripwire.
+  are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings meaning. **The
+  live lanes joined on 2026-09-10** (mike, "yes do everything"): the MLB and
+  NCAAF in-play lanes decide at the best bettable IN-PLAY quote at DK's line,
+  through their own classifiers, with the stale-line cap kept on the DK edge
+  and every candidate quote gated on the same age and score-change clocks as
+  the DK quote; `nfl_live_prop` cannot, its feed is DK-only. No cut moved with
+  either flip — the sweep found none shippable — so every cut is 0.68pp looser
+  on average at the better price (`docs/best_line.md` §4). `scorer._decide` /
+  `_size` (pre-game), `live_scorer.classify_live_signal` (MLB live) and
+  `ncaaf_live.serve.LiveEngine._decide` (NCAAF live) are the ONE code path
+  each lane's two prices run through; `tests/test_decide_on_best_price.py`
+  and `tests/test_best_line_live.py` are the tripwires.
 - **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO PRICE.** (2026-09-03.)
   A win with `dk_odds IS NULL` (and, since 2026-09-09, `decision_odds IS NULL`)
   is stored as +$90.91 on a $100 stake — exactly the payout of -110 — so

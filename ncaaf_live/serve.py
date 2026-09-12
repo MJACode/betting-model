@@ -39,7 +39,8 @@ import numpy as np
 import pandas as pd
 
 from .config import (ARTIFACT_DIR, LEAGUE_PASS_RATE, LIVE_QUOTE_MAX_AGE_SEC,
-                     LIVE_SCORE_LAG_TOLERANCE_SEC, PASS_RATE_PRIOR_PLAYS)
+                     LIVE_SCORE_LAG_TOLERANCE_SEC, PASS_RATE_PRIOR_PLAYS,
+                     SNAPSHOT_BOOK, SNAPSHOT_BOOKS)
 from data.live_quote_guard import quote_predates_score
 from .engine.distribution import ScoreDistribution
 from .engine.pricing import (
@@ -211,6 +212,38 @@ def market_is_takeable(market: dict | None, label: str, game_id: str,
                  game_id, label, age, LIVE_QUOTE_MAX_AGE_SEC)
         return False
     return True
+
+
+def best_takeable_quote(odds: dict | None, market: str, side: str,
+                        line, game_id: str, now: datetime | None,
+                        score_seen_at: datetime | None) -> dict | None:
+    """The best bettable in-play quote on one side, at the same line, among
+    the books the poll returned -- each judged by market_is_takeable on ITS
+    OWN publish clock, so a frozen book cannot win by having stopped
+    updating, and a book that has not re-hung since the score cannot either.
+
+    `market` is "h2h" or "total" (the parser's keys); `side` is home/away or
+    over/under. Same-line only: a better price on Over 50.5 is not a better
+    price on Over 47.5. Returns {book, odds, link} or None. Ties keep
+    DraftKings by SNAPSHOT_BOOKS order (it is first)."""
+    from models.scorer import _best_of, _same_line
+    books = (odds or {}).get("books") or {}
+    quotes = []
+    for book in SNAPSHOT_BOOKS:
+        rec = books.get(book)
+        m = (rec or {}).get(market)
+        if not m:
+            continue
+        if market == "total" and not _same_line(m.get("line"), line):
+            continue
+        price = m.get(side)
+        if price is None:
+            continue
+        if not market_is_takeable(m, f"{market}/{book}", game_id, now,
+                                  score_seen_at):
+            continue
+        quotes.append({"book": book, "odds": float(price), "link": None})
+    return _best_of(quotes)
 
 
 @dataclass
@@ -394,7 +427,20 @@ class LiveEngine:
             min_prob, min_edge, min_ev = cuts[c["model_id"]]
             p, edge, implied = (c["model_probability"], c["edge"],
                                 c["dk_implied_prob"])
-            pick = self._decide(p, edge, min_prob, min_edge, c["dk_odds"], min_ev)
+            # THE BEST BETTABLE IN-PLAY PRICE DECIDES (2026-09-10, mike: "yes
+            # do everything"). `candidates` stays the pure DraftKings
+            # proposition -- that is its contract, and the replay harness
+            # reads it with one book of history -- so the shop happens here,
+            # where the feed's other books and both clocks are in scope. Each
+            # candidate book is judged takeable on ITS OWN publish clock; a
+            # tie keeps DraftKings.
+            best = best_takeable_quote(
+                odds, "h2h" if c["model_id"] == "ncaaf_live_win_prob" else "total",
+                c["pick_side"], c["scored_line"], ctx.game_id, now, score_seen_at)
+            d_book, d_price, d_implied, d_edge = self._deciding(
+                p, c["dk_odds"], implied, best)
+            pick = self._decide(p, d_edge, min_prob, min_edge, d_price, min_ev,
+                                cap_edge=edge)
             pick = self._unless_paused(pick, c["model_id"])
             if not pick:
                 continue
@@ -412,8 +458,33 @@ class LiveEngine:
                 "dk_implied_prob": round(implied, 4),
                 "edge": round(edge, 4), "dk_odds": c["dk_odds"],
                 "scored_line": c["scored_line"], "signal_type": pick,
-                **self._kelly(p, implied, pick)})
+                **self._kelly(p, d_implied, pick),
+                **self._price_fields(d_book, d_price, d_implied, d_edge,
+                                     best, p)})
         return picks
+
+    @staticmethod
+    def _deciding(p: float, dk_price: float, dk_implied: float,
+                  best: dict | None) -> tuple[str, float, float, float]:
+        """(book, price, implied, edge) the lane DECIDES at: the best bettable
+        in-play quote when it beats DraftKings, else DraftKings (2026-09-10,
+        mike: "yes do everything" -- the live lanes join the 2026-09-09 flip).
+        One helper for both lanes, and the same tie rule as MLB's
+        models.scorer._live_decision_quote: a tie keeps the modelled book."""
+        from models.scorer import _live_decision_quote
+        book, price = _live_decision_quote(dk_price, best)
+        if price == dk_price:
+            return SNAPSHOT_BOOK, dk_price, dk_implied, p - dk_implied
+        implied = american_to_prob(price)
+        return book, float(price), implied, p - implied
+
+    @staticmethod
+    def _price_fields(book: str, price: float, implied: float, edge: float,
+                      best: dict | None, p: float) -> dict:
+        """The decision_* and best_* columns for the pick row."""
+        from models.scorer import _best_fields, _decision_fields
+        return {**_decision_fields(book, price, implied, edge),
+                **_best_fields(best, p)}
 
     @staticmethod
     def _unless_paused(pick: str | None, model_id: str) -> str | None:
@@ -431,8 +502,12 @@ class LiveEngine:
 
     @staticmethod
     def _decide(p: float, edge: float, min_prob: float, min_edge: float,
-                dk_odds=None, min_ev: float | None = None) -> str | None:
-        if abs(edge) > MAX_EDGE_CAP:
+                dk_odds=None, min_ev: float | None = None, *,
+                cap_edge: float | None = None) -> str | None:
+        # The stale-line cap is judged on the REFERENCE (DraftKings) edge when
+        # the lane decides at another book: a cheaper price adds a few points
+        # of edge, and that is the price difference, not a frozen quote.
+        if abs(edge if cap_edge is None else cap_edge) > MAX_EDGE_CAP:
             log.warning("edge %+0.3f exceeds the stale-line cap %.2f - "
                         "declining (suspended/stale price is the likely cause)",
                         edge, MAX_EDGE_CAP)
