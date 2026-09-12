@@ -94,9 +94,24 @@ check('no screen or constant hardcodes either window as a literal',
 
 // ── The four things the UX review caught, each pinned ────────────────────────
 const cache = readFileSync(join(SRC, 'lib/settledPickCache.ts'), 'utf-8');
-check('the settled-pick cache key was bumped for the new window',
-  /settledPicks\.v3/.test(cache),
-  'a device upgrading from v2 kept ~3,200 pre-9/1 rows under "since Sep 1" headers');
+// THE VERSION NUMBER, NOT THE LITERAL "v3". This pinned /settledPicks\.v3/ and
+// so began FAILING the moment the key was correctly bumped — v4 on 2026-09-09
+// (#630, condition_status joined SETTLED_PICK_COLUMNS) and v5 the same day
+// (#634, the decision price) — and it sat red through both. A guard that a
+// CORRECT change breaks is a guard nobody can keep green, and a red check
+// stops being read: this one had to be told apart from a real failure by hand
+// before it could be dismissed, twice.
+//
+// What must hold is not "the key is v3" but "the key moved PAST v2", which is
+// the version whose envelope holds ~3,200 rows back to 2026-04-14 — rows a
+// device upgrading would keep under headers that now say "since September 1".
+// Every future bump satisfies it by construction.
+const keyVersion = /settledPicks\.v(\d+)/.exec(cache);
+check('the settled-pick cache key is bumped past v2 for the new window',
+  keyVersion != null && Number(keyVersion[1]) >= 3,
+  keyVersion == null
+    ? 'no settledPicks.vN key found in settledPickCache.ts at all'
+    : `key is v${keyVersion[1]} — a device upgrading from v2 kept ~3,200 pre-9/1 rows under "since Sep 1" headers`);
 check('the cache drops anything before the live date on merge',
   /game_date >= LIVE_RECORD_START/.test(cache),
   'so the next move of the date is self-healing rather than another key bump');

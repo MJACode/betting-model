@@ -102,21 +102,22 @@ def _both_sides(book, home_point, px_home, px_away, **kw):
 
 class TestSelectOpenerBets:
     def test_positive_dev_bets_home_at_soft_number(self):
-        # Pinnacle: MIA -3.5. Soft book hangs MIA -2.0 → dev(home) = +1.5 →
-        # home is getting 1.5 more points than sharp → bet HOME at the soft line.
+        # Pinnacle: MIA -3.5. Soft book hangs MIA -1.5 → dev(home) = +2.0 →
+        # home is getting 2 more points than sharp → bet HOME at the soft line.
+        # (2.0 is the deployed floor since 2026-09-11; 1.5 no longer fires.)
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
-               _both_sides("betmgm", -2.0, -108, -112)
+               _both_sides("betmgm", -1.5, -108, -112)
         bets = card.select_opener_bets(_frame(rows), _sched())
         assert len(bets) == 1
         b = bets.iloc[0]
         assert b.side == "home" and b.bet_team == "MIA"
         assert b.book == "betmgm" and b.price == -108
-        assert b.side_line == -2.0 and b.soft_home_line == -2.0
-        assert b.pin_home_line == -3.5 and b.dev == 1.5
+        assert b.side_line == -1.5 and b.soft_home_line == -1.5
+        assert b.pin_home_line == -3.5 and b.dev == 2.0
         assert b.game_id == "2026_02_NYJ_MIA"
         # Per-bet probability now scales with the deviation (was a flat
         # card.MODEL_PROB for every bet until 2026-08-22).
-        assert b.model_prob == round(card.model_prob_for_dev(1.5), 4)
+        assert b.model_prob == round(card.model_prob_for_dev(2.0), 4)
         assert b.edge_tier in ("SMALL", "MEDIUM", "LARGE")
 
     def test_model_prob_scales_with_deviation(self):
@@ -169,20 +170,37 @@ class TestSelectOpenerBets:
         assert card.select_opener_bets(_frame(rows), _sched()).empty
 
     def test_negative_dev_bets_away_at_away_price(self):
-        # Soft book hangs MIA -5.0 vs Pinnacle -3.5 → dev = -1.5 → away (NYJ)
-        # is getting more points at the soft book → bet AWAY at +5.0.
+        # Soft book hangs MIA -5.5 vs Pinnacle -3.5 → dev = -2.0 → away (NYJ)
+        # is getting more points at the soft book → bet AWAY at +5.5.
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
-               _both_sides("betmgm", -5.0, -115, -105)
+               _both_sides("betmgm", -5.5, -115, -105)
         bets = card.select_opener_bets(_frame(rows), _sched())
         b = bets.iloc[0]
         assert b.side == "away" and b.bet_team == "NYJ"
-        assert b.price == -105 and b.side_line == 5.0
-        assert b.soft_home_line == -5.0
+        assert b.price == -105 and b.side_line == 5.5
+        assert b.soft_home_line == -5.5
 
     def test_below_threshold_no_bet(self):
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
                _both_sides("betmgm", -3.0, -110, -110)   # |dev| = 0.5
         assert len(card.select_opener_bets(_frame(rows), _sched())) == 0
+
+    def test_one_point_deviation_no_longer_fires(self):
+        # THE 2026-09-11 CUT (mike). On bettable books the 1-point rule was
+        # 728 bets at -0.03% over 2020-2025 and 1.5 was -5.09%; only the
+        # 2.0 floor is positive (+3.97% on 125, interval spans zero). The
+        # card must not write them at all -- a gate that hides rows the card
+        # wrote is the silent-disagreement shape CLAUDE.md §1b warns about.
+        assert card.DEPLOY_THRESHOLD == 2.0
+        for soft in (-2.5, -2.0):                      # |dev| 1.0 and 1.5
+            rows = _both_sides("pinnacle", -3.5, -110, -110) + \
+                   _both_sides("betmgm", soft, -108, -112)
+            assert card.select_opener_bets(_frame(rows), _sched()).empty, soft
+        # and the platform gate agrees with the card: 2.0 clears, 1.5 does not
+        import config
+        gate = config.MODEL_PROB_THRESHOLDS["nfl_opener_spread"]
+        assert card.model_prob_for_dev(1.5) < gate <= card.model_prob_for_dev(2.0)
+        assert config.ACTION_THRESHOLDS["nfl_opener_spread"]["min_prob"] == gate
 
     def test_no_pinnacle_no_bets(self):
         rows = _both_sides("betmgm", -2.0, -110, -110) + \
@@ -197,8 +215,8 @@ class TestSelectOpenerBets:
 
     def test_one_bet_per_game_largest_dev_wins(self):
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
-               _both_sides("betmgm", -2.0, -110, -110) + \
-               _both_sides("fanduel", -1.0, -105, -115)   # |dev| 2.5 > 1.5
+               _both_sides("betmgm", -1.5, -110, -110) + \
+               _both_sides("fanduel", -1.0, -105, -115)   # |dev| 2.5 > 2.0
         bets = card.select_opener_bets(_frame(rows), _sched())
         assert len(bets) == 1
         assert bets.iloc[0].book == "fanduel" and bets.iloc[0].dev == 2.5
@@ -393,10 +411,10 @@ class TestBettableBooksOnly:
         # always there.
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
                _both_sides("onexbet", -1.0, -105, -115) + \
-               _both_sides("fanduel", -2.0, -108, -112)
+               _both_sides("fanduel", -1.5, -108, -112)
         bets = card.select_opener_bets(_frame(rows), _sched())
         assert len(bets) == 1
-        assert bets.iloc[0].book == "fanduel" and bets.iloc[0].dev == 1.5
+        assert bets.iloc[0].book == "fanduel" and bets.iloc[0].dev == 2.0
 
     def test_pinnacle_survives_the_filter_as_the_reference(self):
         # Pinnacle is NOT bettable, but removing it would leave nothing to
@@ -404,7 +422,7 @@ class TestBettableBooksOnly:
         # reason — a silent failure that looks exactly like a quiet market.
         assert "pinnacle" not in opener_model._bettable_books()
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
-               _both_sides("betmgm", -2.0, -108, -112)
+               _both_sides("betmgm", -1.5, -108, -112)
         bets = card.select_opener_bets(_frame(rows), _sched())
         assert len(bets) == 1 and bets.iloc[0].pin_home_line == -3.5
 
@@ -434,10 +452,10 @@ class TestBettableBooksOnly:
         monkeypatch.setenv("BETTABLE_BOOKS", "fanduel")
         rows = _both_sides("pinnacle", -3.5, -110, -110) + \
                _both_sides("onexbet", -1.0, -105, -115) + \
-               _both_sides("fanduel", -2.0, -108, -112)
+               _both_sides("fanduel", -1.5, -108, -112)
         bets = card.select_opener_bets(_frame(rows), _sched())
         assert len(bets) == 1
-        assert bets.iloc[0].book == "fanduel" and bets.iloc[0].dev == 1.5
+        assert bets.iloc[0].book == "fanduel" and bets.iloc[0].dev == 2.0
 
     def test_standalone_fallback_matches_the_platform_config(self):
         # The model carries a literal copy of the list for standalone runs
