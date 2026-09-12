@@ -140,6 +140,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // step that makes this live, not the OTA.
   ncaaf_live_win_prob: { min_prob: 0.62, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   ncaaf_live_total: { min_prob: 0.72, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  // Registered but UNLICENSED (see UNLICENSED_MODELS below): the cut mirrors
+  // config so the app has an offline number the day the gate passes.
+  ncaaf_live_spread: { min_prob: 0.62, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
@@ -395,6 +398,33 @@ export function hasServerThresholds(): boolean {
  * from the Models list). Prefers the server flag (model_action_thresholds.paused),
  * falls back to the bundled PAUSED_MODELS set when not yet loaded / offline.
  */
+/**
+ * Registered, but NOT ALLOWED TO BET because a calibration gate has not passed.
+ *
+ * DISTINCT FROM PAUSED ON PURPOSE. A paused model bet before and stopped, so
+ * the app says "the record below is what it bet while it was live". One of
+ * these has never bet and has no record, so that copy would be a lie and the
+ * default treatment is worse: `ncaaf_live_spread` is absent from
+ * config.PAUSED_MODELS (it is dark via `serve.SPREAD_LICENSED`), so without
+ * this set the Models tab lists it as live and its empty state tells a member
+ * to "check back after the next pipeline refresh" — a board that can never
+ * post.
+ *
+ * NOT a mirror of a server table: `model_action_thresholds.paused` is written
+ * from PAUSED_MODELS only (`data/threshold_sync.py`), so there is nothing
+ * server-side that carries this state today. Keep it in step by hand with the
+ * licence flags in `ncaaf_live/serve.py`.
+ */
+export const UNLICENSED_MODELS = new Set<string>([
+  // gate 3 (margin-distribution shape) failed at 2.88pp vs 2.0pp on the 2025
+  // holdout, worst AT THE MEDIAN, which is where a main spread sits.
+  'ncaaf_live_spread',
+]);
+
+export function isModelUnlicensed(modelId: string): boolean {
+  return UNLICENSED_MODELS.has(modelId);
+}
+
 export function isModelPaused(modelId: string): boolean {
   const sv = serverThresholds?.[modelId];
   if (sv) return sv.paused;

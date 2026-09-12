@@ -23,7 +23,12 @@ import {
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { isModelPaused, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
+import {
+  isModelPaused,
+  isModelUnlicensed,
+  isUnlockedPreview,
+  passesRecordFilter,
+} from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -43,6 +48,7 @@ export function BuiltInModelDetailScreen() {
   // which state it is in rather than leaving it to be inferred from an empty
   // board.
   const paused = isModelPaused(modelId);
+  const unlicensed = !paused && isModelUnlicensed(modelId);
 
   const { data: todayRows, loading: todayLoading } = useTodayPicks();
   const {
@@ -151,6 +157,7 @@ export function BuiltInModelDetailScreen() {
                 </View>
                 <Text style={styles.modelTitle}>{modelLong(modelId)}</Text>
                 {paused ? <TagChip label="Paused" /> : null}
+                {unlicensed ? <TagChip label="In validation" /> : null}
               </View>
               <Text style={styles.modelSubtitle}>
                 {meta ? `Built-in ${categoryLabel(meta.type)} model` : 'Built-in model'}
@@ -162,6 +169,15 @@ export function BuiltInModelDetailScreen() {
                 <Text style={styles.modelSubtitle}>
                   Paused — not producing new picks. The record below is what it bet
                   while it was live, and it stays.
+                </Text>
+              ) : null}
+              {/* NOT the paused copy. This model has never bet, so "what it bet
+                  while it was live" would be a lie and there is no record to
+                  point at. */}
+              {unlicensed ? (
+                <Text style={styles.modelSubtitle}>
+                  In validation — not placing bets yet. It has to clear its
+                  accuracy checks before it can post a pick.
                 </Text>
               ) : null}
             </View>
@@ -179,7 +195,9 @@ export function BuiltInModelDetailScreen() {
             <Text style={styles.sectionNote}>
               {paused
                 ? 'Paused, so there are no picks today.'
-                : "Locked for the day once scored — won't change again until the game ends."}
+                : unlicensed
+                  ? 'In validation, so there are no picks today.'
+                  : "Locked for the day once scored — won't change again until the game ends."}
             </Text>
           </>
         }
@@ -196,8 +214,16 @@ export function BuiltInModelDetailScreen() {
             <ActivityIndicator style={styles.loading} />
           ) : (
             <EmptyState
-              title="No live BET picks right now"
-              subtitle="This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab."
+              title={
+                unlicensed ? 'Not posting picks yet' : 'No live BET picks right now'
+              }
+              subtitle={
+                // "Check back after the next refresh" is a promise the app
+                // cannot keep for a model that is not allowed to bet at all.
+                unlicensed
+                  ? "This model is still being validated, so it won't post picks. Nothing to check back for yet."
+                  : "This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab."
+              }
             />
           )
         }

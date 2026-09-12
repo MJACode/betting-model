@@ -32,6 +32,7 @@ data/ingestors/ncaaf_inplay_history.py, not a threshold.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -44,14 +45,42 @@ from .config import (ARTIFACT_DIR, LEAGUE_PASS_RATE, LIVE_QUOTE_MAX_AGE_SEC,
 from data.live_quote_guard import quote_predates_score
 from .engine.distribution import ScoreDistribution
 from .engine.pricing import (
-    american_to_prob, price_moneyline, total_pmf)
+    american_to_prob, price_moneyline, price_spread, total_pmf)
 from .engine.remaining import load_models, predict_remaining
 
 log = logging.getLogger(__name__)
 
-# ── lane licenses (from the calibration gates - see module docstring) ────────
+# ── market licences (from the calibration gates - see module docstring) ─────
 TOTAL_MIN_SECONDS = 900          # totals only in buckets 4+ (coverage <= 2.85pp)
 MAX_PERIOD = 4                   # never price overtime
+
+# SPREAD: OFF, because gate 3 says so (2026-09-12, 2025 holdout).
+#
+# The engine can price a spread exactly -- margin_pmf and price_spread are as
+# exact as the total's pricing given the joint pmf -- so this flag is not about
+# capability. Gate 3 (ncaaf_live.backtest.calibrate) measured the MARGIN
+# distribution's shape for the first time and it FAILS at 2.88pp against a
+# 2.0pp bar, with the worst error AT THE MEDIAN (-2.88pp).
+#
+# That placement is the whole point. The TOTAL's median is calibrated to
+# -0.04pp and only its tails fail, which is exactly why main-line totals are
+# licensed and alternates are not. The MARGIN is worst where a main spread
+# actually sits, so there is no equivalent licensed region to fall back to.
+#
+# The failure is also a SHIFT, not noise: every quantile reads low (-1.18,
+# -1.81, -2.40, -2.88, -1.14, -0.28, +0.03), i.e. real margins land higher in
+# the predicted distribution than they should and the engine under-predicts
+# the home margin. A monotone bias is correctable, and `anchor_to_market` /
+# `_shift_to_wp` already exist for exactly this. Deriving that correction must
+# happen on a 2024 pseudo-holdout with 2025 re-run ONCE afterwards -- the
+# README records that 2025 has already been consulted three times and a fourth
+# casual look would burn the only clean read left.
+#
+# Flip via NCAAF_LIVE_SPREAD=1 once gate 3 passes. Until then the model is
+# registered, tested and dark: it prices nothing, so it cannot quietly bet on
+# a distribution that has failed its own test.
+SPREAD_LICENSED = os.environ.get("NCAAF_LIVE_SPREAD", "0") == "1"
+SPREAD_MIN_SECONDS = 900         # same early/mid-game bound the total gets
 
 # ── floors ──────────────────────────────────────────────────────────────────
 # CANONICAL IN `config.py`, mirrored here only as a standalone fallback. These
@@ -101,6 +130,9 @@ MAX_KELLY_FRACTION = 0.05
 # only when a price exists. Same contract as models/live_scorer.py.
 TOTAL_MIN_EV: float | None = None
 ML_MIN_EV: float | None = None
+SPREAD_MIN_PROB = 0.62
+SPREAD_MIN_EDGE = 0.10
+SPREAD_MIN_EV: float | None = None
 
 try:  # the platform config is the source of truth when it is importable
     import config as _platform_config
@@ -116,6 +148,9 @@ else:
     ML_MIN_EDGE = _cut("ncaaf_live_win_prob", "min_edge", ML_MIN_EDGE)
     TOTAL_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
     ML_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+    SPREAD_MIN_PROB = _cut("ncaaf_live_spread", "min_prob", SPREAD_MIN_PROB)
+    SPREAD_MIN_EDGE = _cut("ncaaf_live_spread", "min_edge", SPREAD_MIN_EDGE)
+    SPREAD_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_spread")
 
 
 def _is_paused(model_id: str) -> bool:
@@ -356,7 +391,23 @@ class LiveEngine:
                               "pick_side": side, "model_probability": p,
                               "dk_implied_prob": implied, "edge": p - implied,
                               "dk_odds": price, "scored_line": None})
-        # -- main-total lane (median-region license only) ---------------------
+        # -- main-spread market (gate 3; dark until it passes) ----------------
+        spr = (odds or {}).get("spread")
+        if SPREAD_LICENSED and spr and secs >= SPREAD_MIN_SECONDS:
+            line = float(spr["line"])                  # HOME-relative
+            wp = price_spread(out, line)
+            for side in ("home", "away"):
+                price = spr.get(side)
+                if price is None:
+                    continue
+                p = float(wp[side])
+                implied = american_to_prob(float(price))
+                cands.append({"model_id": "ncaaf_live_spread",
+                              "pick_side": side, "model_probability": p,
+                              "dk_implied_prob": implied, "edge": p - implied,
+                              "dk_odds": float(price), "scored_line": line})
+
+        # -- main-total market (median-region license only) -------------------
         tot = (odds or {}).get("total")
         if tot and secs >= TOTAL_MIN_SECONDS:
             line = float(tot["line"])
@@ -402,7 +453,8 @@ class LiveEngine:
         # that has frozen, or one stamped before the last score, is dropped
         # before pricing so the candidates are the takeable ones only.
         takeable: dict = {}
-        for key, label in (("h2h", "h2h"), ("total", "totals")):
+        for key, label in (("h2h", "h2h"), ("total", "totals"),
+                           ("spread", "spreads")):
             mkt = (odds or {}).get(key)
             if mkt and market_is_takeable(mkt, label, ctx.game_id, now,
                                           score_seen_at):
@@ -421,7 +473,9 @@ class LiveEngine:
             "score_diff_at_pick": hs - as_,
         }
         cuts = {"ncaaf_live_win_prob": (ML_MIN_PROB, ML_MIN_EDGE, ML_MIN_EV),
-                "ncaaf_live_total": (TOTAL_MIN_PROB, TOTAL_MIN_EDGE, TOTAL_MIN_EV)}
+                "ncaaf_live_total": (TOTAL_MIN_PROB, TOTAL_MIN_EDGE, TOTAL_MIN_EV),
+                "ncaaf_live_spread": (SPREAD_MIN_PROB, SPREAD_MIN_EDGE,
+                                      SPREAD_MIN_EV)}
         picks: list[dict] = []
         for c in self.candidates(row, period, hs, as_, takeable):
             min_prob, min_edge, min_ev = cuts[c["model_id"]]
@@ -447,6 +501,16 @@ class LiveEngine:
             if c["model_id"] == "ncaaf_live_win_prob":
                 team = ctx.home if c["pick_side"] == "home" else ctx.away
                 label = f"{team} ML (live)"
+            elif c["model_id"] == "ncaaf_live_spread":
+                # The stored line is HOME-relative, so the away side's
+                # displayed number is its negation -- the label must not
+                # repeat the home number against the away team.
+                home_line = float(c["scored_line"])
+                if c["pick_side"] == "home":
+                    team, shown = ctx.home, home_line
+                else:
+                    team, shown = ctx.away, -home_line
+                label = f"{team} {shown:+g} (live)"
             else:
                 label = (f"{ctx.away} @ {ctx.home} "
                          f"{c['pick_side'].capitalize()} {c['scored_line']:g} (live)")
