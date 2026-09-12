@@ -97,13 +97,18 @@ export function registerForPush(): Promise<PushState> {
           : existing;
 
       if (!perm.granted) {
+        // The two cases need OPPOSITE advice, which is the whole reason the
+        // check above is split. A dismissed prompt can simply be asked again;
+        // a denial has to be undone in iOS Settings — where an app that has
+        // never been granted anything is not yet listed, so sending a
+        // dismissed-prompt user there dead-ends them.
         return setState({
           status: 'failed',
           diagnosis: diagnosePushError(
             perm.canAskAgain
               ? 'The notification permission prompt was dismissed without allowing.'
               : 'Notifications are denied for this app in iOS Settings.',
-            'permission',
+            perm.canAskAgain ? 'prompt' : 'permission',
           ),
         });
       }
@@ -179,7 +184,10 @@ export async function unregisterForPush(): Promise<void> {
     // Surfaced, not swallowed: the reader has turned notifications off and is
     // entitled to know the server did not hear it. NotificationsCard renders a
     // failure whatever the toggle now says, precisely so this one is visible.
-    setState({ status: 'failed', diagnosis: diagnosePushError(error, 'storage') });
+    // 'stop', not 'storage': the same refusal means "you are not registered"
+    // on the way in and "you are STILL registered" on the way out, and only
+    // the second one is true here.
+    setState({ status: 'failed', diagnosis: diagnosePushError(error, 'stop') });
     return;
   }
   // Forget it only once the server has agreed, so a failed opt-out can be

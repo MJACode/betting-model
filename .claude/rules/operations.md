@@ -61,6 +61,16 @@ before anyone noticed it.
   anyway. No push has ever reached a phone. **So the ledger is evidence a
   signal was CONSIDERED, and the recipient table is the evidence it was SENT —
   check both.** (`docs/push_notifications.md` carries the query.)
+  **Re-measured 2026-09-12 at 1,736 events / still zero devices, and the CAUSE
+  is now known:** the app has shipped `expo-notifications` since 2026-09-08,
+  but the iOS provisioning profile predates it by two months and
+  `eas build --non-interactive` REUSES the profile it holds rather than
+  regenerating one for a newly added capability — so the binary carries no
+  `aps-environment` and Apple will not issue it a token. The build workflow now
+  reads that entitlement out of the finished IPA and refuses to submit without
+  it. **And a third table is needed to close the loop: Expo's own TICKET.**
+  `_expo_send` counted a 200 as a delivery until the same day, so even with a
+  device registered it would have reported "sent" for a message Apple refused.
 - **A health check must not gate on the thing that breaks.** Two checks reported
   SKIPPED for the entire outage they existed to catch, because they keyed off
   data the failing feed produces.

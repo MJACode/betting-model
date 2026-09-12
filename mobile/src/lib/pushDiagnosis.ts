@@ -23,12 +23,23 @@
 
 export type PushFailureReason =
   | 'unsupported' // this binary has no push module, or it is a simulator
-  | 'permission' // the OS prompt was declined, or notifications are off
+  | 'prompt' // the OS prompt was dismissed and CAN be shown again
+  | 'permission' // notifications are off for this app in iOS Settings
   | 'credentials' // the build carries no APNs entitlement / EAS has no push key
   | 'network' // could not reach Expo's token service
   | 'storage' // Apple issued a token but we could not save it
+  | 'stop' // the opt-OUT write failed, so delivery has NOT stopped
   | 'stale' // the stored token is no longer a valid recipient
   | 'unknown'; // unmatched — `detail` is all we know, and it is shown as-is
+
+/**
+ * Reasons that are never inferred from an error's text — the caller is the
+ * only thing that knows them. `prompt` vs `permission` is decided by
+ * `canAskAgain`, and `stop` by which direction the write was going: the same
+ * refusal means "you are not registered" on the way in and "you are still
+ * registered" on the way out, which are opposite sentences.
+ */
+export type ForcedOnlyReason = 'prompt' | 'stop';
 
 export interface PushDiagnosis {
   reason: PushFailureReason;
@@ -115,10 +126,23 @@ const RULES: ReadonlyArray<{ reason: PushFailureReason; match: readonly string[]
 
 const COPY: Record<PushFailureReason, { title: string; advice: string; retryable: boolean; opensSettings: boolean }> = {
   unsupported: {
-    title: 'This build has no push support',
+    title: 'This build cannot receive notifications',
+    // Deliberately covers both cases this bucket matches. It also catches a
+    // SIMULATOR, which can never receive a push however new the build is, and
+    // which is where a developer will see this message most often — so the
+    // TestFlight instruction is conditioned rather than stated flat.
     advice:
-      'It was built before notifications were added. Install the latest build from TestFlight and try again.',
+      'On a physical device, install the latest build from TestFlight — this one was built before notifications were added. A simulator cannot receive them at all.',
     retryable: false,
+    opensSettings: false,
+  },
+  prompt: {
+    title: 'Notifications need your permission',
+    // NOT "open iOS Settings": the prompt was dismissed rather than denied, so
+    // the app is not listed under Settings → Notifications yet and sending the
+    // reader there dead-ends them.
+    advice: 'Tap Try again and choose Allow.',
+    retryable: true,
     opensSettings: false,
   },
   permission: {
@@ -141,9 +165,21 @@ const COPY: Record<PushFailureReason, { title: string; advice: string; retryable
     opensSettings: false,
   },
   stale: {
-    title: 'This device is no longer a valid recipient',
+    // Not "no longer a valid recipient" — that is Expo's phrase for its own
+    // records, and it reads as an accusation about the person.
+    title: 'This device needs to register again',
+    // ONE recovery. It used to name a second ("turn the toggle off and back
+    // on") beside a Try again button, leaving the reader to guess which was
+    // real and unable to tell whether their tap had done anything.
     advice:
-      'Apple has retired the token we hold — this happens after a reinstall or a long gap. Turn the toggle off and back on to register a fresh one.',
+      'Apple has retired the token we hold — normal after a reinstall or a long gap. Tap Try again to register a fresh one.',
+    retryable: true,
+    opensSettings: false,
+  },
+  stop: {
+    title: 'Notifications are still on for this device',
+    advice:
+      'You turned them off, but the server did not hear it, so alerts will keep arriving. Tap Try again.',
     retryable: true,
     opensSettings: false,
   },
@@ -156,7 +192,10 @@ const COPY: Record<PushFailureReason, { title: string; advice: string; retryable
   },
   unknown: {
     title: 'Registration failed',
-    advice: 'The exact error is below. Try again, and send it with any feedback if it persists.',
+    // This bucket's detail is the whole answer, so NotificationsCard opens it
+    // expanded rather than behind "Show details" — the advice used to point at
+    // text that was collapsed out of sight.
+    advice: 'The exact error is below. Try again, and include it if you send feedback.',
     retryable: true,
     opensSettings: false,
   },

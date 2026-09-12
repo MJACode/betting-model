@@ -46,7 +46,7 @@ function reasonOf(err: unknown): PushFailureReason {
   return diagnosePushError(err).reason;
 }
 
-// ── 1. The four causes are four diagnoses ────────────────────────────────────
+// ── 1. Distinct causes get distinct diagnoses ────────────────────────────────────
 // Each string below is the shape of a real failure. They are matched leniently
 // on purpose (see pushDiagnosis.ts), so these assert the CLASSIFICATION, never
 // that Expo emits this exact prose.
@@ -140,6 +140,45 @@ check(
 );
 check('a network failure is retryable', diagnosePushError(new Error('timed out')).retryable);
 
+// ── 4b. The two forced-only reasons ──────────────────────────────────────────
+// Neither is inferable from an error's text; only the caller knows. A dismissed
+// prompt and a denial in iOS Settings need OPPOSITE recoveries, and the hook
+// computes canAskAgain precisely to tell them apart — it forced one reason for
+// both until the 2026-09-12 UX review, sending a user who simply swiped the
+// prompt away into a Settings screen where the app is not yet listed.
+const dismissed = diagnosePushError('prompt dismissed', 'prompt');
+const denied = diagnosePushError('denied in settings', 'permission');
+check('a dismissed prompt can be retried in-app', dismissed.retryable);
+check('a dismissed prompt does NOT send the reader to iOS Settings', !dismissed.opensSettings);
+check('a denial DOES send the reader to iOS Settings', denied.opensSettings);
+check(
+  'the two permission states give different advice',
+  dismissed.advice !== denied.advice && dismissed.title !== denied.title,
+);
+
+// A failed opt-OUT is the opposite sentence to a failed opt-IN: the reader is
+// STILL registered, and saying "could not be saved" would read as the reverse.
+const stop = diagnosePushError({ message: 'write refused' }, 'stop');
+const store = diagnosePushError({ message: 'write refused' }, 'storage');
+check('a failed opt-out says notifications are still ON', stop.title.toLowerCase().includes('still on'));
+check('a failed opt-out is retryable', stop.retryable);
+check('opt-in and opt-out failures do not share copy', stop.title !== store.title);
+
+// ── 4c. Every reason is actionable or honestly dead-ended ────────────────────
+// A reason with no button must at least say why nothing can be done here; a
+// reason with a button must not also tell the reader to do something else.
+for (const d of [dismissed, denied, stop, store, odd,
+                 diagnosePushError(new Error('DeviceNotRegistered')),
+                 diagnosePushError(new Error('timed out')),
+                 diagnosePushError(new Error('aps-environment')),
+                 diagnosePushError(new Error('cannot find native module'))]) {
+  check(`${d.reason}: advice is non-empty`, d.advice.trim().length > 0);
+  check(
+    `${d.reason}: a retryable reason does not ALSO tell the reader to toggle`,
+    !d.retryable || !/toggle off and back on/i.test(d.advice),
+  );
+}
+
 // ── 5. errorText survives whatever was thrown ────────────────────────────────
 eq('a string error passes through', errorText('plain'), 'plain');
 check('an Error uses its message', errorText(new Error('boom')).includes('boom'));
@@ -198,8 +237,57 @@ const msg = buildTestMessage('ExponentPushToken[abc]') as {
 };
 eq('the test message addresses this device', msg.to, 'ExponentPushToken[abc]');
 eq('the test payload carries the current route version', msg.data.v, PUSH_ROUTE_VERSION);
-check('the test payload names a routed type', msg.data.type === 'new_bets');
+// 'dropped' routes to Picks -> Today, which is true whatever is on the board.
+// A test push must not land on Signals claiming signals that do not exist.
+check('the test payload names a routed type', msg.data.type === 'dropped');
+check(
+  'the test push does not land on a board that would be announcing signals',
+  msg.data.type !== 'new_bets' && msg.data.type !== 'live_signals',
+);
+check('the body says where the tap goes', msg.body.toLowerCase().includes("today's board"));
 check('the test message says what it is', msg.title.toLowerCase().includes('test'));
+
+// ── 7b. The hook actually USES the distinction ───────────────────────────────
+// The copy checks above prove the two permission states READ differently; this
+// proves the caller still routes them apart. The bug being guarded is precise:
+// the hook computed `perm.canAskAgain` to tell them apart and then passed one
+// hard-coded reason for both, so the distinction existed in the code and not
+// in the product. A source check, because the branch needs a native module to
+// reach at runtime.
+const hook = readFileSync(
+  join(import.meta.dirname, '..', 'src', 'hooks', 'usePushNotifications.ts'),
+  'utf-8',
+);
+const hookCode = hook
+  .split('\n')
+  .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
+  .join('\n');
+check(
+  'the hook forwards canAskAgain into the reason it reports',
+  /canAskAgain\s*\?\s*'prompt'\s*:\s*'permission'/.test(hookCode),
+);
+check(
+  "the opt-out failure reports 'stop', not 'storage'",
+  /diagnosePushError\(error,\s*'stop'\)/.test(hookCode),
+);
+// SCOPED TO registerForPush's BODY. The first version of this check matched
+// `const { error } = await supabase` anywhere in the file and was therefore
+// satisfied by unregisterForPush's own destructure — it passed while the
+// upsert's error was thrown away, which is the exact bug it was written for.
+// Watched failing before this comment was written.
+const registerBody = hookCode.slice(
+  hookCode.indexOf('export function registerForPush'),
+  hookCode.indexOf('export async function unregisterForPush'),
+);
+check('registerForPush was located in the source', registerBody.length > 200);
+check(
+  'the registration upsert still reads its error',
+  /const \{ error \} = await supabase[\s\S]{0,80}\.upsert\(/.test(registerBody),
+);
+check(
+  'the registration failure path acts on that error',
+  /if \(error\) \{[\s\S]{0,200}status: 'failed'/.test(registerBody),
+);
 
 // ── 8. The version is pinned on BOTH sides ───────────────────────────────────
 // pushRouteVersion.ts and push_notifier.py are one contract shipped by two

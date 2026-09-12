@@ -33,16 +33,24 @@ export interface TestPushResult {
 }
 
 /**
- * The message. `data` is a REAL route (Picks → Signals) rather than a bespoke
- * test payload, so a tap proves the deep link works too — a test that avoided
- * the contract would pass while the contract was broken.
+ * The message.
+ *
+ * `data` is a REAL route rather than a bespoke test payload, so a tap proves
+ * the deep link works too — a test that invented its own payload would pass
+ * while the contract in pushRoute.ts was broken.
+ *
+ * The route is `dropped`, which lands on Picks → TODAY. Not `new_bets`
+ * (→ Signals): that board would be announcing new signals that do not exist,
+ * and a test is not allowed to make a claim about the slate to prove a point
+ * about plumbing (UX review, 2026-09-12). Today shows everything scored, so it
+ * is true whatever is on the board — and the body says where the tap goes.
  */
 export function buildTestMessage(token: string): Record<string, unknown> {
   return {
     to: token,
     title: 'Signalbase test',
-    body: 'Notifications are working. Tap to open your signals.',
-    data: { v: PUSH_ROUTE_VERSION, type: 'new_bets' },
+    body: "Notifications are working. Tap to open today's board.",
+    data: { v: PUSH_ROUTE_VERSION, type: 'dropped' },
     sound: 'default',
     priority: 'high',
   };
