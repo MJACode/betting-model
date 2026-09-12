@@ -575,22 +575,40 @@ at, and it excludes the books a member cannot bet.
   `config.BEST_LINE_BOOKMAKERS`, stored as `picks.decision_book / decision_odds
   / decision_implied_prob / decision_edge`; settlement, the record views, the
   custom-model RPCs, Discord, push and the app's action filter all read those
-  columns with `COALESCE(decision_x, dk_x)` (rows from before the flip were
+  columns with `COALESCE(decision_x, dk_x)` (rows written before that day were
   decided at DraftKings, so the fallback is exact). **DraftKings stays the
-  REFERENCE, not the decider:** the LINE a pick is scored at is DK's (no DK
-  quote, no pick), training features and CLV (`closing_dk_odds` vs `dk_odds`)
-  are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings meaning. **The
-  live lanes joined on 2026-09-10** (mike, "yes do everything"): the MLB and
-  NCAAF in-play lanes decide at the best bettable IN-PLAY quote at DK's line,
-  through their own classifiers, with the stale-line cap kept on the DK edge
-  and every candidate quote gated on the same age and score-change clocks as
-  the DK quote; `nfl_live_prop` cannot, its feed is DK-only. No cut moved with
-  either flip — the sweep found none shippable — so every cut is 0.68pp looser
-  on average at the better price (`docs/best_line.md` §4). `scorer._decide` /
-  `_size` (pre-game), `live_scorer.classify_live_signal` (MLB live) and
-  `ncaaf_live.serve.LiveEngine._decide` (NCAAF live) are the ONE code path
-  each lane's two prices run through; `tests/test_decide_on_best_price.py`
-  and `tests/test_best_line_live.py` are the tripwires.
+  REFERENCE, not the decider:** training features and CLV (`closing_dk_odds`
+  vs `dk_odds`) are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings
+  meaning. **The IN-PLAY models joined on 2026-09-10** (mike, "yes do
+  everything"): the MLB and NCAAF in-play models decide at the best bettable
+  in-play quote at DraftKings' line, through their own classifiers, with the
+  stale-line cap kept on the DraftKings edge and every candidate quote gated
+  on the same age and score-change clocks as the DraftKings quote;
+  `nfl_live_prop` cannot, its feed is DraftKings-only. No cut moved with
+  either change — the sweep found none shippable — so every cut is 0.68pp
+  looser on average at the better price (`docs/best_line.md` §4).
+  `scorer._decide` / `_size` (pre-game), `live_scorer.classify_live_signal`
+  (MLB in-play) and `ncaaf_live.serve.LiveEngine._decide` (NCAAF in-play) are
+  the ONE code path each model's two prices run through;
+  `tests/test_decide_on_best_price.py` and `tests/test_best_line_live.py` are
+  what stop the two splitting again.
+- **A PLAYER PROP DRAFTKINGS DOES NOT LIST IS SCORED OFF THE FIRST BETTABLE
+  BOOK THAT DOES.** (mike, 2026-09-12: *"Yes, scoring of other books lines."*)
+  The book is taken in `config.BEST_LINE_BOOKMAKERS` order, NEVER by price:
+  the LINE is the proposition, so choosing the book by whose number the model
+  likes best would choose the bet to suit the model. The ordinary best-price
+  check then runs at that line. `picks.line_book` names the book, NULL means
+  DraftKings, and on those rows **`dk_odds` / `dk_implied_prob` / `edge` are
+  NULL / 0.0 by design** — DraftKings never quoted the proposition — so every
+  read of a pick's price or edge goes through `decision_*`, and the
+  published-units gate reads `COALESCE(decision_odds, dk_odds)`
+  (`score_off_any_book_line_2026_09_12.sql`). GAME markets are unchanged:
+  DraftKings lists every game we model, and a game-level DraftKings line is a
+  model FEATURE, so changing its source is a retrain question. **These picks
+  are a new population — no cut was swept on it — so report them separately,
+  by `line_book`, before folding them into a model's record.**
+  `SCORE_OFF_ANY_BOOK_LINE=0` restores "no DraftKings quote, no pick". Test:
+  `tests/test_score_off_any_book_line.py`.
 - **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO PRICE.** (2026-09-03.)
   A win with `dk_odds IS NULL` (and, since 2026-09-09, `decision_odds IS NULL`)
   is stored as +$90.91 on a $100 stake — exactly the payout of -110 — so

@@ -75,6 +75,7 @@ from config import (
     today_et,
     DECIDE_ON_CALIBRATED_PROB,
     DECIDE_ON_BEST_PRICE,
+    SCORE_OFF_ANY_BOOK_LINE,
     BEST_LINE_MAX_LAG_MIN,
 )
 from data.live_quote_guard import quote_predates_score
@@ -1226,8 +1227,8 @@ def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
     Left as decided at DraftKings, with decision_* = the DK price, when:
       * DECIDE_ON_BEST_PRICE is off;
       * no bettable book priced the same line (best is None);
-      * the pick carries no DK price at all (prob-only fallback: nothing to
-        shop, nothing to requalify);
+      * the pick carries no deciding price at all (a prob-only model whose
+        market no book lists: nothing to shop, nothing to re-check);
       * the pick was already downgraded with a reason (a capped or declined
         row is not resurrected by a cheaper price);
       * the pick is a live one -- a live pick is decided at its best in-play
@@ -1243,8 +1244,13 @@ def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
     """
     if not pick:
         return pick
+    # Keyed on the DECIDING price, not on dk_odds: since 2026-09-12 a prop
+    # whose line came from another book carries NULL in dk_odds by design, and
+    # keying there would have silently excluded exactly those picks from the
+    # best-price re-check.
+    current = pick.get("decision_odds", pick.get("dk_odds"))
     if (not DECIDE_ON_BEST_PRICE or not best or best.get("odds") is None
-            or pick.get("dk_odds") is None or pick.get("downgrade_reason")
+            or current is None or pick.get("downgrade_reason")
             or pick.get("is_live")):
         return pick
     odds = float(best["odds"])
@@ -1260,9 +1266,10 @@ def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
                                 float(pick.get("bankroll_at_pick") or 0.0),
                                 signal_type, is_prop=is_prop)
     if signal_type != was:
-        logger.info(f"  {pick.get('pick_label')}: {was} at DK {pick['dk_odds']:+.0f} "
+        logger.info(f"  {pick.get('pick_label')}: {was} at "
+                    f"{pick.get('decision_book') or ODDS_API_BOOKMAKER} {current:+.0f} "
                     f"→ {signal_type} at {best['book']} {odds:+.0f} "
-                    f"(edge {pick['edge']*100:+.1f}% → {edge*100:+.1f}%)")
+                    f"(edge {(pick.get('decision_edge') if pick.get('decision_edge') is not None else pick['edge'])*100:+.1f}% → {edge*100:+.1f}%)")
     pick.update({
         "signal_type":     signal_type,
         "kelly_fraction":  kelly_frac,
@@ -2291,6 +2298,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             public_bet_pct, public_money_pct, dk_bet_link, model_probability_cal,
             best_book, best_odds, best_implied_prob, best_edge, best_bet_link,
             is_live, inning_at_pick, score_diff_at_pick, downgrade_reason,
+            line_book,
             decision_book, decision_odds, decision_implied_prob, decision_edge
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
@@ -2302,6 +2310,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             %(model_probability_cal)s,
             %(best_book)s, %(best_odds)s, %(best_implied_prob)s, %(best_edge)s,
             %(best_bet_link)s,
+            %(line_book)s,
             %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s,
             %(downgrade_reason)s,
             %(decision_book)s, %(decision_odds)s, %(decision_implied_prob)s,
@@ -2386,6 +2395,9 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "decision_odds":         p.get("decision_odds", p.get("dk_odds")),
             "decision_implied_prob": p.get("decision_implied_prob", p.get("dk_implied_prob")),
             "decision_edge":         p.get("decision_edge", p.get("edge")),
+            # NULL = DraftKings set the line, which is every row written
+            # before 2026-09-12 and every row DraftKings quotes.
+            "line_book":          p.get("line_book"),
             "is_live":            p.get("is_live", False),
             "inning_at_pick":     p.get("inning_at_pick"),
             "score_diff_at_pick": p.get("score_diff_at_pick"),
@@ -3241,7 +3253,8 @@ def _count_over_prob(lam: float, line: float,
 
 def _latest_dk_prop_row(conn: DBConnection, game_id: str,
                         player_name: str, market: str,
-                        pregame_cutoff: str | None = None):
+                        pregame_cutoff: str | None = None,
+                        bookmaker: str = ODDS_API_BOOKMAKER):
     """The newest PRE-GAME DraftKings quote for one exact feed spelling.
 
     BOUNDED ON THE PRE-GAME CUTOFF (2026-09-03). The prop ingestor keeps
@@ -3286,10 +3299,10 @@ def _latest_dk_prop_row(conn: DBConnection, game_id: str,
         WHERE game_id     = %s
           AND player_name = %s
           AND market      = %s
-          AND bookmaker   = 'draftkings'
+          AND bookmaker   = %s
           AND (snapshot_type IS NULL OR snapshot_type != 'in_play')
     """
-    params = [game_id, player_name, market]
+    params = [game_id, player_name, market, bookmaker]
     if pregame_cutoff:
         sql += " AND snapshot_at::timestamptz <= %s::timestamptz\n"
         params.append(pregame_cutoff)
@@ -3297,12 +3310,61 @@ def _latest_dk_prop_row(conn: DBConnection, game_id: str,
     return conn.execute(sql, tuple(params)).fetchone()
 
 
+def _latest_book_prop_row(conn: DBConnection, game_id: str, player_name: str,
+                          market: str, book: str,
+                          pregame_cutoff: str | None = None):
+    """`_latest_dk_prop_row` for any one book. Same pre-game cutoff, same
+    in-play exclusion, same ordering -- only the bookmaker differs."""
+    return _latest_dk_prop_row(conn, game_id, player_name, market,
+                               pregame_cutoff, bookmaker=book)
+
+
+def _fallback_line_quote(conn: DBConnection, game_id: str, player_name: str,
+                         market: str,
+                         pregame_cutoff: str | None = None) -> dict | None:
+    """The line for a proposition DraftKings does not list, from the first
+    bettable book that does.
+
+    mike, 2026-09-12: "Yes, scoring of other books lines." Until then a
+    proposition with no DraftKings quote produced no pick at all, however
+    many other books priced it -- measured over the markets an active model
+    prices, 2026-08-28 onward: DraftKings listed 11,780 player propositions
+    and the bettable books listed 1,357 more that it did not, four fifths of
+    them from FanDuel, Hard Rock, Fanatics and Caesars.
+
+    The book is taken in `BEST_LINE_BOOKMAKERS` order -- the order mike
+    curated, DraftKings first -- and NOT by best price: the line is the
+    proposition, and picking whichever book happens to quote the softest
+    number would choose the proposition to suit the model. Once the line is
+    set, the ordinary best-price check runs at THAT line
+    (`_best_prop_price` / `_requalify_at_best`), so the pick is still placed
+    at the best bettable price on the same number.
+
+    The row it returns carries `line_book`; `_make_prop_pick` then stores
+    NULL in the DraftKings columns, because DraftKings never quoted it.
+    """
+    if not SCORE_OFF_ANY_BOOK_LINE:
+        return None
+    for book in BEST_LINE_BOOKMAKERS:
+        if book == ODDS_API_BOOKMAKER:
+            continue                      # the caller already tried it
+        row = _latest_book_prop_row(conn, game_id, player_name, market, book,
+                                    pregame_cutoff)
+        if row and row[0] is not None and (row[1] is not None or row[2] is not None):
+            return {"line": row[0], "over_price": row[1], "under_price": row[2],
+                    "over_link": row[3], "under_link": row[4],
+                    "player_name": player_name, "line_book": book}
+    return None
+
+
 def _get_prop_dk_odds(conn: DBConnection, game_id: str,
                       player_name: str, market: str,
                       pregame_cutoff: str | None = None) -> dict | None:
     """
     Fetch the latest DraftKings prop odds for a player+game+market from
-    player_prop_odds.
+    player_prop_odds -- or, when DraftKings does not list the proposition at
+    all, the first bettable book that does (`_fallback_line_quote`, 2026-09-12;
+    the returned row then carries `line_book`).
 
     Exact player_name first: the roster feed and the Odds API agree on
     plain-ASCII names, and that path is a single indexed lookup. When they
@@ -3322,7 +3384,7 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     if row:
         return {"line": row[0], "over_price": row[1], "under_price": row[2],
                 "over_link": row[3], "under_link": row[4],
-                "player_name": player_name}
+                "player_name": player_name, "line_book": None}
 
     # Spelling fallback. resolve_feed_name returns None when two candidates
     # normalize alike (same name bar a Jr./Sr. suffix), so an ambiguous match
@@ -3568,7 +3630,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     pitcher_throw_hand: str = None,
                     sport: str = "MLB",
                     dk_bet_link: str = None,
-                    commence_time: str | None = None) -> dict | None:
+                    commence_time: str | None = None,
+                    line_book: str | None = None) -> dict | None:
     """
     Build a prop pick dict. Returns None only if edge exceeds noise cap.
     BET/AVOID/NONE rows are all written to DB so the website can display every starter.
@@ -3578,6 +3641,16 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     dk_implied_prob / edge / dk_odds may be None for prob-only models when DK
     does not list the market — the pick is then decided on model_prob alone
     and stored with 0.0 placeholders for the NOT NULL implied/edge columns.
+
+    `line_book` names the book whose LINE the proposition came from when
+    DraftKings did not list it at all (mike, 2026-09-12: "Yes, scoring of
+    other books lines"). The caller passes that book's price in the dk_*
+    arguments because it is the only price there is; this function stores it
+    as the DECIDING price and leaves picks.dk_odds / dk_implied_prob / edge
+    NULL, because DraftKings never quoted the proposition and those three
+    columns mean DraftKings everywhere else in this repo. `picks.line_book`
+    records which book set the number, so these picks can be graded on their
+    own -- they are a new population and no cut was swept on it.
     """
     no_dk_price = dk_implied_prob is None
     if not no_dk_price and abs(edge) > MAX_EDGE_CAP:
@@ -3635,11 +3708,24 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "pick_side":           pick_side,
         "pick_label":          pick_label,
         "model_probability":   round(model_prob, 4),
-        "dk_implied_prob":     round(dk_implied_prob, 4) if dk_implied_prob is not None else 0.0,
-        "edge":                round(edge, 4) if edge is not None else 0.0,
-        "dk_odds":             dk_odds,
+        # THE DraftKings COLUMNS MEAN DraftKings. When the line came from
+        # another book, DraftKings quoted nothing, so these three carry the
+        # NOT NULL placeholders rather than another book's number; every
+        # reader takes the price and the edge from decision_* (which
+        # COALESCEs to dk_* only for rows written before 2026-09-09, when
+        # DraftKings was always the decider).
+        "dk_implied_prob":     0.0 if (line_book or dk_implied_prob is None)
+                               else round(dk_implied_prob, 4),
+        "edge":                0.0 if (line_book or edge is None) else round(edge, 4),
+        "dk_odds":             None if line_book else dk_odds,
         "scored_line":         line,
-        **_decision_fields(ODDS_API_BOOKMAKER, dk_odds, dk_implied_prob, edge),
+        # The price that DECIDED: DraftKings when it quoted the proposition,
+        # otherwise the book whose line this is (2026-09-12).
+        # _requalify_at_best may move it again, to whichever bettable book
+        # pays most at the SAME line.
+        **_decision_fields(line_book or ODDS_API_BOOKMAKER, dk_odds,
+                           dk_implied_prob, edge),
+        "line_book":           line_book,
         "player_id":           player_id,
         "pitcher_throw_hand":  pitcher_throw_hand,
         "kelly_fraction":    kelly_frac,
@@ -3650,7 +3736,10 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "signal_type":       signal_type,
         "confidence_tier":   _confidence_tier(edge_for_display),
         "game_time":         commence_time,
-        "dk_bet_link":       dk_bet_link,
+        # A DraftKings betslip link for a proposition DraftKings does not
+        # list would open an empty slip; the other book's link travels in
+        # best_bet_link once the pick is shopped.
+        "dk_bet_link":       None if line_book else dk_bet_link,
         "downgrade_reason":  _pause_note(model_id),
     }
 
@@ -3972,6 +4061,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                     dk_ip_over = american_to_implied_prob(over_price)
                     if dk_ip_over:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="over",
@@ -3990,6 +4080,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                     # No DK price — still emit a prob-only over pick so the
                     # model's HR favorites surface in the picks table.
                     pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                         game_id=game_id, model_id=model_id,
                         game_date=target_date,
                         player_name=player_name, pick_side="over",
@@ -4009,6 +4100,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                     dk_ip_under = american_to_implied_prob(under_price)
                     if dk_ip_under:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="under",
@@ -4165,6 +4257,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                     dk_ip_over = american_to_implied_prob(over_price)
                     if dk_ip_over:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="over",
@@ -4182,6 +4275,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                     dk_ip_under = american_to_implied_prob(under_price)
                     if dk_ip_under:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="under",
@@ -4355,6 +4449,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     dk_ip_over = american_to_implied_prob(over_price)
                     if dk_ip_over:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="over",
@@ -4370,6 +4465,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             model_picks.append(_tag_prop(pick, _best_ctx, conn))
                 elif is_prob_only:
                     pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                         game_id=game_id, model_id=model_id,
                         game_date=target_date,
                         player_name=player_name, pick_side="over",
@@ -4388,6 +4484,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     dk_ip_under = american_to_implied_prob(under_price)
                     if dk_ip_under:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="under",
@@ -4727,6 +4824,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         continue
                     p_cond = _push_adjusted(raw_p, p_push)
                     pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                         game_id=game_id, model_id=model_id, game_date=target_date,
                         player_name=player_name, pick_side=side,
                         model_prob=p_cond, dk_implied_prob=dk_ip,
@@ -5159,6 +5257,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     dk_ip_over = american_to_implied_prob(over_price)
                     if dk_ip_over:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="over",
@@ -5177,6 +5276,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     dk_ip_under = american_to_implied_prob(under_price)
                     if dk_ip_under:
                         pick = _make_prop_pick(
+                            line_book=(prop_odds or {}).get('line_book'),
                             game_id=game_id, model_id=model_id,
                             game_date=target_date,
                             player_name=player_name, pick_side="under",

@@ -64,6 +64,9 @@ _COPY_COLS = (
     # (decide_on_best_price_2026_09_09.sql), so a restored first signal keeps
     # the price that qualified it rather than falling back to DraftKings.
     "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
+    # The book whose LINE the pick was scored off when DraftKings did
+    # not list the proposition (2026-09-12). NULL = DraftKings.
+    "line_book",
 )
 
 

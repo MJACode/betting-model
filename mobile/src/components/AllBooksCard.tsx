@@ -10,6 +10,7 @@ import {
   MODEL_BOOK,
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
+import { lineBook } from '@/lib/decisionPrice';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
@@ -86,7 +87,7 @@ export function AllBooksCard({
                 {bookName(q.bookmaker)}
               </Text>
               <View style={styles.tagRow}>
-                {q.bookmaker === MODEL_BOOK ? (
+                {q.bookmaker === (lineBook(pick) ?? MODEL_BOOK) ? (
                   <Text style={styles.modelTag}>modeled</Text>
                 ) : null}
                 {reference ? <Text style={styles.modelTag}>reference</Text> : null}
@@ -110,9 +111,11 @@ export function AllBooksCard({
       })}
 
       <Text style={styles.footnote}>
-        The line is DraftKings'; edge and stake use the price the pick was
-        decided at. Parlays are priced at DraftKings. Tap a book to open its
-        betslip (reference books excluded).
+        {lineBook(pick)
+          ? `The line is ${bookName(lineBook(pick)!)}’s — DraftKings doesn’t post this one, so it can’t go in a DraftKings slip. `
+          : `The line is DraftKings’. Parlays are priced at DraftKings. `}
+        Edge and stake use the price the pick was decided at. Tap a book to
+        open its betslip (reference books excluded).
       </Text>
     </View>
   );

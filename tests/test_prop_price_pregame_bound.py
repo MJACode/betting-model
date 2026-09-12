@@ -120,7 +120,9 @@ def test_it_fails_open_when_commence_time_is_missing():
     _latest_dk_prop_row(conn, "MLB_x", "Nick Kurtz", "batter_hits", None)
     assert "snapshot_at::timestamptz <=" not in conn.sql, conn.sql
     assert "in_play" in conn.sql, conn.sql
-    assert conn.params == ("MLB_x", "Nick Kurtz", "batter_hits")
+    # the bookmaker is the fourth parameter since 2026-09-12; the point of
+    # this test is that NO cutoff is appended when there is no commence_time
+    assert conn.params == ("MLB_x", "Nick Kurtz", "batter_hits", "draftkings")
 
 
 def test_get_prop_dk_odds_forwards_the_cutoff(monkeypatch):

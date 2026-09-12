@@ -35,6 +35,10 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // v5 (2026-09-09): SETTLED_PICK_COLUMNS gained decision_book / decision_odds /
 // decision_edge, the price each pick was decided at. A v4 envelope would read
 // them as undefined and fall back to the DraftKings price on every row.
+// NOT bumped for line_book (2026-09-12): the settled screens name a book
+// through decision_book, which they already cache, so adding the column
+// would cost every member a full settled-history re-download for something
+// nothing there reads. Bump when a settled surface needs it (UX review).
 const KEY = 'settledPicks.v5';
 
 /**

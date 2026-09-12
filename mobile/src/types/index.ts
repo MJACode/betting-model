@@ -97,6 +97,14 @@ export interface Pick {
   // which were decided at DraftKings -- read them through lib/decisionPrice.ts,
   // never the columns, so the fallback to dk_odds / edge is in one place.
   decision_book: string | null;
+  /**
+   * The book whose LINE this pick was scored off, when DraftKings did not
+   * list the proposition at all (2026-09-12). NULL means DraftKings, which
+   * is every pick before that date and every pick DraftKings quotes. On a
+   * row where this is set, dk_odds is NULL by design -- DraftKings never
+   * priced it -- so read the price through decisionOdds(), as everywhere.
+   */
+  line_book: string | null;
   decision_odds: number | null;
   decision_implied_prob: number | null;
   decision_edge: number | null;
