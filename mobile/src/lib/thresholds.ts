@@ -134,8 +134,8 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // positive every season). Disjoint from ncaaf_spread by construction.
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // NCAAF live lanes — paused 2026-09-11 (see PAUSED_MODELS); cuts kept so unpausing is one edit.
-  ncaaf_live_win_prob: { min_prob: 0.66, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
-  ncaaf_live_total: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  ncaaf_live_win_prob: { min_prob: 0.62, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  ncaaf_live_total: { min_prob: 0.72, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
@@ -235,8 +235,6 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_pitcher_er',
   'mlb_prop_pitcher_walks',
   'mlb_runline',
-  'ncaaf_live_total',
-  'ncaaf_live_win_prob',
   'ncaaf_moneyline',
   'ufc_total_rounds',
   'wnba_over_under',

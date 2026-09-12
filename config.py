@@ -441,8 +441,8 @@ ACTION_THRESHOLDS: dict = {
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
-    "ncaaf_live_win_prob": {"min_prob": 0.66, "min_edge": 0.10},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
-    "ncaaf_live_total":    {"min_prob": 0.66, "min_edge": 0.12},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "ncaaf_live_win_prob": {"min_prob": 0.62, "min_edge": 0.10},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.62 prob x 0.26 EV) — see MODEL_MIN_EV + PAUSED_MODELS
+    "ncaaf_live_total":    {"min_prob": 0.72, "min_edge": 0.12},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.72 prob x 0.22 EV) — see MODEL_MIN_EV + PAUSED_MODELS
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -681,7 +681,7 @@ MODEL_MIN_EV: dict = {
     # lose least while keeping more than one bet. Re-sweep after ~3 more
     # Saturdays and expect these numbers to move.
     "ncaaf_live_total": 0.22,
-    "ncaaf_live_win_prob": 0.22,
+    "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: 0.62 x 0.26 is the both-halves-positive cell
 }
 
 # ── Live volume ceiling (bets per week) ──────────────────────────────────────
@@ -1286,8 +1286,16 @@ PAUSED_MODELS: set = {
     # breakeven in both halves of the season, not on a forward slate. The loop
     # keeps running while paused: it prices every pass and stores the quotes,
     # so the 2026 forward record is replayable the same way.
-    "ncaaf_live_total",
-    "ncaaf_live_win_prob",
+    # UNPAUSED 2026-09-12 (mike) at the cells below. The condition above is met
+    # on its own terms -- positive in BOTH halves of the 2025 replay, on FRESH
+    # quotes, not on a forward slate:
+    #   ncaaf_live_total    0.72/0.22   54 bets  +1.7u  +3.1%   H1 +1.2%  H2 +7.0%
+    #   ncaaf_live_win_prob 0.62/0.26   38 bets  +2.0u  +5.2%   H1 +10.6% H2 +2.1%
+    # STATED PLAINLY: neither CI low clears the ~52.4% breakeven ([46,71] and
+    # [40,70]), so these are the best cells on the grid rather than a proven
+    # edge, and they are the ONLY two that survive the season split -- every
+    # richer-looking cell is a first-half artifact (+54.8% H1 / -15.3% H2 at
+    # 0.60/0.30). Re-sweep at ~50 settled forward bets.
 }
 
 # Fallback for models not listed above.
@@ -1661,8 +1669,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
-    "ncaaf_live_win_prob": 0.66,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
-    "ncaaf_live_total":    0.66,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "ncaaf_live_win_prob": 0.62,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
+    "ncaaf_live_total":    0.72,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
