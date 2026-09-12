@@ -23,7 +23,7 @@ import {
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { isUnlockedPreview, passesActionFilter } from '@/lib/thresholds';
+import { isModelPaused, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -38,6 +38,11 @@ export function BuiltInModelDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { modelId } = route.params;
   const meta = MODEL_META[modelId];
+  // A paused model is LISTED and reachable (mike, 2026-09-12: "Don't hide
+  // detail of paused models unless I say so"), so every surface here has to say
+  // which state it is in rather than leaving it to be inferred from an empty
+  // board.
+  const paused = isModelPaused(modelId);
 
   const { data: todayRows, loading: todayLoading } = useTodayPicks();
   const {
@@ -89,7 +94,7 @@ export function BuiltInModelDetailScreen() {
         .filter(
           (p) =>
             p.model_id === modelId &&
-            passesActionFilter(p) &&
+            passesRecordFilter(p) &&
             (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH'),
         )
         .sort((a, b) => b.game_date.localeCompare(a.game_date)),
@@ -145,10 +150,20 @@ export function BuiltInModelDetailScreen() {
                   <Text style={styles.modelChipText}>{modelShort(modelId)}</Text>
                 </View>
                 <Text style={styles.modelTitle}>{modelLong(modelId)}</Text>
+                {paused ? <TagChip label="Paused" /> : null}
               </View>
               <Text style={styles.modelSubtitle}>
                 {meta ? `Built-in ${categoryLabel(meta.type)} model` : 'Built-in model'}
               </Text>
+              {/* A pause is about the FUTURE. Said plainly here so the settled
+                  record below — which stays, and is why a paused model is shown
+                  at all — is not read as a live model's. */}
+              {paused ? (
+                <Text style={styles.modelSubtitle}>
+                  Paused — not producing new picks. The record below is what it bet
+                  while it was live, and it stays.
+                </Text>
+              ) : null}
             </View>
 
             <View style={styles.sectionHeaderRow}>
@@ -162,7 +177,9 @@ export function BuiltInModelDetailScreen() {
               />
             </View>
             <Text style={styles.sectionNote}>
-              Locked for the day once scored — won't change again until the game ends.
+              {paused
+                ? 'Paused, so there are no picks today.'
+                : "Locked for the day once scored — won't change again until the game ends."}
             </Text>
           </>
         }
@@ -191,7 +208,7 @@ export function BuiltInModelDetailScreen() {
               <StatTile
                 label="Picks"
                 value={String(stats.picks)}
-                caption={`settled, meets current cut${unpriced > 0 ? ` · ${unpriced} unpriced` : ''}`}
+                caption={`settled, as posted${unpriced > 0 ? ` · ${unpriced} unpriced` : ''}`}
               />
               <StatTile
                 label="Win %"
@@ -520,7 +537,7 @@ function computeClvStats(
   settled: SettledPick[],
 ): { avg: number; beatRate: number; count: number } | null {
   const vals = settled
-    .filter((p) => p.model_id === modelId && passesActionFilter(p) && p.clv_pct != null)
+    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && p.clv_pct != null)
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;

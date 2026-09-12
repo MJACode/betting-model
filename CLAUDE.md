@@ -206,25 +206,16 @@ what did I actually change, and what did I merely describe?
 **EVERYTHING GOES IN SUPABASE. THERE ARE NO EXCEPTIONS, AND A TOLERATED ONE IS
 NOT A RULE.** (mike, 2026-08-30 and again 2026-09-12: *"EVERYTHING SHOULD BE IN
 SUPABASE FOR THE MILLIONTH FUCKING TIME. Need a global rule."*) Supabase is the
-system of record. **Any dataset that cost money or time to acquire is stored
-there FIRST** — before it is analysed, modelled on or committed.
-
-This rule existed and was broken anyway, because it carried exceptions "worth
-fixing when touched" and nobody touched them: on 2026-09-12 `nfl/data/odds_cache`
-held **655 MB of PAID Odds API history, NFL 2020-2026, on one laptop** while
-`odds` held NFL 2026 only. The exceptions are gone:
-
-- **A local file is a CACHE OF SUPABASE or it is a bug.** `data/local_store.py`
-  is the sanctioned shape — opt-in, gitignored, regenerable, every row already
-  in the database. Anything else on disk is a primary store, and a primary store
-  outside Supabase is the outage. A Railway volume is ONE COPY, not a backup.
-- **An ingestor that buys data writes it to Supabase in the same run**, keyed so
-  a re-run imports nothing already stored (the `source` marker in
-  `data/ingestors/*_history*.py`). That resume made the 2026-09-12 NCAAF season
-  cost 8,360 credits against a 373,240 plan.
-- `tests/test_everything_in_supabase.py` walks the repo for on-disk data sinks
-  and fails on a new one that is not a declared cache. When it fails, the answer
-  is an importer, not an entry in the allowlist.
+system of record: **any dataset that cost money or time is stored there FIRST**,
+before it is analysed, modelled on or committed. **A local file is a CACHE OF
+Supabase or it is a bug** (`data/local_store.py` is the sanctioned shape:
+opt-in, gitignored, regenerable, every row already in the database); a Railway
+volume is ONE COPY, not a backup; and an ingestor that buys data writes it in
+the same run, keyed on a `source` marker so a re-run imports nothing already
+stored. The old version of this rule carried exceptions "worth fixing when
+touched" and nobody touched them: 655 MB of PAID NFL odds history sat on one
+laptop for a fortnight. `tests/test_everything_in_supabase.py` fails on any
+undeclared store on disk, and the fix is an importer, not an allowlist entry.
 
 **Live player props are a priority and an UNTESTED HYPOTHESIS — not a proven
 market.** (Downgraded 2026-09-03 by mike, after measurement.) The thesis: NOT
@@ -239,17 +230,16 @@ player prop model in production, and the ~400 settled picks that look like one
 are not.** Do not read them as evidence in either direction
 (`docs/rules_evidence.md`).
 
-**A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND
-"SHOULD WE UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A
-pause banks the loss and ends the search. A model that is losing — paused or
-live — gets the FULL SWEEP first: every scored pick (§7's evaluation rule), a
-grid reported as a NEIGHBOURHOOD not a peak, an early/late split, a bet count
-and a confidence interval, and every candidate re-graded on the artifact
-`model_registry` says is LIVE (a pooled record blends retired models).
-**"No cut clears, here is the grid and here is what would have to change" is a
-complete answer; "shall I unpause it?" is not** — it hands back the work.
-`scripts/paused_model_assessment.py` sweeps BOTH pause registers;
-`docs/paused_model_assessment.md` carries the standing result.
+**A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
+UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
+loss and ends the search. A losing model — paused or live — gets the FULL SWEEP
+first: every scored pick (§7's evaluation rule), a grid reported as a
+NEIGHBOURHOOD not a peak, an early/late split, a bet count, a confidence
+interval, and every candidate re-graded on the artifact `model_registry` says is
+LIVE (a pooled record blends retired models). **"No cut clears, here is the grid
+and here is what would have to change" is a complete answer; "shall I unpause
+it?" is not.** `scripts/paused_model_assessment.py`,
+`docs/paused_model_assessment.md`.
 
 **A CHANGE TO HOW ONE MODEL OPERATES IS ASSESSED AGAINST ALL OF THEM.**
 (Repo-level rule, 2026-08-29.) Before shipping an operational change — how a
@@ -310,9 +300,9 @@ A surface with an extra GATE can only lose rows, and does it silently —
   thing you can only fail at quietly.
 - **`opening_signals` is the CLV / opening-signal shadow track, not a gate.**
   It keeps its own window (`docs/opening_signals.md`). Never publish from it.
-- **The one guard that SHOULD bound the set is the started-game check.** The
-  pick is a legitimate bet of record; announcing it once the game is under way
-  sends the reader to a bet they cannot take.
+- **The one guard that SHOULD bound the set is the started-game check** —
+  announcing a pick once the game is under way sends the reader to a bet they
+  cannot take.
 - **A LIVE surface resolves its window with `config.live_slate_dates()`, never
   today** — a game keeps its KICKOFF's game_date, so a late start outlives the
   calendar day. Mirrored in the app by `liveSlateDatesET()`; the two are pinned
@@ -411,16 +401,24 @@ answer is "nothing".
   NONE rows for games that have not started, and the UFC/NCAAF look-ahead
   window, where picks are explicitly not yet locked and re-score until game
   morning (`docs/sports/{ufc,ncaaf}.md`). A BET is never in that set.
-- **A pick the model should never have PRODUCED is VOIDED, never deleted.**
-  (mike, 2026-09-07.) §1c protects a bet against LINE MOVEMENT — not a row
-  emitted while a model fired OUTSIDE its validated window, or on a game that
-  was never eligible. Deleting one destroys the evidence the bug happened, which
-  is usually how it was found. The row stays and stops counting:
-  **`scripts/void_picks.py`** (dry-run by default) sets `result='NO_ACTION'` and
-  `condition_status='VOID'` with a reason, never touches `created_at`, the line
-  or the price, and keeps the insert-once lock. It REFUSES an already-graded
-  pick — that is rewriting a settled result, not correcting a bug.
-  Evidence: `docs/rules_evidence.md`.
+- **A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS, AND A PAUSE IS NEITHER.**
+  (mike, 2026-09-12: *"Pausing a model should not erase settled record unless I
+  explicitly say so."*) A pick is in the record because it was WRITTEN as a
+  BET; no pause, threshold change or retrain reaches back and removes one.
+  One query answering both "may bet next" and "did bet" moves the number with
+  nothing deleted — 55 settled NCAAF bets, overnight. A record query filters on
+  what the pick WAS (`signal_type='BET'`, a real result, in the window), never
+  joining `model_action_thresholds`. The exits: **VOID** — a row the model should never
+  have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
+  sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
+  the line, the price and the lock, and REFUSES a graded pick (deleting
+  destroys the evidence) — and **`config.RECORD_EXCLUSIONS`**, naming who
+  asked. Sweep views DO re-cut (§7). Test:
+  `tests/test_settled_record_is_immutable.py`.
+  **A paused model is LISTED, not hidden** (mike, same day: *"Don't hide detail
+  of paused models unless I say so"*) — labelled "Paused", record shown. Hiding
+  it left the Record tab counting a model the Models tab did not list. RETIRED
+  differs: nothing will score for it again.
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
@@ -488,8 +486,9 @@ flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
 - **Scenario C** — Opponent injury: positive edge signal for the other team
 
 ### Early Season Rule
-No picks are generated until a team has played ≥ 10 games.
-Prior-season stats are used as the feature baseline during this window.
+No picks until a team has played >= 10 games; prior-season stats are the
+baseline in that window. Season-to-date rates are noise early — blend toward
+the prior season by games played.
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
@@ -555,7 +554,7 @@ own doc (§9) and in `docs/local_ops.md`.
 
 ## 6. Config topology — where each kind of setting actually lives
 
-Three homes, three different roles. Getting this wrong is how a threshold change
+Three homes, three roles. Getting this wrong is how a threshold change
 silently fails to reach production.
 
 **Secrets → Railway Variables** (the live copy the worker reads): `DATABASE_URL`

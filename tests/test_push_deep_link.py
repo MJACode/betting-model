@@ -45,6 +45,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 NOTIFIER = ROOT / "tracking" / "push_notifier.py"
 ROUTE_TS = ROOT / "mobile" / "src" / "lib" / "pushRoute.ts"
+# The version constant moved out of pushRoute.ts on 2026-09-12 so that
+# pushTest.ts — which must stay free of react-native to run under tsx — can
+# read it without dragging in useSportFilter. pushRoute.ts re-exports it, so
+# every app importer is unchanged; only this grep had to follow it.
+VERSION_TS = ROOT / "mobile" / "src" / "lib" / "pushRouteVersion.ts"
 HOOK_TS = ROOT / "mobile" / "src" / "hooks" / "usePushDeepLink.ts"
 APP_TSX = ROOT / "mobile" / "App.tsx"
 
@@ -179,9 +184,22 @@ def _py_version() -> int:
 
 
 def _ts_version() -> int:
-    m = re.search(r"export const PUSH_ROUTE_VERSION = (\d+)", _read(ROUTE_TS))
-    assert m, "PUSH_ROUTE_VERSION missing from pushRoute.ts"
+    m = re.search(r"export const PUSH_ROUTE_VERSION = (\d+)", _read(VERSION_TS))
+    assert m, "PUSH_ROUTE_VERSION missing from pushRouteVersion.ts"
     return int(m.group(1))
+
+
+def test_push_route_still_exports_the_version():
+    """The constant moved; the export did not.
+
+    `pushRoute.ts` is what the app imports PUSH_ROUTE_VERSION from, in
+    usePushDeepLink and anywhere else. Moving the definition without keeping
+    the re-export would break those importers — and this file's other checks,
+    which read pushRoute.ts, would all still pass.
+    """
+    assert "export { PUSH_ROUTE_VERSION }" in _read(ROUTE_TS), (
+        "pushRoute.ts must keep re-exporting PUSH_ROUTE_VERSION for its importers"
+    )
 
 
 def test_both_halves_pin_the_same_payload_version():

@@ -144,7 +144,10 @@ export type SettledPickKey =
   | 'clv_pct'
   | 'decision_book'
   | 'decision_odds'
-  | 'decision_edge';
+  | 'decision_edge'
+  // Needed by passesRecordFilter: without it the contaminated-pre-game guard
+  // is always false on a settled row, so session-114 repair rows would count.
+  | 'is_live';
 
 // A mapped type rather than Pick<Pick, …> because the `Pick` interface above
 // shadows TypeScript's built-in Pick<> utility inside this module. It stays

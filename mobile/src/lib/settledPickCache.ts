@@ -39,7 +39,12 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // through decision_book, which they already cache, so adding the column
 // would cost every member a full settled-history re-download for something
 // nothing there reads. Bump when a settled surface needs it (UX review).
-const KEY = 'settledPicks.v5';
+// v6 (2026-09-12): SETTLED_PICK_COLUMNS gained `is_live`. passesRecordFilter
+// excludes a pre-game model's in-play pick (the session-114 repair rows) and
+// reads that column to do it; on a v5 envelope it is undefined, the guard is
+// always false, and ~14k contaminated rows would count toward a model's
+// settled record and its CLV average. Exactly the v4 shape of bug.
+const KEY = 'settledPicks.v6';
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day
