@@ -2292,6 +2292,35 @@ DECIDE_ON_BEST_PRICE: bool = (
 # newest quote in the shop is a book that stopped pricing, not a better number.
 BEST_LINE_MAX_LAG_MIN: float = float(os.environ.get("BEST_LINE_MAX_LAG_MIN", "30"))
 
+# A PROPOSITION DraftKings DOES NOT LIST IS STILL A PROPOSITION (mike,
+# 2026-09-12: "Yes, scoring of other books lines.")
+#
+# Until this flag, no DraftKings quote meant no pick, whatever the other books
+# had. Measured over the markets an ACTIVE model prices, 2026-08-28 onward:
+# DraftKings listed 11,780 player propositions and the bettable books listed
+# 1,357 more that it did not -- four fifths of them from FanDuel, Hard Rock,
+# Fanatics and Caesars. (The two largest pools, batter stolen bases and total
+# bases, belong to models that are PAUSED; unpausing them is a separate
+# decision and this flag does not make it.)
+#
+# What this does NOT do is pick the book by price. The line IS the proposition
+# -- Over 5.5 is a different bet from Over 6.5 -- so the book is taken in
+# BEST_LINE_BOOKMAKERS order (the list mike curated, DraftKings first) and the
+# ordinary best-price check then runs at THAT line. Choosing the book by whose
+# number the model likes best would be choosing the bet to suit the model.
+#
+# Game markets are deliberately NOT included: DraftKings lists every game we
+# model, the handful it does not (MLB first-five spreads and totals) have no
+# model, and a game-level DraftKings line is a model FEATURE, so changing its
+# source is a retrain question rather than a config one.
+#
+# picks.line_book records the book; NULL means DraftKings. These picks are a
+# NEW population -- every cut was swept on DraftKings-lined picks -- so they
+# are reported separately rather than folded into a model's record.
+SCORE_OFF_ANY_BOOK_LINE: bool = (
+    os.environ.get("SCORE_OFF_ANY_BOOK_LINE", "1").strip() not in ("0", "false", "False")
+)
+
 # Books that are REFERENCE ONLY — never offered as a price to take.
 #
 # BEST_LINE_BOOKMAKERS answers one question: "where should the bettor actually

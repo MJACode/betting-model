@@ -229,12 +229,28 @@ def fetch_espn_news(sport: str, teams: list[str] | None = None, fetch=None) -> l
     url = ESPN_NEWS_URL.format(path=path)
 
     items: dict[tuple[str, str], NewsItem] = {}
+    raw_count = 0
+    no_players_sample: dict | None = None
 
     def absorb(articles: list[dict]) -> None:
+        nonlocal raw_count, no_players_sample
         for article in articles:
+            raw_count += 1
             item = _to_item(article)
             if item is not None:
                 items.setdefault((item.source, item.source_item_id), item)
+            elif no_players_sample is None and isinstance(article, dict) \
+                    and (article.get("headline") or article.get("title")):
+                # Fetched fine, parsed fine, but named nobody -- keep ONE raw
+                # sample so a total-zero run is diagnosable from the log alone
+                # instead of guessed at. See docs/rules_evidence.md 2026-09-12:
+                # this ingestor has written zero rows since it shipped and the
+                # shape ESPN actually sends for `categories` was never confirmed
+                # against a live response from a sandbox that can reach ESPN.
+                no_players_sample = {
+                    "headline": article.get("headline") or article.get("title"),
+                    "categories": article.get("categories"),
+                }
 
     absorb(_fetch_espn(url, {"limit": 50}, fetch))
 
@@ -245,6 +261,14 @@ def fetch_espn_news(sport: str, teams: list[str] | None = None, fetch=None) -> l
         if espn_id is None:
             continue
         absorb(_fetch_espn(url, {"limit": 20, "team": espn_id}, fetch))
+
+    if raw_count and not items:
+        logger.warning(
+            f"{sport}: ESPN news returned {raw_count} raw article(s) but 0 named "
+            f"a player — categories shape sample: {no_players_sample}"
+        )
+    elif raw_count == 0:
+        logger.warning(f"{sport}: ESPN news fetch returned 0 raw articles")
 
     return list(items.values())
 

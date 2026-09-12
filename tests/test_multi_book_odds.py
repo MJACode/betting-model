@@ -111,21 +111,36 @@ def _source(rel: str) -> str:
     return (REPO / rel).read_text(encoding="utf-8")
 
 
-def test_scorer_prop_odds_filters_draftkings():
-    """models/scorer.py `_get_prop_dk_odds` must pin props to DK."""
+def test_scorer_prop_odds_reads_one_named_book_at_a_time():
+    """Every player_prop_odds read in the scorer names the book it wants.
+
+    INVERTED 2026-09-12 (mike: "Yes, scoring of other books lines"). Until
+    then the single-book read was pinned to the literal 'draftkings', because
+    only DraftKings could price a bet. It is now parameterised, and the one
+    caller that passes anything else is `_fallback_line_quote`, which walks
+    BEST_LINE_BOOKMAKERS in order and only for a proposition DraftKings does
+    not list. The property worth holding is unchanged: a read must never be
+    unfiltered, which would let any book's number reach the decision by
+    accident rather than by rule.
+    """
     src = _source("models/scorer.py")
     assert "FROM player_prop_odds" in src
-    # Every player_prop_odds read in the scorer either pins DK (the priced
-    # side that decides the bet) or is the best-line lookup, which is scoped to
-    # BEST_LINE_BOOKMAKERS and only ever fills the display-only best_* columns.
     for block in src.split("FROM player_prop_odds")[1:]:
         window = block[:400]
-        pinned_to_dk = re.search(r"bookmaker\s*=\s*'draftkings'", window)
+        one_book = re.search(r"bookmaker\s*=\s*(?:'draftkings'|%s|\?)", window)
         best_line = "bookmaker IN ({placeholders})" in window
-        assert pinned_to_dk or best_line, (
-            "a player_prop_odds read in scorer.py lost its draftkings filter — "
-            "non-DK prices could reach scoring"
+        named_list = "bookmaker = 'draftkings'" in window
+        assert one_book or best_line or named_list, (
+            "a player_prop_odds read in scorer.py names no bookmaker at all — "
+            "any book's price could reach scoring"
         )
+    # The default is still DraftKings, and the ONE place another book is asked
+    # for is the fallback line lookup.
+    assert "bookmaker: str = ODDS_API_BOOKMAKER" in src
+    fb = src[src.index("def _fallback_line_quote("):src.index("def _get_prop_dk_odds(")]
+    assert "for book in BEST_LINE_BOOKMAKERS:" in fb
+    assert "if book == ODDS_API_BOOKMAKER:" in fb, "DraftKings is tried by the caller"
+    assert "SCORE_OFF_ANY_BOOK_LINE" in fb, "the fallback must be switchable off"
 
 
 def test_closing_line_reads_filter_draftkings():

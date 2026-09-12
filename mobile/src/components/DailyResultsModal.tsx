@@ -431,7 +431,10 @@ function PickRow({ pick }: { pick: Pick }) {
   // A pick with no book price is record-only too: the model line above it
   // sums through flatPnl, so showing the settled -110 here would print money
   // the total just excluded.
-  const recordOnly = RECORD_ONLY_MODELS.has(pick.model_id) || pick.dk_odds == null;
+  // decisionOdds, not dk_odds (2026-09-12): the day's total counts a pick
+  // whose price came from another book, so a row keyed on dk_odds would
+  // print 'record only' beside units the total above it already added.
+  const recordOnly = RECORD_ONLY_MODELS.has(pick.model_id) || decisionOdds(pick) == null;
   return (
     <View style={styles.modelRow}>
       <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>

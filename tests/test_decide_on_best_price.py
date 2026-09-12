@@ -59,6 +59,10 @@ def _rules(monkeypatch):
     monkeypatch.setattr(scorer, "MODEL_EDGE_THRESHOLDS", config.MODEL_EDGE_THRESHOLDS)
     monkeypatch.setattr(scorer, "MODEL_PROB_THRESHOLDS", config.MODEL_PROB_THRESHOLDS)
     monkeypatch.setattr(scorer, "PAUSED_MODELS", set())
+    # The AUTOMATIC pauses too: _is_paused also reads model_auto_pauses
+    # (_auto_paused_models), so stubbing the config constant alone leaves the
+    # test reading production state -- see test_prop_calibrated_decision.
+    monkeypatch.setattr(scorer, "_auto_paused_models", lambda: set())
     monkeypatch.setattr(scorer, "DECIDE_ON_CALIBRATED_PROB", False)
     monkeypatch.setattr(scorer, "DECIDE_ON_BEST_PRICE", True)
     monkeypatch.setattr(scorer, "_is_paused", lambda mid: False)
@@ -124,7 +128,7 @@ def test_a_tie_keeps_draftkings_as_the_deciding_book(_rules):
     assert p["signal_type"] == "BET"
 
 
-@pytest.mark.parametrize("why", ["live", "downgraded", "no_dk_price", "flag_off", "no_best"])
+@pytest.mark.parametrize("why", ["live", "downgraded", "no_price", "flag_off", "no_best"])
 def test_the_pick_stays_decided_at_draftkings_when(why, monkeypatch, _rules):
     p = _dk_pick()
     best = {"book": "fanduel", "odds": -120.0, "link": None}
@@ -132,8 +136,14 @@ def test_the_pick_stays_decided_at_draftkings_when(why, monkeypatch, _rules):
         p["is_live"] = True
     elif why == "downgraded":
         p["downgrade_reason"] = "daily cap"
-    elif why == "no_dk_price":
+    elif why == "no_price":
+        # No price ANYWHERE -- a prob-only model whose market no book lists.
+        # Until 2026-09-12 this case keyed on dk_odds alone, which would now
+        # exclude every pick scored off another book's line (dk_odds is NULL
+        # on those by design) from the best-price re-check.
         p["dk_odds"] = None
+        p["decision_odds"] = None
+        p["decision_book"] = None
     elif why == "flag_off":
         monkeypatch.setattr(scorer, "DECIDE_ON_BEST_PRICE", False)
     elif why == "no_best":

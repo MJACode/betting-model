@@ -438,7 +438,7 @@ const PICK_COLUMNS =
   'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
   'clv_captured_at, dk_bet_link, ' +
   'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, ' +
-  'decision_book, decision_odds, decision_implied_prob, decision_edge';
+  'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
 // with SettledPickKey — and bump the cache key in settledPickCache.ts when it
@@ -1569,6 +1569,11 @@ export interface FullOutcomePickRow {
   // The price the pick was DECIDED at (2026-09-09); the view appends them
   // after profit_units and grades profit_units at that price.
   decision_book: string | null;
+  // NO line_book here on purpose: v_model_full_outcome_picks lists its
+  // columns explicitly and does not return it, so declaring it would make
+  // every row read `undefined` and claim DraftKings' line. Add it to the
+  // view first, in the same migration, if a settled surface needs it
+  // (UX review, 2026-09-12).
   decision_odds: number | null;
   decision_edge: number | null;
 }

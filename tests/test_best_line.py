@@ -206,9 +206,19 @@ def test_the_builders_decide_at_draftkings_and_the_stamp_requalifies():
         start = src.index(fn)
         body = src[start:src.index("\ndef ", start + 1)]
         assert "_decide(" in body and "_size(" in body, fn
-        assert "_decision_fields(ODDS_API_BOOKMAKER" in body, (
-            f"{fn} must record DraftKings as the deciding price until the "
-            "best-price stamp says otherwise")
+        assert "_decision_fields(" in body, (
+            f"{fn} must record which price decided it")
+        if fn == "def _make_prop_pick(":
+            # 2026-09-12: a proposition DraftKings does not list is scored off
+            # the first bettable book that does, so the deciding book there is
+            # the line's book and DraftKings only when there is no other.
+            assert "_decision_fields(line_book or ODDS_API_BOOKMAKER" in body
+            assert '"dk_odds":             None if line_book else dk_odds' in body, (
+                "picks.dk_odds must stay NULL when DraftKings never quoted it")
+        else:
+            assert "_decision_fields(ODDS_API_BOOKMAKER" in body, (
+                f"{fn} must record DraftKings as the deciding price until the "
+                "best-price re-check says otherwise")
     for fn in ("def _stamp_best_game_prices(", "def _tag_prop("):
         start = src.index(fn)
         body = src[start:src.index("\ndef ", start + 1)]

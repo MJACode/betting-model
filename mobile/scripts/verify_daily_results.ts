@@ -75,6 +75,7 @@ function mk(over: Partial<Pick>): Pick {
     best_implied_prob: null,
     best_edge: null,
     best_bet_link: null,
+    line_book: null,
     decision_book: null,
     decision_odds: null,
     decision_implied_prob: null,

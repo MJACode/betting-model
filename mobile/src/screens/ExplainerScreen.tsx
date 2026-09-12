@@ -33,10 +33,13 @@ export function ExplainerScreen() {
 
         <Section heading="Which sportsbook the numbers come from">
           <P>
-            <Strong>Every signal is priced against DraftKings.</Strong> The model
-            probability, the edge, the BET/AVOID call, the recommended stake, and
-            every parlay you build all compare against the DraftKings line — that
-            is the one book we score, track, and grade our record against.
+            <Strong>DraftKings sets the number; you get the best price on it.</Strong>{' '}
+            The model prices the DraftKings line, and the BET call and the
+            stake are then taken at the best price any book you can bet is
+            offering on that same number — the pick names the book. Our
+            record is graded at that price. The one exception runs the other
+            way: a player prop DraftKings does not post at all is scored off
+            the first of those books that does, and the pick says so.
           </P>
           <P>
             Every pick lists each book's line, <Strong>best price first</Strong>,
