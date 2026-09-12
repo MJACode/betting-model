@@ -356,9 +356,15 @@ def test_the_edge_band_is_a_band():
     disagreement with a live book is evidence about our snapshot, not value."""
     from ncaaf_live.serve import LiveEngine as _E
     d = _E._decide
-    assert d(0.70, 0.09, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # below floor
-    assert d(0.70, 0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"  # in band
-    assert d(0.70, 0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # over cap
+    # Probability taken FROM the floor rather than hard-coded: this read 0.70
+    # and went red the moment the floor moved to 0.72 (#678, 2026-09-12), which
+    # tested the constant rather than the band it is named for.
+    p_ok = TOTAL_MIN_PROB
+    assert d(p_ok, 0.09, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # below floor
+    assert d(p_ok, 0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"  # in band
+    assert d(p_ok, 0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # over cap
+    assert d(TOTAL_MIN_PROB - 0.01, 0.13, TOTAL_MIN_PROB,
+             TOTAL_MIN_EDGE) is None                               # under floor
     assert MAX_EDGE_CAP > TOTAL_MIN_EDGE, "a cap below the floor fires nothing"
 
 

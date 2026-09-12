@@ -441,7 +441,7 @@ ACTION_THRESHOLDS: dict = {
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
-    "ncaaf_live_win_prob": {"min_prob": 0.62, "min_edge": 0.10},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.62 prob x 0.26 EV) — see MODEL_MIN_EV + PAUSED_MODELS
+    "ncaaf_live_win_prob": {"min_prob": 0.68, "min_edge": 0.10},  # 2026-09-12 mike: 0.62 -> 0.68 with a 10-pt pregame-dog cap (see NCAAF_LIVE_ML_MAX_PREGAME_DOG_POINTS); 23 bets +7.5% H1 +9.5% H2 +4.9% on the 2025 re-sweep, against 38 bets +5.2% at 0.62
     "ncaaf_live_total":    {"min_prob": 0.72, "min_edge": 0.12},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.72 prob x 0.22 EV) — see MODEL_MIN_EV + PAUSED_MODELS
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
@@ -665,6 +665,23 @@ RETIRED_MODELS: frozenset = frozenset({
 # here would remove profitable bets to solve a problem MLB does not have.
 LIVE_MAX_EDGE_CAP: float = float(os.environ.get("LIVE_MAX_EDGE_CAP", 0.20))
 
+# NCAAF LIVE MONEYLINE: never back a team that was getting more than this many
+# points BEFORE kickoff. 2026-09-12 (mike), after an Oklahoma State ML at +101
+# while they led Oregon by 10 in Q2 -- they had been 24.5-point home dogs.
+#
+# The live model already USES the pregame line (ncaaf_live/engine/remaining.py
+# carries pregame_spread, pregame_total and both decayed forms, and serve.py
+# refuses to price a game missing either). This is not a missing feature; it is
+# a cut. The 2025 re-sweep (scripts/ncaaf_live_resweep.py) put 247 cells at
+# >= 20 bets through the season split and the four best all cap this quantity.
+# Shipped cell: min_prob 0.68 x EV 0.26 x cap 10 -- 23 bets, +7.5%, halves
+# +9.5% / +4.9%, the only one whose two halves agree. Full table and the honest
+# status (no cell clears its own breakeven at 95%) in ncaaf_live/serve.py.
+#
+# None = off. Read by ncaaf_live.serve at import.
+NCAAF_LIVE_ML_MAX_PREGAME_DOG_POINTS: float | None = 10.0
+
+
 MODEL_MIN_EV: dict = {
     # 0.32, set 2026-08-29 and RESTORED 2026-08-30 (mike) after a brief 0.28.
     #
@@ -681,7 +698,7 @@ MODEL_MIN_EV: dict = {
     # lose least while keeping more than one bet. Re-sweep after ~3 more
     # Saturdays and expect these numbers to move.
     "ncaaf_live_total": 0.22,
-    "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: 0.62 x 0.26 is the both-halves-positive cell
+    "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: EV floor unchanged; the volume cut came from min_prob 0.68 + the pregame-dog cap below
 }
 
 # ── Live volume ceiling (bets per week) ──────────────────────────────────────
