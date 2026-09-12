@@ -433,7 +433,8 @@ check(
   // made one row of a 25-row board taller than its neighbours (UX review).
   check('the pill prints the off-line number under the price, in the board\'s idiom',
     stats.includes('const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;')
-      && /styles\.oddsCaption\} numberOfLines=\{1\}/.test(stats)
+      && /styles\.oddsCaption, !lineCaption && styles\.oddsCaptionDay\]/.test(stats)
+      && /numberOfLines=\{1\}/.test(stats)
       && modeLineLabel(1.5, 'over', 'atLeast', true) === '2+'
       && modeLineLabel(1.5, 'over', 'over', true) === 'O 1.5'
       && modeLineLabel(1.5, 'under', 'under', true) === 'U 1.5');
@@ -541,8 +542,30 @@ check(
   // A control that only exists on the days it can act is one nobody knows is
   // there. It renders always, disabled with the reason stated.
   check('the toggle renders even when it cannot act, and says why',
-    screen.includes("disabled={!hasSlate || gamesPicked}")
+    screen.includes('disabled={slateCutDead}')
       && screen.includes('A picked game is the narrower cut, so it wins.'));
+  // NOT collapsible: FilterSection treats `summary` as "collapsible" and the
+  // sheet remounts its children on every open, so a summary here put the cut
+  // four taps deep on a board that now defaults to showing everybody.
+  check('and it is not hidden behind a disclosure row',
+    /title="Availability"\s*\n\s*onClear=/.test(screen));
+  // "No games this week" while the slate read is still in flight is a claim we
+  // have not established (CLAUDE.md §00) — hasSlate is false during loading too.
+  check('and never claims an empty schedule while it is still looking',
+    screen.includes('const slateChecking = slateFor !== sport;')
+      && screen.includes("? 'Checking the schedule…'"));
+  // accessibilityState.busy has no VoiceOver trait, so the footer's visible
+  // "Updating…" is not a spoken one. The chip said ", loading"; so does this.
+  // Anchored to the SWITCH. Unanchored it matched the removed chip, which
+  // carried the identical string — so it passed on master with the fix not
+  // made. A guard dead code can satisfy is not a guard (CLAUDE.md §1b).
+  check('and the switch itself speaks the loading state, as the chip did',
+    /onValueChange=\{setTonightOnly\}[\s\S]{0,1600}\? `\$\{slateLabel\}, loading`/.test(screen));
+  // The sheet is now the ONLY route to this cut, so its button needs a trait
+  // and the badge needs explaining.
+  check('the Filters button is a labelled button, badge count and all',
+    screen.includes('`Filters, ${activeFilterCount} active`')
+      && /onPress=\{\(\) => setFiltersOpen\(true\)\}\s*\n\s*accessibilityRole="button"/.test(screen));
   check('the Stats board reads no model at all any more',
     !screen.includes('propModelForStat') && !screen.includes('useTodayPicks'));
 }
@@ -566,9 +589,14 @@ check(
   // key that varies, so it has to lead.
   check('and orders by game_date first, so the paging stays deterministic',
     /export async function fetchPropLinesForDates\([\s\S]{0,2000}?\.order\('game_date'\)\s*\n\s*\.order\('game_id'\)/.test(q));
-  check('the screen reads the same seven days the slate read covers',
+  // SEVEN DAYS INCLUSIVE, not eight: `.gte(from).lte(to)` includes both ends,
+  // so +7 puts today's weekday at each end and a three-letter caption cannot
+  // say which one it means. Measured 2026-09-12: the furthest date any book had
+  // priced was day 6, and day 7 held zero rows across all 38 markets, so the
+  // eighth day returned nothing and cost the caption its meaning.
+  check('the screen reads seven days INCLUSIVE, so no weekday repeats',
     stats.includes('const oddsFrom = todayET();')
-      && stats.includes("const oddsTo = addDays(oddsFrom, 7);")
+      && stats.includes('const oddsTo = addDays(oddsFrom, 6);')
       && stats.includes('fetchPropLinesForDates(oddsFrom, oddsTo, propMarket)'));
   // The unstarted-game bound used to be filtered to one date. Left that way it
   // would have thrown every later game's rows away and the widening would have
@@ -631,17 +659,35 @@ check(
 
   // The header dates the NEAREST slate; a pill only carries a day when its own
   // game is on a different one, so an all-Sunday board reads as it always did.
+  // The header dates the day MOST of the column is for, not the nearest slate.
+  // buildTonightSlate takes the EARLIEST future date, which midweek is one
+  // Thursday game — so "BEST THU" sat over a column that was thirty-of-thirty-two
+  // Sunday and the caption, whose premise is that it marks the exception, fired
+  // on nearly every row (UX review, 2026-09-12).
+  check('the header dates the day most of the column is actually for',
+    stats.includes('const oddsHeaderDate = useMemo(()')
+      && stats.includes('const d = gameDateById.get(q.gameId);')
+      && stats.includes('oddsDateLabel={oddsHeaderDate && oddsHeaderDate !== todayET() ? weekdayET(oddsHeaderDate) : null}'));
   check('the pill carries a weekday only when its game is not the header\'s day',
-    stats.includes('if (!g.game_date || g.game_date === oddsDate) continue;')
+    stats.includes('if (date === oddsHeaderDate) continue;')
       && stats.includes('dayLabel={oddsDay}')
-      && stats.includes("const caption = [dayLabel, lineCaption].filter(Boolean).join(' · ') || null;"));
+      && stats.includes("const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;"));
   check('and VoiceOver hears the day too',
     stats.includes('${dayLabel ? `, ${dayLabel}` : \'\'}'));
   // A team whose game is over but who plays again inside the window keeps its
   // pill: "Final" there would deny the reader a bet that is still on the board.
-  check('a team with a later game in the window is never labelled Live or Final',
-    /for \(const g of slateGames\) \{\s*const teams = \[g\.home_team, g\.away_team\]/.test(stats)
+  // A team forfeits its Live/Final label ONLY to a game the books have PRICED.
+  // Widening the read to the window nearly made the escape hatch universal: in
+  // MLB every club plays tomorrow, and MLB posts zero rows for tomorrow, so no
+  // club could carry a label and none could carry a price either — a bare dash
+  // on every player whose game had just ended, i.e. the 2026-09-04 failure this
+  // block exists to fix, back again (UX review, 2026-09-12).
+  check('a team only loses its Live/Final label to a game that is actually priced',
+    stats.includes('const pricedGameIds = useMemo(()')
+      && /if \(pricedGameIds\.has\(g\.game_id\)\) \{\s*\n\s*teams\.forEach\(\(t\) => pending\.add\(t\)\);/.test(stats)
       && stats.includes('pending.forEach((t) => out.delete(t));'));
+  check('and an unstarted game nobody has priced neither labels nor un-labels',
+    /if \(slateGameIds\.has\(g\.game_id\)\) continue;/.test(stats));
 }
 
 // ── Per-book side coverage, and the Over/Under control it locks ─────────────

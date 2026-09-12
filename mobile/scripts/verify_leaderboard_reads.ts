@@ -271,13 +271,22 @@ async function main() {
     check(`${m[1]}: pages with .range(from, to)`, totalsBody.slice(at, at + 700).includes('.range(from, to)'));
   }
 
-  // The screen has to wait for the slate, or its first read is the whole
-  // league and is thrown away the moment the slate lands.
+  // The screen waits for the slate WHEN THE SLATE WOULD NARROW THE READ, or its
+  // first read is the whole league and is thrown away the moment the slate
+  // lands.
   // GATED ON WHICH SPORT the slate is for, not on a boolean. As a boolean it was
   // read stale on a sport switch — the reset and the load effect land in the
   // same commit, so the effect still saw `true` and fired a read narrowed by
   // the OUTGOING sport's teams (UX review, 2026-09-09).
-  check('the board waits for THIS sport\'s slate before reading', /if \(slateFor !== sport\) return;/.test(s));
+  // AND ONLY WHEN SOMETHING NARROWS, since 2026-09-12: with the board no longer
+  // opening filtered, `readTeams` is null on first paint for every sport, so an
+  // unconditional gate serialised two requests where the second's shape could
+  // not change — up to SLATE_GATE_MS of dead time in front of the whole-league
+  // read that is now the default (UX review).
+  check('the board waits for THIS sport\'s slate before a read the slate NARROWS',
+    /if \(slateFor !== sport && \(tonightOnly \|\| gamesPicked\)\) return;/.test(s));
+  check('and does not wait for one it cannot narrow',
+    !/if \(slateFor !== sport\) return;/.test(s));
   check('and the old boolean is gone, not shadowed', !/slateReady/.test(s));
   check('the slate releases the board even when it fails', /\.finally\(\(\) => \{[\s\S]{0,120}setSlateFor\(sport\)/.test(s));
   // …and even when it never settles at all: supabase-js has no fetch timeout,

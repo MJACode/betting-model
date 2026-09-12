@@ -561,6 +561,11 @@ export function StatsScreen() {
   // (or after switching sports) must not empty the list.
   const hasSlate = slate.keys.size > 0;
   const tonightActive = tonightOnly && hasSlate;
+  /** The slate read has not SETTLED for this sport yet, so "no games" is not
+   *  something we know — only something we have not finished asking. */
+  const slateChecking = slateFor !== sport;
+  /** The Availability switch cannot act: no slate, or Games is the narrower cut. */
+  const slateCutDead = slateChecking || !hasSlate || gamesPicked;
   const slateLabel = slate.isToday ? 'Playing today' : `Next slate ${shortDate(slate.date)}`;
 
   const playerType = stat?.playerType;
@@ -644,9 +649,16 @@ export function StatsScreen() {
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey]);
 
   useEffect(() => {
-    if (slateFor !== sport) return; // the read is narrowed by THIS sport's slate
+    // The gate exists so a read NARROWED by the slate's teams is not fired
+    // before the slate lands (or fired twice). With the board no longer opening
+    // filtered, `readTeams` is null on first paint for every sport, so waiting
+    // serialised two requests where the second's shape could not change —
+    // costing up to SLATE_GATE_MS on the tab bettors open most, in front of the
+    // whole-league read that is now the default (UX review, 2026-09-12).
+    // Wait only when something actually narrows.
+    if (slateFor !== sport && (tonightOnly || gamesPicked)) return;
     void load();
-  }, [load, slateFor, sport]);
+  }, [load, slateFor, sport, tonightOnly, gamesPicked]);
 
   const toggleBasis = (next: Basis) => setBasis(next);
 
@@ -695,8 +707,23 @@ export function StatsScreen() {
   // zero on every later date. Books post daily-sport props about a day out, so
   // the wider bound returns the rows that exist and no others.
   const oddsFrom = todayET();
-  const oddsTo = addDays(oddsFrom, 7);
+  // SIX, NOT SEVEN, and the difference is the whole reason a pill can name a
+  // day. `.gte(from).lte(to)` is INCLUSIVE at both ends, so +7 spans eight days
+  // and today's weekday occurs at both — a "SUN" caption would mean "not this
+  // Sunday" and its absence would mean "this Sunday", with nothing in three
+  // characters able to resolve it (UX review, 2026-09-12). At +6 every weekday
+  // in the window is unique.
+  //
+  // It costs nothing: measured 2026-09-12, the furthest date any book had
+  // priced was 09-18 (day 6) — day 7 held ZERO rows across all 38 markets,
+  // despite carrying 72 NCAAF games and 11 UFC bouts. Books do not post that
+  // far out, so the eighth day was returning nothing and taking the caption's
+  // meaning with it.
+  const oddsTo = addDays(oddsFrom, 6);
   /** The nearest slate the board knows about — what the column header dates. */
+  /** The nearest slate the board knows about. Kept for the coverage copy,
+   *  which is a statement about a SLATE; the odds column dates itself off the
+   *  quotes it actually rendered instead — see `oddsHeaderDate`. */
   const oddsDate = slate.date || oddsFrom;
   useEffect(() => {
     let cancelled = false;
@@ -746,41 +773,49 @@ export function StatsScreen() {
     return out;
   }, [slateGames, slateGameIds]);
 
-  /** game_id → the day to print on its pill, for games that are not `oddsDate`.
-   *  The header already names the nearest slate's weekday; a pill only carries
-   *  a day when its game is on a DIFFERENT one, so the common board (everybody
-   *  on Sunday) reads exactly as it did before the window widened. */
-  const oddsDayByGame = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const g of slateGames) {
-      if (!g.game_date || g.game_date === oddsDate) continue;
-      const day = weekdayET(g.game_date);
-      // weekdayET answers '' for an unparseable date. An empty caption is a
-      // sliver of dead space under the pill, not a fact — leave it out.
-      if (day) out.set(g.game_id, day);
-    }
-    return out;
-  }, [slateGames, oddsDate]);
+  const gameDateById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of slateGames) if (g.game_date) m.set(g.game_id, g.game_date);
+    return m;
+  }, [slateGames]);
 
   // Teams whose game is in progress or over. Their lines are hidden by design
   // (no line a user can still take), and the cell says WHICH — "Live" or
   // "Final", the words GameStatusPill uses — instead of printing a dash that
   // reads as "no line": at 6:45pm on 2026-09-04 the 6:11 game's players had
   // all gone blank while every other row was priced. A team with a game still
-  // to come gets no label: that game's line can still show. That escape hatch
-  // used to mean a doubleheader alone; now the read spans the window it also
-  // means NEXT WEEK — a team whose Sunday game is Final but who plays again on
-  // Thursday is priced for Thursday, and labelling it "Final" would deny the
-  // reader a bet that is still on the board.
+  // to come gets no label: that game's line can still show.
+  //
+  // "CAN STILL SHOW" IS THE TEST, AND IT HAS TO BE MEASURED, NOT ASSUMED. That
+  // escape hatch used to mean a doubleheader, and widening the read to the
+  // window nearly turned it into "every team, always": in MLB every club plays
+  // tomorrow, so every club had an unstarted game and no club could ever carry
+  // a label again — while the same measurement that justified the widening says
+  // MLB posts ZERO rows for tomorrow. Every player whose game had just ended
+  // would have gone back to a bare em-dash, which is exactly the 2026-09-04
+  // failure this block was written to fix (UX review, 2026-09-12).
+  //
+  // So a team only forfeits its label to a game the books have actually PRICED.
+  // A later game with no quote cannot fill the cell, so it must not empty it.
+  const pricedGameIds = useMemo(() => {
+    const out = new Set<string>();
+    if (!propMarket || propLines.market !== propMarket) return out;
+    for (const r of propLines.rows) if (slateGameIds.has(r.game_id)) out.add(r.game_id);
+    return out;
+  }, [propLines, propMarket, slateGameIds]);
+
   const startedTeams = useMemo(() => {
     const out = new Map<string, 'Live' | 'Final'>();
     const pending = new Set<string>();
     for (const g of slateGames) {
       const teams = [g.home_team, g.away_team].filter(Boolean) as string[];
-      if (slateGameIds.has(g.game_id)) {
+      if (pricedGameIds.has(g.game_id)) {
         teams.forEach((t) => pending.add(t));
         continue;
       }
+      // Unstarted but unpriced: no label (nothing has happened) and no reprieve
+      // for a finished game elsewhere in the window either.
+      if (slateGameIds.has(g.game_id)) continue;
       // `now` is not read here, but gameStatus reads the clock internally —
       // the dependency below is what makes this re-derive on the tick.
       const kind = gameStatus(g).kind;
@@ -789,7 +824,7 @@ export function StatsScreen() {
     }
     pending.forEach((t) => out.delete(t));
     return out;
-  }, [slateGames, slateGameIds, now]);
+  }, [slateGames, slateGameIds, pricedGameIds, now]);
 
   const quoteByPlayerKey = useMemo(() => {
     if (!propMarket || propLines.market !== propMarket) return new Map<string, StatsOddsQuote>();
@@ -802,6 +837,54 @@ export function StatsScreen() {
       gameOrder,
     });
   }, [propLines, propMarket, line, side, books, slateGameIds, gameOrder]);
+
+  /**
+   * The day the odds column is MOSTLY for — the modal `game_date` among the
+   * quotes actually rendered, not the nearest slate.
+   *
+   * `buildTonightSlate` takes today if any game exists and otherwise the
+   * EARLIEST future date, which on a Tuesday of an NFL week is Thursday's one
+   * game. Dating the header off that put "BEST THU" above a column in which
+   * thirty of thirty-two teams are Sunday — so the caption, whose whole premise
+   * is that it marks the exception, fired on nearly every row, and the header
+   * named a day true of about 3% of it. NCAAF is worse: one midweek pair makes
+   * the header "BEST WED" while 130-odd programs read "SAT" (UX review).
+   *
+   * Ties break on the earlier date, so a two-day board names the nearer half.
+   */
+  const oddsHeaderDate = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const q of quoteByPlayerKey.values()) {
+      const d = gameDateById.get(q.gameId);
+      if (d) counts.set(d, (counts.get(d) ?? 0) + 1);
+    }
+    let best: string | null = null;
+    let most = 0;
+    for (const [d, c] of counts) {
+      if (c > most || (c === most && best !== null && d < best)) {
+        best = d;
+        most = c;
+      }
+    }
+    // No quotes yet (loading, or the book prices nothing): fall back to the
+    // slate, which is what the coverage copy one row down is talking about.
+    return best ?? oddsDate;
+  }, [quoteByPlayerKey, gameDateById, oddsDate]);
+
+  /** game_id → the day to print on its pill, for games that are NOT the day the
+   *  header names. The common board — everybody on Sunday — therefore carries
+   *  no captions at all, exactly as it read before the window widened. */
+  const oddsDayByGame = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const [gameId, date] of gameDateById) {
+      if (date === oddsHeaderDate) continue;
+      const day = weekdayET(date);
+      // weekdayET answers '' for an unparseable date. An empty caption is a
+      // sliver of dead space under the pill, not a fact — leave it out.
+      if (day) out.set(gameId, day);
+    }
+    return out;
+  }, [gameDateById, oddsHeaderDate]);
 
   // Leaderboard names that two players share once folded. Neither gets a quote:
   // a wrong price on the wrong player is worse than a dash (data/name_match.py).
@@ -1510,6 +1593,15 @@ export function StatsScreen() {
           <View style={styles.rightActions}>
             <Pressable
               onPress={() => setFiltersOpen(true)}
+              accessibilityRole="button"
+              // The badge is a bare number next to the word, so VoiceOver read
+              // "Filters, 2" with no trait and no idea what the 2 counted. This
+              // change makes the sheet the only route to the Availability cut,
+              // which promotes a standing scan finding into a real one (UX
+              // review, 2026-09-12).
+              accessibilityLabel={
+                activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Filters'
+              }
               style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
             >
               <Ionicons name="options-outline" size={16} color={colors.tint} />
@@ -1771,9 +1863,11 @@ export function StatsScreen() {
           // several books selected the cells no longer share one, so the
           // header names the rule ("BEST") and each pill carries its badge.
           oddsLabel={booksLabel(books)}
-          // On an off day the slate — and so the lines — belong to a FUTURE
-          // date. An undated header would read as "now" (UX_REVIEW §3).
-          oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}
+          // On an off day the lines belong to a FUTURE date, and an undated
+          // header would read as "now" (UX_REVIEW §3). Dated off the same value
+          // the pill captions are the exception to, so the header and the
+          // column can never name different days.
+          oddsDateLabel={oddsHeaderDate && oddsHeaderDate !== todayET() ? weekdayET(oddsHeaderDate) : null}
           showMatchup={showMatchupCol}
           matchupTooltip={matchupTooltip}
         />
@@ -1947,48 +2041,61 @@ export function StatsScreen() {
             is only there on the days it is needed is a control nobody knows
             exists — which is how a board defaulting to every player would read
             as having no way back. */}
+        {/* NO `summary`, so this row is NOT collapsible and the switch is on
+            screen the moment the sheet opens. `FilterSection` treats a summary
+            as "collapsible" and `FilterSheet` remounts its children on every
+            open, so with one it reset to collapsed every time — putting the cut
+            the removed chip served four taps deep, on a board that now defaults
+            to showing everybody. Every shipped filter sheet checked keeps
+            boolean toggles visible and reserves the disclosure for multi-value
+            sections (Klarna, Zalando, TheFork; UX review, 2026-09-12). */}
         <FilterSection
           title="Availability"
-          summary={
-            !hasSlate
-              ? 'No games scheduled'
-              : gamesPicked
-                ? 'Set by Games'
-                : tonightActive
-                  ? slateLabel
-                  : 'All players'
-          }
-          defaultOpen={tonightActive}
           onClear={tonightActive && !gamesPicked ? () => setTonightOnly(false) : undefined}
         >
           <View style={styles.ungradedRow}>
-            <Text style={styles.ungradedLabel}>
+            <Text style={[styles.ungradedLabel, slateCutDead && styles.rowDisabled]}>
               {hasSlate ? slateLabel : 'Playing today'}
             </Text>
             <Switch
               value={tonightActive && !gamesPicked}
               onValueChange={setTonightOnly}
-              disabled={!hasSlate || gamesPicked}
+              disabled={slateCutDead}
               accessibilityLabel={
-                !hasSlate
-                  ? 'Playing today, unavailable: no games scheduled'
-                  : gamesPicked
-                    ? `${slateLabel}, unavailable while a game is picked above`
-                    : `${slateLabel}. On shows only players in action, off shows every player`
+                slateChecking
+                  ? 'Playing today, checking the schedule'
+                  : !hasSlate
+                    ? 'Playing today, unavailable: no games scheduled'
+                    : gamesPicked
+                      ? `${slateLabel}, unavailable while a game is picked above`
+                      // The chip said ", loading" for this exact reason: the tap
+                      // is a network read and VoiceOver focus stays on the
+                      // control while the board changes underneath it. The
+                      // footer's `busy` is a visible affordance, not a spoken
+                      // one — accessibilityState.busy has no VoiceOver trait —
+                      // so the words have to be here (UX review, 2026-09-12).
+                      : loading
+                        ? `${slateLabel}, loading`
+                        : `${slateLabel}. On shows only players in action, off shows every player`
               }
             />
           </View>
           {/* Says which way the board is cut, in the words of the thing the
               reader is looking at — "off" on a switch is not a fact about the
-              board until something names what off MEANS. */}
-          <Text style={styles.availabilityNote}>
-            {!hasSlate
-              ? `No ${sport} games in the next week, so there is nobody to narrow to.`
-              : gamesPicked
-                ? 'A picked game is the narrower cut, so it wins. Clear Games to use this.'
-                : tonightActive
-                  ? 'Showing only players whose game is on this slate.'
-                  : 'Showing every player. Lines come from each one’s next game.'}
+              board until something names what off MEANS. And it must not assert
+              an empty schedule while it is still LOOKING: `hasSlate` is false
+              during the first seconds of the slate read too, so a sheet opened
+              then claimed there were no games all week (§00). */}
+          <Text style={[styles.availabilityNote, slateCutDead && styles.rowDisabled]}>
+            {slateChecking
+              ? 'Checking the schedule…'
+              : !hasSlate
+                ? `No ${sport} games in the next week, so there is nobody to narrow to.`
+                : gamesPicked
+                  ? 'A picked game is the narrower cut, so it wins. Clear Games to use this.'
+                  : tonightActive
+                    ? 'Showing only players whose game is on this slate.'
+                    : 'Showing every player. Lines come from each one’s next game.'}
           </Text>
         </FilterSection>
 
@@ -2420,13 +2527,15 @@ function OddsCell({
   // book's own "O 2.5" in Over/Under — so it reads against the header without
   // translation (UX review). statsOdds offLine.
   //
-  // THE DAY RIDES IN THE SAME SLOT, and when both apply the day comes first:
-  // "which game is this?" has to be settled before "which line is this?" means
-  // anything. Both are short (a weekday is three characters, a line label four
-  // or five) and the row is already `numberOfLines={1}`, so the pair fits the
-  // 62pt column that made this a caption rather than a second pill.
+  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first because the
+  // caption is `numberOfLines={1}` inside a container fixed at 62-93pt while
+  // the text scales with Dynamic Type: at accessibility sizes the tail is what
+  // truncates. Losing "MON" costs the reader a schedule fact; losing "3+" hides
+  // that the price is for a DIFFERENT LINE than the ruler's, i.e. a different
+  // bet. Order the sacrifice deliberately (UX review, 2026-09-12). VoiceOver
+  // reads both regardless — see `label` above.
   const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;
-  const caption = [dayLabel, lineCaption].filter(Boolean).join(' · ') || null;
+  const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   return (
     <Pressable
       onPress={onPress}
@@ -2454,7 +2563,13 @@ function OddsCell({
         <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>
       {caption ? (
-        <Text style={styles.oddsCaption} numberOfLines={1}>
+        // The day is a SCHEDULE fact and the line marker changes the BET, so
+        // they do not carry equal weight: semibold when an off-line marker is
+        // present, regular when the caption is only a day.
+        <Text
+          style={[styles.oddsCaption, !lineCaption && styles.oddsCaptionDay]}
+          numberOfLines={1}
+        >
           {caption}
         </Text>
       ) : null}
@@ -3300,6 +3415,12 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 1,
+  },
+  oddsCaptionDay: {
+    fontWeight: font.weight.regular,
+  },
+  rowDisabled: {
+    color: colors.textTertiary,
   },
   availabilityNote: {
     fontSize: font.size.caption,
