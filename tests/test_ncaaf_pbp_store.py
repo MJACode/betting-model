@@ -100,7 +100,7 @@ def test_the_stored_columns_match_the_migration():
 def test_a_season_survives_the_round_trip_in_the_cfbd_spelling():
     conn = _Conn()
     got = store_season(conn, 2025, _plays(3))
-    assert got == {"season": 2025, "plays": 3, "games": 1}
+    assert (got["season"], got["plays"], got["games"]) == (2025, 3, 1)
     assert conn.commits == 1
 
     back = load_season_from_db(conn, 2025)
@@ -133,7 +133,7 @@ def test_cfbd_serving_one_play_twice_does_not_break_the_write():
 def test_a_season_with_no_plays_writes_nothing_and_says_so():
     conn = _Conn()
     assert store_season(conn, 2025, pd.DataFrame()) == {
-        "season": 2025, "plays": 0, "games": 0}
+        "season": 2025, "plays": 0, "games": 0}      # no ranges: nothing seen
     assert conn.commits == 0
 
 
@@ -207,3 +207,53 @@ def test_a_one_season_build_gets_its_own_filename():
     assert out_path([2025]).name == "states_2025.parquet"
     assert out_path([2024, 2025]).name == "states_2024-2025.parquet"
     assert out_path([2025], "/tmp/x.parquet").name == "x.parquet"
+
+
+# ── the column Postgres refuses to name ──────────────────────────────────────
+
+def test_an_out_of_range_value_names_its_column_and_its_play():
+    """The 2026-09-12 failure, pinned. `NumericValueOutOfRange: integer out of
+    range` arrives with no column, no value and no row, so the first run of the
+    worker job was undiagnosable from its own traceback."""
+    from ncaaf_live.backtest.pull_pbp import _check_ranges
+    df = _plays(3).rename(columns=DB_COLUMNS)
+    df["play_id"] = df["play_id"].astype(str)
+    df["game_id_cfbd"] = df["game_id_cfbd"].astype(str)
+    # int64 cannot hold a value BIGINT rejects, so the realistic shape is an
+    # object column carrying a Python int -- what a bad parse actually yields.
+    df["yards_gained"] = df["yards_gained"].astype(object)
+    df.loc[1, "yards_gained"] = 2 ** 64
+
+    with pytest.raises(ValueError) as e:
+        _check_ranges(df, 2025)
+    msg = str(e.value)
+    assert "yards_gained" in msg          # the column Postgres would not name
+    assert "2025p1" in msg                # and which play it was
+    assert "2025" in msg
+
+
+def test_ordinary_values_pass_the_range_check():
+    from ncaaf_live.backtest.pull_pbp import _check_ranges
+    df = _plays(5).rename(columns=DB_COLUMNS)
+    _check_ranges(df, 2025)               # must not raise
+
+
+def test_a_stored_season_reports_the_ranges_it_saw():
+    """So the next surprise is visible in the job result before it is fatal."""
+    conn = _Conn()
+    got = store_season(conn, 2025, _plays(4))
+    assert got["ranges"]["period"] == [1, 1]
+    assert got["ranges"]["offense_score"] == [0, 21]
+
+
+def test_every_numeric_column_in_the_table_is_range_checked():
+    """A column added to the table but not to NUMERIC_COLUMNS would overflow
+    with exactly the unnamed error this check exists to replace."""
+    import io
+    import re
+    from ncaaf_live.backtest.pull_pbp import NUMERIC_COLUMNS
+    sql = io.open("data/migrations/widen_ncaaf_plays_ints.sql",
+                  encoding="utf-8").read()
+    block = sql.split("ARRAY[", 1)[1].split("]", 1)[0]
+    widened = set(re.findall(r"'([a-z_]+)'", block))
+    assert set(NUMERIC_COLUMNS) == widened
