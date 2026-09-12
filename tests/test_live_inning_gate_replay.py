@@ -118,3 +118,47 @@ def test_force_is_the_only_way_past_a_failing_control():
 
 def test_force_does_not_invent_a_failure_when_the_control_passed():
     assert _refuse_tables(set(), True) is False
+
+
+# ── the stale-quote guard, the third rule production applies ──────────────────
+#
+# `_get_live_dk_odds` declines a quote the book stamped BEFORE the score it has
+# not priced yet (#458, 2026-09-03). The replay paired on time alone until
+# 2026-09-12, so it counted bets production would have refused: 18 of the 38
+# that set the 0.72 cut on the 2026 replay, and they went 16-2.
+
+def _scored(ts, home, away, inning=1):
+    return {"snapshot_at": ts, "inning": inning,
+            "home_score": home, "away_score": away}
+
+
+def test_a_quote_published_before_the_run_it_has_not_priced_is_dropped():
+    """23:02 shows a run we first see there; the newest price at or before it
+    was stamped 23:01, so the book has not priced that run. Production
+    declines it. The 23:00 state, whose score has not moved, keeps its own."""
+    states = [_scored(f"{BASE}0:00Z", 0, 0), _scored(f"{BASE}2:00Z", 1, 0)]
+    prices = [_price("2026-09-05T22:59:00Z"), _price(f"{BASE}1:00Z")]
+    paired = _pair(states, prices)
+    assert [st["snapshot_at"] for st, _ in paired] == [f"{BASE}0:00Z"]
+
+
+def test_a_quote_republished_after_the_run_is_kept():
+    states = [_scored(f"{BASE}0:00Z", 0, 0), _scored(f"{BASE}2:00Z", 1, 0),
+              _scored(f"{BASE}4:00Z", 1, 0)]
+    prices = [_price("2026-09-05T22:59:00Z"), _price(f"{BASE}1:00Z"),
+              _price(f"{BASE}3:00Z", 9.5)]
+    paired = _pair(states, prices)
+    assert [p["total_line"] for _, p in paired] == [8.5, 9.5]
+
+
+def test_a_score_that_never_moved_has_nothing_to_be_stale_against():
+    states = [_scored(f"{BASE}0:00Z", 2, 1), _scored(f"{BASE}2:00Z", 2, 1)]
+    prices = [_price("2026-09-05T22:59:00Z"), _price(f"{BASE}1:00Z")]
+    assert len(_pair(states, prices)) == 2
+
+
+def test_the_first_state_is_not_treated_as_a_score_change():
+    """We cannot know when a score we have always seen was first shown, so the
+    opening state must not block every quote before it."""
+    states = [_scored(f"{BASE}2:00Z", 3, 2)]
+    assert len(_pair(states, [_price(f"{BASE}1:00Z")])) == 1

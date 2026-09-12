@@ -110,6 +110,7 @@ from loguru import logger
 import config
 from data.db import get_connection
 from features.live_game_features import build_live_state_row
+from data.live_quote_guard import quote_predates_score
 from models.live_scorer import (
     _count_over_prob,
     classify_live_signal,
@@ -122,10 +123,17 @@ STATE_COLS = ["inning", "inning_half", "outs", "bases_state",
               "home_score", "away_score", "abstract_game_state", "snapshot_at"]
 
 # How stale an in-play price may be relative to the state it is paired with.
-# The live loop's own guard is tighter (a quote must not predate the score it
-# has not priced yet); here the pairing is by time only, so this is the honest
-# bound rather than a claim to reproduce that guard exactly.
 MAX_PRICE_AGE_S = 120
+
+# AND THE SAME STALE-QUOTE GUARD PRODUCTION APPLIES. Until 2026-09-12 the
+# pairing here was by time ALONE, while `_get_live_dk_odds` had (since #458,
+# 2026-09-03) also declined a quote the book stamped BEFORE the score it has
+# not priced yet. The gap was not academic: on the 47-slate 2026 replay that
+# set the 0.72 cut, 18 of the 38 qualifying bets were quotes production would
+# have refused, and they went 16-2 -- they carried the entire result
+# (docs/thresholds.md, "The forward check on fresh quotes"). A replay that
+# counts bets production cannot take is not a replay of production.
+LIVE_SCORE_LAG_TOLERANCE_SEC = getattr(config, "LIVE_SCORE_LAG_TOLERANCE_SEC", 0.0)
 
 
 def _games(conn, since: str) -> list[dict]:
@@ -166,8 +174,30 @@ def _prices(conn, game_id: str) -> list[dict]:
             for r in rows]
 
 
+def _score_seen_at(states: list[dict]) -> list:
+    """Per state, when we FIRST saw the score that state carries.
+
+    The offline twin of live_scorer._score_changed_at, which asks the same
+    question of live_game_state at one instant. None where the score has not
+    changed since the first state we hold -- the same "first sight" rule, and
+    the same meaning: nothing to be stale against.
+    """
+    out, first_seen, prev = [], None, None
+    for st in states:
+        score = (st.get("home_score"), st.get("away_score"))
+        if prev is None:
+            prev = score          # the opening state: no earlier, different score
+        elif score != prev:
+            first_seen = st["snapshot_at"]
+            prev = score
+        out.append(first_seen)
+    return out
+
+
 def _pair(states: list[dict], prices: list[dict]) -> list[tuple[dict, dict]]:
-    """Each state with the newest price at or before it, within the age bound.
+    """Each state with the newest price at or before it, within the age bound
+    AND not predating the score that state shows — production's own two rules
+    (`_get_live_dk_odds`), the second via production's own helper.
 
     A merge walk rather than a per-state scan: these are two sorted lists of a
     few thousand rows per game, and the quadratic version took longer than the
@@ -184,14 +214,18 @@ def _pair(states: list[dict], prices: list[dict]) -> list[tuple[dict, dict]]:
 
     pt = [(ts(p["snapshot_at"]), p) for p in prices]
     pt = [(t, p) for t, p in pt if t is not None]
+    seen = _score_seen_at(states)
     out, i = [], 0
-    for st in states:
+    for st, score_seen_at in zip(states, seen):
         t = ts(st["snapshot_at"])
         if t is None:
             continue
         while i + 1 < len(pt) and pt[i + 1][0] <= t:
             i += 1
         if not pt or pt[i][0] > t or (t - pt[i][0]) > MAX_PRICE_AGE_S:
+            continue
+        if quote_predates_score(pt[i][1]["snapshot_at"], score_seen_at,
+                                LIVE_SCORE_LAG_TOLERANCE_SEC):
             continue
         out.append((st, pt[i][1]))
     return out

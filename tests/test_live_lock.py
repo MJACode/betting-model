@@ -189,3 +189,42 @@ def test_flag_off_restores_delete_and_replace(monkeypatch):
     kept = _write_live_picks(conn, "g1", fresh)
     assert kept == fresh and written == fresh          # ...but churn wins with flag off
     assert "mlb_live_total_runs" in {p[1] for p in conn.deletes}
+
+
+# ── the skip message names the reason it actually happened ───────────────────
+#
+# This logged EVERY dropped pick as "lane locked at first BET signal ()" --
+# empty parens included -- when the common case by far is the
+# unchanged-proposition filter, which is the 5s loop working as designed.
+# Observed on 2026-09-11 in the pollers log on a game with nothing locked.
+
+def _log_lines(func):
+    from loguru import logger
+    lines = []
+    sink = logger.add(lines.append, level="DEBUG", format="{message}")
+    try:
+        func()
+    finally:
+        logger.remove(sink)
+    return "".join(lines)
+
+
+def test_an_unchanged_lane_is_not_reported_as_locked(monkeypatch):
+    monkeypatch.setattr(live_mod, "LIVE_MODELS", _TWO_LANES)
+    monkeypatch.setattr(live_mod, "_insert_picks", lambda c, p: None)
+    pick = _pick("lane_a", "home")
+    # the stored row IS this pick: same side, signal, line and price
+    conn = FakeConn(existing=[("lane_a", "home", "BET", None, None)])
+    out = _log_lines(lambda: _write_live_picks(conn, "g1", [pick]))
+    assert "lane locked" not in out, (
+        "an unchanged proposition was reported as a first-signal lock: " + out)
+    assert "not rewritten" in out
+
+
+def test_a_locked_lane_still_says_so_and_names_the_lane(monkeypatch):
+    monkeypatch.setattr(live_mod, "LIVE_MODELS", _TWO_LANES)
+    monkeypatch.setattr(live_mod, "_insert_picks", lambda c, p: None)
+    conn = FakeConn(locked=["lane_b"])
+    out = _log_lines(lambda: _write_live_picks(
+        conn, "g1", [_pick("lane_b", "over"), _pick("lane_a", "home")]))
+    assert "lane locked at first BET signal (lane_b)" in out
