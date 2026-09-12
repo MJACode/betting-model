@@ -62,6 +62,29 @@ every hour inside 24 h. Grade the rule by the hour the soft quote was taken
 variant) and decide 12 / 24 / 36 on that, not on the slot proxies. The open
 question is whether to WIDEN to 36 h to reach the Saturday-morning band.
 
+## [ ] [needs-decision] Buy the 2025 NCAAF in-play snapshots and run the live-lane replay
+
+Both NCAAF live lanes are paused (2026-09-11, mike) and the unpause condition
+is a season replay, not a forward slate. The ingestor and the harness exist
+and are tested on synthetic data; neither has run against real data.
+
+1. mike approves the spend: `python -m data.ingestors.ncaaf_inplay_history
+   --season 2025 --dry-run` says **18,662 calls = 373,240 credits (h2h +
+   totals) or 186,620 (`--markets totals`)**; 2,490,486 remained on
+   2026-09-11. Then `--apply --shard i/4` in four processes, on the worker or
+   Matt's machine (both hold `ODDS_API_KEY`).
+2. Build the states parquet where `CFBD_API_KEY` exists (the worker, or Matt's
+   machine — it is not in the local `.env`): `python -m
+   ncaaf_live.backtest.pull_pbp` then `build_states`.
+3. `python -m scripts.ncaaf_inplay_history_backtest --season 2025`, read the
+   FRESH grid, both halves, and the calibration table. Unpause only at a cell
+   positive in both halves with a CI clear of zero; a grid negative everywhere
+   means retrain or retire.
+
+The ~1.7k historical DK in-play rows already in `odds` for 2023-25
+(`source='odds_api_historical'`) are one pull per slate day and do not carry
+`last_update`; they are not a substitute.
+
 ## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
 
 Production has the guard: `models/live_scorer._get_live_dk_odds` declines an

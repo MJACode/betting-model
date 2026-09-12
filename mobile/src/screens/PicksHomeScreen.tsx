@@ -91,7 +91,14 @@ import { isGameSelected, selectableGames } from '@/lib/gameFilter';
 import { slipKeyForPick } from '@/lib/parlay';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { isUnlockedPreview, passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
+import {
+  isModelPaused,
+  isModelRetired,
+  isUnlockedPreview,
+  passesActionFilter,
+  unitsFor,
+  formatUnits,
+} from '@/lib/thresholds';
 import { formatCurrency, formatPct, gameStatus, todayET } from '@/lib/format';
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -148,10 +155,23 @@ export function PicksHomeScreen() {
   // The state poller is MLB-only, so other sports fall through to gameStatus's
   // blind-window branch rather than a real clock. Better than "until tomorrow
   // morning", and not the durable fix — that is server-side (see the PR).
+  //
+  // A PAUSED or RETIRED model's live BET is not stakeable. The Live board is
+  // the one board that never ran rows through the action filter, so a live
+  // BET locked before its lane was paused (the row is never rewritten, §1c)
+  // kept drawing a green BET badge and a stake here while Discord and push
+  // had already stopped on `model_action_thresholds.paused`. The surfaces
+  // show the same picks (CLAUDE.md §1b); this is the Live board's half.
+  // Deliberately NOT the full passesActionFilter: nfl_live_prop's cut is EV
+  // server-side, and its bundled row would hide BETs the lane legitimately
+  // wrote.
   const liveInProgress = useMemo(
     () =>
       allLiveData.filter(
-        (d) => gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
+        (d) =>
+          !isModelPaused(d.pick.model_id) &&
+          !isModelRetired(d.pick.model_id) &&
+          gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
       ),
     [allLiveData, liveStates],
   );

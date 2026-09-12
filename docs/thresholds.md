@@ -344,6 +344,8 @@ even money and a fixed number would mis-call every one of them.
 | `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | 35 (16W, bx .530, −4.81u, z −0.86) | pause if still below breakeven |
 | `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | 15 (6W, bx .503, −3.92u, z −0.80) | pause if still below breakeven |
 | `mlb_live_total_runs` | ~~2026-08-31~~ **2026-09-09** | ~~n ≥ 150~~ **n ≥ 75** | 0 on the current artifact (the 70 above were the June model, retired 09-09) | re-sweep the cut on the honest replay — see "mlb_live_total_runs cut, 2026-09-09" |
+| `ncaaf_live_total` | 2026-08-30 | — | **PAUSED 2026-09-11 (mike)**: 55 settled 28-27 −2.99u, claims 67.5% wins 50.9%; 31 BETs on 36 priceable games on 09-05 | unpause only on the 2025 in-play replay (`scripts/ncaaf_inplay_history_backtest.py`) — `docs/live_betting.md` |
+| `ncaaf_live_win_prob` | 2026-08-30 | — | **PAUSED 2026-09-11 (mike)**: 6 settled 4-2 +0.49u, claims 78.6% wins 66.7% — unassessable | same replay, same bar |
 
 **Why `k` is not paused today**, given it is the largest single loss in the
 30-day table at −18.30u/72: **that record spans two artifacts.** Split at the

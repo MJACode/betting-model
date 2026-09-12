@@ -1199,6 +1199,33 @@ PAUSED_MODELS: set = {
     # population that can actually discriminate comes back positive — not on a
     # retrain of the same features, which has now been tried twice.
     "ufc_total_rounds",
+    # 2026-09-11 (mike: "Still too many live ncaaf picks. Every game is getting
+    # a live pick it seems. We need to only bet the absolute strongest picks
+    # and proof of profitable backtested model"). Both NCAAF live lanes.
+    #
+    # The record, from `picks` on 2026-09-11 (settled BETs, dk_odds present):
+    #   ncaaf_live_total     55 settled, 28-27, -2.99u; claims 67.5%, wins
+    #                        50.9% (live_calibration: 16.6pp overconfident);
+    #                        31 BETs on the 36 games DK priced in-play on 09-05.
+    #   ncaaf_live_win_prob   6 settled, 4-2, +0.49u; claims 78.6%, wins 66.7%.
+    # No cut on that record is evidenced: p >= 0.70 is 2-2, edge >= 0.15 is
+    # 8-7, the period/side slices are post-hoc on n=55, and the recommender's
+    # own verdict is "a threshold cannot fix a calibration error". The go-live
+    # gate (CLAUDE.md section 2) fails on two of three for the totals lane and
+    # cannot be assessed on six bets for the moneyline lane.
+    #
+    # The engine was gated on CALIBRATION only (ncaaf_live/README.md): win
+    # probability passed, total-distribution shape FAILED, and the phase-3
+    # edge harness -- the only thing that could show a profitable rule -- was
+    # never started. Weeks 0-1 were declared a calibration set; it is week 3.
+    #
+    # UNPAUSE on a positive replay of the 2025 season's DK in-play snapshots
+    # (data/ingestors/ncaaf_inplay_history.py, then the harness) that clears
+    # breakeven in both halves of the season, not on a forward slate. The loop
+    # keeps running while paused: it prices every pass and stores the quotes,
+    # so the 2026 forward record is replayable the same way.
+    "ncaaf_live_total",
+    "ncaaf_live_win_prob",
 }
 
 # Fallback for models not listed above.
