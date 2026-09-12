@@ -33,8 +33,8 @@ import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
-import { FilterField } from '@/components/filters/FilterField';
 import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
+import { RangeSlider } from '@/components/filters/RangeSlider';
 import { GameFilterSection } from '@/components/filters/GameFilterSection';
 import type { ActivePill } from '@/components/filters/FilterBar';
 import { useNow } from '@/hooks/useNow';
@@ -97,7 +97,10 @@ import {
 import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
 import {
   EMPTY_SLATE,
+  HIT_RATE_MAX,
+  HIT_RATE_MIN,
   HIT_RATE_PRESETS,
+  HIT_RATE_STEP,
   buildSlateGameIndex,
   buildTonightSlate,
   compareRows,
@@ -109,9 +112,6 @@ import {
   slateSubline,
   slateTeams,
   sublineSpoken,
-  sortLabel,
-  sortOptionsFor,
-  type SortKey,
   type TonightSlate,
 } from '@/lib/statsBoard';
 import {
@@ -341,7 +341,6 @@ export function StatsScreen() {
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
   const [query, setQuery] = useState<string>('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('default');
   // Hit Rate controls (front page): a ruler, plus which side of it the bet is
   // on. `lineN` is the ruler's STOP INDEX, not the number on its face — the
   // face is the stop drawn in the active mode's idiom (whole in At Least,
@@ -362,8 +361,10 @@ export function StatsScreen() {
   // visitors — the softest spots on the board. Excluding them by default made
   // the filter delete the answer to its own question (UX review).
   const [includeUngraded, setIncludeUngraded] = useState<boolean>(true);
-  const [minHitRate, setMinHitRate] = useState<string>('');
-  const [maxHitRate, setMaxHitRate] = useState<string>('');
+  // The hit-rate band, as whole percents, straight off the sheet's slider.
+  // 0-100 is "Any" — the band only narrows the board once an end has moved.
+  const [hitLow, setHitLow] = useState<number>(HIT_RATE_MIN);
+  const [hitHigh, setHitHigh] = useState<number>(HIT_RATE_MAX);
 
   const [rows, setRows] = useState<SeasonTotalsRow[]>([]); // totals mode
   const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode, last-N
@@ -1078,7 +1079,7 @@ export function StatsScreen() {
     [lineSheet, slateGames],
   );
 
-  const band = useMemo(() => hitRateBand(minHitRate, maxHitRate), [minHitRate, maxHitRate]);
+  const band = useMemo(() => hitRateBand(hitLow, hitHigh), [hitLow, hitHigh]);
 
   // ── Averages / Totals mode ranking ──
   const ranked = useMemo(() => {
@@ -1098,13 +1099,9 @@ export function StatsScreen() {
         return { row: r, value, total, gp };
       })
       .sort((a, b) =>
-        compareRows(
-          { primary: a.value, games: a.gp, avg: a.gp > 0 ? a.total / a.gp : 0 },
-          { primary: b.value, games: b.gp, avg: b.gp > 0 ? b.total / b.gp : 0 },
-          sortKey,
-        ),
+        compareRows({ primary: a.value, games: a.gp }, { primary: b.value, games: b.gp }),
       );
-  }, [rows, stat, sport, basis, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [rows, stat, sport, basis, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -1170,13 +1167,9 @@ export function StatsScreen() {
       .filter((p) => !minGrade || meetsGradeFloor(matchupFor(p)?.grade, minGrade, includeUngraded))
       .filter((p) => !q || p.player_name.toLowerCase().includes(q))
       .sort((a, b) =>
-        compareRows(
-          { primary: a.pct, games: a.total, avg: a.avg },
-          { primary: b.pct, games: b.total, avg: b.avg },
-          sortKey,
-        ),
+        compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
 
   // Does the hit-rate column span more than one colour band? A rare-event
   // column (Doubles, Triples, Home Runs) does not — every player lands in the
@@ -1300,14 +1293,13 @@ export function StatsScreen() {
     if (minGrade) n += 1;
     if (minGrade && !includeUngraded) n += 1;
     if (query.trim()) n += 1;
-    if (sortKey !== 'default') n += 1;
     if (effectiveMode === 'hitRate') {
       if (band.lo > 0 || band.hi < 1) n += 1;
     } else if (basis !== 'perGame') {
       n += 1;
     }
     return n;
-  }, [teamFilter, gamePicker.selected, minGrade, includeUngraded, query, sortKey, effectiveMode, band, basis]);
+  }, [teamFilter, gamePicker.selected, minGrade, includeUngraded, query, effectiveMode, band, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -1319,9 +1311,8 @@ export function StatsScreen() {
     setBasis('perGame');
     setQuery('');
     setTeamFilter(null);
-    setMinHitRate('');
-    setMaxHitRate('');
-    setSortKey('default');
+    setHitLow(HIT_RATE_MIN);
+    setHitHigh(HIT_RATE_MAX);
     setTonightOnly(false);
     setMinGrade(null);
     setIncludeUngraded(true);
@@ -1358,21 +1349,14 @@ export function StatsScreen() {
     if (tonightActive && !gamesPicked) {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
     }
-    if (sortKey !== 'default') {
-      out.push({
-        key: 'sort',
-        label: `by ${sortLabel(sortKey, effectiveMode).toLowerCase()}`,
-        onRemove: () => setSortKey('default'),
-      });
-    }
     if (effectiveMode === 'hitRate') {
       if (band.lo > 0 || band.hi < 1) {
         out.push({
           key: 'hitBand',
           label: `hit ${bandSummary}`,
           onRemove: () => {
-            setMinHitRate('');
-            setMaxHitRate('');
+            setHitLow(HIT_RATE_MIN);
+            setHitHigh(HIT_RATE_MAX);
           },
         });
       }
@@ -1380,7 +1364,7 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, gamesPicked, slateLabel, sortKey, effectiveMode, band, bandSummary, basis,
+  }, [teamFilter, query, tonightActive, gamesPicked, slateLabel, effectiveMode, band, bandSummary, basis,
       gamePicker, pickableGames, minGrade, includeUngraded]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
@@ -2008,25 +1992,8 @@ export function StatsScreen() {
           </FilterSection>
         ) : null}
 
-        <FilterSection
-          title="Sort by"
-          subtitle="Ties break on sample size, so regulars come first."
-          summary={sortLabel(sortKey, effectiveMode)}
-        >
-          <View style={styles.chipWrap}>
-            {sortOptionsFor(effectiveMode).map((o) => (
-              <FilterChip
-                key={o.key}
-                label={o.label}
-                active={sortKey === o.key}
-                onPress={() => setSortKey(o.key)}
-              />
-            ))}
-          </View>
-        </FilterSection>
-
         {/* Hit-rate band — the reason someone opens this sheet is usually
-            "show me the 70%+ guys", so the presets come before the fields. */}
+            "show me the 70%+ guys", so the presets come before the slider. */}
         {effectiveMode === 'hitRate' ? (
           <FilterSection
             title="Hit rate"
@@ -2035,36 +2002,39 @@ export function StatsScreen() {
           >
             <View style={styles.chipWrap}>
               {HIT_RATE_PRESETS.map((p) => {
-                const on = (parseFloat(minHitRate) || 0) === p && maxHitRate.trim() === '';
+                const on = hitLow === p && hitHigh === HIT_RATE_MAX;
                 return (
                   <FilterChip
                     key={p}
                     label={`${p}%+`}
                     active={on}
                     onPress={() => {
-                      setMinHitRate(on ? '' : String(p));
-                      setMaxHitRate('');
+                      setHitLow(on ? HIT_RATE_MIN : p);
+                      setHitHigh(HIT_RATE_MAX);
                     }}
                   />
                 );
               })}
             </View>
-            <View style={styles.fieldRow}>
-              <FilterField
-                label="Min hit rate"
-                value={minHitRate}
-                onChange={setMinHitRate}
-                placeholder="0"
-                suffix="%"
-                maxLength={3}
-              />
-              <FilterField
-                label="Max hit rate"
-                value={maxHitRate}
-                onChange={setMaxHitRate}
-                placeholder="100"
-                suffix="%"
-                maxLength={3}
+            {/* The band is DRAGGED, not typed (Matt, 2026-09-12). The two
+                number fields this replaced raised the keyboard over the
+                sheet's own result count — the feedback the whole live-editing
+                sheet is built on — to answer a question that is one gesture. */}
+            <View style={styles.sliderWrap}>
+              <RangeSlider
+                min={HIT_RATE_MIN}
+                max={HIT_RATE_MAX}
+                step={HIT_RATE_STEP}
+                low={hitLow}
+                high={hitHigh}
+                onChange={(lo, hi) => {
+                  setHitLow(lo);
+                  setHitHigh(hi);
+                }}
+                format={(v) => `${v}%`}
+                lowLabel="Minimum hit rate"
+                highLabel="Maximum hit rate"
+                readout={bandSummary === 'Any' ? 'Any hit rate' : bandSummary}
               />
             </View>
           </FilterSection>
@@ -2791,9 +2761,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  fieldRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
+  // Breathing room under the preset chips; the slider brings its own
+  // read-out and end labels.
+  sliderWrap: {
+    marginTop: spacing.md,
   },
   // Separates the time-window chips from the tonight toggle in the same row.
   rowDivider: {
