@@ -441,6 +441,12 @@ ACTION_THRESHOLDS: dict = {
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
+    # PLACEHOLDER, and unreachable while gate 3 fails. Deliberately NOT swept:
+    # the 2025 in-play pull bought h2h + totals only, so there is no NCAAF
+    # in-play spread history to sweep against and any number here would be
+    # invented. Shaped like the moneyline's because the margin's SIGN is what
+    # gate 1 licensed; its SHAPE is what gate 3 rejected.
+    "ncaaf_live_spread":   {"min_prob": 0.62, "min_edge": 0.10},
     "ncaaf_live_win_prob": {"min_prob": 0.62, "min_edge": 0.10},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.62 prob x 0.26 EV) — see MODEL_MIN_EV + PAUSED_MODELS
     "ncaaf_live_total":    {"min_prob": 0.72, "min_edge": 0.12},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.72 prob x 0.22 EV) — see MODEL_MIN_EV + PAUSED_MODELS
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
@@ -682,6 +688,8 @@ MODEL_MIN_EV: dict = {
     # Saturdays and expect these numbers to move.
     "ncaaf_live_total": 0.22,
     "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: 0.62 x 0.26 is the both-halves-positive cell
+    # Placeholder, binds on nothing while the market is dark.
+    "ncaaf_live_spread": 0.22,
 }
 
 # ── Live volume ceiling (bets per week) ──────────────────────────────────────
@@ -700,6 +708,7 @@ LIVE_MAX_BETS_PER_WEEK: dict = {
     # NCAAF plays one day a week, so a "week" here is one Saturday slate.
     "ncaaf_live_total": 20,
     "ncaaf_live_win_prob": 10,
+    "ncaaf_live_spread": 10,
 }
 
 # ── Live signals per model per day ───────────────────────────────────────────
@@ -1493,6 +1502,7 @@ SCORING_METHODS: dict = {
     "wnba_prop_market":    "rule",    # models/wnba_prop_market.py — the same rule, pointed at WNBA
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
+    "ncaaf_live_spread":   "engine",
     "ncaaf_live_total":    "engine",
     # Trained AND registered, but scored by models/live_scorer.py rather than
     # the generic path, so it falls out of MODELS/PROP_MODELS. It DOES carry a
@@ -1576,6 +1586,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
     "ncaaf_spread_premium": 0.0,   # the [2.5, inf) band IS the filter
+    "ncaaf_live_spread":   0.10,
     "ncaaf_live_win_prob": 0.10,
     "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
@@ -1669,6 +1680,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
+    "ncaaf_live_spread":   0.62,  # placeholder; dark until gate 3 passes
     "ncaaf_live_win_prob": 0.62,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
     "ncaaf_live_total":    0.72,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
@@ -1902,6 +1914,16 @@ LIVE_MODELS = {
     # at pick time), the MLB-live convention.
     "ncaaf_live_win_prob": ("NCAAF", "h2h",    "engine",
                             "P(home wins) from the live two-stage engine"),
+    # 2026-09-12 (mike: "build the live spread model for ncaaf"). REGISTERED
+    # AND DARK. The engine prices a spread exactly, but gate 3 -- the MARGIN
+    # distribution's shape, added and run the same day -- FAILS at 2.88pp
+    # against a 2.0pp bar with its worst error AT THE MEDIAN, which is exactly
+    # where a main spread sits. serve.SPREAD_LICENSED (env NCAAF_LIVE_SPREAD)
+    # is 0 until that passes, so this is registered, tested and produces
+    # nothing rather than betting off a distribution that failed its own test.
+    "ncaaf_live_spread":   ("NCAAF", "spreads", "engine",
+                            "Live spread from the remaining-points margin "
+                            "distribution"),
     "ncaaf_live_total":    ("NCAAF", "totals", "engine",
                             "Live main-total from the remaining-points distribution"),
 }

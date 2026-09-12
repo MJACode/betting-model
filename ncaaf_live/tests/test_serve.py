@@ -12,6 +12,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -356,9 +358,16 @@ def test_the_edge_band_is_a_band():
     disagreement with a live book is evidence about our snapshot, not value."""
     from ncaaf_live.serve import LiveEngine as _E
     d = _E._decide
-    assert d(0.70, 0.09, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # below floor
-    assert d(0.70, 0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"  # in band
-    assert d(0.70, 0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # over cap
+    # Derived from the CONFIGURED cut, not a hardcoded 0.70. This test broke
+    # when #678 raised the totals cut 0.66 -> 0.72, which is a threshold change
+    # doing exactly what it should; a test that fails on a legitimate re-cut is
+    # testing the number rather than the behaviour.
+    p_ok = TOTAL_MIN_PROB
+    assert d(p_ok, TOTAL_MIN_EDGE - 0.03, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None
+    assert d(p_ok, TOTAL_MIN_EDGE + 0.01, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"
+    assert d(p_ok, MAX_EDGE_CAP + 0.04, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None
+    assert d(p_ok - 0.01, TOTAL_MIN_EDGE + 0.01,
+             TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None          # below prob floor
     assert MAX_EDGE_CAP > TOTAL_MIN_EDGE, "a cap below the floor fires nothing"
 
 
@@ -418,3 +427,89 @@ def test_the_pause_is_per_lane(engine, monkeypatch):
     picks = engine.price(_state(), _ctx(), _ODDS)
     bets = {p["model_id"] for p in picks if p["signal_type"] == "BET"}
     assert bets == {"ncaaf_live_win_prob"}
+
+
+# ── the live spread (2026-09-12) ──────────────────────────────────────────────
+
+_ODDS_SPREAD = {**_ODDS, "spread": {"line": -7.5, "home": -110, "away": -110}}
+
+
+def test_the_spread_is_dark_by_default_because_gate_3_failed(engine):
+    """Gate 3 measured the MARGIN distribution's shape for the first time on
+    2026-09-12 and it failed at 2.88pp against 2.0pp, worst AT THE MEDIAN --
+    which is where a main spread sits. The engine can price it exactly, so the
+    only thing stopping it betting is this licence. Default OFF."""
+    from ncaaf_live import serve
+    assert serve.SPREAD_LICENSED is False
+    picks = engine.price(_state(), _ctx(), _ODDS_SPREAD)
+    assert all(p["model_id"] != "ncaaf_live_spread" for p in picks)
+
+
+def test_the_spread_prices_when_licensed(engine, monkeypatch):
+    """The control: without it, the test above passes for the wrong reason
+    (a spread that never prices at all would look identical)."""
+    from ncaaf_live import serve
+    monkeypatch.setattr(serve, "SPREAD_LICENSED", True)
+    row = engine.feature_row(_state(), _ctx())
+    cands = engine.candidates(row, 2, 14, 10, _ODDS_SPREAD)
+    spread = [c for c in cands if c["model_id"] == "ncaaf_live_spread"]
+    assert len(spread) == 2                         # home and away
+    assert {c["pick_side"] for c in spread} == {"home", "away"}
+    assert all(c["scored_line"] == -7.5 for c in spread)
+    # two sides of one number: the probabilities cannot both be high
+    assert sum(c["model_probability"] for c in spread) <= 1.0 + 1e-9
+
+
+def test_the_spread_line_is_home_relative_and_the_label_says_so(engine, monkeypatch):
+    """`scored_line` is always the HOME number (CLAUDE.md section 4), and
+    settlement depends on it. The away label must show the negation, not
+    repeat the home number against the away team."""
+    from ncaaf_live import serve
+    monkeypatch.setattr(serve, "SPREAD_LICENSED", True)
+    monkeypatch.setattr(serve, "SPREAD_MIN_PROB", 0.0)
+    monkeypatch.setattr(serve, "SPREAD_MIN_EDGE", -1.0)
+    monkeypatch.setattr(serve, "SPREAD_MIN_EV", None)
+    picks = [p for p in engine.price(_state(), _ctx(), _ODDS_SPREAD)
+             if p["model_id"] == "ncaaf_live_spread"]
+    assert picks
+    for p in picks:
+        assert p["scored_line"] == -7.5             # HOME number on both rows
+        if p["pick_side"] == "home":
+            assert "-7.5" in p["pick_label"] and _ctx().home in p["pick_label"]
+        else:
+            assert "+7.5" in p["pick_label"] and _ctx().away in p["pick_label"]
+
+
+def test_the_spread_is_dark_in_the_endgame_too(engine, monkeypatch):
+    from ncaaf_live import serve
+    monkeypatch.setattr(serve, "SPREAD_LICENSED", True)
+    row = engine.feature_row(_state(period=4, clock_seconds=60), _ctx())
+    cands = engine.candidates(row, 4, 14, 10, _ODDS_SPREAD)
+    assert all(c["model_id"] != "ncaaf_live_spread" for c in cands)
+
+
+def test_a_frozen_spread_quote_is_never_priced(engine, monkeypatch):
+    """The quote guards apply to the new market exactly as to the other two."""
+    from ncaaf_live import serve
+    monkeypatch.setattr(serve, "SPREAD_LICENSED", True)
+    stale = {**_ODDS_SPREAD,
+             "spread": {"line": -7.5, "home": -110, "away": -110,
+                        "ts": "2020-01-01T00:00:00Z"}}
+    picks = engine.price(_state(), _ctx(), stale, now=datetime.now(timezone.utc))
+    assert all(p["model_id"] != "ncaaf_live_spread" for p in picks)
+
+
+def test_the_feed_buys_the_spread_market():
+    from ncaaf_live.feeds.odds_live import LIVE_MARKETS
+    assert "spreads" in LIVE_MARKETS
+
+
+def test_the_feed_parses_a_home_relative_spread():
+    from ncaaf_live.feeds.odds_live import _parse_book_markets
+    bk = {"last_update": "2026-09-12T20:00:00Z", "markets": [
+        {"key": "spreads", "last_update": "2026-09-12T20:00:05Z", "outcomes": [
+            {"name": "TCU", "price": -115, "point": -6.5},
+            {"name": "North Carolina", "price": -105, "point": 6.5}]}]}
+    rec = _parse_book_markets(bk, "TCU", "North Carolina")
+    assert rec["spread"] == {"line": -6.5, "home": -115, "away": -105,
+                             "ts": "2026-09-12T20:00:05Z"}

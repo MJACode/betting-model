@@ -199,3 +199,58 @@ def test_the_prob_only_set_matches_config():
     assert (app - retired_app) == canon, (
         f"prob-only drift -- app: {sorted(app - retired_app)}, config: {sorted(canon)}"
     )
+
+
+# ── the UNLICENSED set (2026-09-12) ──────────────────────────────────────────
+
+def _app_set(name: str) -> set[str]:
+    block = _block(_src(), f"export const {name} = new Set<string>([", "\n]);")
+    return {m.group(1) for m in re.finditer(r"'([a-z0-9_]+)'", block)}
+
+
+def test_the_unlicensed_set_matches_the_engine_licence_flags():
+    """A model that cannot bet must not render as live.
+
+    `ncaaf_live_spread` is deliberately NOT in config.PAUSED_MODELS -- it is
+    dark because its calibration gate failed, which the engine expresses with
+    `serve.SPREAD_LICENSED`. Nothing server-side carries that state
+    (`threshold_sync` writes `paused` from PAUSED_MODELS only), so the app
+    keeps its own set and this test is the only thing stopping the two
+    drifting. Drift is silent and one-directional in the bad way: the Models
+    tab would list a model as live and tell members to check back for picks it
+    can never post.
+    """
+    import ncaaf_live.serve as serve
+
+    app = _app_set("UNLICENSED_MODELS")
+    engine_dark = set()
+    if not serve.SPREAD_LICENSED:
+        engine_dark.add("ncaaf_live_spread")
+    assert app == engine_dark, (
+        "the app's UNLICENSED_MODELS and the engine's licence flags disagree: "
+        f"app={sorted(app)} engine_dark={sorted(engine_dark)}"
+    )
+
+
+def test_an_unlicensed_model_is_not_also_paused():
+    """The two states have different copy for a reason -- a paused model has a
+    record to show, an unlicensed one has never bet. Both at once would render
+    contradictory sentences."""
+    import config
+
+    for mid in _app_set("UNLICENSED_MODELS"):
+        assert mid not in config.PAUSED_MODELS, (
+            f"{mid} is both unlicensed and paused; pick one"
+        )
+        assert mid not in _app_set("PAUSED_MODELS"), (
+            f"{mid} is in both app sets; pick one"
+        )
+
+
+def test_an_unlicensed_model_still_carries_a_cut_and_a_label():
+    """So the day it is licensed, no app build is needed to show it."""
+    import config
+
+    for mid in _app_set("UNLICENSED_MODELS"):
+        assert mid in config.ACTION_THRESHOLDS, f"{mid} has no cut in config"
+        assert f"  {mid}: {{ min_prob" in _src(), f"{mid} has no cut in the app"

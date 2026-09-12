@@ -20,7 +20,7 @@ import {
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { betTypeLabel, MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
-import { isModelPaused, isModelRetired } from '@/lib/thresholds';
+import { isModelPaused, isModelRetired, isModelUnlicensed } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
@@ -305,6 +305,9 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
               {modelLong(modelId)}
             </Text>
             {paused ? <TagChip label="Paused" /> : null}
+            {!paused && isModelUnlicensed(modelId) ? (
+              <TagChip label="In validation" />
+            ) : null}
           </View>
           <Text style={styles.subtle}>
             {stats.picks} pick{stats.picks === 1 ? '' : 's'}

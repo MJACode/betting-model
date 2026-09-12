@@ -22,6 +22,11 @@ from ..config import (LIVE_ODDS_MAX_AGE_SEC, LIVE_ODDS_SESSION_CREDIT_CAP,
 
 log = logging.getLogger(__name__)
 
+# The in-play markets the poll buys. spreads added 2026-09-12 (mike: "build
+# the live spread model for ncaaf"); the Odds API bills per MARKET, so this is
+# the line that decides the live odds spend -- see docs/live_betting.md.
+LIVE_MARKETS = ("h2h", "totals", "spreads")
+
 ODDS_URL = f"https://api.the-odds-api.com/v4/sports/{ODDS_SPORT_KEY}/odds"
 
 # Sized in config against the CURRENT cadence. This was a flat 5000, which
@@ -71,7 +76,7 @@ class LiveOddsFeed:
         try:
             r = requests.get(ODDS_URL, params={
                 "apiKey": ODDS_API_KEY, "regions": "us",
-                "markets": "h2h,totals", "oddsFormat": "american",
+                "markets": ",".join(LIVE_MARKETS), "oddsFormat": "american",
                 "bookmakers": ",".join(SNAPSHOT_BOOKS),
             }, timeout=30)
             r.raise_for_status()
@@ -91,7 +96,7 @@ class LiveOddsFeed:
 def _parse_book_markets(bk: dict, home: str, away: str) -> dict:
     """{h2h: {home, away, ts} | None, total: {line, over, under, ts} | None}
     for ONE bookmaker entry of an event."""
-    rec = {"h2h": None, "total": None}
+    rec = {"h2h": None, "total": None, "spread": None}
     book_ts = bk.get("last_update")
     for m in bk.get("markets", []) or []:
         ts = m.get("last_update") or book_ts
@@ -115,6 +120,22 @@ def _parse_book_markets(bk: dict, home: str, away: str) -> dict:
             if line is not None:
                 rec["total"] = {"line": line, "over": over,
                                 "under": under, "ts": ts}
+        elif m.get("key") == "spreads":
+            # HOME-RELATIVE, like `scored_line` everywhere else in this repo
+            # (CLAUDE.md section 4): the stored number is the HOME point, and
+            # away covers when (away - home) - line > 0. The Odds API gives a
+            # point per side; take the home outcome's and price the away side
+            # off the same number rather than trusting the two to be exact
+            # negatives, which they are not when a book hangs -3.5/+3.0.
+            line = home_px = away_px = None
+            for o in m.get("outcomes", []) or []:
+                if o.get("name") == home:
+                    line, home_px = o.get("point"), o.get("price")
+                elif o.get("name") == away:
+                    away_px = o.get("price")
+            if line is not None:
+                rec["spread"] = {"line": line, "home": home_px,
+                                 "away": away_px, "ts": ts}
     return rec
 
 

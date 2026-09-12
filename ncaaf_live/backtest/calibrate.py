@@ -12,9 +12,19 @@ win probability and a calibrated total distribution on a season it has never
 seen, then every market it derives is wrong and no amount of hunting for lagging
 derivative lines will save it.
 
-Two gates, from the build spec:
+Three gates:
   1. Brier score for derived win probability under 0.20 on in-game states.
   2. Total-distribution quantile coverage within 2pp of nominal.
+  3. MARGIN-distribution quantile coverage within 2pp of nominal (2026-09-12).
+
+GATE 3 EXISTS BECAUSE A SPREAD WAS ABOUT TO BE PRICED OFF AN UNTESTED
+DISTRIBUTION. Gate 1 validates the SIGN of the margin -- does home win -- and
+nothing more. A spread bet needs the margin right AT A NUMBER, which is its
+SHAPE, and shape is a different claim: the total's shape FAILED gate 2 at
+2.60pp while its median was calibrated to -0.04pp. Margin and total are two
+projections of the same joint pmf, so the total's failure is a direct reason to
+doubt the margin's shape rather than assume it. mike asked for a live spread
+model on 2026-09-12; this is the test that says whether it may bet.
 
 Gate 2 is the one that actually matters for this system. A win probability can
 be well calibrated while the SHAPE of the total distribution is wrong, and the
@@ -36,13 +46,17 @@ _sys.path.insert(0, str(_Path(__file__).parent.parent.parent))
 
 from ncaaf_live.config import ARTIFACT_DIR
 from ncaaf_live.engine.distribution import ScoreDistribution, SUPPORT, time_bucket
-from ncaaf_live.engine.pricing import price_moneyline, total_pmf
+from ncaaf_live.engine.pricing import margin_pmf, price_moneyline, total_pmf
 from ncaaf_live.engine.remaining import load_models, predict_remaining
 from ncaaf_live.backtest.train_engine import load_states
 
 QUANTILES = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)
 BRIER_GATE = 0.20
 COVERAGE_GATE_PP = 2.0
+# Same standard as the total. A spread is priced off this distribution the same
+# way an over/under is priced off that one, so it earns the same bar rather
+# than a friendlier one chosen after seeing the number.
+MARGIN_COVERAGE_GATE_PP = 2.0
 PIT_SEED = 11
 BOOT_DRAWS = 400
 
@@ -59,8 +73,20 @@ BOOT_DRAWS = 400
 # much of any late-game failure is the atom rather than the model.
 
 
-def evaluate(season: int, sample_every: int = 10) -> dict:
-    states = load_states()
+def evaluate(season: int, sample_every: int = 10, states_path=None) -> dict:
+    # Prefer the season's own build, then the full corpus. Same rule as the
+    # replay: a partial corpus never wears states_all.parquet's name, so the
+    # gate has to look for both rather than assume one exists.
+    if states_path is None:
+        from ncaaf_live.backtest.build_states import out_path
+        cand = out_path([season])
+        states_path = cand if cand.exists() else None
+    if states_path is not None:
+        import pandas as _pd
+        print(f"states: {states_path}")
+        states = _pd.read_parquet(states_path)
+    else:
+        states = load_states()
     df = states[states.season == season]
     if df.empty:
         raise SystemExit(f"no states for season {season}")
@@ -76,11 +102,15 @@ def evaluate(season: int, sample_every: int = 10) -> dict:
     tied = (df["final_home"] == df["final_away"]).to_numpy()
     actual_total = (df["final_home"] + df["final_away"]).to_numpy().astype(float)
 
+    actual_margin = (df["final_home"] - df["final_away"]).to_numpy().astype(float)
+
     rng = np.random.default_rng(PIT_SEED)
     wp = np.zeros(len(df))
     pit_rand = np.zeros(len(df))
     pit_mid = np.zeros(len(df))
     tot_mean = np.zeros(len(df))
+    pit_margin = np.zeros(len(df))
+    margin_mean = np.zeros(len(df))
 
     mu_h = preds["home_remaining_hat"].to_numpy()
     mu_a = preds["away_remaining_hat"].to_numpy()
@@ -102,6 +132,16 @@ def evaluate(season: int, sample_every: int = 10) -> dict:
         at = float(probs[values == actual_total[i]].sum())
         pit_mid[i] = below + 0.5 * at
         pit_rand[i] = below + rng.random() * at
+
+        # GATE 3. The same randomised PIT, on the margin. The margin pmf is at
+        # least as lumpy as the total's -- a one-score game concentrates mass
+        # on a handful of integers -- so the randomised correction is not
+        # optional here either.
+        mvals, mprobs = margin_pmf(out["joint_remaining"], hs[i] - as_[i])
+        margin_mean[i] = float((mvals * mprobs).sum())
+        m_below = float(mprobs[mvals < actual_margin[i]].sum())
+        m_at = float(mprobs[mvals == actual_margin[i]].sum())
+        pit_margin[i] = m_below + rng.random() * m_at
 
     # ------------------------------------------------------------ gate 1
     ok = ~tied
@@ -130,6 +170,12 @@ def evaluate(season: int, sample_every: int = 10) -> dict:
     games = df["gameId"].to_numpy()
     boot = _cluster_bootstrap(games, pit_rand, wp, home_won, ok, rng)
 
+    # ------------------------------------------------------------ gate 3
+    margin_coverage = {q: float((pit_margin <= q).mean()) for q in QUANTILES}
+    margin_worst_pp = max(abs(margin_coverage[q] - q) * 100 for q in QUANTILES)
+    margin_boot = _coverage_bootstrap(games, pit_margin, rng)
+    margin_by_bucket = []
+
     # Coverage by time bucket. An average that passes while the last two
     # minutes are badly miscalibrated is a model that will lose money on the
     # exact states where the derivative markets are laziest.
@@ -140,11 +186,16 @@ def evaluate(season: int, sample_every: int = 10) -> dict:
         if m.sum() < 100:
             continue
         cov = {q: float((pit_rand[m] <= q).mean()) for q in QUANTILES}
+        mcov = {q: float((pit_margin[m] <= q).mean()) for q in QUANTILES}
         by_bucket.append({
             "bucket": int(b), "n": int(m.sum()),
             "worst_pp": max(abs(cov[q] - q) * 100 for q in QUANTILES),
             "brier": float(np.mean((wp[m & ok] - home_won[m & ok]) ** 2))
             if (m & ok).sum() else float("nan"),
+        })
+        margin_by_bucket.append({
+            "bucket": int(b), "n": int(m.sum()),
+            "worst_pp": max(abs(mcov[q] - q) * 100 for q in QUANTILES),
         })
 
     res = {
@@ -160,8 +211,35 @@ def evaluate(season: int, sample_every: int = 10) -> dict:
         "gate1_pass": brier < BRIER_GATE,
         "gate2_pass": worst_pp <= COVERAGE_GATE_PP,
         "gate2_pass_ci": boot["worst_coverage_pp_lo"] <= COVERAGE_GATE_PP,
+        # gate 3: the margin's shape, which is what a SPREAD is priced off
+        "margin_coverage": margin_coverage,
+        "margin_worst_pp": margin_worst_pp,
+        "margin_boot": margin_boot,
+        "margin_by_bucket": margin_by_bucket,
+        "margin_mae": float(np.abs(margin_mean - actual_margin).mean()),
+        "gate3_pass": margin_worst_pp <= MARGIN_COVERAGE_GATE_PP,
+        "gate3_pass_ci": margin_boot["worst_coverage_pp_lo"] <= MARGIN_COVERAGE_GATE_PP,
     }
     return res
+
+
+def _coverage_bootstrap(games, pit, rng):
+    """Cluster bootstrap of one PIT's worst coverage error, over GAMES.
+
+    Split out of _cluster_bootstrap so the margin gets the same honest interval
+    as the total without duplicating the resampling logic -- states inside a
+    game are correlated, and the game is the only unit that resamples honestly.
+    """
+    uniq = np.unique(games)
+    idx_by_game = {g: np.flatnonzero(games == g) for g in uniq}
+    worsts = []
+    for _ in range(BOOT_DRAWS):
+        pick = rng.choice(uniq, size=len(uniq), replace=True)
+        idx = np.concatenate([idx_by_game[g] for g in pick])
+        cov = {q: float((pit[idx] <= q).mean()) for q in QUANTILES}
+        worsts.append(max(abs(cov[q] - q) * 100 for q in QUANTILES))
+    return {"worst_coverage_pp_lo": float(np.percentile(worsts, 5)),
+            "worst_coverage_pp_hi": float(np.percentile(worsts, 95))}
 
 
 def _cluster_bootstrap(games, pit, wp, home_won, ok, rng):
@@ -216,19 +294,50 @@ def report(res: dict) -> None:
         print(f"    bucket {b['bucket']}  n={b['n']:6d}  "
               f"worst coverage {b['worst_pp']:5.2f}pp  brier {b['brier']:.4f}")
 
-    verdict = "PASS" if (res["gate1_pass"] and res["gate2_pass"]) else "FAIL"
-    print(f"\n  VERDICT: {verdict}")
-    if not res["gate2_pass"] and res.get("gate2_pass_ci"):
-        print("  (gate 2 misses on the point estimate but its bootstrap "
-              "interval covers the gate, so the miss is inside sampling noise)")
+    mb = res["margin_boot"]
+    print(f"\ngate 3  MARGIN quantile coverage (randomised PIT), worst "
+          f"{res['margin_worst_pp']:.2f}pp "
+          f"[{mb['worst_coverage_pp_lo']:.2f}, {mb['worst_coverage_pp_hi']:.2f}] "
+          f"{'PASS' if res['gate3_pass'] else 'FAIL'} vs "
+          f"{MARGIN_COVERAGE_GATE_PP}pp")
+    print("        this is the gate a SPREAD is priced off. Gate 1 only "
+          "validates the margin's SIGN.")
+    for q, c in res["margin_coverage"].items():
+        print(f"    q{q:<5} nominal {100*q:5.1f}%  actual {100*c:5.1f}%  "
+              f"{100*(c-q):+5.2f}pp")
+    print(f"  margin point MAE {res['margin_mae']:.2f}")
+    print("\n  margin coverage by time bucket "
+          "(0 = final 2 min, 6 = pregame/Q1):")
+    for b in res["margin_by_bucket"]:
+        print(f"    bucket {b['bucket']}  n={b['n']:6d}  "
+              f"worst coverage {b['worst_pp']:5.2f}pp")
+
+    verdict = "PASS" if (res["gate1_pass"] and res["gate2_pass"]
+                         and res["gate3_pass"]) else "FAIL"
+    print(f"\n  VERDICT (all three gates): {verdict}")
+    for n, key, ci in ((2, "gate2_pass", "gate2_pass_ci"),
+                       (3, "gate3_pass", "gate3_pass_ci")):
+        if not res[key] and res.get(ci):
+            print(f"  (gate {n} misses on the point estimate but its bootstrap "
+                  "interval covers the gate, so the miss is inside sampling "
+                  "noise)")
+    print("\n  WHAT EACH GATE LICENSES:")
+    print(f"    moneyline      {'yes' if res['gate1_pass'] else 'NO'}  (gate 1)")
+    print(f"    main total     {'yes' if res['gate2_pass'] else 'NO'}  (gate 2)")
+    print(f"    main spread    {'yes' if res['gate3_pass'] else 'NO'}  (gate 3)")
+    print("    alt lines / team totals / quarters / final 2 min: never, by "
+          "construction")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--season", type=int, default=2025)
     ap.add_argument("--sample-every", type=int, default=10)
+    ap.add_argument("--states", default=None,
+                    help="states parquet (default: the season's own build, "
+                         "then the full corpus)")
     args = ap.parse_args()
-    report(evaluate(args.season, args.sample_every))
+    report(evaluate(args.season, args.sample_every, args.states))
 
 
 if __name__ == "__main__":

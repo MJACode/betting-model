@@ -412,6 +412,17 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  ncaaf_live_spread: {
+    // 'LIVE Spread', not 'LIVE SPREAD': the live family spells a word in mixed
+    // case whenever it spells one out ('LIVE ML', 'LIVE O/U', 'LIVE Att'), the
+    // chip's row does not wrap in ParlayLegCard, and this label is also the
+    // nav-bar title on the model detail screen.
+    shortLabel: 'LIVE Spread',
+    longLabel: 'Live Spread',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   ncaaf_live_total: {
     shortLabel: 'LIVE O/U',
     longLabel: 'Live Total',
