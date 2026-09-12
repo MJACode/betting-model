@@ -217,3 +217,49 @@ def test_the_app_still_filters_todays_pickable_board_on_model_state():
     src = (ROOT / "mobile" / "src" / "lib" / "thresholds.ts").read_text(encoding="utf-8")
     body = src[src.index("export function passesActionFilter"):]
     assert "paused" in body[:body.index("\n}")]
+
+
+# ── the rule has to be in CLAUDE.md, not in a path-scoped rules file ─────────
+#
+# A CLAUDE.md restructure was in flight on 2026-09-12 moving rule text into
+# .claude/rules/*.md. That is right for AREA rules and wrong for this one: a
+# scoped file loads only when a session opens a file matching its `paths`
+# frontmatter, and the way this bug happens is that somebody pauses a model —
+# a config.py edit, or no edit at all, just a threshold_sync — and never opens
+# tracking/, mobile/src/ or data/migrations/. The session that erased 55 settled
+# NCAAF bets would not have loaded a scoped copy of this rule.
+#
+# Same argument, same shape, as tests/test_everything_in_supabase.py.
+
+CLAUDE_MD = ROOT / "CLAUDE.md"
+
+
+def test_the_settled_record_rule_is_in_claude_md_itself():
+    """Not merely 'somewhere in the repo' — in the file every session reads."""
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+    assert "A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS" in text, (
+        "The settled-record rule is not in CLAUDE.md. If it was moved into "
+        ".claude/rules/*.md, move it back: a scoped rule loads only when a file "
+        "matching its paths is opened, and pausing a model does not require "
+        "opening any of them. mike, 2026-09-12: 'this needs to be a global rule'."
+    )
+
+
+def test_the_paused_visibility_rule_is_in_claude_md_itself():
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+    assert "A paused model is LISTED, not hidden" in text, (
+        "The paused-model visibility rule is not in CLAUDE.md. mike, "
+        "2026-09-12: \"Don't hide detail of paused models unless I say so.\""
+    )
+
+
+def test_both_rules_name_the_two_exits_and_not_the_paused_flag():
+    """The rule is only load-bearing if it still says what it says."""
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+    start = text.index("A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS")
+    block = text[start:start + 2000]
+    assert "RECORD_EXCLUSIONS" in block, "the rule no longer names the exclusion list"
+    assert "void_picks.py" in block, "the rule no longer names the VOID route"
+    assert "model_action_thresholds" in block, (
+        "the rule no longer says a record query must not join the live "
+        "threshold table, which is the actual defect it exists to prevent")
