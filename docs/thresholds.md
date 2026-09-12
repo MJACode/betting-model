@@ -585,11 +585,11 @@ half of them.
 **Re-sweep trigger: n ≥ 75 settled BETs on `v20260908_230751`** — about 40
 slates at 1.9 a slate. Same population query as the dated criteria above.
 
-## The NCAAF live lanes on a bought 2025 season, 2026-09-12 (mike): BOTH STAY PAUSED
+## The NCAAF live models on a bought 2025 season, 2026-09-12 (mike): BOTH STAY PAUSED
 
 mike: *"We need to only bet the absolute strongest picks and proof of
 profitable backtested model."* This is that measurement, and the answer is no
-for both lanes. Neither is a threshold problem, so neither has a cut to move.
+for both models. Neither is a threshold problem, so neither has a cut to move.
 
 **The instrument.** 57,979 DraftKings in-play rows bought over 5,765 snapshots
 on 736 games (`data/ingestors/ncaaf_inplay_history.py`, ~245,360 credits of the
@@ -597,7 +597,7 @@ on 736 games (`data/ingestors/ncaaf_inplay_history.py`, ~245,360 credits of the
 (`ncaaf_plays` -> `build_states --seasons 2025`). 2025 is out of sample for the
 active artifact, which trains through 2024. The production pricing path decides
 (`LiveEngine.candidates` + `_decide`), under the first-signal lock, so each
-(game, lane) contributes one bet per cell.
+(game, model) contributes one bet per cell.
 
 **Read the FRESH column, not the ALL column.** A quote whose `last_update`
 predates the score is one the book has not repriced, and production declines it
@@ -609,7 +609,7 @@ predates the score is one the book has not repriced, and production declines it
 | **FRESH quotes** | 280 | 146-134 | **-9.50** | **-3.4%** | 52.1 [46.3, 57.9] |
 
 So the positive pooled number is bets nobody could have taken. On fresh quotes
-the lane is negative, and it splits **first half -10.1% / second half +7.1%**.
+the model is negative, and it splits **first half -10.1% / second half +7.1%**.
 
 `ncaaf_live_win_prob` on fresh quotes: **51 bets, -6.69u, -13.1%**, both halves
 negative.
@@ -631,7 +631,7 @@ rather than dismissed, and it is **entirely a first-half artifact**:
 The time split is part of the method precisely because this keeps happening
 (CLAUDE.md section 7).
 
-### The two lanes fail for OPPOSITE reasons, and that is the useful part
+### The two models fail for OPPOSITE reasons, and that is the useful part
 
 **`ncaaf_live_total`: the probability does not discriminate.** Win rate by
 claimed band is flat:
@@ -654,7 +654,7 @@ standard) showing up as an absence of information, and no cut repairs it.
 Monotone, and if anything UNDER-confident in the middle -- exactly what gate 1
 passing (Brier 0.115) predicted. Every band still loses. **The model can tell
 you who wins and the market already knows.** A calibrated probability is not an
-edge, and this lane is the cleanest example of the difference in the repo.
+edge, and this model is the cleanest example of the difference in the repo.
 
 ### What would change the answer
 
@@ -662,7 +662,7 @@ NOT a threshold sweep; the grids are done. For totals, the distribution's shape
 has to improve (the gate that failed), which is a modelling change and probably
 more recent seasons. For the moneyline, it needs a price the market does not
 already reflect, which this feed does not appear to contain. Until one of those
-moves, both lanes stay in `config.PAUSED_MODELS` and the loop keeps running,
+moves, both models stay in `config.PAUSED_MODELS` and the loop keeps running,
 pricing and storing quotes so the forward record stays replayable.
 
 ## `mlb_live_total_runs` on the bought 2025 in-play history, 2026-09-10 (mike)
