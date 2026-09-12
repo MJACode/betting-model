@@ -234,11 +234,107 @@ def _build_messages(tokens: list[str], new_bets: list[dict], dropped: list[dict]
     return messages
 
 
-def _expo_send(messages: list[dict]) -> int:
-    """POST messages to the Expo push service in chunks. Returns sent count.
-    Non-fatal: logs and continues on a failed chunk so one bad token can't
-    sink the run."""
+# Expo ticket codes that mean the whole APNs/FCM setup is wrong rather than
+# one device being stale. They are the difference between "nobody got this
+# push" and "nobody will get any push until someone fixes credentials", so
+# they are logged as their own line instead of being counted with the rest.
+_FATAL_TICKET_ERRORS = {"InvalidCredentials", "MismatchSenderId"}
+
+
+def _read_tickets(chunk: list[dict], body: object) -> tuple[int, list[str]]:
+    """Turn one Expo reply into (accepted, dead_tokens).
+
+    A 200 IS NOT A DELIVERY. Expo answers every send with one ticket per
+    message, and a ticket carries its own status:
+
+        {"data": [{"status": "ok", "id": "<receipt>"},
+                  {"status": "error", "message": "...",
+                   "details": {"error": "DeviceNotRegistered"}}]}
+
+    Until 2026-09-12 this function did not exist and `_expo_send` counted
+    `len(chunk)` on any 2xx — so a message Apple refused for want of a push
+    key was reported as sent, and the pipeline's own log would have said
+    delivery was working while no phone ever buzzed. That is the same shape as
+    the app's silent `catch`, one process further along, and it mattered more:
+    the app's version was visible to one person, this one to nobody.
+    """
+    if not isinstance(body, dict):
+        logger.error(f"Expo returned an unreadable body for {len(chunk)} msgs: {body!r}")
+        return 0, []
+
+    if body.get("errors"):
+        # A request-level rejection: no ticket for anything in the chunk.
+        logger.error(f"Expo rejected a chunk of {len(chunk)}: {body['errors']}")
+        return 0, []
+
+    tickets = body.get("data") or []
+    if isinstance(tickets, dict):        # single-message sends come back bare
+        tickets = [tickets]
+    if len(tickets) != len(chunk):
+        # Positional pairing is the only link Expo gives between a message and
+        # its ticket, so a length mismatch means we cannot say WHICH token an
+        # error belongs to. Count nothing and say so, rather than disabling a
+        # token on a guess.
+        logger.error(
+            f"Expo returned {len(tickets)} tickets for {len(chunk)} messages — "
+            "cannot pair them; treating the chunk as undelivered"
+        )
+        return 0, []
+
+    accepted = 0
+    dead: list[str] = []
+    for msg, ticket in zip(chunk, tickets):
+        if not isinstance(ticket, dict):
+            logger.error(f"Expo ticket was not an object: {ticket!r}")
+            continue
+        if ticket.get("status") == "ok":
+            accepted += 1
+            continue
+        code = (ticket.get("details") or {}).get("error") or ""
+        token = msg.get("to", "")
+        if code == "DeviceNotRegistered":
+            dead.append(token)
+            logger.info(f"Expo: token retired, disabling …{token[-12:]}")
+        elif code in _FATAL_TICKET_ERRORS:
+            logger.error(
+                f"Expo REFUSED delivery on credentials ({code}): {ticket.get('message')}. "
+                "No device will receive anything until the APNs key / FCM config is fixed."
+            )
+        else:
+            logger.error(f"Expo refused a message ({code or 'no code'}): {ticket.get('message')}")
+    return accepted, dead
+
+
+def _disable_tokens(conn, tokens: list[str]) -> None:
+    """Stop selecting tokens Expo has told us are no longer recipients.
+
+    Disabled, never deleted: the row is the record that this device was once
+    registered, and re-opting in from the phone is then an UPDATE onto the same
+    row rather than a second one competing for the same unique token.
+    """
+    if not tokens:
+        return
+    try:
+        conn.execute(
+            "UPDATE device_push_tokens SET enabled = FALSE WHERE token = ANY(%s)",
+            (tokens,),
+        )
+        conn.commit()
+        logger.info(f"Disabled {len(tokens)} retired push token(s)")
+    except Exception as exc:  # noqa: BLE001 — bookkeeping must not break delivery
+        logger.error(f"Could not disable {len(tokens)} retired token(s): {exc}")
+
+
+def _expo_send(messages: list[dict], conn=None) -> int:
+    """POST messages to the Expo push service in chunks.
+
+    Returns the number Expo ACCEPTED — not the number posted. Non-fatal: logs
+    and continues on a failed chunk so one bad token can't sink the run. When
+    `conn` is given, tokens Expo reports as retired are disabled, so a
+    reinstalled phone stops being pushed to forever.
+    """
     sent = 0
+    dead: list[str] = []
     for i in range(0, len(messages), _EXPO_CHUNK):
         chunk = messages[i:i + _EXPO_CHUNK]
         try:
@@ -249,9 +345,13 @@ def _expo_send(messages: list[dict]) -> int:
                 timeout=15,
             )
             resp.raise_for_status()
-            sent += len(chunk)
+            accepted, chunk_dead = _read_tickets(chunk, resp.json())
+            sent += accepted
+            dead.extend(chunk_dead)
         except Exception as exc:  # noqa: BLE001 — never let delivery break the pipeline
             logger.error(f"Expo push chunk failed ({len(chunk)} msgs): {exc}")
+    if conn is not None:
+        _disable_tokens(conn, dead)
     return sent
 
 
@@ -306,7 +406,7 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     # isn't re-detected forever (it would spam once a device registers late).
     sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
     messages = _build_messages(tokens, new_bets, dropped) if tokens else []
-    sent = _expo_send(messages) if messages else 0
+    sent = _expo_send(messages, conn) if messages else 0
 
     for s in new_bets:
         conn.execute(
@@ -432,7 +532,7 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
                     "sound": "default",
                     "priority": "high",
                 })
-        sent = _expo_send(messages) if messages else 0
+        sent = _expo_send(messages, conn) if messages else 0
 
         # Ledger every alert (even with no device online) so it isn't re-detected
         # forever — mirrors notify_signal_changes.
@@ -519,7 +619,7 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
             "to": token, "title": title, "body": body, "data": data,
             "sound": "default", "priority": "high",
         } for token in tokens]
-        sent = _expo_send(messages) if messages else 0
+        sent = _expo_send(messages, conn) if messages else 0
 
         for s in new:
             conn.execute(
@@ -594,7 +694,7 @@ def notify_feedback_replies(dry_run: bool = False) -> int:
             "sound": "default",
             "priority": "high",
         } for r in replies]
-        sent = _expo_send(messages)
+        sent = _expo_send(messages, conn)
 
         # Ledger every reply, delivered or not — mirrors the other producers, so
         # a delivery failure can't turn into a nightly re-notify.
