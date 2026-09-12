@@ -59,6 +59,10 @@ def _rules(monkeypatch):
     monkeypatch.setattr(scorer, "MODEL_EDGE_THRESHOLDS", config.MODEL_EDGE_THRESHOLDS)
     monkeypatch.setattr(scorer, "MODEL_PROB_THRESHOLDS", config.MODEL_PROB_THRESHOLDS)
     monkeypatch.setattr(scorer, "PAUSED_MODELS", set())
+    # The AUTOMATIC pauses too: _is_paused also reads model_auto_pauses
+    # (_auto_paused_models), so stubbing the config constant alone leaves the
+    # test reading production state -- see test_prop_calibrated_decision.
+    monkeypatch.setattr(scorer, "_auto_paused_models", lambda: set())
     monkeypatch.setattr(scorer, "DECIDE_ON_CALIBRATED_PROB", False)
     monkeypatch.setattr(scorer, "DECIDE_ON_BEST_PRICE", True)
     monkeypatch.setattr(scorer, "_is_paused", lambda mid: False)

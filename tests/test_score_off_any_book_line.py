@@ -142,6 +142,10 @@ def _cut(monkeypatch):
     monkeypatch.setattr(scorer, "MODEL_MIN_ODDS", {})
     monkeypatch.setattr(scorer, "PROB_ONLY_MODELS", set())
     monkeypatch.setattr(scorer, "PAUSED_MODELS", set())
+    # The AUTOMATIC pauses too: _is_paused also reads model_auto_pauses
+    # (_auto_paused_models), so stubbing the config constant alone leaves the
+    # test reading production state -- see test_prop_calibrated_decision.
+    monkeypatch.setattr(scorer, "_auto_paused_models", lambda: set())
     monkeypatch.setattr(scorer, "DECIDE_ON_CALIBRATED_PROB", False)
     monkeypatch.setattr(scorer, "MAX_EDGE_CAP", 0.30)
 

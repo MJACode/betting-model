@@ -227,6 +227,18 @@ player prop model in production, and the ~400 settled picks that look like one
 are not.** Do not read them as evidence in either direction; the numbers and
 the population are in `docs/rules_evidence.md`.
 
+**A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND
+"SHOULD WE UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A
+pause banks the loss and ends the search. A model that is losing — paused or
+live — gets the FULL SWEEP first: every scored pick (§7's evaluation rule), a
+grid reported as a NEIGHBOURHOOD not a peak, an early/late split, a bet count
+and a confidence interval, and every candidate re-graded on the artifact
+`model_registry` says is LIVE (a pooled record blends retired models).
+**"No cut clears, here is the grid and here is what would have to change" is a
+complete answer; "shall I unpause it?" is not** — it hands back the work.
+`scripts/paused_model_assessment.py` sweeps BOTH pause registers;
+`docs/paused_model_assessment.md` carries the standing result.
+
 **A CHANGE TO HOW ONE MODEL OPERATES IS ASSESSED AGAINST ALL OF THEM.**
 (Repo-level rule, 2026-08-29.) Before shipping an operational change — how a
 loop prices, what it records, how it locks, what it publishes — ask whether the
@@ -313,16 +325,11 @@ A surface with an extra GATE can only lose rows, and does it silently —
   NCAAF's `'OK'` / `'GONE'` are live states on real picks.
 - **A new surface is a line in the parity tests**, not a copied query:
   `tests/test_{nfl_lookahead_signals,publish_key_identity,publisher_lock}.py`.
-- **LIVE PICKS POST TO THEIR SPORT'S LIVE CHANNEL.** (mike, 2026-09-09: *"Push
-  picks to discord in live games to their live channels."*) `#nfl-live`,
-  `#mlb-live`, `#ncaaf-live` via `DISCORD_WEBHOOK_LIVE_{SPORT}` on Railway
-  (both services), resolved by `discord_notifier._live_webhook_for_sport`; the
-  shared `DISCORD_WEBHOOK_LIVE` and the pre-game channel are fallbacks only.
-  **Every live lane announces its BETs** — the MLB and NCAAF loops at the end of
-  a pass, the NFL in-play worker per committed BET — and a new live lane that
-  writes `is_live` picks without calling `notify_discord_live` is the NFL bug
-  of 2026-09-05→09-09 again. Webhook URLs are credentials: Railway variables,
-  never the repo.
+- **LIVE PICKS POST TO THEIR SPORT'S LIVE CHANNEL.** (mike, 2026-09-09:
+  *"Push picks to discord in live games to their live channels."*) Every
+  in-play model announces its BETs there, and a new in-play model that writes
+  `is_live` picks without calling `notify_discord_live` is the NFL bug of
+  2026-09-05 again. Webhooks, fallbacks and the routing: `docs/discord.md`.
 
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
@@ -477,9 +484,8 @@ No picks are generated until a team has played ≥ 10 games.
 Prior-season stats are used as the feature baseline during this window.
 
 ### NHL Overtime
-Full-game moneyline counts OT/SO results.
-Regulation-only model uses a separate 3-way market (Home / Draw / Away).
-Regulation market often has better value since casual bettors underweight it.
+Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
+market (`docs/sports/nhl.md`).
 
 ---
 
@@ -568,47 +574,36 @@ at, and it excludes the books a member cannot bet.
 
 ### Two invariants that must not be broken
 
-- **A PICK IS DECIDED, SIZED AND SETTLED AT THE BEST BETTABLE PRICE AT THE
-  DRAFTKINGS LINE, AND THE ROW SAYS WHICH PRICE THAT WAS.** (mike, 2026-09-09:
-  *"we should remove DK only - we want best lines for us regardless."*) Since
-  that day `edge`-style decisions on pre-game picks run at the best price across
-  `config.BEST_LINE_BOOKMAKERS`, stored as `picks.decision_book / decision_odds
-  / decision_implied_prob / decision_edge`; settlement, the record views, the
-  custom-model RPCs, Discord, push and the app's action filter all read those
-  columns with `COALESCE(decision_x, dk_x)` (rows written before that day were
-  decided at DraftKings, so the fallback is exact). **DraftKings stays the
-  REFERENCE, not the decider:** training features and CLV (`closing_dk_odds`
-  vs `dk_odds`) are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings
-  meaning. **The IN-PLAY models joined on 2026-09-10** (mike, "yes do
-  everything"): the MLB and NCAAF in-play models decide at the best bettable
-  in-play quote at DraftKings' line, through their own classifiers, with the
-  stale-line cap kept on the DraftKings edge and every candidate quote gated
-  on the same age and score-change clocks as the DraftKings quote;
-  `nfl_live_prop` cannot, its feed is DraftKings-only. No cut moved with
-  either change — the sweep found none shippable — so every cut is 0.68pp
-  looser on average at the better price (`docs/best_line.md` §4).
-  `scorer._decide` / `_size` (pre-game), `live_scorer.classify_live_signal`
-  (MLB in-play) and `ncaaf_live.serve.LiveEngine._decide` (NCAAF in-play) are
-  the ONE code path each model's two prices run through;
-  `tests/test_decide_on_best_price.py` and `tests/test_best_line_live.py` are
-  what stop the two splitting again.
+- **A PICK IS DECIDED, SIZED AND SETTLED AT THE BEST BETTABLE PRICE, AND THE
+  ROW SAYS WHICH PRICE AND WHOSE LINE.** (mike, 2026-09-09: *"we should remove
+  DK only - we want best lines for us regardless"*; the in-play models joined
+  2026-09-10, *"yes do everything"*.) The decision runs at the best price
+  across `config.BEST_LINE_BOOKMAKERS` at the line, stored as
+  `picks.decision_book / decision_odds / decision_implied_prob /
+  decision_edge`; settlement, the record views, the RPCs, Discord, push and
+  the app's action filter all read them as `COALESCE(decision_x, dk_x)`
+  (pre-2026-09-09 rows were decided at DraftKings, so the fallback is exact).
+  **DraftKings stays the REFERENCE:** training features and CLV are DK-to-DK,
+  and `edge` / `dk_odds` keep their DraftKings meaning. No cut moved with
+  either change. One code path per model decides at both prices —
+  `scorer._decide` / `_size`, `live_scorer.classify_live_signal`,
+  `ncaaf_live.serve.LiveEngine._decide` — with the stale-line cap always on
+  the DraftKings edge. `nfl_live_prop` stays DraftKings-only (its feed carries
+  no other book). Detail and the measurements: `docs/best_line.md`. Tests:
+  `tests/test_{decide_on_best_price,best_line_live}.py`.
 - **A PLAYER PROP DRAFTKINGS DOES NOT LIST IS SCORED OFF THE FIRST BETTABLE
   BOOK THAT DOES.** (mike, 2026-09-12: *"Yes, scoring of other books lines."*)
-  The book is taken in `config.BEST_LINE_BOOKMAKERS` order, NEVER by price:
-  the LINE is the proposition, so choosing the book by whose number the model
-  likes best would choose the bet to suit the model. The ordinary best-price
-  check then runs at that line. `picks.line_book` names the book, NULL means
-  DraftKings, and on those rows **`dk_odds` / `dk_implied_prob` / `edge` are
-  NULL / 0.0 by design** — DraftKings never quoted the proposition — so every
-  read of a pick's price or edge goes through `decision_*`, and the
-  published-units gate reads `COALESCE(decision_odds, dk_odds)`
-  (`score_off_any_book_line_2026_09_12.sql`). GAME markets are unchanged:
-  DraftKings lists every game we model, and a game-level DraftKings line is a
-  model FEATURE, so changing its source is a retrain question. **These picks
-  are a new population — no cut was swept on it — so report them separately,
-  by `line_book`, before folding them into a model's record.**
-  `SCORE_OFF_ANY_BOOK_LINE=0` restores "no DraftKings quote, no pick". Test:
-  `tests/test_score_off_any_book_line.py`.
+  Book taken in `BEST_LINE_BOOKMAKERS` order, NEVER by price — the LINE is the
+  proposition, so choosing the book by the number would choose the bet to suit
+  the model. `picks.line_book` names it, NULL = DraftKings, and on those rows
+  **`dk_odds` / `dk_implied_prob` / `edge` are NULL / 0.0 by design**, so every
+  read of a pick's price or edge goes through `decision_*` and the
+  published-units gate reads `COALESCE(decision_odds, dk_odds)`. GAME markets
+  are unchanged: a game-level DraftKings line is a model FEATURE, so changing
+  its source is a retrain question. **These picks are a new population — no cut
+  was swept on it — so report them separately, by `line_book`.**
+  `SCORE_OFF_ANY_BOOK_LINE=0` restores "no DraftKings quote, no pick".
+  Test: `tests/test_score_off_any_book_line.py`.
 - **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO PRICE.** (2026-09-03.)
   A win with `dk_odds IS NULL` (and, since 2026-09-09, `decision_odds IS NULL`)
   is stored as +$90.91 on a $100 stake — exactly the payout of -110 — so
@@ -765,6 +760,7 @@ to be known BEFORE deciding which file to open.
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Sportsbook logos in the line pills (and why a label ships first) | `docs/book_logos.md` |
+| **Can a paused model be profitable? The standing assessment** | `docs/paused_model_assessment.md` |
 | **Evidence behind the §1b and §7 rules** | `docs/rules_evidence.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | **Model artifacts: present, tracked, and loadable** | `docs/artifact_integrity.md` |
