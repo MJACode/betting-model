@@ -23,7 +23,7 @@ import {
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { isUnlockedPreview, passesActionFilter } from '@/lib/thresholds';
+import { isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -89,7 +89,7 @@ export function BuiltInModelDetailScreen() {
         .filter(
           (p) =>
             p.model_id === modelId &&
-            passesActionFilter(p) &&
+            passesRecordFilter(p) &&
             (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH'),
         )
         .sort((a, b) => b.game_date.localeCompare(a.game_date)),
@@ -520,7 +520,7 @@ function computeClvStats(
   settled: SettledPick[],
 ): { avg: number; beatRate: number; count: number } | null {
   const vals = settled
-    .filter((p) => p.model_id === modelId && passesActionFilter(p) && p.clv_pct != null)
+    .filter((p) => p.model_id === modelId && passesRecordFilter(p) && p.clv_pct != null)
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;

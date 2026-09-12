@@ -47,6 +47,68 @@ BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
 # (CLAUDE.md 7, THE EVALUATION RULE).
 PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-09-01")
 
+# ── EXPLICIT RECORD REMOVALS — the ONLY way a settled pick leaves the record ──
+# mike, 2026-09-12: "Pausing a model should not erase settled record unless I
+# explicitly say so ... If I didn't explicitly say to remove a settled record,
+# and I have in the past for some others, then you need to keep the record. I
+# did not say this explicitly for NCAA football. Do not do it unless I
+# explicitly say so."
+#
+# A settled pick is in the published record because it was written as a BET.
+# NOTHING ABOUT THE MODEL'S PRESENT STATE MAY REMOVE IT — not a pause, not a
+# threshold change, not a retrain, not a recalibration. There are exactly two
+# ways out, both requiring somebody to have said so out loud:
+#
+#   1. VOID the pick — scripts/void_picks.py sets result='NO_ACTION', which the
+#      record queries drop because they count only WIN/LOSS/PUSH. This is for a
+#      pick that should never have been PRODUCED (CLAUDE.md 1c), and it carries
+#      its reason and its requester in `condition_note`.
+#   2. An entry HERE, for a whole model or a model-before-a-date.
+#
+# ADD TO THIS ONLY ON AN EXPLICIT INSTRUCTION, AND NAME WHO GAVE IT. An entry
+# with no attribution puts a decision in somebody's mouth, which is how the
+# 2026-09-11 NCAAF pause came to be stamped `Updated-By: mike` (docs/rules_evidence.md).
+#
+# The published window ALSO starts at PAPER_TRADING_START above (matt,
+# 2026-09-04, "only start tracking bets as of 9/1"). That is a window, not a
+# removal: the picks before it are untouched and still the bet of record.
+RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
+    {
+        "model_id": "mlb_over_under",
+        "before": "2026-07-05",
+        "asked_by": "unattributed — pinned as found, 2026-09-12",
+        "reason": (
+            "The 'honest era' gate. Two live-input repairs landed 2026-07-04/05 "
+            "(the bullpen-freeze catch-up and the NaN spread_home fix), so picks "
+            "priced before them came off out-of-distribution inputs. Carried in "
+            "the sweep views since; DEAD in the published record, which starts "
+            "2026-09-01 and so can never reach it. Kept here so the exclusion is "
+            "greppable rather than buried in a view definition."
+        ),
+    },
+)
+
+
+def record_exclusion_sql(alias: str = "p") -> str:
+    """RECORD_EXCLUSIONS as a SQL predicate, ANDed into a record query.
+
+    Generated rather than hand-written so the published record and the views
+    cannot drift apart — the same reason scripts/emit_threshold_sql.py exists.
+    Returns "" when nothing is excluded, so callers can concatenate blindly.
+    """
+    clauses = []
+    for ex in RECORD_EXCLUSIONS:
+        model = ex["model_id"].replace("'", "''")
+        if ex.get("before"):
+            before = ex["before"].replace("'", "''")
+            clauses.append(
+                f"NOT ({alias}.model_id = '{model}' "
+                f"AND {alias}.game_date < '{before}')")
+        else:
+            clauses.append(f"{alias}.model_id <> '{model}'")
+    return "".join(f"\n          AND {c}" for c in clauses)
+
+
 # ── Pick locking ──────────────────────────────────────────────────────────────
 # When True (default), game-level picks (ML / runline / O-U / F5 / 3-way /
 # method) LOCK at the first scoring run of the day (≈7am ET) and are NOT

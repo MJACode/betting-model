@@ -513,6 +513,40 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   return edge >= t.min_edge;
 }
 
+/**
+ * THE RECORD FILTER — what a model HAS bet, as opposed to what it may bet next.
+ *
+ * A settled pick belongs to the record because it was written as a BET: it
+ * cleared its model's cut on the day, at the price available then. Nothing
+ * about the model's present state may take that back — not a pause, not a
+ * threshold change, not a retrain.
+ *
+ * mike, 2026-09-12: "Pausing a model should not erase settled record unless I
+ * explicitly say so ... Do not do it unless I explicitly say so." On the
+ * morning of 2026-09-12 the published NCAAF record went from 27-25 over 52
+ * settled picks to 0-3 over 3, because two NCAAF live lanes had been paused the
+ * evening before and every record surface re-applied `paused` to settled rows.
+ *
+ * A settled pick leaves the record by exactly two deliberate acts: a VOID, and
+ * an entry in config.RECORD_EXCLUSIONS (mirrored server-side in
+ * v_public_track_record). Both are checked here; model state is not.
+ *
+ * Use passesActionFilter instead for anything the reader could still BET —
+ * there a paused model must not be offered. The two filters answering two
+ * questions is the point; one filter answering both is the bug.
+ */
+export function passesRecordFilter(p: PickRow): boolean {
+  if (p.signal_type !== 'BET') return false;
+  // A VOIDed pick is not a bet of record (CLAUDE.md 1c). Server-side the same
+  // exclusion happens via result='NO_ACTION'.
+  if (p.condition_status === 'VOID') return false;
+  // A pre-game model's in-play pick does not count; a dedicated live lane does.
+  // Pre-game and in-play prices never mix (CLAUDE.md 6). Same helper the rest
+  // of the record path uses, so this cannot drift from the DB views.
+  if (isContaminatedPregamePick(p)) return false;
+  return true;
+}
+
 /** Effective fraction of bankroll after applying multiplier + user cap. */
 export function effectiveKellyFraction(
   serverKellyFraction: number,

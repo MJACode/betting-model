@@ -83,6 +83,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # views. This must run AFTER track_record_reads_graded_matview, which used to
     # own the daily view and reverted it to the 2026-04-14 window on every pass.
     "live_record_start_views_2026_09_01.sql",
+    # 2026-09-12: a settled pick stays in the published record whatever the
+    # model does next. Drops `paused` and the re-application of today's
+    # thresholds from both published views — a pause had erased 55 settled
+    # NCAAF bets overnight. MUST run after live_record_start_views_2026_09_01,
+    # which owns these two views and would otherwise restore the paused clause
+    # on the next pass.
+    "settled_record_survives_a_pause_2026_09_12.sql",
     # 2026-09-05: one row per pick, enforced by a unique index. No-ops (with a
     # NOTICE) until scripts/dedupe_picks.py has cleared the 63 rows a released
     # lock wrote, then creates the index on the next pass.

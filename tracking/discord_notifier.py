@@ -1713,23 +1713,41 @@ def notify_discord_free_pick(target_date: str | None = None,
 #
 # Retired models need no clause: the JOIN drops them, because a retirement
 # deletes the model_action_thresholds row.
+# THE RECORD IS WHAT WAS BET, NOT WHAT WE WOULD BET TODAY.
+#
+# A pick is in here because `signal_type = 'BET'` — it cleared its model's cut
+# on the day it was written, at the price that was available then. Nothing about
+# the model's PRESENT state may take that back: not a pause, not a threshold
+# change, not a retrain. This query therefore does not join
+# model_action_thresholds at all.
+#
+# It used to. `AND t.paused = FALSE` plus a re-application of the current
+# min_prob / min_edge / min_odds meant the published all-time figure was
+# recomputed from scratch every morning under whatever config happened to be
+# live. On 2026-09-12 that turned NCAAF's published record from 27-25 over 52
+# settled picks into 0-3 over 3, because two NCAAF live lanes had been paused
+# the evening before — 55 settled bets erased by a flag about the future.
+# Threshold edits had been doing the quieter version of the same thing for a
+# fortnight (-104 settled on 09-02, -22 on 09-09).
+#
+# mike, 2026-09-12: "Pausing a model should not erase settled record unless I
+# explicitly say so ... Do not do it unless I explicitly say so." The two ways
+# a settled pick DOES leave are both deliberate acts: a VOID, which sets
+# result='NO_ACTION' and so fails the WIN/LOSS/PUSH filter below, and an entry
+# in config.RECORD_EXCLUSIONS, appended here. See CLAUDE.md 1c.
+#
+# The open-pick publishers above are the opposite case and keep their paused and
+# threshold checks: a paused model must not be offered as something to bet.
 _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
                p.clv_pct, p.is_live
         FROM picks p
-        JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
           AND (p.is_live IS NOT TRUE OR p.model_id LIKE '%%\_live\_%%')
-          AND p.result IN ('WIN', 'LOSS', 'PUSH')
-          AND t.paused = FALSE
-          AND p.model_probability >= t.min_prob
-          -- The cut at the price the pick was DECIDED at (2026-09-09).
-          AND (t.prob_only = TRUE
-               OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
-          AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
-               OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
-"""
+          -- VOIDed picks are result='NO_ACTION' and drop out here.
+          AND p.result IN ('WIN', 'LOSS', 'PUSH')""" \
+    + config.record_exclusion_sql("p") + "\n"
 
 
 def _settled_rows(conn, game_date: str) -> list[tuple]:

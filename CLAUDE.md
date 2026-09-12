@@ -399,16 +399,20 @@ answer is "nothing".
   NONE rows for games that have not started, and the UFC/NCAAF look-ahead
   window, where picks are explicitly not yet locked and re-score until game
   morning (`docs/sports/{ufc,ncaaf}.md`). A BET is never in that set.
-- **A pick the model should never have PRODUCED is VOIDED, never deleted.**
-  (mike, 2026-09-07.) §1c protects a bet against LINE MOVEMENT — not a row
-  emitted while a model fired OUTSIDE its validated window, or on a game that
-  was never eligible. Deleting one destroys the evidence the bug happened, which
-  is usually how it was found. The row stays and stops counting:
-  **`scripts/void_picks.py`** (dry-run by default) sets `result='NO_ACTION'` and
-  `condition_status='VOID'` with a reason, never touches `created_at`, the line
-  or the price, and keeps the insert-once lock. It REFUSES an already-graded
-  pick — that is rewriting a settled result, not correcting a bug.
-  Evidence: `docs/rules_evidence.md`.
+- **A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS, AND A PAUSE IS NEITHER.**
+  (mike, 2026-09-12: *"Pausing a model should not erase settled record unless I
+  explicitly say so."*) A pick is in the record because it was WRITTEN as a
+  BET; no pause, threshold change or retrain reaches back and removes one.
+  One query answering both "may bet next" and "did bet" moves the number with
+  nothing deleted — 55 settled NCAAF bets, overnight. A record query filters on
+  what the pick WAS (`signal_type='BET'`, a real result, in the window), never
+  joining `model_action_thresholds`. The exits: **VOID** — a row the model should never
+  have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
+  sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
+  the line, the price and the lock, and REFUSES a graded pick (deleting
+  destroys the evidence) — and **`config.RECORD_EXCLUSIONS`**, naming who
+  asked. Sweep views DO re-cut (§7). Test:
+  `tests/test_settled_record_is_immutable.py`.
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
