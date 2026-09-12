@@ -19,6 +19,14 @@ EDGE FLOORS ARE PLACEHOLDERS AND SAY SO. No historical in-play NCAAF edge has
 been measured (that is the phase-3 snapshot harness). Week 1 output is a
 CALIBRATION SET at minimum size; the floors are set high on purpose so the
 loop is quiet rather than busy.
+
+BOTH LANES ARE PAUSED (config.PAUSED_MODELS, 2026-09-11, mike). The
+calibration set spoke: ncaaf_live_total 55 settled 28-27 -2.99u, claiming
+67.5% and winning 50.9%; 31 BETs on the 36 priceable games of 09-05. A paused
+lane still prices every pass and its polled quotes still land in `odds`
+(live_price_log), so the forward record is replayed from stored snapshots --
+it just never writes a BET. The unpause is the phase-3 replay in
+data/ingestors/ncaaf_inplay_history.py, not a threshold.
 """
 
 from __future__ import annotations
@@ -108,6 +116,19 @@ else:
     ML_MIN_EDGE = _cut("ncaaf_live_win_prob", "min_edge", ML_MIN_EDGE)
     TOTAL_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
     ML_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+
+
+def _is_paused(model_id: str) -> bool:
+    """config.PAUSED_MODELS, read at CALL time so a pause (or a test) lands
+    without a restart of this module. Same source the MLB live loop reads
+    (models/live_scorer.py); the pre-game scorer additionally honours the
+    auto-pause table, which no live lane does -- deliberately the same across
+    live lanes. Standalone use (no platform config) is never paused."""
+    try:
+        import config as _c
+    except Exception:  # pragma: no cover - standalone/offline use
+        return False
+    return model_id in getattr(_c, "PAUSED_MODELS", ())
 
 
 def expected_value(model_prob: float, american) -> float | None:
@@ -301,6 +322,58 @@ class LiveEngine:
         return pd.DataFrame([row])
 
     # ---------------------------------------------------------------- price
+    def candidates(self, row: pd.DataFrame, period: int, hs: int, as_: int,
+                   odds: dict | None) -> list[dict]:
+        """Every proposition the engine can price from ONE state, with its
+        model probability, the book's price and the edge -- and NO threshold
+        applied. `price()` is this plus the licences, the guards and the cut;
+        the replay harness (scripts/ncaaf_inplay_history_backtest.py) is this
+        plus a grid of cuts. One pricing path, so a cut swept offline is a cut
+        the loop actually applies.
+
+        `row` is one feature row in the training schema (feature_row() live,
+        the states parquet in replay). Lane licences that are properties of
+        the STATE -- overtime, the totals endgame -- live here so the replay
+        cannot price what the loop would decline."""
+        if period > MAX_PERIOD:
+            return []                                   # OT: declined
+        preds = predict_remaining(self.models, row)
+        mu_h = float(preds["home_remaining_hat"].iloc[0])
+        mu_a = float(preds["away_remaining_hat"].iloc[0])
+        secs = float(row["seconds_remaining"].iloc[0])
+        out = self.dist.final_score_pmf(mu_h, mu_a, secs, hs, as_)
+
+        cands: list[dict] = []
+        # -- moneyline lane (gate-1 licensed) ---------------------------------
+        ml = (odds or {}).get("h2h")
+        if ml and ml.get("home") is not None and ml.get("away") is not None:
+            wp = price_moneyline(out)
+            for side in ("home", "away"):
+                p = float(wp[side])
+                price = float(ml[side])
+                implied = american_to_prob(price)
+                cands.append({"model_id": "ncaaf_live_win_prob",
+                              "pick_side": side, "model_probability": p,
+                              "dk_implied_prob": implied, "edge": p - implied,
+                              "dk_odds": price, "scored_line": None})
+        # -- main-total lane (median-region license only) ---------------------
+        tot = (odds or {}).get("total")
+        if tot and secs >= TOTAL_MIN_SECONDS:
+            line = float(tot["line"])
+            values, probs = total_pmf(out["joint_remaining"], hs + as_)
+            p_over = float(probs[values > line].sum())
+            p_under = float(probs[values < line].sum())
+            for side, p, price in (("over", p_over, tot.get("over")),
+                                   ("under", p_under, tot.get("under"))):
+                if price is None:
+                    continue
+                implied = american_to_prob(float(price))
+                cands.append({"model_id": "ncaaf_live_total",
+                              "pick_side": side, "model_probability": p,
+                              "dk_implied_prob": implied, "edge": p - implied,
+                              "dk_odds": float(price), "scored_line": line})
+        return cands
+
     def price(self, state: dict, ctx: GameContext, odds: dict | None,
               now: datetime | None = None,
               score_seen_at: datetime | None = None) -> list[dict]:
@@ -322,14 +395,22 @@ class LiveEngine:
             return []
 
         row = self.feature_row(state, ctx)
-        preds = predict_remaining(self.models, row)
-        mu_h = float(preds["home_remaining_hat"].iloc[0])
-        mu_a = float(preds["away_remaining_hat"].iloc[0])
         secs = float(row["seconds_remaining"].iloc[0])
         hs, as_ = int(state["home_score"]), int(state["away_score"])
-        out = self.dist.final_score_pmf(mu_h, mu_a, secs, hs, as_)
 
-        picks: list[dict] = []
+        # The quote guards are properties of the FEED, not the state: a market
+        # that has frozen, or one stamped before the last score, is dropped
+        # before pricing so the candidates are the takeable ones only.
+        takeable: dict = {}
+        for key, label in (("h2h", "h2h"), ("total", "totals")):
+            mkt = (odds or {}).get(key)
+            if mkt and market_is_takeable(mkt, label, ctx.game_id, now,
+                                          score_seen_at):
+                takeable[key] = mkt
+        if takeable.get("total") and secs < TOTAL_MIN_SECONDS:
+            log.debug("%s: totals lane closed (%.0fs left < %s)",
+                      ctx.game_id, secs, TOTAL_MIN_SECONDS)
+
         base = {
             "game_id": ctx.game_id, "sport": "NCAAF",
             "game_date": ctx.game_date, "game_time": ctx.commence_time,
@@ -339,76 +420,47 @@ class LiveEngine:
             "inning_at_pick": period,           # the period, in the shared column
             "score_diff_at_pick": hs - as_,
         }
-
-        # ── moneyline lane (gate-1 licensed) ────────────────────────────────
-        ml = (odds or {}).get("h2h")
-        if not market_is_takeable(ml, "h2h", ctx.game_id, now,
-                                  score_seen_at):
-            ml = None
-        if ml and ml.get("home") is not None and ml.get("away") is not None:
-            wp = price_moneyline(out)
-            for side, label_team in (("home", ctx.home), ("away", ctx.away)):
-                p = float(wp[side])
-                price = float(ml[side])
-                implied = american_to_prob(price)
-                edge = p - implied
-                best = best_takeable_quote(odds, "h2h", side, None,
-                                           ctx.game_id, now, score_seen_at)
-                d_book, d_price, d_implied, d_edge = self._deciding(
-                    p, price, implied, best)
-                pick = self._decide(p, d_edge, ML_MIN_PROB, ML_MIN_EDGE,
-                                    d_price, ML_MIN_EV, cap_edge=edge)
-                if pick:
-                    picks.append({**base,
-                        "model_id": "ncaaf_live_win_prob",
-                        "pick_side": side,
-                        "pick_label": f"{label_team} ML (live)",
-                        "model_probability": round(p, 4),
-                        "dk_implied_prob": round(implied, 4),
-                        "edge": round(edge, 4), "dk_odds": price,
-                        "scored_line": None, "signal_type": pick,
-                        **self._kelly(p, d_implied, pick),
-                        **self._price_fields(d_book, d_price, d_implied,
-                                             d_edge, best, p)})
-
-        # ── main-total lane (median-region license only) ────────────────────
-        tot = (odds or {}).get("total")
-        if not market_is_takeable(tot, "totals", ctx.game_id, now,
-                                  score_seen_at):
-            tot = None
-        if tot and secs >= TOTAL_MIN_SECONDS:
-            line = float(tot["line"])
-            values, probs = total_pmf(out["joint_remaining"], hs + as_)
-            p_over = float(probs[values > line].sum())
-            p_under = float(probs[values < line].sum())
-            for side, p, price in (("over", p_over, tot.get("over")),
-                                   ("under", p_under, tot.get("under"))):
-                if price is None:
-                    continue
-                implied = american_to_prob(float(price))
-                edge = p - implied
-                best = best_takeable_quote(odds, "total", side, line,
-                                           ctx.game_id, now, score_seen_at)
-                d_book, d_price, d_implied, d_edge = self._deciding(
-                    p, float(price), implied, best)
-                pick = self._decide(p, d_edge, TOTAL_MIN_PROB, TOTAL_MIN_EDGE,
-                                    d_price, TOTAL_MIN_EV, cap_edge=edge)
-                if pick:
-                    picks.append({**base,
-                        "model_id": "ncaaf_live_total",
-                        "pick_side": side,
-                        "pick_label": f"{ctx.away} @ {ctx.home} "
-                                      f"{side.capitalize()} {line:g} (live)",
-                        "model_probability": round(p, 4),
-                        "dk_implied_prob": round(implied, 4),
-                        "edge": round(edge, 4), "dk_odds": float(price),
-                        "scored_line": line, "signal_type": pick,
-                        **self._kelly(p, d_implied, pick),
-                        **self._price_fields(d_book, d_price, d_implied,
-                                             d_edge, best, p)})
-        elif tot and secs < TOTAL_MIN_SECONDS:
-            log.debug("%s: totals lane closed (%.0fs left < %s)",
-                      ctx.game_id, secs, TOTAL_MIN_SECONDS)
+        cuts = {"ncaaf_live_win_prob": (ML_MIN_PROB, ML_MIN_EDGE, ML_MIN_EV),
+                "ncaaf_live_total": (TOTAL_MIN_PROB, TOTAL_MIN_EDGE, TOTAL_MIN_EV)}
+        picks: list[dict] = []
+        for c in self.candidates(row, period, hs, as_, takeable):
+            min_prob, min_edge, min_ev = cuts[c["model_id"]]
+            p, edge, implied = (c["model_probability"], c["edge"],
+                                c["dk_implied_prob"])
+            # THE BEST BETTABLE IN-PLAY PRICE DECIDES (2026-09-10, mike: "yes
+            # do everything"). `candidates` stays the pure DraftKings
+            # proposition -- that is its contract, and the replay harness
+            # reads it with one book of history -- so the shop happens here,
+            # where the feed's other books and both clocks are in scope. Each
+            # candidate book is judged takeable on ITS OWN publish clock; a
+            # tie keeps DraftKings.
+            best = best_takeable_quote(
+                odds, "h2h" if c["model_id"] == "ncaaf_live_win_prob" else "total",
+                c["pick_side"], c["scored_line"], ctx.game_id, now, score_seen_at)
+            d_book, d_price, d_implied, d_edge = self._deciding(
+                p, c["dk_odds"], implied, best)
+            pick = self._decide(p, d_edge, min_prob, min_edge, d_price, min_ev,
+                                cap_edge=edge)
+            pick = self._unless_paused(pick, c["model_id"])
+            if not pick:
+                continue
+            if c["model_id"] == "ncaaf_live_win_prob":
+                team = ctx.home if c["pick_side"] == "home" else ctx.away
+                label = f"{team} ML (live)"
+            else:
+                label = (f"{ctx.away} @ {ctx.home} "
+                         f"{c['pick_side'].capitalize()} {c['scored_line']:g} (live)")
+            picks.append({**base,
+                "model_id": c["model_id"],
+                "pick_side": c["pick_side"],
+                "pick_label": label,
+                "model_probability": round(p, 4),
+                "dk_implied_prob": round(implied, 4),
+                "edge": round(edge, 4), "dk_odds": c["dk_odds"],
+                "scored_line": c["scored_line"], "signal_type": pick,
+                **self._kelly(p, d_implied, pick),
+                **self._price_fields(d_book, d_price, d_implied, d_edge,
+                                     best, p)})
         return picks
 
     @staticmethod
@@ -433,6 +485,20 @@ class LiveEngine:
         from models.scorer import _best_fields, _decision_fields
         return {**_decision_fields(book, price, implied, edge),
                 **_best_fields(best, p)}
+
+    @staticmethod
+    def _unless_paused(pick: str | None, model_id: str) -> str | None:
+        """A paused lane never surfaces a BET. It writes NOTHING for it --
+        not a NONE row: this loop delete-and-replaces every non-BET row of an
+        unlocked lane each pass, so a NONE here would churn `picks_log` for
+        every priced game all afternoon and still only hold the LAST state.
+        The forward record lives in the in-play quotes the loop stores anyway.
+        AVOID is informational and unaffected (the pre-game convention)."""
+        if pick == "BET" and _is_paused(model_id):
+            log.debug("%s paused (config.PAUSED_MODELS) - BET not written",
+                      model_id)
+            return None
+        return pick
 
     @staticmethod
     def _decide(p: float, edge: float, min_prob: float, min_edge: float,

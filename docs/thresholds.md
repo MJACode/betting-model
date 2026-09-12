@@ -344,6 +344,8 @@ even money and a fixed number would mis-call every one of them.
 | `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | 35 (16W, bx .530, −4.81u, z −0.86) | pause if still below breakeven |
 | `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | 15 (6W, bx .503, −3.92u, z −0.80) | pause if still below breakeven |
 | `mlb_live_total_runs` | ~~2026-08-31~~ **2026-09-09** | ~~n ≥ 150~~ **n ≥ 75** | 0 on the current artifact (the 70 above were the June model, retired 09-09) | re-sweep the cut on the honest replay — see "mlb_live_total_runs cut, 2026-09-09" |
+| `ncaaf_live_total` | 2026-08-30 | — | **PAUSED 2026-09-11 (mike)**: 55 settled 28-27 −2.99u, claims 67.5% wins 50.9%; 31 BETs on 36 priceable games on 09-05 | unpause only on the 2025 in-play replay (`scripts/ncaaf_inplay_history_backtest.py`) — `docs/live_betting.md` |
+| `ncaaf_live_win_prob` | 2026-08-30 | — | **PAUSED 2026-09-11 (mike)**: 6 settled 4-2 +0.49u, claims 78.6% wins 66.7% — unassessable | same replay, same bar |
 
 **Why `k` is not paused today**, given it is the largest single loss in the
 30-day table at −18.30u/72: **that record spans two artifacts.** Split at the
@@ -381,6 +383,117 @@ are ONE decision, never two.
 
 
 ---
+
+## `nfl_prop_market` cut, 2026-09-12 (mike): one floor → two, over 5pp → 6pp
+
+mike: *"I asked you to find evidence for stat models any way you can... Figure
+it out. Find the solution."*
+
+**The two sides of this rule are no longer held to the same edge floor.** The
+under keeps its pre-committed 5pp; the over is held to 6pp.
+`config.NFL_PROP_MARKET_SIDE_EDGE`.
+
+WHY, AND THE MECHANISM CAME FIRST. NFL prop lines lean over. Measured with no
+model in the loop across 27,976 propositions 2023-25 at the best bettable price
+(`scripts/nfl_prop_over_lean.py`): blind unders −1.29%, blind overs −7.91%, and
+the under hit rate rises with how prominent and widely quoted the proposition is
+— 49.7% / 52.2% / 52.6% by tercile against a 52.4% break-even — in all three
+seasons separately. The gradient survives at a FLAT −110, so it is a lean in the
+line rather than an artifact of shopping.
+
+That predicted the split before the rule's own record was cut by side:
+
+| side | bets | ROI | 90% CI | 2023 / 2024 / 2025 |
+|---|---|---|---|---|
+| over | 1,092 | +4.11% | (−0.8, +9.0) | +1.1 / +11.1 / +2.1 |
+| under | 898 | +12.36% | (+7.2, +17.5) | +12.6 / +4.9 / +21.1 |
+
+and the two curves move oppositely with the cut — over 5pp +4.1%, 6pp +15.8%,
+7pp +20.5%; under 5pp +12.4%, 6pp +13.5%, 7pp +12.2%. Monotone on the side that
+has to overcome the lean, flat on the side carried by it.
+
+PAIRED, graded end to end:
+
+| | bets | units | ROI | 90% CI | seasons |
+|---|---|---|---|---|---|
+| one floor (was) | 1,990 | +155.9 | +7.84% | (+4.3, +11.4) | +6.4 / +8.2 / +10.1 |
+| **two floors (now)** | **1,248** | **+166.3** | **+13.33%** | **(+8.9, +17.8)** | +13.2 / +12.6 / +14.5 |
+
+More profit from 742 fewer bets, all three seasons positive, and the season
+spread tightens from 3.7pp to 1.9pp.
+
+REPLICATION: the under-minus-over gap holds at three independent snapshot
+offsets (`open` +8.3pp, `t48` +5.2pp, `t72` +2.2pp).
+
+WHAT IS FITTED: the number 6, off this grid. The mechanism is not. If the over
+cut is noise, overs revert to +4.11% and the pairing still returns ~+10.0%.
+The one cell against it: 2025 overs at 6pp are −4.2% on 73 bets. Re-measure on
+2026 settled bets (`docs/followups.md`). Full evidence:
+`docs/nfl_prop_over_lean.md`.
+
+NOT COPIED ACROSS SPORTS. `min_edge_by_side` is opt-in on the shared
+`market_relative.find_bets`; the WNBA, MLB and NCAAF ports pass nothing and are
+unchanged (CLAUDE.md §1b: mechanics are shared, cuts are measured per model).
+
+## `nfl_opener_spread` cut, 2026-09-11 (mike): |dev| 1.0 → 2.0, gate 0.52 → 0.55
+
+mike: *"the opener needs to be more aggressive, way too many picks, I need
+statistical profitability - revise all open picks based on stricter criteria.
+What's already settled is fine."*
+
+**The answer to "statistical profitability" is that no cut of this rule has
+it.** Stated first so the table below is not read as a finding. What the
+sweep does establish is that the 1-point rule was flat, and 2.0 is the only
+floor whose row stays positive across the edge grid.
+
+Swept on the selection the live card actually runs — the twelve bettable
+books (six of which exist in the 2020-2025 snapshot cache: draftkings,
+fanduel, betmgm, williamhill_us, betrivers, fanatics), first qualifying
+snapshot, one bet per game, Kelly-sized with sub-0.25u bets skipped — at the
+juice actually quoted. `nfl/scripts/opener_cut_sweep.py`, zero credits.
+The per-bet probability table it uses was fitted on this same sample
+(`opener_spread.DEV_WIN_PROB`), so probabilities are partly in-sample; the ROI
+is the realised return of the bets each cut would have taken.
+
+| \|dev\| floor | edge floor | bets | W-L | ROI at price | 95% CI | seasons +ve |
+|---|---|---|---|---|---|---|
+| 1.0 (old) | 0 | 728 | 387-341 | −0.03% | [−6.9, +6.7] | 4/6 |
+| 1.0 | 0.02 | 581 | 294-287 | −3.64% | [−11.2, +4.0] | 2/6 |
+| 1.5 | 0 | 268 | 137-131 | −5.09% | [−16.1, +6.0] | 2/6 |
+| 1.5 | 0.02 | 216 | 113-103 | −1.22% | [−13.7, +11.7] | 4/6 |
+| **2.0 (new)** | **0** | **125** | **72-53** | **+3.97%** | **[−11.8, +19.1]** | **5/6** |
+| 2.0 | 0.02 | 112 | 64-48 | +6.22% | [−10.4, +23.1] | 5/6 |
+| 2.0 | 0.03 | 92 | 50-42 | +1.50% | [−17.5, +20.7] | 3/6 |
+| 2.5 | 0 | 76 | 39-37 | −11.00% | [−30.3, +8.3] | 3/6 |
+| 3.0 | 0 | 25 | 12-13 | −28.92% | [−59.0, +0.1] | 0/5 |
+
+By season at 2.0/0: 2020 +0.5% (26), 2021 +18.0% (16), 2022 −28.4% (21),
+2023 +9.1% (18), 2024 +22.1% (23), 2025 +5.5% (23).
+
+Read it honestly: 1.5 and 2.5 are both negative, so 2.0 is a ridge rather
+than a plateau (§7). Every interval spans zero. A 2.0 floor removes the 83% of
+picks that measured −0.03% and keeps roughly 21 bets a season. It does not
+make the model a proven earner, and the alternative on the table is pausing
+it — that is mike's call, put to him in the session that shipped this.
+
+Two more things the sweep showed, not acted on:
+
+- **An edge floor of 0.04+ is strongly negative at every deviation** (n=38-45,
+  −30 to −40%, 0/6 or 1/6 seasons). The bets the DEV_WIN_PROB table likes
+  most on bettable books are the ones that lose. That is a calibration
+  problem in the table, not a threshold, and it is worth a look before the
+  next re-cut.
+- On ALL 34 clean books the old 1.0 cut reads +3.68% on 929 bets — the
+  difference from −0.03% is entirely books nobody here can bet at.
+
+What changed: `nfl/models/opener_spread.DEPLOY_THRESHOLD` 1.0 → 2.0 (the card
+stops writing sub-2.0 rows, rather than the gate hiding rows the card wrote);
+`config` min_prob 0.52 → 0.55 for `nfl_opener_spread` (0.5557 at |dev| 2.0
+clears, 0.5470 at 1.0 does not — the calibration's original intent, lowered on
+2026-08-22); `model_action_thresholds` hand-set to 0.55 the same hour so the
+app and Discord apply it before the 6am sync. The seven open Week-1 picks
+below 2.0 were voided (`scripts/void_picks.py`, reason on each row); the
+settled SF @ LA win stands; BUF @ HOU at |dev| 2.0 stands.
 
 ## `mlb_live_total_runs` cut, 2026-09-09 (mike): 0.70 → 0.72
 

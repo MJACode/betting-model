@@ -21,6 +21,70 @@
 
 ---
 
+## [ ] Re-measure the `nfl_prop_market` over cut on 2026 settled bets
+
+Shipped 2026-09-12 (mike): the over side is held to 6pp, the under to 5pp
+(`config.NFL_PROP_MARKET_SIDE_EDGE`, `docs/nfl_prop_over_lean.md`). The
+MECHANISM is measured on 27,976 propositions and replicates in three seasons and
+at three snapshot offsets; the NUMBER 6 is fitted on the same 2023-25 grid it is
+quoted on, and one cell argues against it -- 2025 overs at 6pp are -4.2% on 73
+bets against +2.1% on 283 at 5pp. 2026 is the first season graded out of sample
+on it. Re-run `nfl_prop_two_sharps --min-edge 0.05 --over-edge 0.06 --by-side`
+with 2026 settled and check: is the over curve still monotone in the cut, and is
+the under side still the stronger one? If the over side reverts, the fallback is
+a single 5pp floor -- the pre-committed number -- which costs ~3pp of ROI.
+
+## [ ] Does the over-lean exist in the OTHER sports' prop markets?
+
+The NFL lean is measured (`docs/nfl_prop_over_lean.md`). The same
+market-relative rule is ported to WNBA (`models/wnba_prop_market`, live), MLB
+(`models/mlb_prop_market`, never wired) and NCAAF. If recreational over-shading
+is market structure rather than an NFL quirk, the same side split should appear
+there -- and CLAUDE.md §1b requires the question be asked either way. It was NOT
+answered here: the per-side floor is opt-in and those ports pass nothing, so
+they are untouched until someone measures them.
+`scripts/mlb_prop_market_sweep.py` already carries `side` in its graded tuples,
+so the MLB arm is a small change; MLB Pinnacle prop coverage starts 2026-08-27,
+so the window is thin.
+
+## [ ] Re-measure the NFL prop lead curve inside 24 h on the 2026 hourly polls (October)
+
+mike, 2026-09-11: the ceiling STAYS at 24 h (`config.NFL_PROP_MAX_LEAD_HOURS`)
+and is re-measured in October. The 2023-25 evidence is one snapshot a day at
+13:55 UTC, so its "lead bands" are kickoff-slot proxies
+(`docs/nfl_prop_offset_evidence.md`, correction banner): last 4 h +2.96% on
+450 (spans zero), 4-8 h +9.30% on 971 (clear), Saturday-morning read of Sunday
+games +17.45% on 173 (clear), the separate t24 series +2.12% on 187. Production
+has polled hourly since 2026-09-06 (`NFL_PROP_WINDOW_HOURS` 240), so by
+mid-October there are ~5 weeks of settled `nfl_prop_market` propositions at
+every hour inside 24 h. Grade the rule by the hour the soft quote was taken
+(`scripts/nfl_prop_two_sharps.py --by-lead` on the 2026 rows, or a per-hour
+variant) and decide 12 / 24 / 36 on that, not on the slot proxies. The open
+question is whether to WIDEN to 36 h to reach the Saturday-morning band.
+
+## [ ] [needs-decision] Buy the 2025 NCAAF in-play snapshots and run the live-lane replay
+
+Both NCAAF live lanes are paused (2026-09-11, mike) and the unpause condition
+is a season replay, not a forward slate. The ingestor and the harness exist
+and are tested on synthetic data; neither has run against real data.
+
+1. mike approves the spend: `python -m data.ingestors.ncaaf_inplay_history
+   --season 2025 --dry-run` says **18,662 calls = 373,240 credits (h2h +
+   totals) or 186,620 (`--markets totals`)**; 2,490,486 remained on
+   2026-09-11. Then `--apply --shard i/4` in four processes, on the worker or
+   Matt's machine (both hold `ODDS_API_KEY`).
+2. Build the states parquet where `CFBD_API_KEY` exists (the worker, or Matt's
+   machine — it is not in the local `.env`): `python -m
+   ncaaf_live.backtest.pull_pbp` then `build_states`.
+3. `python -m scripts.ncaaf_inplay_history_backtest --season 2025`, read the
+   FRESH grid, both halves, and the calibration table. Unpause only at a cell
+   positive in both halves with a CI clear of zero; a grid negative everywhere
+   means retrain or retire.
+
+The ~1.7k historical DK in-play rows already in `odds` for 2023-25
+(`source='odds_api_historical'`) are one pull per slate day and do not carry
+`last_update`; they are not a substitute.
+
 ## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
 
 Production has the guard: `models/live_scorer._get_live_dk_odds` declines an

@@ -464,13 +464,21 @@ def test_the_ncaaf_cap_is_judged_on_the_dk_edge():
 
 
 def test_the_ncaaf_lanes_route_through_the_deciding_helper():
+    """Both lanes come out of ONE `candidates` loop since #660, so the shop,
+    the decision and the stake are one site each -- and `candidates` itself
+    must stay the pure DraftKings proposition, because that is what the
+    replay harness (scripts/ncaaf_inplay_history_backtest.py) reads, with one
+    book of history. A cut swept offline has to be the cut the loop applies."""
     src = (ROOT / "ncaaf_live/serve.py").read_text(encoding="utf-8")
-    body = src[src.index("    def price("):src.index("    @staticmethod\n    def _deciding")]
-    assert body.count("best_takeable_quote(odds,") == 2
-    assert body.count("self._deciding(") == 2
-    assert body.count("cap_edge=edge") == 2
-    assert body.count("self._price_fields(") == 2
-    assert 'self._kelly(p, d_implied, pick)' in body and 'self._kelly(p, implied, pick)' not in body
+    body = src[src.index("    def price("):src.index("    def _deciding(")]
+    assert body.count("best_takeable_quote(") == 1
+    assert body.count("self._deciding(") == 1
+    assert body.count("cap_edge=edge") == 1
+    assert body.count("self._price_fields(") == 1
+    assert "self._kelly(p, d_implied, pick)" in body
+    assert "self._kelly(p, implied, pick)" not in body
+    cands = src[src.index("    def candidates("):src.index("    def price(")]
+    assert "best_takeable_quote(" not in cands and "decision_" not in cands
 
 
 def test_ncaaf_gameday_logs_every_book_it_priced_on():

@@ -4,7 +4,8 @@
  * Picks and Signals tabs (which both showed BET picks and read as redundant):
  *   - Today    = every scored pick today (the old Picks tab).
  *   - Signals  = picks that crossed the bet line and are still live.
- *   - Live     = in-play picks, and ONLY when there are some (see below).
+ *   - Live Signals = in-play picks. Always on screen; empty when nothing is
+ *     live, which is itself the answer (see below).
  *
  * LIVE WAS A BOTTOM TAB UNTIL 2026-09-06 (Matt's call, after measurement). It
  * was the same PickCard, over the same sport filter, in a header that was a
@@ -14,13 +15,23 @@
  * the clock, and for NBA, NHL, NFL, UFC and GOLF it was empty 100% of it. A tab
  * that is empty on your first three visits teaches you not to go there.
  *
- * So the Live SEGMENT is conditional: it renders only when the selected sport
- * has an in-play pick standing. When nothing is live the control reads
- * `Today | Signals` exactly as before and nobody learns to ignore an empty
- * slot — the segment appearing IS the live indicator. Which sport is live is
- * carried by the red dot on the sport chips (SportToggle `liveSports`), which
- * is strictly more than the tab ever said: the tab was always visible but never
- * named the sport.
+ * THE SEGMENT WAS CONDITIONAL FROM 2026-09-06 UNTIL 2026-09-12, when matt asked
+ * for the opposite and for the name: "I want it to always show for each sport
+ * but only populates with live signal bets", called Live Signals. So it is now
+ * unconditional on every sport, and the measurement above stands as the known
+ * cost — most of the time it reads (0).
+ *
+ * What carries the information instead is the COUNT and the dot: `(0)` with no
+ * dot is the "nothing in play" answer, given in the same place every time
+ * somebody looks for it. That is the one thing the conditional version could not
+ * do — a board that exists only when it has something cannot be found when it
+ * has nothing, so "is anything live?" had nowhere to be asked and its absence
+ * read as a missing feature rather than an empty one (matt, 2026-09-12).
+ *
+ * Which sport is live is still carried by the red dot on the sport chips
+ * (SportToggle `liveSports`). A sport with no in-play model AT ALL says so in
+ * its own empty state (lib/liveSports.ts): "no edge right now" is a false
+ * promise on NBA, which has no live lane that could find one.
  *
  * Picks lock the first time a model scores them each day (game markets at the
  * first run, props at their first signal) and never change again for the rest
@@ -32,10 +43,11 @@
  * per-view difference is the data source.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  type LayoutChangeEvent,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -64,6 +76,7 @@ import { LiveDot } from '@/components/LiveDot';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { showToast } from '@/components/Toast';
 import { useEntitlement } from '@/hooks/useEntitlement';
+import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
@@ -74,13 +87,22 @@ import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
+import { isGameSelected, selectableGames } from '@/lib/gameFilter';
 import { slipKeyForPick } from '@/lib/parlay';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { isUnlockedPreview, passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
-import { formatCurrency, formatPct, gameStatus } from '@/lib/format';
+import {
+  isModelPaused,
+  isModelRetired,
+  isUnlockedPreview,
+  passesActionFilter,
+  unitsFor,
+  formatUnits,
+} from '@/lib/thresholds';
+import { formatCurrency, formatPct, gameStatus, todayET } from '@/lib/format';
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
+import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 export type { PicksView };
@@ -133,10 +155,23 @@ export function PicksHomeScreen() {
   // The state poller is MLB-only, so other sports fall through to gameStatus's
   // blind-window branch rather than a real clock. Better than "until tomorrow
   // morning", and not the durable fix — that is server-side (see the PR).
+  //
+  // A PAUSED or RETIRED model's live BET is not stakeable. The Live board is
+  // the one board that never ran rows through the action filter, so a live
+  // BET locked before its lane was paused (the row is never rewritten, §1c)
+  // kept drawing a green BET badge and a stake here while Discord and push
+  // had already stopped on `model_action_thresholds.paused`. The surfaces
+  // show the same picks (CLAUDE.md §1b); this is the Live board's half.
+  // Deliberately NOT the full passesActionFilter: nfl_live_prop's cut is EV
+  // server-side, and its bundled row would hide BETs the lane legitimately
+  // wrote.
   const liveInProgress = useMemo(
     () =>
       allLiveData.filter(
-        (d) => gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
+        (d) =>
+          !isModelPaused(d.pick.model_id) &&
+          !isModelRetired(d.pick.model_id) &&
+          gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
       ),
     [allLiveData, liveStates],
   );
@@ -163,40 +198,64 @@ export function PicksHomeScreen() {
     [sportsWithPicks, liveSports],
   );
 
+  // Live picks standing on the board at the previous settled fetch, for the
+  // transition toast below. Declared here because the sport-change reset clears
+  // it, and that effect runs first.
+  const prevLiveCount = useRef<number | null>(null);
+
   // MLB and WNBA share no model_ids — a stale filter would show "0 of N" after a
   // sport switch. Reset filter/search on sport change.
   //
-  // The view is only reset when the NEW sport cannot show it: bouncing someone
-  // back to Today every time they switch sports was fine while both views always
-  // existed, but the live segment is conditional, so a blanket reset would eject
-  // a user watching a live game the moment they glanced at another sport. Live
-  // survives a switch to another live sport; it falls back to Today otherwise,
-  // because there is no segment left to stand on.
+  // THE VIEW IS NOT RESET, and that is the whole of what a sport switch does to
+  // it. It had to be while the live segment was conditional — a sport with
+  // nothing in play had no segment to stand on, so someone glancing at another
+  // sport was put back on Today. Live Signals is on screen for every sport now
+  // (matt, 2026-09-12), so the board a reader chose survives the switch:
+  // changing sport is how you check another game, not a request to change board.
   useEffect(() => {
     setFilter(freshFilter());
     setSearch('');
-    setView((v) => (v === 'live' && !liveSports.has(sport) ? 'today' : v));
-    // liveSports is deliberately not a dependency: this runs on a SPORT change,
-    // and re-running it as live picks arrive would fight the user's own taps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // And the live board's previous count is FORGOTTEN, because `liveData` is
+    // sport-scoped: without this, a reader on 3 MLB live picks who taps NBA goes
+    // 3 -> 0 and gets told "Last in-play game finished". Nothing finished; they
+    // changed sport. With the board empty ~81% of the clock and 100% of it on the
+    // sports with no live lane, that false report was the USUAL outcome of a sport
+    // tap from the live board (UX review, 2026-09-12).
+    prevLiveCount.current = null;
   }, [sport]);
+
+  // Where each segment sits in the scroller, measured rather than assumed: the
+  // labels scale with Dynamic Type, so no constant survives a text-size change.
+  const segmentsRef = useRef<ScrollView | null>(null);
+  const segmentX = useRef<Partial<Record<PicksView, number>>>({});
+  const onSegmentLayout = (v: PicksView) => (e: LayoutChangeEvent) => {
+    segmentX.current[v] = e.nativeEvent.layout.x;
+  };
+  useEffect(() => {
+    const x = segmentX.current[view];
+    if (x == null) return;
+    segmentsRef.current?.scrollTo({ x: Math.max(0, x - spacing.md), animated: true });
+  }, [view]);
 
   const requestedView = route.params?.view;
 
-  // The live board emptying out (last game ended) has to move the user too —
-  // the segment is about to disappear from under them. SAY SO: this swaps the
-  // whole list and drops the caveat block under a scrolling finger, and a
-  // screen that rearranges itself in silence reads as a glitch.
+  // The live board emptying out under a reader (the last game ended) still gets
+  // a word — the list swaps for an empty state while they are looking at it, and
+  // a screen that rearranges itself in silence reads as a glitch. What changed
+  // on 2026-09-12 is that NOBODY IS MOVED: the segment no longer vanishes, so
+  // the honest thing is to say the games finished and leave them where they are.
+  //
+  // Fires on the something-to-zero TRANSITION only, never on a board that was
+  // already empty when they arrived — the empty state says that perfectly well,
+  // and a toast for it would fire on arrival from the Settings row. Hence the
+  // ref: `liveLoading` flips on every 30s poll, so a check on the count alone
+  // re-ran this effect and toasted every half minute.
   useEffect(() => {
-    if (view === 'live' && !liveLoading && liveData.length === 0) {
-      setView('today');
-      showToast(
-        // Someone arriving from a notification never saw the Live board, so
-        // "last in-play game finished" reports on a screen they were never on.
-        requestedView === 'live'
-          ? 'That game has finished — showing today’s board'
-          : 'Last in-play game finished — showing today’s board',
-      );
+    if (liveLoading) return;
+    const prev = prevLiveCount.current;
+    prevLiveCount.current = liveData.length;
+    if (view === 'live' && liveData.length === 0 && prev !== null && prev > 0) {
+      showToast('Last in-play game finished — no live signals right now');
     }
   }, [view, liveLoading, liveData.length]);
 
@@ -245,9 +304,44 @@ export function PicksHomeScreen() {
     [activeItems],
   );
 
+  // ── The GAMES cut, shared with the Stats tab ───────────────────────────────
+  // Matt, 2026-09-09: one selection across both tabs, so picking tonight's
+  // game on the Stats board narrows this list to that game's bets and back.
+  // Kept OUT of PicksFilterState deliberately: that object is cloned, reset and
+  // persisted as a set of thresholds, and a game id is none of those things —
+  // it is one fixture on one date and belongs to the slate, not to the filter.
+  const gamePicker = useGameSelection(sport);
+  const pickableGames = useMemo(
+    () =>
+      selectableGames(
+        activeItems.map((d) => d.game).filter((g): g is NonNullable<typeof g> => !!g),
+        sport,
+        todayET(),
+      ),
+    [activeItems, sport],
+  );
+  // THIS SCREEN DOES NOT PRUNE, AND MUST NOT. Pruning belongs to the one read
+  // that sees the whole forward window — the Stats tab's slate read. The list
+  // here is only the games with picks IN THIS VIEW (`activeItems` swaps with
+  // Today / Signals / Live), so pruning against it would intersect the shared
+  // selection down to nothing: Picks mounts at launch and never unmounts, so a
+  // game picked on the Stats board for Sunday would be dropped immediately by
+  // a screen that has never heard of it, and the Stats board would silently
+  // widen back to the whole league. Tapping Today -> Signals did the same thing
+  // inside this screen alone (UX review, 2026-09-09).
+  //
+  // A picked game with no picks in this view is a legitimate empty list, and
+  // the existing "no picks match your filter" state is the honest answer.
+
   const filtered = useMemo(
-    () => searchPicks(applyFilter(activeItems, filter), search),
-    [activeItems, filter, search],
+    () =>
+      searchPicks(
+        applyFilter(activeItems, filter).filter((d) =>
+          isGameSelected(d.pick.game_id, gamePicker.selected),
+        ),
+        search,
+      ),
+    [activeItems, filter, search, gamePicker.selected],
   );
   const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
 
@@ -271,7 +365,17 @@ export function PicksHomeScreen() {
     return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, kelly, decisionOdds(d.pick)), 0);
   }, [filtered, view, kelly]);
 
-  const busy = view === 'live' ? liveLoading : loading;
+  // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,
+  // and the poll is 30s while this segment is open — so while the board was
+  // conditional this was invisible (it always had rows), and the moment it became
+  // permanent it meant a reader parked on an empty board watched the empty state
+  // blink out to a spinner twice a minute (UX review, 2026-09-12). prevLiveCount
+  // is null until the first settled fetch, which is exactly "never loaded".
+  const liveFirstLoad = liveLoading && prevLiveCount.current === null;
+  const busy = view === 'live' ? liveFirstLoad : loading;
+  // Pull-to-refresh still has to spin, and it cannot read `busy` any more for the
+  // same reason. Local, because the hook cannot tell a poll from a pull.
+  const [pulling, setPulling] = useState(false);
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
   const subtitle =
     view === 'today'
@@ -286,10 +390,20 @@ export function PicksHomeScreen() {
       // information and carried wrong information (UX review, 2026-09-06;
       // Apple Sports and FotMob both replace the date with the clock in play).
       : view === 'live'
-        ? `${liveData.length} in play${stakedSuffix}`
-        // "signals", not "live": with a segment labelled Live on the same
-        // control, "3 live" meant two different things one line apart.
-        : `${date} · ${live.length} signals${stakedSuffix}`;
+        ? // An always-on board is read when it is empty too, so the header says
+          // so in words rather than handing back "0 in play".
+          liveData.length === 0
+          ? 'No live signals right now'
+          : `${liveData.length} in play${stakedSuffix}`
+        // "PRE-GAME signals". Signals and Live Signals are disjoint sets —
+        // fetchPicksForDate excludes is_live rows — so `Signals (3)` beside
+        // `Live Signals (2)` is five standing bets, not two of three. Naming the
+        // third board "Live Signals" is what invites the subset reading, and the
+        // person it misleads is the one adding up exposure (UX review,
+        // 2026-09-12). "signals", not "live", for the older reason: with a
+        // segment labelled Live on the same control, "3 live" meant two different
+        // things one line apart.
+        : `${date} · ${live.length} pre-game signals${stakedSuffix}`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -297,11 +411,15 @@ export function PicksHomeScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Picks</Text>
           <InfoTooltip
-            title="Today, Signals & Live"
+            title="The three boards"
             body={
-              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still standing right now.\n\nLive = in-play picks, priced at DraftKings while a game is running. This one only appears when a game is actually in play, so no tab sits empty waiting for one. A game that started before midnight stays here until it ends, so a late game keeps yesterday\'s date everywhere else in the app.\n\nA red dot on a sport means a game there is in play now.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.'
+              // The live sports are INTERPOLATED, not typed out: this sentence
+              // and the empty state are the two places a reader is told which
+              // sports have an in-play model, and a hand-written list here would
+              // be the one that goes stale when a lane ships (lib/liveSports.ts).
+              `Today = every pick the model scored today.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
             }
-            accessibilityLabel="About Today, Signals and Live"
+            accessibilityLabel="About the three boards"
           />
           <View style={styles.headerRight}>
             <BetslipButton />
@@ -316,34 +434,41 @@ export function PicksHomeScreen() {
         />
         {/* Horizontal scroller, the same one SportToggle uses. Three segments
             with counts and a dot fit comfortably at default text size, but only
-            the labels scale: the row runs off the right edge at roughly the
-            first accessibility text size on a 375pt screen, and at plain xxLarge
-            on a 320pt one (or any phone with Display Zoom on). A row that cannot
-            grow takes the third segment's tap target off-screen with it. */}
+            the labels scale: the row ran off the right edge at roughly the first
+            accessibility text size on a 375pt screen, and at plain xxLarge on a
+            320pt one (or any phone with Display Zoom on). "Live Signals (0)" is
+            8 characters longer than "Live (3)", which moves both breakpoints
+            down by about a quarter (UX review, 2026-09-12), so the row gets the
+            two things SportToggle already has: trailing padding, so the last
+            pill never butts the bezel with no hint that there is more, and
+            SCROLL-INTO-VIEW on the selected segment — a deep link from Settings
+            or a push can select one that is off-screen, and a control showing
+            three unselected segments reads as a rendering bug. */}
         <ScrollView
+          ref={segmentsRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.subTabsScroll}
         >
           <View style={styles.subTabs}>
-            <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
-            <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} />
-            {/* Conditional by design — see the file header. No live picks in this
-                sport, no segment, so there is no empty slot to learn to ignore.
-                `|| view === 'live'` covers arrival by push: the route sets the
-                view before useLivePicks has fetched, and without this the
-                control renders with NO segment selected for the whole fetch,
-                which reads as a rendering bug rather than a load. The effect
-                below removes it once the fetch confirms the board is empty. */}
-            {liveData.length > 0 || view === 'live' ? (
-              <SubTabBtn
-                label="Live"
-                count={liveData.length}
-                active={view === 'live'}
-                onPress={() => setView('live')}
-                live
-              />
-            ) : null}
+            <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} onLayout={onSegmentLayout('today')} />
+            <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} onLayout={onSegmentLayout('signals')} />
+            {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
+                header. The count and the dot carry what the conditional render
+                used to: `(0)` with no dot is the "nothing in play" answer, in a
+                fixed place. The DOT is what must stay conditional — a red mark
+                that is always lit says nothing at all, and it is the same 6pt
+                dot the sport chips and the LIVE pill on a card use. */}
+            <SubTabBtn
+              label="Live Signals"
+              count={liveData.length}
+              active={view === 'live'}
+              onPress={() => setView('live')}
+              live
+              dot={liveData.length > 0}
+              onLayout={onSegmentLayout('live')}
+            />
           </View>
         </ScrollView>
       </View>
@@ -354,7 +479,7 @@ export function PicksHomeScreen() {
           in-play model reads DK's line and the bet is placed there. Kept as one
           paragraph: "bet your sportsbook's number" beside "your sportsbook
           doesn't apply" contradicted itself (UX review). */}
-      {view === 'live' ? (
+      {view === 'live' && liveData.length > 0 ? (
         <View style={styles.liveNoteWrap}>
           <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
           <Text style={styles.liveNote}>DraftKings only · prices up to ~45s old</Text>
@@ -419,12 +544,22 @@ export function PicksHomeScreen() {
           totalShown={filtered.length}
           totalAll={activeItems.length}
           availableModelIds={availableModelIds}
+          games={pickableGames}
+          selectedGames={gamePicker.selected}
+          onToggleGame={gamePicker.toggle}
+          onClearGames={gamePicker.clear}
           showSignals={view === 'today'}
           itemNoun={view === 'today' ? 'pick' : view === 'live' ? 'live pick' : 'signal'}
         />
       ) : null}
 
-      {signalsLocked ? (
+      {/* The paywall card is for picks that EXIST and are hidden behind it. On an
+          empty live board it said "the models haven't found a bet that clears the
+          line yet today", which on a sport with no in-play model is a promise the
+          app cannot keep — the exact sentence lib/liveSports.ts exists to prevent
+          — and it pitched a trial on a board that is structurally empty there
+          (UX review, 2026-09-12). */}
+      {signalsLocked && !(view === 'live' && liveData.length === 0) ? (
         <SignalLockCard
           count={view === 'live' ? liveData.length : live.length}
           onPress={() => navigation.navigate('Paywall')}
@@ -458,11 +593,16 @@ export function PicksHomeScreen() {
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
-            refreshing={busy}
+            refreshing={view === 'live' ? pulling : busy}
             onRefresh={() => {
               // Pull-to-refresh on the live segment must hit the live fetch —
               // refreshing today's board there would spin and change nothing.
-              void (view === 'live' ? refreshLive() : refresh());
+              if (view !== 'live') {
+                void refresh();
+                return;
+              }
+              setPulling(true);
+              void refreshLive().finally(() => setPulling(false));
             }}
           />
         }
@@ -508,15 +648,25 @@ function EmptyForView({
     );
   }
   if (view === 'live') {
-    // Reachable only in the instant between the last live game ending and the
-    // effect that moves the user back to Today — the segment does not render
-    // without picks behind it. Written out rather than inherited, because the
-    // Signals copy ("check back after the next refresh") is wrong here: nothing
-    // is coming back until a game is in play.
+    // THE ORDINARY STATE OF THIS BOARD, not a transient one: it is on screen for
+    // every sport now, and empty most of the clock (file header). So it has to
+    // answer the question a reader opened it with, and that answer is different
+    // per sport — which is the whole reason lib/liveSports.ts exists. For a
+    // sport with an in-play model, empty means no edge right now. For a sport
+    // without one, "an in-play model finds an edge" is a promise about something
+    // that cannot happen, and a reader waiting on it waits forever.
+    if (!hasLiveModel(sport)) {
+      return (
+        <EmptyState
+          title={`No live model for ${sport} yet`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()} today, so this board stays empty for ${sport}. Today and Signals carry ${sport}’s pre-game picks.`}
+        />
+      );
+    }
     return (
       <EmptyState
-        title={`No ${sport} picks in play`}
-        subtitle="The last in-play game finished. Live picks appear here while a game is running and an in-play model finds an edge — zero live picks is a valid signal."
+        title={`No ${sport} live signals right now`}
+        subtitle="Live signals appear while a game is in play and the in-play model finds an edge at DraftKings’ live number. Zero of them is a valid answer, not a board that failed to load."
       />
     );
   }
@@ -534,18 +684,30 @@ function SubTabBtn({
   active,
   onPress,
   live = false,
+  dot = false,
+  onLayout,
 }: {
   label: string;
   count: number;
   active: boolean;
   onPress: () => void;
-  /** Draws the app's live dot ahead of the label. */
+  /** Reports where this segment sits, so the selected one can be scrolled to. */
+  onLayout?: (e: LayoutChangeEvent) => void;
+  /** This is the in-play board — drives what its count is counting. */
   live?: boolean;
+  /**
+   * Draws the app's live dot ahead of the label. SEPARATE from `live` since
+   * 2026-09-12: the live board is always on screen, so "is this the live board"
+   * and "is anything live right now" stopped being the same question, and a
+   * permanently lit dot is a dot that has stopped meaning anything.
+   */
+  dot?: boolean;
 }) {
   const noun = label === 'Today' ? 'picks' : live ? 'picks in play' : 'signals';
   return (
     <Pressable
       onPress={onPress}
+      onLayout={onLayout}
       hitSlop={{ top: 8, bottom: 8 }}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
@@ -553,7 +715,7 @@ function SubTabBtn({
       style={({ pressed }) => [styles.subTab, active && styles.subTabActive, pressed && styles.pressed]}
     >
       <View style={styles.subTabInner}>
-        {live ? <LiveDot /> : null}
+        {dot ? <LiveDot /> : null}
         <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
           {label} ({count})
         </Text>
@@ -596,6 +758,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  // Trailing gutter on the SCROLLER, not on the row: the last segment must not
+  // butt the bezel, which is the only hint a reader gets that the row scrolls
+  // (SportToggle does the same).
+  subTabsScroll: {
+    paddingRight: spacing.lg,
   },
   subTabs: {
     flexDirection: 'row',

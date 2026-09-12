@@ -177,3 +177,75 @@ its opening number, which is rarely true by kickoff.
   --fit-totals` periodically in season so the artifact sees the current year;
   the fit refuses to register if the walk-forward no longer clears the kill
   line.
+
+### Session 280 (2026-09-10) — the pre-game board audited, and what changed
+
+Full detail in `docs/sessions/2026-09.md` (session 280). What a future
+session needs to know:
+
+- **The pre-game board is ONE model.** `ncaaf_moneyline` is paused; both
+  spread tiers are live and cannot fire on this feed, measured on 2026: of
+  249 DK-priced games, 18 had a Bovada opener inside the 90-minute skew and
+  17 of those agreed within 0.5 pts; on the 128 games where Bovada posted
+  later (median 5.2 days), DK's line at that moment sat 0.28 pts from
+  Bovada's opener, zero at the premium band. mike declined to pause the
+  tiers on 2026-09-10; they stay live, and they will keep writing "watching"
+  rows.
+- **"Watching" rows now say why.** Every precondition failure or inside-the-
+  gate decline persists its reason in `picks.downgrade_reason`
+  (`scorer._apply_no_signal`). Before this, 0 of 1,012 non-BET rows carried
+  one; the doc above claimed they all did.
+- **A paused model is paused on both sides** (`scorer._paused_signal`,
+  sport-agnostic): `ncaaf_moneyline` had written 80 AVOID rows the Signals
+  board rendered as fade signals.
+- **The totals under-lean is real and small; it is spread across inputs, with
+  no single feature, NaN column or artifact bias found.**
+  `scripts/ncaaf_search/totals_input_drift.py`: on the 2026 board the
+  production artifact predicts a mean 0.85 below DK (56.6% of games below)
+  against +0.68 (47.3% below) on 2025's games through 09-20; the same lean
+  inside 7 days as beyond. The market is 0.6 higher, the prediction 0.9
+  lower, spread across scoring and defence inputs (no single feature, no
+  NaN column); with every feature set to the 2025 mean the artifact predicts
+  52.9 vs 53.1. The ECDF's −0.62 offset turns a −0.85 mean into P(under) > 0.5
+  on ~three quarters of rows, which is what the board shows. The one-at-a-time
+  weather deltas also fill the 44% of board rows that have no weather, so
+  they partly measure missing weather; the within-7-days (−0.82, 16% missing)
+  vs beyond (−0.91, 100% missing) split is what shows missing weather is not
+  the driver.
+- **The information test the NFL props got, run on the totals rule**
+  (`scripts/ncaaf_search/totals_information_test.py`, DK close, de-vigged):
+  b = +0.137 ± 0.085 (fit 2023 → read 2024) and +0.101 ± 0.086 (fit 2024 →
+  read 2025). Positive both pairs, neither interval excludes zero; the book
+  beats the raw model on Brier in both seasons and the blend beats the book
+  by ≤ 0.001. The same verdict as the eleven NFL prop models: at the close
+  the disagreement is at most marginal information.
+- **Books we never request post LATER than DK, and FanDuel posts earlier.**
+  One 20-credit historical snapshot (`book_timing_snapshot.py`, Monday
+  2026-08-31 12:00Z, stored in `odds` as `odds_api_historical`): FanDuel,
+  BetRivers, BallyBet, BetParx and Hard Rock carried 99-102 of 103 events
+  against DK's 75 (FanDuel had 28 games DK did not); betonlineag 53, lowvig
+  50, betus 43, betanysports 43, mybookieag 40, every one behind DK. Now that
+  the decision price is best-of-book (#634), FanDuel's earlier posting is
+  worth measuring as a lead; the offshore books' is not. The pull also
+  created 11 `games` rows for already-played FCS-visitor games (two with the
+  mascot in the id); none has a pick and they are listed for deletion in the
+  session entry.
+- **Kalshi lists NCAAF game markets and is now recorded** every hour at :45
+  (`data/ingestors/kalshi_game_ingestor.py` → `kalshi_game_markets`): 478
+  winner contracts on 239 events, 2,008 total-ladder and 2,541 spread-ladder
+  contracts on 120 events at the first snapshot. Research only. The join to
+  our game ids is `kalshi_ncaaf_events` (event code → `game_id`), refreshed
+  after every snapshot from the winner contracts' team names: 154 of 239
+  events resolved on 2026-09-11 and every FBS-vs-FBS event among them; the
+  unresolved remainder are FCS games. Extend `KALSHI_TEAM_MAP` in
+  `data/ingestors/kalshi_game_ingestor.py` when a label fails to resolve.
+- **Issued forecasts exist for 2024-2025** (`game_weather_issued`, leads
+  1/3/5, `scripts/ncaaf_weather_issued_backfill.py`), the train/serve repair
+  for the three `wx_*` features. `scripts/ncaaf_search/totals_weather_source.py`
+  measures the four arms (reanalysis / served / issued / none). At the 8-pt
+  gate the deployed arm (train on reanalysis, serve the lead-3 forecast) reads
+  53.8% in both 2024 and 2025 against reanalysis's 62.0% / 52.9%, every
+  interval overlapping; training on one season of issued forecasts gives
+  47.6%; no weather at all is worst (51.7% / 44.8%). The forecast haircut is
+  real in one season of two and not separable at ~90 bets a season. Artifact
+  unchanged; the issued series accrues for a two-season refit.

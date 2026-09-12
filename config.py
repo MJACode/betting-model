@@ -306,10 +306,13 @@ ACTION_THRESHOLDS: dict = {
     "nfl_wind_totals":          {"min_prob": 0.52, "min_edge": 0.03},
     # NFL opener-spread (§28) — the sharp-vs-soft stale-line rule, published by
     # scripts/nfl_wind_publisher.py --opener. The card is the real gate
-    # (|soft − Pinnacle| >= 1.0 in the T-7..T-2 window); model_prob is the
-    # pooled validated ATS (0.5818), so 0.55 floors it and edge >= 0 filters
-    # bets whose quoted juice already eats the whole edge.
-    "nfl_opener_spread":        {"min_prob": 0.52, "min_edge": 0.00},
+    # (|soft − Pinnacle| >= 2.0, nfl/models/opener_spread.DEPLOY_THRESHOLD);
+    # 0.55 MIRRORS it: model_prob_for_dev(2.0) = 0.5557 clears, the 0.5470 a
+    # 1-point deviation carries does not. 2026-09-11 (mike): the 1-point rule
+    # measured -0.03% over 728 bets on bettable books, |dev| >= 2.0 is +3.97%
+    # on 125 (CI spans zero — see the model file). edge >= 0 drops quotes
+    # whose juice already eats the edge.
+    "nfl_opener_spread":        {"min_prob": 0.55, "min_edge": 0.00},
     # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
     # LIVE MLB, re-cut 2026-08-29 (mike) from the settled live record (70 BETs).
     # Sweep over every settled live BET, real DK prices, flat $100:
@@ -1196,6 +1199,33 @@ PAUSED_MODELS: set = {
     # population that can actually discriminate comes back positive — not on a
     # retrain of the same features, which has now been tried twice.
     "ufc_total_rounds",
+    # 2026-09-11 (mike: "Still too many live ncaaf picks. Every game is getting
+    # a live pick it seems. We need to only bet the absolute strongest picks
+    # and proof of profitable backtested model"). Both NCAAF live lanes.
+    #
+    # The record, from `picks` on 2026-09-11 (settled BETs, dk_odds present):
+    #   ncaaf_live_total     55 settled, 28-27, -2.99u; claims 67.5%, wins
+    #                        50.9% (live_calibration: 16.6pp overconfident);
+    #                        31 BETs on the 36 games DK priced in-play on 09-05.
+    #   ncaaf_live_win_prob   6 settled, 4-2, +0.49u; claims 78.6%, wins 66.7%.
+    # No cut on that record is evidenced: p >= 0.70 is 2-2, edge >= 0.15 is
+    # 8-7, the period/side slices are post-hoc on n=55, and the recommender's
+    # own verdict is "a threshold cannot fix a calibration error". The go-live
+    # gate (CLAUDE.md section 2) fails on two of three for the totals lane and
+    # cannot be assessed on six bets for the moneyline lane.
+    #
+    # The engine was gated on CALIBRATION only (ncaaf_live/README.md): win
+    # probability passed, total-distribution shape FAILED, and the phase-3
+    # edge harness -- the only thing that could show a profitable rule -- was
+    # never started. Weeks 0-1 were declared a calibration set; it is week 3.
+    #
+    # UNPAUSE on a positive replay of the 2025 season's DK in-play snapshots
+    # (data/ingestors/ncaaf_inplay_history.py, then the harness) that clears
+    # breakeven in both halves of the season, not on a forward slate. The loop
+    # keeps running while paused: it prices every pass and stores the quotes,
+    # so the 2026 forward record is replayable the same way.
+    "ncaaf_live_total",
+    "ncaaf_live_win_prob",
 }
 
 # Fallback for models not listed above.
@@ -1519,9 +1549,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
-    "nfl_opener_spread":        0.52,   # ~breakeven at -110, a sanity floor like wind's. Was 0.55, which
-                                    # was set against a FLAT 0.5818 model prob; once the card began
-                                    # pricing per deviation it silently became an edge filter (§28)
+    "nfl_opener_spread":        0.55,   # mirrors the card's |dev| >= 2.0 (2026-09-11, mike): 0.5557 at
+                                    # 2.0 clears, 0.5470 at 1.0 does not. Was lowered to 0.52 on
+                                    # 2026-08-22, which let the 1-point picks through (§28)
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.58,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
     "mlb_prop_pitcher_hits":     0.54,  # 2026-08-31 (mike): UNPAUSED at 0.54/0.08 on the calibrated sweep = 49-46 +11.0%
@@ -2013,21 +2043,63 @@ NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "24
 # nfl_prop_market's three at 137.6-179.8h -- five to seven days out, against a
 # measured envelope that ends at 36. Under the §1c first-signal lock those picks
 # are permanent, so the lane was locking its bets at a lead time where nothing
-# has ever been measured positive. The graded numbers at the offsets we DO have:
-# ~7h +10.75%, 24h +5.01%, 48h +0.65%, 72h +4.54% (paired, 5pp cut).
+# has ever been measured positive.
 #
-# 24 rather than 36: 36 is the measured MAXIMUM, and gating there would let the
-# lock happen in the tail of the distribution rather than near its mass. 24 sits
-# inside the envelope, is a natural "game day" boundary, and is a tenth of what
-# the lane was doing. A tighter value (12) is closer to the measured median and
-# costs volume; that trade wants its own measurement, not a guess.
-#
-# NOT MONOTONE, so do not read this as "earlier is always worse": T-72h beats
-# T-48h. What is established is that the ~7h board is the only offset positive
-# in all three seasons with an interval excluding zero, and this keeps the lane
-# near it. Evidence: docs/nfl_prop_offset_evidence.md.
+# CORRECTED 2026-09-11. The offset table this comment used to quote (~7h
+# +10.75%, 24h +5.01%, 48h +0.65%, 72h +4.54%) came from a grader that dropped
+# every quote taken on the kickoff's UTC date -- a 'T' > ' ' string compare --
+# so it had never seen the Sunday-morning reads it described. Re-graded with
+# the bound fixed (either sharp reference, 5pp, one bet per proposition):
+#   open, all games   1,990 bets  +7.84%  (+4.3, +11.4)  3/3 seasons
+#   by the bet's own lead:  0-4h   450  +2.96%  (spans zero, 2024 -4.5%)
+#                           4-8h   971  +9.30%  (+4.2, +14.3) 3/3
+#                           8-12h  394  +5.60%  (spans zero)
+#                          24-48h  173 +17.45%  (+5.5, +29.2) 3/3
+#   paired offsets: open +7.61% / t24 +2.12% / t48 -0.51% / t72 +4.52%
+# The LAST FOUR HOURS ARE THE WEAKEST BAND, and the Saturday-morning read of
+# Sunday games (28-31h) the strongest. So: do not tighten below 24. Whether to
+# widen to 36 to reach the Saturday read is mike's call and is open -- the
+# separate t24 series (Saturday ~1pm ET) reads only +2.12% on 187, so the
+# 24-36h region is not resolved. Evidence: docs/nfl_prop_offset_evidence.md,
+# the correction banner at the top.
 NFL_PROP_MAX_LEAD_HOURS: float = float(
     os.environ.get("NFL_PROP_MAX_LEAD_HOURS", "24"))
+
+# THE TWO SIDES OF models/nfl_prop_market ARE NOT HELD TO THE SAME FLOOR.
+# (2026-09-12, mike: "find evidence for stat models any way you can.")
+#
+# NFL prop LINES lean over. Measured with no model in the loop, across 27,976
+# propositions 2023-25 graded at the best bettable price
+# (scripts/nfl_prop_over_lean.py): blind unders -1.3%, blind overs -7.9%, and
+# the under hit rate rises with how prominent and widely quoted the proposition
+# is (49.7% / 52.2% / 52.6% by tercile, against a 52.4% break-even at -110) in
+# EVERY one of the three seasons. The gap survives at a FLAT -110, so it is a
+# lean in the line, not an artifact of shopping.
+#
+# The rule's own record splits the same way at the shipped 5pp:
+#   unders   898 bets  +12.36%  CI (+7.2, +17.5)  2023 +12.6 / 2024 +4.9 / 2025 +21.1
+#   overs  1,092 bets   +4.11%  CI (-0.8,  +9.0)  spans zero
+# and the over curve climbs monotonically with the cut (5pp +4.1%, 6pp +15.8%,
+# 7pp +20.5%) while the under curve is flat (+12.4 / +13.5 / +12.2) -- exactly
+# what the lean predicts, since an over has to overcome it and an under is
+# helped by it. Replicated in direction at three independent snapshot offsets
+# (open +8.3pp, t48 +5.2pp, t72 +2.2pp in favour of unders).
+#
+# PAIRED, over 2023-25: 1,248 bets, +166.3u, +13.3%, positive in all three
+# seasons -- against 1,990 bets / +155.9u / +7.8% on a single floor. MORE
+# PROFIT FROM FEWER BETS, which is why this is not simply a volume trade.
+#
+# WHAT IS FITTED AND WHAT IS NOT. The MECHANISM was measured first, on a
+# different population, and predicted the direction before the rule's record
+# was split. The NUMBER 6 is chosen off this grid and is in-sample in the sense
+# §7 warns about; the bound on being wrong is that overs revert to their 5pp
+# behaviour (+4.11%), which still leaves the pairing ahead of one floor on ROI.
+# 2025 overs at 6pp are -4.2% on 73 bets, the one cell that argues against.
+# Re-measure with 2026 settled. Evidence: docs/nfl_prop_over_lean.md.
+NFL_PROP_MARKET_SIDE_EDGE: dict = {
+    "over":  float(os.environ.get("NFL_PROP_MARKET_OVER_EDGE", "0.06")),
+    "under": float(os.environ.get("NFL_PROP_MARKET_UNDER_EDGE", "0.05")),
+}
 
 
 LINE_SHOP_BOOKMAKERS = [

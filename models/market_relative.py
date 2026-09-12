@@ -83,7 +83,8 @@ def devig(over_price, under_price) -> tuple[float | None, float | None]:
 
 
 def find_bets(quotes: dict, sharp_book: str, min_edge: float = 0.02,
-              soft_books: tuple[str, ...] | None = None
+              soft_books: tuple[str, ...] | None = None,
+              min_edge_by_side: dict[str, float] | None = None
               ) -> tuple[list[MarketBet], dict]:
     """
     `quotes` is {(game_id, player, market, book): {line, over_price, under_price}}.
@@ -92,7 +93,25 @@ def find_bets(quotes: dict, sharp_book: str, min_edge: float = 0.02,
     decoration: `line_mismatch` counts soft quotes dropped for sitting on a
     different number than the sharp book, and if that is most of them then the
     result is about coverage rather than about edge.
+
+    `min_edge_by_side` holds the two sides to different floors. It is OPT-IN and
+    defaults to None, so every caller that does not pass it -- the WNBA, MLB and
+    NCAAF ports of this rule -- behaves exactly as before. CLAUDE.md §1b: the
+    MECHANICS are shared, the CUTS are measured per model and never copied.
+
+    IT CAN ONLY TIGHTEN. The effective floor is max(min_edge, side floor), so a
+    side entry below the base cut cannot resurrect a bet the base cut rejected
+    and raising `min_edge` always narrows the card. Without that, sweeping a
+    tighter grid would silently keep one side at the old number.
+
+    Why NFL sets it (2026-09-12): NFL prop lines carry a measured over-lean --
+    blind unders -1.3% against blind overs -7.9% across 27,976 propositions at
+    the best bettable price, and the gap survives at a flat price, so it is in
+    the line rather than in the shopping (scripts/nfl_prop_over_lean.py). An
+    over therefore needs a bigger disagreement to be worth the same as an under,
+    which is what this expresses.
     """
+    by_side = min_edge_by_side or {}
     diag = {"sharp_quotes": 0, "compared": 0, "line_mismatch": 0,
             "one_way": 0, "no_sharp": 0, "bets": 0}
 
@@ -129,7 +148,7 @@ def find_bets(quotes: dict, sharp_book: str, min_edge: float = 0.02,
             if price is None:
                 continue
             edge = fair - book_p
-            if edge >= min_edge:
+            if edge >= max(min_edge, by_side.get(side, min_edge)):
                 out.append(MarketBet(gid, player, market, side, book,
                                      float(q["line"]), float(price), fair, edge,
                                      float(sharp_p)))

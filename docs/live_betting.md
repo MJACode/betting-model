@@ -13,7 +13,7 @@ live_game_state_poller (15s, free MLB API)
       → live_trigger_orchestrator (debounce + credit cap)
          → live_odds_ingestor (bulk DK fetch, snapshot_type='in_play', ~3 credits)
             → live_scorer (LIVE_MODELS) → picks with is_live=true
-               → mobile Picks tab, Live segment (fetchLivePicks polls every 30s)
+               → mobile Picks tab, Live Signals segment (fetchLivePicks polls every 30s)
 ```
 
 One process runs the whole loop: `python -m data.ingestors.live_trigger_orchestrator --loop`.
@@ -168,15 +168,29 @@ board. `modelMeta.ts` renders LIVE ML / LIVE O/U / LIVE RL chips; `thresholds.ts
 65%/10% placeholders.
 
 **It stopped being its own bottom tab on 2026-09-06 (matt)** and became a third segment on the
-Picks screen — `Today | Signals | Live` — rendered ONLY when the selected sport has an in-play
-pick standing. It was the same PickCard over the same sport filter (both screens already called
-`useSportFilter`) in a lossy copy of the Picks header, and it was empty most of the time:
-measured over the 30 days to 2026-09-06, 175 live BETs on 25 of 31 days, ~5.3h of board
-occupancy per active day — empty ~81% of the clock, and empty 100% of it for NBA, NHL, NFL, UFC
-and GOLF (the only sports firing were MLB 123, NCAAF 51, WNBA 1). Which sport is live is carried
-by a red dot on the sport chips (`SportToggle` `liveSports`), which the tab never said. The poll
-is 30s while the segment is open and 120s elsewhere, since the Picks screen is open for most of
-a session. `tests/test_mobile_live_segment.py` pins the properties with silent failure modes.
+Picks screen — rendered ONLY when the selected sport had an in-play pick standing. It was the
+same PickCard over the same sport filter (both screens already called `useSportFilter`) in a
+lossy copy of the Picks header, and it was empty most of the time: measured over the 30 days to
+2026-09-06, 175 live BETs on 25 of 31 days, ~5.3h of board occupancy per active day — empty
+~81% of the clock, and empty 100% of it for NBA, NHL, NFL, UFC and GOLF (the only sports firing
+were MLB 123, NCAAF 51, WNBA 1). The poll is 30s while the segment is open and 120s elsewhere,
+since the Picks screen is open for most of a session.
+
+**The segment is ALWAYS ON and is called Live Signals, from 2026-09-12** — matt: *"I want it to
+always show for each sport but only populates with live signal bets. And let's call it live
+signals."* So the control reads `Today | Signals | Live Signals` on every sport, whether or not
+anything is in play. The measurement above is the accepted cost; what the conditional version
+could not do is be FOUND when nothing was live, so "is anything live?" had nowhere to be asked
+and the missing segment read as a missing feature. The live indicator moved into the segment's own count and dot
+(`(0)` with no dot = nothing in play), alongside the red dot on the sport chips
+(`SportToggle` `liveSports`). Two auto-redirects went with it: neither a sport switch nor the last
+game ending moves the reader off the board any more (a toast says the games finished).
+
+Because the board is now permanent on sports that have no in-play model at all, its empty state
+distinguishes them: `mobile/src/lib/liveSports.ts` carries which sports have a live lane (MLB,
+NCAAF, NFL today) and is pinned to `config.LIVE_MODELS` + `nfl/live_model/config.MODEL_IDS` by
+`tests/test_mobile_live_segment.py`, which also pins the properties with silent failure modes.
+**Add a sport there when its live lane ships.**
 
 **Live picks are addable to the betslip as of 2026-09-06 (matt).** `useResolvedSlip` therefore
 resolves against pre-game **and** live picks: `fetchPicksForDate` excludes `is_live` rows by
@@ -230,8 +244,8 @@ than a surviving one. **~63 bets/week at an unchanged cut.**
 | model | prob | edge | EV | ceiling |
 |---|---|---|---|---|
 | `mlb_live_total_runs` | 0.70 | 0.14 | 0.28 | 30/wk |
-| `ncaaf_live_total` | 0.66 | 0.12 | 0.22 | 20/wk |
-| `ncaaf_live_win_prob` | 0.66 | 0.10 | 0.22 | 10/wk |
+| `ncaaf_live_total` | 0.66 | 0.12 | 0.22 | 20/wk | **PAUSED 2026-09-11 (mike)** |
+| `ncaaf_live_win_prob` | 0.66 | 0.10 | 0.22 | 10/wk | **PAUSED 2026-09-11 (mike)** |
 
 `LIVE_MAX_BETS_PER_WEEK` is **not** a runtime cap — nothing enforces it at score
 time. It is the constraint the recommender optimises UNDER, because a cut that
@@ -239,8 +253,58 @@ earns more ROI by making more bets is not an answer to "too many bets". Left
 unconstrained the sweep's first run proposed a LOOSER cut than the one it was
 checking.
 
-The NCAAF numbers are **least-bad and explicitly unvalidated** — 10 settled bets
-from one Saturday. Every EV cut on that sample is still negative overall.
+The NCAAF numbers were **least-bad and explicitly unvalidated** — 10 settled
+bets from one Saturday when set. Every EV cut on that sample was negative.
+
+### NCAAF live: BOTH LANES PAUSED 2026-09-11 (mike), pending a season replay
+
+mike: *"Still too many live ncaaf picks. Every game is getting a live pick it
+seems. We need to only bet the absolute strongest picks and proof of profitable
+backtested model."* Measured that day from `picks` (settled BETs with a price):
+
+| lane | settled | record | units | claims | wins | 09-05 conversion |
+|---|---|---|---|---|---|---|
+| `ncaaf_live_total` | 55 | 28-27 | −2.99u | 67.5% | 50.9% | 31 BETs on the 36 games DK priced in-play |
+| `ncaaf_live_win_prob` | 6 | 4-2 | +0.49u | 78.6% | 66.7% | — |
+
+No cut on that record is evidenced: prob ≥ 0.70 is 2-2, edge ≥ 0.15 is 8-7,
+period 2 (+3.63u/28) against period 1 (−6.22u/21) and Over (+2.70u/40) against
+Under (−5.69u/15) are post-hoc slices of n=55, and `live_calibration`'s own
+verdict that evening was *"OVERCONFIDENT by 16.6pp … a threshold cannot fix a
+calibration error — retrain is the lever"*. The engine was gated on
+calibration only (`ncaaf_live/README.md`: win probability passed, total
+distribution shape FAILED) and the phase-3 edge harness was never started.
+
+**What paused means here.** `config.PAUSED_MODELS` now reaches the NCAAF loop
+(`ncaaf_live/serve.py::_unless_paused`; until this it was read by the pre-game
+scorer and the MLB live loop only, so a pause of an NCAAF live lane was a
+silent no-op). A paused lane still prices every pass and its polled DK quotes
+still land in `odds` through `live_price_log`, so the 2026 forward record is
+replayable; it writes no BET and nothing for the would-be BET (no NONE churn —
+this loop delete-and-replaces non-BET rows each pass). AVOIDs still write.
+Mirrored the same evening into `model_action_thresholds.paused` (the app,
+Discord and push all filter on it) and into the app's bundled
+`PAUSED_MODELS`. `RUN_NCAAF_LIVE` is unchanged: the loop keeps running.
+
+**The unpause condition is a replay, not a slate.** Two new pieces:
+
+- `data/ingestors/ncaaf_inplay_history.py` buys every ~5-minute DraftKings
+  in-play snapshot of a season (h2h + totals), the NCAAF port of the MLB
+  ingestor. Dry-run for 2025 (measured 2026-09-11): **100 slate days, 18,662
+  calls, 373,240 credits for both markets or 186,620 for totals only**,
+  against 2,490,486 remaining. Not run — the spend is mike's call.
+- `scripts/ncaaf_inplay_history_backtest.py` replays the PRODUCTION pricing
+  path (`LiveEngine.candidates` + `_decide`, split out of `price()` so the loop
+  and the harness share one path) over those snapshots, aligned to the play-by-
+  play states by wallclock, under the first-signal lock, on a prob × EV grid,
+  ALL quotes and FRESH quotes (no score since the book's `last_update`), with
+  the two-half split and a claimed-vs-realised calibration table. Needs the
+  states parquet (`ncaaf_live.backtest.build_states`, which needs
+  `CFBD_API_KEY` — not in the local `.env`; the worker has it).
+
+Unpause on a cut that clears breakeven in BOTH halves of 2025 on FRESH quotes
+with a CI that does not straddle zero — and then only at that cut. If the
+grid is negative everywhere, the lane is retrained or retired, not re-cut.
 
 ### Two things measured on the way in, both worth keeping
 

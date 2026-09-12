@@ -5,9 +5,9 @@
  * both modes (Hit Rates / Averages), and so they can be verified offline:
  *
  *  1. SORT — the board is ordered by the number it displays (hit rate), with
- *     sample size as the tie-break, and the user can switch to games played or
- *     average. Deliberately NOT a shrinkage-adjusted rank: when the visible
- *     column doesn't explain the order, the list reads as broken.
+ *     sample size as the tie-break. Deliberately NOT a shrinkage-adjusted rank,
+ *     and no longer switchable: when the visible column doesn't explain the
+ *     order, the list reads as broken.
  *
  *  2. TONIGHT — "only players in action", and the "7:05 PM ET · @ SEA"
  *     subline under each row's name. Both are derived from the `games` table
@@ -29,54 +29,46 @@ import type { GameRow } from '@/types';
 
 // ── 1. Sort ──
 
-export type SortKey = 'default' | 'games' | 'avg';
+/**
+ * The board has ONE order: the number it displays, best first, with sample
+ * size as the tie-break.
+ *
+ * It used to offer hit rate / games played / average in the filter sheet; that
+ * picker was removed 2026-09-12 (Matt's call). Three orders for a board whose
+ * headline column is the thing you came to rank by is a control that mostly
+ * gets set by accident, and a board sorted by something other than the column
+ * you are reading looks broken — the reason this was never a shrinkage-adjusted
+ * rank either. Games played and average are both still ON the row, so the
+ * numbers that drove the other two orders never left the screen.
+ */
 
-/** A row reduced to the three numbers any sort needs. */
+/** A row reduced to the two numbers the order needs. */
 export interface SortableRow {
   /** Hit rate 0..1 in Hit Rates mode; the ranked stat value in Averages mode. */
   primary: number;
   /** Games behind the number (hit-rate denominator / games played). */
   games: number;
-  /** Per-game average of the stat. */
-  avg: number;
 }
 
-export function compareRows(a: SortableRow, b: SortableRow, key: SortKey): number {
-  if (key === 'games') return b.games - a.games || b.primary - a.primary;
-  if (key === 'avg') return b.avg - a.avg || b.games - a.games;
+export function compareRows(a: SortableRow, b: SortableRow): number {
   return b.primary - a.primary || b.games - a.games;
-}
-
-/** Sheet labels — the primary column means different things per mode. */
-export function sortOptionsFor(mode: 'hitRate' | 'totals'): { key: SortKey; label: string }[] {
-  return mode === 'hitRate'
-    ? [
-        { key: 'default', label: 'Hit rate' },
-        { key: 'games', label: 'Games played' },
-        { key: 'avg', label: 'Average' },
-      ]
-    : [
-        { key: 'default', label: 'Stat value' },
-        { key: 'games', label: 'Games played' },
-      ];
-}
-
-export function sortLabel(key: SortKey, mode: 'hitRate' | 'totals'): string {
-  return sortOptionsFor(mode).find((o) => o.key === key)?.label ?? 'Hit rate';
 }
 
 // ── 2. Hit-rate band ──
 
 /**
- * Percent bounds the user typed, as a 0..1 band. Blank/garbage → unbounded.
- * An inverted band (min 80, max 60) is normalised rather than emptying the
- * board.
+ * The slider's percent bounds (0..100) as a 0..1 band.
+ *
+ * Numbers rather than the strings the old min/max text fields produced — the
+ * fields became a two-thumb slider on 2026-09-12, so there is no longer any
+ * such thing as a blank or a typo to parse. Out-of-range values are still
+ * clamped and an inverted band (min 80, max 60) is still normalised rather
+ * than emptying the board: the slider cannot produce either, but neither can
+ * silently wrong an answer here.
  */
-export function hitRateBand(min: string, max: string): { lo: number; hi: number } {
-  const parse = (s: string, fallback: number) => {
-    const n = parseFloat(s);
-    return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) / 100 : fallback;
-  };
+export function hitRateBand(min: number, max: number): { lo: number; hi: number } {
+  const parse = (n: number, fallback: number) =>
+    Number.isFinite(n) ? Math.min(100, Math.max(0, n)) / 100 : fallback;
   const lo = parse(min, 0);
   const hi = parse(max, 1);
   return lo <= hi ? { lo, hi } : { lo: hi, hi: lo };
@@ -87,8 +79,20 @@ export function inHitRateBand(pct: number, band: { lo: number; hi: number }): bo
   return pct >= band.lo - 1e-9 && pct <= band.hi + 1e-9;
 }
 
-/** Quick-pick minimums offered above the numeric fields. */
+/** Quick-pick minimums offered above the slider. */
 export const HIT_RATE_PRESETS = [50, 60, 70, 80];
+
+/** The band slider's scale, in whole percent. */
+export const HIT_RATE_MIN = 0;
+export const HIT_RATE_MAX = 100;
+/**
+ * Snap interval. 5 rather than 1 because a 1% step on a ~300pt track is a
+ * sub-3pt target that no thumb can hold, and because nothing on this board
+ * lands between two 5s that matters: a last-5 window quantises to 20%, last-10
+ * to 10%, and the presets are all multiples of 5 so every chip is also a
+ * reachable drag position (pinned in verify_stats_board.ts).
+ */
+export const HIT_RATE_STEP = 5;
 
 /**
  * Does this player actually PLAY the selected stat?

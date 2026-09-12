@@ -50,6 +50,8 @@ import { FilterBar, type ActivePill } from './FilterBar';
 import { FilterChip, chipRowStyle } from './FilterChip';
 import { FilterField } from './FilterField';
 import { FilterSection, FilterSheet } from './FilterSheet';
+import { GameFilterSection } from './GameFilterSection';
+import { gameFilterSummary, type SelectableGame } from '@/lib/gameFilter';
 import type { SignalType } from '@/types';
 
 // Re-exported so the screens keep one import site for the whole filter surface.
@@ -61,6 +63,8 @@ export {
   freshFilter,
 } from '@/lib/pickFilterState';
 export type { ModelCategory, PicksFilterState } from '@/lib/pickFilterState';
+
+const EMPTY_SELECTION: Set<string> = new Set();
 
 interface Props {
   state: PicksFilterState;
@@ -79,6 +83,16 @@ interface Props {
    * Batter chips on the NFL board.
    */
   availableModelIds: string[];
+  /**
+   * Tonight's games, and which of them the user has picked. The SELECTION is
+   * shared with the Stats tab (useGameSelection) rather than living in
+   * PicksFilterState: that object is a set of thresholds, cloned and reset as
+   * one, and a game id is a fixture on a date — it belongs to the slate.
+   */
+  games?: SelectableGame[];
+  selectedGames?: Set<string>;
+  onToggleGame?: (gameId: string) => void;
+  onClearGames?: () => void;
   /** Hide the Signal section (Signals are all BET — the chips are noise). */
   showSignals?: boolean;
   /** Noun for counts and the sheet footer, e.g. "pick" / "signal". */
@@ -95,6 +109,10 @@ export function PickFilters({
   totalShown,
   totalAll,
   availableModelIds,
+  games = [],
+  selectedGames = EMPTY_SELECTION,
+  onToggleGame,
+  onClearGames,
   showSignals = true,
   itemNoun = 'pick',
 }: Props) {
@@ -173,12 +191,26 @@ export function PickFilters({
   const marketIsNarrowed = categoriesAreNarrowed(state, presentCategories);
   const marketCutBites = presentCategories.length > 1 || marketIsNarrowed;
 
-  const pills = useMemo(
-    () => buildPills(state, onChange, presentCategories),
-    [state, onChange, presentCategories],
-  );
+  // THE GAME CUT IS IN THE BAR, NOT JUST THE SHEET. It lives outside
+  // PicksFilterState (it is shared with the Stats tab), and leaving it out of
+  // the pills and the count meant a user could filter to one game, close the
+  // sheet, and see a shorter board with no badge, no removable pill and no
+  // Clear all — the exact blindness the pill row was added to end. It also made
+  // Reset look like it cleared something that had never been shown as set.
+  const gamesNarrowed = selectedGames.size > 0;
+  const pills = useMemo(() => {
+    const out = buildPills(state, onChange, presentCategories);
+    if (gamesNarrowed && onClearGames) {
+      out.push({
+        key: 'games',
+        label: gameFilterSummary(games, selectedGames),
+        onRemove: onClearGames,
+      });
+    }
+    return out;
+  }, [state, onChange, presentCategories, gamesNarrowed, games, selectedGames, onClearGames]);
 
-  const count = activeFilterCount(state, presentCategories);
+  const count = activeFilterCount(state, presentCategories) + (gamesNarrowed ? 1 : 0);
 
   // Collapsed-row summaries. "All" rather than an exhaustive list when nothing
   // is excluded — the row exists to say what is NARROWING the board.
@@ -206,7 +238,14 @@ export function PickFilters({
         onOpenFilters={() => setOpen(true)}
         activeCount={count}
         pills={pills}
-        onClearAll={count > 0 ? () => onChange(freshFilter()) : undefined}
+        onClearAll={
+          count > 0
+            ? () => {
+                onChange(freshFilter());
+                onClearGames?.();
+              }
+            : undefined
+        }
         countLabel={totalShown === totalAll ? undefined : `${totalShown}/${totalAll}`}
       >
         <ScrollView
@@ -253,9 +292,32 @@ export function PickFilters({
         title={`Filter ${itemNoun}s`}
         resultCount={totalShown}
         itemNoun={itemNoun}
-        onReset={() => onChange(freshFilter())}
-        canReset={count > 0}
+        onReset={() => {
+          onChange(freshFilter());
+          onClearGames?.();
+        }}
+        canReset={count > 0 || selectedGames.size > 0}
       >
+        {/* GAMES first — the widest cut on the sheet, and the same control the
+            Stats tab renders from the same selection (Matt, 2026-09-09). Only
+            where there are fixtures to pick: a UFC card is fighters, and the
+            section would be an empty box. */}
+        {onToggleGame && games.length > 0 ? (
+          <FilterSection
+            title="Games"
+            summary={gameFilterSummary(games, selectedGames)}
+            defaultOpen={selectedGames.size > 0}
+            onClear={gamesNarrowed ? onClearGames : undefined}
+          >
+            <GameFilterSection
+              games={games}
+              selected={selectedGames}
+              onToggle={onToggleGame}
+              emptyNote="No games on this board."
+            />
+          </FilterSection>
+        ) : null}
+
         {showSignals ? (
           <FilterSection
             title="Signal"

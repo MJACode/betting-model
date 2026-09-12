@@ -680,5 +680,29 @@
     "args": {
       "game_date": "2026-09-09"
     }
+  },
+  {
+    "key": "verify-280-paused-avoid-2026-09-12",
+    "job_type": "verify_checks",
+    "requested_by": "mike",
+    "run_after": "2026-09-12T10:45:00+00:00",
+    "note": "Session 280 post-deploy check, after the 6am ET full-horizon pass: no paused model holds an AVOID on an unstarted game (43 pre-deploy ncaaf_moneyline rows should have been replaced by NONE + 'model paused'). Verdict to the ops channel.",
+    "args": {
+      "checks": [
+        "ncaaf_paused_avoid_gone"
+      ]
+    }
+  },
+  {
+    "key": "verify-280-kalshi-snapshot-2026-09-12",
+    "job_type": "verify_checks",
+    "requested_by": "mike",
+    "run_after": "2026-09-12T02:20:00+00:00",
+    "note": "Session 280 post-deploy check, after the worker's first :45 Kalshi NCAAF snapshot: kalshi_game_markets has a snapshot inside 2h and kalshi_ncaaf_events was re-resolved with it. Verdict to the ops channel.",
+    "args": {
+      "checks": [
+        "kalshi_game_snapshot_fresh"
+      ]
+    }
   }
 ]

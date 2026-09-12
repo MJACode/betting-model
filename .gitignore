@@ -63,3 +63,7 @@ ncaaf_live/data/artifacts/*
 # Comparison-run artifacts (`python -m models.trainer --no-register`).
 # Never real models: they exist to be measured against and thrown away.
 models/saved/_baseline/
+# analysis dumps, never committed (2026-09-11)
+data/local/prop_dump/
+data/local/*.csv
+data/local/over_lean*.csv

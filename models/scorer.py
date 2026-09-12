@@ -70,6 +70,7 @@ from config import (
     GAME_SCORE_AHEAD_DAYS,
     GAME_SCORE_AHEAD_SPORTS,
     NCAAF_TOTALS_MAX_LEAD_DAYS,
+    NFL_PROP_MAX_LEAD_HOURS,
     PROP_MARKETS_NFL,
     today_et,
     DECIDE_ON_CALIBRATED_PROB,
@@ -561,10 +562,7 @@ def score_game(conn: DBConnection,
     # still hand the UNDER side a probability above the 0.65 floor and would
     # otherwise fire a BET the walk-forward never validated.
     if no_signal:
-        for p in picks:
-            p["signal_type"]     = "NONE"
-            p["kelly_fraction"]  = 0.0
-            p["recommended_bet"] = 0.0
+        _apply_no_signal(picks, no_signal)
 
     # Write to DB
     if picks and not dry_run:
@@ -919,9 +917,8 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     # never be presented as if it were.
     signal_type = ("NONE" if REQUIRE_DK_PRICE
                    else ("BET" if model_prob >= prob_thresh else "NONE"))
-    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if _is_paused(model_id) and signal_type == "BET":
-        signal_type = "NONE"
+    # A paused model is paused on both sides -- see _paused_signal.
+    signal_type, _ = _paused_signal(model_id, signal_type)
 
     if signal_type == "BET":
         kelly_frac, rec_bet = quarter_kelly(model_prob, fair, bankroll)
@@ -948,6 +945,7 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
         "signal_type":       signal_type,
         "confidence_tier":   _confidence_tier(edge),
         "game_time":         commence_time,
+        "downgrade_reason":  _pause_note(model_id),
     }
 
     if signal_type == "BET":
@@ -1069,8 +1067,42 @@ def _auto_paused_models() -> set[str]:
 
 
 def _is_paused(model_id: str) -> bool:
-    """True when a model must not fire a BET, for either reason."""
+    """True when a model must not fire a signal, for either reason."""
     return model_id in PAUSED_MODELS or model_id in _auto_paused_models()
+
+
+def _paused_signal(model_id: str, signal_type: str) -> tuple[str, str | None]:
+    """A paused model's BET *and* AVOID both become NONE, with the reason.
+
+    Until 2026-09-10 only the BET was downgraded, so a paused model kept
+    writing AVOID rows -- 80 of them from ncaaf_moneyline, paused because
+    every edge cell lost at real prices -- and the Today/Signals board, which
+    checks retired and VOID but not paused, drew them as fade signals. One
+    helper for every decision path so no lane can pause one side and not the
+    other. Returns (signal_type, downgrade_reason).
+    """
+    if signal_type in ("BET", "AVOID") and _is_paused(model_id):
+        return "NONE", "model paused"
+    return signal_type, None
+
+
+def _pause_note(model_id: str) -> str | None:
+    """The persisted reason on every row a paused model writes."""
+    return "model paused" if _is_paused(model_id) else None
+
+
+def _apply_no_signal(picks: list[dict], reason: str) -> list[dict]:
+    """A declined rule's rows: NONE, unsized, and the reason PERSISTED.
+
+    The rows were forced to NONE by hand before 2026-09-10 and the reason
+    only reached the log: 0 of 1,012 non-BET NCAAF rows that season carried
+    `downgrade_reason`, while docs/sports/ncaaf.md said every "watching" row
+    explained itself. Mutates in place (the caller has already stamped prices
+    onto the same dicts).
+    """
+    for p in picks:
+        p.update(_downgrade(p, reason))
+    return picks
 
 
 def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
@@ -1150,9 +1182,8 @@ def _decide(model_id: str, model_prob: float, implied_prob: float | None,
     if signal_type == "BET" and _missing_price(odds):
         signal_type = "NONE"
 
-    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if _is_paused(model_id) and signal_type == "BET":
-        signal_type = "NONE"
+    # A paused model is paused on BOTH sides -- see _paused_signal.
+    signal_type, _ = _paused_signal(model_id, signal_type)
     return signal_type
 
 
@@ -1293,6 +1324,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "signal_type":       signal_type,
         "confidence_tier":   conf_tier,
         "game_time":         commence_time,
+        "downgrade_reason":  _pause_note(model_id),
         **_decision_fields(ODDS_API_BOOKMAKER, dk_odds, dk_implied_prob, edge),
     }
 
@@ -3619,6 +3651,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "confidence_tier":   _confidence_tier(edge_for_display),
         "game_time":         commence_time,
         "dk_bet_link":       dk_bet_link,
+        "downgrade_reason":  _pause_note(model_id),
     }
 
 
@@ -4480,6 +4513,38 @@ def _push_adjusted(p_side: float, p_push: float) -> float:
     return float(p_side / denom) if denom > 1e-9 else 0.0
 
 
+def _nfl_prop_too_early(kickoff: str | None, now: datetime | None = None) -> bool:
+    """True if an NFL kickoff is further out than NFL_PROP_MAX_LEAD_HOURS.
+
+    THE CEILING, for the eleven nfl_prop_* models. #610 put it on the market
+    card only; the scorer kept the started-game floor and no ceiling, so on
+    2026-09-07 it wrote seventeen Week-1 prop picks five to six days before
+    kickoff -- at a lead where nothing has ever measured positive
+    (docs/nfl_prop_offset_evidence.md) -- and under the first-signal lock they
+    were permanent. Deleted 2026-09-11 (mike); this stops the next tick
+    writing them back. Same constant as the card, on purpose.
+
+    A game beyond the ceiling is SKIPPED, never dropped: it comes back into
+    range on a later tick. Inclusive at the ceiling, like the card. Unknown or
+    unparseable kickoff -> False, the same fail-open the floor uses, so a slate
+    whose kickoffs have not been ingested is not silently blocked. The past is
+    the floor's business, not this one's.
+    """
+    if not kickoff:
+        return False
+    ts = str(kickoff).strip()
+    try:
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    now = now or datetime.now(ZoneInfo("UTC"))
+    return (dt - now).total_seconds() / 3600.0 > NFL_PROP_MAX_LEAD_HOURS
+
+
 def _nfl_kickoff_map(conn: DBConnection, game_date: str) -> dict[str, str]:
     """{game_id: SCHEDULED kickoff ISO} for a slate, from nfl_team_game_stats.
 
@@ -4629,6 +4694,8 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue
                 if _game_started(cutoffs.get(game_id)):
                     continue   # kicked off — any quote now is an in-play price
+                if _nfl_prop_too_early(kickoffs.get(game_id)):
+                    continue   # > NFL_PROP_MAX_LEAD_HOURS out — waits for a later tick
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
                                               cutoffs.get(game_id))

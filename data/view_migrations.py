@@ -47,6 +47,18 @@ ACTIVE_MIGRATIONS: list[str] = [
     # settled history reaches back only to 2026 preseason, so every week without
     # this is a week of evidence that cannot be recovered afterwards.
     "add_kalshi_prop_ladders.sql",
+    # 2026-09-10 (session 280, mike): Kalshi NCAAF GAME markets -- winner,
+    # total and spread ladders. Recording only. The 13-book search found one
+    # number across every bookmaker; an exchange price is the one kind of
+    # college number that record has never held.
+    "add_kalshi_game_markets.sql",
+    # 2026-09-11 (session 280): the event-code -> games-row join for the table
+    # above, refreshed by the recorder after every snapshot.
+    "add_kalshi_ncaaf_events.sql",
+    # 2026-09-10 (session 280, mike): point-in-time ISSUED weather forecasts
+    # for NCAAF games, the train/serve repair for the totals model's wx_*
+    # features (it trained on reanalysis and is served a forecast).
+    "add_game_weather_issued.sql",
     # 2026-09-09 (mike: "remove DK only - we want best lines for us
     # regardless"): picks carry the price each pick was DECIDED at
     # (decision_*); the graded matview, the record views and the custom-model

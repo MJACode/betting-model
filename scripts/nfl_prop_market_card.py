@@ -32,6 +32,7 @@ from loguru import logger
 
 import models.nfl_prop_market as mk
 from data import local_store
+import config
 from config import NFL_PROP_MAX_LEAD_HOURS
 from data.db import get_connection
 from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_quotes
@@ -145,7 +146,10 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     if snapshot_types:          # replay only; live takes the pre-game default
         kw["snapshot_types"] = snapshot_types
     quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS), **kw)
-    bets, diag = mk.find_bets(quotes, min_edge=min_edge, soft_books=SOFT_BOOKS)
+    # The over side is held to a stricter floor than the under side; the lean
+    # that justifies it is measured in config.NFL_PROP_MARKET_SIDE_EDGE.
+    bets, diag = mk.find_bets(quotes, min_edge=min_edge, soft_books=SOFT_BOOKS,
+                              min_edge_by_side=config.NFL_PROP_MARKET_SIDE_EDGE)
     diag["games"] = len(open_games)
     diag["started_skipped"] = len(live)
     diag["too_early"] = len(too_early)

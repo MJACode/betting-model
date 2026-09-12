@@ -123,7 +123,30 @@ def _bettable_books() -> set[str]:
     return bettable_books()
 
 
-DEPLOY_THRESHOLD = 1.0   # |soft_home_line - pinnacle_home_line|, points
+# |soft_home_line - pinnacle_home_line|, points.
+#
+# 2.0, NOT 1.0 (mike, 2026-09-11: "the opener needs to be more aggressive, way
+# too many picks, I need statistical profitability"). Measured on the selection
+# the live card actually runs -- bettable books only, first qualifying
+# snapshot, Kelly-skipped -- over 2020-2025 (scripts/opener_cut_sweep.py):
+#
+#   |dev| >= 1.0   728 bets   -0.03% ROI  [-6.9, +6.7]   4/6 seasons positive
+#   |dev| >= 1.5   268 bets   -5.09%      [-16.1, +6.0]  2/6
+#   |dev| >= 2.0   125 bets   +3.97%      [-11.8, +19.1] 5/6  (2022 -28% the one loss)
+#   |dev| >= 2.5    76 bets  -11.00%      [-30.3, +8.3]  3/6
+#
+# So the 1-point rule is flat on the books we can bet at, and 2.0 is the only
+# floor whose row is positive across the edge grid (0/0.02/0.03 -> +4.0/+6.2/
+# +1.5%). It is NOT statistically profitable: no cell in the sweep has an
+# interval that excludes zero, and 1.5 and 2.5 are both negative, so this is a
+# ridge rather than a plateau. Stated plainly so nobody reads 2.0 as a finding.
+# What it does do is stop writing the 83% of picks that measured -0.03%.
+#
+# This is also what the six-season calibration always intended: DEV_WIN_PROB
+# puts |dev| < 2.0 at 0.5470, below the 0.55 platform gate "ON PURPOSE" (the
+# note that was on config.py until 2026-08-22). The gate was lowered to 0.52
+# that day and the 1-point picks started flowing. Both levers now agree.
+DEPLOY_THRESHOLD = 2.0
 
 # THE FIRE WINDOW: T-LEAD_HI_DAYS .. T-LEAD_LO_DAYS.
 #
@@ -185,10 +208,11 @@ POOLED_MODEL_PROB = 0.5688      # six-season pooled ATS (was 0.5818 on three)
 # average is preserved and only the distribution across deviation sizes moves.
 # Regenerate with scripts/calibrate_opener.py --emit.
 #
-# Minimum modelled probability is now 0.5470 at |dev| 1.0, BELOW the min_prob
+# Minimum modelled probability is 0.5470 at |dev| 1.0, BELOW the min_prob
 # 0.55 gate in config.py. That is intended: on six seasons a 1-point deviation
-# is not worth betting, and the platform gate drops it without needing a
-# separate rule. Only |dev| >= 2.0 clears the gate.
+# is not worth betting. Since 2026-09-11 the card itself does not fire below
+# DEPLOY_THRESHOLD = 2.0 either, so the gate and the rule agree rather than the
+# gate silently hiding rows the card wrote.
 # ---------------------------------------------------------------------------
 DEV_WIN_PROB = {
     1.0: 0.5470, 1.5: 0.5470, 2.0: 0.5557, 2.5: 0.5806, 3.0: 0.5987,

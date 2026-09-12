@@ -17,7 +17,7 @@ weekly routine).
 | Strategy | Result | Notes |
 |---|---|---|
 | **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
-| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
+| **Opener strategy** | **NOT proven profitable.** On the books you can actually bet at, 2020-2025: |dev| 1.0 = 728 bets, -0.03%; |dev| 2.0 (deployed since 2026-09-11) = 125 bets, +3.97%, CI [-11.8, +19.1] | The +6.98% [-0.6, +14.5] that stood here until 2026-09-11 was 2023-2025 only, all 35 books, exchange included. Adding 2020-2022 took it to +1.34% (2026-08-23, kept by Matt's call); restricting to bettable books (mike, 2026-09-06) took it to flat. Each step is in `nfl/models/opener_spread.py` and `docs/thresholds.md`. It runs as a forward test, not a proven edge |
 | **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
 
 **Critical data rules:**
@@ -72,9 +72,11 @@ in-week during the season.
   (0.5489 at 7 days → 0.5671 at 3 → 0.5735 at 1). Since the pick is insert-once,
   firing early bought the worse number permanently.
   Pinned by `tests/test_nfl_wind_fire_window.py`.
-- **The five Week 1 picks written before the gate STAY** (CLAUDE.md §1c). They
-  were picks; the line moving under them — or the window tightening over them —
-  does not retract them.
+- **The six Week 1 picks written before the gate were VOIDED on 2026-09-07 and
+  DELETED on 2026-09-11**, both on mike's instruction (the second overriding,
+  for those rows, his own §1c "voided, never deleted" corollary — the rule
+  stands). `picks_log` holds all six; see `docs/sessions/2026-09.md`,
+  session 281.
 - 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
 - First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
   shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.
@@ -107,7 +109,7 @@ in-week during the season.
 - **The OPENER rule is also live (2026-08-16, `nfl_opener_spread`):** NEW
   `nfl/scripts/daily_opener_card.py` deploys the corrected backtest_opener rule —
   in the T-7..T-2 window, wherever a clean soft book's HOME spread deviates
-  ≥ 1.0 pts from Pinnacle's (regions `us,eu`, 2 credits/run), bet the side
+  **≥ 2.0 pts** from Pinnacle's (regions `us,eu`, 2 credits/run), bet the side
   Pinnacle favours at the soft book's stale number; one bet per game, largest
   |dev| at the first qualifying daily run. `scheduler.py` runs it daily 9:30am ET
   (same `RUN_NFL_WIND_CARD` kill switch), then `nfl_wind_publisher --opener`.
@@ -120,6 +122,18 @@ in-week during the season.
   excluded (commission-gross prices). Evidence: +5.78pp ATS excess
   [CI +1.8, +9.6] but ROI +6.98% [CI −0.6, +14.5] grazes zero — treat as
   PAPER-FIRST; wind stays the only `docs/sports/nfl.md` rule its own docs clear for live money.
+  **The floor is 2.0 points since 2026-09-11 (mike: "way too many picks, I
+  need statistical profitability"), was 1.0.** Measured on the selection the
+  card actually runs — bettable books only, Kelly-skipped — over 2020-2025
+  (`nfl/scripts/opener_cut_sweep.py`): |dev| ≥ 1.0 is 728 bets at −0.03%,
+  ≥ 1.5 is 268 at −5.09%, ≥ 2.0 is 125 at +3.97% (5 of 6 seasons positive,
+  CI [−11.8, +19.1]), ≥ 2.5 is 76 at −11.00%. No cell in the sweep has an
+  interval excluding zero, so 2.0 is the strictest defensible cut, not a
+  proven edge. `config` gate restored to 0.55 the same day (0.5557 at |dev|
+  2.0 clears, 0.5470 at 1.0 does not — the calibration's original intent,
+  lowered to 0.52 on 2026-08-22). The seven open Week-1 picks under 2.0 were
+  VOIDED, not deleted (`scripts/void_picks.py`); BUF @ HOU at |dev| 2.0
+  stands. Full table: `docs/thresholds.md`.
 - **DK line snapshots + pick-timing display (2026-08-19, session 121):** every
   LIVE card run also dumps DraftKings' totals/spreads for every game within 8
   days (`nfl/data_ingest/line_snapshots.py`, reusing the payload the card

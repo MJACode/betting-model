@@ -132,7 +132,7 @@ export function FilterSheet({
 
 /**
  * One row of the sheet. Pass `summary` to make it collapsible: the row then
- * reads as `Sort by            Hit rate  ⌄` until it is tapped.
+ * reads as `Hit rate            60–80%  ⌄` until it is tapped.
  *
  * `summary` is what the filter is set to right now, in the same words the row
  * uses once open — that is the whole reason a collapsed row is still useful.
@@ -143,6 +143,7 @@ export function FilterSection({
   subtitle,
   summary,
   defaultOpen = false,
+  onClear,
   children,
 }: {
   title: string;
@@ -150,6 +151,17 @@ export function FilterSection({
   /** Current value, shown on the collapsed row. Presence makes the row collapsible. */
   summary?: string;
   defaultOpen?: boolean;
+  /**
+   * Clear THIS section, from its own header. Rendered only when given, so a
+   * section that is not narrowing anything shows nothing.
+   *
+   * Added 2026-09-09 for the Games list, which first shipped an "All games"
+   * checkbox row instead — a checkbox whose checked state means "nothing
+   * selected", which cannot be unchecked and promises VoiceOver a toggle that
+   * does nothing. A section-level Clear is the shape the reference sheets use
+   * and it serves every other section here too (UX review).
+   */
+  onClear?: () => void;
   children: React.ReactNode;
 }) {
   const collapsible = summary !== undefined;
@@ -176,6 +188,17 @@ export function FilterSection({
       >
         <Text style={styles.sectionTitle}>{title}</Text>
         <View style={styles.rowRight}>
+          {onClear ? (
+            <Pressable
+              onPress={onClear}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Clear ${title.toLowerCase()}`}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Text style={styles.clearLink}>Clear</Text>
+            </Pressable>
+          ) : null}
           {/* Truncates rather than wrapping, so the collapsed rows keep a
               uniform height and read as one clean column. */}
           <Text style={styles.rowValue} numberOfLines={1}>
@@ -271,6 +294,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     flexShrink: 1,
+  },
+  clearLink: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   sectionTitle: {
     fontSize: font.size.headline,

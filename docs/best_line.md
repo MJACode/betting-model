@@ -371,7 +371,7 @@ What shipped, in one change:
 > (widen the live lanes among them): "Yes do everything".**
 
 Measured first, on the live BETs written since 08-30 with a stamped best
-price (query in session 280: `picks` where `is_live`, BET, `dk_odds` present,
+price (query in session 289: `picks` where `is_live`, BET, `dk_odds` present,
 paid at `dk_odds` vs at `COALESCE(best_odds, dk_odds)` on the stored result):
 
 | lane | BETs graded | with a non-DK best | best vs DK, implied | units at DK | units at best |
