@@ -150,6 +150,10 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
   // bettable price since 2026-09-09 -- a slip DK cannot price is worse than
   // a slip at DK's own number. Only the pool ranking (legEdge) reads the
   // decision edge. UX review, 2026-09-09.
+  // dk_odds, NOT the deciding price: a parlay is ONE DraftKings slip, so a
+  // leg needs a DraftKings price. Since 2026-09-12 that also excludes a prop
+  // DraftKings does not list at all (line_book set, dk_odds NULL), which is
+  // right: DraftKings cannot take a bet it does not post.
   const odds = p.dk_odds == null ? null : Number(p.dk_odds);
   if (odds == null) return null; // prob-only — no payout
   // bestOdds is already the best non-DK price that STRICTLY beats DK for this

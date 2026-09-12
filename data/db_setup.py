@@ -706,6 +706,7 @@ CREATE TABLE IF NOT EXISTS picks (
     decision_odds         NUMERIC,
     decision_implied_prob NUMERIC,
     decision_edge         NUMERIC,
+    line_book             TEXT,
     result             TEXT,
     profit_flat        REAL,
     profit_kelly       REAL,
@@ -1446,6 +1447,8 @@ _MIGRATIONS = [
     ("picks_log", "decision_odds", "NUMERIC"),
     ("picks_log", "decision_implied_prob", "NUMERIC"),
     ("picks_log", "decision_edge", "NUMERIC"),
+    ("picks", "line_book", "TEXT"),
+    ("picks_log", "line_book", "TEXT"),
     # NFL locked-pick condition tracking. The pick is immutable once locked;
     # these say whether the conditions that justified it still hold, so a
     # collapsed forecast or a line that ran away is surfaced loudly instead of

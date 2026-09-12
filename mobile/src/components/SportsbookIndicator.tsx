@@ -37,7 +37,7 @@ export function SportsbookIndicator({
   const onlyModelBook = books.length === 1 && books[0] === MODEL_BOOK;
   const label = onlyModelBook
     ? `Stats lines at ${booksName(books)}`
-    : `${books.length > 1 ? 'Best of ' : 'Stats lines at '}${booksName(books)} · Picks stay at DraftKings`;
+    : `${books.length > 1 ? 'Best of ' : 'Stats lines at '}${booksName(books)} · Picks are priced at the DraftKings line`;
 
   return (
     <>

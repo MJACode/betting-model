@@ -80,7 +80,9 @@ class FakeConn:
         if "DISTINCT player_name" in sql:
             self._result = [(n,) for n in self._quotes]
         else:
-            _game, name, _market = params
+            # params gained the bookmaker on 2026-09-12, when a prop could be
+            # scored off another book's line
+            _game, name, _market = params[:3]
             q = self._quotes.get(name)
             self._result = [q] if q else []
         return self

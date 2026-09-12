@@ -323,8 +323,9 @@ What shipped, in one change:
   (`data/migrations/decide_on_best_price_2026_09_09.sql`, applied to
   production before the code deployed; the two active view files re-applied
   once).
-- **What stays DraftKings:** the LINE a pick is scored at (a game or prop DK
-  does not list still produces no pick), training features, CLV
+- **What stays DraftKings:** the LINE a pick is scored at (until 2026-09-12,
+  when a prop DraftKings does not list gained a line from the first bettable
+  book that does -- the last section of this file), training features, CLV
   (`closing_dk_odds` vs `dk_odds`), the line-movement monitor, and the
   opening-signal shadow track. The live lanes were fenced out on 2026-09-09
   (his 2026-09-02 "only for pregame picks for now") and joined on 2026-09-10
@@ -431,3 +432,65 @@ What shipped:
 | Per-event fetch (F5, UFC round totals) | `data/ingestors/odds_ingestor.py` — `_get_event_odds` |
 | Retention | `data/prune_odds.py`, `config.PRUNE_NON_DK_KEEP_DAYS` |
 | The DK-decides invariant | CLAUDE.md §6; `tests/test_multi_book_odds.py`, `tests/test_best_line.py` |
+
+---
+
+## Scoring off another book's line, 2026-09-12
+
+> **mike: "Yes, scoring of other books lines."**
+
+Until this change a proposition with no DraftKings quote produced no pick at
+all, however many bettable books priced it. Measured over the markets an
+ACTIVE model prices, 2026-08-28 onward (query in session 290):
+
+| | player propositions since 08-28 |
+|---|---|
+| DraftKings listed | 11,780 |
+| a bettable book listed, DraftKings did not | 1,357 |
+| where those came from | FanDuel 607, Hard Rock 550, Fanatics 291, Caesars 259, Fliff 245, BetMGM 109, BetRivers 69, BetPARX 12 |
+
+Counting the PAUSED models too it is 5,344, and the two largest pools are
+theirs: batter stolen bases (2,110) and batter total bases (1,723). Unpausing
+those is a separate decision this change does not make.
+
+**The line is the proposition.** The book is taken in
+`config.BEST_LINE_BOOKMAKERS` order -- the list mike curated, DraftKings
+first -- and never by price: Over 5.5 is a different bet from Over 6.5, so
+picking whichever book quotes the softest number would be choosing the bet to
+suit the model. Once the line is fixed, the ordinary best-price check runs at
+THAT line, so the bet is still placed at the best bettable price on the same
+number.
+
+What shipped:
+
+- **`picks.line_book`** (and on `picks_log`, copied by the audit trigger):
+  the book whose line it is, NULL for DraftKings, which is every row before
+  today.
+- **`scorer._fallback_line_quote`**, called by `_get_prop_dk_odds` only when
+  DraftKings has nothing. Same pre-game cutoff bound and same in-play
+  exclusion as the DraftKings read.
+- **The DraftKings columns stay DraftKings.** `dk_odds` NULL,
+  `dk_implied_prob` and `edge` at their NOT NULL placeholders, `dk_bet_link`
+  NULL (a DraftKings slip for a proposition DraftKings does not list opens
+  empty). The deciding price is in `decision_*` as it has been since 09-09.
+- **The best-price re-check keyed on `dk_odds`** and would have skipped every
+  one of these; it keys on the deciding price now.
+- **The published record gated its units on `p.dk_odds IS NOT NULL`** (the
+  2026-09-03 fabrication guard), which would have bet these and counted
+  none of them. It reads `COALESCE(p.decision_odds, p.dk_odds)` now; the
+  guard is unchanged in substance, because that is NULL only when no book
+  priced the pick at all.
+- **The app** carries `line_book`, says whose line it is on the pick's detail
+  and line-movement copy, and bumps the settled-pick cache key (a cached row
+  from before would claim DraftKings' line).
+- **GAME markets are deliberately out.** DraftKings lists every game we
+  model; the markets it does not list (MLB first-five spreads and totals, 114
+  each since 08-28) have no model; and a game-level DraftKings line is a model
+  FEATURE, so changing its source is a retrain question rather than a config
+  one.
+- **Flag:** `SCORE_OFF_ANY_BOOK_LINE=0` restores "no DraftKings quote, no
+  pick".
+
+**These picks have no settled record yet**, and every cut in this repo was
+swept on DraftKings-lined picks. `line_book` is what keeps them separable:
+report them on their own before folding them into any model's record.

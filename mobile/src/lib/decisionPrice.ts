@@ -47,3 +47,18 @@ export function decisionBook(p: { decision_book?: string | null }): string | nul
   const b = p.decision_book;
   return b ? String(b).toLowerCase() : null;
 }
+
+/**
+ * The book whose LINE a pick was scored off, or null when it was DraftKings'.
+ *
+ * Since 2026-09-12 (mike: "Yes, scoring of other books lines") a player prop
+ * DraftKings does not list at all is scored off the first bettable book that
+ * does. On those rows `dk_odds` is NULL by design -- DraftKings never priced
+ * the proposition -- so any copy that says "DraftKings" about the line, the
+ * signal price or the close is wrong for them, and any read of `dk_odds`
+ * renders a dash.
+ */
+export function lineBook(p: { line_book?: string | null }): string | null {
+  const b = p.line_book;
+  return b ? String(b).toLowerCase() : null;
+}

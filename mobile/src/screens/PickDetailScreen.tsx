@@ -525,6 +525,9 @@ function ClvCard({ pick }: { pick: Pick }) {
 
       {hasLines ? (
         <View style={styles.clvRow}>
+          {/* DraftKings close vs DraftKings signal, so this card does not
+              mount for a pick DraftKings never priced -- CLV capture is
+              gated on dk_odds (tracking/paper_tracker.py). */}
           <Text style={styles.clvRowLabel}>Signal line (DK)</Text>
           <Text style={styles.clvRowValue}>
             {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}

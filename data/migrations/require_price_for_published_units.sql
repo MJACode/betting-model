@@ -27,13 +27,21 @@ DECLARE d text; v text; patched text := ''; skipped text := '';
     'COALESCE(sum(p.profit_flat) FILTER (WHERE (p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AND p.dk_odds IS NOT NULL), 0::numeric)';
   old_stake CONSTANT text :=
     '100 * count(*) FILTER (WHERE p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AS staked_flat';
+  decision_profit CONSTANT text :=
+    'COALESCE(sum(p.profit_flat) FILTER (WHERE (p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AND COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL), 0::numeric)';
   new_stake CONSTANT text :=
     '100 * count(*) FILTER (WHERE (p.result = ANY (ARRAY[''WIN''::text, ''LOSS''::text, ''PUSH''::text])) AND p.dk_odds IS NOT NULL) AS staked_flat';
 BEGIN
   FOREACH v IN ARRAY ARRAY['v_public_track_record', 'v_public_track_record_daily'] LOOP
     d := pg_get_viewdef(('public.' || v)::regclass, true);
 
-    IF position(new_profit in d) > 0 THEN
+    -- Either shape counts as patched: the DraftKings-only gate this file
+    -- introduced on 2026-09-03, or the deciding-price gate that superseded it
+    -- on 2026-09-12 (score_off_any_book_line_2026_09_12.sql, after a prop
+    -- could be scored off another book's line and so carry no dk_odds). The
+    -- property this file owns is that UNPRICED settled picks contribute no
+    -- units; which column names the price is the other file's business.
+    IF position(new_profit in d) > 0 OR position(decision_profit in d) > 0 THEN
       skipped := skipped || v || ' ';
       CONTINUE;                       -- already patched
     END IF;

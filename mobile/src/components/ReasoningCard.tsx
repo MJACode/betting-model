@@ -20,7 +20,7 @@ import {
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
 import { bookLabel, bookName, storedQuoteBook } from '@/lib/markets';
-import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
+import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
 
 interface Props {
   pick: Pick;
@@ -106,7 +106,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
       ) : null}
 
       {pick.scored_line != null ? (
-        <Row label="Line at score time" value={String(pick.scored_line)} sub="The DK line when we generated this pick. If it has since moved against you, the edge may be smaller now." />
+        <Row label="Line at score time" value={String(pick.scored_line)} sub={`The ${bookName(lineBook(pick) ?? bookKey)} line when we generated this pick. If it has since moved against you, the edge may be smaller now.`} />
       ) : null}
     </View>
   );
