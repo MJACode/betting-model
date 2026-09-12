@@ -165,7 +165,131 @@ under-bias audit (§1) is a one-hour precondition and should run first, because
 if the P(over) arithmetic in `scorer._make_prop_pick` is wrong, every graded
 number in §1 is wrong in the same direction.
 
-## 5. What NOT to spend credits on
+## 5. RESULTS (2026-09-11, same day, mike: "1 and 2") — the method fails its own bars. Closed.
+
+Run in order, zero credits, everything from `data/local`.
+
+### 5a. The precondition: the 87% under lean is a dispersion mis-fit, not a level bias
+
+From the walk-forward dump (`models.nfl_prop_backtest --all --dump`, 2024-25),
+per model over every quoted row: the projection level is within 0-6% of the
+realised mean, and correcting it barely moves the side split.
+
+| model | rows | pred / actual mean | model mean P(over) | realised over rate | under share | under share after level fix |
+|---|---|---|---|---|---|---|
+| pass_attempts | 826 | 1.005 | 45.9% | 46.4% | 61% | 65% |
+| pass_completions | 828 | 0.995 | 44.4% | 48.2% | 69% | 67% |
+| pass_tds | 916 | 0.957 | 45.0% | 50.1% | 66% | 57% |
+| pass_yards | 942 | 1.005 | 46.0% | 50.3% | 70% | 71% |
+| rec_yards | 3,177 | 1.005 | 48.2% | 47.6% | 60% | 61% |
+| receptions | 3,114 | 1.000 | 47.0% | 47.2% | 61% | 61% |
+| rush_attempts | 984 | 0.971 | 43.4% | 47.6% | 67% | 58% |
+| rush_rec_yards | 1,916 | 0.951 | 44.3% | 49.2% | 75% | 67% |
+| rush_yards | 1,244 | 0.967 | 45.3% | 48.0% | 71% | 64% |
+| sacks | 1,747 | 0.943 | 33.0% | 37.4% | 96% | 93% |
+| tackles_assists | 2,347 | 0.988 | 43.7% | 45.5% | 72% | 68% |
+
+Two things fall out. The models' P(over) sits 2-5pp under the realised over
+rate on the volume markets even when the mean is right, so the lean comes from
+the fitted distribution putting too much mass low (zero-inflation and shape),
+not from the projection. And **the realised over rate at the main line is
+46-48% on almost every market** — the book's line sits a little above the
+median, so a blind under is a ~52-53% proposition, about break-even at −110.
+That is why under-leaning models have looked "nearly fine" for a year: they
+were riding a market lean, not a model.
+
+### 5b. Is DraftKings' alternate ladder mispriced anywhere? No — it is over-priced on the over side everywhere
+
+`scripts/nfl_prop_ladder_calibration.py`. Every DraftKings alternate OVER
+quote in the `open` series 2023-25, latest pre-kickoff snapshot per
+proposition, 126,546 strike rows over 13,000+ propositions. "adj" is the
+implied probability scaled by the main line's two-way de-vig factor, which
+under-corrects longshots, so a negative reading at high strikes is conservative.
+
+| strike / main line | n | raw implied | adjusted fair | realised | realised − fair | ROI of every over, blind |
+|---|---|---|---|---|---|---|
+| 0.00-0.60 | 11,668 | 89.2% | 84.0% | 84.2% | +0.2pp | −5.7% |
+| 0.60-0.85 | 16,426 | 76.4% | 71.9% | 69.9% | −2.0pp | −8.6% |
+| 0.85-1.15 | 17,412 | 53.0% | 49.9% | 48.1% | −1.8pp | −9.3% |
+| 1.15-1.50 | 23,525 | 28.2% | 26.6% | 24.4% | −2.2pp | −14.1% |
+| 1.50-2.00 | 23,368 | 16.4% | 15.4% | 13.7% | −1.7pp | −19.6% |
+| 2.00+ | 34,147 | 8.2% | 7.7% | 6.2% | −1.5pp | −28.9% |
+
+Every band, every market, every season with ≥ 100 rows reads the same way:
+the over hits LESS often than even the vig-adjusted price says. The
+favourite-longshot bias, exactly as the literature has it. There is no band
+where an over on the ladder is under-priced, and DraftKings quotes no under on
+the ladder (0% of 2025 rows), so the side that IS mispriced cannot be bet.
+**A shape model against this ladder can only win by finding player-specific
+overs the book has under-priced, against a base rate where every over is 1.5
+to 2.2pp too dear.**
+
+### 5c. The simulation — three arms, two markets, every cell negative
+
+`scripts/nfl_prop_shape_sim.py`, walk-forward, one bet per proposition at the
+largest-edge strike, real DraftKings alternate prices, 10,000 draws per
+proposition, anchor from Pinnacle (89%), betonlineag (10%) or DK's own two-way
+main (1%).
+
+| market | arm | cut | bets | ROI | 90% CI | 2024 / 2025 |
+|---|---|---|---|---|---|---|
+| receiving yards | player usage compound | 3% | 2,900 | −10.3% | (−16.5, −4.0) | −3.9% / −20.0% |
+| receiving yards | player usage compound | 5% | 1,741 | −17.0% | (−24.9, −8.5) | −2.9% / −25.5% |
+| receiving yards | player gamma, own totals | 3% | 2,957 | −10.9% | (−14.9, −7.1) | both negative |
+| receiving yards | player gamma, own totals | 5% | 2,268 | −11.8% | (−16.0, −7.5) | both negative |
+| receiving yards | **placebo**, pooled gamma | 3% | 3,618 | −21.2% | (−27.7, −14.5) | |
+| rushing yards | player usage compound | 3% | 1,571 | −11.0% | (−17.7, −4.0) | −15.7% / −7.0% |
+| rushing yards | player usage compound | 5% | 1,017 | −10.6% | (−19.5, −1.3) | −10.3% / −14.4% |
+| rushing yards | player gamma, own totals | 3% | 1,698 | −9.8% | (−16.0, −3.5) | both negative |
+| rushing yards | player gamma, own totals | 5% | 1,218 | −8.4% | (−15.9, −0.4) | both negative |
+| rushing yards | **placebo**, pooled gamma | 3% | 2,107 | −13.2% | (−23.2, −2.8) | |
+
+(2023 carries 60-185 bets per cell, intervals of ±30pp, and is not read.)
+
+Against the pre-registered bars: **bar 1 fails** (no graded season positive
+in any cell); **bar 2 fails** (every interval that excludes zero excludes it
+on the negative side); **bar 3 is moot** (the placebo loses more, but there
+is nothing for it to reproduce). The kill criterion in §4 is met.
+
+The calibration tables say why. The per-player gamma reads 22.0% where the
+book's adjusted fair reads 22.2% and reality reads 20.2%; the usage compound
+reads 22.0% against 18.3% and 16.3%. The player's own shape knows nothing the
+ladder does not already price, and the compound arm's tails run FATTER than
+reality (a 16-game usage window carries role changes the book has already
+priced out). Selecting on "sim > fair" therefore selects the strikes where the
+sim is most wrong, and grades at −10% to −17% against a ladder whose blind
+over already runs −6% to −29%.
+
+### 5d. What this closes, and what it leaves
+
+Closed, with this measurement: the stat-based approach in ANY of its forms
+tried here — projecting the mean (11/11 lose vs DK, §1), projecting the shape
+around the market's mean (this section), and the ladder as a mechanical edge
+(§5b). With §1's six angles that is nine attempts, all graded, none positive
+out of sample. The honest conclusion is the one the information test already
+gave: **public box-score data does not price NFL player props better than
+DraftKings does, at the middle or in the tails.**
+
+What is left is not a modelling problem:
+
+- `nfl_prop_market` is the lane that works (+7.84% over 1,990, CI clear of
+  zero, three seasons). Its ceiling question is in `docs/followups.md`.
+- `nfl_prop_tackles_assists` is the one stat model with a clean record
+  (+19.9% on 240 bets in this dump; +15.6% on 340 with placebo in
+  `nfl_prop_profitability_search.md` §4) and its edge is definitional, not
+  projective. It is live.
+- The other ten stat models have no evidence for them and nine graded
+  attempts against them. Pausing them is a model update and mike's call; the
+  case for keeping them running is only that the tightened cuts limit the
+  damage to a measured −1.9% on 2,133 bets.
+- The Kalshi ladder as a second exchange-grade reference for the MARKET rule
+  (`docs/prop_market_research.md` §1, §6b — built, unwired) is the one lead
+  in this area with an A grade that has not been graded yet.
+
+Nothing further from this line of work should be built without a new source
+of information the book does not have.
+
+## 6. What NOT to spend credits on
 
 Measured and closed; re-opening any of these needs a new argument, not a new
 season:
