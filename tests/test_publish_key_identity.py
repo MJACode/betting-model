@@ -336,7 +336,8 @@ def test_the_live_producers_return_the_projected_key_not_a_rebuilt_one():
     assert pn._new_live_signals(_KeyConn([row]), "2026-09-09")[0]["lock_key"] == key
     drow = ("G", "nfl_live_prop", "over", "C.J. Stroud Over 32.5 Pass Attempts",
             "NFL", 0.6, 0.07, -115.0, 0.011, None, None, "SEA", "NE",
-            "2026-09-10T00:20:00Z", "2026-09-10T01:00:00+00:00", 0.0, -140, key)
+            "2026-09-10T00:20:00Z", "2026-09-10T01:00:00+00:00", 0.0, -140, key,
+            None, None, None, -115.0, None)   # best_*, decision_odds/book (2026-09-10)
     assert dn._new_live_signals(_KeyConn([drow]), "2026-09-09")[0]["lock_key"] == key
 
 

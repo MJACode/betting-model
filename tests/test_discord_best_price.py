@@ -157,12 +157,17 @@ def test_best_odds_never_reaches_the_qualifying_gate():
         "the row dict must read the projected columns")
 
 
-def test_the_live_path_is_untouched():
-    """
-    Live picks carry no multi-book best price, and the live lane has its own
-    staleness story. Publishing a shopped price there would advertise a number
-    we never measured in-play.
-    """
+def test_the_live_path_publishes_the_deciding_price():
+    """INVERTED 2026-09-10. Until then the live producer was pinned to carry
+    no shopped price: live picks were decided on DraftKings' in-play quote
+    and a best price there was a number never measured in-play. The live
+    lanes now decide at the best bettable in-play quote (docs/best_line.md,
+    the live section), so the card headlines it through publish_price like
+    the pre-game cards, and the "good to" bound is taken at the deciding
+    price."""
     i = _SRC.index("def _new_live_signals(")
     j = _SRC.index("\ndef ", i + 10)
-    assert "best_odds" not in _SRC[i:j]
+    body = _SRC[i:j]
+    assert "p.best_book, p.best_odds, p.best_bet_link" in body
+    assert "COALESCE(p.decision_odds, p.dk_odds) AS decision_odds" in body
+    assert '"good_to": price_bound(r[5], r[1], r[15], r[16], r[21])' in body

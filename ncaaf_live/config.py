@@ -159,6 +159,23 @@ SUMMARY_FETCH_WORKERS = int(os.environ.get("NCAAF_LIVE_SUMMARY_WORKERS", "6"))
 ODDS_API_KEY = os.environ.get("THE_ODDS_API_KEY") or os.environ.get("ODDS_API_KEY", "")
 ODDS_SPORT_KEY = "americanfootball_ncaaf"
 SNAPSHOT_BOOK = "draftkings"
+# Every book the in-play poll asks for (2026-09-10, the live lanes decide at
+# the best bettable price). DraftKings stays the REFERENCE: its line is the
+# proposition, its price is `dk_odds`. The others are the bettable books in
+# DraftKings' Odds API region, so naming them costs nothing -- the bill is
+# markets x regions, measured 2026-09-11: x-requests-last = 2 with DK alone
+# and 2 with all five. A us2 book here would double every poll; see
+# config.LIVE_FEED_BOOKMAKERS in the repo root, which carries the same default
+# and is pinned to this one by tests/test_best_line_live.py.
+SNAPSHOT_BOOKS = [
+    b.strip().lower()
+    for b in os.environ.get(
+        "NCAAF_LIVE_ODDS_BOOKMAKERS",
+        "draftkings,fanduel,betmgm,williamhill_us,fanatics").split(",")
+    if b.strip()
+]
+if SNAPSHOT_BOOK not in SNAPSHOT_BOOKS:
+    SNAPSHOT_BOOKS.insert(0, SNAPSHOT_BOOK)
 
 # Hard stop against a retry bug draining the account, NOT a budget. Sized
 # against the WORST realistic case rather than the nominal cadence, because the

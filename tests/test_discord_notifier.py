@@ -1540,7 +1540,8 @@ def _live_row(sport, game_id="G1", model="x_live", commence="2026-08-29T16:00:00
     return (game_id, model, "over", f"{sport} Over 50.5 (live)", sport,
             0.662, 0.138, -110.0, 0.02, None, None, "HOME", "AWAY",
             commence, "2026-08-29T16:14:38+00:00", 0.08, None,
-            f"live:{game_id}:{model}:over")
+            f"live:{game_id}:{model}:over",
+            None, None, None, -110.0, None)   # best_*, decision_odds/book
 
 
 def _live_setup(monkeypatch, *, live=None, shared="", sport=None):

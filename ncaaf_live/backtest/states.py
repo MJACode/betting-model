@@ -85,14 +85,45 @@ def _with_order(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def load_pbp(seasons=ALL_SEASONS) -> pd.DataFrame:
+def load_pbp(seasons=ALL_SEASONS, conn=None) -> pd.DataFrame:
+    """A season's plays: the local parquet cache first, Supabase second.
+
+    The DB fallback is what lets a machine WITHOUT CFBD_API_KEY build states --
+    the key is a Railway variable, the worker fetches with it (`pull_pbp
+    --to-db`), and this reads the result. A season present in neither is still
+    an error: silently returning fewer seasons than asked for would train or
+    replay on a corpus nobody chose.
+    """
     frames = []
+    missing = []
+    owned = False
     for season in seasons:
         path = PBP_DIR / f"plays_{season}.parquet"
-        if not path.exists():
-            raise FileNotFoundError(
-                f"{path} missing - run ncaaf_live.backtest.pull_pbp first")
-        frames.append(pd.read_parquet(path))
+        if path.exists():
+            frames.append(pd.read_parquet(path))
+            continue
+        if conn is None and not owned:
+            try:
+                from data.db import get_connection
+                conn = get_connection()
+                owned = True
+            except Exception:                              # noqa: BLE001
+                conn = None
+        df = None
+        if conn is not None:
+            from ncaaf_live.backtest.pull_pbp import load_season_from_db
+            df = load_season_from_db(conn, season)
+        if df is None or df.empty:
+            missing.append(season)
+        else:
+            frames.append(df)
+    if owned and conn is not None:
+        conn.close()
+    if missing:
+        raise FileNotFoundError(
+            f"no plays for {missing} - in {PBP_DIR} or ncaaf_plays. "
+            f"Run `ncaaf_live.backtest.pull_pbp --seasons {' '.join(str(m) for m in missing)} "
+            f"--to-db` on the worker (it holds CFBD_API_KEY).")
     return pd.concat(frames, ignore_index=True)
 
 

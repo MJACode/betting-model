@@ -53,6 +53,7 @@ from data.db import get_connection
 from data.ingestors.odds_ingestor import (
     _build_game_id, _insert_odds, _normalize_team, _parse_total_outcomes,
     record_quota_headers)
+from data.ingestors.odds_quota import DEFAULT_RESERVE_DAYS, plan_credit_budget
 
 SPORT_KEY = "baseball_mlb"
 SOURCE_PREFIX = "historical_inplay|"
@@ -101,6 +102,13 @@ def slate_windows(season: int) -> list[tuple[str, datetime, datetime]]:
 
 def planned_calls(windows) -> int:
     return sum(int((hi - lo) / STEP) + 1 for _, lo, hi in windows)
+
+
+def shard_windows(windows, spec: str) -> list:
+    """This shard's slate days. Shared with the NCAAF port so a bad spec
+    (`4/4` selects NOTHING and exits successfully) is refused in both."""
+    from data.ingestors.ncaaf_inplay_history import shard_windows as _sw
+    return _sw(windows, spec)
 
 
 def _served_already(conn, lo: datetime, hi: datetime) -> set[str]:
@@ -178,8 +186,8 @@ def rows_for(events: list[dict], requested: str, served: datetime,
     return rows
 
 
-def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
-             budget: dict, known_games: set[str]) -> None:
+def pull_day(conn, day: str, lo: datetime, hi: datetime,
+             budget, known_games: set[str]) -> None:
     have = _served_already(conn, lo, hi)
     skipped: dict = {}
     t = lo
@@ -188,9 +196,8 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
         logger.info(f"{day}: {len(have)} snapshots stored, resuming at {_iso(t)}")
     calls = wrote = 0
     while t <= hi:
-        if budget["spent"] + CREDITS_PER_CALL > budget["max"]:
-            logger.error(f"{day}: credit budget {budget['max']} reached; stopping")
-            budget["stop"] = True
+        if not budget.can_afford(CREDITS_PER_CALL):
+            logger.error(f"{day}: {budget.stopped_reason}; stopping")
             return
         requested = _iso(t)
         resp = _get({"apiKey": ODDS_API_KEY, "regions": "us", "markets": "totals",
@@ -198,16 +205,16 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
                      "date": requested, "includeLinks": "true", "includeSids": "true"})
         if resp is None:
             logger.error(f"{day}: network gave up at {requested}; stopping")
-            budget["stop"] = True
+            budget.stopped_reason = "network gave up"
             return
         record_quota_headers(resp)
         remaining = resp.headers.get("x-requests-remaining")
-        budget["spent"] += int(resp.headers.get("x-requests-last") or CREDITS_PER_CALL)
+        budget.charge(resp, assumed=CREDITS_PER_CALL)
         calls += 1
         if resp.status_code != 200:
             logger.warning(f"{day}: HTTP {resp.status_code} at {requested}: {resp.text[:120]}")
             if resp.status_code == 401 or resp.status_code == 422:
-                budget["stop"] = True
+                budget.stopped_reason = f"HTTP {resp.status_code}"
                 return
             t += STEP
             continue
@@ -222,9 +229,8 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
                 conn.commit()
                 wrote += len(rows)
             have.add(_iso(served))
-        if remaining is not None and int(remaining) < floor:
-            logger.error(f"quota {remaining} under floor {floor}; stopping")
-            budget["stop"] = True
+        if not budget.check_remaining(remaining):
+            logger.error(f"{budget.stopped_reason}; stopping")
             return
         if nxt:
             t = max(_ts(nxt), t + timedelta(seconds=1))
@@ -234,7 +240,8 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
     if skipped:
         logger.warning(f"{day}: not in games, skipped: "
                        + ", ".join(f"{g} x{n}" for g, n in sorted(skipped.items())))
-    logger.info(f"{day}: {calls} calls, {wrote} rows, spent so far {budget['spent']}")
+    logger.info(f"{day}: {calls} calls, {wrote} rows, "
+                f"spent so far {budget.spent:,} of {budget.ceiling:,}")
 
 
 def main() -> None:
@@ -243,9 +250,20 @@ def main() -> None:
     ap.add_argument("--season", type=int, required=True)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--max-credits", type=int, default=350_000)
-    ap.add_argument("--floor", type=int, default=2_600_000,
-                    help="stop when x-requests-remaining drops under this")
+    # DERIVED, NOT CHOSEN -- data/ingestors/odds_quota.py carries the why.
+    # This file's 350,000 / 2,600,000 were picked against one day's quota and
+    # were per PROCESS, so N shards meant N budgets; the NCAAF port inherited
+    # the shape and the bug (2026-09-11).
+    ap.add_argument("--max-credits", type=int, default=None,
+                    help="whole-run budget across ALL shards (default: the "
+                         "printed plan). Split by each shard's share of the work.")
+    ap.add_argument("--reserve-days", type=int, default=DEFAULT_RESERVE_DAYS,
+                    help="days of MEASURED burn the account must keep after "
+                         f"this pull (default {DEFAULT_RESERVE_DAYS})")
+    ap.add_argument("--burn-per-day", type=int, default=None,
+                    help="override the measured burn rate (refuses without one)")
+    ap.add_argument("--remaining", type=int, default=None,
+                    help="override the quota reading (refuses without one)")
     ap.add_argument("--shard", default="0/1", help="i/n: this process takes days i, i+n, ...")
     args = ap.parse_args()
     if not (args.dry_run or args.apply):
@@ -257,29 +275,37 @@ def main() -> None:
     calls = planned_calls(windows)
     logger.info(f"{args.season}: {len(windows)} slate days, {calls} planned calls, "
                 f"{calls * CREDITS_PER_CALL:,} credits at {CREDITS_PER_CALL}/call")
-    if args.dry_run:
-        for day, lo, hi in windows[:3] + windows[-3:]:
-            logger.info(f"  {day}: {_iso(lo)} -> {_iso(hi)}  {int((hi - lo) / STEP) + 1} calls")
-        return
-    if calls * CREDITS_PER_CALL > args.max_credits:
-        raise SystemExit(f"planned {calls * CREDITS_PER_CALL:,} credits exceeds "
-                         f"--max-credits {args.max_credits:,}; refusing")
-    i, n = (int(x) for x in args.shard.split("/"))
-    mine = [w for k, w in enumerate(windows) if k % n == i]
-    budget = {"spent": 0, "max": args.max_credits, "stop": False}
     conn = get_connection()
     try:
+        mine = shard_windows(windows, args.shard)
+        budget, problems = plan_credit_budget(
+            conn,
+            shard_calls=planned_calls(mine), total_calls=calls,
+            credits_per_call=CREDITS_PER_CALL,
+            max_credits=args.max_credits, reserve_days=args.reserve_days,
+            burn_per_day=args.burn_per_day, remaining=args.remaining)
+        logger.info("credit guards (all derived -- odds_quota.py):\n"
+                    + budget.describe())
+        for p in problems:
+            logger.error(f"REFUSING: {p}")
+        if args.dry_run:
+            for day, lo, hi in windows[:3] + windows[-3:]:
+                logger.info(f"  {day}: {_iso(lo)} -> {_iso(hi)}  {int((hi - lo) / STEP) + 1} calls")
+            return
+        if problems:
+            raise SystemExit("refusing to start: " + "; ".join(problems))
         known = {r[0] for r in conn.execute(
             "SELECT game_id FROM games WHERE sport = 'MLB' AND season = %s",
             (args.season,)).fetchall()}
         for day, lo, hi in mine:
-            pull_day(conn, day, lo, hi, args.floor, budget, known)
-            if budget["stop"]:
+            pull_day(conn, day, lo, hi, budget, known)
+            if budget.stop:
                 break
     finally:
         conn.close()
-    logger.success(f"shard {args.shard}: spent {budget['spent']:,} credits"
-                   f"{' (STOPPED EARLY)' if budget['stop'] else ''}")
+    logger.success(
+        f"shard {args.shard}: spent {budget.spent:,} of {budget.ceiling:,} "
+        f"credits{' -- STOPPED EARLY: ' + budget.stopped_reason if budget.stop else ''}")
 
 
 if __name__ == "__main__":

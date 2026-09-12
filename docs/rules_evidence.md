@@ -691,6 +691,50 @@ The nearest real signal is `mlb_live_total_runs` at **+15.94% over 87 settled
 bets, 95% CI [-2.8%, +34.7%]** — promising, unproven, and a game total rather
 than a prop.
 
+## Checking tool ACCESS, not assuming it (2026-09-12)
+
+Rule: CLAUDE.md §1b, "reachability and capability are two measurements" and "a
+missing credential is not a missing capability". mike: *"I want global rules and
+settings updated to reflect that you need to check access to all tools like
+railway rather than assuming. I'm so fucking sick of it."* The same rule now
+also lives in `~/.claude/CLAUDE.md`, because this is not a property of this
+repo.
+
+**The 2026-09-05 rule was too narrow and its successor walked straight past
+it.** That rule said an MCP auth banner is a claim, so call the tool. It is
+about REACHABILITY. It says nothing about what a tool can DO once it answers,
+and both of the limits below had to be learned by calling:
+
+| Tool | Answers? | The limit, measured |
+|---|---|---|
+| Supabase `execute_sql` | yes | READ-ONLY. `UPDATE` → `25006: cannot execute UPDATE in a read-only transaction`. Production writes go via `data.db.get_connection()` and the local `DATABASE_URL`. |
+| Railway `list-variables` | yes | Returns variable NAMES, **values redacted** to OAuth apps. `CFBD_API_KEY` is visible by name and unreadable. |
+
+**The expensive one: "the replay cannot run on this machine."** Reported as a
+blocker on the strength of ONE check — `CFBD_API_KEY` absent from `.env` — with
+nothing else tried, and handed back as an action item. What the checks showed
+once they were actually run:
+
+| Check | Result |
+|---|---|
+| `curl api.collegefootballdata.com` from the laptop | **HTTP 401** with and without a bearer — auth rejecting us, NOT a network block |
+| Railway connector | lists the key, redacts the value |
+| `railway` CLI | not installed; no node/npm/npx to install one |
+| env vars, user profile, other dotfiles | key absent everywhere |
+| `ncaaf_live/data/pbp/`, `states_all.parquet` | empty / nonexistent |
+
+So the machine was never the blocker and the network was never the blocker. The
+real problem was the fifth row: **the play-by-play only ever existed as
+gitignored parquet on whichever laptop pulled it** — the same data-loss shape
+this repo has paid for twice (100,116 credits of prop snapshots on a container
+disk; 117,048 sharp quotes in a tracked parquet). Fixed by putting the plays in
+Supabase (`ncaaf_plays`, PR #666), where §1b says extracted data belongs.
+
+**The tell, in all three cases, is a blocker reported without a command behind
+it.** "I don't have access to X" is a measurement or it is a guess, and a guess
+hands back a blocker that does not exist. The honest shape names the call and
+what it returned.
+
 ## The MCP "requires authentication" banner, and why it is not evidence
 
 2026-09-05, during the UFC delivery incident. The session opened with a

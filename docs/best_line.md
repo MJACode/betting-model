@@ -325,10 +325,11 @@ What shipped, in one change:
   once).
 - **What stays DraftKings:** the LINE a pick is scored at (a game or prop DK
   does not list still produces no pick), training features, CLV
-  (`closing_dk_odds` vs `dk_odds`), the line-movement monitor, the
-  opening-signal shadow track, and the live lanes (his 2026-09-02 fence, "only
-  for pregame picks for now"). `MAX_EDGE_CAP` is judged on the DraftKings edge
-  in the builders and not re-applied at the best price.
+  (`closing_dk_odds` vs `dk_odds`), the line-movement monitor, and the
+  opening-signal shadow track. The live lanes were fenced out on 2026-09-09
+  (his 2026-09-02 "only for pregame picks for now") and joined on 2026-09-10
+  — the section below. `MAX_EDGE_CAP` is judged on the DraftKings edge in the
+  builders and not re-applied at the best price.
 - **Flag:** `DECIDE_ON_BEST_PRICE=0` restores DraftKings as the deciding price.
 
 **The order, when the evidence arrives.**
@@ -354,16 +355,70 @@ What shipped, in one change:
   that is a separate piece of work, not part of this.
 - **No backfill of `best_*` onto locked picks.** Stamping today's shop onto an
   old pick fabricates score-time data — §1c, timing is data.
-- **Live lanes untouched, with ONE deliberate exception.** `_best_live_price`
-  and the in-play loops are unchanged in mechanics, per mike's instruction. But
-  the unbettable-book exclusion in §2 is a shared config constant, so it applies
-  to live stamping too — and that is on purpose: a price the bettor cannot take
-  is the wrong number on a live pick for exactly the same reason it is wrong on
-  a pre-game one, and §1b says a fix like this is assessed against every lane
-  rather than left in one. It changes which book a live pick names, never
-  whether it fires. Say the word and it can be pre-game-only instead.
+- **Live lanes untouched on 2026-09-09, with ONE deliberate exception.**
+  `_best_live_price` and the in-play loops were unchanged in mechanics that
+  day, per mike's instruction. But the unbettable-book exclusion in §2 is a
+  shared config constant, so it applied to live stamping too — a price the
+  bettor cannot take is the wrong number on a live pick for exactly the same
+  reason it is wrong on a pre-game one. The fence came down the next day
+  (below).
 - **No UI change.** Whether the headline price members see becomes best-instead-
   of-DK is a product decision, not a consequence of this.
+
+### The live lanes join, 2026-09-10
+
+> **mike, 2026-09-10, to the list of decisions the 09-09 reply put to him
+> (widen the live lanes among them): "Yes do everything".**
+
+Measured first, on the live BETs written since 08-30 with a stamped best
+price (query in session 289: `picks` where `is_live`, BET, `dk_odds` present,
+paid at `dk_odds` vs at `COALESCE(best_odds, dk_odds)` on the stored result):
+
+| lane | BETs graded | with a non-DK best | best vs DK, implied | units at DK | units at best |
+|---|---|---|---|---|---|
+| `mlb_live_total_runs` | 99 | 59 | 1.81pp cheaper on average, 10.7pp at most | +7.48 | +10.41 |
+| `ncaaf_live_total` / `_win_prob` | 47 / 5 | 0 (the feed asked DraftKings only) | — | +1.35 / +1.49 | same |
+| `nfl_live_prop` | 0 | 0 (DK-only feed, no in-play prop rows from any other book) | — | — | — |
+
+The NONE→BET population is NOT measurable for the live lanes: a dead-zone live
+pick is never written, so there is no row to re-price. Say so rather than
+estimate it.
+
+The 10.7pp outlier (FanDuel +122 against DK −126 on a live total, 2026-08-31)
+is the shape of a frozen book: the old stamp was age-gated only. Every
+candidate quote is now also gated on the score-change clock the DK quote
+passes through (`quote_predates_score`), on both lanes.
+
+What shipped:
+
+- **MLB (`models/live_scorer.py`).** `_make_live_pick` takes the best
+  bettable in-play quote at the same line (`scorer._live_book_quotes` →
+  `_best_live_side`, one LATERAL top-1-per-book read per (game, market) per
+  pass: 41 ms against the 951 ms of the previous sort-the-game shape) and
+  decides, sizes and stamps `decision_*` at the better of it and DraftKings
+  (`scorer._live_decision_quote`; a tie keeps DK), through the SAME
+  `classify_live_signal` — with the stale-line cap (`LIVE_MAX_EDGE_CAP`)
+  judged on the DK edge, as pre-game keeps `MAX_EDGE_CAP` on it. The decision
+  has to happen inside the builder: a dead-zone live pick returns None and is
+  never written, so there is no NONE row to requalify later. The lane
+  signature (what makes a rewrite) carries the deciding price.
+- **NCAAF (`ncaaf_live/`).** The in-play poll asks for the bettable books in
+  DraftKings' Odds API region (`SNAPSHOT_BOOKS`, pinned to
+  `config.LIVE_FEED_BOOKMAKERS`): measured 2026-09-11, `x-requests-last` = 2
+  with DK alone and 2 with all five, so it costs nothing; a us2 book would
+  double every poll. `parse_event_odds` keeps DK on top as the reference and
+  carries every book underneath; `serve.best_takeable_quote` picks the best
+  same-line quote whose OWN publish clock passes `market_is_takeable`;
+  `LiveEngine._deciding` / `_decide(cap_edge=)` decide at it; gameday logs
+  every book's quote to `odds`, not only DK's.
+- **`nfl_live_prop` cannot join**: its feed is DraftKings-only and no other
+  book has an in-play prop row in `player_prop_odds` (0 since 08-28). It keeps
+  deciding at DK, `decision_book = draftkings`.
+- **Surfaces.** The live Discord card headlines the deciding price and book
+  through `publish_price` and bounds "good to" at it; settlement already read
+  `COALESCE(decision_odds, dk_odds)` on every path; the live record views cut
+  on the decision columns since 09-09.
+- **Flag:** `DECIDE_ON_BEST_PRICE=0` puts every lane back on DraftKings.
 
 ---
 

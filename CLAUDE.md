@@ -158,7 +158,11 @@ SYSTEM does not. Four routes reach anything:
    push it, then point a one-off service's start command at it (`prop-probe`
    exists for this) or add a scheduler job. See `docs/cloud_worker.md`.
 3. **Matt's machine** — ask for a specific command, not a vague blocker.
-4. **The Supabase MCP** — reads and writes production data directly.
+4. **The Supabase MCP** — READS production data directly. It does NOT write:
+   `execute_sql` runs in a read-only transaction and an UPDATE fails with
+   `25006: cannot execute UPDATE in a read-only transaction` (measured
+   2026-09-11). Production writes go through `data.db.get_connection()` and the
+   local `DATABASE_URL`.
 
 So the shape of an honest report is "the sandbox can't reach it, so I'm going
 via Railway / WebSearch / you" — never "this can't be done." If a blocker is
@@ -169,6 +173,20 @@ notice listing MCP servers as needing OAuth was wrong for Railway AND Supabase
 on 2026-09-05 — both answered on the first call, no auth step — and repeating it
 instead of spending two seconds on the call cost a turn mid-incident. Try the
 tool. Evidence: `docs/rules_evidence.md`.
+
+**REACHABILITY AND CAPABILITY ARE TWO MEASUREMENTS. MAKE BOTH, BY CALLING.**
+(mike, 2026-09-12: *"you need to check access to all tools like railway rather
+than assuming."*) The 2026-09-05 rule above fixed "can I reach it" and left
+"can it do the thing" untouched, so the mistake returned the moment a tool
+answered and then refused the operation. Neither limit is visible in a tool's
+name: Supabase `execute_sql` answers and is READ-ONLY; Railway `list-variables`
+answers, lists `CFBD_API_KEY`, and REDACTS every value.
+
+**A MISSING CREDENTIAL IS NOT A MISSING CAPABILITY. TEST THE LAYERS SEPARATELY:
+network → auth → permission → capability.** A 401 and a connection refused are
+different problems and only one is a blocker. "It can't run here" needs a
+command behind it; one absent route is not zero routes. Evidence, and the
+2026-09-12 case that cost a day: `docs/rules_evidence.md`.
 
 **THE CURRENT STATE OF A SYSTEM IS NOT ITS CAPABILITY, AND WORK YOU CAN DO IS
 NOT AN ACTION ITEM FOR MATT.** (Added 2026-09-01.) Two halves, both common:
@@ -561,12 +579,18 @@ at, and it excludes the books a member cannot bet.
   decided at DraftKings, so the fallback is exact). **DraftKings stays the
   REFERENCE, not the decider:** the LINE a pick is scored at is DK's (no DK
   quote, no pick), training features and CLV (`closing_dk_odds` vs `dk_odds`)
-  are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings meaning. Live lanes
-  still decide on the in-play DraftKings price (his 2026-09-02 fence). No cut
-  moved with the flip — the sweep found none shippable — so every cut is
-  0.68pp looser on average at the better price (`docs/best_line.md` §4).
-  `scorer._decide` / `_size` are the ONE code path both prices run through;
-  `tests/test_decide_on_best_price.py` is the tripwire.
+  are DK-to-DK, and `edge` / `dk_odds` keep their DraftKings meaning. **The
+  live lanes joined on 2026-09-10** (mike, "yes do everything"): the MLB and
+  NCAAF in-play lanes decide at the best bettable IN-PLAY quote at DK's line,
+  through their own classifiers, with the stale-line cap kept on the DK edge
+  and every candidate quote gated on the same age and score-change clocks as
+  the DK quote; `nfl_live_prop` cannot, its feed is DK-only. No cut moved with
+  either flip — the sweep found none shippable — so every cut is 0.68pp looser
+  on average at the better price (`docs/best_line.md` §4). `scorer._decide` /
+  `_size` (pre-game), `live_scorer.classify_live_signal` (MLB live) and
+  `ncaaf_live.serve.LiveEngine._decide` (NCAAF live) are the ONE code path
+  each lane's two prices run through; `tests/test_decide_on_best_price.py`
+  and `tests/test_best_line_live.py` are the tripwires.
 - **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO PRICE.** (2026-09-03.)
   A win with `dk_odds IS NULL` (and, since 2026-09-09, `decision_odds IS NULL`)
   is stored as +$90.91 on a $100 stake — exactly the payout of -110 — so

@@ -66,6 +66,8 @@ from data.db import get_connection
 from data.ingestors.odds_ingestor import (
     _build_game_id, _insert_odds, _normalize_team, _parse_outcomes,
     _parse_total_outcomes, record_quota_headers)
+from data.ingestors.odds_quota import (
+    DEFAULT_RESERVE_DAYS, plan_credit_budget)
 
 SPORT = "NCAAF"
 SPORT_KEY = "americanfootball_ncaaf"
@@ -115,6 +117,59 @@ def slate_windows(conn, season: int) -> list[tuple[str, datetime, datetime]]:
 
 def planned_calls(windows) -> int:
     return sum(int((hi - lo) / STEP) + 1 for _, lo, hi in windows)
+
+
+def calls_in(day_window) -> int:
+    """Planned calls for ONE slate day."""
+    _, lo, hi = day_window
+    return int((hi - lo) / STEP) + 1
+
+
+def parse_shard(spec: str) -> tuple[int, int]:
+    """`i/n` -> (i, n), refusing anything that would silently drop days.
+
+    A bad spec used to raise deep inside main() as a ValueError from int(), or
+    worse, quietly select nothing: `4/4` matches no day at all, so a fourth
+    shard launched as 4/4 rather than 3/4 exits SUCCESSFULLY having pulled
+    nothing, and the gap only shows up as a hole in the replay.
+    """
+    parts = str(spec).split("/")
+    if len(parts) != 2:
+        raise ValueError(f"--shard must be i/n, got {spec!r}")
+    try:
+        i, n = int(parts[0]), int(parts[1])
+    except ValueError:
+        raise ValueError(f"--shard must be i/n with integers, got {spec!r}")
+    if n < 1 or i < 0 or i >= n:
+        raise ValueError(f"--shard {spec!r}: need 0 <= i < n and n >= 1")
+    return i, n
+
+
+def shard_windows(windows, spec: str) -> list:
+    """This shard's slate days, round-robin so every day is taken exactly once."""
+    i, n = parse_shard(spec)
+    return [w for k, w in enumerate(windows) if k % n == i]
+
+
+def budget_for(conn, windows, spec: str, markets, *, max_credits=None,
+               reserve_days: int = DEFAULT_RESERVE_DAYS, burn_per_day=None,
+               remaining=None, calls_per_day=None):
+    """This shard's credit budget: its OWN planned calls, its OWN share.
+
+    The seam the 2026-09-11 bug needed and did not have. Everything about how
+    much may be spent is decided here, from the shard's real work and the
+    measured burn rate -- see `data/ingestors/odds_quota.py` for why both
+    numbers are derived rather than chosen.
+    """
+    per_day = calls_per_day or (lambda w: calls_in(w))
+    mine = shard_windows(windows, spec)
+    return plan_credit_budget(
+        conn,
+        shard_calls=sum(per_day(w) for w in mine),
+        total_calls=sum(per_day(w) for w in windows),
+        credits_per_call=CREDITS_PER_MARKET * len(markets),
+        max_credits=max_credits, reserve_days=reserve_days,
+        burn_per_day=burn_per_day, remaining=remaining)
 
 
 def _served_already(conn, lo: datetime, hi: datetime) -> set[str]:
@@ -229,8 +284,8 @@ def rows_for(events: list[dict], requested: str, served: datetime,
     return rows
 
 
-def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
-             budget: dict, known_games: set[str], markets) -> None:
+def pull_day(conn, day: str, lo: datetime, hi: datetime,
+             budget, known_games: set[str], markets) -> None:
     have = _served_already(conn, lo, hi)
     skipped: dict = {}
     t = lo
@@ -240,9 +295,8 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
     per_call = CREDITS_PER_MARKET * len(markets)
     calls = wrote = 0
     while t <= hi:
-        if budget["spent"] + per_call > budget["max"]:
-            logger.error(f"{day}: credit budget {budget['max']} reached; stopping")
-            budget["stop"] = True
+        if not budget.can_afford(per_call):
+            logger.error(f"{day}: {budget.stopped_reason}; stopping")
             return
         requested = _iso(t)
         resp = _get({"apiKey": ODDS_API_KEY, "regions": "us",
@@ -251,16 +305,16 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
                      "date": requested, "includeLinks": "true", "includeSids": "true"})
         if resp is None:
             logger.error(f"{day}: network gave up at {requested}; stopping")
-            budget["stop"] = True
+            budget.stopped_reason = "network gave up"
             return
         record_quota_headers(resp)
         remaining = resp.headers.get("x-requests-remaining")
-        budget["spent"] += int(resp.headers.get("x-requests-last") or per_call)
+        budget.charge(resp, assumed=per_call)
         calls += 1
         if resp.status_code != 200:
             logger.warning(f"{day}: HTTP {resp.status_code} at {requested}: {resp.text[:120]}")
             if resp.status_code in (401, 422):
-                budget["stop"] = True
+                budget.stopped_reason = f"HTTP {resp.status_code}"
                 return
             t += STEP
             continue
@@ -276,9 +330,8 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
                 conn.commit()
                 wrote += len(rows)
             have.add(_iso(served))
-        if remaining is not None and int(remaining) < floor:
-            logger.error(f"quota {remaining} under floor {floor}; stopping")
-            budget["stop"] = True
+        if not budget.check_remaining(remaining):
+            logger.error(f"{budget.stopped_reason}; stopping")
             return
         if nxt:
             t = max(_ts(nxt), t + timedelta(seconds=1))
@@ -288,7 +341,8 @@ def pull_day(conn, day: str, lo: datetime, hi: datetime, floor: int,
     if skipped:
         logger.warning(f"{day}: not in games, skipped: "
                        + ", ".join(f"{g} x{n}" for g, n in sorted(skipped.items())))
-    logger.info(f"{day}: {calls} calls, {wrote} rows, spent so far {budget['spent']}")
+    logger.info(f"{day}: {calls} calls, {wrote} rows, "
+                f"spent so far {budget.spent:,} of {budget.ceiling:,}")
 
 
 def main() -> None:
@@ -299,9 +353,20 @@ def main() -> None:
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--markets", default=",".join(DEFAULT_MARKETS),
                     help="comma list from h2h,totals (default both)")
-    ap.add_argument("--max-credits", type=int, default=400_000)
-    ap.add_argument("--floor", type=int, default=2_000_000,
-                    help="stop when x-requests-remaining drops under this")
+    # THE GUARDS ARE DERIVED, NOT CHOSEN -- see data/ingestors/odds_quota.py.
+    # --max-credits is the budget for the WHOLE pull across every shard and
+    # defaults to the run's own printed plan; --floor is gone, replaced by a
+    # reserve measured off odds_api_quota.
+    ap.add_argument("--max-credits", type=int, default=None,
+                    help="whole-run budget across ALL shards (default: the "
+                         "printed plan). Split by each shard's share of the work.")
+    ap.add_argument("--reserve-days", type=int, default=DEFAULT_RESERVE_DAYS,
+                    help="days of MEASURED burn the account must keep after "
+                         f"this pull (default {DEFAULT_RESERVE_DAYS})")
+    ap.add_argument("--burn-per-day", type=int, default=None,
+                    help="override the measured burn rate (refuses without one)")
+    ap.add_argument("--remaining", type=int, default=None,
+                    help="override the quota reading (refuses without one)")
     ap.add_argument("--shard", default="0/1", help="i/n: this process takes days i, i+n, ...")
     args = ap.parse_args()
     if not (args.dry_run or args.apply):
@@ -319,27 +384,39 @@ def main() -> None:
         logger.info(f"{args.season}: {len(windows)} slate days, {calls} planned calls, "
                     f"{calls * per_call:,} credits at {per_call}/call "
                     f"({','.join(markets)})")
+        # The budget is built for THIS SHARD from its own work and the measured
+        # burn rate, and it is printed whether or not we are about to spend --
+        # a dry run that does not show the guards cannot be used to approve
+        # them, which is how the 2026-09-11 numbers went unexamined.
+        budget, problems = budget_for(
+            conn, windows, args.shard, markets,
+            max_credits=args.max_credits, reserve_days=args.reserve_days,
+            burn_per_day=args.burn_per_day, remaining=args.remaining)
+        logger.info("credit guards (all derived -- odds_quota.py):\n"
+                    + budget.describe())
+        for p in problems:
+            logger.error(f"REFUSING: {p}")
+
         if args.dry_run:
             for day, lo, hi in windows[:3] + windows[-3:]:
                 logger.info(f"  {day}: {_iso(lo)} -> {_iso(hi)}  {int((hi - lo) / STEP) + 1} calls")
             return
         if not ODDS_API_KEY:
             raise SystemExit("ODDS_API_KEY not set")
-        if calls * per_call > args.max_credits:
-            raise SystemExit(f"planned {calls * per_call:,} credits exceeds "
-                             f"--max-credits {args.max_credits:,}; refusing")
-        i, n = (int(x) for x in args.shard.split("/"))
-        mine = [w for k, w in enumerate(windows) if k % n == i]
-        budget = {"spent": 0, "max": args.max_credits, "stop": False}
+        if problems:
+            raise SystemExit("refusing to start: " + "; ".join(problems))
+
+        mine = shard_windows(windows, args.shard)
         known = {r[0] for r in conn.execute(
             "SELECT game_id FROM games WHERE sport = %s AND season = %s",
             (SPORT, args.season)).fetchall()}
         for day, lo, hi in mine:
-            pull_day(conn, day, lo, hi, args.floor, budget, known, markets)
-            if budget["stop"]:
+            pull_day(conn, day, lo, hi, budget, known, markets)
+            if budget.stop:
                 break
-        logger.success(f"shard {args.shard}: spent {budget['spent']:,} credits"
-                       f"{' (STOPPED EARLY)' if budget['stop'] else ''}")
+        logger.success(
+            f"shard {args.shard}: spent {budget.spent:,} of {budget.ceiling:,} "
+            f"credits{' — STOPPED EARLY: ' + budget.stopped_reason if budget.stop else ''}")
     finally:
         conn.close()
 

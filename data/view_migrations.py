@@ -55,6 +55,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-11 (session 280): the event-code -> games-row join for the table
     # above, refreshed by the recorder after every snapshot.
     "add_kalshi_ncaaf_events.sql",
+    # 2026-09-12 (session 287): CFBD NCAAF play-by-play. The states corpus the
+    # live engine was trained on lived only as gitignored parquet on one
+    # laptop, and the laptop that needs it for the 2025 in-play replay has no
+    # CFBD key. The worker fetches, this table carries it, any machine reads.
+    "add_ncaaf_plays.sql",
+    # 2026-09-12: int32 was an arbitrary ceiling on a third-party feed's
+    # numbers, and Postgres does not name the column when one overflows.
+    "widen_ncaaf_plays_ints.sql",
     # 2026-09-10 (session 280, mike): point-in-time ISSUED weather forecasts
     # for NCAAF games, the train/serve repair for the totals model's wx_*
     # features (it trained on reanalysis and is served a forecast).

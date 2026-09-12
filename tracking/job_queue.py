@@ -673,6 +673,50 @@ def _validate_void_picks(args: dict) -> dict:
     return {"pick_ids": ids, "reason": reason[:500]}
 
 
+def _job_ncaaf_pbp_pull(**kw):
+    """Pull CFBD play-by-play for a season into `ncaaf_plays`, ON THE WORKER.
+
+    THE WHOLE POINT IS WHERE THIS RUNS. CFBD_API_KEY is a Railway variable: it
+    is not in the local .env, the Railway connector returns variable values
+    redacted to OAuth apps, and there is no Railway CLI on the laptop. The API
+    itself IS reachable from the laptop (401, not a network block), so the only
+    missing piece there is the key -- and the answer is not to move the key, it
+    is to run the fetch on the machine that already has it and land the result
+    somewhere both can read (CLAUDE.md section 1b: extracted data belongs in
+    Supabase).
+
+    Free on CFBD's metered plan at ~17 calls a season, and idempotent on the
+    play id, so a retry costs calls and never duplicates a play.
+    """
+    from data.db import get_connection
+    from ncaaf_live.backtest.pull_pbp import store_season
+
+    conn = get_connection()
+    try:
+        out = []
+        for season in kw["seasons"]:
+            out.append(store_season(conn, season))
+        return {"seasons": out}
+    finally:
+        conn.close()
+
+
+def _validate_ncaaf_pbp_pull(args: dict) -> dict:
+    seasons = args.get("seasons") or []
+    if not isinstance(seasons, list) or not seasons:
+        raise ValueError("seasons must be a non-empty list")
+    if len(seasons) > 12:
+        raise ValueError("at most 12 seasons per job")
+    out = []
+    for s in seasons:
+        s = int(s)
+        # CFBD play-by-play quality before 2015 is untested (ncaaf_live.config).
+        if not (2015 <= s <= datetime.now().year):
+            raise ValueError(f"season {s} outside 2015..now")
+        out.append(s)
+    return {"seasons": out}
+
+
 def _job_ncaaf_teams_refresh(**kw):
     """Re-pull the school registry, every classification, and PROBE the
     resolver on the worker with the names that broke. The probe is the
@@ -783,6 +827,9 @@ JOBS = {
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),
     "ncaaf_teams_refresh": (_job_ncaaf_teams_refresh, _validate_ncaaf_teams_refresh),
+    # 2026-09-12: the worker holds CFBD_API_KEY and the laptop does not, so the
+    # play-by-play fetch runs here and lands in Supabase for everyone else.
+    "ncaaf_pbp_pull": (_job_ncaaf_pbp_pull, _validate_ncaaf_pbp_pull),
     "publish_x_results": (_job_publish_x_results, _validate_publish_x_results),
     # Both surfaces, one job: the 2026-09-09 recovery. Same validator as the
     # X-only job; the argument is the same one field.
