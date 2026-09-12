@@ -203,29 +203,41 @@ The tell is the same in both: a turn that ends with a tidy summary and a to-do
 list FOR SOMEONE ELSE feels finished. It is the work redistributed. Ask instead:
 what did I actually change, and what did I merely describe?
 
-**EXTRACTED DATA BELONGS IN SUPABASE.** Supabase is the system of record. Any
-dataset that cost money or time to acquire goes there, so it is queryable beside
-everything else and covered by one backup story rather than N. Ephemeral
-container disk is never a home for paid data, and **a Railway volume is one
-copy, not a backup** — 100,116 credits of prop snapshots once existed nowhere
-else. Still outside and worth fixing when touched: the live decision log
-(`DECISION_LOG_DIR`) and `nfl/data/odds_cache`.
+**EVERYTHING GOES IN SUPABASE. THERE ARE NO EXCEPTIONS, AND A TOLERATED ONE IS
+NOT A RULE.** (mike, 2026-08-30 and again 2026-09-12: *"EVERYTHING SHOULD BE IN
+SUPABASE FOR THE MILLIONTH FUCKING TIME. Need a global rule."*) Supabase is the
+system of record. **Any dataset that cost money or time to acquire is stored
+there FIRST** — before it is analysed, modelled on or committed.
+
+This rule existed and was broken anyway, because it carried exceptions "worth
+fixing when touched" and nobody touched them: on 2026-09-12 `nfl/data/odds_cache`
+held **655 MB of PAID Odds API history, NFL 2020-2026, on one laptop** while
+`odds` held NFL 2026 only. The exceptions are gone:
+
+- **A local file is a CACHE OF SUPABASE or it is a bug.** `data/local_store.py`
+  is the sanctioned shape — opt-in, gitignored, regenerable, every row already
+  in the database. Anything else on disk is a primary store, and a primary store
+  outside Supabase is the outage. A Railway volume is ONE COPY, not a backup.
+- **An ingestor that buys data writes it to Supabase in the same run**, keyed so
+  a re-run imports nothing already stored (the `source` marker in
+  `data/ingestors/*_history*.py`). That resume made the 2026-09-12 NCAAF season
+  cost 8,360 credits against a 373,240 plan.
+- `tests/test_everything_in_supabase.py` walks the repo for on-disk data sinks
+  and fails on a new one that is not a declared cache. When it fails, the answer
+  is an importer, not an entry in the allowlist.
 
 **Live player props are a priority and an UNTESTED HYPOTHESIS — not a proven
-market.** (Downgraded 2026-09-03 at mike's instruction, after measurement; it
-had been stated here as "treated as a proven-profitable market", which was a
-conviction, never a result.) The thesis is unchanged and still worth pursuing:
-NOT beating line movement or reacting faster than a book, but a statistical
-model for live prop over/unders priced RELATIVE TO THE STARTING LINE, capturing
-in-game flow. The book re-anchors its live prop line mechanically off the
-pregame number and the clock; the edge is predicting where true remaining
-production deviates from that. Do not rebuild a player projection from scratch
-and throw the pregame line away.
+market.** (Downgraded 2026-09-03 by mike, after measurement.) The thesis: NOT
+beating line movement, but a statistical model for live prop over/unders priced
+RELATIVE TO THE STARTING LINE. The book re-anchors its live line mechanically
+off the pregame number and the clock; the edge is predicting where true
+remaining production deviates from that. Do not rebuild a player projection
+from scratch and throw the pregame line away. Detail: `docs/live_betting.md`.
 
 **The settled live-prop record is ZERO BETS — there has never been a live
 player prop model in production, and the ~400 settled picks that look like one
-are not.** Do not read them as evidence in either direction; the numbers and
-the population are in `docs/rules_evidence.md`.
+are not.** Do not read them as evidence in either direction
+(`docs/rules_evidence.md`).
 
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND
 "SHOULD WE UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A
@@ -438,10 +450,10 @@ Models currently in that state are flagged as PAPER ONLY in their own section
 (e.g. `ncaaf_spread` — see `docs/sports/ncaaf.md`). Everything else is live.
 
 **`nfl_live_prop` is LIVE with the gate deliberately NOT met** (Matt,
-2026-09-05). Settled record at go-live: **zero** — it wrote to a JSONL file, so
-it could never have cleared the gate by waiting. Raised, restated, his call.
-**Do not pause it or restore the gate without asking him.** Re-sweep its cut at
-~50 settled bets; it runs 0.0/0.0 because the cut is EV, in
+2026-09-05). Settled record at go-live: zero — it wrote to a JSONL file, so it
+could never have cleared the gate by waiting. Raised, restated, his call. **Do
+not pause it or restore the gate without asking him.** Re-sweep its cut at ~50
+settled bets; it runs 0.0/0.0 because the cut is EV, in
 `nfl/live_model/config.EV_THRESHOLDS`. Detail: `docs/rules_evidence.md`.
 
 ---
@@ -465,14 +477,10 @@ reached in practice. It is **0.10**, not the ±3% this section documented until
 tightening and never corrected here.
 
 ### Tenth-Kelly Bet Sizing
-```
-f_q = 0.10 × (model_prob − implied_prob) / (1 − implied_prob)
-max bet = min(f_q × bankroll, 5% of bankroll)
-```
-Switched from quarter-Kelly (0.25) to tenth-Kelly (0.10) on 2026-05-04.
-Quarter-Kelly always exceeded the 5% cap for picks meeting min-edge thresholds (10-14%),
-producing identical flat bets on every pick. Tenth-Kelly keeps bets at 2-4% of bankroll
-and lets edge size drive differentiation. KELLY_MULTIPLIER in config.py is env-overridable.
+`f = 0.10 x (model_prob - implied) / (1 - implied)`, capped at 5% of bankroll.
+Quarter-Kelly always hit that cap at our edge sizes, so every pick got the same
+flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
+(2026-05-04). `config.KELLY_MULTIPLIER` is env-overridable.
 
 ### Injury Scenarios
 - **Scenario A** — Active injury: penalizes team's expected performance
