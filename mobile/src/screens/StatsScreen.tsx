@@ -1107,7 +1107,13 @@ export function StatsScreen() {
   // groups the raw rows client-side; Season mode reads the per-player value
   // arrays from player_season_stat_values_* (values newest-first, nulls already
   // excluded server-side), so the line ruler stays instant either way. ──
-  const hitRatePlayers = useMemo<HitRatePlayer[]>(() => {
+  // Split in two ON PURPOSE (UX review, 2026-09-12). Everything expensive —
+  // grouping every fetched game row by player, computing hit rates, and the
+  // sort — is keyed on everything EXCEPT the band, because the band is now
+  // dragged: a single gesture steps it up to twenty times, and these boards
+  // run to tens of thousands of rows. The band is a filter over the finished,
+  // already-sorted list (a filter preserves order), so a drag costs one pass.
+  const hitRateBase = useMemo<HitRatePlayer[]>(() => {
     if (!stat || effectiveMode !== 'hitRate') return [];
     const out: HitRatePlayer[] = [];
     if (timeWindow === 'season') {
@@ -1160,7 +1166,6 @@ export function StatsScreen() {
     const q = query.trim().toLowerCase();
     return out
       .filter((p) => isStatParticipant(sport, p.values))
-      .filter((p) => inHitRateBand(p.pct, band))
       .filter((p) => !teamFilter || p.team === teamFilter)
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
@@ -1169,7 +1174,12 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+
+  const hitRatePlayers = useMemo<HitRatePlayer[]>(
+    () => hitRateBase.filter((p) => inHitRateBand(p.pct, band)),
+    [hitRateBase, band],
+  );
 
   // Does the hit-rate column span more than one colour band? A rare-event
   // column (Doubles, Triples, Home Runs) does not — every player lands in the
@@ -1278,11 +1288,24 @@ export function StatsScreen() {
   const bandSummary = useMemo(() => {
     const lo = Math.round(band.lo * 100);
     const hi = Math.round(band.hi * 100);
+    // The thumbs are allowed to MEET, and the slider makes that a one-drag
+    // routine where typing 60 into both fields never was. "60–60%" reads as a
+    // rendering bug on all three surfaces this feeds (UX review, 2026-09-12).
+    if (lo === hi) return `Exactly ${lo}%`;
     if (band.lo > 0 && band.hi < 1) return `${lo}–${hi}%`;
     if (band.hi < 1) return `≤ ${hi}%`;
     if (band.lo > 0) return `${lo}%+`;
     return 'Any';
   }, [band]);
+
+  /** Is the hit-rate band narrowing the board right now? */
+  const bandActive = band.lo > 0 || band.hi < 1;
+
+  /** Back to "Any". The pill, the section's own Clear and the reset all use it. */
+  const clearBand = useCallback(() => {
+    setHitLow(HIT_RATE_MIN);
+    setHitHigh(HIT_RATE_MAX);
+  }, []);
 
   // Count filters the user has changed away from defaults, for the trigger badge.
   // Only counts what still lives in the modal — the front-page controls are visible.
@@ -1294,12 +1317,12 @@ export function StatsScreen() {
     if (minGrade && !includeUngraded) n += 1;
     if (query.trim()) n += 1;
     if (effectiveMode === 'hitRate') {
-      if (band.lo > 0 || band.hi < 1) n += 1;
+      if (bandActive) n += 1;
     } else if (basis !== 'perGame') {
       n += 1;
     }
     return n;
-  }, [teamFilter, gamePicker.selected, minGrade, includeUngraded, query, effectiveMode, band, basis]);
+  }, [teamFilter, gamePicker.selected, minGrade, includeUngraded, query, effectiveMode, bandActive, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -1311,13 +1334,12 @@ export function StatsScreen() {
     setBasis('perGame');
     setQuery('');
     setTeamFilter(null);
-    setHitLow(HIT_RATE_MIN);
-    setHitHigh(HIT_RATE_MAX);
+    clearBand();
     setTonightOnly(false);
     setMinGrade(null);
     setIncludeUngraded(true);
     gamePicker.clear();
-  }, [gamePicker]);
+  }, [gamePicker, clearBand]);
 
   // Removable chips for whatever is narrowing the board right now. Before this,
   // the only hint that a filter was on was a number badge on the Filters button.
@@ -1350,22 +1372,15 @@ export function StatsScreen() {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
     }
     if (effectiveMode === 'hitRate') {
-      if (band.lo > 0 || band.hi < 1) {
-        out.push({
-          key: 'hitBand',
-          label: `hit ${bandSummary}`,
-          onRemove: () => {
-            setHitLow(HIT_RATE_MIN);
-            setHitHigh(HIT_RATE_MAX);
-          },
-        });
+      if (bandActive) {
+        out.push({ key: 'hitBand', label: `hit ${bandSummary}`, onRemove: clearBand });
       }
     } else if (basis !== 'perGame') {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, gamesPicked, slateLabel, effectiveMode, band, bandSummary, basis,
-      gamePicker, pickableGames, minGrade, includeUngraded]);
+  }, [teamFilter, query, tonightActive, gamesPicked, slateLabel, effectiveMode, bandActive, bandSummary,
+      basis, clearBand, gamePicker, pickableGames, minGrade, includeUngraded]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
   // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
@@ -1999,6 +2014,14 @@ export function StatsScreen() {
             title="Hit rate"
             subtitle="Only show players inside this band."
             summary={bandSummary}
+            // Every other narrowing section on this sheet carries its own
+            // Clear. The band needs it MORE than they do now the fields are
+            // gone: emptying two text boxes used to be the way back to "Any",
+            // and "Clear all" also wipes Games, Matchup, Search and Team.
+            onClear={bandActive ? clearBand : undefined}
+            // A sheet that opens collapsed hides the control that produced the
+            // band the row is reporting (UX review, 2026-09-12).
+            defaultOpen={bandActive}
           >
             <View style={styles.chipWrap}>
               {HIT_RATE_PRESETS.map((p) => {
@@ -2034,7 +2057,6 @@ export function StatsScreen() {
                 format={(v) => `${v}%`}
                 lowLabel="Minimum hit rate"
                 highLabel="Maximum hit rate"
-                readout={bandSummary === 'Any' ? 'Any hit rate' : bandSummary}
               />
             </View>
           </FilterSection>
@@ -2459,8 +2481,16 @@ function ColumnHeader({
     <View style={styles.colHeader}>
       <Text style={styles.colHeaderRank}>RK</Text>
       <Text style={styles.colHeaderName}>PLAYER</Text>
-      <Text style={styles.colHeaderRight} numberOfLines={1}>
-        {rightLabel.toUpperCase()}
+      {/* The arrow is the board's only statement of its own order now the
+          sort picker is gone — the removable "by games played" pill used to
+          be the one place it was written down (UX review, 2026-09-12). It is
+          an indicator, not a control: the order is fixed. */}
+      <Text
+        style={styles.colHeaderRight}
+        numberOfLines={1}
+        accessibilityLabel={`${rightLabel}, sorted highest first`}
+      >
+        {`${rightLabel.toUpperCase()} ↓`}
       </Text>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>

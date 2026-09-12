@@ -13,8 +13,10 @@
 import {
   applyBound,
   grabTarget,
+  readIntent,
   resolveTie,
   snapTo,
+  tapTarget,
   valueAtX,
   type Scale,
 } from '../src/lib/rangeSlider';
@@ -87,7 +89,36 @@ check('a touch dead centre takes the min (the tie goes left, deterministically)'
 check('a touch outside the band takes the end it is outside of',
   grabTarget(5, 20, 80) === 'low' && grabTarget(99, 20, 80) === 'high');
 
-// ── 6. Every preset chip is a position the finger can reach ──
+// ── 6. Gesture intent — the slider lives inside a scrolling sheet ──
+// The first version claimed every touch on contact AND committed on grant, so
+// a finger put down to flick the sheet moved a thumb instead (UX review).
+
+check('a touch that has barely moved commits to nothing',
+  readIntent(0, 0) === 'idle' && readIntent(3, 2) === 'idle');
+check('a horizontal drag is the slider\'s', readIntent(40, 6) === 'drag');
+check('a vertical flick belongs to the sheet', readIntent(6, 40) === 'scroll');
+check('a diagonal drag goes to the dominant axis',
+  readIntent(30, 29) === 'drag' && readIntent(29, 30) === 'scroll');
+check('a long vertical drag is never the slider\'s, however far it travels',
+  readIntent(10, 400) === 'scroll');
+// The slop is what keeps a TAP from being read as a drag: a tap wobbles a few
+// points, and every one of those points would otherwise move a thumb.
+check('the slop holds in both axes', readIntent(5, 5) === 'idle' && readIntent(7, 0) === 'drag');
+
+// ── 7. Taps — the one case that cannot be deferred to a direction ──
+
+check('a tap picks the nearer end', tapTarget(25, 20, 80) === 'low' && tapTarget(75, 20, 80) === 'high');
+check('a tap above a collapsed band opens it upward', tapTarget(80, 60, 60) === 'high');
+check('a tap below a collapsed band opens it downward', tapTarget(40, 60, 60) === 'low');
+check('a tap never returns the deferred answer',
+  ([tapTarget(60, 60, 60), tapTarget(0, 0, 0), tapTarget(100, 100, 100)] as string[])
+    .every((t) => t === 'low' || t === 'high'));
+// End to end: a collapsed band at 60 reopens on a tap at 80.
+const tapped = applyBound(tapTarget(80, 60, 60), 80, 60, 60);
+check('a tap reopens a collapsed band', tapped.low === 60 && tapped.high === 80,
+  JSON.stringify(tapped));
+
+// ── 8. Every preset chip is a position the finger can reach ──
 // The chips set the band directly, so a preset off the stop grid would leave
 // the slider unable to reproduce what the chip above it just set.
 check('every preset round-trips through the slider',

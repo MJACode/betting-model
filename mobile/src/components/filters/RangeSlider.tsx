@@ -25,8 +25,11 @@
  *
  * Accessibility: each thumb is its own `adjustable` element with increment /
  * decrement actions, so VoiceOver drives the two ends separately. The visual
- * thumb is 28pt inside a 44pt touch area (HIG minimum), and the numbers are
- * printed above the track — colour and position are never the only carrier.
+ * thumb is 28pt inside a 44pt touch area (HIG minimum), and the two bounds are
+ * printed at the ends of the track — colour and position are never the only
+ * carrier. The band is NOT restated above the track: the section header row is
+ * already live (`FilterSection.summary`), and Strava, UNIQLO and Best Buy all
+ * print the bounds at the track's ends and nowhere else (UX review).
  */
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -34,9 +37,12 @@ import { PanResponder, StyleSheet, Text, View } from 'react-native';
 import {
   applyBound,
   grabTarget,
+  readIntent,
   resolveTie,
   snapTo,
+  tapTarget,
   valueAtX,
+  type GestureIntent,
   type Scale,
 } from '@/lib/rangeSlider';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -61,8 +67,6 @@ interface Props {
   /** VoiceOver labels for the two thumbs. */
   lowLabel: string;
   highLabel: string;
-  /** Sentence above the track, e.g. "60–80%". */
-  readout: string;
 }
 
 export function RangeSlider({
@@ -75,7 +79,6 @@ export function RangeSlider({
   format = (v) => String(v),
   lowLabel,
   highLabel,
-  readout,
 }: Props) {
   const [width, setWidth] = useState(0);
   const [dragging, setDragging] = useState<'low' | 'high' | null>(null);
@@ -95,6 +98,8 @@ export function RangeSlider({
 
   /** Which thumb the current gesture owns; 'tie' until the first move. */
   const activeRef = useRef<'low' | 'high' | 'tie'>('low');
+  /** What the current gesture has turned out to be — see `readIntent`. */
+  const intentRef = useRef<GestureIntent>('idle');
 
   const scale: Scale = { min, max, step };
   const scaleRef = useRef(scale);
@@ -114,30 +119,57 @@ export function RangeSlider({
   const pan = useMemo(
     () =>
       PanResponder.create({
+        // Claimed on contact so a TAP can set the band — but nothing is
+        // committed until the gesture says what it is (see below).
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        // The sheet's ScrollView must not be able to steal a drag in flight.
-        onPanResponderTerminationRequest: () => false,
+        // Yield to the sheet's ScrollView right up until a horizontal drag has
+        // been claimed, and never after. This is what lets a vertical flick
+        // that started ON the track scroll the sheet; without it the slider is
+        // a full-width dead zone in the middle of a scrolling list.
+        onPanResponderTerminationRequest: () => intentRef.current !== 'drag',
         onPanResponderGrant: (e) => {
-          const v = valueAt(e.nativeEvent.pageX);
-          const which = grabTarget(v, lowRef.current, highRef.current);
-          activeRef.current = which;
-          if (which !== 'tie') {
-            setDragging(which);
-            apply(which, v);
-          }
+          intentRef.current = 'idle';
+          // Position picks the thumb; the VALUE is not applied here. Applying
+          // on grant is what turned a failed scroll into a silent edit.
+          activeRef.current = grabTarget(
+            valueAt(e.nativeEvent.pageX),
+            lowRef.current,
+            highRef.current,
+          );
         },
         onPanResponderMove: (e, g) => {
+          if (intentRef.current !== 'drag') {
+            const intent = readIntent(g.dx, g.dy);
+            // 'scroll' is terminal for this gesture: the sheet has it now.
+            if (intent !== 'drag') return;
+            intentRef.current = 'drag';
+          }
           if (activeRef.current === 'tie') {
             const which = resolveTie(g.dx);
             if (!which) return; // still ambiguous
             activeRef.current = which;
-            setDragging(which);
           }
+          // Same value re-set is a no-op in React; a ref comparison here
+          // would just be a second source of truth for the same thing.
+          setDragging(activeRef.current);
           apply(activeRef.current, valueAt(e.nativeEvent.pageX));
         },
-        onPanResponderRelease: () => setDragging(null),
-        onPanResponderTerminate: () => setDragging(null),
+        onPanResponderRelease: (e, g) => {
+          // A touch that never became a drag is a tap: set the nearer end to
+          // where the finger landed. This is the whole reason the responder is
+          // claimed on contact rather than on the first horizontal movement.
+          if (readIntent(g.dx, g.dy) === 'idle') {
+            const v = valueAt(e.nativeEvent.pageX);
+            apply(tapTarget(v, lowRef.current, highRef.current), v);
+          }
+          intentRef.current = 'idle';
+          setDragging(null);
+        },
+        onPanResponderTerminate: () => {
+          intentRef.current = 'idle';
+          setDragging(null);
+        },
       }),
     // Built once — everything it reads lives in a ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -180,18 +212,18 @@ export function RangeSlider({
 
   return (
     <View>
-      <View style={styles.readoutRow}>
-        <Text style={styles.readout}>{readout}</Text>
-      </View>
-
-      {/* The padding keeps a thumb at either end from clipping; the track
-          itself is measured inside it, so 0% and 100% land on the ends. */}
-      <View style={styles.pad}>
+      {/* The responder is on the full-width WRAPPER, not on the inset track.
+          A touch target is dead wherever it falls outside the view that owns
+          the responder, and at 0% / 100% half of a thumb's 44pt box sits in
+          the gutter — so the visible half of the resting min thumb answered
+          nothing (UX review, 2026-09-12). The gutter is TAP_W/2 for the same
+          reason: at either end the whole box is then inside the wrapper. The
+          TRACK is still what gets measured, so 0% and 100% land on its ends. */}
+      <View style={styles.pad} {...pan.panHandlers}>
         <View
           ref={trackRef}
           style={styles.track}
           onLayout={(e) => measure(e.nativeEvent.layout.width)}
-          {...pan.panHandlers}
         >
           <View style={styles.rail} />
           {width > 0 ? (
@@ -214,27 +246,21 @@ export function RangeSlider({
         </View>
       </View>
 
-      <View style={styles.endRow}>
-        <Text style={styles.endLabel}>{format(min)}</Text>
-        <Text style={styles.endLabel}>{format(max)}</Text>
+      {/* The LIVE bounds, not the scale's ends — at rest they degenerate to
+          "0%" and "100%", so the scale still reads. Hidden from VoiceOver:
+          each thumb already announces its own value, and a screen reader
+          hearing the same two numbers twice learns nothing. */}
+      <View style={styles.endRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Text style={styles.endLabel}>{format(low)}</Text>
+        <Text style={styles.endLabel}>{format(high)}</Text>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  readoutRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  readout: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
   pad: {
-    paddingHorizontal: THUMB / 2,
+    paddingHorizontal: TAP_W / 2,
   },
   track: {
     height: TAP_W,
@@ -272,16 +298,27 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
   },
+  // The thumb GROWS rather than filling with tint: the active state has to be
+  // visible at the thumb's edge, because the middle of it is under a fingertip
+  // at exactly the moment it changes (UX review — the iOS scrubber convention).
   thumbActive: {
-    backgroundColor: colors.tint,
+    transform: [{ scale: 1.12 }],
+    shadowOpacity: 0.26,
+    shadowRadius: 5,
   },
   endRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: spacing.xs,
+    // Same gutter as the track, so each number sits under the end it reports
+    // rather than out at the card's edge.
+    paddingHorizontal: TAP_W / 2,
   },
   endLabel: {
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    fontWeight: font.weight.medium,
+    // textTertiary is ~3.4:1 on bgCard — below the AA floor, and these labels
+    // are the only statement of what the track's ends mean (UX_REVIEW §5).
+    color: colors.textSecondary,
   },
 });

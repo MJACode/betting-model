@@ -81,3 +81,31 @@ export function resolveTie(dx: number, slop = 2): 'low' | 'high' | null {
   if (Math.abs(dx) < slop) return null;
   return dx > 0 ? 'high' : 'low';
 }
+
+/**
+ * What a gesture on the track has turned out to be, once the finger has moved
+ * far enough to say.
+ *
+ * The slider lives inside the filter sheet's ScrollView, and the first version
+ * of it claimed every touch on contact AND committed a value on grant — so a
+ * user who put a finger on the 44pt strip to flick the sheet did not merely
+ * fail to scroll, they moved a thumb and re-filtered the board behind them
+ * (UX review, 2026-09-12). Intent is read from the gesture instead: a
+ * horizontal drag is the slider's, a vertical one belongs to the sheet, and
+ * neither is decided until the finger has travelled past the slop.
+ */
+export type GestureIntent = 'idle' | 'drag' | 'scroll';
+
+export function readIntent(dx: number, dy: number, slop = 6): GestureIntent {
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < slop) return 'idle';
+  return Math.abs(dx) >= Math.abs(dy) ? 'drag' : 'scroll';
+}
+
+/**
+ * Which thumb a TAP moves — the one case that cannot be deferred, because a
+ * tap has no direction to defer to. Collapsed bands open toward the tap.
+ */
+export function tapTarget(v: number, low: number, high: number): 'low' | 'high' {
+  if (low === high) return v >= low ? 'high' : 'low';
+  return grabTarget(v, low, high) as 'low' | 'high';
+}
