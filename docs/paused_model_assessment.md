@@ -22,8 +22,9 @@ python -m scripts.paused_model_assessment --all                # every model
 **No model has a cut that clears the standards on the artifact that is actually
 deployed.** Three cuts clear on pooled history, and all three collapse to
 between 0 and 19 settled bets once the record is scoped to the model currently
-live. Nothing is shippable today, and the rest of this file is what would have
-to change.
+live. The two NCAAF live models now have a real answer instead of a small one:
+a full out-of-sample season replay puts them at −3.4% and −13.1%. Nothing is
+shippable today, and the rest of this file is what would have to change.
 
 ## The standards a cut has to clear
 
@@ -57,8 +58,8 @@ forecast.
 | `mlb_prop_pitcher_k` *(auto)* | 2,184 | 133 | 194-166 −1.4% | 0.54/0.16 clears pooled (75-59, +3.5%); **19** settled since the retrain, −0.6% |
 | `mlb_prop_pitcher_walks` | 2,408 | 1,585 | 80-62 −2.5% | no cut clears (84 cells) |
 | `mlb_runline` | 1,438 | 252 | 18-11 +10.2% | 0.70/0.08 clears pooled (17-10, +5.7%); **3** settled since the retrain |
-| `ncaaf_live_total` | 60 BETs only | 0 | 30-25 +1.7% | peak, not a plateau — and see below |
-| `ncaaf_live_win_prob` | 6 BETs only | 0 | 4-2 +8.1% | nothing to sweep |
+| `ncaaf_live_total` | 60 BETs only | 0 | 30-25 +1.7% | **season replay: −3.4% over 280 bets** (below) |
+| `ncaaf_live_win_prob` | 6 BETs only | 0 | 4-2 +8.1% | **season replay: −13.1% over 51 bets** (below) |
 | `ncaaf_moneyline` | 0 settled | 0 | — | nothing to sweep |
 | `ufc_total_rounds` | 8 BETs only | 8 | 4-4 −13.6% | nothing to sweep |
 | `wnba_over_under` | 0 settled | 0 | — | nothing to sweep |
@@ -92,23 +93,47 @@ problem — the model has no edge to cut for, and the fix is features or a
 different model, not a different number. `pitcher_walks`, `batter_tb` and
 `batter_sb` have the same shape.
 
-## NCAAF in play: the backtest exists, the data does not
+## NCAAF in play: the backtest was run, and both models lose
 
-`ncaaf_live_total` cannot be assessed properly for a structural reason: **the
-live models write no dead-zone rows by construction** (a live game would write
-hundreds a day), so the only population is its own 60 settled bets —
-systematically optimistic and far too few. Its grid is flat: every cell from
-0.66/0.00 to 0.66/0.08 is the same 55 bets at +1.7%, and everything above that
-is a 12-bet corner.
+The forward record was never going to settle this: the live models write no
+dead-zone rows by construction, so the only population was their own 60 settled
+bets. mike approved the season purchase on 2026-09-12 and it came to **8,360
+credits, not the 373,240 planned** — 5,765 of the season's in-play snapshots
+were already in Supabase from an earlier run and the ingestor's resume skipped
+every one of them. The stored season is 57,979 rows over 736 games,
+2025-08-23 to 2026-01-20.
 
-The honest backtest is the one already built and never run: a 2025 season of
-DraftKings in-play snapshots replayed through the production rule
-(`data/ingestors/ncaaf_inplay_history.py`,
-`scripts/ncaaf_inplay_history_backtest.py` — both written and tested on
-synthetic data; dry-run 2025: **18,662 calls, 373,240 credits**). The Odds API
-balance on 2026-09-12 is **2,178,760 credits remaining**, so the replay is about
-17% of what is left this month. That spend is mike's call (§1b) and it is the
-only route to a real backtest on this model.
+The replay (`scripts/ncaaf_inplay_history_backtest.py`) then ran the production
+pricing path over every stored snapshot. 2025 is out of sample for the live
+artifact: Stage 1 trained through 2024 and held 2025 out.
+
+**Fresh quotes only** — the ones production can actually take, where the score
+has not moved since the book's own last update:
+
+| | candidates | production cut (prob ≥ 0.66, EV ≥ 0.22) |
+|---|---|---|
+| `ncaaf_live_total` | 32,304 | **280 bets, 146-134, −9.50u, −3.4%** |
+| `ncaaf_live_win_prob` | 27,920 | **51 bets, 26-25, −6.69u, −13.1%** |
+
+And no cut in the grid rescues it. The best totals cell with 30+ bets is
+prob ≥ 0.72 / EV ≥ 0.22 at **+3.1% over 54 bets**, with its neighbour at
++0.9% and the rest of the region hovering on either side of zero. That is a
+flat surface, not a plateau.
+
+Two things worth keeping from the run:
+
+* **The all-quotes table reads +1.8% and is a trap.** It includes quotes the
+  book had not re-hung since the last score — the score priced twice, which
+  production already declines. The fresh-only table is the one to read a cut
+  off, and it is −3.4%.
+* **The probabilities are honest; the prices are not beatable.** In the
+  calibration table every claimed band lands within a couple of points of its
+  realised win rate (claimed 0.675 → 74.5% won in the 0.65-0.70 band, claimed
+  0.934 → 94.8%), and every band still loses money. A well-calibrated model
+  that cannot beat the vig is not a threshold problem.
+
+So the pause stands on evidence now rather than on a slate, and the next move
+for NCAAF in play is a better model, not a better cut.
 
 ## Re-run cadence
 
