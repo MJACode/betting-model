@@ -441,7 +441,7 @@ ACTION_THRESHOLDS: dict = {
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
-    "ncaaf_live_win_prob": {"min_prob": 0.62, "min_edge": 0.10},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.62 prob x 0.26 EV) — see MODEL_MIN_EV + PAUSED_MODELS
+    "ncaaf_live_win_prob": {"min_prob": 0.65, "min_edge": 0.10},  # 2026-09-12 mike: RE-SWEPT ON THE CORRECTED SCALE. Stage 3 (ncaaf_live/serve.correct_for_pregame) changed what this number means, so the 0.62/0.68 cuts swept on raw probabilities were the wrong number on the wrong scale -- 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities 0.65 x EV 0.26 is 33 bets +25.7%, halves +23.8%/+34.2%, and its four neighbours are ALL positive in both halves: a plateau, where the raw scale only ever had islands
     "ncaaf_live_total":    {"min_prob": 0.72, "min_edge": 0.12},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.72 prob x 0.22 EV) — see MODEL_MIN_EV + PAUSED_MODELS
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
@@ -681,7 +681,7 @@ MODEL_MIN_EV: dict = {
     # lose least while keeping more than one bet. Re-sweep after ~3 more
     # Saturdays and expect these numbers to move.
     "ncaaf_live_total": 0.22,
-    "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: 0.62 x 0.26 is the both-halves-positive cell
+    "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: EV floor unchanged. It is now applied to the PREGAME-CORRECTED probability (ncaaf_live/serve.correct_for_pregame), and min_prob 0.65 was swept on that same scale -- the briefly-shipped pregame-dog cap is gone, superseded by the correction
 }
 
 # ── Live volume ceiling (bets per week) ──────────────────────────────────────

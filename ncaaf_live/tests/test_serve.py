@@ -343,8 +343,17 @@ def test_a_stale_total_does_not_take_the_moneyline_with_it(engine):
 
 def test_a_quote_with_no_timestamp_still_prices(engine):
     """Backward compatible on purpose: a feed shape change is logged, not
-    allowed to blank the board."""
-    assert engine.price(_state(), _ctx(), _ODDS) != []
+    allowed to blank the board.
+
+    The h2h price is local rather than `_ODDS`: this fixture's home side is a
+    9.5-point pregame favourite, and stage 3 (correct_for_pregame, 2026-09-12)
+    marks favourites UP, which at -220 put the edge past the 0.18 stale-line
+    cap and emptied the board for a reason that has nothing to do with
+    timestamps. Measured before changing it -- the cap refuses 38.2% of
+    raw qualifying states and 40.0% of corrected ones on the 2025 replay, so
+    this is a fixture artifact, not the correction crowding the cap."""
+    odds = {"h2h": {"home": -280, "away": 230}, "total": _ODDS["total"]}
+    assert engine.price(_state(), _ctx(), odds) != []
 
 
 # ── the edge is a band, not a floor ──────────────────────────────────────────
@@ -356,9 +365,15 @@ def test_the_edge_band_is_a_band():
     disagreement with a live book is evidence about our snapshot, not value."""
     from ncaaf_live.serve import LiveEngine as _E
     d = _E._decide
-    assert d(0.70, 0.09, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # below floor
-    assert d(0.70, 0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"  # in band
-    assert d(0.70, 0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # over cap
+    # Probability taken FROM the floor rather than hard-coded: this read 0.70
+    # and went red the moment the floor moved to 0.72 (#678, 2026-09-12), which
+    # tested the constant rather than the band it is named for.
+    p_ok = TOTAL_MIN_PROB
+    assert d(p_ok, 0.09, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # below floor
+    assert d(p_ok, 0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"  # in band
+    assert d(p_ok, 0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # over cap
+    assert d(TOTAL_MIN_PROB - 0.01, 0.13, TOTAL_MIN_PROB,
+             TOTAL_MIN_EDGE) is None                               # under floor
     assert MAX_EDGE_CAP > TOTAL_MIN_EDGE, "a cap below the floor fires nothing"
 
 
