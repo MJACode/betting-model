@@ -111,7 +111,7 @@ def ensure_schema(conn) -> None:
     # rls= and revoked_from= are load-bearing, not decoration: without them this
     # returns True on a database where worker_jobs exists but is still
     # anon-granted and RLS-off, and the lock_down() below never runs.
-    if schema_is_current(conn, "worker_jobs", columns=("dedupe_key",),
+    if schema_is_current(conn, "worker_jobs", columns=("dedupe_key", "run_after"),
                          indexes=_INDEX_NAMES, rls=True,
                          revoked_from=API_ROLES):
         return
@@ -129,7 +129,11 @@ def ensure_schema(conn) -> None:
     # promoted columns for a day.
     for stmt in ("ALTER TABLE worker_jobs ADD COLUMN IF NOT EXISTS dedupe_key TEXT",
                  "CREATE UNIQUE INDEX IF NOT EXISTS worker_jobs_dedupe_idx "
-                 "ON worker_jobs (dedupe_key)"):
+                 "ON worker_jobs (dedupe_key)",
+                 # 2026-09-11 (session 280): a job may name the earliest moment
+                 # it can run, so a check that is only meaningful after the 6am
+                 # pass can be queued the evening before and left alone.
+                 "ALTER TABLE worker_jobs ADD COLUMN IF NOT EXISTS run_after TIMESTAMPTZ"):
         try:
             conn.execute(stmt)
         except Exception:  # noqa: BLE001
@@ -739,7 +743,40 @@ def _job_backfill_publish_keys(**kw):
     return {"push_sent_added": added, "opening_signals_rekeyed": rekeyed}
 
 
+def _validate_verify_checks(a: dict) -> dict:
+    from tracking.deploy_checks import CHECKS
+
+    names = a.get("checks")
+    if not isinstance(names, list) or not names:
+        raise ValueError("verify_checks needs a non-empty list of check names")
+    unknown = sorted(set(names) - set(CHECKS))
+    if unknown:
+        raise ValueError(f"unknown checks {unknown}; known: {sorted(CHECKS)}")
+    return {"checks": list(names)}
+
+
+def _job_verify_checks(conn=None, checks: list[str] | None = None, **kw) -> dict:
+    """Run named read-only checks (tracking/deploy_checks.py) and announce.
+
+    A failing check raises, so the queue's own ❌ card carries the detail to
+    the ops channel; a pass posts the ✅ card with each check's line. With
+    `run_after` this is how "confirm X after the 6am pass and alert me" is
+    scheduled without anyone's laptop.
+    """
+    from data.db import get_connection
+    from tracking.deploy_checks import run_checks
+
+    owns = conn is None
+    conn = conn or get_connection()
+    try:
+        return run_checks(conn, checks or [])
+    finally:
+        if owns:
+            conn.close()
+
+
 JOBS = {
+    "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
     "backfill_publish_keys": (_job_backfill_publish_keys, lambda a: {}),
     # Read-mostly: writes only system_health_checks. Here so nobody has to
@@ -771,8 +808,13 @@ JOBS = {
 
 def enqueue(conn, job_type: str, args: dict | None = None,
             requested_by: str = "claude", note: str = "",
-            dedupe_key: str | None = None) -> int | None:
+            dedupe_key: str | None = None,
+            run_after: str | None = None) -> int | None:
     """Validate and insert. Returns the new job_id, or None if the key existed.
+
+    `run_after` (ISO-8601 with offset) is the earliest instant the claim may
+    take the job; NULL means now. Parsed here so a malformed time fails in
+    front of the person queueing it.
 
     Validation happens HERE as well as at run time so a bad request fails in
     front of the person making it rather than half-way through a paid pull.
@@ -781,13 +823,19 @@ def enqueue(conn, job_type: str, args: dict | None = None,
         raise ValueError(f"unknown job_type {job_type!r}; known: {sorted(JOBS)}")
     _, validator = JOBS[job_type]
     cleaned = validator(args or {})
+    if run_after is not None:
+        t = datetime.fromisoformat(str(run_after).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            raise ValueError(f"run_after must carry a timezone offset: {run_after!r}")
+        run_after = t.isoformat()
     ensure_schema(conn)
     row = conn.execute("""
-        INSERT INTO worker_jobs (dedupe_key, job_type, args, requested_by, note)
-        VALUES (%s, %s, %s::jsonb, %s, %s)
+        INSERT INTO worker_jobs (dedupe_key, job_type, args, requested_by, note, run_after)
+        VALUES (%s, %s, %s::jsonb, %s, %s, %s)
         ON CONFLICT (dedupe_key) DO NOTHING
         RETURNING job_id
-    """, (dedupe_key, job_type, json.dumps(cleaned), requested_by, note)).fetchone()
+    """, (dedupe_key, job_type, json.dumps(cleaned), requested_by, note,
+          run_after)).fetchone()
     conn.commit()
     return int(row[0]) if row else None
 
@@ -832,7 +880,8 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
             key = str(entry["key"])
             job_id = enqueue(conn, entry["job_type"], entry.get("args") or {},
                              requested_by=entry.get("requested_by", "declared"),
-                             note=entry.get("note", ""), dedupe_key=key)
+                             note=entry.get("note", ""), dedupe_key=key,
+                             run_after=entry.get("run_after"))
         except Exception as exc:  # noqa: BLE001 — see docstring
             logger.warning(f"declared job {entry!r} rejected: {exc}")
             continue
@@ -895,6 +944,7 @@ def claim_one(conn) -> dict | None:
          WHERE job_id = (
                SELECT job_id FROM worker_jobs
                 WHERE status = 'pending'
+                  AND (run_after IS NULL OR run_after <= NOW())
                 ORDER BY created_at
                 LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING job_id, job_type, args, attempts

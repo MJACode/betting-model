@@ -133,7 +133,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Premium opener band [2.5, inf): 344 bets, 60.5%, +15.4% (2023-25,
   // positive every season). Disjoint from ncaaf_spread by construction.
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
-  // NCAAF live lanes (calibration set — no in-play edge measured yet)
+  // NCAAF live lanes — paused 2026-09-11 (see PAUSED_MODELS); cuts kept so unpausing is one edit.
   ncaaf_live_win_prob: { min_prob: 0.66, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   ncaaf_live_total: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
@@ -235,6 +235,8 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_pitcher_er',
   'mlb_prop_pitcher_walks',
   'mlb_runline',
+  'ncaaf_live_total',
+  'ncaaf_live_win_prob',
   'ncaaf_moneyline',
   'ufc_total_rounds',
   'wnba_over_under',
