@@ -1290,8 +1290,11 @@ export function StatsScreen() {
     const hi = Math.round(band.hi * 100);
     // The thumbs are allowed to MEET, and the slider makes that a one-drag
     // routine where typing 60 into both fields never was. "60–60%" reads as a
-    // rendering bug on all three surfaces this feeds (UX review, 2026-09-12).
-    if (lo === hi) return `Exactly ${lo}%`;
+    // rendering bug on all three surfaces this feeds. Phrased as "60% only"
+    // rather than "Exactly 60%" because the pill composes `hit ${summary}`,
+    // and a capital mid-phrase is the one thing this string cannot carry
+    // (UX review, 2026-09-12).
+    if (lo === hi) return `${lo}% only`;
     if (band.lo > 0 && band.hi < 1) return `${lo}–${hi}%`;
     if (band.hi < 1) return `≤ ${hi}%`;
     if (band.lo > 0) return `${lo}%+`;
@@ -2482,16 +2485,25 @@ function ColumnHeader({
       <Text style={styles.colHeaderRank}>RK</Text>
       <Text style={styles.colHeaderName}>PLAYER</Text>
       {/* The arrow is the board's only statement of its own order now the
-          sort picker is gone — the removable "by games played" pill used to
-          be the one place it was written down (UX review, 2026-09-12). It is
-          an indicator, not a control: the order is fixed. */}
-      <Text
-        style={styles.colHeaderRight}
-        numberOfLines={1}
+          sort picker is gone — the removable "by games played" pill used to be
+          the one place it was written down (UX review, 2026-09-12). It is an
+          indicator, not a control: the order is fixed.
+
+          It is a SIBLING of the label, not part of its string: the cell is a
+          fixed 48pt box with `numberOfLines={1}`, so an arrow appended inside
+          it is the first glyph the ellipsis eats — and `rightLabel` in
+          Averages mode is the stat's own name ("PASSING YARDS"), which
+          overflows that box on its own. The label shrinks; the arrow does
+          not. */}
+      <View
+        style={styles.colHeaderSorted}
         accessibilityLabel={`${rightLabel}, sorted highest first`}
       >
-        {`${rightLabel.toUpperCase()} ↓`}
-      </Text>
+        <Text style={[styles.colHeaderRight, styles.colHeaderSortLabel]} numberOfLines={1}>
+          {rightLabel.toUpperCase()}
+        </Text>
+        <Ionicons name="arrow-down" size={9} color={colors.textTertiary} />
+      </View>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
           {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
@@ -3061,6 +3073,17 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
+  // The sorted column: label + a fixed arrow, in one 48pt cell.
+  colHeaderSorted: {
+    width: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 2,
+  },
+  // Inside the row the label gives up its own fixed width and shrinks instead,
+  // so the arrow beside it can never be truncated away.
+  colHeaderSortLabel: { width: undefined, flexShrink: 1 },
   // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
   // where a column of dashes would otherwise read as a broken screen.
   noLinesRow: {

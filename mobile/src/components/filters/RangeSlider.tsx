@@ -28,8 +28,9 @@
  * thumb is 28pt inside a 44pt touch area (HIG minimum), and the two bounds are
  * printed at the ends of the track — colour and position are never the only
  * carrier. The band is NOT restated above the track: the section header row is
- * already live (`FilterSection.summary`), and Strava, UNIQLO and Best Buy all
- * print the bounds at the track's ends and nowhere else (UX review).
+ * already live (`FilterSection.summary`), and the bounds are printed at the
+ * track's ends and nowhere else, labelled "Min"/"Max" the way Viator and Depop
+ * label theirs (UX review).
  */
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -42,6 +43,7 @@ import {
   snapTo,
   tapTarget,
   valueAtX,
+  TAP_SLOP,
   type GestureIntent,
   type Scale,
 } from '@/lib/rangeSlider';
@@ -159,7 +161,10 @@ export function RangeSlider({
           // A touch that never became a drag is a tap: set the nearer end to
           // where the finger landed. This is the whole reason the responder is
           // claimed on contact rather than on the first horizontal movement.
-          if (readIntent(g.dx, g.dy) === 'idle') {
+          // Judged at TAP_SLOP, not the drag slop — an ordinary tap wobbles
+          // further than the 6pt that claims a drag, and on a sheet short
+          // enough not to scroll, a tap failing both tests does nothing at all.
+          if (readIntent(g.dx, g.dy, TAP_SLOP) === 'idle') {
             const v = valueAt(e.nativeEvent.pageX);
             apply(tapTarget(v, lowRef.current, highRef.current), v);
           }
@@ -246,13 +251,15 @@ export function RangeSlider({
         </View>
       </View>
 
-      {/* The LIVE bounds, not the scale's ends — at rest they degenerate to
-          "0%" and "100%", so the scale still reads. Hidden from VoiceOver:
-          each thumb already announces its own value, and a screen reader
-          hearing the same two numbers twice learns nothing. */}
+      {/* The live bounds, PREFIXED. A bare number under the end of a track
+          reads as a tick mark — true at rest, where it is "0%" and "100%", and
+          a lie the moment a thumb moves away from the end it sits under
+          (UX review, 2026-09-12). "Min 60%" cannot be read as an axis. Hidden
+          from VoiceOver: each thumb already announces its own value, and a
+          screen reader hearing the same two numbers twice learns nothing. */}
       <View style={styles.endRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Text style={styles.endLabel}>{format(low)}</Text>
-        <Text style={styles.endLabel}>{format(high)}</Text>
+        <Text style={styles.endLabel}>{`Min ${format(low)}`}</Text>
+        <Text style={styles.endLabel}>{`Max ${format(high)}`}</Text>
       </View>
     </View>
   );

@@ -93,13 +93,33 @@ export function resolveTie(dx: number, slop = 2): 'low' | 'high' | null {
  * (UX review, 2026-09-12). Intent is read from the gesture instead: a
  * horizontal drag is the slider's, a vertical one belongs to the sheet, and
  * neither is decided until the finger has travelled past the slop.
+ *
+ * Two calibrations, both deliberate:
+ *
+ *  - A TIE goes to the sheet, not to the slider. iOS does not block the native
+ *    scroll view under a JS responder (`RCTUIManager` discards
+ *    `blockNativeResponder`; it is Android-only), so a ~45° flick can start the
+ *    sheet scrolling AND move a thumb before the terminate lands. Dominance is
+ *    a ratio for that reason, not a `>=`.
+ *  - The slop that claims a DRAG is not the slop that classifies a finished
+ *    TOUCH. 6pt is right for "the finger meant to drag"; judging a released
+ *    tap by it throws away an ordinary sloppy tap — UIKit's own
+ *    `allowableMovement` is 10pt — and on a sheet short enough not to scroll
+ *    (`bounces={false}`) nothing else would have happened either. Callers pass
+ *    the wider slop at release.
  */
 export type GestureIntent = 'idle' | 'drag' | 'scroll';
 
+/** How far a horizontal drag must dominate a vertical one to be the slider's. */
+export const DRAG_DOMINANCE = 1.2;
+
 export function readIntent(dx: number, dy: number, slop = 6): GestureIntent {
   if (Math.max(Math.abs(dx), Math.abs(dy)) < slop) return 'idle';
-  return Math.abs(dx) >= Math.abs(dy) ? 'drag' : 'scroll';
+  return Math.abs(dx) > Math.abs(dy) * DRAG_DOMINANCE ? 'drag' : 'scroll';
 }
+
+/** Release-time slop — a tap is allowed to wobble further than a drag claim. */
+export const TAP_SLOP = 10;
 
 /**
  * Which thumb a TAP moves — the one case that cannot be deferred, because a

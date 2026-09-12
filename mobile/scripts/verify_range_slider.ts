@@ -14,6 +14,7 @@ import {
   applyBound,
   grabTarget,
   readIntent,
+  TAP_SLOP,
   resolveTie,
   snapTo,
   tapTarget,
@@ -97,13 +98,29 @@ check('a touch that has barely moved commits to nothing',
   readIntent(0, 0) === 'idle' && readIntent(3, 2) === 'idle');
 check('a horizontal drag is the slider\'s', readIntent(40, 6) === 'drag');
 check('a vertical flick belongs to the sheet', readIntent(6, 40) === 'scroll');
-check('a diagonal drag goes to the dominant axis',
-  readIntent(30, 29) === 'drag' && readIntent(29, 30) === 'scroll');
 check('a long vertical drag is never the slider\'s, however far it travels',
   readIntent(10, 400) === 'scroll');
 // The slop is what keeps a TAP from being read as a drag: a tap wobbles a few
 // points, and every one of those points would otherwise move a thumb.
 check('the slop holds in both axes', readIntent(5, 5) === 'idle' && readIntent(7, 0) === 'drag');
+
+// A TIE goes to the sheet. iOS does not block the native scroll view under a
+// JS responder, so a ~45° flick that the slider claims can move a thumb AND
+// scroll the sheet before the terminate arrives — the one outcome with no
+// right answer for the user.
+check('an exact diagonal is the sheet\'s, not the slider\'s', readIntent(30, 30) === 'scroll');
+check('a barely-horizontal diagonal is still the sheet\'s', readIntent(31, 30) === 'scroll');
+check('a decisively horizontal drag is the slider\'s', readIntent(40, 30) === 'drag');
+
+// Release is judged at a WIDER slop than a drag claim: an ordinary tap wobbles
+// further than the 6pt that means "this finger meant to drag", and a tap that
+// fails both tests does nothing at all on a sheet too short to scroll.
+check('a tap that drifts vertically is still a tap at release',
+  readIntent(2, 7, TAP_SLOP) === 'idle');
+check('the same drift WOULD have been read as a scroll at the drag slop',
+  readIntent(2, 7) === 'scroll');
+check('a real drag is not a tap, even at the wider slop',
+  readIntent(2, 14, TAP_SLOP) === 'scroll' && readIntent(30, 2, TAP_SLOP) === 'drag');
 
 // ── 7. Taps — the one case that cannot be deferred to a direction ──
 
