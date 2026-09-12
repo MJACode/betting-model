@@ -444,6 +444,33 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
   401.** A silent quota exhaustion took out every feed for 2.5 days. Check the
   live figure (`odds_api_quota`), never a code comment.
 
+### A test written from the same understanding that produced the code
+
+The rule is in CLAUDE.md §7. These are the five guards, all in one day
+(2026-09-04, sessions 220-222), that PASSED while the thing they guarded was
+broken. They were moved here from §7 on 2026-09-12 when that section was
+layered; the rule statement in CLAUDE.md is unchanged.
+
+- `tracking/job_queue.py` and `tracking/threshold_review.py` gated on
+  `schema_is_current` **without `rls=`**, so the lock-down beneath them never
+  ran. The guard was satisfied by the call that skipped the work.
+- The anon-write sweep **iterated a declared list** and so never visited
+  `feedback`, which kept `TRUNCATE` — while the TRUNCATE test passed, because it
+  asserted on the tables the list did contain.
+- The `api_call_daily` rollup **silently decayed the partially-pruned boundary
+  day**, while its "never zeroes a pruned day" test passed on the fully-pruned
+  case — the only case its author had in mind.
+
+Each test checked the case its author had in mind, which is the case the code
+already handled. The generalisation: **a guard is not evidence.** Go and look at
+the running system — the catalog after an apply, the worker's own scheduled cycle
+rather than a hand-run of it, the row counts a query returns rather than the exit
+code. The test is what stops a fixed bug returning; it is not what finds one.
+
+The same shape, measured separately, is in the DDL-guard entry above: the first
+tripwire missed `tracking/threshold_review.py` entirely by grepping only for the
+RLS statement, and **only deliberately reverting the fix showed it**.
+
 ### Verification standards — what "verified" means here
 
 - **`git stash` is NOT a master baseline once the work is committed.** Use

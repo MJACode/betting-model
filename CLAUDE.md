@@ -1,16 +1,22 @@
 # CLAUDE.md — Betting Model Project Context
 
-> Read at the start of every session. This file holds only what governs EVERY
-> session: how to reply, the standing rules, the pick rule, the business logic,
-> and the traps that have bitten us more than once.
+> **This file is the always-loaded layer. It holds only what a session must know
+> BEFORE it decides which file to open**: how to reply, the rules that no folder
+> can trigger, the business logic, and the map.
 >
-> **Everything else is in `docs/` and is loaded on demand** — per-sport
-> pipelines, thresholds, the mobile prompt, Discord, the live loop. The map is
-> §9.
+> **Everything else loads by itself, at the moment it applies.** Three layers,
+> and §10 says how to choose between them:
 >
-> **Keep it that way** (this file was once 909 KB, re-read every session):
-> append your session summary to `docs/sessions/<YYYY-MM>.md`, and only PROMOTE
-> something into this file when it becomes a rule that governs future work.
+> | Layer | Lives in | Arrives |
+> |---|---|---|
+> | Always | this file | every session |
+> | When you touch the code it governs | `.claude/rules/*.md` | on opening a matching file |
+> | When you go looking | `docs/**` | you read it |
+>
+> Nothing was deleted to make this file smaller — every rule is in one of the
+> three layers and §10 says which. **Section numbers never change**, because
+> `config.py`, the models and ~300 lines of `docs/` cite them; a section whose
+> body moved keeps its number and points at the new home.
 >
 > **Read Section 00 first — no guessing, factual answers only. Then Section 0,
 > the required format for every reply.**
@@ -147,47 +153,28 @@ This is the general form of the sandbox rule below, and of §7's verification
 standards. Those say "go and look" for one specific case each; this says it for
 every case.
 
-**THE SANDBOX'S LIMITS ARE NOT THE SYSTEM'S LIMITS. Never report "I can't
-reach X" as a conclusion.** The dev sandbox has a narrow egress allowlist. The
-SYSTEM does not. Four routes reach anything:
+**THE SANDBOX'S LIMITS ARE NOT THE SYSTEM'S LIMITS. Never report "I can't reach
+X" as a conclusion.** The dev sandbox has a narrow egress allowlist. The SYSTEM
+does not. Four routes reach anything, and a blocker report must name which were
+tried and what each returned:
 
-1. **WebSearch / WebFetch** — available in-session, for docs, vendor pricing,
-   API coverage, anything on the public web.
+1. **WebSearch / WebFetch** — docs, vendor pricing, API coverage, the public web.
 2. **The Railway worker** — open egress, already holds `ODDS_API_KEY`,
-   `DATABASE_URL`, `DATAGOLF_API_KEY`. Any script in the repo can run there:
-   push it, then point a one-off service's start command at it (`prop-probe`
-   exists for this) or add a scheduler job. See `docs/cloud_worker.md`.
+   `DATABASE_URL`, `DATAGOLF_API_KEY`. Any script in the repo can run there: push
+   it, then point a one-off service's start command at it (`prop-probe` exists for
+   this) or add a scheduler job. See `docs/cloud_worker.md`.
 3. **Matt's machine** — ask for a specific command, not a vague blocker.
-4. **The Supabase MCP** — READS production data directly. It does NOT write:
-   `execute_sql` runs in a read-only transaction and an UPDATE fails with
-   `25006: cannot execute UPDATE in a read-only transaction` (measured
-   2026-09-11). Production writes go through `data.db.get_connection()` and the
-   local `DATABASE_URL`.
+4. **The Supabase MCP** — READS production. It does not write.
 
-So the shape of an honest report is "the sandbox can't reach it, so I'm going
-via Railway / WebSearch / you" — never "this can't be done." If a blocker is
-real, name which of the four routes was tried and why each failed.
-
-**A "requires authentication" banner is a CLAIM, not a test.** The session-start
-notice listing MCP servers as needing OAuth was wrong for Railway AND Supabase
-on 2026-09-05 — both answered on the first call, no auth step — and repeating it
-instead of spending two seconds on the call cost a turn mid-incident. Try the
-tool. Evidence: `docs/rules_evidence.md`.
-
-**REACHABILITY AND CAPABILITY ARE TWO MEASUREMENTS. MAKE BOTH, BY CALLING.**
-(mike, 2026-09-12: *"you need to check access to all tools like railway rather
-than assuming."*) The 2026-09-05 rule above fixed "can I reach it" and left
-"can it do the thing" untouched, so the mistake returned the moment a tool
-answered and then refused the operation. Neither limit is visible in a tool's
-name: Supabase `execute_sql` answers and is READ-ONLY; Railway `list-variables`
-answers, lists `CFBD_API_KEY`, and REDACTS every value.
-
-**A MISSING CREDENTIAL IS NOT A MISSING CAPABILITY. TEST THE LAYERS SEPARATELY:
-network → auth → permission → capability.** A 401 and a connection refused are
-different problems and only one is a blocker. "It can't run here" needs a
-command behind it; one absent route is not zero routes. Evidence, and the
-2026-09-12 case that cost a day: `docs/rules_evidence.md`.
-
+**The general form of this rule — a banner is not a test, reachability and
+capability are two separate measurements, a missing credential is not a missing
+capability, one absent route is not zero routes — is in the global
+`~/.claude/CLAUDE.md` §0 and loads on every project.** It is not repeated here.
+What is project-specific is the four routes above and the MEASURED limit of each
+tool, which the session-start hook injects verbatim
+(`.claude/hooks/connector_reminder.json`): Supabase `execute_sql` is read-only,
+Railway `list-variables` hides the values, and there is no node and no Railway
+CLI on this machine. The cases that cost a day each: `docs/rules_evidence.md`.
 **THE CURRENT STATE OF A SYSTEM IS NOT ITS CAPABILITY, AND WORK YOU CAN DO IS
 NOT AN ACTION ITEM FOR MATT.** (Added 2026-09-01.) Two halves, both common:
 
@@ -217,19 +204,6 @@ touched" and nobody touched them: 655 MB of PAID NFL odds history sat on one
 laptop for a fortnight. `tests/test_everything_in_supabase.py` fails on any
 undeclared store on disk, and the fix is an importer, not an allowlist entry.
 
-**Live player props are a priority and an UNTESTED HYPOTHESIS — not a proven
-market.** (Downgraded 2026-09-03 by mike, after measurement.) The thesis: NOT
-beating line movement, but a statistical model for live prop over/unders priced
-RELATIVE TO THE STARTING LINE. The book re-anchors its live line mechanically
-off the pregame number and the clock; the edge is predicting where true
-remaining production deviates from that. Do not rebuild a player projection
-from scratch and throw the pregame line away. Detail: `docs/live_betting.md`.
-
-**The settled live-prop record is ZERO BETS — there has never been a live
-player prop model in production, and the ~400 settled picks that look like one
-are not.** Do not read them as evidence in either direction
-(`docs/rules_evidence.md`).
-
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
 UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
 loss and ends the search. A losing model — paused or live — gets the FULL SWEEP
@@ -241,97 +215,24 @@ and here is what would have to change" is a complete answer; "shall I unpause
 it?" is not.** `scripts/paused_model_assessment.py`,
 `docs/paused_model_assessment.md`.
 
-**A CHANGE TO HOW ONE MODEL OPERATES IS ASSESSED AGAINST ALL OF THEM.**
-(Repo-level rule, 2026-08-29.) Before shipping an operational change — how a
-loop prices, what it records, how it locks, what it publishes — ask whether the
-other models, sports, or publishing surfaces want it too, and say so either way.
+**EVERY MODEL UPDATE IS STAMPED WITH WHO ASKED FOR IT** — the git trailer
+`Updated-By: mike` (or `matt`) on the commit that lands it, and **if you do not
+know whose call it is, ASK before committing.** A retrain, a registry swap, a
+threshold move, a pause or unpause, a feature-list change, a new or retired
+model. Not plumbing, cadence, docs or mobile UI. The full definition, plus **one
+model's operational change is assessed against all of them** and the live-prop
+hypothesis → **`.claude/rules/model-updates.md`** (loads on `config.py`,
+`models/**`, `nfl/live_model/**`, `docs/thresholds.md`).
 
-The test is mechanical: *if this had been a problem in sport X, would we have
-noticed?* If the answer is "only after someone questioned a number", the change
-belongs in shared code, not in one loop. Prefer a sport-agnostic helper the
-loops call over a per-sport implementation — `data/ingestors/live_price_log.py`
-is the shape.
-
-This applies to model MECHANICS, not to model CUTS: a threshold is measured per
-model on its own record and must never be copied across.
-
-**EVERY MODEL UPDATE IS STAMPED WITH WHO ASKED FOR IT — `mike` or `matt`.**
-(Repo-level rule, 2026-08-29.) Six months later "why is this model paused?" is
-unanswerable if the commit does not say whose call it was, and threshold sweeps
-get re-litigated constantly — the person is part of the evidence.
-
-The stamp is a **git trailer on the commit** that lands the change:
-
-```
-Updated-By: mike
-```
-
-It goes on the branch commit, so it survives the squash-merge into master and
-is greppable forever (`git log --grep="Updated-By: matt"`).
-
-**What counts as a model update** — anything that changes what a model does or
-whether it fires:
-- a retrain, or a `model_registry` version swap / rollback
-- a threshold change in `MODEL_PROB_THRESHOLDS` / `MODEL_EDGE_THRESHOLDS` /
-  `ACTION_THRESHOLDS` / `MODEL_MIN_ODDS`
-- a pause or unpause (`PAUSED_MODELS`)
-- a feature-list change, a new model, or a retired one
-
-**Not** a model update: cadence, plumbing, notifications, mobile UI, docs. Those
-do not need the trailer.
-
-**If you do not know whose call it is, ASK before committing.** Guessing an
-attribution is worse than none — it puts a decision in someone's mouth. Where a
-session's own user is the one directing, that is the name; where they are
-relaying ("Matt wants…"), the name is the originator, not the relayer.
-
-**THE APP, DISCORD AND PUSH SHOW THE SAME PICKS. THEY ARE IDENTICAL.**
-(Matt, 2026-09-05: *"The app and discord should always show the same picks.
-They should be identical."*) Every publishing surface reads **`picks`** and
-applies the **same `model_action_thresholds` cut** the app's
-`passesActionFilter` applies. A surface that reads anything else is a surface
-that will disagree, and the disagreement is always silent.
-
-A surface with an extra GATE can only lose rows, and does it silently —
-`opening_signals` did, at 6 of 125 eligible BETs (`docs/rules_evidence.md`).
-
-- **No publishing surface gets a date horizon.** A pick is publishable when its
-  game has **not started**, however far ahead it was written. A horizon is a
-  thing you can only fail at quietly.
-- **`opening_signals` is the CLV / opening-signal shadow track, not a gate.**
-  It keeps its own window (`docs/opening_signals.md`). Never publish from it.
-- **The one guard that SHOULD bound the set is the started-game check** —
-  announcing a pick once the game is under way sends the reader to a bet they
-  cannot take.
-- **A LIVE surface resolves its window with `config.live_slate_dates()`, never
-  today** — a game keeps its KICKOFF's game_date, so a late start outlives the
-  calendar day. Mirrored in the app by `liveSlateDatesET()`; the two are pinned
-  by `tests/test_live_slate_midnight.py`.
-- **ONE PUBLISHER AT A TIME — a ledger cannot PREVENT a duplicate, only record
-  one.** Read → send → ledger is in that order deliberately, so two processes in
-  one window both send and the second INSERT is swallowed: one row, two
-  messages. Take `tracking/publish_lock.py`'s advisory lock — `pollers` and
-  `worker` both publish, so this is live.
-- **ONE PICK, ONE KEY — and two picks are never one key.** Every surface
-  identifies a pick by the synthesised `push_sent.lock_key`, which is UNIQUE per
-  `kind`, so two picks that share a key are ONE pick: the second is not delayed,
-  it is gone. Mint it ONLY from `tracking/publish_keys.py`, and when a model
-  writes a NEW identity column, add it there — `nfl_prop_market` writes
-  `player_key` + `prop_market` and no `player_id`, so a whole game's props
-  collapsed onto one key (`docs/discord.md`). Changing the key is a data
-  migration, not a code change: re-ledger the already-published picks
-  (`scripts/backfill_publish_keys.py`) BEFORE the code ships, or every one of
-  them republishes.
-- **A VOIDED pick is not publishable and not displayable** (§1c). Excluded in
-  the publishers' SQL and in the app's `passesActionFilter`. Only `'VOID'` —
-  NCAAF's `'OK'` / `'GONE'` are live states on real picks.
-- **A new surface is a line in the parity tests**, not a copied query:
-  `tests/test_{nfl_lookahead_signals,publish_key_identity,publisher_lock}.py`.
-- **LIVE PICKS POST TO THEIR SPORT'S LIVE CHANNEL.** (mike, 2026-09-09:
-  *"Push picks to discord in live games to their live channels."*) Every
-  in-play model announces its BETs there, and a new in-play model that writes
-  `is_live` picks without calling `notify_discord_live` is the NFL bug of
-  2026-09-05 again. Webhooks, fallbacks and the routing: `docs/discord.md`.
+**THE APP, DISCORD AND PUSH SHOW THE SAME PICKS. THEY ARE IDENTICAL.** (Matt,
+2026-09-05.) Every publishing surface reads **`picks`** and applies the same
+`model_action_thresholds` cut the app's `passesActionFilter` applies. A surface
+that reads anything else will disagree, and the disagreement is always silent.
+**No publishing surface gets a date horizon; one publisher at a time; one pick,
+one key; a VOID pick is neither publishable nor displayable; live picks post to
+their sport's live channel.** → **`.claude/rules/picks-and-publishing.md`**,
+which loads on `tracking/**`, `models/**`, `nfl/**`, `ncaaf_live/**`,
+`mobile/src/**` and the migrations. Read it before touching any surface.
 
 **Front-end changes are reviewed by the UX designer agent before their PR
 opens — always.** The full rule loads automatically from
@@ -365,42 +266,13 @@ one point, which is why timing is key."*
 
 Once a model produces a BET at a line and a price, **that pick existed** and is
 the bet of record. If the line then moves so the model would no longer take it,
-that is LINE MOVEMENT. It does not retract the bet, does not change the number
-that was given, and must never delete or overwrite the row. A user told to take
-Over 44.5 at −115 was not told to take Over 54.5 at −120 — the second is a
-DIFFERENT BET, and publishing it as though it were the first is misreporting
-what the model said.
+that is LINE MOVEMENT: it does not retract the bet, does not change the number
+that was given, and **must never delete or overwrite the row**. Every model locks
+its pick — game-level at the first scoring run, props at the first signal on a
+confirmed lineup, live at the first BET per lane, NFL wind/opener by
+construction. **Timing is data, not metadata:** `created_at` is when the number
+was available and is part of the pick's meaning.
 
-**The NFL rules (`docs/sports/nfl.md`) are the reference implementation.** `nfl_wind_totals` and
-`nfl_opener_spread` are insert-once by construction: the pick locks the moment
-it lands and is never re-priced. Every other model was brought to match:
-
-| Scope | Flag | Locks at |
-|---|---|---|
-| NFL wind / opener | (insert-once by construction) | first qualifying card |
-| Game-level picks | `LOCK_GAME_PICKS_AT_FIRST_RUN` | first scoring run of the day |
-| Player props | `LOCK_PROP_PICKS_AT_FIRST_SIGNAL` | first signal on a confirmed lineup |
-| Live / in-play | `LOCK_LIVE_PICKS_AT_FIRST_SIGNAL` | first live BET per (game, model) lane |
-
-**Anything new must follow the same rule.** A new model, sport or lane does not
-get to delete-and-replace its own picks. If you are writing a scorer loop, the
-question to answer before it ships is: *when this re-runs and the line has
-moved, what happens to the pick that already exists?* The only acceptable
-answer is "nothing".
-
-### Corollaries
-
-- **Timing is data, not metadata.** `created_at` is when the number was
-  available and is part of the pick's meaning. A restore or a backfill must
-  preserve it; stamping today's clock on an old pick misreports the bet.
-- **A "no longer qualifies" row is a display state, not a deletion.** NCAAF
-  writes a NONE row carrying DK's live number and a reason (`docs/sports/ncaaf.md`); it never
-  removes the game. Live lanes keep the locked BET standing after the lane
-  closes.
-- **Deletes that remain are scoped to rows that were never a pick**: dead-zone
-  NONE rows for games that have not started, and the UFC/NCAAF look-ahead
-  window, where picks are explicitly not yet locked and re-score until game
-  morning (`docs/sports/{ufc,ncaaf}.md`). A BET is never in that set.
 - **A SETTLED PICK LEAVES THE RECORD ONLY TWO WAYS, AND A PAUSE IS NEITHER.**
   (mike, 2026-09-12: *"Pausing a model should not erase settled record unless I
   explicitly say so."*) A pick is in the record because it was WRITTEN as a
@@ -419,12 +291,12 @@ answer is "nothing".
   of paused models unless I say so"*) — labelled "Paused", record shown. Hiding
   it left the Record tab counting a model the Models tab did not list. RETIRED
   differs: nothing will score for it again.
-- **The audit log is the backstop.** `picks_log` records every INSERT and
-  DELETE, so a pick destroyed by pre-lock churn is recoverable.
-  `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
-  every NCAAF live-loop start) reads the first BET back out and restores it as
-  the standing row, preserving the original `created_at` and clearing the
-  notification ledger so the corrected pick is re-announced. Idempotent.
+
+**The mechanics — the four lock flags, the remaining corollaries and the
+`picks_log` backstop — are in `.claude/rules/picks-and-publishing.md`**, which
+loads whenever you open code that could break them. The question to answer before
+any scorer loop ships: *when this re-runs and the line has moved, what happens to
+the pick that already exists?* The only acceptable answer is "nothing".
 
 ## 2. Project Purpose
 Building a **personal sports betting model** targeting **DraftKings** as the
@@ -553,87 +425,39 @@ own doc (§9) and in `docs/local_ops.md`.
 ---
 
 ## 6. Config topology — where each kind of setting actually lives
-
-Three homes, three roles. Getting this wrong is how a threshold change
+Three homes, three different roles. Getting this wrong is how a threshold change
 silently fails to reach production.
 
-**Secrets → Railway Variables** (the live copy the worker reads): `DATABASE_URL`
-(Supabase **session pooler** string), `ODDS_API_KEY`, `DATAGOLF_API_KEY`,
-`CFBD_API_KEY`, `FETCH_F5_LIVE=1`, `TZ=America/New_York`, plus the loop kill
-switches (`RUN_LIVE_LOOP`, `RUN_NFL_WIND_CARD`, `LIVE_DAILY_CREDIT_CAP`). The
-same keys also sit in the local `.env` for manual CLI runs.
-**Railway env edits only take effect on redeploy.** `docs/cloud_worker.md` is the
-source of truth for the variable list.
+- **Secrets → Railway Variables**, mirrored in the local `.env` for CLI runs.
+  **Railway env edits only take effect on redeploy.** `docs/cloud_worker.md` is
+  the source of truth for the variable list.
+- **Thresholds → canonical in `config.py`, mirrored to Supabase** by
+  `data.threshold_sync` (Step 0c of the daily pipeline). The scorer reads
+  `config.py`, so the BET decision is config-canonical wherever it runs. **A hand
+  edit to `model_action_thresholds` is temporary** — the next 6am run overwrites
+  it from `config.py` on master.
+- **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` is what
+  gets fetched; `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED at.
 
-**Thresholds → canonical in `config.py`, mirrored to Supabase.** The scorer reads
-`config.py` directly, so the BET decision is config-canonical wherever the code
-runs. `data.threshold_sync` (Step 0c of the daily pipeline) mirrors it into the
-`model_action_thresholds` table, which the app action filter and the track-record
-views read. **A hand edit to that table is temporary** — the next daily run
-overwrites it from `config.py` on master. To change a cut permanently, edit
-`config.py` and merge; to make it live immediately, edit the table AND merge
-before the next 6am run.
+**The invariants that must not be broken are in
+`.claude/rules/config-topology.md`** (loads on `config.py`, the scorers,
+`data/threshold_sync.py`, `scheduler.py`) — breaking one means editing a file it
+is scoped to. In one line each, so you know they exist:
 
-**Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` drives the
-Odds API `bookmakers` param (the `us2` books cost a second region — measured,
-`docs/best_line.md` §2); `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED
-at, and it excludes the books a member cannot bet.
-
-### Two invariants that must not be broken
-
-- **A PICK IS DECIDED, SIZED AND SETTLED AT THE BEST BETTABLE PRICE, AND THE
-  ROW SAYS WHICH PRICE AND WHOSE LINE.** (mike, 2026-09-09: *"we should remove
-  DK only - we want best lines for us regardless"*; the in-play models joined
-  2026-09-10, *"yes do everything"*.) The decision runs at the best price
-  across `config.BEST_LINE_BOOKMAKERS` at the line, stored as
-  `picks.decision_book / decision_odds / decision_implied_prob /
-  decision_edge`; settlement, the record views, the RPCs, Discord, push and
-  the app's action filter all read them as `COALESCE(decision_x, dk_x)`
-  (pre-2026-09-09 rows were decided at DraftKings, so the fallback is exact).
-  **DraftKings stays the REFERENCE:** training features and CLV are DK-to-DK,
-  and `edge` / `dk_odds` keep their DraftKings meaning. No cut moved with
-  either change. One code path per model decides at both prices —
-  `scorer._decide` / `_size`, `live_scorer.classify_live_signal`,
-  `ncaaf_live.serve.LiveEngine._decide` — with the stale-line cap always on
-  the DraftKings edge. `nfl_live_prop` stays DraftKings-only (its feed carries
-  no other book). Detail and the measurements: `docs/best_line.md`. Tests:
-  `tests/test_{decide_on_best_price,best_line_live}.py`.
-- **A PLAYER PROP DRAFTKINGS DOES NOT LIST IS SCORED OFF THE FIRST BETTABLE
-  BOOK THAT DOES.** (mike, 2026-09-12: *"Yes, scoring of other books lines."*)
-  Book taken in `BEST_LINE_BOOKMAKERS` order, NEVER by price — the LINE is the
-  proposition, so choosing the book by the number would choose the bet to suit
-  the model. `picks.line_book` names it, NULL = DraftKings, and on those rows
-  **`dk_odds` / `dk_implied_prob` / `edge` are NULL / 0.0 by design**, so every
-  read of a pick's price or edge goes through `decision_*` and the
-  published-units gate reads `COALESCE(decision_odds, dk_odds)`. GAME markets
-  are unchanged: a game-level DraftKings line is a model FEATURE, so changing
-  its source is a retrain question. **These picks are a new population — no cut
-  was swept on it — so report them separately, by `line_book`.**
-  `SCORE_OFF_ANY_BOOK_LINE=0` restores "no DraftKings quote, no pick".
-  Test: `tests/test_score_off_any_book_line.py`.
-- **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO PRICE.** (2026-09-03.)
-  A win with `dk_odds IS NULL` (and, since 2026-09-09, `decision_odds IS NULL`)
-  is stored as +$90.91 on a $100 stake — exactly the payout of -110 — so
-  `profit_flat` is NOT a safe units source on its own. **Any read of
-  `profit_flat` must be gated on `dk_odds IS NOT NULL`.**
-  `mv_scored_pick_outcomes.profit_units` is correctly NULL for these. Evidence,
-  and the 261 affected BETs: `docs/rules_evidence.md`.
-
-- **ACCESS IS DECIDED IN ONE PLACE, AND IT IS NOT THE SUBSCRIPTIONS TABLE.**
-  (2026-08-30, Matt.) A membership bought on Discord (Whop) entitles the app,
-  and an app subscription entitles the Discord — so `subscriptions` only ever
-  holds half the answer. The gate is `public.my_access()` / `has_app_access()`
-  server-side and `useEntitlement()` in the app; gating on
-  `useSubscription().entitled` charges a Discord member twice for what they
-  already bought. Revocation follows the same rule in reverse, with one
-  refinement that must not be lost: **each side revokes only the Discord role
-  it granted**, so a lapsed App Store subscription cannot strip a member who is
-  still paying Whop. Detail: `mobile/docs/DISCORD_LINKING.md`.
-- **Pre-game and in-play prices never mix.** In-play rows are written with
-  `snapshot_type='in_play'` and are excluded from pre-game scoring, training
-  features and closing-line math. Separately, the evening refresh keeps writing
-  `open` rows AFTER first pitch, so any read of a "pre-game" line must also bound
-  on `snapshot_at <= commence_time` — see the leak trap in §7.
+- **A pick is decided, sized and settled at the best bettable price**, and the
+  row records which price and whose line (`decision_*`, read as
+  `COALESCE(decision_x, dk_x)`). DraftKings stays the REFERENCE for features and
+  CLV.
+- **A player prop DraftKings does not list is scored off the first bettable book
+  that does** — in `BEST_LINE_BOOKMAKERS` order, never by price. `line_book`
+  names it. These picks are a NEW population; report them separately.
+- **`picks.profit_flat` fabricates -110 for any pick with no price**, so every
+  read of it must be gated on a non-NULL price.
+- **Access is decided by `public.my_access()`, not the `subscriptions` table** —
+  one membership entitles both the app and Discord.
+- **Pre-game and in-play prices never mix**, and the evening refresh keeps
+  writing `open` rows after first pitch, so bound on
+  `snapshot_at <= commence_time`.
 
 Full detail (retention and pruning, best-line mechanics, machine paths):
 `docs/config_topology.md`.
@@ -659,19 +483,10 @@ your case; the rules below are complete as stated, the evidence is why.
   MAX_EDGE_CAP` gets **no row at all**. Clean windows: 2026-05-12→06-25 and
   2026-08-09→present. Re-verify by month; never assume.
   Full version: `docs/signal_timing.md`.
-- **Validate the grading before moving a cut.** Recompute outcomes from raw
-  scores and reconcile against stored settlements first. A sign bug in away-side
-  spread grading turned a −20.6% cut into a phantom +15%.
-- **Require a plateau, not a peak.** A cell whose eight neighbours flip negative
-  one grid step away is noise. Report the neighbourhood, the per-season split,
-  the bet count and a CI — and when the grid is negative everywhere, say so and
-  retrain instead of shipping the least-bad cut.
-- **A time split kills most false positives.** Every situational edge in the
-  NCAAF search that looked strong pooled collapsed when split early/late. Make
-  the split part of the method, not a follow-up.
-- **In-sample is in-sample.** Cuts swept on live picks regress forward. State
-  which samples are trustworthy by volume and which are not.
-
+- **The method rules — validate the grading before moving a cut, require a
+  plateau and not a peak, split early/late, in-sample is in-sample** — are in
+  `.claude/rules/analysis-and-thresholds.md`, which loads on `models/**` and
+  `scripts/**`. They were duplicated here word-for-word until 2026-09-12.
 ### Data integrity, and Operations
 
 **These moved to `.claude/rules/` on 2026-09-03** and load automatically when
@@ -687,19 +502,13 @@ to be known BEFORE deciding which file to open.
 
 - **A TEST WRITTEN FROM THE SAME UNDERSTANDING THAT PRODUCED THE CODE INHERITS
   ITS BLIND SPOT.** Five guards in one day (2026-09-04) passed while the thing
-  they guarded was broken: `job_queue` and `threshold_review` gated on
-  `schema_is_current` without `rls=`, so the lock-down beneath them never ran;
-  the anon write sweep iterated a declared list and never visited `feedback`,
-  which kept TRUNCATE while the TRUNCATE test passed; and the `api_call_daily`
-  rollup silently decayed the partially-pruned boundary day while its
-  "never zeroes a pruned day" test passed on the fully-pruned case. Each test
-  checked the case its author had in mind, which is the case the code already
-  handled.
+  they guarded was broken — each checked the case its author had in mind, which
+  is the case the code already handled.
   **So a guard is not evidence. Go and look at the running system** — the
   catalog after an apply, the worker's own scheduled cycle rather than your
   hand-run of it, the row counts a query returns rather than the exit code.
   The test is what stops a fixed bug returning; it is not what finds one.
-  Evidence: `docs/rules_evidence.md`, sessions 220-222.
+  All five, and what each missed: `docs/rules_evidence.md`.
 
 ### Verification standards — what "verified" means here
 
@@ -796,5 +605,50 @@ state, data sources, model registry, spec decisions),
 
 ---
 
-*CLAUDE.md was 909 KB on 2026-08-30. Keep it under ~30 KB: new work goes in
-`docs/sessions/`, and only rules that govern future sessions get promoted here.*
+## 10. Where a NEW rule goes — the only question to ask
+
+**Can this rule ONLY be broken by editing files in a known folder?** That is the
+whole decision.
+
+| If the rule… | it goes in | and it arrives |
+|---|---|---|
+| governs every reply, or is needed BEFORE deciding which file to open | **this file** | always |
+| can only be broken by editing files in one area | **`.claude/rules/<topic>.md`**, with `paths:` frontmatter | when Claude opens one of them |
+| is a measured fact about a tool or this machine | **`.claude/hooks/connector_reminder.json`** | injected at session start |
+| is what happened, or the evidence behind a rule | **`docs/sessions/<YYYY-MM>.md`** / **`docs/rules_evidence.md`** | when someone reads it |
+
+**The test that matters is the one that has already failed.** On 2026-09-12 a
+pause erased 55 settled bets, and that session edited one line of `config.py` —
+it opened nothing under `tracking/`, `mobile/src/` or `data/migrations/`. A
+folder-scoped copy of "a pause must not erase a settled record" would not have
+loaded for the session that broke it. So: **anything reachable WITHOUT opening a
+file — pausing a model, running SQL, answering a question — stays here.**
+
+Four rules are pinned here by tests that assert the rule is in THIS file, not
+merely somewhere in the repo: `test_everything_in_supabase.py`,
+`test_settled_record_is_immutable.py` (two) and
+`test_paused_model_assessment.py`. Do not move them out.
+
+**Putting a rule in `.claude/rules/` is NOT demoting it.** It arrives at the
+moment it applies, beside the code it governs, instead of 700 lines earlier in a
+file that was skimmed.
+
+**Two obligations when a rule moves out:**
+
+1. **Leave a one-line pointer here**, under its original section number — the
+   rule, the file, and what opens it. A session doing analysis in SQL touches no
+   file in `tracking/`, so the pointer is how it learns the rule exists.
+2. **Never renumber a section.** `config.py`, the model code and ~300 `docs/`
+   lines cite §1b, §1c, §6, §7. A section whose body moved keeps its number and
+   becomes the signpost.
+
+**Nobody has to police the size of this file.** `tests/test_context_budget.py`
+does: a cap on this file, a cap on this file PLUS the session-start hook (so
+moving prose between them cannot game it), a per-file cap on each rules file, and
+a check that every rules file is pointed at from here. It fails once, at merge
+time, for whoever grew it — which is why no session needs to spend a reply on it.
+
+*Layered 2026-09-12: three layers and a routing rule (§10) replaced "keep this
+file under ~30 KB", which was repeated in three places and re-read every
+session. `tests/test_context_budget.py` holds the budget now. Nothing was
+deleted — §10 says where each rule went.*
