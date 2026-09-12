@@ -21,6 +21,21 @@
 
 ---
 
+## [ ] Re-measure the NFL prop lead curve inside 24 h on the 2026 hourly polls (October)
+
+mike, 2026-09-11: the ceiling STAYS at 24 h (`config.NFL_PROP_MAX_LEAD_HOURS`)
+and is re-measured in October. The 2023-25 evidence is one snapshot a day at
+13:55 UTC, so its "lead bands" are kickoff-slot proxies
+(`docs/nfl_prop_offset_evidence.md`, correction banner): last 4 h +2.96% on
+450 (spans zero), 4-8 h +9.30% on 971 (clear), Saturday-morning read of Sunday
+games +17.45% on 173 (clear), the separate t24 series +2.12% on 187. Production
+has polled hourly since 2026-09-06 (`NFL_PROP_WINDOW_HOURS` 240), so by
+mid-October there are ~5 weeks of settled `nfl_prop_market` propositions at
+every hour inside 24 h. Grade the rule by the hour the soft quote was taken
+(`scripts/nfl_prop_two_sharps.py --by-lead` on the 2026 rows, or a per-hour
+variant) and decide 12 / 24 / 36 on that, not on the slot proxies. The open
+question is whether to WIDEN to 36 h to reach the Saturday-morning band.
+
 ## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
 
 Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
