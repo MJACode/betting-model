@@ -39,6 +39,7 @@ import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useOtaUpdates } from '@/hooks/useOtaUpdates';
 import { usePushDeepLink } from '@/hooks/usePushDeepLink';
+import { installNotificationHandler } from '@/lib/pushPresentation';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
@@ -185,6 +186,10 @@ function DailyRecap({ onboardingDone }: { onboardingDone: boolean }) {
     />
   );
 }
+
+// Module scope, so it is in place before any screen mounts and before a
+// notification that launched the app is handed over.
+installNotificationHandler();
 
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();

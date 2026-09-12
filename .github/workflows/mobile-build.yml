@@ -55,6 +55,14 @@ name: Mobile TestFlight build
 
 on:
   workflow_dispatch:
+    inputs:
+      allow_missing_push_entitlement:
+        description: >-
+          Submit even if the built IPA carries no aps-environment entitlement
+          (i.e. the build cannot receive notifications). Leave false unless you
+          know this build is deliberately push-less.
+        type: boolean
+        default: false
 
 concurrency:
   group: mobile-testflight
@@ -239,6 +247,74 @@ jobs:
           BUILD_PAGE_URL="https://expo.dev/accounts/mjacode/projects/betting-picks/builds/${BUILD_ID}"
           echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
           echo "build_page_url=$BUILD_PAGE_URL" >> "$GITHUB_OUTPUT"
+
+      # WHY THIS EXISTS. expo-notifications landed on 2026-09-08 and the build
+      # that followed it (run #69, 2026-09-11) shipped to TestFlight with no
+      # complaint from anything. A push-capable iOS binary needs the
+      # `aps-environment` entitlement, which comes from the provisioning
+      # profile — and `eas build --non-interactive` REUSES the profile it
+      # already has rather than regenerating one for a newly added capability.
+      # So the failure mode is silent by construction: a green build, a
+      # successful submit, and an app that Apple will never issue a push token
+      # to. Nothing in the pipeline could have told you, and nothing did.
+      #
+      # The IPA is the ground truth — not the credentials summary above, whose
+      # format is EAS's to change. Read the profile out of the artifact and
+      # look for the entitlement itself.
+      - name: Verify the IPA carries the push entitlement
+        id: entitlement
+        working-directory: mobile
+        env:
+          ALLOW_MISSING: ${{ inputs.allow_missing_push_entitlement }}
+        run: |
+          set -o pipefail
+          IPA_URL=$(jq -r '.[0].artifacts.applicationArchiveUrl // empty' build_output.json)
+          if [ -z "$IPA_URL" ]; then
+            echo "::warning::No IPA URL in the build output — skipping the entitlement check."
+            exit 0
+          fi
+
+          curl -fsSL --retry 3 -o build.ipa "$IPA_URL"
+          # The profile is CMS-signed DER. openssl unwraps it; `strings` is the
+          # fallback so a signature quirk degrades to a looser check rather
+          # than to no check.
+          unzip -p build.ipa 'Payload/*.app/embedded.mobileprovision' > profile.der
+          openssl smime -inform DER -verify -noverify -in profile.der 2>/dev/null > profile.plist \
+            || strings profile.der > profile.plist
+
+          if grep -q 'aps-environment' profile.plist; then
+            APS=$(grep -A1 'aps-environment' profile.plist | tr -d '\0' | tail -1 | sed -e 's/.*<string>//' -e 's|</string>.*||')
+            echo "Push entitlement present: aps-environment = ${APS:-unknown}"
+            echo "## Push entitlement: present (aps-environment = ${APS:-unknown})" >> "$GITHUB_STEP_SUMMARY"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "present=false" >> "$GITHUB_OUTPUT"
+          {
+            echo '## This build CANNOT receive notifications'
+            echo ''
+            echo 'The IPA carries no `aps-environment` entitlement, so Apple will'
+            echo 'refuse to issue it a push token and Settings → Notifications will'
+            echo 'report "This build is not registered for Apple push".'
+            echo ''
+            echo 'Fix it once, from a machine signed in to the Apple account:'
+            echo ''
+            echo '```'
+            echo 'cd mobile'
+            echo 'eas credentials   # iOS -> production -> Push Notifications -> set up a Push Key'
+            echo '```'
+            echo ''
+            echo 'Then re-run this workflow. EAS regenerates the provisioning profile'
+            echo 'with the capability and the next IPA carries the entitlement.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$ALLOW_MISSING" = "true" ]; then
+            echo "::warning::No aps-environment entitlement — submitting anyway (allow_missing_push_entitlement was set)."
+            exit 0
+          fi
+          echo "::error::The built IPA has no aps-environment entitlement, so notifications cannot work. Nothing was submitted. Run 'eas credentials' to add a Push Key, or re-run with allow_missing_push_entitlement to ship anyway."
+          exit 1
 
       - name: Submit to TestFlight
         id: submit

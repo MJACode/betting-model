@@ -31,7 +31,7 @@ import {
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
-import { usePushOptIn } from '@/hooks/usePushOptIn';
+import { NotificationsCard } from '@/components/NotificationsCard';
 import { useFeedbackUnread } from '@/hooks/useFeedback';
 import { useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
@@ -113,7 +113,6 @@ export function SettingsScreen() {
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
   const { settings: rg, setExposureCapUnits } = useResponsibleGambling();
-  const { enabled: pushEnabled, setOptIn: setPushOptIn } = usePushOptIn();
   const feedbackUnread = useFeedbackUnread();
   const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
   // Two different questions, deliberately asked of two different hooks:
@@ -521,17 +520,7 @@ export function SettingsScreen() {
 
         <SectionHeader title="Alerts" />
 
-        <View style={styles.card}>
-          <View style={styles.capHeader}>
-            <Text style={styles.cardLabel}>Notifications</Text>
-            <Switch value={pushEnabled} onValueChange={setPushOptIn} />
-          </View>
-          <Text style={styles.sub}>
-            {pushEnabled
-              ? 'On — new BET signals, big line moves on bets you track, and live in-play signals.'
-              : 'New BET signals, big line moves on bets you track, and live in-play signals. Needs an app build with push support.'}
-          </Text>
-        </View>
+        <NotificationsCard />
 
         <SectionHeader title="Explore" />
 
