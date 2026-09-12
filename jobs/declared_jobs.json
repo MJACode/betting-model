@@ -3,7 +3,7 @@
     "key": "mlb-historical-pilot-2024-06-01",
     "job_type": "historical_odds",
     "requested_by": "mike",
-    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 — 205 rows over 48 games — two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
+    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 \u2014 205 rows over 48 games \u2014 two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
     "args": {
       "sport": "MLB",
       "start": "2024-06-01",
@@ -28,7 +28,7 @@
     "key": "mlb-relabel-in-play-2024-pilot",
     "job_type": "relabel_in_play",
     "requested_by": "mike",
-    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game — ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
+    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game \u2014 ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
     "args": {
       "sport": "MLB",
       "since": "2024-06-01"
@@ -702,6 +702,17 @@
     "args": {
       "checks": [
         "kalshi_game_snapshot_fresh"
+      ]
+    }
+  },
+  {
+    "key": "ncaaf-pbp-2025-for-the-inplay-replay",
+    "job_type": "ncaaf_pbp_pull",
+    "requested_by": "mike",
+    "note": "The 2025 states corpus for the paused live lanes' replay. 57,979 in-play DK rows were bought on 2026-09-11 (736 games); pairing them with the state on the field needs play-by-play, and PBP_DIR is gitignored and empty in the checkout that has to run the replay. CFBD_API_KEY is on the worker only. ~17 free CFBD calls; idempotent on the play id.",
+    "args": {
+      "seasons": [
+        2025
       ]
     }
   }
