@@ -30,6 +30,7 @@ from loguru import logger
 
 from data.db import get_connection
 from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
+from tracking.publish_filters import live_publishable_sql
 from tracking.publish_keys import key_partition_sql, live_lock_key_sql, lock_key_sql
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
@@ -465,6 +466,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
           AND p.is_live = TRUE
           AND p.signal_type = 'BET'
           AND p.result IS NULL
+          {live_publishable_sql()}
           AND NOT EXISTS (
               SELECT 1 FROM push_sent s
               WHERE s.lock_key = {live_lock_key_sql()}

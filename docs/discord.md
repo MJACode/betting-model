@@ -47,7 +47,7 @@ shows up as a collision.
 | Function | Source of truth | Called from |
 |---|---|---|
 | `notify_discord_signals` | **`picks` ⋈ `model_action_thresholds`** — the same table the app reads, at the same cut as its `passesActionFilter` and the `docs/mobile_picks_prompt.md` query. Was `opening_signals` until 2026-09-05; see "One board" below | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
-| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer`, end of each `ncaaf_live.gameday` pass, and `nfl/live_model/pick_writer.announce_live_picks` after every NFL live BET the in-play worker commits (2026-09-09; before that the NFL lane announced nowhere) |
+| `notify_discord_live` | `picks WHERE is_live` BET rows, through `tracking/publish_filters.live_publishable_sql` (2026-09-12) | end of `models/live_scorer.run_live_scorer`, end of each `ncaaf_live.gameday` pass, and `nfl/live_model/pick_writer.announce_live_picks` after every NFL live BET the in-play worker commits (2026-09-09; before that the NFL lane announced nowhere) |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 | `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
 | `notify_discord_restate` | **`picks`**, same cut, minus the not-yet-posted filter — the whole date, not whatever happens to be unposted. Was `opening_signals` until 2026-09-05; see "The repair paths" below | same step as the signals producer, gated on `DISCORD_RESTATE_DATES` |
@@ -84,6 +84,57 @@ Consequences worth knowing before touching either producer:
   from it.
 - **The started-game guard stays** — on both surfaces. It is the one bound that
   should exist.
+
+### One board, on the LIVE channel too (2026-09-12)
+
+Matt: *"Can you make sure all the models in discord match the app."*
+
+The 2026-09-05 fix moved the PRE-GAME producers onto `picks` through
+`model_action_thresholds`, so they select what the app's `passesActionFilter`
+selects. **The LIVE producers were never part of that.** Both
+`discord_notifier._new_live_signals` and `push_notifier._new_live_signals` took
+every `is_live` BET row with `result IS NULL` and applied **no gate at all** —
+no paused check, no retired check, no VOID check — while the app's Live board
+applies `!isModelPaused && !isModelRetired` (`PicksHomeScreen.liveInProgress`)
+and `queries.fetchLivePicks` excludes `condition_status = 'VOID'` in its own SQL.
+
+So the live channel could announce a bet the app refuses to draw, and the two
+had no shared definition to drift from. `tracking/publish_filters.py` is that
+definition now, and both live producers select through it.
+
+**Why nothing was visibly wrong on the board the day it was found**, which is
+the interesting half: both NCAAF lanes suppress the BET *at source*
+(`ncaaf_live.serve._unless_paused` writes nothing for a paused lane), so no row
+existed for the publisher to over-announce. The publisher was relying on the
+scorer's gate, one layer away, for a rule the app enforces itself — the shape
+§7 calls a guard that dead code can satisfy. Measured on production
+2026-09-12: of the live BETs belonging to a model that is paused or retired
+today, **60 of 60 `ncaaf_live_total`, 6 of 6 `ncaaf_live_win_prob`, and 2 of 7
+each for the retired `mlb_live_win_prob` / `mlb_live_runline`** carry a
+`discord_live` ledger row. Those were all written while their lane was live, so
+none of them is a bug that shipped; they are the count of rows the gate now
+stands in front of.
+
+**RETIREMENT NEEDS NO LIST.** `data.threshold_sync` prunes
+`model_action_thresholds` to `config.ACTION_THRESHOLDS`, and a retired model is
+out of that dict — so it has NO ROW, and requiring one is exactly the app's
+`isModelRetired`. Verified: all four retired models with live BETs carry zero
+threshold rows. The pre-game producers get this free from their INNER JOIN.
+
+**WHAT IS DELIBERATELY NOT IN THE GATE: `min_prob` / `min_edge` / `min_odds`.**
+The app's Live board does not apply them either, and its comment says why —
+`nfl_live_prop`'s cut is EV, applied server-side in
+`nfl/live_model/config.EV_THRESHOLDS`, so filtering on the bundled prob/edge row
+would hide BETs that lane legitimately wrote. Adding them here would create the
+mismatch in the other direction, which is the same fault with the sign flipped.
+The in-play engines decide; these clauses only remove what is not stakeable at
+all.
+
+Pinned by `tests/test_live_publish_parity.py` — twelve cases, both producers,
+the real SQL against sqlite. Six were watched failing before the fix; the other
+six are controls that must pass both ways (an unpaused model still publishes, a
+`'GONE'` health state still publishes, and the pre-game cut is still not
+applied), because "returns nothing" is the shape of a fix that breaks a channel.
 
 ### One board is not enough — the KEY has to tell two picks apart (2026-09-09)
 
