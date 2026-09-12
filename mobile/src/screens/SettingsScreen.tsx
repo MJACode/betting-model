@@ -546,8 +546,8 @@ export function SettingsScreen() {
         />
 
         <LinkRow
-          label="Live betting (beta)"
-          sub="In-play picks that update while games are running. They show on Picks under Live, which appears while a game is in play. The live models are unproven — treat them that way."
+          label="Live Signals (beta)"
+          sub="In-play picks that update while games are running. They show on Picks under Live Signals, which is always there and fills while a game is in play. The live models are unproven — treat them that way."
           onPress={() =>
             navigation.navigate('Tabs', { screen: 'Picks', params: { view: 'live' } })
           }
