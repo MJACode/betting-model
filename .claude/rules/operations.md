@@ -80,3 +80,25 @@ before anyone noticed it.
 - **The Odds API returns `x-requests-remaining` on every response, including a
   401.** A silent quota exhaustion took out every feed for 2.5 days. Check the
   live figure (`odds_api_quota`), never a code comment.
+- **A CREDIT GUARD IS DERIVED FROM A MEASUREMENT OR IT IS DECORATION — and
+  reporting one as a safety property is the same error as quoting a stale
+  number.** (2026-09-11.) The NCAAF backfill shipped with `--max-credits
+  400_000` and `--floor 2_000_000`, both hand-picked, and none of the three
+  things wrong with them was visible from the flag names: the budget was built
+  inside `main()` so it was per PROCESS (four shards = 1,600,000 against a
+  373,240 plan); the refuse-to-start check compared the whole run's plan to ONE
+  shard's ceiling, so the ceiling had to be inflated past the plan for anything
+  to start — 400,000 was chosen *because* the plan came out at 373,240; and the
+  floor sat below where the run would land, so it could never fire.
+  **Both halves must come from numbers the system already knows**
+  (`data/ingestors/odds_quota.plan_credit_budget`): the ceiling from the run's
+  own printed plan, split by each shard's share so N processes SUM to it; the
+  floor from `reserve_days x` the **median** daily burn in `odds_api_quota`
+  (a mean lets one backfill day claim the platform needs 6x what it does, and
+  a negative day is a billing reset, not a refund). **When it cannot measure,
+  it REFUSES** — a default burn rate is a guessed one. The judgement that is
+  left gets a name and a flag rather than being baked into a credit count.
+  Corollary: **a ceiling bounds one PROCESS and starts at zero**, so it cannot
+  see what an interrupted earlier run spent; what keeps a resumed pull honest
+  is the resume skipping stored work, and that distinction is worth stating out
+  loud rather than letting the guard take the credit.
