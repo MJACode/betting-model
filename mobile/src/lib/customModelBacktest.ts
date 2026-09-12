@@ -13,7 +13,7 @@
  */
 
 import { isOutcomeGraded, pickMatchesModel } from './customModelFilters';
-import { flatPnl, isModelRetired, passesActionFilter } from './thresholds';
+import { flatPnl, isModelRetired, passesRecordFilter } from './thresholds';
 import type { CustomModel, CustomModelRule, SettledPick, SignalType } from '@/types';
 
 export interface CustomModelStats {
@@ -192,7 +192,13 @@ export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]
 
   for (const p of settled) {
     if (p.model_id !== modelId) continue;
-    if (!passesActionFilter(p)) continue;
+    // AS POSTED, not re-cut (2026-09-12). This is the fallback behind the
+    // detail screen's header tiles when the v_public_track_record fetch fails,
+    // and that view no longer re-applies the cut. Re-cutting here made the
+    // tiles read 0 picks for a paused model while the list directly below them
+    // showed its settled bets. The custom-model callers keep passesActionFilter:
+    // "what would this filter do" is a different question.
+    if (!passesRecordFilter(p)) continue;
     // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
     // would otherwise inflate the count vs the displayed record.
     if (p.result === 'WIN') wins++;

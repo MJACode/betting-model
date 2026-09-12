@@ -447,7 +447,8 @@ const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
-  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge';
+  'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
+  'is_live';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -1530,9 +1531,10 @@ export async function fetchPublishedModelRecord(): Promise<Record<string, FullOu
     const profit = Number(r.profit_flat ?? 0);
     map[r.model_id] = {
       model_id: r.model_id,
-      // The view only ever returns unpaused models (it joins
-      // model_action_thresholds and filters), and a retired model has no
-      // threshold row at all, so both flags are constant here.
+      // NOT a claim that the model is live (2026-09-12). The view no longer
+      // joins model_action_thresholds, so it CAN return a paused model's
+      // as-posted record. This shape carries no paused flag of its own; read
+      // isModelPaused(model_id) if a surface needs to label one.
       paused: false,
       prob_only: false,
       bets: Number(r.picks ?? 0),
