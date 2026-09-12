@@ -777,12 +777,15 @@ def run_kalshi_game_record() -> None:
     held, and it cannot be graded until it has been recorded through a season.
     Free, keyless, and never on the betting path: a failure is a warning.
     """
-    from data.ingestors.kalshi_game_ingestor import record_game_markets
+    from data.ingestors.kalshi_game_ingestor import record_game_markets, resolve_events
 
     try:
         got = record_game_markets()
         log.info("kalshi game markets: %s contracts, %s events",
                  got.get("contracts"), got.get("events"))
+        res = resolve_events()
+        log.info("kalshi ncaaf events: %s resolved, %s unresolved",
+                 res.get("resolved"), res.get("unresolved"))
     except Exception as exc:                                   # noqa: BLE001
         log.warning("kalshi game market record failed: %s: %s",
                     type(exc).__name__, exc)
