@@ -103,7 +103,12 @@ def test_nothing_navigates_to_a_live_route():
 
 def test_settings_points_at_the_live_segment():
     src = _read(SETTINGS)
-    assert "Live betting (beta)" in src, "the Settings entry point disappeared"
+    # Renamed with the board, 2026-09-12, and its copy no longer says the segment
+    # "appears while a game is in play" -- it is always there (UX review).
+    assert "Live Signals (beta)" in src, "the Settings entry point disappeared"
+    assert "which appears while a game is in play" not in src, (
+        "Settings still describes the conditional segment"
+    )
     assert re.search(
         r"screen:\s*'Picks',\s*params:\s*\{\s*view:\s*'live'\s*\}", src
     ), "Settings' live-betting row no longer opens the live segment"
@@ -259,6 +264,89 @@ def test_the_empty_state_is_exhaustive_over_the_three_views():
     assert re.search(r"if \(view === 'live'\) \{", src), "no live empty state"
 
 
+def test_a_sport_switch_cannot_report_a_game_finishing():
+    """`liveData` is sport-scoped; the toast's memory must be too.
+
+    Found by the UX review on the 2026-09-12 change: the sport-change effect no
+    longer resets the view, so a reader on 3 MLB live picks who taps NBA went
+    3 -> 0 and was told "Last in-play game finished". With the board empty ~81% of
+    the clock, and 100% of it on the sports with no live lane, that false report
+    was the USUAL outcome of a sport tap from the live board.
+    """
+    src = _read(PICKS)
+    m = re.search(
+        r"useEffect\(\(\) => \{\s*setFilter\(freshFilter\(\)\);(.*?)\}, \[sport\]\);", src, re.S
+    )
+    assert m, "the sport-change reset effect is gone"
+    assert "prevLiveCount.current = null" in m.group(1), (
+        "a sport switch no longer forgets the previous sport's live count, so it "
+        "will report a game finishing that did not finish"
+    )
+
+
+def test_the_empty_live_board_does_not_blink_to_a_spinner():
+    """An empty live board is the ORDINARY state now, and it is polled every 30s.
+
+    `refresh()` sets loading on every poll, so a reader parked on an empty board
+    watched the empty state swap for an ActivityIndicator twice a minute. Invisible
+    while the segment was conditional (it always had rows); the dominant experience
+    the moment it became permanent (UX review, 2026-09-12).
+    """
+    src = _read(PICKS)
+    assert re.search(
+        r"const liveFirstLoad = liveLoading && prevLiveCount\.current === null;", src
+    ), "the live spinner is not restricted to the first load"
+    assert re.search(r"const busy = view === 'live' \? liveFirstLoad : loading;", src), (
+        "the live board's busy flag is back on every poll"
+    )
+    # ... and pull-to-refresh must still spin, which it can no longer read off `busy`.
+    assert "setPulling(true)" in src and "refreshing={view === 'live' ? pulling : busy}" in src, (
+        "pull-to-refresh on the live board no longer shows the reader anything"
+    )
+
+
+def test_the_paywall_card_never_replaces_the_live_empty_state():
+    """SignalLockCard is for picks that EXIST and are hidden, not for an empty board.
+
+    At count 0 it says the models "haven't found a bet that clears the line yet
+    today" -- on a sport with no in-play model that is a promise the app cannot
+    keep, which is the sentence lib/liveSports.ts exists to prevent, and it pitches
+    a trial on a board that is structurally empty there (UX review, 2026-09-12).
+    """
+    src = _read(PICKS)
+    assert re.search(
+        r"\{signalsLocked && !\(view === 'live' && liveData\.length === 0\) \?", src
+    ), "an unentitled reader gets the paywall card instead of the live empty state"
+
+
+def test_the_selected_segment_can_be_scrolled_into_view():
+    """The row is longer than the screen at large text sizes, and a deep link can
+    select a segment that is off it -- a control with nothing selected reads as a
+    rendering bug (UX review, 2026-09-12)."""
+    src = _read(PICKS)
+    assert "subTabsScroll" in src, "the segment scroller lost its trailing gutter"
+    assert "segmentsRef.current?.scrollTo(" in src, (
+        "the selected segment is no longer scrolled into view"
+    )
+    # Measured, not assumed: the labels scale with Dynamic Type.
+    assert "onSegmentLayout" in src, "segment offsets are not measured"
+
+
+def test_the_two_signal_counts_are_not_presented_as_a_subset():
+    """Signals and Live Signals are DISJOINT: fetchPicksForDate excludes is_live.
+
+    So `Signals (3)` beside `Live Signals (2)` is five standing bets, not two of
+    three, and the reader it misleads is the one adding up exposure.
+    """
+    src = _read(PICKS)
+    assert "pre-game signals" in src, (
+        "the Signals subtitle no longer says it is the pre-game board"
+    )
+    assert "the two boards never hold the same pick" in src, (
+        "nothing tells the reader the two signal counts are disjoint"
+    )
+
+
 # ── 3. the betslip actually works on a live pick ──────────────────────────────
 
 
@@ -409,11 +497,17 @@ def test_the_live_pricing_caveat_is_scoped_to_the_live_view():
         "the live DK-only / staleness caveat was lost in the merge (CLAUDE.md §6)"
     )
     m = re.search(
-        r"\{view === 'live' \? \(\s*<View style=\{styles\.liveNoteWrap\}>(.*?)\)\s*:\s*null\}",
+        r"\{view === 'live' && liveData\.length > 0 \? \(\s*<View style=\{styles\.liveNoteWrap\}>(.*?)\)\s*:\s*null\}",
         src,
         re.S,
     )
-    assert m, "the live caveat is not gated on view === 'live'"
+    assert m, (
+        "the live caveat is not gated on BOTH the live view and there being live "
+        "picks. It describes the staleness of prices on screen, so above an empty "
+        "board it is a warning about prices that do not exist (UX review, "
+        "2026-09-12) -- and on a sport with no live model it sits above an empty "
+        "state saying exactly that."
+    )
     assert "DraftKings only" in m.group(1)
 
 
