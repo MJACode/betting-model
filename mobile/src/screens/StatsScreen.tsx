@@ -42,7 +42,7 @@ import { useGameSelection } from '@/hooks/useGameSelection';
 import { useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { usePreferredBooks, BOOKS } from '@/hooks/usePreferredBooks';
 import {
-  fetchPropLinesForDate,
+  fetchPropLinesForDates,
   fetchRecentGames,
   fetchSeasonStatValues,
   fetchSlateGames,
@@ -289,21 +289,26 @@ function hitRateColor(pct: number, colorful: boolean): string {
  * the first whole number that clears them.
  */
 /**
- * Does this sport's board start filtered to the slate?
+ * THE BOARD STARTS WHOLE, FOR EVERY SPORT.
  *
- * Football does. Its leaderboard is national — 136 college programs — while
- * props are pulled only for games a book already prices (~70 of a 120-game
- * Saturday), so an unfiltered board is mostly dashes: every one of them
- * honest, none of them explained. Baseball's slate is nearly the whole league
- * every day, so the filter would only hide players.
+ * Matt, 2026-09-12: *"Instead of playing today. We should always show all
+ * players and pull in a better line they have. In the filter at the top we
+ * should have a toggle for playing today."* So this is a constant, not a
+ * per-sport rule, and it is `false`.
  *
- * Stated once because the initial value and the sport-change reset have to
- * agree, and they did not when this was written inline (UX review,
- * 2026-09-05).
+ * WHAT IT REPLACES. NFL and NCAAF used to start filtered to the slate, because
+ * college's leaderboard is national — 136 programs — while props are pulled
+ * only for games a book already prices, so an unfiltered board was mostly
+ * dashes. The dashes were the real complaint, and the fix for them is the odds
+ * read, not the roster: the LINE column now spans the whole forward window
+ * (`fetchPropLinesForDates`), so a player is blank because no book priced him
+ * and not because his game is on Monday.
+ *
+ * Named rather than inlined because the initial value and the sport-change
+ * reset have to agree, and they did not when this was written inline (UX
+ * review, 2026-09-05).
  */
-function defaultTonightOnly(sport: Sport): boolean {
-  return sport === 'NCAAF' || sport === 'NFL';
-}
+const SLATE_ONLY_DEFAULT = false;
 
 function defaultLineN(def: StatDef | null): number {
   return Math.max(1, Math.ceil(defaultThresholdFor(def)));
@@ -382,7 +387,7 @@ export function StatsScreen() {
   const [matchups, setMatchups] = useState<TonightMatchupRow[]>([]);
   // "Playing tonight": who is actually in action. Read from `games`, so unlike
   // the matchup views above this works for every sport.
-  const [tonightOnly, setTonightOnly] = useState<boolean>(() => defaultTonightOnly(sport));
+  const [tonightOnly, setTonightOnly] = useState<boolean>(SLATE_ONLY_DEFAULT);
   const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
   // The leaderboard read is NARROWED to the slate's teams when the board is
   // filtered to it (statsBoard.slateTeams), so it has to wait for the slate to
@@ -428,7 +433,7 @@ export function StatsScreen() {
     const next = defaultStatFor(sport);
     setStat(next);
     setQuery('');
-    setTonightOnly(defaultTonightOnly(sport)); // a different sport is a different slate
+    setTonightOnly(SLATE_ONLY_DEFAULT); // a different sport is a different slate
     setLineN(defaultLineN(next));
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
@@ -556,6 +561,11 @@ export function StatsScreen() {
   // (or after switching sports) must not empty the list.
   const hasSlate = slate.keys.size > 0;
   const tonightActive = tonightOnly && hasSlate;
+  /** The slate read has not SETTLED for this sport yet, so "no games" is not
+   *  something we know — only something we have not finished asking. */
+  const slateChecking = slateFor !== sport;
+  /** The Availability switch cannot act: no slate, or Games is the narrower cut. */
+  const slateCutDead = slateChecking || !hasSlate || gamesPicked;
   const slateLabel = slate.isToday ? 'Playing today' : `Next slate ${shortDate(slate.date)}`;
 
   const playerType = stat?.playerType;
@@ -639,9 +649,16 @@ export function StatsScreen() {
   }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey]);
 
   useEffect(() => {
-    if (slateFor !== sport) return; // the read is narrowed by THIS sport's slate
+    // The gate exists so a read NARROWED by the slate's teams is not fired
+    // before the slate lands (or fired twice). With the board no longer opening
+    // filtered, `readTeams` is null on first paint for every sport, so waiting
+    // serialised two requests where the second's shape could not change —
+    // costing up to SLATE_GATE_MS on the tab bettors open most, in front of the
+    // whole-league read that is now the default (UX review, 2026-09-12).
+    // Wait only when something actually narrows.
+    if (slateFor !== sport && (tonightOnly || gamesPicked)) return;
     void load();
-  }, [load, slateFor, sport]);
+  }, [load, slateFor, sport, tonightOnly, gamesPicked]);
 
   const toggleBasis = (next: Basis) => setBasis(next);
 
@@ -677,9 +694,37 @@ export function StatsScreen() {
   // the player's detail screen, which is where a researcher lands anyway.
   const propMarket = propMarketForStat(stat);
 
-  // Prop lines for the slate date. Bounded to one market, and re-read when the
-  // user switches stat — a full MLB market is ~190 players x 13 books.
-  const oddsDate = slate.date || todayET();
+  // Prop lines for the WHOLE forward window, not one date. The board is no
+  // longer cut to the slate (Matt, 2026-09-12), so a player whose next game is
+  // Monday has to be priced on a Sunday board — bounded to one date he read as
+  // unpriced, which is a fact about our query, not about the book. The window
+  // is the same seven days the slate read already covers, so the two agree
+  // about which games exist. Bounded to one market, and re-read when the user
+  // switches stat — a full MLB market is ~190 players x 13 books.
+  //
+  // Measured before widening it (2026-09-12): NFL pass yards is 4,063 rows on
+  // the Sunday slate and 4,361 over the week; MLB hits is 8,469 rows today and
+  // zero on every later date. Books post daily-sport props about a day out, so
+  // the wider bound returns the rows that exist and no others.
+  const oddsFrom = todayET();
+  // SIX, NOT SEVEN, and the difference is the whole reason a pill can name a
+  // day. `.gte(from).lte(to)` is INCLUSIVE at both ends, so +7 spans eight days
+  // and today's weekday occurs at both — a "SUN" caption would mean "not this
+  // Sunday" and its absence would mean "this Sunday", with nothing in three
+  // characters able to resolve it (UX review, 2026-09-12). At +6 every weekday
+  // in the window is unique.
+  //
+  // It costs nothing: measured 2026-09-12, the furthest date any book had
+  // priced was 09-18 (day 6) — day 7 held ZERO rows across all 38 markets,
+  // despite carrying 72 NCAAF games and 11 UFC bouts. Books do not post that
+  // far out, so the eighth day was returning nothing and taking the caption's
+  // meaning with it.
+  const oddsTo = addDays(oddsFrom, 6);
+  /** The nearest slate the board knows about — what the column header dates. */
+  /** The nearest slate the board knows about. Kept for the coverage copy,
+   *  which is a statement about a SLATE; the odds column dates itself off the
+   *  quotes it actually rendered instead — see `oddsHeaderDate`. */
+  const oddsDate = slate.date || oddsFrom;
   useEffect(() => {
     let cancelled = false;
     if (!propMarket) {
@@ -687,7 +732,7 @@ export function StatsScreen() {
       return;
     }
     setPropLines((prev) => ({ ...prev, status: 'loading' }));
-    fetchPropLinesForDate(oddsDate, propMarket)
+    fetchPropLinesForDates(oddsFrom, oddsTo, propMarket)
       .then((rows) => {
         if (!cancelled) setPropLines({ market: propMarket, rows, status: 'ok' });
       })
@@ -697,40 +742,80 @@ export function StatsScreen() {
       .catch((e: unknown) => {
         if (cancelled) return;
         setPropLines({ market: propMarket, rows: [], status: 'failed' });
-        showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
+        showToast(`Couldn’t load the latest lines — ${errorText(e)}`);
       });
     return () => {
       cancelled = true;
     };
-  }, [propMarket, oddsDate]);
+  }, [propMarket, oddsFrom, oddsTo]);
 
-  // The slate's games that have NOT started. A game in progress has no line a
-  // user can still take, and its "latest" pre-game row is a live number.
+  // Every game in the window that has NOT started. A game in progress has no
+  // line a user can still take, and its "latest" pre-game row is a live number.
   const slateGameIds = useMemo(
-    () =>
-      unstartedGameIds(
-        slateGames.filter((g) => g.game_date === oddsDate),
-        new Date(now).toISOString(),
-      ),
-    [slateGames, oddsDate, now],
+    () => unstartedGameIds(slateGames, new Date(now).toISOString()),
+    [slateGames, now],
   );
+
+  // Those games ranked by kickoff, so a player with lines in two of them is
+  // quoted from the NEXT one (statsOdds.nextGameRows). Only unstarted games
+  // are ranked: an id absent from the map sorts last, which is exactly the
+  // treatment a game already under way should get.
+  const gameOrder = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const g of slateGames) {
+      if (!slateGameIds.has(g.game_id)) continue;
+      const t = g.commence_time ? Date.parse(g.commence_time) : NaN;
+      // No kickoff yet: fall back to the DATE so a game with a TBD time still
+      // sorts against the ones that have a clock, instead of dropping out of
+      // the ranking and losing to a game a week later.
+      out.set(g.game_id, Number.isNaN(t) ? Date.parse(`${g.game_date}T23:59:59Z`) : t);
+    }
+    return out;
+  }, [slateGames, slateGameIds]);
+
+  const gameDateById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of slateGames) if (g.game_date) m.set(g.game_id, g.game_date);
+    return m;
+  }, [slateGames]);
 
   // Teams whose game is in progress or over. Their lines are hidden by design
   // (no line a user can still take), and the cell says WHICH — "Live" or
   // "Final", the words GameStatusPill uses — instead of printing a dash that
   // reads as "no line": at 6:45pm on 2026-09-04 the 6:11 game's players had
   // all gone blank while every other row was priced. A team with a game still
-  // to come (a doubleheader) gets no label: that game's line can still show.
+  // to come gets no label: that game's line can still show.
+  //
+  // "CAN STILL SHOW" IS THE TEST, AND IT HAS TO BE MEASURED, NOT ASSUMED. That
+  // escape hatch used to mean a doubleheader, and widening the read to the
+  // window nearly turned it into "every team, always": in MLB every club plays
+  // tomorrow, so every club had an unstarted game and no club could ever carry
+  // a label again — while the same measurement that justified the widening says
+  // MLB posts ZERO rows for tomorrow. Every player whose game had just ended
+  // would have gone back to a bare em-dash, which is exactly the 2026-09-04
+  // failure this block was written to fix (UX review, 2026-09-12).
+  //
+  // So a team only forfeits its label to a game the books have actually PRICED.
+  // A later game with no quote cannot fill the cell, so it must not empty it.
+  const pricedGameIds = useMemo(() => {
+    const out = new Set<string>();
+    if (!propMarket || propLines.market !== propMarket) return out;
+    for (const r of propLines.rows) if (slateGameIds.has(r.game_id)) out.add(r.game_id);
+    return out;
+  }, [propLines, propMarket, slateGameIds]);
+
   const startedTeams = useMemo(() => {
     const out = new Map<string, 'Live' | 'Final'>();
     const pending = new Set<string>();
     for (const g of slateGames) {
-      if (g.game_date !== oddsDate) continue;
       const teams = [g.home_team, g.away_team].filter(Boolean) as string[];
-      if (slateGameIds.has(g.game_id)) {
+      if (pricedGameIds.has(g.game_id)) {
         teams.forEach((t) => pending.add(t));
         continue;
       }
+      // Unstarted but unpriced: no label (nothing has happened) and no reprieve
+      // for a finished game elsewhere in the window either.
+      if (slateGameIds.has(g.game_id)) continue;
       // `now` is not read here, but gameStatus reads the clock internally —
       // the dependency below is what makes this re-derive on the tick.
       const kind = gameStatus(g).kind;
@@ -739,7 +824,7 @@ export function StatsScreen() {
     }
     pending.forEach((t) => out.delete(t));
     return out;
-  }, [slateGames, oddsDate, slateGameIds, now]);
+  }, [slateGames, slateGameIds, pricedGameIds, now]);
 
   const quoteByPlayerKey = useMemo(() => {
     if (!propMarket || propLines.market !== propMarket) return new Map<string, StatsOddsQuote>();
@@ -749,8 +834,57 @@ export function StatsScreen() {
       side,
       books,
       gameIds: slateGameIds,
+      gameOrder,
     });
-  }, [propLines, propMarket, line, side, books, slateGameIds]);
+  }, [propLines, propMarket, line, side, books, slateGameIds, gameOrder]);
+
+  /**
+   * The day the odds column is MOSTLY for — the modal `game_date` among the
+   * quotes actually rendered, not the nearest slate.
+   *
+   * `buildTonightSlate` takes today if any game exists and otherwise the
+   * EARLIEST future date, which on a Tuesday of an NFL week is Thursday's one
+   * game. Dating the header off that put "BEST THU" above a column in which
+   * thirty of thirty-two teams are Sunday — so the caption, whose whole premise
+   * is that it marks the exception, fired on nearly every row, and the header
+   * named a day true of about 3% of it. NCAAF is worse: one midweek pair makes
+   * the header "BEST WED" while 130-odd programs read "SAT" (UX review).
+   *
+   * Ties break on the earlier date, so a two-day board names the nearer half.
+   */
+  const oddsHeaderDate = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const q of quoteByPlayerKey.values()) {
+      const d = gameDateById.get(q.gameId);
+      if (d) counts.set(d, (counts.get(d) ?? 0) + 1);
+    }
+    let best: string | null = null;
+    let most = 0;
+    for (const [d, c] of counts) {
+      if (c > most || (c === most && best !== null && d < best)) {
+        best = d;
+        most = c;
+      }
+    }
+    // No quotes yet (loading, or the book prices nothing): fall back to the
+    // slate, which is what the coverage copy one row down is talking about.
+    return best ?? oddsDate;
+  }, [quoteByPlayerKey, gameDateById, oddsDate]);
+
+  /** game_id → the day to print on its pill, for games that are NOT the day the
+   *  header names. The common board — everybody on Sunday — therefore carries
+   *  no captions at all, exactly as it read before the window widened. */
+  const oddsDayByGame = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const [gameId, date] of gameDateById) {
+      if (date === oddsHeaderDate) continue;
+      const day = weekdayET(date);
+      // weekdayET answers '' for an unparseable date. An empty caption is a
+      // sliver of dead space under the pill, not a fact — leave it out.
+      if (day) out.set(gameId, day);
+    }
+    return out;
+  }, [gameDateById, oddsHeaderDate]);
 
   // Leaderboard names that two players share once folded. Neither gets a quote:
   // a wrong price on the wrong player is worse than a dash (data/name_match.py).
@@ -1298,6 +1432,11 @@ export function StatsScreen() {
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (gamePicker.selected.size > 0) n += 1;
+    // Counted since 2026-09-12: it lives on the sheet now, and the badge on the
+    // Filters button is the only thing that says the sheet is holding a cut.
+    // A filter the badge does not count is one the user cannot find their way
+    // back from.
+    if (tonightActive && !gamesPicked) n += 1;
     if (minGrade) n += 1;
     if (minGrade && !includeUngraded) n += 1;
     if (query.trim()) n += 1;
@@ -1307,7 +1446,8 @@ export function StatsScreen() {
       n += 1;
     }
     return n;
-  }, [gamePicker.selected, minGrade, includeUngraded, query, effectiveMode, bandActive, basis]);
+  }, [gamePicker.selected, tonightActive, gamesPicked, minGrade, includeUngraded, query,
+      effectiveMode, bandActive, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -1378,12 +1518,12 @@ export function StatsScreen() {
         ? `Nothing matched "${query.trim()}". Search matches player names — pick a game under Games to narrow by team.`
         : `Nothing matched "${query.trim()}".`;
     }
-    if (activeFilterCount > 0 || tonightActive) {
+    if (activeFilterCount > 0) {
       return 'No players match your filters. Tap a pill above to widen the board.';
     }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
-  }, [error, query, activeFilterCount, tonightActive, timeWindow, windowN, sport, stat, pickableGames]);
+  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames]);
 
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
@@ -1453,6 +1593,15 @@ export function StatsScreen() {
           <View style={styles.rightActions}>
             <Pressable
               onPress={() => setFiltersOpen(true)}
+              accessibilityRole="button"
+              // The badge is a bare number next to the word, so VoiceOver read
+              // "Filters, 2" with no trait and no idea what the 2 counted. This
+              // change makes the sheet the only route to the Availability cut,
+              // which promotes a standing scan finding into a real one (UX
+              // review, 2026-09-12).
+              accessibilityLabel={
+                activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Filters'
+              }
               style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
             >
               <Ionicons name="options-outline" size={16} color={colors.tint} />
@@ -1575,10 +1724,14 @@ export function StatsScreen() {
         </>
       ) : null}
 
-      {/* Time window strip (L3…L20) + the tonight-slate toggle at the end.
-          The toggle sits here rather than in the Filters sheet because "who is
-          playing today" is the cut users reach for constantly; it only renders
-          when a slate actually exists, so it can never empty the board.
+      {/* Time window strip (L3…L20).
+          THE SLATE CHIP USED TO LIVE AT THE END OF THIS ROW. Matt moved it into
+          the Filters sheet on 2026-09-12 ("in the filter at the top we should
+          have a toggle for playing today") — with the board no longer starting
+          filtered, a chip that only sometimes rendered, sat next to four time
+          windows it had nothing to do with, and re-read the board on tap was
+          the wrong home for it. It is one line in `Availability` now, beside
+          the Games cut it actually composes with.
           RN ScrollViews default to flexGrow/flexShrink 1, so as a direct child
           of the screen column this row gets crushed to a sliver whenever the
           controls + list overflow the screen (labels clip out entirely).
@@ -1599,41 +1752,6 @@ export function StatsScreen() {
             onPress={() => setTimeWindow(w.value)}
           />
         ))}
-        {hasSlate ? (
-          <>
-            <View style={styles.rowDivider} />
-            {/* This chip re-READS the board now (the server is narrowed to the
-                slate's teams), so it is the one chip on the row whose tap is
-                not instant. Two consequences, both handled here rather than
-                left to the list: a second impatient tap must not queue a
-                second whole-league read, and VoiceOver has to be told that
-                something is happening — focus stays on the chip while the
-                rows underneath it change silently. */}
-            <FilterChip
-              label={slateLabel}
-              icon="flame-outline"
-              active={tonightActive && !gamesPicked}
-              busy={loading}
-              // MUTED, NOT REMOVED, while a specific game is picked. The two
-              // are not the same cut — the chip is one slate date, the Games
-              // list is a seven-day window — so with both on you get their
-              // INTERSECTION, which on a Sunday game with "Next slate" showing
-              // is an empty board and two pills each claiming to be on (UX
-              // review, 2026-09-09). The narrower one wins and says so.
-              disabled={gamesPicked}
-              accessibilityLabel={
-                gamesPicked
-                  ? `${slateLabel}, off while a game is picked`
-                  : loading
-                    ? `${slateLabel}, loading`
-                    : tonightActive
-                      ? `${slateLabel}, on. Turn off to show every player`
-                      : `${slateLabel}, off`
-              }
-              onPress={() => setTonightOnly((v) => !v)}
-            />
-          </>
-        ) : null}
       </ScrollView>
 
       {/* Hit Rates | Averages */}
@@ -1704,7 +1822,7 @@ export function StatsScreen() {
             </Pressable>
           ))}
           {/* Only offered once the user has actually changed something. */}
-          {activeFilterCount > 0 || tonightActive ? (
+          {activeFilterCount > 0 ? (
             <Pressable
               onPress={resetFilters}
               style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
@@ -1745,9 +1863,11 @@ export function StatsScreen() {
           // several books selected the cells no longer share one, so the
           // header names the rule ("BEST") and each pill carries its badge.
           oddsLabel={booksLabel(books)}
-          // On an off day the slate — and so the lines — belong to a FUTURE
-          // date. An undated header would read as "now" (UX_REVIEW §3).
-          oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}
+          // On an off day the lines belong to a FUTURE date, and an undated
+          // header would read as "now" (UX_REVIEW §3). Dated off the same value
+          // the pill captions are the exception to, so the header and the
+          // column can never name different days.
+          oddsDateLabel={oddsHeaderDate && oddsHeaderDate !== todayET() ? weekdayET(oddsHeaderDate) : null}
           showMatchup={showMatchupCol}
           matchupTooltip={matchupTooltip}
         />
@@ -1773,6 +1893,7 @@ export function StatsScreen() {
                 statLabel={betLabel}
                 hitMode={hitMode}
                 colorful={colorful}
+                oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
@@ -1821,6 +1942,7 @@ export function StatsScreen() {
                 showOdds={showOdds}
                 statLabel={betLabel}
                 hitMode={hitMode}
+                oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
@@ -1878,6 +2000,12 @@ export function StatsScreen() {
         title="Filter players"
         resultCount={effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length}
         itemNoun="player"
+        // The Availability toggle re-READS the board (the server is narrowed to
+        // the slate's teams), so the count on the footer is the answer to the
+        // previous question until it lands. It is the one control on this sheet
+        // whose tap is not instant — the same fact the chip used to announce
+        // with `busy` when it lived on the window strip.
+        busy={loading}
         onReset={resetFilters}
         canReset={activeFilterCount > 0}
       >
@@ -1900,6 +2028,75 @@ export function StatsScreen() {
                 : `No ${sport} games scheduled in the next week.`
             }
           />
+        </FilterSection>
+
+        {/* AVAILABILITY — the old "Playing today" chip, moved here by Matt on
+            2026-09-12. It sits directly under Games because they are the same
+            kind of cut at two grains (this slate / these fixtures), and with
+            both on you get their INTERSECTION — which is why the narrower one
+            wins and this one says so rather than quietly doing nothing.
+
+            It is rendered even when it cannot act, disabled with the reason in
+            the summary. The chip's answer was to disappear, and a control that
+            is only there on the days it is needed is a control nobody knows
+            exists — which is how a board defaulting to every player would read
+            as having no way back. */}
+        {/* NO `summary`, so this row is NOT collapsible and the switch is on
+            screen the moment the sheet opens. `FilterSection` treats a summary
+            as "collapsible" and `FilterSheet` remounts its children on every
+            open, so with one it reset to collapsed every time — putting the cut
+            the removed chip served four taps deep, on a board that now defaults
+            to showing everybody. Every shipped filter sheet checked keeps
+            boolean toggles visible and reserves the disclosure for multi-value
+            sections (Klarna, Zalando, TheFork; UX review, 2026-09-12). */}
+        <FilterSection
+          title="Availability"
+          onClear={tonightActive && !gamesPicked ? () => setTonightOnly(false) : undefined}
+        >
+          <View style={styles.ungradedRow}>
+            <Text style={[styles.ungradedLabel, slateCutDead && styles.rowDisabled]}>
+              {hasSlate ? slateLabel : 'Playing today'}
+            </Text>
+            <Switch
+              value={tonightActive && !gamesPicked}
+              onValueChange={setTonightOnly}
+              disabled={slateCutDead}
+              accessibilityLabel={
+                slateChecking
+                  ? 'Playing today, checking the schedule'
+                  : !hasSlate
+                    ? 'Playing today, unavailable: no games scheduled'
+                    : gamesPicked
+                      ? `${slateLabel}, unavailable while a game is picked above`
+                      // The chip said ", loading" for this exact reason: the tap
+                      // is a network read and VoiceOver focus stays on the
+                      // control while the board changes underneath it. The
+                      // footer's `busy` is a visible affordance, not a spoken
+                      // one — accessibilityState.busy has no VoiceOver trait —
+                      // so the words have to be here (UX review, 2026-09-12).
+                      : loading
+                        ? `${slateLabel}, loading`
+                        : `${slateLabel}. On shows only players in action, off shows every player`
+              }
+            />
+          </View>
+          {/* Says which way the board is cut, in the words of the thing the
+              reader is looking at — "off" on a switch is not a fact about the
+              board until something names what off MEANS. And it must not assert
+              an empty schedule while it is still LOOKING: `hasSlate` is false
+              during the first seconds of the slate read too, so a sheet opened
+              then claimed there were no games all week (§00). */}
+          <Text style={[styles.availabilityNote, slateCutDead && styles.rowDisabled]}>
+            {slateChecking
+              ? 'Checking the schedule…'
+              : !hasSlate
+                ? `No ${sport} games in the next week, so there is nobody to narrow to.`
+                : gamesPicked
+                  ? 'A picked game is the narrower cut, so it wins. Clear Games to use this.'
+                  : tonightActive
+                    ? 'Showing only players whose game is on this slate.'
+                    : 'Showing every player. Lines come from each one’s next game.'}
+          </Text>
         </FilterSection>
 
         {/* TOUGHNESS. Only where the sport can answer it — a control over a
@@ -2280,6 +2477,7 @@ function OddsCell({
   playerName,
   statLabel,
   hitMode,
+  dayLabel,
   onPress,
 }: {
   quote: StatsOddsQuote | null;
@@ -2288,6 +2486,10 @@ function OddsCell({
   statLabel: string;
   /** Which idiom the board is speaking, for the off-line caption. */
   hitMode: HitMode;
+  /** "MON" — the day of THIS quote's game, when it is not the day the column
+   *  header names. Null on the common row, so an all-Sunday board is silent
+   *  about the day exactly as it was before the odds window widened. */
+  dayLabel?: string | null;
   onPress?: () => void;
 }) {
   if (quote == null) {
@@ -2319,12 +2521,21 @@ function OddsCell({
   // inherits nothing from the row — without the player and the stat it is 25
   // near-identical prices with no way to tell whose is whose. The line goes in
   // here precisely because it is no longer printed on the row.
-  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
+  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}${dayLabel ? `, ${dayLabel}` : ''}${quote.offLine ? ', the book’s own line, not the board’s' : ''}`;
   // The book's OWN line, when it does not post the board's: printed under the
   // price in whichever idiom the header is speaking — "3+" in At Least, the
   // book's own "O 2.5" in Over/Under — so it reads against the header without
   // translation (UX review). statsOdds offLine.
-  const caption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;
+  //
+  // THE DAY RIDES IN THE SAME SLOT, and the LINE MARKER goes first because the
+  // caption is `numberOfLines={1}` inside a container fixed at 62-93pt while
+  // the text scales with Dynamic Type: at accessibility sizes the tail is what
+  // truncates. Losing "MON" costs the reader a schedule fact; losing "3+" hides
+  // that the price is for a DIFFERENT LINE than the ruler's, i.e. a different
+  // bet. Order the sacrifice deliberately (UX review, 2026-09-12). VoiceOver
+  // reads both regardless — see `label` above.
+  const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;
+  const caption = [lineCaption, dayLabel].filter(Boolean).join(' · ') || null;
   return (
     <Pressable
       onPress={onPress}
@@ -2352,7 +2563,13 @@ function OddsCell({
         <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>
       {caption ? (
-        <Text style={styles.oddsCaption} numberOfLines={1}>
+        // The day is a SCHEDULE fact and the line marker changes the BET, so
+        // they do not carry equal weight: semibold when an off-line marker is
+        // present, regular when the caption is only a day.
+        <Text
+          style={[styles.oddsCaption, !lineCaption && styles.oddsCaptionDay]}
+          numberOfLines={1}
+        >
           {caption}
         </Text>
       ) : null}
@@ -2510,6 +2727,7 @@ function LeaderRow({
   showOdds,
   statLabel,
   hitMode,
+  oddsDay,
   onOddsPress,
   tappable,
   onPress,
@@ -2532,6 +2750,8 @@ function LeaderRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  /** Weekday of the quote's game, when it is not the day the header names. */
+  oddsDay?: string | null;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -2578,6 +2798,7 @@ function LeaderRow({
           playerName={row.player_name ?? ''}
           statLabel={statLabel}
           hitMode={hitMode}
+          dayLabel={oddsDay}
           onPress={onOddsPress}
         />
       ) : null}
@@ -2614,6 +2835,7 @@ function HitRateRow({
   statLabel,
   hitMode,
   colorful,
+  oddsDay,
   onOddsPress,
   tappable,
   onPress,
@@ -2635,6 +2857,8 @@ function HitRateRow({
   statLabel: string;
   /** Passed through to the odds cell's off-line caption. */
   hitMode: HitMode;
+  /** Weekday of the quote's game, when it is not the day the header names. */
+  oddsDay?: string | null;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -2687,6 +2911,7 @@ function HitRateRow({
           playerName={player.player_name}
           statLabel={statLabel}
           hitMode={hitMode}
+          dayLabel={oddsDay}
           onPress={onOddsPress}
         />
       ) : null}
@@ -2773,12 +2998,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   // Separates the time-window chips from the tonight toggle in the same row.
-  rowDivider: {
-    width: 1,
-    alignSelf: 'stretch',
-    marginVertical: 4,
-    backgroundColor: colors.separatorOpaque,
-  },
 
   header: {
     paddingHorizontal: spacing.lg,
@@ -3196,6 +3415,18 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 1,
+  },
+  oddsCaptionDay: {
+    fontWeight: font.weight.regular,
+  },
+  rowDisabled: {
+    color: colors.textTertiary,
+  },
+  availabilityNote: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: 6,
+    lineHeight: 16,
   },
   matchupWrap: {
     minWidth: MATCHUP_W,

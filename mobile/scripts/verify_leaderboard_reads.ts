@@ -271,13 +271,22 @@ async function main() {
     check(`${m[1]}: pages with .range(from, to)`, totalsBody.slice(at, at + 700).includes('.range(from, to)'));
   }
 
-  // The screen has to wait for the slate, or its first read is the whole
-  // league and is thrown away the moment the slate lands.
+  // The screen waits for the slate WHEN THE SLATE WOULD NARROW THE READ, or its
+  // first read is the whole league and is thrown away the moment the slate
+  // lands.
   // GATED ON WHICH SPORT the slate is for, not on a boolean. As a boolean it was
   // read stale on a sport switch — the reset and the load effect land in the
   // same commit, so the effect still saw `true` and fired a read narrowed by
   // the OUTGOING sport's teams (UX review, 2026-09-09).
-  check('the board waits for THIS sport\'s slate before reading', /if \(slateFor !== sport\) return;/.test(s));
+  // AND ONLY WHEN SOMETHING NARROWS, since 2026-09-12: with the board no longer
+  // opening filtered, `readTeams` is null on first paint for every sport, so an
+  // unconditional gate serialised two requests where the second's shape could
+  // not change — up to SLATE_GATE_MS of dead time in front of the whole-league
+  // read that is now the default (UX review).
+  check('the board waits for THIS sport\'s slate before a read the slate NARROWS',
+    /if \(slateFor !== sport && \(tonightOnly \|\| gamesPicked\)\) return;/.test(s));
+  check('and does not wait for one it cannot narrow',
+    !/if \(slateFor !== sport\) return;/.test(s));
   check('and the old boolean is gone, not shadowed', !/slateReady/.test(s));
   check('the slate releases the board even when it fails', /\.finally\(\(\) => \{[\s\S]{0,120}setSlateFor\(sport\)/.test(s));
   // …and even when it never settles at all: supabase-js has no fetch timeout,
@@ -298,14 +307,24 @@ async function main() {
     && (s.match(/rowsAreStale \? EMPTY_ROWS :/g) ?? []).length === 2);
   check('and a row-shaped placeholder stands in while it loads',
     (s.match(/<BoardSkeleton \/>/g) ?? []).length === 2 && /accessibilityLabel="Loading players"/.test(s));
-  // The slate chip is the one chip whose tap is a network read. It is
-  // ANNOUNCED busy, never dimmed: `disabled` renders tertiary text, and on an
-  // active chip that is tertiary on the tint fill — which erases the on/off
-  // affordance of the one control that changes the population of the board
-  // (UX_REVIEW §5). A second tap is harmless because the read is stamped.
-  check('the slate chip is announced busy', /busy=\{loading\}/.test(s));
-  check('and never dimmed while active', !/label=\{slateLabel\}[\s\S]{0,300}disabled=\{loading\}/.test(s));
-  check('and it tells VoiceOver so', /\$\{slateLabel\}, loading/.test(s));
+  // The slate cut is the one control whose tap is a NETWORK READ, so the count
+  // it is judged by is stale until the read lands. It used to be a chip on the
+  // window strip and said so with `busy`; Matt moved it onto the Filters sheet
+  // on 2026-09-12, and the sheet's footer — which asserts "Show N players" —
+  // had to inherit that or start stating a number nobody has measured
+  // (CLAUDE.md §00).
+  //
+  // ANNOUNCED busy, never disabled, which is the same call the chip made:
+  // trapping the user behind a spinner to protect a label is the worse trade,
+  // and a second tap is harmless because the read is stamped (UX_REVIEW §5).
+  check('the slate cut is announced busy', /busy=\{loading\}/.test(s));
+  const sheet = read('src/components/filters/FilterSheet.tsx');
+  check('and the footer says so rather than asserting a stale count',
+    /busy\s*\?\s*'Updating…'/.test(sheet)
+    && /accessibilityState=\{\{ busy \}\}/.test(sheet));
+  check('and it stays tappable, so nobody is trapped behind the read',
+    /accessibilityState=\{\{ busy \}\}[\s\S]{0,200}styles\.showBtn/.test(sheet)
+    && !/disabled=\{busy\}/.test(sheet));
   check('FilterChip keeps the active fill when busy',
     /busy\?: boolean;/.test(read('src/components/filters/FilterChip.tsx'))
     && /accessibilityState=\{\{ selected: active, disabled, busy \}\}/.test(read('src/components/filters/FilterChip.tsx')));
