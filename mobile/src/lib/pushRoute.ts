@@ -36,8 +36,9 @@ export type PushRoute =
 
 /** Which board view each summary push belongs on. */
 const VIEW_FOR_TYPE: Record<string, PicksView> = {
-  // In-play picks live on the Live segment, which only renders while that sport
-  // has one standing — which is exactly when this push is sent.
+  // In-play picks live on the Live Signals segment, which is on screen for every
+  // sport since 2026-09-12 — so this lands on the board whether or not the pick
+  // is still standing by the time the push is tapped.
   live_signals: 'live',
   // A fresh BET is a signal, so Signals is the shortest path to it.
   new_bets: 'signals',
