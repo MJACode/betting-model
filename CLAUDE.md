@@ -158,7 +158,11 @@ SYSTEM does not. Four routes reach anything:
    push it, then point a one-off service's start command at it (`prop-probe`
    exists for this) or add a scheduler job. See `docs/cloud_worker.md`.
 3. **Matt's machine** — ask for a specific command, not a vague blocker.
-4. **The Supabase MCP** — reads and writes production data directly.
+4. **The Supabase MCP** — READS production data directly. It does NOT write:
+   `execute_sql` runs in a read-only transaction and an UPDATE fails with
+   `25006: cannot execute UPDATE in a read-only transaction` (measured
+   2026-09-11). Production writes go through `data.db.get_connection()` and the
+   local `DATABASE_URL`.
 
 So the shape of an honest report is "the sandbox can't reach it, so I'm going
 via Railway / WebSearch / you" — never "this can't be done." If a blocker is
@@ -169,6 +173,20 @@ notice listing MCP servers as needing OAuth was wrong for Railway AND Supabase
 on 2026-09-05 — both answered on the first call, no auth step — and repeating it
 instead of spending two seconds on the call cost a turn mid-incident. Try the
 tool. Evidence: `docs/rules_evidence.md`.
+
+**REACHABILITY AND CAPABILITY ARE TWO MEASUREMENTS. MAKE BOTH, BY CALLING.**
+(mike, 2026-09-12: *"you need to check access to all tools like railway rather
+than assuming."*) The 2026-09-05 rule above fixed "can I reach it" and left
+"can it do the thing" untouched, so the mistake returned the moment a tool
+answered and then refused the operation. Neither limit is visible in a tool's
+name: Supabase `execute_sql` answers and is READ-ONLY; Railway `list-variables`
+answers, lists `CFBD_API_KEY`, and REDACTS every value.
+
+**A MISSING CREDENTIAL IS NOT A MISSING CAPABILITY. TEST THE LAYERS SEPARATELY:
+network → auth → permission → capability.** A 401 and a connection refused are
+different problems and only one is a blocker. "It can't run here" needs a
+command behind it; one absent route is not zero routes. Evidence, and the
+2026-09-12 case that cost a day: `docs/rules_evidence.md`.
 
 **THE CURRENT STATE OF A SYSTEM IS NOT ITS CAPABILITY, AND WORK YOU CAN DO IS
 NOT AN ACTION ITEM FOR MATT.** (Added 2026-09-01.) Two halves, both common:
