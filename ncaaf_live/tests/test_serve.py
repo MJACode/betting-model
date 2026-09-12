@@ -343,8 +343,17 @@ def test_a_stale_total_does_not_take_the_moneyline_with_it(engine):
 
 def test_a_quote_with_no_timestamp_still_prices(engine):
     """Backward compatible on purpose: a feed shape change is logged, not
-    allowed to blank the board."""
-    assert engine.price(_state(), _ctx(), _ODDS) != []
+    allowed to blank the board.
+
+    The h2h price is local rather than `_ODDS`: this fixture's home side is a
+    9.5-point pregame favourite, and stage 3 (correct_for_pregame, 2026-09-12)
+    marks favourites UP, which at -220 put the edge past the 0.18 stale-line
+    cap and emptied the board for a reason that has nothing to do with
+    timestamps. Measured before changing it -- the cap refuses 38.2% of
+    raw qualifying states and 40.0% of corrected ones on the 2025 replay, so
+    this is a fixture artifact, not the correction crowding the cap."""
+    odds = {"h2h": {"home": -280, "away": 230}, "total": _ODDS["total"]}
+    assert engine.price(_state(), _ctx(), odds) != []
 
 
 # ── the edge is a band, not a floor ──────────────────────────────────────────
