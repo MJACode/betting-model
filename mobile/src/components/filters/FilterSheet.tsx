@@ -43,6 +43,18 @@ interface Props {
   title: string;
   /** Number of rows the current filter yields — shown on the footer button. */
   resultCount: number;
+  /**
+   * A filter on this sheet is still being READ from the server, so
+   * `resultCount` is the answer to the previous question.
+   *
+   * The Stats sheet's Availability toggle narrows the leaderboard read itself
+   * (statsBoard.slateTeams), so flipping it leaves the footer asserting a count
+   * nobody has measured yet. It used to be a chip on the board, where `busy`
+   * said so out loud; moving the control here has to move that with it, or the
+   * sheet states a number it does not have (CLAUDE.md §00). Optional: a sheet
+   * whose filters are all client-side never has anything in flight.
+   */
+  busy?: boolean;
   /** Singular noun for the footer, e.g. "pick" → "Show 24 picks". */
   itemNoun: string;
   /** Clears every filter. "Clear all" is dimmed + inert when `canReset` is false. */
@@ -59,6 +71,7 @@ export function FilterSheet({
   itemNoun,
   onReset,
   canReset,
+  busy = false,
   children,
 }: Props) {
   /**
@@ -108,18 +121,26 @@ export function FilterSheet({
             </ScrollView>
 
             <View style={styles.footer}>
+              {/* Still TAPPABLE while busy — it only dismisses the sheet, and
+                  trapping the user behind a spinner to protect a label is the
+                  worse trade. It is announced busy rather than disabled, the
+                  same call the slate chip made on the board (UX_REVIEW §5). */}
               <Pressable
                 onPress={onClose}
+                accessibilityRole="button"
+                accessibilityState={{ busy }}
                 style={({ pressed }) => [
                   styles.showBtn,
-                  resultCount === 0 && styles.showBtnEmpty,
+                  !busy && resultCount === 0 && styles.showBtnEmpty,
                   pressed && styles.pressed,
                 ]}
               >
                 <Text style={styles.showBtnText}>
-                  {resultCount === 0
-                    ? 'No matches — adjust filters'
-                    : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
+                  {busy
+                    ? 'Updating…'
+                    : resultCount === 0
+                      ? 'No matches — adjust filters'
+                      : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
                 </Text>
               </Pressable>
             </View>

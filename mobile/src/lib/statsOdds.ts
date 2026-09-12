@@ -138,11 +138,60 @@ export function ambiguousKeys(names: Iterable<string | null | undefined>): Set<s
 }
 
 /**
+ * Each player's rows narrowed to their NEXT game.
+ *
+ * The board is no longer cut to one date (Matt, 2026-09-12: "always show all
+ * players and pull in a better line they have"), so the odds read spans the
+ * whole forward window and a player whose team plays Thursday AND Sunday has
+ * rows from both. Without this the best-price pick below would cross games and
+ * hand the reader Sunday's number under a Thursday matchup — two different
+ * bets, one pill, no way to tell (docs/best_line.md §5 is the same rule one
+ * level up: a price hung off another proposition is a different bet).
+ *
+ * The NEXT game wins, never the best price: which game a player is in is a
+ * fact about the schedule, and choosing it by the number would be choosing the
+ * bet to suit the board — the same reason `line_book` is taken in book order
+ * and not by price (CLAUDE.md §6).
+ *
+ * An UNRANKED game id sorts last, never first: the caller ranks the games it
+ * knows are still unstarted, so an id missing from the map is one we know
+ * nothing about, and letting it win would hide the game we do know is next.
+ * When no row's game is ranked the rows pass through untouched — fail open,
+ * exactly as `unstartedGameIds` does, because a blank column is the worse
+ * failure.
+ */
+function nextGameRows(
+  rows: PropOddsByBookRow[],
+  order?: ReadonlyMap<string, number> | null,
+): PropOddsByBookRow[] {
+  if (!order || rows.length < 2) return rows;
+  let bestGame: string | null = null;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const r of rows) {
+    const rank = order.get(r.game_id);
+    if (rank == null) continue;
+    // Ties break on the id so two games at the same kickoff resolve the same
+    // way on every render — an unstable winner reshuffles the pill's price
+    // and its badge on each refresh.
+    if (rank < bestRank || (rank === bestRank && bestGame != null && r.game_id < bestGame)) {
+      bestRank = rank;
+      bestGame = r.game_id;
+    }
+  }
+  if (bestGame == null) return rows;
+  const game = bestGame;
+  return rows.filter((r) => r.game_id === game);
+}
+
+/**
  * The selected book's quote per player for one market, at one line and side.
  *
  * `gameIds` bounds the rows to the sport's slate: the view has no sport column
  * and `player_points` is both an NBA and a WNBA market, so without it a WNBA
  * board could show an NBA price.
+ *
+ * `gameOrder` ranks those games by kickoff, so a player with rows in more than
+ * one of them is quoted from the nearest — see `nextGameRows`.
  */
 export function buildQuoteIndex(
   rows: PropOddsByBookRow[],
@@ -154,6 +203,10 @@ export function buildQuoteIndex(
      *  fallback outside the set; the best price among them wins the cell. */
     books: readonly string[];
     gameIds?: Set<string> | null;
+    /** game_id → kickoff rank, lowest first. Optional: without it the rows
+     *  are assumed to be one game per player, which is what a single-date
+     *  read guarantees. */
+    gameOrder?: ReadonlyMap<string, number> | null;
   },
 ): Map<string, StatsOddsQuote> {
   // Every row for the market on the slate, at ANY line: the ruler's line is
@@ -181,7 +234,8 @@ export function buildQuoteIndex(
   const rank = new Map(opts.books.map((b, i) => [b, i] as const));
   const priceOf = (r: PropOddsByBookRow) => num(opts.side === 'under' ? r.under_price : r.over_price);
   const out = new Map<string, StatsOddsQuote>();
-  for (const [key, all] of byPlayer) {
+  for (const [key, rowsForPlayer] of byPlayer) {
+    const all = nextGameRows(rowsForPlayer, opts.gameOrder);
     const atLine = all.filter((r) => sameLine(num(r.line), opts.line));
     const mine = (list: PropOddsByBookRow[]) =>
       list

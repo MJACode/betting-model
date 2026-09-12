@@ -432,7 +432,7 @@ check(
   // capped at one line: "Under 224.5" wrapped inside the 62pt odds column and
   // made one row of a 25-row board taller than its neighbours (UX review).
   check('the pill prints the off-line number under the price, in the board\'s idiom',
-    stats.includes('const caption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;')
+    stats.includes('const lineCaption = quote.offLine ? offLineCaption(quote.line, quote.side, hitMode) : null;')
       && /styles\.oddsCaption\} numberOfLines=\{1\}/.test(stats)
       && modeLineLabel(1.5, 'over', 'atLeast', true) === '2+'
       && modeLineLabel(1.5, 'over', 'over', true) === 'O 1.5'
@@ -517,11 +517,131 @@ check(
       && screen.includes('.every((s) => propMarketForStat(s) == null)'));
   check('the note dates itself to the slate, not to "today"',
     screen.includes('const slateDayLabel =') && screen.includes('weekdayET(slate.date)'));
-  check('football starts filtered to the slate, and the two places that decide agree',
-    screen.includes('function defaultTonightOnly(sport: Sport)')
-      && (screen.match(/defaultTonightOnly\(sport\)/g) ?? []).length === 2);
+  // 2026-09-12, Matt: "Instead of playing today. We should always show all
+  // players ... In the filter at the top we should have a toggle for playing
+  // today." NFL and NCAAF used to start filtered; nothing does now, and the
+  // two places that decide (the initial value and the sport-change reset) must
+  // still agree — the bug this check was written for (UX review, 2026-09-05).
+  check('no sport starts filtered to the slate, and the two places that decide agree',
+    screen.includes('const SLATE_ONLY_DEFAULT = false;')
+      && !screen.includes('function defaultTonightOnly')
+      && (screen.match(/SLATE_ONLY_DEFAULT/g) ?? []).length === 3);
+  // The chip is gone from the time-window strip and the toggle lives on the
+  // sheet. Both halves are pinned: leaving the chip behind would give one cut
+  // two controls, and dropping it without adding the switch would leave the
+  // board with no way back to the slate at all.
+  check('the slate cut moved off the window strip and onto the Filters sheet',
+    !/icon="flame-outline"/.test(screen)
+      && screen.includes('title="Availability"')
+      && screen.includes('onValueChange={setTonightOnly}'));
+  // It is a sheet filter now, so the Filters badge has to count it — the badge
+  // is the only thing on screen that says the sheet is holding a cut.
+  check('and the Filters badge counts it',
+    /activeFilterCount = useMemo\(\(\) => \{[\s\S]{0,600}if \(tonightActive && !gamesPicked\) n \+= 1;/.test(screen));
+  // A control that only exists on the days it can act is one nobody knows is
+  // there. It renders always, disabled with the reason stated.
+  check('the toggle renders even when it cannot act, and says why',
+    screen.includes("disabled={!hasSlate || gamesPicked}")
+      && screen.includes('A picked game is the narrower cut, so it wins.'));
   check('the Stats board reads no model at all any more',
     !screen.includes('propModelForStat') && !screen.includes('useTodayPicks'));
+}
+
+// ── The odds window: all players, each priced from HIS OWN next game ─────────
+// Matt, 2026-09-12: "We should always show all players and pull in a better
+// line they have." With the board no longer cut to one slate, a player whose
+// next game is Monday must still be priced on a Sunday board — so the read
+// spans the forward window, and the join has to pick the right game out of it.
+{
+  const stats = read('src/screens/StatsScreen.tsx');
+  const q = read('src/lib/queries.ts');
+
+  check('the prop read is a date RANGE, not one date',
+    q.includes('export async function fetchPropLinesForDates(')
+      && !q.includes('export async function fetchPropLinesForDate(')
+      && q.includes(".gte('game_date', from)")
+      && q.includes(".lte('game_date', to)"));
+  // PostgREST range paging without a total order can repeat or skip rows
+  // between windows (lib/paging.ts). The wider bound makes game_date the first
+  // key that varies, so it has to lead.
+  check('and orders by game_date first, so the paging stays deterministic',
+    /export async function fetchPropLinesForDates\([\s\S]{0,2000}?\.order\('game_date'\)\s*\n\s*\.order\('game_id'\)/.test(q));
+  check('the screen reads the same seven days the slate read covers',
+    stats.includes('const oddsFrom = todayET();')
+      && stats.includes("const oddsTo = addDays(oddsFrom, 7);")
+      && stats.includes('fetchPropLinesForDates(oddsFrom, oddsTo, propMarket)'));
+  // The unstarted-game bound used to be filtered to one date. Left that way it
+  // would have thrown every later game's rows away and the widening would have
+  // been a no-op with a bigger query.
+  check('and the unstarted-game bound spans the window rather than one date',
+    stats.includes('unstartedGameIds(slateGames, new Date(now).toISOString())')
+      && !/unstartedGameIds\(\s*slateGames\.filter\(\(g\) => g\.game_date === oddsDate\)/.test(stats));
+
+  // THE JOIN. A player with rows in two unstarted games is quoted from the
+  // NEXT one — never from the better price, which would hand the reader
+  // Sunday's number under a Thursday matchup.
+  const THU = 'nfl-thu';
+  const SUN = 'nfl-sun';
+  const twoGames: PropOddsByBookRow[] = [
+    row('Josh Allen', THU, '224.5', '-112', '-108', 'draftkings', 'player_pass_yds'),
+    row('Josh Allen', SUN, '224.5', '140', '-170', 'draftkings', 'player_pass_yds'),
+  ];
+  const order = new Map([[THU, 1], [SUN, 2]]);
+  const opts = {
+    market: 'player_pass_yds',
+    line: 224.5,
+    side: 'over' as const,
+    books: ['draftkings'],
+  };
+  const next = buildQuoteIndex(twoGames, { ...opts, gameOrder: order });
+  check('a player in two upcoming games is quoted from the NEXT one',
+    next.get('josh allen')?.gameId === THU, `got ${next.get('josh allen')?.gameId}`);
+  check('and it is the schedule that decides, not the better number',
+    next.get('josh allen')?.price === -112,
+    `+140 at ${SUN} is the better price and must lose`);
+  // Reversing the ranking must reverse the answer. The PRICES are reversed with
+  // it, so the expected game is again the WORSE number — a build that ignores
+  // the ranking answers THU here and SUN above, and cannot pass both.
+  const twoGamesFlipped: PropOddsByBookRow[] = [
+    row('Josh Allen', THU, '224.5', '140', '-170', 'draftkings', 'player_pass_yds'),
+    row('Josh Allen', SUN, '224.5', '-112', '-108', 'draftkings', 'player_pass_yds'),
+  ];
+  const flipped = buildQuoteIndex(twoGamesFlipped, {
+    ...opts,
+    gameOrder: new Map([[SUN, 1], [THU, 2]]),
+  });
+  check('reversing the kickoff order reverses the quote',
+    flipped.get('josh allen')?.gameId === SUN && flipped.get('josh allen')?.price === -112,
+    `got ${flipped.get('josh allen')?.gameId} at ${flipped.get('josh allen')?.price}`);
+  // A game already under way is absent from the rank map. It must sort LAST,
+  // never first: an unranked id is one we know nothing about. SUN is the
+  // started one here, and it also holds the better price — so it can only lose
+  // on the ranking.
+  const partial = buildQuoteIndex(twoGames, { ...opts, gameOrder: new Map([[THU, 5]]) });
+  check('an unranked game sorts last, so a started game cannot win the cell',
+    partial.get('josh allen')?.gameId === THU,
+    `got ${partial.get('josh allen')?.gameId}`);
+  // Fail OPEN, exactly as unstartedGameIds does: no ranking at all must not
+  // blank the column.
+  const unranked = buildQuoteIndex(twoGames, { ...opts, gameOrder: new Map() });
+  check('and no ranking at all still prices the player rather than dropping him',
+    unranked.get('josh allen') != null);
+  check('a caller that passes no gameOrder is unaffected',
+    buildQuoteIndex(twoGames, opts).get('josh allen') != null);
+
+  // The header dates the NEAREST slate; a pill only carries a day when its own
+  // game is on a different one, so an all-Sunday board reads as it always did.
+  check('the pill carries a weekday only when its game is not the header\'s day',
+    stats.includes('if (!g.game_date || g.game_date === oddsDate) continue;')
+      && stats.includes('dayLabel={oddsDay}')
+      && stats.includes("const caption = [dayLabel, lineCaption].filter(Boolean).join(' · ') || null;"));
+  check('and VoiceOver hears the day too',
+    stats.includes('${dayLabel ? `, ${dayLabel}` : \'\'}'));
+  // A team whose game is over but who plays again inside the window keeps its
+  // pill: "Final" there would deny the reader a bet that is still on the board.
+  check('a team with a later game in the window is never labelled Live or Final',
+    /for \(const g of slateGames\) \{\s*const teams = \[g\.home_team, g\.away_team\]/.test(stats)
+      && stats.includes('pending.forEach((t) => out.delete(t));'));
 }
 
 // ── Per-book side coverage, and the Over/Under control it locks ─────────────
