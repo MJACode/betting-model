@@ -1,4 +1,4 @@
-"""Live is a conditional segment on Picks, not a bottom tab.
+"""Live Signals is a segment on Picks, not a bottom tab — and it is always on.
 
 2026-09-06 (matt). The in-play board was its own tab from Phase 5 until now. It
 was the same PickCard over the same sport filter in a lossy copy of the Picks
@@ -10,11 +10,19 @@ it is sport-scoped, empty 100% of it for NBA, NHL, NFL, UFC and GOLF.
 The app had already run this merge once -- `Today | Signals` replaced separate
 Picks and Signals tabs for the same reason -- so Live became the third segment.
 
+IT WAS CONDITIONAL UNTIL 2026-09-12, when matt asked for the opposite and for
+the name: "I want it to always show for each sport but only populates with live
+signal bets". The measurement above is the accepted cost; what the conditional
+version could not do is be FOUND when nothing was live, so "is anything live?"
+had nowhere to be asked and its absence read as a missing feature.
+
 Three properties are pinned here, each of which has a silent failure mode:
 
-1. THE SEGMENT IS CONDITIONAL. It renders only when the selected sport has live
-   picks. An always-present segment that is empty 81% of the time reproduces
-   exactly the thing the tab was removed for.
+1. THE SEGMENT IS UNCONDITIONAL AND THE DOT IS NOT. An always-on board makes
+   "is this the live board" and "is anything live" two different questions, and
+   a red dot that is always lit answers neither. The count and the dot are now
+   the whole live indicator on this control, so a guard creeping back onto the
+   segment, or a dot wired to the wrong thing, silently removes it.
 
 2. THE BETSLIP RESOLVER READS LIVE PICKS. Live picks became addable to the slip
    in the same change. fetchPicksForDate excludes is_live rows by construction,
@@ -31,7 +39,11 @@ Three properties are pinned here, each of which has a silent failure mode:
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+# nfl/live_model is its own package root (see tests/test_nfl_live_pick_writer.py).
+sys.path.insert(0, str(Path(__file__).parent.parent / "nfl"))
 
 ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
@@ -97,7 +109,7 @@ def test_settings_points_at_the_live_segment():
     ), "Settings' live-betting row no longer opens the live segment"
 
 
-# ── 2. the segment is conditional ─────────────────────────────────────────────
+# ── 2. the segment is always on, and so is its name ───────────────────────────
 
 
 def test_picks_carries_a_live_view():
@@ -117,41 +129,116 @@ def test_picks_carries_a_live_view():
         )
 
 
-def test_the_live_segment_renders_only_when_something_is_live():
-    """No live picks in this sport, no segment -- no empty slot to learn to ignore."""
+def test_the_live_segment_is_always_rendered():
+    """Every sport gets the board, whether or not anything is in play (matt, 2026-09-12)."""
     src = _read(PICKS)
-    m = re.search(r"(\{[^{}]*liveData\.length > 0[^{}]*\?\s*\(\s*<SubTabBtn)", src, re.S)
-    assert m, (
-        "the Live SubTabBtn is not guarded by liveData.length > 0. An "
-        "always-present segment that is empty most of the time is the failure "
-        "the Live TAB was removed for."
+    m = re.search(r'<SubTabBtn\s+label="Live Signals"', src)
+    assert m, "the Live Signals segment is gone, or was renamed"
+    preceding = src[max(0, m.start() - 400) : m.start()]
+    # A JSX conditional immediately ahead of it is the old behaviour returning.
+    assert "liveData.length > 0 ?" not in preceding and "view === 'live' ?" not in preceding, (
+        "the Live Signals segment is conditional again. matt asked for it on "
+        "every sport: a board that only exists when it has something cannot be "
+        "found when it has nothing."
     )
 
 
-def test_the_other_two_segments_are_unconditional():
-    """Today and Signals must NOT pick up the live segment's guard."""
+def test_the_live_dot_on_the_segment_is_conditional():
+    """The segment is permanent, so the DOT is what has to carry 'something is live'."""
+    src = _read(PICKS)
+    m = re.search(r'<SubTabBtn\s+label="Live Signals"(.*?)/>', src, re.S)
+    assert m, "the Live Signals segment is gone, or was renamed"
+    assert re.search(r"dot=\{liveData\.length > 0\}", m.group(1)), (
+        "the live dot is not gated on there being live picks -- a dot that is "
+        "always lit has stopped meaning anything"
+    )
+    # and the dot the button draws must be the gated prop, not "this is the live
+    # board" -- which `live` now is, on every render of the live segment.
+    assert "{dot ? <LiveDot /> : null}" in src, "SubTabBtn no longer draws the gated dot"
+    assert "{live ? <LiveDot" not in src, (
+        "SubTabBtn draws its dot from `live` again, which is always true on the "
+        "live board -- the dot would never go out"
+    )
+
+
+def test_the_live_board_says_which_sports_have_a_live_model():
+    """Empty means two different things, and one of them is 'never' (lib/liveSports.ts)."""
+    src = _read(PICKS)
+    assert "hasLiveModel(sport)" in src, (
+        "the live empty state no longer distinguishes a sport with no in-play "
+        "model -- 'an in-play model finds an edge' is a promise NBA cannot keep"
+    )
+    assert "liveModelSportsSentence()" in src, (
+        "nothing names the sports that do have a live lane, so a permanently "
+        "empty board gives the reader nowhere to go"
+    )
+
+
+def test_the_live_sports_constant_matches_the_python_registry():
+    """The app's live-lane list is pinned to config.py, like lib/thresholds.ts.
+
+    Two sources, because the NFL in-play lane is its own worker: config.LIVE_MODELS
+    carries the MLB and NCAAF lanes the generic live scorer runs, and
+    nfl/live_model/config.MODEL_IDS carries the NFL one.
+    """
+    import config  # noqa: PLC0415
+    from live_model import config as nfl_live_config  # noqa: PLC0415
+
+    expected = {sport for sport, *_ in config.LIVE_MODELS.values()}
+    if nfl_live_config.MODEL_IDS:
+        expected.add("NFL")
+
+    src = _read(MOBILE / "src" / "lib" / "liveSports.ts")
+    m = re.search(r"LIVE_MODEL_SPORTS[^=]*=\s*new Set\(\[([^\]]*)\]\)", src)
+    assert m, "LIVE_MODEL_SPORTS is not a literal Set in lib/liveSports.ts"
+    actual = {s.strip().strip("'\"") for s in m.group(1).split(",") if s.strip()}
+    assert actual == expected, (
+        f"the app thinks {sorted(actual)} have in-play models; the Python "
+        f"registry says {sorted(expected)}. A live lane shipped (or retired) and "
+        "the app's Live Signals empty state is now lying about it."
+    )
+
+
+def test_all_three_segments_are_unconditional():
+    """Since 2026-09-12 none of the three is allowed a render guard."""
     src = _read(PICKS)
     for label in ("Today", "Signals"):
         m = re.search(rf'<SubTabBtn label="{label}"', src)
         assert m, f"the {label} segment disappeared"
         preceding = src[max(0, m.start() - 120) : m.start()]
-        assert "length > 0 ?" not in preceding, (
-            f"the {label} segment became conditional; only Live is"
-        )
+        assert "length > 0 ?" not in preceding, f"the {label} segment became conditional"
 
 
-def test_leaving_a_sport_does_not_eject_you_from_a_live_game():
-    """The sport-change reset keeps the view when the new sport is also live.
+def test_nothing_moves_the_reader_off_the_live_board():
+    """Neither a sport switch nor the last game ending may change the view.
 
-    A blanket setView('today') was correct while both views always existed; with
-    a conditional third segment it would bounce a user out of a game they are
-    watching every time they glanced at another sport.
+    Both used to, and both had to while the segment was conditional: the board
+    was about to disappear from under the reader. It does not disappear any more,
+    so a setView() on either path is a screen that changes boards on its own --
+    the thing 2026-09-06 removed the TAB for, inverted.
     """
     src = _read(PICKS)
-    assert re.search(
-        r"setView\(\(v\) => \(v === 'live' && !liveSports\.has\(sport\) \? 'today' : v\)\)",
-        src,
-    ), "the sport-change effect resets the view unconditionally again"
+    # The sport-change reset: filter and search only.
+    m = re.search(r"useEffect\(\(\) => \{\s*setFilter\(freshFilter\(\)\);(.*?)\}, \[sport\]\);", src, re.S)
+    assert m, "the sport-change reset effect is gone"
+    assert "setView" not in m.group(1), (
+        "the sport-change effect moves the reader's view again; Live Signals "
+        "exists on every sport now, so there is nothing to eject them from"
+    )
+    # The board emptying out: a toast, not a redirect.
+    m = re.search(r"const prevLiveCount = useRef<number \| null>\(null\);(.*?)\}, \[view, liveLoading, liveData\.length\]\);", src, re.S)
+    assert m, "the live-board-emptied effect no longer tracks the previous count"
+    assert "setView" not in m.group(1), (
+        "the last game ending moves the reader back to Today again"
+    )
+    assert "showToast" in m.group(1), (
+        "the board now empties in silence, which reads as a glitch -- say the "
+        "games finished"
+    )
+    assert "prev !== null && prev > 0" in m.group(1), (
+        "the toast is no longer gated on the something-to-zero transition: it "
+        "will fire on arrival at an already-empty board, and again on every poll"
+    )
 
 
 def test_the_live_poll_is_slow_unless_you_are_watching_it():
