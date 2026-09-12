@@ -3,6 +3,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   FlatList,
+  PixelRatio,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -22,11 +23,12 @@ import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { HitModeSheet } from '@/components/HitModeSheet';
+import { StatGroupSheet } from '@/components/StatGroupSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
-import { GroupTabs, SegmentTabs } from '@/components/GroupTabs';
+import { SegmentTabs } from '@/components/GroupTabs';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
@@ -354,6 +356,7 @@ export function StatsScreen() {
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [hitMode, setHitMode] = useState<HitMode>('atLeast');
   const [modeOpen, setModeOpen] = useState<boolean>(false);
+  const [groupOpen, setGroupOpen] = useState<boolean>(false);
   // TOUGHNESS as a filter, which is the half of Matt's ask the grade alone did
   // not answer: the column is truthful on every sport now, but until this the
   // board could not be cut or ordered by it. A FLOOR, not a band — "B or
@@ -1375,6 +1378,10 @@ export function StatsScreen() {
   };
 
   const groups = GROUP_ORDER[sport];
+  // Does Hit Rates | Averages still fit on the end of the window row? Read at
+  // render rather than cached in state: a Dynamic Type change re-renders the
+  // tree, and a stale flag here is a clipped control.
+  const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // The headline under the ruler, in the mode's own idiom: "25+ Points" in
   // At Least, "Over 0.5 Hits" in Over (lib/hitMode.ts).
@@ -1489,6 +1496,11 @@ export function StatsScreen() {
         },
       });
     }
+    // The slate cut DOES belong here. It was suppressed for one commit on the
+    // reasoning that its own chip sat on the window row two rows up, so the
+    // pill drew one filter as two controls — but Matt moved that chip into the
+    // Filters sheet the same day, and a sheet cut with no pill has no
+    // on-screen representation at all. That is exactly what this row is for.
     if (tonightActive && !gamesPicked) {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
     }
@@ -1500,8 +1512,8 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [query, tonightActive, gamesPicked, slateLabel, effectiveMode, bandActive, bandSummary, basis,
-      clearBand, gamePicker, pickableGames, minGrade, includeUngraded]);
+  }, [query, tonightActive, gamesPicked, slateLabel, effectiveMode, bandActive,
+      bandSummary, basis, clearBand, gamePicker, pickableGames, minGrade, includeUngraded]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
   // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
@@ -1591,23 +1603,44 @@ export function StatsScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Stats</Text>
           <View style={styles.rightActions}>
+            {/* "Clear all" lives beside the control it undoes rather than on a
+                row of its own at the bottom of the stack — MasterClass puts
+                FILTERS and CLEAR FILTERS on one line, and with the duplicate
+                slate pill suppressed below there was nothing else left on that
+                row to justify its 34pt (UX review, 2026-09-12). */}
+            {activeFilterCount > 0 ? (
+              <Pressable
+                onPress={resetFilters}
+                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
+                style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.clearText}>Clear all</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={() => setFiltersOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
-              // The badge is a bare number next to the word, so VoiceOver read
-              // "Filters, 2" with no trait and no idea what the 2 counted. This
-              // change makes the sheet the only route to the Availability cut,
-              // which promotes a standing scan finding into a real one (UX
-              // review, 2026-09-12).
+              // The badge is a bare number in a View next to the word, so
+              // VoiceOver read "Filters, 2" with no trait and no idea what the
+              // 2 counted — the button said the same whether one filter was on
+              // or five. Two changes landed on this in one day and both fixed
+              // it: master made the sheet the only route to the Availability
+              // cut, which promoted a standing scan finding into a real one,
+              // and the control-stack collapse hit it from the scan side (UX
+              // reviews, 2026-09-12).
               accessibilityLabel={
                 activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Filters'
               }
+              accessibilityHint="Opens the filter options"
               style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
             >
               <Ionicons name="options-outline" size={16} color={colors.tint} />
               <Text style={styles.filterBtnText}>Filters</Text>
               {activeFilterCount > 0 ? (
-                <View style={styles.filterBadge}>
+                <View style={styles.filterBadge} importantForAccessibility="no">
                   <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
                 </View>
               ) : null}
@@ -1623,37 +1656,60 @@ export function StatsScreen() {
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
       ) : null}
 
-      {/* Stat selector — the primary control, straight under the sport row.
-          One tappable group row (Passing | Rushing | …) plus a single stat chip
-          row scoped to the active group, instead of the old one-chip-row-per-
-          group stack (4 rows for NFL) that pushed the leaderboard below the
-          fold. Sports with a single group (WNBA/NBA/UFC) skip the group row. */}
+      {/* Stat selector — the primary control, straight under the sport row, and
+          the one row on this screen that is never allowed to cost less: it is
+          the board's subject, one tap, directly manipulated.
+          ONE row, not three. It was a chip row per group (4 for NFL), then a
+          group tab row above a chip row; both pushed the leaderboard below the
+          fold. The group is now a pill at the head of the chips it scopes, so
+          the two levels share a line (UX review, 2026-09-12).
+          Sports with a single group (WNBA/NBA/UFC) skip the pill. */}
       <View style={styles.statPicker}>
-        {groups.length > 1 ? (
-          <GroupTabs
-            groups={groups}
-            active={activeGroup}
-            onChange={pickGroup}
-          />
-        ) : null}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.fixedRow}
-          contentContainerStyle={styles.chipRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {statsForSport(sport)
-            .filter((s) => s.group === activeGroup)
-            .map((s) => (
-              <FilterChip
-                key={`${s.group}:${String(s.key)}`}
-                label={s.label}
-                active={s.key === stat.key && s.group === stat.group}
-                onPress={() => pickStat(s)}
-              />
-            ))}
-        </ScrollView>
+        {/* The group is PINNED at the head of the row, outside the scroller:
+            it names what the chips beside it are a subset of, so scrolling it
+            off would leave "Pass Yards … Pass Attempts" with nothing saying
+            which of the NFL's four groups they came from. */}
+        <View style={styles.statRow}>
+          {groups.length > 1 ? (
+            <Pressable
+              onPress={() => setGroupOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Stat group"
+              accessibilityValue={{ text: activeGroup }}
+              accessibilityHint={`Opens the ${groups.join(', ')} options`}
+              // Shares the direction pill's style object rather than copying
+              // it: two chevron pills on one screen drawn from two style
+              // blocks is the duplicate UX_REVIEW §8 exists to catch. A THIRD
+              // caller means extracting a DropdownPill component.
+              style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
+            >
+              <Text style={styles.dirPillText} numberOfLines={1}>
+                {activeGroup}
+              </Text>
+              {/* chevron-expand, not chevron-down: it opens a menu in place. */}
+              <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
+            </Pressable>
+          ) : null}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.rowScroller}
+            contentContainerStyle={styles.chipRowInline}
+            keyboardShouldPersistTaps="handled"
+          >
+            {statsForSport(sport)
+              .filter((s) => s.group === activeGroup)
+              .map((s) => (
+                <FilterChip
+                  key={`${s.group}:${String(s.key)}`}
+                  label={s.label}
+                  active={s.key === stat.key && s.group === stat.group}
+                  onPress={() => pickStat(s)}
+                />
+              ))}
+          </ScrollView>
+        </View>
       </View>
 
       {/* Line picker: the mode, a tick ruler, then the headline. */}
@@ -1704,27 +1760,39 @@ export function StatsScreen() {
               max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}
               onChange={setLineN}
               format={(n) => rulerValueLabel(n, hitMode)}
-              describe={(n) => hitModeHeadline(n, hitMode, stat?.label ?? '')}
+              // Carries the book's number in At Least mode because the
+              // headline row that used to print it is gone: the ruler is the
+              // one element a screen-reader user drives, so dropping it here
+              // would take the book's line off the screen entirely for them —
+              // the exact regression the 2026-09-05 fix prevented.
+              describe={(n) =>
+                hitMode === 'atLeast'
+                  ? `${hitModeHeadline(n, hitMode, stat?.label ?? '')}, ${hitModeLineLabel(n, hitMode)}`
+                  : hitModeHeadline(n, hitMode, stat?.label ?? '')
+              }
               a11yLabel={`${stat?.label ?? ''} line`}
             />
-          </View>
-          <View style={styles.headlineRow}>
-            <View style={styles.headlineRule} />
-            <Text style={styles.headlineText}>{lineHeadline}</Text>
-            {/* At Least only. Its headline is the fan's idiom — "2+ Hits" —
-                so the book's number for the same bet would otherwise be
-                nowhere on screen (UX review, 2026-09-05). Over and Under ARE
-                that number now, and repeating it beside itself is noise
-                (Matt, 2026-09-06). */}
+            {/* At Least only, and a footnote rather than a headline. The row
+                this replaces restated the stat, the number and the direction —
+                all three already on screen — in the screen's second-largest
+                type, outweighing the hit rate the board exists to show (UX
+                review, 2026-09-12). Only the book's half-point line was novel,
+                so only it survives. Over and Under ARE that number already. */}
             {hitMode === 'atLeast' ? (
-              <Text style={styles.headlineLine}>{hitModeLineLabel(lineN, hitMode)}</Text>
+              // Silent: `describe` above already appends this exact string to
+              // the ruler's accessibilityValue, so leaving it reachable made
+              // VoiceOver read "Over 1.5" twice — once in the adjustable, once
+              // on the next swipe. Same double-read the direction pill's note
+              // records fixing on 2026-09-05.
+              <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
+                {hitModeLineLabel(lineN, hitMode)}
+              </Text>
             ) : null}
-            <View style={styles.headlineRule} />
           </View>
         </>
       ) : null}
 
-      {/* Time window strip (L3…L20).
+      {/* Time window strip (L3…L20), with Hit Rates | Averages riding the end.
           THE SLATE CHIP USED TO LIVE AT THE END OF THIS ROW. Matt moved it into
           the Filters sheet on 2026-09-12 ("in the filter at the top we should
           have a toggle for playing today") — with the board no longer starting
@@ -1732,30 +1800,56 @@ export function StatsScreen() {
           windows it had nothing to do with, and re-read the board on tap was
           the wrong home for it. It is one line in `Availability` now, beside
           the Games cut it actually composes with.
-          RN ScrollViews default to flexGrow/flexShrink 1, so as a direct child
-          of the screen column this row gets crushed to a sliver whenever the
-          controls + list overflow the screen (labels clip out entirely).
-          Pin it to its natural height — the FlatList below is the flexible
-          region. */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.fixedRow}
-        contentContainerStyle={styles.windowRow}
-        keyboardShouldPersistTaps="handled"
-      >
-        {TIME_WINDOWS.map((w) => (
-          <FilterChip
-            key={String(w.value)}
-            label={w.label}
-            active={w.value === timeWindow}
-            onPress={() => setTimeWindow(w.value)}
-          />
-        ))}
-      </ScrollView>
-
-      {/* Hit Rates | Averages */}
-      {canHitRate ? (
+          RN ScrollViews default to flexGrow/flexShrink 1, so a direct child of
+          the screen column gets crushed to a sliver whenever the controls +
+          list overflow the screen (labels clip out entirely). The WRAPPER is
+          that child now and carries the pin; the scroller inside it flexes on
+          the horizontal axis, which cannot crush anything. The FlatList below
+          stays the one flexible region. */}
+      <View style={[styles.fixedRow, styles.windowStrip]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.rowScroller}
+          contentContainerStyle={styles.windowRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {TIME_WINDOWS.map((w) => (
+            <FilterChip
+              key={String(w.value)}
+              label={w.label}
+              active={w.value === timeWindow}
+              onPress={() => setTimeWindow(w.value)}
+            />
+          ))}
+        </ScrollView>
+        {/* Hit Rates | Averages — a two-value switch, so it rides the end of
+            this row instead of spending a third full-width underline-tab row
+            on the screen (UX review, 2026-09-12). Still SegmentTabs and not a
+            hand-rolled segment: the tablist/tab/selected roles travel with the
+            component, and that is the point of reusing it. The row is a View
+            with the scroller flexing inside it, so `fixedRow` still pins the
+            whole strip to its natural height and the FlatList stays the one
+            flexible child of the screen column. */}
+        {canHitRate && !stackModeTabs ? (
+          <View style={styles.modeSeg}>
+            <SegmentTabs
+              items={MODES}
+              active={mode}
+              onChange={setMode}
+              compact
+              labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
+            />
+          </View>
+        ) : null}
+      </View>
+      {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
+          row and nothing in the strip can shrink (tabCompact is flex: 0, and a
+          plain View defaults to flexShrink: 0 in RN), so the time-window chips
+          are squeezed to nothing and "Averages" clips. The 38pt row is the
+          right answer for exactly the users who need it, and only for them
+          (UX review, 2026-09-12). */}
+      {canHitRate && stackModeTabs ? (
         <SegmentTabs
           items={MODES}
           active={mode}
@@ -1821,16 +1915,6 @@ export function StatsScreen() {
               <Ionicons name="close" size={12} color={colors.tint} />
             </Pressable>
           ))}
-          {/* Only offered once the user has actually changed something. */}
-          {activeFilterCount > 0 ? (
-            <Pressable
-              onPress={resetFilters}
-              style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
-              hitSlop={6}
-            >
-              <Text style={styles.clearText}>Clear all</Text>
-            </Pressable>
-          ) : null}
         </ScrollView>
       ) : null}
 
@@ -1986,6 +2070,14 @@ export function StatsScreen() {
         underAvailable={underAvailable}
         unavailableNote={dirLockNote}
         onClose={() => setModeOpen(false)}
+      />
+      <StatGroupSheet
+        visible={groupOpen}
+        groups={groups}
+        active={activeGroup}
+        countFor={(g) => statsForSport(sport).filter((st) => st.group === g).length}
+        onPick={pickGroup}
+        onClose={() => setGroupOpen(false)}
       />
       <AddLineSheet
         input={lineSheetInput}
@@ -2983,7 +3075,11 @@ const styles = StyleSheet.create({
   clearText: {
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
-    color: colors.avoid,
+    // NOT colors.avoid. bet/avoid/none are SIGNAL colours (UX_REVIEW §2) and
+    // this is an undoable view control, not a signal — it was tolerable at the
+    // end of a chip row and is not now that it sits in the header, above a
+    // board that uses the same red to mean something.
+    color: colors.tint,
   },
 
   // Sheet layout helpers
@@ -3090,6 +3186,9 @@ const styles = StyleSheet.create({
   },
   rulerWrap: {
     flex: 1,
+    // A floor, so nothing sharing the row can shrink the strip out of
+    // existence. Below this the ticks are unusable anyway.
+    minWidth: 120,
     height: 58,
     justifyContent: 'center',
   },
@@ -3147,42 +3246,69 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  headlineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-  },
-  headlineRule: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.separator,
-  },
-  headlineLine: {
+  // The book's half-point line, sitting at the end of the ruler row. A
+  // footnote, not a headline: it qualifies the number the ruler is showing.
+  bookLine: {
+    // Shrinks, and truncates via numberOfLines: the ruler beside it is
+    // `flex: 1` with flexBasis 0, so an unshrinkable footnote starved it to
+    // zero width at large Dynamic Type — and the ruler renders nothing at
+    // width 0, leaving an empty 58pt band and no way to set the line by touch
+    // (UX review, 2026-09-12).
+    flexShrink: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  headlineText: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
 
   // ── Window chips ──
+  // The strip is the direct child of the screen column, so IT carries
+  // `fixedRow`'s flexGrow/flexShrink 0; the scroller inside it flexes
+  // horizontally, which is a different axis and cannot crush the row.
+  windowStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   windowRow: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+
+  // Shared by the two rows that pair a pinned control with a scroller.
+  rowScroller: {
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+  modeSeg: {
+    paddingRight: spacing.lg,
+    paddingLeft: spacing.sm,
   },
 
   // ── Hit Rates / Averages tabs ──
 
   statPicker: {
-    paddingTop: spacing.xs,
+    paddingTop: 0,
+    // Explicit rather than relying on a plain View's flexShrink: 0 default —
+    // the row below states the same invariant in a comment, and the two should
+    // not be pinned by different mechanisms.
+    flexGrow: 0,
+    flexShrink: 0,
   },
-  // Group tabs (Passing | Rushing | …) — same uppercase-caption look the old
-  // section labels had, but tappable and on one row.
+  // The pinned group pill plus the scrolling stat chips, on one line.
+  statRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: spacing.lg,
+    gap: spacing.sm,
+  },
+  // The chips' own row already starts after the pill, so it drops the left
+  // inset `chipRow` carries and keeps only the trailing one.
+  chipRowInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingRight: spacing.lg,
+    paddingVertical: 2,
+  },
   ungradedRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3194,11 +3320,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.footnote,
     color: colors.textPrimary,
-  },
-  chipRow: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-    paddingVertical: 2,
   },
   searchWrap: {
     flexDirection: 'row',
@@ -3233,18 +3354,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
+  // textSecondary, not textTertiary: tertiary composites to ~3.4:1 on the card
+  // and this is 11pt, which is not large text — the case UX_REVIEW §5 names by
+  // hand, on the legend for every column below it. Hierarchy is carried by
+  // size and position, exactly as rowSubline does (UX review, 2026-09-12).
   colHeaderRank: {
     width: 20,
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     letterSpacing: 0.3,
   },
   colHeaderName: {
     flex: 1,
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     letterSpacing: 0.3,
   },
   colHeaderRight: {
@@ -3252,7 +3377,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     letterSpacing: 0.3,
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },

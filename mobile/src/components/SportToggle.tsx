@@ -73,6 +73,11 @@ export function SportToggle({
                 offsets.current[s] = e.nativeEvent.layout.x;
                 if (s === sport) scrollToActive();
               }}
+              // ~26pt tall, the smallest target on the Stats board and well
+              // under the 44pt HIG floor. Slop rather than height: this row is
+              // on three tabs and growing it costs vertical space everywhere
+              // (UX review, 2026-09-12).
+              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               accessibilityLabel={[

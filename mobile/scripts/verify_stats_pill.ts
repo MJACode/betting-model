@@ -106,8 +106,12 @@ check(
 
 // ── 3. The stat groups are tabs, everywhere ─────────────────────────────────
 
+// StatsScreen is deliberately NOT in this list. Its group row collapsed into a
+// dropdown pill on 2026-09-12 (UX review): three underline-tab rows on one
+// screen at two sizes left the eye unable to tell a board-level switch from a
+// filter, and the row was 33pt of a 446pt control stack. The boards that still
+// have the vertical room keep the tabs, so the component stays pinned there.
 for (const [file, src] of [
-  ['StatsScreen', stats],
   ['TeamsBoard', teams],
   ['PlayerStatsScreen', player],
 ] as const) {
@@ -117,6 +121,22 @@ for (const [file, src] of [
     !src.includes('styles.groupTab') && !src.includes('groupTabText'),
   );
 }
+check(
+  'StatsScreen: no hand-rolled floating group row survives',
+  !stats.includes('styles.groupTab') && !stats.includes('groupTabText'),
+);
+check(
+  "StatsScreen: the group pill reuses the direction pill's style, not a second copy",
+  // Two chevron pills drawn from two style blocks is the duplicate the UX
+  // review flagged; a third caller means extracting a DropdownPill.
+  (stats.match(/styles\.dirPill,/g) ?? []).length === 2 &&
+    !/groupPill:\s*\{/.test(stats),
+);
+check(
+  'StatsScreen: the group pill says what it opens, and is a button not a tab',
+  /accessibilityLabel="Stat group"/.test(stats) &&
+    /accessibilityValue=\{\{ text: activeGroup \}\}/.test(stats),
+);
 check(
   'Players | Teams and Hit Rates | Averages use the same component as the groups',
   // Word-bounded: <SegmentTabsAnythingElse must not count as a match.
