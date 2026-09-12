@@ -183,13 +183,11 @@ def test_a_declined_rule_can_never_leak_a_signal():
     inside-the-gate game can still hand the UNDER side a probability above the
     0.65 floor — which would fire a BET the walk-forward never validated.
     """
-    i = _SRC.index("\n    if no_signal:\n        for p in picks:")
-    block = _SRC[i:i + 400]
-    assert 'p["signal_type"]     = "NONE"' in block
-    assert 'p["kelly_fraction"]  = 0.0' in block
-    assert 'p["recommended_bet"] = 0.0' in block
+    i = _SRC.index("\n    if no_signal:\n        _apply_no_signal(picks, no_signal)")
     assert i < _SRC.index("        _insert_picks(conn, picks)"), (
         "the downgrade must happen BEFORE the row is written")
+    # The helper's behaviour (NONE, unsized, reason PERSISTED) is pinned in
+    # tests/test_paused_and_no_signal_rows.py.
 
 
 def test_a_no_signal_row_does_not_lock_an_ncaaf_game_for_the_week():
