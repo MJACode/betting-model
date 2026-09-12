@@ -306,6 +306,15 @@ Unpause on a cut that clears breakeven in BOTH halves of 2025 on FRESH quotes
 with a CI that does not straddle zero — and then only at that cut. If the
 grid is negative everywhere, the lane is retrained or retired, not re-cut.
 
+**RUN 2026-09-12: NO CELL CLEARS, ON EITHER LANE.** The replay is done and both
+lanes stay paused. `ncaaf_live_total` reads **-3.4% over 280 fresh-quote bets**
+and its probability does not discriminate (flat ~52-54% win rate from a claimed
+0.52 to a claimed 0.71). `ncaaf_live_win_prob` reads **-13.1% over 51** while
+being WELL calibrated (claims 0.675 wins 74.5%, claims 0.934 wins 94.8%) — it
+predicts the winner and the market already prices it. The full grids, the
+both-halves split of the one candidate region, and what would change the
+answer: `docs/thresholds.md`, "The NCAAF live lanes on a bought 2025 season".
+
 ### Two things measured on the way in, both worth keeping
 
 - **The EV floor was already 0.32.** The sweep table that produced "EV 0.28"
