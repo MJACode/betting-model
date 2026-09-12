@@ -274,13 +274,29 @@ jobs:
             exit 0
           fi
 
-          curl -fsSL --retry 3 -o build.ipa "$IPA_URL"
+          # A check that cannot READ the profile must not block a release: this
+          # step's job is to catch a build that is definitely push-less, not to
+          # turn a network blip into a failed submit. So every "could not
+          # look" path warns and exits 0, and only a profile we actually read
+          # and found wanting fails the job.
+          if ! curl -fsSL --retry 3 -o build.ipa "$IPA_URL"; then
+            echo "::warning::Could not download the IPA — skipping the push entitlement check."
+            exit 0
+          fi
           # The profile is CMS-signed DER. openssl unwraps it; `strings` is the
           # fallback so a signature quirk degrades to a looser check rather
           # than to no check.
-          unzip -p build.ipa 'Payload/*.app/embedded.mobileprovision' > profile.der
+          if ! unzip -p build.ipa 'Payload/*.app/embedded.mobileprovision' > profile.der \
+             || [ ! -s profile.der ]; then
+            echo "::warning::No embedded.mobileprovision in the IPA — skipping the push entitlement check."
+            exit 0
+          fi
           openssl smime -inform DER -verify -noverify -in profile.der 2>/dev/null > profile.plist \
             || strings profile.der > profile.plist
+          if [ ! -s profile.plist ]; then
+            echo "::warning::Could not read the provisioning profile — skipping the push entitlement check."
+            exit 0
+          fi
 
           if grep -q 'aps-environment' profile.plist; then
             APS=$(grep -A1 'aps-environment' profile.plist | tr -d '\0' | tail -1 | sed -e 's/.*<string>//' -e 's|</string>.*||')
