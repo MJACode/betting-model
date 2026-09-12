@@ -102,6 +102,40 @@ MAX_KELLY_FRACTION = 0.05
 TOTAL_MIN_EV: float | None = None
 ML_MIN_EV: float | None = None
 
+# THE PREGAME UNDERDOG CAP. Never back a live moneyline on a team that was
+# getting more than this many points BEFORE kickoff.
+#
+# 2026-09-12, mike, on an Oklahoma State ML written at +101 while they led
+# Oregon by 10 in the second quarter: *"they were huge underdogs to start the
+# game and half the game is left, are you taking the starting spread/odds into
+# the live betting model"*. The model DOES take it -- `pregame_spread` and
+# `spread_decayed` are features and the engine refuses to price a game without
+# them -- and the pick still fired, because the 0.62 probability floor admits
+# the band where the model and the market disagree for no reason that pays.
+#
+# The re-sweep (scripts/ncaaf_live_resweep.py, 2025, 27,088 fresh graded
+# candidates, first-signal lock) put 247 cells at >= 20 bets through the season
+# split. Twelve survive, and the four best all cap this quantity:
+#
+#   prob  ev   cap  bets  units    roi    H1      H2
+#   0.55  0.30   7    30  +10.50  +35.0%  +56.0%  +3.5%
+#   0.58  0.30   7    29   +9.05  +31.2%  +50.8%  +3.5%
+#   0.70  0.26  10    20   +2.89  +14.5%   +3.4% +31.1%
+#   0.68  0.26  10    23   +1.73   +7.5%   +9.5%  +4.9%   <- shipped
+#
+# The shipped cell is NOT the richest. It is the one whose two halves agree
+# (+9.5% / +4.9%); every richer cell earns nearly all of it in one half, which
+# is the shape of every NCAAF false positive this repo has already paid for.
+# Against the previous cut (0.62 / 0.26 / no cap: 38 bets, +5.2%) it is 23
+# bets -- a 39% volume cut, which is what was asked for.
+#
+# HONEST STATUS: no cell in the grid clears its own breakeven at 95%. This one
+# runs 60.9% [40.8, 77.8] against a 56.3% breakeven. It is the best-behaved
+# cell on a grid, not a demonstrated edge. Re-sweep at ~50 settled forward bets.
+#
+# None = off (the pre-2026-09-12 behaviour).
+ML_MAX_PREGAME_DOG_POINTS: float | None = 10.0
+
 try:  # the platform config is the source of truth when it is importable
     import config as _platform_config
 except Exception:  # pragma: no cover - standalone/offline use keeps the fallbacks
@@ -116,6 +150,9 @@ else:
     ML_MIN_EDGE = _cut("ncaaf_live_win_prob", "min_edge", ML_MIN_EDGE)
     TOTAL_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
     ML_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+    ML_MAX_PREGAME_DOG_POINTS = getattr(
+        _platform_config, "NCAAF_LIVE_ML_MAX_PREGAME_DOG_POINTS",
+        ML_MAX_PREGAME_DOG_POINTS)
 
 
 def _is_paused(model_id: str) -> bool:
@@ -441,6 +478,8 @@ class LiveEngine:
                 p, c["dk_odds"], implied, best)
             pick = self._decide(p, d_edge, min_prob, min_edge, d_price, min_ev,
                                 cap_edge=edge)
+            pick = self._unless_big_dog(pick, c["model_id"], c["pick_side"],
+                                        ctx.pregame_spread)
             pick = self._unless_paused(pick, c["model_id"])
             if not pick:
                 continue
@@ -485,6 +524,40 @@ class LiveEngine:
         from models.scorer import _best_fields, _decision_fields
         return {**_decision_fields(book, price, implied, edge),
                 **_best_fields(best, p)}
+
+    @staticmethod
+    def _pregame_dog_points(pick_side: str, pregame_spread: float | None) -> float | None:
+        """How many points the BACKED side was getting before kickoff.
+
+        `pregame_spread` is HOME-relative (negative = home laying), the same
+        convention the feature row uses. Positive here means the pick is on the
+        pregame underdog. None when the game has no stored pregame spread --
+        which cannot happen on the pricing path, because `price` declines
+        without one, but the helper is total anyway.
+        """
+        if pregame_spread is None:
+            return None
+        sp = float(pregame_spread)
+        return sp if pick_side == "home" else -sp
+
+    @classmethod
+    def _unless_big_dog(cls, pick: str | None, model_id: str, pick_side: str,
+                        pregame_spread: float | None) -> str | None:
+        """Never back a live moneyline on a big pregame underdog.
+
+        See ML_MAX_PREGAME_DOG_POINTS for the measurement. Moneyline only: a
+        total has no side that can be a dog, and the spread lane prices the
+        number itself. A declined BET writes nothing, exactly as a pause does.
+        """
+        cap = ML_MAX_PREGAME_DOG_POINTS
+        if pick != "BET" or cap is None or model_id != "ncaaf_live_win_prob":
+            return pick
+        dog = cls._pregame_dog_points(pick_side, pregame_spread)
+        if dog is not None and dog > cap:
+            log.info("%s: backed side was a %.1f-point pregame dog (cap %.1f) "
+                     "- BET not written", model_id, dog, cap)
+            return None
+        return pick
 
     @staticmethod
     def _unless_paused(pick: str | None, model_id: str) -> str | None:

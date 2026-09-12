@@ -138,7 +138,17 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // fallback; the server flag in model_action_thresholds is what actually
   // ships an unpause (isModelPaused prefers it), so threshold_sync is the
   // step that makes this live, not the OTA.
-  ncaaf_live_win_prob: { min_prob: 0.62, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  //
+  // THIS MAP IS A STRICT SUBSET OF THE WIN_PROB LANE'S REAL GATE, and cannot
+  // express the rest of it. The full cut is min_prob 0.68 x EV >= 0.26 x a
+  // 10-point PREGAME-UNDERDOG cap (never back a live ML on a team that was
+  // getting more than 10 before kickoff -- config.MODEL_MIN_EV and
+  // config.NCAAF_LIVE_ML_MAX_PREGAME_DOG_POINTS, both enforced server-side in
+  // ncaaf_live/serve.py). Neither reaches model_action_thresholds either, so
+  // NO app surface can reproduce the live gate exactly -- the same shape as
+  // the nfl_live_prop note below. 2026-09-12 (mike), after a live ML on a
+  // 24.5-point pregame dog.
+  ncaaf_live_win_prob: { min_prob: 0.68, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   ncaaf_live_total: { min_prob: 0.72, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
