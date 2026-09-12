@@ -12,6 +12,7 @@ import {
   isContaminatedPregamePick,
   isModelRetired,
   passesActionFilter,
+  passesRecordFilter,
   RECORD_ONLY_MODELS,
 } from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
@@ -275,7 +276,17 @@ export function computeDailyResults(
     // Every scored row (BET/AVOID/NONE) counts toward its game's pick count.
     picksPerGame.set(p.game_id, (picksPerGame.get(p.game_id) ?? 0) + 1);
 
-    if (!passesActionFilter(p)) continue; // BET-only, meets current cut
+    // TWO QUESTIONS, TWO FILTERS (2026-09-12). A GRADED pick is history: it was
+    // bet, so it counts however the model's cut or paused flag has moved since
+    // — passesRecordFilter. An UNGRADED one is still a claim about what to bet
+    // now, so a paused model's row must not be counted as placed —
+    // passesActionFilter. Applying the action filter to both is what made the
+    // Discord recap and this modal disagree: tracking/discord_notifier.py's
+    // _SETTLED_SQL stopped re-cutting settled rows, and a surface with an extra
+    // gate loses rows silently (CLAUDE.md 1b).
+    const graded =
+      p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH';
+    if (!(graded ? passesRecordFilter(p) : passesActionFilter(p))) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') {
       if (p.result == null) {
         // Placed, not yet graded — track per sport so the breakdown can say

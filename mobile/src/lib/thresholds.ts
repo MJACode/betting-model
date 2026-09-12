@@ -527,15 +527,21 @@ export function passesActionFilter(p: ActionFilterable): boolean {
  * settled picks to 0-3 over 3, because two NCAAF live lanes had been paused the
  * evening before and every record surface re-applied `paused` to settled rows.
  *
- * A settled pick leaves the record by exactly two deliberate acts: a VOID, and
- * an entry in config.RECORD_EXCLUSIONS (mirrored server-side in
- * v_public_track_record). Both are checked here; model state is not.
+ * A settled pick leaves the record by exactly two deliberate acts: a VOID,
+ * checked here, and an entry in config.RECORD_EXCLUSIONS, which is enforced
+ * SERVER-SIDE in v_public_track_record and is unreachable from the app (its
+ * only entry predates the published window). Model state is checked nowhere.
  *
  * Use passesActionFilter instead for anything the reader could still BET —
  * there a paused model must not be offered. The two filters answering two
  * questions is the point; one filter answering both is the bug.
  */
-export function passesRecordFilter(p: PickRow): boolean {
+export type RecordFilterable = Pick<
+  PickRow,
+  'model_id' | 'signal_type' | 'condition_status' | 'is_live'
+>;
+
+export function passesRecordFilter(p: RecordFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
   // A VOIDed pick is not a bet of record (CLAUDE.md 1c). Server-side the same
   // exclusion happens via result='NO_ACTION'.

@@ -191,7 +191,7 @@ export function BuiltInModelDetailScreen() {
               <StatTile
                 label="Picks"
                 value={String(stats.picks)}
-                caption={`settled, meets current cut${unpriced > 0 ? ` · ${unpriced} unpriced` : ''}`}
+                caption={`settled, as posted${unpriced > 0 ? ` · ${unpriced} unpriced` : ''}`}
               />
               <StatTile
                 label="Win %"
