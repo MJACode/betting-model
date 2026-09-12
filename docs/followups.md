@@ -85,19 +85,26 @@ The ~1.7k historical DK in-play rows already in `odds` for 2023-25
 (`source='odds_api_historical'`) are one pull per slate day and do not carry
 `last_update`; they are not a substitute.
 
-## [ ] The replay and the cut grid pair quotes without production's stale-quote guard
+## [x] The replay and the cut grid paired quotes without production's stale-quote guard — FIXED 2026-09-12
 
 Production has the guard: `models/live_scorer._get_live_dk_odds` declines an
 in-play quote whose `snapshot_at` (the market's own `last_update`) predates
 the first sight of the game's current score (`_score_changed_at`,
 `data/live_quote_guard.quote_predates_score`, tolerance 0). The REPLAY and
-the cut sweep (`scripts/live_inning_gate_replay._pair`) pair the newest price
-at or before each state with only the age bound, so their "all quotes" grids
-count bets production would have declined -- on 2025, 37 of the shipped
-cut's 128 bets, 30-7. The sweep cache now carries `runs_moved` (the state at
-the price's snapshot_at vs the candidate state), and a sweep read for
-production is the FRESH-only grid. `_pair` itself should apply the same rule
-so the two never diverge again; a test that a stale pair is dropped.
+the cut sweep (`scripts/live_inning_gate_replay._pair`) paired on the age
+bound alone, so their grids counted bets production would have declined: on
+the 47-slate 2026 replay that set the 0.72 cut, 18 of 38 qualifying bets,
+and those 18 went 16-2.
+
+**Done 2026-09-12.** `_pair` calls production's own `quote_predates_score`
+against a per-state "when did we first see this score" walk — the offline
+twin of `_score_changed_at`. Every cell the replay and `live_cut_sweep`
+print is now production-faithful by construction, so the separate
+fresh-only reading of a cached grid is no longer needed; the cache's
+`runs_moved` stays as a diagnostic (it asks a slightly different question:
+did the score move between the price snapshot and the state). **Any grid
+cached before 2026-09-12 was built without the guard — rebuild with
+`--rebuild` before reading it.**
 
 ## [ ] [needs-decision] A calibration map for `mlb_live_total_runs`, fit on the 2025 in-play history
 
