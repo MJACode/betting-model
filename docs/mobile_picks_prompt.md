@@ -33,19 +33,31 @@ The Railway worker already refreshes every hour (and every 10 min in the evening
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-**The filter is generated from `config.py`, not transcribed.** Three copies of
-this WHERE clause used to live in CLAUDE.md, maintained by hand, and they
-drifted. The block pasted into Claude mobile carries 42 model ids; `config.py` yields 41. Three are missing (`nba_over_under`, `nba_spread`, `nfl_prop_market`) and four are stale — paused models still listed, which surfaces picks the scorer has stopped making. Print the current one with:
+**The prompt does not carry the cuts. It joins `model_action_thresholds`.**
+(2026-09-12, mike: *"I am connected through claude rc to my computer - why does
+mobile matter, it should not."*)
 
-```bash
-python -m scripts.emit_threshold_sql            # bare columns
-python -m scripts.emit_threshold_sql --prefix p.  # for the joined query below
-```
+It used to carry them: 52 per-model literals, regenerated with
+`scripts/emit_threshold_sql` and pasted by hand into the project instructions.
+That block went stale on every threshold change, pause, unpause and new model,
+and nothing in this repo can write that field — which is why "paste the prompt
+block" kept coming back as a task only a person could do. The doc itself
+recorded the damage: at one point the pasted copy carried 42 model ids against
+config's 41, three missing and four stale, surfacing picks the scorer had
+stopped making.
 
-It reads `ACTION_THRESHOLDS`, `PAUSED_MODELS` (emitted as comments),
-`PROB_ONLY_MODELS` (edge clause omitted) and `MODEL_MIN_ODDS` (price floor), so
-it can never disagree with what the scorer actually does. Live models are left
-out unless you pass `--live`.
+The table is written from `config.py` by the 6am pipeline
+(`data/threshold_sync.py`) and is the same row the app's action filter, Discord
+and push read, so the prompt now cannot disagree with them. **Paste it once.**
+
+`scripts/emit_threshold_sql` still exists for `docs/thresholds.md` and for
+reading the cuts at a glance; it is no longer part of this prompt.
+
+**The table mirrors BOTH pause registers** — `config.PAUSED_MODELS` (a person's
+call) and `model_auto_pauses` (the 250-bet review's). Until 2026-09-12 it
+carried only the first, so an auto-paused model read `paused = false` to every
+reader above; on the two busiest recent slates that was 4 `mlb_prop_pitcher_k`
+picks the scorer's own register excludes.
 
 Zero picks on a given day is valid — it means no high-conviction plays.
 
@@ -96,6 +108,8 @@ When I ask "what are today's picks?" or similar:
      lo.spread_home AS live_spread_home, lo.total_line AS live_total_line
    FROM picks p
    JOIN games g ON g.game_id = p.game_id
+   -- The model's own cut, from the table the pipeline syncs from config.
+   JOIN model_action_thresholds t ON t.model_id = p.model_id
    LEFT JOIN game_weather w ON w.game_id = p.game_id
    LEFT JOIN latest_odds lo ON lo.game_id = p.game_id
         AND lo.market = CASE
@@ -110,71 +124,21 @@ When I ask "what are today's picks?" or similar:
             ELSE 'h2h' END
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
-   AND (
-    (p.model_id = 'mlb_f5_moneyline'          AND p.model_probability >= 0.58 AND COALESCE(p.decision_edge, p.edge) >= 0.02 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'mlb_moneyline'             AND p.model_probability >= 0.72 AND COALESCE(p.decision_edge, p.edge) >= 0.11 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    -- mlb_over_under PAUSED (cut kept 0.5/0.04)
-    -- mlb_prop_batter_hits PAUSED (cut kept 0.78/0.17)
-     -- mlb_prop_batter_hr and mlb_prop_batter_rbi RETIRED 2026-09-02 (matt): no OR-line, never surfaced.
-    OR (p.model_id = 'mlb_prop_batter_runs'      AND p.model_probability >= 0.62 AND COALESCE(p.decision_edge, p.edge) >= 0.1 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    -- mlb_prop_batter_sb PAUSED (cut kept 0.18/0.1)
-    -- mlb_prop_batter_tb PAUSED (cut kept 0.83/0.17)
-    OR (p.model_id = 'mlb_prop_batter_walks'     AND p.model_probability >= 0.45 AND COALESCE(p.decision_edge, p.edge) >= 0.14 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    -- mlb_prop_pitcher_er PAUSED (cut kept 0.61/0.08)
-    OR (p.model_id = 'mlb_prop_pitcher_hits'     AND p.model_probability >= 0.54 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    OR (p.model_id = 'mlb_prop_pitcher_k'        AND p.model_probability >= 0.58 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    OR (p.model_id = 'mlb_prop_pitcher_outs'     AND p.model_probability >= 0.5 AND COALESCE(p.decision_edge, p.edge) >= 0.12 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    -- mlb_prop_pitcher_walks PAUSED (cut kept 0.6/0.08)
-    -- mlb_runline PAUSED (cut kept 0.68/0.11)
-    OR (p.model_id = 'nba_moneyline'             AND p.model_probability >= 0.66 AND COALESCE(p.decision_edge, p.edge) >= 0.12 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_over_under'            AND p.model_probability >= 0.66 AND COALESCE(p.decision_edge, p.edge) >= 0.12 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_assists'   AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_blocks'    AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_dd'        AND p.model_probability >= 0.55 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_points'    AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_pra'       AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_rebounds'  AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_steals'    AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_threes'    AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_prop_player_turnovers' AND p.model_probability >= 0.6 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nba_spread'                AND p.model_probability >= 0.66 AND COALESCE(p.decision_edge, p.edge) >= 0.12 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    -- ncaaf_moneyline PAUSED (cut kept 0.62/0.08)
-    OR (p.model_id = 'ncaaf_over_under'          AND p.model_probability >= 0.65 AND COALESCE(p.decision_edge, p.edge) >= 0.0 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'ncaaf_spread'              AND p.model_probability >= 0.55 AND COALESCE(p.decision_edge, p.edge) >= 0.0 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'ncaaf_spread_premium'      AND p.model_probability >= 0.58 AND COALESCE(p.decision_edge, p.edge) >= 0.0 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_live_prop'             AND p.model_probability >= 0.0 AND COALESCE(p.decision_edge, p.edge) >= 0.0 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    OR (p.model_id = 'nfl_opener_spread'         AND p.model_probability >= 0.52 AND COALESCE(p.decision_edge, p.edge) >= 0.0 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_anytime_td'       AND p.model_probability >= 0.37 AND COALESCE(p.decision_edge, p.edge) >= 0.16 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_market'           AND p.model_probability >= 0.0 AND COALESCE(p.decision_edge, p.edge) >= 0.05 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_pass_attempts'    AND p.model_probability >= 0.73 AND COALESCE(p.decision_edge, p.edge) >= 0.19 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_pass_completions' AND p.model_probability >= 0.68 AND COALESCE(p.decision_edge, p.edge) >= 0.16 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_pass_tds'         AND p.model_probability >= 0.78 AND COALESCE(p.decision_edge, p.edge) >= 0.17 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_pass_yards'       AND p.model_probability >= 0.68 AND COALESCE(p.decision_edge, p.edge) >= 0.15 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_rec_yards'        AND p.model_probability >= 0.69 AND COALESCE(p.decision_edge, p.edge) >= 0.16 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_receptions'       AND p.model_probability >= 0.63 AND COALESCE(p.decision_edge, p.edge) >= 0.16 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_rush_attempts'    AND p.model_probability >= 0.76 AND COALESCE(p.decision_edge, p.edge) >= 0.2 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_rush_rec_yards'   AND p.model_probability >= 0.68 AND COALESCE(p.decision_edge, p.edge) >= 0.15 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_rush_yards'       AND p.model_probability >= 0.71 AND COALESCE(p.decision_edge, p.edge) >= 0.19 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_sacks'            AND p.model_probability >= 0.7 AND COALESCE(p.decision_edge, p.edge) >= 0.15 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_prop_tackles_assists'  AND p.model_probability >= 0.7 AND COALESCE(p.decision_edge, p.edge) >= 0.15 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nfl_wind_totals'           AND p.model_probability >= 0.52 AND COALESCE(p.decision_edge, p.edge) >= 0.03 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nhl_moneyline'             AND p.model_probability >= 0.55 AND COALESCE(p.decision_edge, p.edge) >= 0.05 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nhl_moneyline_regulation'  AND p.model_probability >= 0.4 AND COALESCE(p.decision_edge, p.edge) >= 0.05 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nhl_over_under'            AND p.model_probability >= 0.55 AND COALESCE(p.decision_edge, p.edge) >= 0.05 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'nhl_puckline'              AND p.model_probability >= 0.55 AND COALESCE(p.decision_edge, p.edge) >= 0.05 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'ufc_method_of_victory'     AND p.model_probability >= 0.65 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    OR (p.model_id = 'ufc_moneyline'             AND p.model_probability >= 0.65 AND COALESCE(p.decision_edge, p.edge) >= 0.08 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    -- ufc_total_rounds PAUSED (cut kept 0.62/0.08)
-    OR (p.model_id = 'wnba_moneyline'            AND p.model_probability >= 0.5 AND COALESCE(p.decision_edge, p.edge) >= 0.06 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -200.0))
-    -- wnba_over_under PAUSED (cut kept 0.6/0.06)
-    OR (p.model_id = 'wnba_prop_market'          AND p.model_probability >= 0.0 AND COALESCE(p.decision_edge, p.edge) >= 0.05 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    OR (p.model_id = 'wnba_prop_player_assists'  AND p.model_probability >= 0.5 AND COALESCE(p.decision_edge, p.edge) >= 0.1 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    -- wnba_prop_player_points PAUSED (cut kept 0.58/0.17)
-    OR (p.model_id = 'wnba_prop_player_pra'      AND p.model_probability >= 0.68 AND COALESCE(p.decision_edge, p.edge) >= 0.16 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    OR (p.model_id = 'wnba_prop_player_rebounds' AND p.model_probability >= 0.62 AND COALESCE(p.decision_edge, p.edge) >= 0.0 AND (COALESCE(p.decision_odds, p.dk_odds) IS NULL OR COALESCE(p.decision_odds, p.dk_odds) >= -140))
-    -- wnba_prop_player_threes PAUSED (cut kept 0.706/0.026)
-    -- wnba_spread PAUSED (cut kept 0.6/0.1)
-   )
+     -- THE CUT COMES FROM THE TABLE, NOT FROM THIS PROMPT (2026-09-12).
+     -- model_action_thresholds is written from config.py by the 6am pipeline
+     -- (data/threshold_sync.py) and is the same row the app's action filter,
+     -- Discord and push read. Listing the cuts here instead meant this prompt
+     -- went stale on every threshold change, pause, unpause or new model, and
+     -- somebody had to paste a fresh block into the project instructions.
+     AND t.paused = FALSE
+     AND p.model_probability >= t.min_prob
+     AND (t.prob_only = TRUE
+          OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+     AND (t.min_odds IS NULL
+          OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+          OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
+     -- A VOIDED pick is not publishable (CLAUDE.md 1c).
+     AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
    ORDER BY g.commence_time, COALESCE(p.decision_edge, p.edge) DESC;
 
 3. For each row, compute the bet size from MY bankroll (not bankroll_at_pick):
