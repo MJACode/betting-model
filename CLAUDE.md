@@ -413,6 +413,10 @@ answer is "nothing".
   destroys the evidence) — and **`config.RECORD_EXCLUSIONS`**, naming who
   asked. Sweep views DO re-cut (§7). Test:
   `tests/test_settled_record_is_immutable.py`.
+  **A paused model is LISTED, not hidden** (mike, same day: *"Don't hide detail
+  of paused models unless I say so"*) — labelled "Paused", record shown. Hiding
+  it left the Record tab counting a model the Models tab did not list. RETIRED
+  differs: nothing will score for it again.
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
