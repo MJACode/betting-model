@@ -585,6 +585,86 @@ half of them.
 **Re-sweep trigger: n ≥ 75 settled BETs on `v20260908_230751`** — about 40
 slates at 1.9 a slate. Same population query as the dated criteria above.
 
+## The NCAAF live models on a bought 2025 season, 2026-09-12 (mike): BOTH STAY PAUSED
+
+mike: *"We need to only bet the absolute strongest picks and proof of
+profitable backtested model."* This is that measurement, and the answer is no
+for both models. Neither is a threshold problem, so neither has a cut to move.
+
+**The instrument.** 57,979 DraftKings in-play rows bought over 5,765 snapshots
+on 736 games (`data/ingestors/ncaaf_inplay_history.py`, ~245,360 credits of the
+373,240 approved), paired with 158,274 play-by-play states on 891 games
+(`ncaaf_plays` -> `build_states --seasons 2025`). 2025 is out of sample for the
+active artifact, which trains through 2024. The production pricing path decides
+(`LiveEngine.candidates` + `_decide`), under the first-signal lock, so each
+(game, model) contributes one bet per cell.
+
+**Read the FRESH column, not the ALL column.** A quote whose `last_update`
+predates the score is one the book has not repriced, and production declines it
+(`quote_predates_score`). The gap between the two is the whole apparent edge:
+
+| `ncaaf_live_total`, production cut | bets | record | units | ROI | win % [CI] |
+|---|---|---|---|---|---|
+| ALL quotes | 297 | 163-134 | +5.41 | **+1.8%** | 54.9 [49.2, 60.4] |
+| **FRESH quotes** | 280 | 146-134 | **-9.50** | **-3.4%** | 52.1 [46.3, 57.9] |
+
+So the positive pooled number is bets nobody could have taken. On fresh quotes
+the model is negative, and it splits **first half -10.1% / second half +7.1%**.
+
+`ncaaf_live_win_prob` on fresh quotes: **51 bets, -6.69u, -13.1%**, both halves
+negative.
+
+**No cell on either grid clears the bar** (positive in BOTH halves, CI low above
+the ~52.4% breakeven at -110). The 88-cell totals grid is negative almost
+everywhere; its least-bad cells are +0.9% (217 bets) and +3.1% (54), both with
+CI lows under breakeven. The moneyline grid showed four adjacent positive cells
+at low prob x high EV (+5% to +17%) -- the shape of a plateau, so it was split
+rather than dismissed, and it is **entirely a first-half artifact**:
+
+| cell | H1 | H2 |
+|---|---|---|
+| prob>=0.55 ev>=0.30 | +38.1% (14) | +2.2% (27) |
+| prob>=0.58 ev>=0.30 | +48.7% (13) | -0.9% (23) |
+| prob>=0.60 ev>=0.30 | +54.8% (11) | -15.3% (16) |
+| prob>=0.60 ev>=0.34 | +79.0% (6) | -72.5% (8) |
+
+The time split is part of the method precisely because this keeps happening
+(CLAUDE.md section 7).
+
+### The two models fail for OPPOSITE reasons, and that is the useful part
+
+**`ncaaf_live_total`: the probability does not discriminate.** Win rate by
+claimed band is flat:
+
+| claims | 0.525 | 0.572 | 0.62 | 0.67 | 0.714 | 0.769 |
+|---|---|---|---|---|---|---|
+| wins | 54.4% | 51.0% | 54.2% | 53.9% | 51.6% | 61.9% |
+
+Moving from a claimed 52.5% to a claimed 71.4% buys nothing. That is the
+engine's own gate-2 FAILURE (total-distribution shape, 2.60pp vs a 2.0pp
+standard) showing up as an absence of information, and no cut repairs it.
+
+**`ncaaf_live_win_prob`: the probability is GOOD and there is still no edge.**
+
+| claims | 0.525 | 0.626 | 0.675 | 0.725 | 0.776 | 0.842 | 0.934 |
+|---|---|---|---|---|---|---|---|
+| wins | 51.0% | 65.1% | 74.5% | 75.4% | 80.1% | 88.5% | 94.8% |
+| ROI | -12.9% | -5.4% | +0.2% | -4.7% | -4.8% | -1.2% | -1.6% |
+
+Monotone, and if anything UNDER-confident in the middle -- exactly what gate 1
+passing (Brier 0.115) predicted. Every band still loses. **The model can tell
+you who wins and the market already knows.** A calibrated probability is not an
+edge, and this model is the cleanest example of the difference in the repo.
+
+### What would change the answer
+
+NOT a threshold sweep; the grids are done. For totals, the distribution's shape
+has to improve (the gate that failed), which is a modelling change and probably
+more recent seasons. For the moneyline, it needs a price the market does not
+already reflect, which this feed does not appear to contain. Until one of those
+moves, both models stay in `config.PAUSED_MODELS` and the loop keeps running,
+pricing and storing quotes so the forward record stays replayable.
+
 ## `mlb_live_total_runs` on the bought 2025 in-play history, 2026-09-10 (mike)
 
 mike, 2026-09-09: *"why cant you test this against historical odds api data,
