@@ -228,29 +228,16 @@ are not.** Do not read them as evidence in either direction; the numbers and
 the population are in `docs/rules_evidence.md`.
 
 **A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND
-"SHOULD WE UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12:
-*"I didn't fucking tell you to pause the NCA models. I said find profitable
-cuts. Find profitable models. I want profitable backtest... I need you to
-always run an assessment if these models can be profitable. That is the whole
-point."*)
-
-A pause banks the loss and ends the search. The point of this project is a
-profitable model, so a model that is losing — paused or live — gets the FULL
-SWEEP before anything else is proposed:
-
-- every scored pick, `BET` / `AVOID` / dead-zone `NONE` alike (§7's evaluation
-  rule, and the coverage traps there — `NONE` rows exist only from 2026-05-12
-  and were deleted 2026-06-26 → 08-09);
-- a grid over the model's own cut, reported as a NEIGHBOURHOOD, never a peak;
-- an early/late time split, a bet count and a confidence interval per cell;
-- units, never dollars, and the query named.
-
+"SHOULD WE UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A
+pause banks the loss and ends the search. A model that is losing — paused or
+live — gets the FULL SWEEP first: every scored pick (§7's evaluation rule), a
+grid reported as a NEIGHBOURHOOD not a peak, an early/late split, a bet count
+and a confidence interval, and every candidate re-graded on the artifact
+`model_registry` says is LIVE (a pooled record blends retired models).
 **"No cut clears, here is the grid and here is what would have to change" is a
-complete answer. "Shall I unpause it?" is not** — it hands back the work that
-was asked for. If a sweep finds a cut that clears §7's standards, propose THAT,
-with its numbers. Pausing stays available as a measure of last resort when mike
-asks for it in those words, and it is stamped `Updated-By:` like any other
-model update.
+complete answer; "shall I unpause it?" is not** — it hands back the work.
+`scripts/paused_model_assessment.py` sweeps BOTH pause registers;
+`docs/paused_model_assessment.md` carries the standing result.
 
 **A CHANGE TO HOW ONE MODEL OPERATES IS ASSESSED AGAINST ALL OF THEM.**
 (Repo-level rule, 2026-08-29.) Before shipping an operational change — how a
