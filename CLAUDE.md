@@ -203,41 +203,43 @@ The tell is the same in both: a turn that ends with a tidy summary and a to-do
 list FOR SOMEONE ELSE feels finished. It is the work redistributed. Ask instead:
 what did I actually change, and what did I merely describe?
 
-**EXTRACTED DATA BELONGS IN SUPABASE.** Supabase is the system of record. Any
-dataset that cost money or time to acquire goes there, so it is queryable beside
-everything else and covered by one backup story rather than N. Ephemeral
-container disk is never a home for paid data, and **a Railway volume is one
-copy, not a backup** — 100,116 credits of prop snapshots once existed nowhere
-else. Still outside and worth fixing when touched: the live decision log
-(`DECISION_LOG_DIR`) and `nfl/data/odds_cache`.
+**EVERYTHING GOES IN SUPABASE. THERE ARE NO EXCEPTIONS, AND A TOLERATED ONE IS
+NOT A RULE.** (mike, 2026-08-30 and again 2026-09-12: *"EVERYTHING SHOULD BE IN
+SUPABASE FOR THE MILLIONTH FUCKING TIME. Need a global rule."*) Supabase is the
+system of record: **any dataset that cost money or time is stored there FIRST**,
+before it is analysed, modelled on or committed. **A local file is a CACHE OF
+Supabase or it is a bug** (`data/local_store.py` is the sanctioned shape:
+opt-in, gitignored, regenerable, every row already in the database); a Railway
+volume is ONE COPY, not a backup; and an ingestor that buys data writes it in
+the same run, keyed on a `source` marker so a re-run imports nothing already
+stored. The old version of this rule carried exceptions "worth fixing when
+touched" and nobody touched them: 655 MB of PAID NFL odds history sat on one
+laptop for a fortnight. `tests/test_everything_in_supabase.py` fails on any
+undeclared store on disk, and the fix is an importer, not an allowlist entry.
 
 **Live player props are a priority and an UNTESTED HYPOTHESIS — not a proven
-market.** (Downgraded 2026-09-03 at mike's instruction, after measurement; it
-had been stated here as "treated as a proven-profitable market", which was a
-conviction, never a result.) The thesis is unchanged and still worth pursuing:
-NOT beating line movement or reacting faster than a book, but a statistical
-model for live prop over/unders priced RELATIVE TO THE STARTING LINE, capturing
-in-game flow. The book re-anchors its live prop line mechanically off the
-pregame number and the clock; the edge is predicting where true remaining
-production deviates from that. Do not rebuild a player projection from scratch
-and throw the pregame line away.
+market.** (Downgraded 2026-09-03 by mike, after measurement.) The thesis: NOT
+beating line movement, but a statistical model for live prop over/unders priced
+RELATIVE TO THE STARTING LINE. The book re-anchors its live line mechanically
+off the pregame number and the clock; the edge is predicting where true
+remaining production deviates from that. Do not rebuild a player projection
+from scratch and throw the pregame line away. Detail: `docs/live_betting.md`.
 
 **The settled live-prop record is ZERO BETS — there has never been a live
 player prop model in production, and the ~400 settled picks that look like one
-are not.** Do not read them as evidence in either direction; the numbers and
-the population are in `docs/rules_evidence.md`.
+are not.** Do not read them as evidence in either direction
+(`docs/rules_evidence.md`).
 
-**A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND
-"SHOULD WE UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A
-pause banks the loss and ends the search. A model that is losing — paused or
-live — gets the FULL SWEEP first: every scored pick (§7's evaluation rule), a
-grid reported as a NEIGHBOURHOOD not a peak, an early/late split, a bet count
-and a confidence interval, and every candidate re-graded on the artifact
-`model_registry` says is LIVE (a pooled record blends retired models).
-**"No cut clears, here is the grid and here is what would have to change" is a
-complete answer; "shall I unpause it?" is not** — it hands back the work.
-`scripts/paused_model_assessment.py` sweeps BOTH pause registers;
-`docs/paused_model_assessment.md` carries the standing result.
+**A LOSING MODEL IS AN ASSESSMENT TO RUN, NOT A MODEL TO PAUSE — AND "SHOULD WE
+UNPAUSE IT?" IS NEVER A QUESTION TO ASK.** (mike, 2026-09-12.) A pause banks the
+loss and ends the search. A losing model — paused or live — gets the FULL SWEEP
+first: every scored pick (§7's evaluation rule), a grid reported as a
+NEIGHBOURHOOD not a peak, an early/late split, a bet count, a confidence
+interval, and every candidate re-graded on the artifact `model_registry` says is
+LIVE (a pooled record blends retired models). **"No cut clears, here is the grid
+and here is what would have to change" is a complete answer; "shall I unpause
+it?" is not.** `scripts/paused_model_assessment.py`,
+`docs/paused_model_assessment.md`.
 
 **A CHANGE TO HOW ONE MODEL OPERATES IS ASSESSED AGAINST ALL OF THEM.**
 (Repo-level rule, 2026-08-29.) Before shipping an operational change — how a
@@ -298,9 +300,9 @@ A surface with an extra GATE can only lose rows, and does it silently —
   thing you can only fail at quietly.
 - **`opening_signals` is the CLV / opening-signal shadow track, not a gate.**
   It keeps its own window (`docs/opening_signals.md`). Never publish from it.
-- **The one guard that SHOULD bound the set is the started-game check.** The
-  pick is a legitimate bet of record; announcing it once the game is under way
-  sends the reader to a bet they cannot take.
+- **The one guard that SHOULD bound the set is the started-game check** —
+  announcing a pick once the game is under way sends the reader to a bet they
+  cannot take.
 - **A LIVE surface resolves its window with `config.live_slate_dates()`, never
   today** — a game keeps its KICKOFF's game_date, so a late start outlives the
   calendar day. Mirrored in the app by `liveSlateDatesET()`; the two are pinned
@@ -446,10 +448,10 @@ Models currently in that state are flagged as PAPER ONLY in their own section
 (e.g. `ncaaf_spread` — see `docs/sports/ncaaf.md`). Everything else is live.
 
 **`nfl_live_prop` is LIVE with the gate deliberately NOT met** (Matt,
-2026-09-05). Settled record at go-live: **zero** — it wrote to a JSONL file, so
-it could never have cleared the gate by waiting. Raised, restated, his call.
-**Do not pause it or restore the gate without asking him.** Re-sweep its cut at
-~50 settled bets; it runs 0.0/0.0 because the cut is EV, in
+2026-09-05). Settled record at go-live: zero — it wrote to a JSONL file, so it
+could never have cleared the gate by waiting. Raised, restated, his call. **Do
+not pause it or restore the gate without asking him.** Re-sweep its cut at ~50
+settled bets; it runs 0.0/0.0 because the cut is EV, in
 `nfl/live_model/config.EV_THRESHOLDS`. Detail: `docs/rules_evidence.md`.
 
 ---
@@ -473,14 +475,10 @@ reached in practice. It is **0.10**, not the ±3% this section documented until
 tightening and never corrected here.
 
 ### Tenth-Kelly Bet Sizing
-```
-f_q = 0.10 × (model_prob − implied_prob) / (1 − implied_prob)
-max bet = min(f_q × bankroll, 5% of bankroll)
-```
-Switched from quarter-Kelly (0.25) to tenth-Kelly (0.10) on 2026-05-04.
-Quarter-Kelly always exceeded the 5% cap for picks meeting min-edge thresholds (10-14%),
-producing identical flat bets on every pick. Tenth-Kelly keeps bets at 2-4% of bankroll
-and lets edge size drive differentiation. KELLY_MULTIPLIER in config.py is env-overridable.
+`f = 0.10 x (model_prob - implied) / (1 - implied)`, capped at 5% of bankroll.
+Quarter-Kelly always hit that cap at our edge sizes, so every pick got the same
+flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
+(2026-05-04). `config.KELLY_MULTIPLIER` is env-overridable.
 
 ### Injury Scenarios
 - **Scenario A** — Active injury: penalizes team's expected performance
@@ -488,8 +486,9 @@ and lets edge size drive differentiation. KELLY_MULTIPLIER in config.py is env-o
 - **Scenario C** — Opponent injury: positive edge signal for the other team
 
 ### Early Season Rule
-No picks are generated until a team has played ≥ 10 games.
-Prior-season stats are used as the feature baseline during this window.
+No picks until a team has played >= 10 games; prior-season stats are the
+baseline in that window. Season-to-date rates are noise early — blend toward
+the prior season by games played.
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
@@ -555,7 +554,7 @@ own doc (§9) and in `docs/local_ops.md`.
 
 ## 6. Config topology — where each kind of setting actually lives
 
-Three homes, three different roles. Getting this wrong is how a threshold change
+Three homes, three roles. Getting this wrong is how a threshold change
 silently fails to reach production.
 
 **Secrets → Railway Variables** (the live copy the worker reads): `DATABASE_URL`
