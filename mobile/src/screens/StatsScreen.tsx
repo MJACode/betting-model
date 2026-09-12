@@ -3,6 +3,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   FlatList,
+  PixelRatio,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -1243,6 +1244,10 @@ export function StatsScreen() {
   };
 
   const groups = GROUP_ORDER[sport];
+  // Does Hit Rates | Averages still fit on the end of the window row? Read at
+  // render rather than cached in state: a Dynamic Type change re-renders the
+  // tree, and a stale flag here is a clipped control.
+  const stackModeTabs = PixelRatio.getFontScale() >= 1.4;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // The headline under the ruler, in the mode's own idiom: "25+ Points" in
   // At Least, "Over 0.5 Hits" in Over (lib/hitMode.ts).
@@ -1632,7 +1637,12 @@ export function StatsScreen() {
                 review, 2026-09-12). Only the book's half-point line was novel,
                 so only it survives. Over and Under ARE that number already. */}
             {hitMode === 'atLeast' ? (
-              <Text style={styles.bookLine} numberOfLines={1}>
+              // Silent: `describe` above already appends this exact string to
+              // the ruler's accessibilityValue, so leaving it reachable made
+              // VoiceOver read "Over 1.5" twice — once in the adjustable, once
+              // on the next swipe. Same double-read the direction pill's note
+              // records fixing on 2026-09-05.
+              <Text style={styles.bookLine} numberOfLines={1} importantForAccessibility="no">
                 {hitModeLineLabel(lineN, hitMode)}
               </Text>
             ) : null}
@@ -1652,11 +1662,58 @@ export function StatsScreen() {
           the horizontal axis, which cannot crush anything. The FlatList below
           stays the one flexible region. */}
       <View style={[styles.fixedRow, styles.windowStrip]}>
+        {/* PINNED at the head, outside the scroller. It was the last chip in
+            the scrolling row until 2026-09-12, which was survivable while the
+            row ran to the screen edge; once the mode segment took the right of
+            the strip the chip started ~151pt off-screen on a 402pt phone, and
+            the duplicate pill that used to be its second representation is now
+            suppressed — so a board narrowed to the slate looked identical to a
+            full one, with nothing on screen saying why (UX review, 2026-09-12).
+            The L-chips are the ones that can afford to scroll: they are cheap,
+            instant, and one is always visible. This chip costs a network read
+            and is the only sign a whole-population cut is on. Binance's and
+            Beli's leaderboards pin their dropdowns at the head for the same
+            reason. */}
+        {hasSlate ? (
+          <View style={styles.slatePin}>
+            {/* This chip re-READS the board (the server is narrowed to the
+                slate's teams), so it is the one control on the row whose tap is
+                not instant. Two consequences, both handled here rather than
+                left to the list: a second impatient tap must not queue a second
+                whole-league read, and VoiceOver has to be told that something
+                is happening — focus stays on the chip while the rows underneath
+                it change silently. */}
+            <FilterChip
+              label={slateLabel}
+              icon="flame-outline"
+              active={tonightActive && !gamesPicked}
+              busy={loading}
+              // MUTED, NOT REMOVED, while a specific game is picked. The two
+              // are not the same cut — the chip is one slate date, the Games
+              // list is a seven-day window — so with both on you get their
+              // INTERSECTION, which on a Sunday game with "Next slate" showing
+              // is an empty board and two pills each claiming to be on (UX
+              // review, 2026-09-09). The narrower one wins and says so.
+              disabled={gamesPicked}
+              accessibilityLabel={
+                gamesPicked
+                  ? `${slateLabel}, off while a game is picked`
+                  : loading
+                    ? `${slateLabel}, loading`
+                    : tonightActive
+                      ? `${slateLabel}, on. Turn off to show every player`
+                      : `${slateLabel}, off`
+              }
+              onPress={() => setTonightOnly((v) => !v)}
+            />
+            <View style={styles.rowDivider} />
+          </View>
+        ) : null}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.rowScroller}
-          contentContainerStyle={styles.windowRow}
+          contentContainerStyle={hasSlate ? styles.windowRowPinned : styles.windowRow}
           keyboardShouldPersistTaps="handled"
         >
           {TIME_WINDOWS.map((w) => (
@@ -1667,41 +1724,6 @@ export function StatsScreen() {
               onPress={() => setTimeWindow(w.value)}
             />
           ))}
-          {hasSlate ? (
-            <>
-              <View style={styles.rowDivider} />
-              {/* This chip re-READS the board now (the server is narrowed to the
-                  slate's teams), so it is the one chip on the row whose tap is
-                  not instant. Two consequences, both handled here rather than
-                  left to the list: a second impatient tap must not queue a
-                  second whole-league read, and VoiceOver has to be told that
-                  something is happening — focus stays on the chip while the
-                  rows underneath it change silently. */}
-              <FilterChip
-                label={slateLabel}
-                icon="flame-outline"
-                active={tonightActive && !gamesPicked}
-                busy={loading}
-                // MUTED, NOT REMOVED, while a specific game is picked. The two
-                // are not the same cut — the chip is one slate date, the Games
-                // list is a seven-day window — so with both on you get their
-                // INTERSECTION, which on a Sunday game with "Next slate" showing
-                // is an empty board and two pills each claiming to be on (UX
-                // review, 2026-09-09). The narrower one wins and says so.
-                disabled={gamesPicked}
-                accessibilityLabel={
-                  gamesPicked
-                    ? `${slateLabel}, off while a game is picked`
-                    : loading
-                      ? `${slateLabel}, loading`
-                      : tonightActive
-                        ? `${slateLabel}, on. Turn off to show every player`
-                        : `${slateLabel}, off`
-                }
-                onPress={() => setTonightOnly((v) => !v)}
-              />
-            </>
-          ) : null}
         </ScrollView>
         {/* Hit Rates | Averages — a two-value switch, so it rides the end of
             this row instead of spending a third full-width underline-tab row
@@ -1711,7 +1733,7 @@ export function StatsScreen() {
             with the scroller flexing inside it, so `fixedRow` still pins the
             whole strip to its natural height and the FlatList stays the one
             flexible child of the screen column. */}
-        {canHitRate ? (
+        {canHitRate && !stackModeTabs ? (
           <View style={styles.modeSeg}>
             <SegmentTabs
               items={MODES}
@@ -1723,6 +1745,20 @@ export function StatsScreen() {
           </View>
         ) : null}
       </View>
+      {/* At accessibility text sizes the inline segment is ~302pt of a 375pt
+          row and nothing in the strip can shrink (tabCompact is flex: 0, and a
+          plain View defaults to flexShrink: 0 in RN), so the time-window chips
+          are squeezed to nothing and "Averages" clips. The 38pt row is the
+          right answer for exactly the users who need it, and only for them
+          (UX review, 2026-09-12). */}
+      {canHitRate && stackModeTabs ? (
+        <SegmentTabs
+          items={MODES}
+          active={mode}
+          onChange={setMode}
+          labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
+        />
+      ) : null}
 
       {/* A failed load is recoverable far more often than not — PostgREST
           answers 503 for as long as it takes to rebuild its schema cache — so
@@ -2834,7 +2870,11 @@ const styles = StyleSheet.create({
   clearText: {
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
-    color: colors.avoid,
+    // NOT colors.avoid. bet/avoid/none are SIGNAL colours (UX_REVIEW §2) and
+    // this is an undoable view control, not a signal — it was tolerable at the
+    // end of a chip row and is not now that it sits in the header, above a
+    // board that uses the same red to mean something.
+    color: colors.tint,
   },
 
   // Sheet layout helpers
@@ -2947,6 +2987,9 @@ const styles = StyleSheet.create({
   },
   rulerWrap: {
     flex: 1,
+    // A floor, so nothing sharing the row can shrink the strip out of
+    // existence. Below this the ticks are unusable anyway.
+    minWidth: 120,
     height: 58,
     justifyContent: 'center',
   },
@@ -3007,7 +3050,12 @@ const styles = StyleSheet.create({
   // The book's half-point line, sitting at the end of the ruler row. A
   // footnote, not a headline: it qualifies the number the ruler is showing.
   bookLine: {
-    flexShrink: 0,
+    // Shrinks, and truncates via numberOfLines: the ruler beside it is
+    // `flex: 1` with flexBasis 0, so an unshrinkable footnote starved it to
+    // zero width at large Dynamic Type — and the ruler renders nothing at
+    // width 0, leaving an empty 58pt band and no way to set the line by touch
+    // (UX review, 2026-09-12).
+    flexShrink: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
@@ -3025,6 +3073,21 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingVertical: spacing.xs,
   },
+  // The pinned slate chip already supplies the row's left inset, so the
+  // scroller drops its own and keeps only the trailing one.
+  windowRowPinned: {
+    paddingLeft: 0,
+    paddingRight: spacing.lg,
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  slatePin: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.sm,
+  },
   // Shared by the two rows that pair a pinned control with a scroller.
   rowScroller: {
     flexGrow: 1,
@@ -3039,6 +3102,11 @@ const styles = StyleSheet.create({
 
   statPicker: {
     paddingTop: 0,
+    // Explicit rather than relying on a plain View's flexShrink: 0 default —
+    // the row below states the same invariant in a comment, and the two should
+    // not be pinned by different mechanisms.
+    flexGrow: 0,
+    flexShrink: 0,
   },
   // The pinned group pill plus the scrolling stat chips, on one line.
   statRow: {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -59,7 +59,12 @@ export function StatGroupSheet<T extends string>({
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
-          <View style={styles.list}>
+          {/* Scrolls, and the sheet is capped — `groups` is a prop, and each row
+              stacks a body over a footnote, so at accessibility text sizes four
+              rows already overflow a 667pt phone upward out of a flex-end
+              backdrop, putting the top rows off-screen and out of reach. Same
+              two lines SportsbookPickerSheet carries. */}
+          <ScrollView style={styles.list} contentContainerStyle={styles.listBody} bounces={false}>
             {groups.map((g) => {
               const isActive = g === active;
               const n = countFor?.(g);
@@ -98,7 +103,7 @@ export function StatGroupSheet<T extends string>({
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -114,6 +119,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xxl,
+    maxHeight: '85%',
   },
   grabber: {
     alignSelf: 'center',
@@ -130,7 +136,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   title: { fontSize: font.size.title3, fontWeight: font.weight.bold, color: colors.textPrimary },
-  list: { gap: spacing.xs },
+  // flexGrow: 0 so the list is only as tall as its rows and the sheet hugs
+  // them, matching SportsbookPickerSheet. The gap belongs to the CONTENT
+  // container — on a ScrollView's outer style it would never reach the rows.
+  list: { flexGrow: 0 },
+  listBody: { gap: spacing.xs },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

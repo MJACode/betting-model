@@ -62,7 +62,7 @@ export function SegmentTabs<T extends string>({
               styles.tab,
               second && styles.tabSecond,
               compact && styles.tabCompact,
-              isActive && (second ? styles.tabActiveSecond : styles.tabActive),
+              isActive && (second || compact ? styles.tabActiveSecond : styles.tabActive),
             ]}
           >
             <Text
@@ -70,7 +70,7 @@ export function SegmentTabs<T extends string>({
                 styles.text,
                 second && styles.textSecond,
                 compact && styles.textCompact,
-                isActive && (second ? styles.textActiveSecond : styles.textActive),
+                isActive && (second || compact ? styles.textActiveSecond : styles.textActive),
               ]}
               numberOfLines={1}
             >
@@ -152,6 +152,12 @@ const styles = StyleSheet.create({
     flex: 0,
     paddingVertical: 6,
     paddingHorizontal: spacing.sm,
+    // 1px, and the active label in textPrimary rather than tint (see
+    // `tabSecond` above): a 2px tint underline here would be the SECOND one on
+    // the screen, ~140pt under Players | Teams, and tint is reserved for the
+    // level that changes the board's subject. Uppercase is deliberately NOT
+    // inherited — this sits in a row of sentence-case pill chips.
+    borderBottomWidth: 1,
   },
   tabActive: {
     borderBottomColor: colors.tint,
