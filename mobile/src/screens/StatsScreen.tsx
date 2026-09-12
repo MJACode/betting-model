@@ -22,11 +22,12 @@ import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { HitModeSheet } from '@/components/HitModeSheet';
+import { StatGroupSheet } from '@/components/StatGroupSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
-import { GroupTabs, SegmentTabs } from '@/components/GroupTabs';
+import { SegmentTabs } from '@/components/GroupTabs';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
@@ -349,6 +350,7 @@ export function StatsScreen() {
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [hitMode, setHitMode] = useState<HitMode>('atLeast');
   const [modeOpen, setModeOpen] = useState<boolean>(false);
+  const [groupOpen, setGroupOpen] = useState<boolean>(false);
   // TOUGHNESS as a filter, which is the half of Matt's ask the grade alone did
   // not answer: the column is truthful on every sport now, but until this the
   // board could not be cut or ordered by it. A FLOOR, not a band — "B or
@@ -1349,7 +1351,15 @@ export function StatsScreen() {
         },
       });
     }
-    if (tonightActive && !gamesPicked) {
+    // NOT the slate cut: its own chip is on the window row two rows up,
+    // already filled and already one tap to undo. Rendering it here as well
+    // drew one filter as two controls with the same words 100pt apart, and
+    // invited the reader to wonder whether they were two cuts (UX review,
+    // 2026-09-12). No shipped comparator does this — in Cash App's and Yahoo
+    // Finance's screeners the active chip IS the active-filter pill. This row
+    // is for cuts that live in the Filters sheet, where there is no other
+    // on-screen sign they are on.
+    if (tonightActive && !gamesPicked && !hasSlate) {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
     }
     if (effectiveMode === 'hitRate') {
@@ -1360,8 +1370,8 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [query, tonightActive, gamesPicked, slateLabel, effectiveMode, bandActive, bandSummary, basis,
-      clearBand, gamePicker, pickableGames, minGrade, includeUngraded]);
+  }, [query, tonightActive, gamesPicked, hasSlate, slateLabel, effectiveMode, bandActive,
+      bandSummary, basis, clearBand, gamePicker, pickableGames, minGrade, includeUngraded]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
   // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
@@ -1451,14 +1461,39 @@ export function StatsScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Stats</Text>
           <View style={styles.rightActions}>
+            {/* "Clear all" lives beside the control it undoes rather than on a
+                row of its own at the bottom of the stack — MasterClass puts
+                FILTERS and CLEAR FILTERS on one line, and with the duplicate
+                slate pill suppressed below there was nothing else left on that
+                row to justify its 34pt (UX review, 2026-09-12). */}
+            {activeFilterCount > 0 || tonightActive ? (
+              <Pressable
+                onPress={resetFilters}
+                hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
+                style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.clearText}>Clear all</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={() => setFiltersOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              accessibilityRole="button"
+              // The badge is a View, so VoiceOver never read the count: the
+              // button said "Filters" whether one filter was on or five (scan
+              // finding, 2026-09-12). It is spoken here instead.
+              accessibilityLabel={
+                activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : 'Filters'
+              }
+              accessibilityHint="Opens the filter options"
               style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
             >
               <Ionicons name="options-outline" size={16} color={colors.tint} />
               <Text style={styles.filterBtnText}>Filters</Text>
               {activeFilterCount > 0 ? (
-                <View style={styles.filterBadge}>
+                <View style={styles.filterBadge} importantForAccessibility="no">
                   <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
                 </View>
               ) : null}
@@ -1474,37 +1509,60 @@ export function StatsScreen() {
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
       ) : null}
 
-      {/* Stat selector — the primary control, straight under the sport row.
-          One tappable group row (Passing | Rushing | …) plus a single stat chip
-          row scoped to the active group, instead of the old one-chip-row-per-
-          group stack (4 rows for NFL) that pushed the leaderboard below the
-          fold. Sports with a single group (WNBA/NBA/UFC) skip the group row. */}
+      {/* Stat selector — the primary control, straight under the sport row, and
+          the one row on this screen that is never allowed to cost less: it is
+          the board's subject, one tap, directly manipulated.
+          ONE row, not three. It was a chip row per group (4 for NFL), then a
+          group tab row above a chip row; both pushed the leaderboard below the
+          fold. The group is now a pill at the head of the chips it scopes, so
+          the two levels share a line (UX review, 2026-09-12).
+          Sports with a single group (WNBA/NBA/UFC) skip the pill. */}
       <View style={styles.statPicker}>
-        {groups.length > 1 ? (
-          <GroupTabs
-            groups={groups}
-            active={activeGroup}
-            onChange={pickGroup}
-          />
-        ) : null}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.fixedRow}
-          contentContainerStyle={styles.chipRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {statsForSport(sport)
-            .filter((s) => s.group === activeGroup)
-            .map((s) => (
-              <FilterChip
-                key={`${s.group}:${String(s.key)}`}
-                label={s.label}
-                active={s.key === stat.key && s.group === stat.group}
-                onPress={() => pickStat(s)}
-              />
-            ))}
-        </ScrollView>
+        {/* The group is PINNED at the head of the row, outside the scroller:
+            it names what the chips beside it are a subset of, so scrolling it
+            off would leave "Pass Yards … Pass Attempts" with nothing saying
+            which of the NFL's four groups they came from. */}
+        <View style={styles.statRow}>
+          {groups.length > 1 ? (
+            <Pressable
+              onPress={() => setGroupOpen(true)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Stat group"
+              accessibilityValue={{ text: activeGroup }}
+              accessibilityHint={`Opens the ${groups.join(', ')} options`}
+              // Shares the direction pill's style object rather than copying
+              // it: two chevron pills on one screen drawn from two style
+              // blocks is the duplicate UX_REVIEW §8 exists to catch. A THIRD
+              // caller means extracting a DropdownPill component.
+              style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
+            >
+              <Text style={styles.dirPillText} numberOfLines={1}>
+                {activeGroup}
+              </Text>
+              {/* chevron-expand, not chevron-down: it opens a menu in place. */}
+              <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
+            </Pressable>
+          ) : null}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.rowScroller}
+            contentContainerStyle={styles.chipRowInline}
+            keyboardShouldPersistTaps="handled"
+          >
+            {statsForSport(sport)
+              .filter((s) => s.group === activeGroup)
+              .map((s) => (
+                <FilterChip
+                  key={`${s.group}:${String(s.key)}`}
+                  label={s.label}
+                  active={s.key === stat.key && s.group === stat.group}
+                  onPress={() => pickStat(s)}
+                />
+              ))}
+          </ScrollView>
+        </View>
       </View>
 
       {/* Line picker: the mode, a tick ruler, then the headline. */}
@@ -1555,22 +1613,29 @@ export function StatsScreen() {
               max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}
               onChange={setLineN}
               format={(n) => rulerValueLabel(n, hitMode)}
-              describe={(n) => hitModeHeadline(n, hitMode, stat?.label ?? '')}
+              // Carries the book's number in At Least mode because the
+              // headline row that used to print it is gone: the ruler is the
+              // one element a screen-reader user drives, so dropping it here
+              // would take the book's line off the screen entirely for them —
+              // the exact regression the 2026-09-05 fix prevented.
+              describe={(n) =>
+                hitMode === 'atLeast'
+                  ? `${hitModeHeadline(n, hitMode, stat?.label ?? '')}, ${hitModeLineLabel(n, hitMode)}`
+                  : hitModeHeadline(n, hitMode, stat?.label ?? '')
+              }
               a11yLabel={`${stat?.label ?? ''} line`}
             />
-          </View>
-          <View style={styles.headlineRow}>
-            <View style={styles.headlineRule} />
-            <Text style={styles.headlineText}>{lineHeadline}</Text>
-            {/* At Least only. Its headline is the fan's idiom — "2+ Hits" —
-                so the book's number for the same bet would otherwise be
-                nowhere on screen (UX review, 2026-09-05). Over and Under ARE
-                that number now, and repeating it beside itself is noise
-                (Matt, 2026-09-06). */}
+            {/* At Least only, and a footnote rather than a headline. The row
+                this replaces restated the stat, the number and the direction —
+                all three already on screen — in the screen's second-largest
+                type, outweighing the hit rate the board exists to show (UX
+                review, 2026-09-12). Only the book's half-point line was novel,
+                so only it survives. Over and Under ARE that number already. */}
             {hitMode === 'atLeast' ? (
-              <Text style={styles.headlineLine}>{hitModeLineLabel(lineN, hitMode)}</Text>
+              <Text style={styles.bookLine} numberOfLines={1}>
+                {hitModeLineLabel(lineN, hitMode)}
+              </Text>
             ) : null}
-            <View style={styles.headlineRule} />
           </View>
         </>
       ) : null}
@@ -1579,72 +1644,85 @@ export function StatsScreen() {
           The toggle sits here rather than in the Filters sheet because "who is
           playing today" is the cut users reach for constantly; it only renders
           when a slate actually exists, so it can never empty the board.
-          RN ScrollViews default to flexGrow/flexShrink 1, so as a direct child
-          of the screen column this row gets crushed to a sliver whenever the
-          controls + list overflow the screen (labels clip out entirely).
-          Pin it to its natural height — the FlatList below is the flexible
-          region. */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.fixedRow}
-        contentContainerStyle={styles.windowRow}
-        keyboardShouldPersistTaps="handled"
-      >
-        {TIME_WINDOWS.map((w) => (
-          <FilterChip
-            key={String(w.value)}
-            label={w.label}
-            active={w.value === timeWindow}
-            onPress={() => setTimeWindow(w.value)}
-          />
-        ))}
-        {hasSlate ? (
-          <>
-            <View style={styles.rowDivider} />
-            {/* This chip re-READS the board now (the server is narrowed to the
-                slate's teams), so it is the one chip on the row whose tap is
-                not instant. Two consequences, both handled here rather than
-                left to the list: a second impatient tap must not queue a
-                second whole-league read, and VoiceOver has to be told that
-                something is happening — focus stays on the chip while the
-                rows underneath it change silently. */}
+          Hit Rates | Averages rides the end of it (see below).
+          RN ScrollViews default to flexGrow/flexShrink 1, so a direct child of
+          the screen column gets crushed to a sliver whenever the controls +
+          list overflow the screen (labels clip out entirely). The WRAPPER is
+          that child now and carries the pin; the scroller inside it flexes on
+          the horizontal axis, which cannot crush anything. The FlatList below
+          stays the one flexible region. */}
+      <View style={[styles.fixedRow, styles.windowStrip]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.rowScroller}
+          contentContainerStyle={styles.windowRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {TIME_WINDOWS.map((w) => (
             <FilterChip
-              label={slateLabel}
-              icon="flame-outline"
-              active={tonightActive && !gamesPicked}
-              busy={loading}
-              // MUTED, NOT REMOVED, while a specific game is picked. The two
-              // are not the same cut — the chip is one slate date, the Games
-              // list is a seven-day window — so with both on you get their
-              // INTERSECTION, which on a Sunday game with "Next slate" showing
-              // is an empty board and two pills each claiming to be on (UX
-              // review, 2026-09-09). The narrower one wins and says so.
-              disabled={gamesPicked}
-              accessibilityLabel={
-                gamesPicked
-                  ? `${slateLabel}, off while a game is picked`
-                  : loading
-                    ? `${slateLabel}, loading`
-                    : tonightActive
-                      ? `${slateLabel}, on. Turn off to show every player`
-                      : `${slateLabel}, off`
-              }
-              onPress={() => setTonightOnly((v) => !v)}
+              key={String(w.value)}
+              label={w.label}
+              active={w.value === timeWindow}
+              onPress={() => setTimeWindow(w.value)}
             />
-          </>
+          ))}
+          {hasSlate ? (
+            <>
+              <View style={styles.rowDivider} />
+              {/* This chip re-READS the board now (the server is narrowed to the
+                  slate's teams), so it is the one chip on the row whose tap is
+                  not instant. Two consequences, both handled here rather than
+                  left to the list: a second impatient tap must not queue a
+                  second whole-league read, and VoiceOver has to be told that
+                  something is happening — focus stays on the chip while the
+                  rows underneath it change silently. */}
+              <FilterChip
+                label={slateLabel}
+                icon="flame-outline"
+                active={tonightActive && !gamesPicked}
+                busy={loading}
+                // MUTED, NOT REMOVED, while a specific game is picked. The two
+                // are not the same cut — the chip is one slate date, the Games
+                // list is a seven-day window — so with both on you get their
+                // INTERSECTION, which on a Sunday game with "Next slate" showing
+                // is an empty board and two pills each claiming to be on (UX
+                // review, 2026-09-09). The narrower one wins and says so.
+                disabled={gamesPicked}
+                accessibilityLabel={
+                  gamesPicked
+                    ? `${slateLabel}, off while a game is picked`
+                    : loading
+                      ? `${slateLabel}, loading`
+                      : tonightActive
+                        ? `${slateLabel}, on. Turn off to show every player`
+                        : `${slateLabel}, off`
+                }
+                onPress={() => setTonightOnly((v) => !v)}
+              />
+            </>
+          ) : null}
+        </ScrollView>
+        {/* Hit Rates | Averages — a two-value switch, so it rides the end of
+            this row instead of spending a third full-width underline-tab row
+            on the screen (UX review, 2026-09-12). Still SegmentTabs and not a
+            hand-rolled segment: the tablist/tab/selected roles travel with the
+            component, and that is the point of reusing it. The row is a View
+            with the scroller flexing inside it, so `fixedRow` still pins the
+            whole strip to its natural height and the FlatList stays the one
+            flexible child of the screen column. */}
+        {canHitRate ? (
+          <View style={styles.modeSeg}>
+            <SegmentTabs
+              items={MODES}
+              active={mode}
+              onChange={setMode}
+              compact
+              labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
+            />
+          </View>
         ) : null}
-      </ScrollView>
-
-      {/* Hit Rates | Averages */}
-      {canHitRate ? (
-        <SegmentTabs
-          items={MODES}
-          active={mode}
-          onChange={setMode}
-          labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
-        />
-      ) : null}
+      </View>
 
       {/* A failed load is recoverable far more often than not — PostgREST
           answers 503 for as long as it takes to rebuild its schema cache — so
@@ -1703,16 +1781,6 @@ export function StatsScreen() {
               <Ionicons name="close" size={12} color={colors.tint} />
             </Pressable>
           ))}
-          {/* Only offered once the user has actually changed something. */}
-          {activeFilterCount > 0 || tonightActive ? (
-            <Pressable
-              onPress={resetFilters}
-              style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
-              hitSlop={6}
-            >
-              <Text style={styles.clearText}>Clear all</Text>
-            </Pressable>
-          ) : null}
         </ScrollView>
       ) : null}
 
@@ -1864,6 +1932,14 @@ export function StatsScreen() {
         underAvailable={underAvailable}
         unavailableNote={dirLockNote}
         onClose={() => setModeOpen(false)}
+      />
+      <StatGroupSheet
+        visible={groupOpen}
+        groups={groups}
+        active={activeGroup}
+        countFor={(g) => statsForSport(sport).filter((st) => st.group === g).length}
+        onPick={pickGroup}
+        onClose={() => setGroupOpen(false)}
       />
       <AddLineSheet
         input={lineSheetInput}
@@ -2928,42 +3004,58 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  headlineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-  },
-  headlineRule: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.separator,
-  },
-  headlineLine: {
+  // The book's half-point line, sitting at the end of the ruler row. A
+  // footnote, not a headline: it qualifies the number the ruler is showing.
+  bookLine: {
+    flexShrink: 0,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  headlineText: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
 
   // ── Window chips ──
+  // The strip is the direct child of the screen column, so IT carries
+  // `fixedRow`'s flexGrow/flexShrink 0; the scroller inside it flexes
+  // horizontally, which is a different axis and cannot crush the row.
+  windowStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   windowRow: {
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  // Shared by the two rows that pair a pinned control with a scroller.
+  rowScroller: {
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+  modeSeg: {
+    paddingRight: spacing.lg,
+    paddingLeft: spacing.sm,
   },
 
   // ── Hit Rates / Averages tabs ──
 
   statPicker: {
-    paddingTop: spacing.xs,
+    paddingTop: 0,
   },
-  // Group tabs (Passing | Rushing | …) — same uppercase-caption look the old
-  // section labels had, but tappable and on one row.
+  // The pinned group pill plus the scrolling stat chips, on one line.
+  statRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: spacing.lg,
+    gap: spacing.sm,
+  },
+  // The chips' own row already starts after the pill, so it drops the left
+  // inset `chipRow` carries and keeps only the trailing one.
+  chipRowInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingRight: spacing.lg,
+    paddingVertical: 2,
+  },
   ungradedRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2975,11 +3067,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.footnote,
     color: colors.textPrimary,
-  },
-  chipRow: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-    paddingVertical: 2,
   },
   searchWrap: {
     flexDirection: 'row',
@@ -3014,18 +3101,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
+  // textSecondary, not textTertiary: tertiary composites to ~3.4:1 on the card
+  // and this is 11pt, which is not large text — the case UX_REVIEW §5 names by
+  // hand, on the legend for every column below it. Hierarchy is carried by
+  // size and position, exactly as rowSubline does (UX review, 2026-09-12).
   colHeaderRank: {
     width: 20,
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     letterSpacing: 0.3,
   },
   colHeaderName: {
     flex: 1,
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     letterSpacing: 0.3,
   },
   colHeaderRight: {
@@ -3033,7 +3124,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     letterSpacing: 0.3,
   },
   colHeaderOdds: { minWidth: ODDS_W, textAlign: 'right' },
