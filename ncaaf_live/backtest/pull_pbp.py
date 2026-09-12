@@ -129,13 +129,31 @@ def pull_season(season: int, force: bool = False) -> Path | None:
     return out
 
 
-# Postgres does not name the column in `NumericValueOutOfRange: integer out of
-# range`, so the first run of this job (2026-09-12) failed with no way to tell
-# WHICH value did not fit. This check runs before the INSERT and names it. The
-# columns are BIGINT now (data/migrations/widen_ncaaf_plays_ints.sql), so a
-# value that trips this is genuinely wrong -- a parse gone sideways or a feed
-# change -- rather than merely large, and the run SHOULD stop rather than store
-# it.
+# Postgres does not name the column in `integer out of range` / `bigint out of
+# range`. Attempt 1 of the ncaaf_pbp_pull job (2026-09-12) failed the first way,
+# the columns were widened to BIGINT, and attempt 2 failed the second way — so
+# some value CFBD serves genuinely exceeds 2^63, and neither traceback said
+# which.
+#
+# WHAT IS NOT KNOWN YET, STATED PLAINLY: attempt 2 ran WITH a pre-insert range
+# check and that check PASSED, then Postgres refused the row anyway. The
+# obvious explanation — that `pd.to_numeric(..., errors="coerce")` NaN-drops a
+# value too large to represent, so the check skipped it — was tested against a
+# 2**70 object column and is FALSE: to_numeric returns 1.18e21 there and the
+# check would have caught it. So the reason the check passed is still open, and
+# no comment here should pretend otherwise.
+#
+# What changed on the evidence actually in hand:
+#   * the columns are NUMERIC (data/migrations/ncaaf_plays_numeric_not_bigint),
+#     which has no ceiling. That ends a sequence of guesses at the right width
+#     rather than adding a third.
+#   * the scan below walks the RAW objects with Python's int(), which has no
+#     ceiling and no coercion step, instead of routing through to_numeric. Not
+#     because to_numeric was proven wrong, but because the raw walk has strictly
+#     fewer ways to be wrong on the exact question being asked.
+#   * it REPORTS instead of raising, and store_season returns the observed
+#     min/max per column in the job result — which is how the actual value gets
+#     identified, since guessing at it has now cost two deploy cycles.
 NUMERIC_COLUMNS = (
     "play_number", "period", "clock_minutes", "clock_seconds",
     "offense_score", "defense_score", "offense_timeouts", "defense_timeouts",
@@ -144,22 +162,53 @@ NUMERIC_COLUMNS = (
 BIGINT_MAX = 2 ** 63 - 1
 
 
-def _check_ranges(out, season: int) -> None:
-    """Raise naming the column and the offending value, before Postgres can
-    raise without naming either."""
+def _extremes(series):
+    """(min, max) as PYTHON ints over the raw objects.
+
+    Deliberately not `pd.to_numeric`: its `errors="coerce"` maps an
+    unrepresentable integer to NaN, and `errors="raise"` would abort the scan on
+    the first non-numeric cell. int() on each object has neither problem and no
+    ceiling.
+    """
+    lo = hi = None
+    for v in series:
+        if v is None:
+            continue
+        try:
+            if v != v:                                   # NaN, without numpy
+                continue
+        except (TypeError, ValueError):
+            pass
+        try:
+            i = int(v)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        lo = i if lo is None else min(lo, i)
+        hi = i if hi is None else max(hi, i)
+    return lo, hi
+
+
+def observed_ranges(out) -> dict:
+    """min/max per numeric column, for the job result."""
+    got = {}
     for col in NUMERIC_COLUMNS:
-        if col not in out.columns:
-            continue
-        vals = pd.to_numeric(out[col], errors="coerce")
-        vals = vals[vals.notna()]
-        if vals.empty:
-            continue
-        lo, hi = float(vals.min()), float(vals.max())
+        if col in out.columns:
+            lo, hi = _extremes(out[col])
+            if lo is not None:
+                got[col] = [lo, hi]
+    return got
+
+
+def _report_ranges(out, season: int) -> dict:
+    """Log any column carrying a value past BIGINT, naming it and a play."""
+    ranges = observed_ranges(out)
+    for col, (lo, hi) in ranges.items():
         if hi > BIGINT_MAX or lo < -BIGINT_MAX:
-            bad = out.loc[vals.abs().idxmax()]
-            raise ValueError(
-                f"{season}: {col} out of range at play {bad.get('play_id')!r} "
-                f"(game {bad.get('game_id_cfbd')!r}): min {lo:,.0f} max {hi:,.0f}")
+            worst = max(out[col], key=lambda v: abs(int(v))
+                        if isinstance(v, (int, float)) and v == v else -1)
+            print(f"  WARN {season}: {col} carries {worst!r} "
+                  f"(min {lo}, max {hi}) — past bigint; stored as NUMERIC")
+    return ranges
 
 
 def store_season(conn, season: int, df=None) -> dict:
@@ -183,7 +232,7 @@ def store_season(conn, season: int, df=None) -> dict:
     for c in ("play_id", "game_id_cfbd", "drive_id"):
         if c in out.columns:
             out[c] = out[c].astype(str)
-    _check_ranges(out, season)
+    ranges = _report_ranges(out, season)
     names = list(out.columns)
     placeholders = ", ".join(f"%({c})s" for c in names)
     updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in names if c != "play_id")
@@ -193,15 +242,9 @@ def store_season(conn, season: int, df=None) -> dict:
     rows = out.where(pd.notna(out), None).to_dict("records")
     conn.executemany(sql, rows)
     conn.commit()
-    widest = {}
-    for col in NUMERIC_COLUMNS:
-        if col in out.columns:
-            v = pd.to_numeric(out[col], errors="coerce")
-            if v.notna().any():
-                widest[col] = [int(v.min()), int(v.max())]
     return {"season": season, "plays": len(rows),
             "games": int(out["game_id_cfbd"].nunique()),
-            "ranges": widest}
+            "ranges": ranges}
 
 
 def load_season_from_db(conn, season: int):
