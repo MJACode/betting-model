@@ -1283,6 +1283,57 @@ def run_system_health(run_date: str | None = None) -> dict:
             getattr(conn, "rollback", lambda: None)()
             r.add("ncaaf_game_identity", ERROR, "CRIT", f"query failed: {exc}")
 
+        # ── The FBS registry agrees with SP+ ─────────────────────────────────
+        # A school `ncaaf_teams` calls FBS that SP+ has never rated is two of
+        # our own tables disagreeing, and the cost is a DK-priced game that
+        # leaves the board with NO row and no reason — the exact shape
+        # .claude/rules/operations.md warns about, where an empty board and a
+        # broken pipeline look identical.
+        #
+        # Found 2026-09-12: `ncaaf_teams` and every 2026 `ncaaf_team_stats`
+        # snapshot carried North Dakota State [Mountain West] and Sacramento
+        # State [Mid-American] as `fbs`, both written in one 2026-08-29 pass
+        # and neither in the conference named. 138 schools classified fbs, 136
+        # with an SP+ rating — and 136 is the FBS count CLAUDE.md section 4
+        # states. Their two games that Saturday (NDSU @ Air Force, Sac State @
+        # Fresno State) produced nothing: `picks_log` holds zero rows for
+        # either id, so no model ever wrote and nothing was there to delete.
+        #
+        # WARN, not CRIT: nothing is mispriced by it — `features.
+        # ncaaf_feature_engine._is_fbs` now requires the SP+ rating, so these
+        # decline at the gate. What is wrong is the registry, and the fix is a
+        # `ncaaf_teams_refresh` job, not a code change.
+        # Season label = calendar year of the FALL (cfbd_ingestor.
+        # ncaaf_season_for_date); never derived by hand — CLAUDE.md section 4.
+        from data.ingestors.cfbd_ingestor import ncaaf_season_for_date
+        season_now = ncaaf_season_for_date(run_date)
+        try:
+            unrated = conn.execute("""
+                SELECT DISTINCT t.school, t.conference
+                FROM ncaaf_teams t
+                WHERE t.classification = 'fbs'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM ncaaf_team_stats s
+                      WHERE s.team = t.school AND s.season = ?
+                        AND s.sp_overall IS NOT NULL
+                  )
+                ORDER BY t.school
+            """, (season_now,)).fetchall()
+            if unrated:
+                named = "; ".join(f"{row[0]} [{row[1] or '?'}]" for row in unrated[:5])
+                more = f" (+{len(unrated) - 5} more)" if len(unrated) > 5 else ""
+                r.add("ncaaf_fbs_registry", STALE, "WARN",
+                      f"{len(unrated)} school(s) classified FBS with no {season_now} "
+                      f"SP+ rating — their games are declined at the FBS gate and "
+                      f"never reach the board: {named}{more}. Queue a "
+                      f"ncaaf_teams_refresh job to re-pull the registry")
+            else:
+                r.add("ncaaf_fbs_registry", OK, "WARN",
+                      f"every FBS school carries a {season_now} SP+ rating")
+        except Exception as exc:                            # noqa: BLE001
+            getattr(conn, "rollback", lambda: None)()
+            r.add("ncaaf_fbs_registry", ERROR, "WARN", f"query failed: {exc}")
+
         # ── Model calibration on the LIVE record ─────────────────────────────
         # Does a published probability still mean what it says? The training
         # gate only ever sees the holdout, and for a Poisson model it was not

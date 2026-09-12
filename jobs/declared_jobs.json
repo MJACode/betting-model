@@ -3,7 +3,7 @@
     "key": "mlb-historical-pilot-2024-06-01",
     "job_type": "historical_odds",
     "requested_by": "mike",
-    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 \u2014 205 rows over 48 games \u2014 two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
+    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 — 205 rows over 48 games — two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
     "args": {
       "sport": "MLB",
       "start": "2024-06-01",
@@ -28,7 +28,7 @@
     "key": "mlb-relabel-in-play-2024-pilot",
     "job_type": "relabel_in_play",
     "requested_by": "mike",
-    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game \u2014 ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
+    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game — ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
     "args": {
       "sport": "MLB",
       "since": "2024-06-01"
@@ -713,6 +713,21 @@
     "args": {
       "seasons": [
         2025
+      ]
+    }
+  },
+  {
+    "key": "ncaaf-teams-refresh-2026-fbs-registry",
+    "job_type": "ncaaf_teams_refresh",
+    "requested_by": "matt",
+    "note": "Re-pull the 2026 school registry from CFBD. ncaaf_teams carries 138 schools classified 'fbs' where CLAUDE.md section 4 says 136, and the two extras -- North Dakota State [Mountain West] and Sacramento State [Mid-American], both written in one 2026-08-29 pass, neither in the conference named -- have no SP+ rating on any of their 15 2026 ncaaf_team_stats snapshots. SP+ is FBS-only, so that absence is the tell. Their two DK-priced games on 2026-09-12 (NDSU @ Air Force, Sac State @ Fresno State) produced no pick row at all: picks_log holds zero rows for either id. /teams/fbs?year=2026 is the authority and this job is how we ask it; the probe re-checks name resolution against the registry the worker actually holds.",
+    "args": {
+      "season": 2026,
+      "probe": [
+        "North Dakota State Bison",
+        "Sacramento State Hornets",
+        "Air Force Falcons",
+        "Fresno State Bulldogs"
       ]
     }
   }

@@ -109,6 +109,33 @@ its opening number, which is rarely true by kickoff.
   the gap between the earliest book and DK is a median 0.0 days, 90th
   percentile 0.62, and only 205 of 2,651 games had any book a full day ahead.
   The opener rule has no limit either: its own preconditions are its window.
+- **THE FBS GATE TRUSTS SP+, NOT THE REGISTRY** (2026-09-12, matt: *"make sure
+  we have the right NCAA picks"*). `_is_fbs` used to read `classification` and
+  consult `sp_overall` only as a FALLBACK when that column was NULL — so a row
+  whose classification WRONGLY said `fbs` sailed through, and the proof the
+  function's own docstring calls decisive was never looked at. SP+ is FBS-only,
+  so it is now REQUIRED and `classification` may only ever VETO.
+  Measured that day: `ncaaf_teams` held **138** schools classified `fbs`, **136**
+  with a 2026 SP+ rating — and 136 is the FBS count CLAUDE.md §4 states. The two
+  extras, **North Dakota State [Mountain West]** and **Sacramento State
+  [Mid-American]**, were written in one 2026-08-29 pass, are in neither
+  conference named, and carry no SP+ on any of their 15 snapshots. Their two
+  DK-priced games that Saturday (NDSU @ Air Force, Sac State @ Fresno State)
+  produced **no pick row at all** — `picks_log` holds zero rows for either id,
+  so no model ever wrote and nothing was there to delete. The same shape recurs
+  every season, always on a school moving between FCS and FBS: 2025 Delaware,
+  Idaho, Missouri State; 2024 those three plus Kennesaw State.
+  **Nothing priceable is lost:** `sp_overall` is itself a feature
+  (`d_sp_overall`), so a team without it yields a NULL the scorer must not
+  impute and the game was already being dropped — inside four models that each
+  returned `[]`. What moved is WHERE, and that it now has a name. A decline
+  where the registry and SP+ DISAGREE logs at WARNING (an ordinary FCS opponent
+  stays at debug, or 33 of a 98-game Saturday would bury the two that matter),
+  and `system_health`'s **`ncaaf_fbs_registry`** check reports any FBS-classified
+  school with no current-season rating. The data fix is a `ncaaf_teams_refresh`
+  job, not a code change — declared in `jobs/declared_jobs.json`.
+  Tests: `tests/test_ncaaf_fbs_registry.py` (14; the two gate cases watched
+  failing, and the check's FBS-only bound watched failing under mutation).
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
   ~52 DK-priced — so the board is tens of games, not hundreds.
 

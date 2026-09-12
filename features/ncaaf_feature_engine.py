@@ -103,19 +103,60 @@ def _is_fbs(stats: dict) -> bool:
     Mere row EXISTENCE is not enough. CFBD's ratings and talent endpoints cover
     FCS programs too, so the backfill writes snapshots for them — 162 such teams
     in our data, none of which we can model. Verified against the loaded data:
-    every one of those rows is missing sp_overall (SP+ is FBS-only), so SP+ is
-    itself proof of FBS membership and serves as the fallback when the
-    classification column was never populated.
+    every one of those rows is missing sp_overall (SP+ is FBS-only), so SP+ IS
+    the proof of FBS membership.
 
     Training was already protected by dropna; this protects LIVE SCORING, which
     would otherwise happily price an FBS-vs-FCS game off a row of nulls.
+
+    SP+ IS REQUIRED, NOT A FALLBACK (2026-09-12, matt). It used to be consulted
+    only when `classification` was NULL — so a row whose classification WRONGLY
+    said "fbs" sailed through the gate, and the proof the docstring above calls
+    decisive was never looked at. That is not hypothetical: `ncaaf_teams` and
+    `ncaaf_team_stats` both carried **North Dakota State** and **Sacramento
+    State** as `fbs` from a 2026-08-29 write (with conferences "Mountain West"
+    and "Mid-American", neither of which they belong to), and SP+ has no rating
+    for either. Measured the same day: of 138 schools classified `fbs` for
+    2026, exactly 136 carry an SP+ rating — and 136 is the FBS count CLAUDE.md
+    section 4 states. The same shape appears in every season the registry
+    covers, always on a school moving between FCS and FBS: 2025 Delaware,
+    Idaho, Missouri State; 2024 those three plus Kennesaw State.
+
+    So the order is inverted: SP+ is NECESSARY, and `classification` may only
+    ever VETO. Nothing that could be priced is lost by this — `sp_overall` is
+    itself a feature (`d_sp_overall`), so a team without it produces a NULL the
+    scorer must not impute, and the game was already being dropped. What
+    changes is WHERE: at the gate, with a name, instead of somewhere inside
+    four models that each return an empty list.
     """
     if not stats:
         return False
+    # SP+ is FBS-only, so its absence settles the question whatever the
+    # registry claims.
+    if stats.get("sp_overall") is None:
+        return False
     cls = stats.get("classification")
-    if cls is not None:
-        return str(cls).lower() == "fbs"
-    return stats.get("sp_overall") is not None
+    # A classification that names another division vetoes; NULL (never
+    # populated) defers to the SP+ rating above.
+    return cls is None or str(cls).lower() == "fbs"
+
+
+def unrated_fbs_claim(stats: dict) -> str | None:
+    """The registry claims FBS and SP+ has never rated the team — the
+    SURPRISING half of an FBS-gate decline, worth a name.
+
+    An ordinary FBS-vs-FCS matchup is not this: its snapshot says `fcs` (or
+    nothing) and no one expects a pick. This is the case where two sources
+    inside our own database disagree, which is how a game goes missing from the
+    board with nobody able to say why. Returns None when there is nothing
+    surprising to report.
+    """
+    if not stats or stats.get("sp_overall") is not None:
+        return None
+    cls = stats.get("classification")
+    if cls is None or str(cls).lower() != "fbs":
+        return None
+    return "classified FBS but SP+ has no rating for it"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -434,7 +475,20 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
     home_stats = _get_ncaaf_team_stats(conn, home_team, season, game_date)
     away_stats = _get_ncaaf_team_stats(conn, away_team, season, game_date)
     if not _is_fbs(home_stats) or not _is_fbs(away_stats):
-        logger.debug(f"{game_id}: not an FBS-vs-FBS matchup — skipping")
+        # An ordinary FCS opponent is expected and stays at debug — the FBS
+        # gate is most of what keeps a 98-game Saturday down to tens of games.
+        # A team the REGISTRY calls FBS that SP+ has never rated is a different
+        # animal: two of our own tables disagreeing, which is how a DK-priced
+        # game leaves the board with no row and no reason (2026-09-12).
+        claims = [f"{team} {why}"
+                  for team, why in ((home_team, unrated_fbs_claim(home_stats)),
+                                    (away_team, unrated_fbs_claim(away_stats)))
+                  if why]
+        if claims:
+            logger.warning(f"{game_id}: FBS gate declined — " + "; ".join(claims)
+                           + " (check ncaaf_teams against CFBD)")
+        else:
+            logger.debug(f"{game_id}: not an FBS-vs-FBS matchup — skipping")
         return None
 
     row = conn.execute("""
