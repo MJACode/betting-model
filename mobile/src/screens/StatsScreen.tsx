@@ -340,7 +340,6 @@ export function StatsScreen() {
   const [basis, setBasis] = useState<Basis>('perGame');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
   const [query, setQuery] = useState<string>('');
-  const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('default');
   // Hit Rate controls (front page): a ruler, plus which side of it the bet is
   // on. `lineN` is the ruler's STOP INDEX, not the number on its face — the
@@ -428,7 +427,6 @@ export function StatsScreen() {
     const next = defaultStatFor(sport);
     setStat(next);
     setQuery('');
-    setTeamFilter(null);
     setTonightOnly(defaultTonightOnly(sport)); // a different sport is a different slate
     setLineN(defaultLineN(next));
     // UFC and golf have no teams — never strand the user on an empty board.
@@ -1086,7 +1084,6 @@ export function StatsScreen() {
     const q = query.trim().toLowerCase();
     return rows
       .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
-      .filter((r) => !teamFilter || r.team === teamFilter)
       .filter((r) => !tonightActive || gamesPicked || isOnSlate(r, slate))
       .filter((r) => !gameTeams || (!!r.team && gameTeams.includes(r.team)))
       .filter((r) => !minGrade || meetsGradeFloor(matchupFor(r)?.grade, minGrade, includeUngraded))
@@ -1104,7 +1101,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [rows, stat, sport, basis, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -1164,7 +1161,6 @@ export function StatsScreen() {
     return out
       .filter((p) => isStatParticipant(sport, p.values))
       .filter((p) => inHitRateBand(p.pct, band))
-      .filter((p) => !teamFilter || p.team === teamFilter)
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
       .filter((p) => !minGrade || meetsGradeFloor(matchupFor(p)?.grade, minGrade, includeUngraded))
@@ -1176,7 +1172,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, teamFilter, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, band, query, effectiveMode, tonightActive, gamesPicked, slate, sortKey, gameTeams, minGrade, includeUngraded, matchupFor]);
 
   // Does the hit-rate column span more than one colour band? A rare-event
   // column (Doubles, Triples, Home Runs) does not — every player lands in the
@@ -1204,19 +1200,6 @@ export function StatsScreen() {
     () => hitRateColorDiscriminates(hitRatePlayers.map((p) => p.pct)),
     [hitRatePlayers],
   );
-
-  // Teams present in the active dataset, for the team filter chips.
-  const teams = useMemo(() => {
-    const src: Array<{ team: string | null }> =
-      effectiveMode === 'hitRate'
-        ? timeWindow === 'season'
-          ? seasonValues.rows
-          : recentRows
-        : rows;
-    const set = new Set<string>();
-    for (const r of src) if (r.team) set.add(r.team);
-    return Array.from(set).sort();
-  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
 
   // Every sport with a per-game player log gets the detail view; UFC/NHL/Golf
   // have no per-game player stats to chart.
@@ -1295,7 +1278,6 @@ export function StatsScreen() {
   // Only counts what still lives in the modal — the front-page controls are visible.
   const activeFilterCount = useMemo(() => {
     let n = 0;
-    if (teamFilter) n += 1;
     if (gamePicker.selected.size > 0) n += 1;
     if (minGrade) n += 1;
     if (minGrade && !includeUngraded) n += 1;
@@ -1307,7 +1289,7 @@ export function StatsScreen() {
       n += 1;
     }
     return n;
-  }, [teamFilter, gamePicker.selected, minGrade, includeUngraded, query, sortKey, effectiveMode, band, basis]);
+  }, [gamePicker.selected, minGrade, includeUngraded, query, sortKey, effectiveMode, band, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -1318,7 +1300,6 @@ export function StatsScreen() {
   const resetFilters = useCallback(() => {
     setBasis('perGame');
     setQuery('');
-    setTeamFilter(null);
     setMinHitRate('');
     setMaxHitRate('');
     setSortKey('default');
@@ -1332,9 +1313,6 @@ export function StatsScreen() {
   // the only hint that a filter was on was a number badge on the Filters button.
   const activePills = useMemo<ActivePill[]>(() => {
     const out: ActivePill[] = [];
-    if (teamFilter) {
-      out.push({ key: 'team', label: teamFilter, onRemove: () => setTeamFilter(null) });
-    }
     if (query.trim()) {
       out.push({ key: 'query', label: `"${query.trim()}"`, onRemove: () => setQuery('') });
     }
@@ -1380,7 +1358,7 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, gamesPicked, slateLabel, sortKey, effectiveMode, band, bandSummary, basis,
+  }, [query, tonightActive, gamesPicked, slateLabel, sortKey, effectiveMode, band, bandSummary, basis,
       gamePicker, pickableGames, minGrade, includeUngraded]);
 
   // What the empty board should SAY. An empty list and a failed fetch look
@@ -1390,13 +1368,20 @@ export function StatsScreen() {
   // different problem with a different fix. The error case wins.
   const emptySubtitle = useMemo(() => {
     if (error) return 'The board could not be loaded. Tap Retry above.';
-    if (query.trim()) return `Nothing matched "${query.trim()}".`;
+    // Search matches player_name only (lines above), and the Team chips that
+    // used to give a team name a home in this sheet are gone — so a user typing
+    // an abbrev lands here. Name the surviving route rather than dead-ending.
+    if (query.trim()) {
+      return pickableGames.length > 0
+        ? `Nothing matched "${query.trim()}". Search matches player names — pick a game under Games to narrow by team.`
+        : `Nothing matched "${query.trim()}".`;
+    }
     if (activeFilterCount > 0 || tonightActive) {
       return 'No players match your filters. Tap a pill above to widen the board.';
     }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
-  }, [error, query, activeFilterCount, tonightActive, timeWindow, windowN, sport, stat]);
+  }, [error, query, activeFilterCount, tonightActive, timeWindow, windowN, sport, stat, pickableGames]);
 
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
@@ -2066,27 +2051,6 @@ export function StatsScreen() {
                 suffix="%"
                 maxLength={3}
               />
-            </View>
-          </FilterSection>
-        ) : null}
-
-        {teams.length > 1 ? (
-          <FilterSection title="Team" summary={teamFilter ?? 'All teams'}>
-            <View style={styles.chipWrap}>
-              <FilterChip
-                label="All teams"
-                active={teamFilter === null}
-                onPress={() => setTeamFilter(null)}
-              />
-              {teams.map((t) => (
-                <FilterChip
-                  key={t}
-                  label={t}
-                  size="sm"
-                  active={teamFilter === t}
-                  onPress={() => setTeamFilter(teamFilter === t ? null : t)}
-                />
-              ))}
             </View>
           </FilterSection>
         ) : null}
