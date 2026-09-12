@@ -21,6 +21,27 @@
 
 ---
 
+## [ ] The live model's play corpus includes SPRING TRAINING games
+
+Measured 2026-09-12 while backfilling 2019–2020: of 290 March 2019 games
+carrying rows in `plays`, **178 are dated before the season opener** (2019
+opened 03-20 in Japan, 03-28 domestically), so they are exhibition games.
+260 of the 290 predate today's backfill — this is long-standing, not new.
+`mlb_pbp_ingestor.backfill_pbp` walks `statsapi.schedule` from March 1 and
+loads any game that resolves to a scored `games` row, and the SBR CSVs carry
+spring training, so both halves let them in.
+
+`features.live_game_features.build_live_training_dataset` selects games by
+`season`, so every one of these is a training row for `mlb_live_total_runs`.
+Spring training is a different run environment played by different players
+in games that can end in a tie, which is exactly the thing a
+runs-remaining model should not be learning from. Measure first — refit with
+them excluded and compare on the 2025 in-play history
+(`scripts/inplay_history_backtest.py`) — then decide whether the filter
+belongs in the ingest (`game_type == 'R'` and the postseason codes, as
+`data/ingestors/mlb_inplay_history.GAME_TYPES` already lists) or only in the
+training select. A retrain is a model update either way.
+
 ## [ ] Re-measure the `nfl_prop_market` over cut on 2026 settled bets
 
 Shipped 2026-09-12 (mike): the over side is held to 6pp, the under to 5pp
