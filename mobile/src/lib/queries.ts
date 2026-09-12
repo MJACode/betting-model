@@ -541,18 +541,32 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
 }
 
 /**
- * Every book's latest prop line for ONE market on one date.
+ * Every book's latest prop line for ONE market across a range of dates.
  *
  * The Stats board's LINE column reads this rather than `picks`: the user's own
  * sportsbook's current number for every player, separate from the models
  * (lib/statsOdds.ts). Bounded to one market so the read stays small: a full
  * MLB slate is ~190 players x 13 books per market.
  *
+ * A RANGE, NOT A DATE, since 2026-09-12. The board no longer cuts itself to
+ * one slate (Matt: "always show all players and pull in a better line they
+ * have"), so a player whose next game is Monday must still be priced on a
+ * Sunday board — bounded to one date he read as unpriced, which is a fact
+ * about our query and not about the book.
+ *
+ * IT IS NEARLY FREE, because the books decide the window, not us. Measured
+ * 2026-09-12 over 2026-09-12 → 09-19: `player_pass_yds` (+ alternates) is
+ * 4,063 rows on the Sunday slate and 4,361 across the whole week, and MLB's
+ * `batter_hits` is 8,469 rows on 09-12 and ZERO on every later date — books
+ * post daily-sport props about a day out. Widening the bound adds the rows
+ * that exist and no others.
+ *
  * The view carries no sport column and `player_points` is both an NBA and a
  * WNBA market, so the CALLER must bound the rows to its sport's game ids.
  */
-export async function fetchPropLinesForDate(
-  date: string,
+export async function fetchPropLinesForDates(
+  from: string,
+  to: string,
   market: string,
 ): Promise<PropOddsByBookRow[]> {
   // Paged: a full MLB market is ~1,900 rows, over the 1,000-row response cap.
@@ -561,18 +575,23 @@ export async function fetchPropLinesForDate(
   // with every line a book posts. The line is in the order and the key: an
   // alternate key returns several rows per (game, player, book).
   const rows = await fetchAllPages<PropOddsByBookRow>(
-    (from, to) =>
+    (lo, hi) =>
       supabase
         .from('v_latest_prop_odds_all_books')
         .select(PROP_ODDS_BY_BOOK_COLUMNS)
-        .eq('game_date', date)
+        .gte('game_date', from)
+        .lte('game_date', to)
         .in('market', [market, alternateMarketFor(market)])
+        // game_date leads the order so the paging stays deterministic across
+        // the wider bound — PostgREST range paging without a total order can
+        // repeat or skip rows between windows (lib/paging.ts).
+        .order('game_date')
         .order('game_id')
         .order('market')
         .order('player_name')
         .order('bookmaker')
         .order('line')
-        .range(from, to),
+        .range(lo, hi),
     propLineRowKey,
   );
   return foldAlternateRows(rows);
