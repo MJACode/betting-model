@@ -1,0 +1,35 @@
+{
+  "model_id": "ncaaf_live_win_prob",
+  "kind": "pregame_status_logistic",
+  "form": "logit(p_adj) = a + b*logit(p_raw) + c*dog_points",
+  "a": 0.09519,
+  "b": 0.81613,
+  "c": -0.05673,
+  "c_stderr": 0.00193,
+  "fitted_on": "2025",
+  "fitted_at": "2026-09-12",
+  "n_states": 27088,
+  "dog_points": "points the BACKED side was getting before kickoff; the stored pregame spread is home-relative, so the away side's value is its negation",
+  "validation": {
+    "method": "fit on the first half of 2025, read on the second; never both",
+    "held_out_states": 11022,
+    "brier": {
+      "raw": 0.16316,
+      "platt_only": 0.16287,
+      "this": 0.15429
+    },
+    "logloss": {
+      "raw": 0.48953,
+      "platt_only": 0.48844,
+      "this": 0.46453
+    },
+    "note": "plain Platt barely moves; the pregame term is what carries it"
+  },
+  "defect": "measured on 2025: the model under-rates favourites and over-rates underdogs, monotonically. Backed side laying 14+ claims 0.890 wins 0.955; getting 7-14 claims 0.291 wins 0.207; a >=14pt dog that is AHEAD claims 0.239 wins 0.121 (interval [0.060,0.229] excludes the claim). Calibration by CURRENT LEAD is inside its interval in every bucket, so the defect is the pregame dimension only.",
+  "refit": "python -m scripts.ncaaf_live_dog_correction --season YYYY --fit",
+  "shipped_cut": {
+    "min_prob": 0.65,
+    "min_ev": 0.26,
+    "note": "SWEPT ON THE CORRECTED SCALE. Stage 3 changes what model_probability means, so a cut swept on raw probabilities is the wrong number on the wrong scale -- the raw-scale 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities: 33 bets +25.7%, halves +23.8%/+34.2%, and the four neighbouring cells (0.62/0.26, 0.65/0.22, 0.65/0.30, 0.60/0.26) are all positive in both halves. A plateau, where the raw scale only had islands."
+  }
+}

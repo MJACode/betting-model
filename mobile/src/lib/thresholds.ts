@@ -133,22 +133,39 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Premium opener band [2.5, inf): 344 bets, 60.5%, +15.4% (2023-25,
   // positive every season). Disjoint from ncaaf_spread by construction.
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
-  // NCAAF live lanes — UNPAUSED 2026-09-12 (mike) at the 2025 replay's
-  // both-halves-positive cells. These bundled numbers are the OFFLINE
-  // fallback; the server flag in model_action_thresholds is what actually
-  // ships an unpause (isModelPaused prefers it), so threshold_sync is the
-  // step that makes this live, not the OTA.
+  // NCAAF live lanes — UNPAUSED 2026-09-12 (mike). ncaaf_live_total's
+  // 0.72/0.22 is the raw 2025 replay's both-halves-positive cell;
+  // ncaaf_live_win_prob's 0.65 is the CORRECTED-scale re-sweep described
+  // three paragraphs down. Two different sweeps, so do not read them as one.
+  //
+  // These bundled numbers are the OFFLINE fallback; the server row in
+  // model_action_thresholds is what actually ships an unpause (isModelPaused
+  // prefers it), so threshold_sync is the step that makes this live, not the
+  // OTA. THE SAME IS TRUE OF min_prob, and for win_prob it bites harder:
+  // until threshold_sync runs, the server row still holds the raw-scale cut,
+  // so the app gates CORRECTED probabilities at a number swept on RAW ones --
+  // looser than either value anyone chose. The window is one sync.
   //
   // THIS MAP IS A STRICT SUBSET OF THE WIN_PROB LANE'S REAL GATE, and cannot
-  // express the rest of it. The full cut is min_prob 0.68 x EV >= 0.26 x a
-  // 10-point PREGAME-UNDERDOG cap (never back a live ML on a team that was
-  // getting more than 10 before kickoff -- config.MODEL_MIN_EV and
-  // config.NCAAF_LIVE_ML_MAX_PREGAME_DOG_POINTS, both enforced server-side in
-  // ncaaf_live/serve.py). Neither reaches model_action_thresholds either, so
-  // NO app surface can reproduce the live gate exactly -- the same shape as
-  // the nfl_live_prop note below. 2026-09-12 (mike), after a live ML on a
-  // 24.5-point pregame dog.
-  ncaaf_live_win_prob: { min_prob: 0.68, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  // express the rest of it. The full cut is min_prob 0.65 x EV >= 0.26
+  // (config.MODEL_MIN_EV, enforced server-side); the EV floor does not reach
+  // model_action_thresholds either, so NO app surface can reproduce the live
+  // gate exactly -- the same shape as the nfl_live_prop note below.
+  //
+  // AND min_prob HERE IS ON A DIFFERENT SCALE THAN IT WAS BEFORE 2026-09-12.
+  // The lane gained a third model stage that day (correct_for_pregame in
+  // ncaaf_live/serve.py): the two-stage probability under-rated favourites
+  // and over-rated underdogs -- a >=14pt pregame dog that was AHEAD got
+  // claimed at 0.239 and won 0.121 -- so the stored model_probability, AND
+  // THE EDGE DERIVED FROM IT (picks.edge and decision_edge, which the
+  // candidate computes as corrected_p - implied), are now the pregame-
+  // corrected numbers. That second half matters: sharpScore and the custom-
+  // model rules read the edge column for this non-prob-only model, not the
+  // probability. 0.65 was swept on THAT scale. Comparing either column to a
+  // pre-09-12 row is comparing two different quantities.
+  // The 10-point dog CAP that briefly shipped earlier the same day is gone:
+  // the correction prices that region rather than refusing it.
+  ncaaf_live_win_prob: { min_prob: 0.65, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   ncaaf_live_total: { min_prob: 0.72, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
