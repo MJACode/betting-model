@@ -122,7 +122,7 @@ restarts it every 10 minutes); the app's action filter compares the RAW
 probability against `min_prob`, which is looser than the decision path when
 the cut is on the calibrated scale, so no BET is hidden.
 
-## [ ] Four franchises are filed twice in `games`, and the scores sit on the SBR twin
+## [x] Four franchises are filed twice in `games`, and the scores sit on the SBR twin — FIXED 2026-09-12
 
 ARI/AZ, CWS/CHW, OAK/ATH, WSH/WAS: the odds ingestor, the Stats API map and
 every `live` row use the first form; the SBR CSV import files the same game
@@ -132,11 +132,26 @@ under the second, with the final score, while the live row stays unscored
 WSH game in the 2024 training corpus (81 unscored live rows each), 534 of the
 priced 2025 games without plays** — fixed at the read
 (`mlb_pbp_ingestor.mlb_game_final` reads the twin) and the 2025 corpus
-backfilled (613 games, 46,595 plays). NOT fixed: the duplicate rows
-themselves, whatever settles picks on those games, and whether the 2019–2024
-PBP corpora are missing those teams' games too (`--backfill` is idempotent;
-run it per season and count). Retraining on a corpus that now includes them
-is a model update.
+backfilled (613 games, 46,595 plays).
+
+**Done 2026-09-12** (`scripts/merge_mlb_twin_games.py --apply`, mike: "yes to
+all"). 5,723 SBR rows merged onto the canonical ids — 1,877 with a twin,
+every one supplying the score the canonical row lacked, and 3,846 orphans
+from the 2009–2020 SBR-only era inserted under canonical ids. 26,000 `odds`
+and 2,524 `game_weather` rows re-pointed, no weather collisions; `games`
+42,824 rows, zero non-canonical ids left in games, odds or weather; SBR rows
+backed up to `games_sbr_twins_20260912`. The 2021–2024 PBP backfill then
+loaded 1,201 games / 91,052 plays that had been skipped (2021 went 2,086 →
+2,323 games, 2024 1,985 → 2,429). `sbr_loader` now canonicalises the four
+abbreviations and COALESCEs its upsert, so an import cannot recreate the
+split. **A first run's verification line said FAILED on a whole-table `odds`
+count — the live loop wrote 34,134 rows during the 54 minutes it took. The
+check is now scoped to the affected ids and a clean re-run says PASSED.**
+
+NOT done: **2019–2020 have no canonical rows to backfill against until now**,
+so `python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2020` is worth
+a run; and retraining on the fuller corpus is a model update nobody has
+asked for.
 
 ## [x] The calibrated decision never reaches player props — FIXED 2026-09-07
 
