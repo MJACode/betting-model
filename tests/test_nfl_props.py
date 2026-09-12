@@ -1412,13 +1412,34 @@ def test_card_selects_what_the_backtest_would_on_one_slate():
         q[(r.game_id, r.k, r.market, r.bookmaker)] = {
             "line": p(r.line), "over_price": p(r.over_price),
             "under_price": p(r.under_price)}
-    bt = mkt.best_per_prop(mkt.find_bets(q, 0.05, soft_books=mkt.SOFT_BOOKS)[0])
+    # THE SAME CUT ON BOTH ARMS, and since 2026-09-12 that cut is per side:
+    # the under keeps 5pp and the over is held to 6pp
+    # (config.NFL_PROP_MARKET_SIDE_EDGE, docs/nfl_prop_over_lean.md). This test
+    # pins the PLUMBING -- slate query, started-game guard, soft-book filter,
+    # dedupe -- so both arms must price with the same rule or it is measuring
+    # the threshold instead.
+    import config
+    bt = mkt.best_per_prop(mkt.find_bets(
+        q, 0.05, soft_books=mkt.SOFT_BOOKS,
+        min_edge_by_side=config.NFL_PROP_MARKET_SIDE_EDGE)[0])
     bt_keys = {(b.game_id, b.player, b.market, b.side) for b in bt}
 
     assert card_keys == bt_keys, (
         f"card and backtest disagree on {D}: "
         f"card-only {len(card_keys - bt_keys)}, backtest-only {len(bt_keys - card_keys)}")
     assert card_keys, "fixture slate produced no bets — it is no longer a test"
+
+    # AND THE CARD REALLY APPLIES THE SIDE FLOOR. Without this the test above
+    # would still pass if someone deleted the card's `min_edge_by_side=`
+    # argument AND this arm's -- two halves of one mistake cancelling. Priced
+    # with a single 5pp floor the rule takes strictly more bets on this slate,
+    # and every extra one is an OVER.
+    flat = mkt.best_per_prop(mkt.find_bets(q, 0.05, soft_books=mkt.SOFT_BOOKS)[0])
+    flat_keys = {(b.game_id, b.player, b.market, b.side) for b in flat}
+    extra = flat_keys - card_keys
+    assert extra, "the 6pp over floor excluded nothing on this slate — pick another date"
+    assert all(k[3] == "over" for k in extra), sorted(extra)
+    assert not (card_keys - flat_keys), "a side floor may only tighten"
 
 
 def test_sweep_refuses_markets_it_cannot_grade():
