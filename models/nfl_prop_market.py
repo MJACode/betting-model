@@ -119,7 +119,8 @@ from models.market_relative import (  # noqa: E402
 
 
 def find_bets(quotes: dict, min_edge: float = 0.02,
-              soft_books: tuple[str, ...] | None = None
+              soft_books: tuple[str, ...] | None = None,
+              min_edge_by_side: dict[str, float] | None = None
               ) -> tuple[list[MarketBet], dict]:
     """NFL binding: a bet if EITHER sharp reference disagrees by min_edge.
 
@@ -149,11 +150,28 @@ def find_bets(quotes: dict, min_edge: float = 0.02,
     +10.04 at 3/4/5/6pp. The cut is untouched; only the reference set moves.
 
     betonlineag is a REFERENCE, never a book we bet -- SOFT_BOOKS is unchanged.
+
+    THE TWO SIDES ARE NOT HELD TO THE SAME FLOOR (2026-09-12, mike). NFL prop
+    lines lean over, measured with no model in the loop: across 27,976
+    propositions 2023-25 at the best bettable price, blind unders return -1.3%
+    and blind overs -7.9%, and the gap survives at a FLAT -110, so it sits in
+    the line and not in the shopping (scripts/nfl_prop_over_lean.py). This
+    rule's own record splits the same way at the shipped 5pp -- unders +12.36%
+    (CI +7.2, +17.5, three seasons positive), overs +4.11% (CI spanning zero) --
+    and the over curve climbs with the cut (5pp +4.1%, 6pp +15.8%, 7pp +20.5%)
+    while the under curve is flat (+12.4 / +13.5 / +12.2). So the unders keep
+    the pre-committed 5pp and the overs are held to 6pp:
+    `config.NFL_PROP_MARKET_SIDE_EDGE`. Measured effect of that pairing over
+    2023-25: 1,248 bets, +166.3u, +13.3%, positive in all three seasons,
+    against 1,990 bets / +155.9u / +7.8% on one floor -- more profit from
+    fewer bets. The 6pp is FITTED on this grid and the mechanism is not; see
+    docs/nfl_prop_over_lean.md for what that does and does not license.
     """
     best: dict = {}
     diag_out: dict = {}
     for ref in SHARP_BOOKS:
-        bets, diag = _find_bets_generic(quotes, ref, min_edge, soft_books)
+        bets, diag = _find_bets_generic(quotes, ref, min_edge, soft_books,
+                                        min_edge_by_side=min_edge_by_side)
         for k, v in diag.items():
             diag_out[f"{ref}_{k}"] = v
         for b in bets:

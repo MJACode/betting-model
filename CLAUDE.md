@@ -738,6 +738,7 @@ to be known BEFORE deciding which file to open.
 | **The eleven NFL prop models hold no information the line lacks** | `docs/nfl_prop_information_test.md` |
 | **The search for a profitable NFL prop model: tackles was the wrong stat, DK is flat** | `docs/nfl_prop_profitability_search.md` |
 | **The stat models: what is exhausted, what the outside world does, the one method left (market-anchored shape simulation)** | `docs/nfl_prop_method_search.md` |
+| **NFL prop lines lean over — the measured bias, and the per-side cut it bought** | `docs/nfl_prop_over_lean.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —

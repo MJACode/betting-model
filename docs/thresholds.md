@@ -384,6 +384,57 @@ are ONE decision, never two.
 
 ---
 
+## `nfl_prop_market` cut, 2026-09-12 (mike): one floor → two, over 5pp → 6pp
+
+mike: *"I asked you to find evidence for stat models any way you can... Figure
+it out. Find the solution."*
+
+**The two sides of this rule are no longer held to the same edge floor.** The
+under keeps its pre-committed 5pp; the over is held to 6pp.
+`config.NFL_PROP_MARKET_SIDE_EDGE`.
+
+WHY, AND THE MECHANISM CAME FIRST. NFL prop lines lean over. Measured with no
+model in the loop across 27,976 propositions 2023-25 at the best bettable price
+(`scripts/nfl_prop_over_lean.py`): blind unders −1.29%, blind overs −7.91%, and
+the under hit rate rises with how prominent and widely quoted the proposition is
+— 49.7% / 52.2% / 52.6% by tercile against a 52.4% break-even — in all three
+seasons separately. The gradient survives at a FLAT −110, so it is a lean in the
+line rather than an artifact of shopping.
+
+That predicted the split before the rule's own record was cut by side:
+
+| side | bets | ROI | 90% CI | 2023 / 2024 / 2025 |
+|---|---|---|---|---|
+| over | 1,092 | +4.11% | (−0.8, +9.0) | +1.1 / +11.1 / +2.1 |
+| under | 898 | +12.36% | (+7.2, +17.5) | +12.6 / +4.9 / +21.1 |
+
+and the two curves move oppositely with the cut — over 5pp +4.1%, 6pp +15.8%,
+7pp +20.5%; under 5pp +12.4%, 6pp +13.5%, 7pp +12.2%. Monotone on the side that
+has to overcome the lean, flat on the side carried by it.
+
+PAIRED, graded end to end:
+
+| | bets | units | ROI | 90% CI | seasons |
+|---|---|---|---|---|---|
+| one floor (was) | 1,990 | +155.9 | +7.84% | (+4.3, +11.4) | +6.4 / +8.2 / +10.1 |
+| **two floors (now)** | **1,248** | **+166.3** | **+13.33%** | **(+8.9, +17.8)** | +13.2 / +12.6 / +14.5 |
+
+More profit from 742 fewer bets, all three seasons positive, and the season
+spread tightens from 3.7pp to 1.9pp.
+
+REPLICATION: the under-minus-over gap holds at three independent snapshot
+offsets (`open` +8.3pp, `t48` +5.2pp, `t72` +2.2pp).
+
+WHAT IS FITTED: the number 6, off this grid. The mechanism is not. If the over
+cut is noise, overs revert to +4.11% and the pairing still returns ~+10.0%.
+The one cell against it: 2025 overs at 6pp are −4.2% on 73 bets. Re-measure on
+2026 settled bets (`docs/followups.md`). Full evidence:
+`docs/nfl_prop_over_lean.md`.
+
+NOT COPIED ACROSS SPORTS. `min_edge_by_side` is opt-in on the shared
+`market_relative.find_bets`; the WNBA, MLB and NCAAF ports pass nothing and are
+unchanged (CLAUDE.md §1b: mechanics are shared, cuts are measured per model).
+
 ## `nfl_opener_spread` cut, 2026-09-11 (mike): |dev| 1.0 → 2.0, gate 0.52 → 0.55
 
 mike: *"the opener needs to be more aggressive, way too many picks, I need

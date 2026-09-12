@@ -197,12 +197,13 @@ def build(min_edge: float, snapshot: str | None = None,
                     prev = staged[name].get(prop)
                     if prev is None or best_edge > prev[0]:
                         staged[name][prop] = (best_edge, season, p,
-                                              _lead_hours(q.snapshot_at, ko.get(gid)))
+                                              _lead_hours(q.snapshot_at, ko.get(gid)),
+                                              side)
 
     sel = defaultdict(list)
     for name, props in staged.items():
-        for _edge, season, p, lead in props.values():
-            sel[name].append((season, p, lead))
+        for edge, season, p, lead, sd in props.values():
+            sel[name].append((season, p, lead, sd, edge))
     return sel, diag
 
 
@@ -244,6 +245,19 @@ def main() -> None:
                     help="override the bettable set (comma separated)")
     ap.add_argument("--refs", default=f"{REF_A},{REF_B}",
                     help="the two reference books (the placebo swaps in retail)")
+    ap.add_argument("--over-edge", type=float, default=None,
+                    help="hold the OVER side to this floor instead of --min-edge. "
+                         "The shipped pairing is --min-edge 0.05 --over-edge 0.06, "
+                         "mirroring config.NFL_PROP_MARKET_SIDE_EDGE; NFL prop lines "
+                         "lean over, so an over needs a bigger disagreement to be "
+                         "worth the same as an under (docs/nfl_prop_over_lean.md).")
+    ap.add_argument("--by-side", action="store_true",
+                    help="split each selection into the overs and the unders it took. "
+                         "The repo measured a market-wide OVER-LEAN on NFL props "
+                         "(scripts/nfl_prop_over_lean.py): blind unders beat blind overs "
+                         "by ~6.6pp at the best price. If this rule's edge is really that "
+                         "lean wearing a sharp reference's clothes, its unders will carry "
+                         "the result and its overs will be flat or negative.")
     ap.add_argument("--by-lead", action="store_true",
                     help="split each selection by the bet's own lead hours "
                          "(soft quote taken -> kickoff), LEAD_BUCKETS")
@@ -252,6 +266,13 @@ def main() -> None:
     refs = tuple(x.strip() for x in a.refs.split(","))
     soft = tuple(x.strip() for x in a.soft.split(',')) if a.soft else None
     sel, diag = build(a.min_edge, a.snapshot, refs, a.only_games_with, soft)
+    if a.over_edge is not None:
+        # Tighten only the overs, exactly as models.market_relative.find_bets
+        # does in production: the floor can rise, never fall.
+        floor = max(a.over_edge, a.min_edge)
+        sel = {k: [r for r in v if r[3] != "over" or r[4] >= floor]
+               for k, v in sel.items()}
+        print(f"\nOVER side held to {floor:.0%} (under stays at {a.min_edge:.0%})")
 
     print(f"\nNFL props — two sharp references, min edge {a.min_edge:.0%}")
     print(f"soft books: {len(mk.SOFT_BOOKS)}   markets: {len(mk.SHARP_MARKETS)}\n")
@@ -264,6 +285,9 @@ def main() -> None:
             print(f"{name:16s} {len(rows):>6}   (thin)")
             continue
         _report(name, rows, rng)
+        if a.by_side:
+            for sd in ("over", "under"):
+                _report(f"  {sd}", [r for r in rows if r[3] == sd], rng, thin=20)
         if a.by_lead:
             for lo_h, hi_h in LEAD_BUCKETS:
                 sub = [r for r in rows if r[2] is not None and lo_h <= r[2] < hi_h]
