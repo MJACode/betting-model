@@ -1885,32 +1885,37 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
 
 // ── Line movement ───────────────────────────────────────────────────────────
 
-/** All DK snapshots for one game+market, oldest first (line movement history). */
-export async function fetchOddsHistory(gameId: string, market: string): Promise<OddsSnapshotRow[]> {
+/** Snapshots for one game+market at one book, oldest first (line movement history). */
+export async function fetchOddsHistory(
+  gameId: string,
+  market: string,
+  bookmaker = 'draftkings',
+): Promise<OddsSnapshotRow[]> {
   const { data, error } = await supabase
     .from('odds')
     .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
     .eq('game_id', gameId)
     .eq('market', market)
-    .eq('bookmaker', 'draftkings')
+    .eq('bookmaker', bookmaker)
     .order('snapshot_at', { ascending: true })
     .limit(50);
   if (error) throw error;
   return (data ?? []) as OddsSnapshotRow[];
 }
 
-/** All DK prop-line snapshots for one player+market in a game, oldest first. */
+/** Prop-line snapshots for one player+market in a game at one book, oldest first. */
 export async function fetchPropOddsHistory(
   gameId: string,
   market: string,
   playerName: string,
+  bookmaker = 'draftkings',
 ): Promise<PropOddsSnapshotRow[]> {
   const { data, error } = await supabase
     .from('player_prop_odds')
     .select('snapshot_at, line, over_price, under_price')
     .eq('game_id', gameId)
     .eq('market', market)
-    .eq('bookmaker', 'draftkings')
+    .eq('bookmaker', bookmaker)
     .eq('player_name', playerName)
     .order('snapshot_at', { ascending: true })
     .limit(50);

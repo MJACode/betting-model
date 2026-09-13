@@ -1117,13 +1117,24 @@ export function movementFromDkHistory(
   latest: PricedSnapshot,
   market: string | null,
 ): Movement | null {
-  if (pick.dk_odds == null) return null;
+  if (!canShowLineMovementHistory(pick)) return null;
   const lineOnly = isNflLineOnly(pick.model_id);
-  if (!lineOnly && storedQuoteBook(pick) !== MODEL_BOOK) return null;
   return computeMovement(pick, latest, market, {
     lineOnly,
     scoredPrice: numOrNull(pick.dk_odds),
   });
+}
+
+/**
+ * Detail Line Movement card. History fetch is DK-only, so the card only
+ * opens when that series is the same book as the lock — or NFL line-only,
+ * where price is ignored. Off-DK props do not get a DK table next to a
+ * FanDuel `decisionOdds` header (the remaining High on #703).
+ */
+export function canShowLineMovementHistory(pick: Pick): boolean {
+  if (pick.dk_odds == null) return false;
+  if (isNflLineOnly(pick.model_id)) return true;
+  return storedQuoteBook(pick) === MODEL_BOOK;
 }
 
 // ── NFL pick timing ─────────────────────────────────────────────────────────

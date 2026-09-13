@@ -8,6 +8,7 @@
 import { hasPricedLine } from '../src/lib/decisionPrice';
 import {
   bestHandoffForPick,
+  canShowLineMovementHistory,
   computeMovement,
   formatSideLine,
   heroAmericanForPick,
@@ -227,6 +228,7 @@ check(
     'DK-history path does not steam an off-DK pick',
     movementFromDkHistory(fd, snap, 'totals') === null,
   );
+  check('off-DK prop does not open the DK history card', !canShowLineMovementHistory(fd));
 }
 {
   const dk = mkPick({
@@ -238,6 +240,7 @@ check(
     'DK-history path still steams a DK pick against DK now',
     movementFromDkHistory(dk, latest({ over_price: -140 }), 'totals')?.severity === 'caution',
   );
+  check('DK pick opens the DK history card', canShowLineMovementHistory(dk));
 }
 {
   const noDk = mkPick({
@@ -250,6 +253,7 @@ check(
     'DK-history path hides when dk_odds is null',
     movementFromDkHistory(noDk, latest({ over_price: -140 }), 'totals') === null,
   );
+  check('no dk_odds does not open the history card', !canShowLineMovementHistory(noDk));
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican, formatGameTimeET } from '@/lib/format';
-import { formatSideLine, gameMarketForModel, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromDkHistory, priceForSide, propMarketForModel, type PricedSnapshot, MODEL_BOOK, bookName, storedQuoteBook } from '@/lib/markets';
+import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromDkHistory, priceForSide, propMarketForModel, type PricedSnapshot, MODEL_BOOK, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -29,14 +29,16 @@ export function LineMovementCard({ pick, playerName }: Props) {
 
   useEffect(() => {
     let mounted = true;
-    // This table is DK history. An off-DK-only prop has no series to draw.
-    if (pick.dk_odds == null || market == null || (isProp && !playerName)) {
+    // Same-book gate: do not fetch DK history for an off-DK lock (except
+    // NFL line-only, which ignores price). Header never pairs decisionOdds
+    // with a hard-coded DK series.
+    if (!canShowLineMovementHistory(pick) || market == null || (isProp && !playerName)) {
       setSnaps([]);
       return undefined;
     }
     const load = isProp
-      ? fetchPropOddsHistory(pick.game_id, market, playerName!)
-      : fetchOddsHistory(pick.game_id, market);
+      ? fetchPropOddsHistory(pick.game_id, market, playerName!, MODEL_BOOK)
+      : fetchOddsHistory(pick.game_id, market, MODEL_BOOK);
     load
       .then((rows) => {
         if (mounted) setSnaps(rows as Snap[]);
@@ -47,7 +49,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, pick.dk_odds, market, isProp, playerName]);
+  }, [pick.pick_id, pick.game_id, pick.dk_odds, pick.decision_book, pick.line_book, market, isProp, playerName]);
 
   if (!snaps || snaps.length === 0 || market == null) return null;
 
@@ -61,16 +63,10 @@ export function LineMovementCard({ pick, playerName }: Props) {
   const movement = movementFromDkHistory(pick, latest, market);
   const currentPrice = priceForSide(latest, pick.pick_side);
   const currentLine = lineFromSnapshot(latest, market);
-  const decidedOffDk = storedQuoteBook(pick) !== MODEL_BOOK;
 
   const verdict = (() => {
     if (!movement) {
-      return {
-        label: decidedOffDk && !lineOnly
-          ? 'DraftKings history — not your book'
-          : 'Line steady since pick',
-        color: colors.textSecondary,
-      };
+      return { label: 'Line steady since pick', color: colors.textSecondary };
     }
     if (movement.severity === 'skip') {
       return {
@@ -113,13 +109,6 @@ export function LineMovementCard({ pick, playerName }: Props) {
             {`${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
               `${formatSideLine(currentLine, pick.pick_side, market)}`}
           </Text>
-        ) : decidedOffDk ? (
-          <>
-            <Text style={styles.prices}>
-              {`Decided ${bookName(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`}
-            </Text>
-            <Text style={styles.dkNow}>{`DK now ${formatAmerican(currentPrice)}`}</Text>
-          </>
         ) : (
           <Text style={styles.prices}>
             {`${formatAmerican(pick.dk_odds)} → ${formatAmerican(currentPrice)}`}
@@ -156,7 +145,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
             `it settles.`
           : `Your pick was decided at ${bookName(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
-            `This just shows how ${storedQuoteBook(pick) === MODEL_BOOK ? "that book's" : "DraftKings'"} line has moved since, for or against you. It doesn't ` +
+            `This just shows how that book's line has moved since, for or against you. It doesn't ` +
             `change the pick or how it settles.`}
       </Text>
     </View>
@@ -186,12 +175,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
-  },
-  dkNow: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.medium,
-    color: colors.textSecondary,
-    marginTop: 2,
   },
   verdict: {
     fontSize: font.size.footnote,
