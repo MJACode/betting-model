@@ -1106,35 +1106,40 @@ export function movementFromLatest(
 }
 
 /**
- * Detail-card path: the history table is DraftKings-only. Price steam is
- * same-book — require a stored DK price, and do not compare a FanDuel (or
- * other) lock to a DK snapshot. That default (`computeMovement` →
- * `decisionOdds`) is the cross-book false steam the board path already
- * refuses. NFL line-only still compares lines (price is ignored).
+ * Detail-card path. Snapshots MUST be the deciding book (`historyBookForPick`).
+ * scoredPrice is decisionOdds — same book as the fetch. Passing a DK row
+ * for a FanDuel lock is the cross-book false steam; the card must not
+ * fetch that pair. NFL line-only still ignores price.
  */
-export function movementFromDkHistory(
+export function movementFromSameBookHistory(
   pick: Pick,
   latest: PricedSnapshot,
   market: string | null,
 ): Movement | null {
   if (!canShowLineMovementHistory(pick)) return null;
-  const lineOnly = isNflLineOnly(pick.model_id);
+  const locked = decisionOdds(pick);
+  if (locked == null) return null;
   return computeMovement(pick, latest, market, {
-    lineOnly,
-    scoredPrice: numOrNull(pick.dk_odds),
+    lineOnly: isNflLineOnly(pick.model_id),
+    scoredPrice: locked,
   });
 }
 
+/** @deprecated Use movementFromSameBookHistory — same function. */
+export const movementFromDkHistory = movementFromSameBookHistory;
+
+/** Book whose snapshot series the detail card may fetch. */
+export function historyBookForPick(pick: Pick): string | null {
+  if (decisionOdds(pick) == null) return null;
+  return storedQuoteBook(pick);
+}
+
 /**
- * Detail Line Movement card. History fetch is DK-only, so the card only
- * opens when that series is the same book as the lock — or NFL line-only,
- * where price is ignored. Off-DK props do not get a DK table next to a
- * FanDuel `decisionOdds` header (the remaining High on #703).
+ * Detail Line Movement card. Opens when there is a deciding price.
+ * Fetch that book's history — not a hard-coded DraftKings series.
  */
 export function canShowLineMovementHistory(pick: Pick): boolean {
-  if (pick.dk_odds == null) return false;
-  if (isNflLineOnly(pick.model_id)) return true;
-  return storedQuoteBook(pick) === MODEL_BOOK;
+  return historyBookForPick(pick) != null;
 }
 
 // ── NFL pick timing ─────────────────────────────────────────────────────────

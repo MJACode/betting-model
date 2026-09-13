@@ -5,6 +5,8 @@
  * Run: npx tsx scripts/verify_pick_card.ts
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { hasPricedLine } from '../src/lib/decisionPrice';
 import {
   bestHandoffForPick,
@@ -12,8 +14,10 @@ import {
   computeMovement,
   formatSideLine,
   heroAmericanForPick,
-  movementFromDkHistory,
+  historyBookForPick,
+  isNflLineOnly,
   movementFromLatest,
+  movementFromSameBookHistory,
   MODEL_BOOK,
 } from '../src/lib/markets';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
@@ -210,25 +214,29 @@ check(
   formatSideLine(-4.5, 'away', 'spreads') === '+4.5',
 );
 
-// ── movementFromDkHistory: detail card must not cross-book steam ────────────
+// ── same-book history: fetch book === lock book ────────────────────────────
 {
   const fd = mkPick({
+    model_id: 'mlb_prop_batter_hits',
     dk_odds: -110,
     decision_odds: -105,
     decision_book: 'fanduel',
     line_book: 'fanduel',
   });
   const snap = latest({ over_price: -140 });
+  check('off-DK PROP is not lineOnly', !isNflLineOnly(fd.model_id));
+  check('off-DK PROP history book is FanDuel, not DK', historyBookForPick(fd) === 'fanduel');
+  check('off-DK PROP can open history (at FanDuel)', canShowLineMovementHistory(fd));
+  const sameBook = movementFromSameBookHistory(fd, snap, 'totals');
+  check(
+    'same-book path steams an FD lock vs an FD snapshot at scoredPrice −105',
+    sameBook?.severity === 'caution' && sameBook.scoredPrice === -105,
+  );
   const naive = computeMovement(fd, snap, 'totals');
   check(
-    'naive computeMovement steams an FD lock vs a DK snapshot (the trap)',
+    'naive computeMovement also uses decisionOdds (trap if the snap is DK)',
     naive?.severity === 'caution' && naive.scoredPrice === -105,
   );
-  check(
-    'DK-history path does not steam an off-DK pick',
-    movementFromDkHistory(fd, snap, 'totals') === null,
-  );
-  check('off-DK prop does not open the DK history card', !canShowLineMovementHistory(fd));
 }
 {
   const dk = mkPick({
@@ -236,24 +244,39 @@ check(
     decision_odds: -110,
     decision_book: 'draftkings',
   });
+  check('DK history book is DraftKings', historyBookForPick(dk) === MODEL_BOOK);
   check(
-    'DK-history path still steams a DK pick against DK now',
-    movementFromDkHistory(dk, latest({ over_price: -140 }), 'totals')?.severity === 'caution',
+    'same-book path steams a DK pick against DK now',
+    movementFromSameBookHistory(dk, latest({ over_price: -140 }), 'totals')?.severity === 'caution',
   );
-  check('DK pick opens the DK history card', canShowLineMovementHistory(dk));
 }
 {
-  const noDk = mkPick({
+  const unpriced = mkPick({
     dk_odds: null,
-    decision_odds: -105,
-    decision_book: 'fanduel',
-    line_book: 'fanduel',
+    decision_odds: null,
+    decision_book: null,
   });
+  check('unpriced pick has no history book', historyBookForPick(unpriced) === null);
+  check('unpriced pick does not open the history card', !canShowLineMovementHistory(unpriced));
+}
+
+{
+  const cardSrc = readFileSync(join(__dirname, '../src/components/LineMovementCard.tsx'), 'utf-8');
   check(
-    'DK-history path hides when dk_odds is null',
-    movementFromDkHistory(noDk, latest({ over_price: -140 }), 'totals') === null,
+    'LineMovementCard fetch uses historyBook, not MODEL_BOOK',
+    cardSrc.includes('historyBookForPick') &&
+      cardSrc.includes('fetchOddsHistory(pick.game_id, market, historyBook)') &&
+      !cardSrc.includes('MODEL_BOOK'),
   );
-  check('no dk_odds does not open the history card', !canShowLineMovementHistory(noDk));
+  const qSrc = readFileSync(join(__dirname, '../src/lib/queries.ts'), 'utf-8');
+  const hist = qSrc.slice(
+    qSrc.indexOf('export async function fetchOddsHistory'),
+    qSrc.indexOf('export async function fetchSavantStats'),
+  );
+  check(
+    'history fetches have no draftkings literal',
+    hist.includes(".eq('bookmaker', bookmaker)") && !hist.includes("'draftkings'"),
+  );
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);

@@ -1889,7 +1889,7 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
 export async function fetchOddsHistory(
   gameId: string,
   market: string,
-  bookmaker = 'draftkings',
+  bookmaker: string,
 ): Promise<OddsSnapshotRow[]> {
   const { data, error } = await supabase
     .from('odds')
@@ -1908,7 +1908,7 @@ export async function fetchPropOddsHistory(
   gameId: string,
   market: string,
   playerName: string,
-  bookmaker = 'draftkings',
+  bookmaker: string,
 ): Promise<PropOddsSnapshotRow[]> {
   const { data, error } = await supabase
     .from('player_prop_odds')
