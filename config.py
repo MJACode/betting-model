@@ -442,7 +442,7 @@ ACTION_THRESHOLDS: dict = {
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
     "ncaaf_live_win_prob": {"min_prob": 0.65, "min_edge": 0.10},  # 2026-09-12 mike: RE-SWEPT ON THE CORRECTED SCALE. Stage 3 (ncaaf_live/serve.correct_for_pregame) changed what this number means, so the 0.62/0.68 cuts swept on raw probabilities were the wrong number on the wrong scale -- 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities 0.65 x EV 0.26 is 33 bets +25.7%, halves +23.8%/+34.2%, and its four neighbours are ALL positive in both halves: a plateau, where the raw scale only ever had islands
-    "ncaaf_live_total":    {"min_prob": 0.72, "min_edge": 0.12},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.72 prob x 0.22 EV) — see MODEL_MIN_EV + PAUSED_MODELS
+    "ncaaf_live_total":    {"min_prob": 0.73, "min_edge": 0.12},  # 2026-09-13 mike ("only the best of the best"): 0.72 x EV 0.22 -> 0.73 x EV 0.24, shipped WITH the FBS-only gate in ncaaf_live/serve.price. 2025 replay, first signal per game, FBS-vs-FBS: 39 bets +2.9% -> 17 bets +21.3% (0.097 -> 0.042 per game). Of those 17, 14 are first-half (+21.5%) and 3 second-half (+20.0%): the replay says NOT WORSE, it does not prove better, and there is no production evidence of profit yet. 0.735 flips negative on one second-half bet. A stricter cut, not a pause and not a cap
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -680,7 +680,7 @@ MODEL_MIN_EV: dict = {
     # EV cut on that sample is still negative overall; these are the cells that
     # lose least while keeping more than one bet. Re-sweep after ~3 more
     # Saturdays and expect these numbers to move.
-    "ncaaf_live_total": 0.22,
+    "ncaaf_live_total": 0.24,  # 2026-09-13 mike: 0.22 -> 0.24 with min_prob 0.73 (see ACTION_THRESHOLDS). EV 0.24 sits mid-plateau: 0.20-0.28 all positive in both halves at prob 0.73
     "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: EV floor unchanged. It is now applied to the PREGAME-CORRECTED probability (ncaaf_live/serve.correct_for_pregame), and min_prob 0.65 was swept on that same scale -- the briefly-shipped pregame-dog cap is gone, superseded by the correction
 }
 
@@ -1669,8 +1669,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
-    "ncaaf_live_win_prob": 0.62,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
-    "ncaaf_live_total":    0.72,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
+    "ncaaf_live_win_prob": 0.65,  # 2026-09-13: aligned to ACTION_THRESHOLDS; the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
+    "ncaaf_live_total":    0.73,  # 2026-09-13 mike: aligned to ACTION_THRESHOLDS (0.73 x EV 0.24); the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────

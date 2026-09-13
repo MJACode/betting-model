@@ -343,6 +343,11 @@ class GameContext:
     wind_mph: float | None
     is_dome: bool
     game_date: str = ""
+    # BOTH teams proven FBS by the pre-game models' own rule
+    # (features.ncaaf_feature_engine._is_fbs: an SP+ rating is NECESSARY, a
+    # classification may only veto). False by default, so a context nobody
+    # checked is not priced -- "not proven FBS" declines, it does not pass.
+    fbs_matchup: bool = False
 
 
 class LiveEngine:
@@ -487,6 +492,17 @@ class LiveEngine:
             return []                                   # OT: declined
         if ctx.pregame_total is None or ctx.pregame_spread is None:
             log.info("%s: no pregame line context - not pricing", ctx.game_id)
+            return []
+        # THE PLATFORM'S NCAAF IS FBS, AND THE LIVE MODELS WERE THE ONE PLACE
+        # IT WASN'T (2026-09-13, mike: "only the best of the best"). Every
+        # pre-game NCAAF model declines an FBS-vs-FCS game at _is_fbs; this
+        # loop priced every game with a DK pregame line. Measured: 24 of 43
+        # ncaaf_live_total BETs in the week of 09-07 were FBS-vs-FCS, and on
+        # the 2025 replay those games fired 0.144 bets/game against 0.097 for
+        # FBS-vs-FBS and returned -1.1% (at 0.73/0.24: -5.8%) where FBS-vs-FBS
+        # returned +2.9% (+21.3%). Logged once per gameday in load_context.
+        if not ctx.fbs_matchup:
+            log.debug("%s: not FBS-vs-FBS - not pricing", ctx.game_id)
             return []
 
         row = self.feature_row(state, ctx)
