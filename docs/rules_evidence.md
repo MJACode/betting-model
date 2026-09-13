@@ -749,8 +749,9 @@ run over all 4,543 BET rows across 44 models, flags zero. So the data was never
 wrong; what was missing was a check between the data and the reader.
 
 **What now holds it:** `tracking/pick_integrity.py` refuses, and does not
-ledger, any pick whose label disagrees with its side and line, on all six send
-paths (Discord pre-game, restate, live, free pick; push pre-game, live); the
+ledger, any pick whose label disagrees with its side and line, on all eight send
+paths (Discord pre-game, restate, live, free pick; push pre-game, live, the
+"moved past the bet line" alert, the tracked-bet line-move alert); the
 `pick_label_integrity` health check goes CRIT on any open one; and
 `tests/test_pick_integrity.py` pins the real row, each publisher, the health
 check, the app renders and this rule's place in CLAUDE.md — each watched to

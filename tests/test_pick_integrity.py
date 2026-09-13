@@ -214,6 +214,29 @@ def test_push_live_refuses_and_does_not_ledger(monkeypatch):
     assert conn.ledgered() == {GOOD["lock_key"]}
 
 
+def test_push_dropped_refuses_and_does_not_ledger(monkeypatch):
+    """The "moved past the bet line" alert names a pick too, so it is checked
+    like every other send path."""
+    monkeypatch.setattr(push_notifier, "_new_bet_signals", lambda c, d: [])
+    monkeypatch.setattr(push_notifier, "_dropped_signals", lambda c, d: [GOOD, BAD])
+    conn = _Conn()
+    push_notifier._send_signal_changes(conn, "2026-09-13", False)
+    assert conn.ledgered() == {GOOD["lock_key"]}
+
+
+def test_push_line_change_refuses_and_does_not_ledger(monkeypatch):
+    """A tracked bet's line-move alert carries the pick's label into a push."""
+    def alert(sig):
+        return dict(sig, device_id="d1", kind="line_change_1", locked=-115,
+                    current=-130, against=True)
+    monkeypatch.setattr(push_notifier, "_line_change_alerts",
+                        lambda c, d: [alert(GOOD), alert(BAD)])
+    conn = _Conn()
+    monkeypatch.setattr(push_notifier, "get_connection", lambda: conn)
+    push_notifier.notify_line_changes("2026-09-13")
+    assert conn.ledgered() == {GOOD["lock_key"]}
+
+
 # ── 3. the health check makes a refusal loud ─────────────────────────────────
 
 class _Shim:
