@@ -271,6 +271,13 @@ check(
     'MLB totals FD decision, line_book null, FD 9.0 vs scored 8.5 is not a line SKIP',
     gated === null || gated.severity !== 'skip',
   );
+  const board = movementFromLatest(mlbFd, null, [
+    { bookmaker: 'fanduel', total_line: 9.0, over_price: -110 },
+  ]);
+  check(
+    'board path: FD 9.0 vs scored 8.5 via bookRows is not a line SKIP',
+    board === null || board.severity !== 'skip',
+  );
 }
 {
   const unpriced = mkPick({

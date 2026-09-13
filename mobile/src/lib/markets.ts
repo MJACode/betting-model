@@ -1097,17 +1097,27 @@ export function movementFromLatest(
   const lineOnly = isNflLineOnly(pick.model_id);
   const book = storedQuoteBook(pick);
   const scored = decisionOdds(pick);
+  const skipLineDeltas = (lineBook(pick) ?? MODEL_BOOK) !== book;
   if (book === MODEL_BOOK && latest) {
-    return computeMovement(pick, latest, latest.market, { lineOnly, scoredPrice: scored });
+    return computeMovement(pick, latest, latest.market, {
+      lineOnly,
+      scoredPrice: scored,
+      skipLineDeltas,
+    });
   }
   const row = (bookRows ?? []).find((r) => r.bookmaker === book);
   if (row) {
-    return computeMovement(pick, row, marketForPick(pick), { lineOnly, scoredPrice: scored });
+    return computeMovement(pick, row, marketForPick(pick), {
+      lineOnly,
+      scoredPrice: scored,
+      skipLineDeltas,
+    });
   }
   if (latest && pick.dk_odds != null) {
     return computeMovement(pick, latest, latest.market, {
       lineOnly,
       scoredPrice: numOrNull(pick.dk_odds),
+      skipLineDeltas,
     });
   }
   return null;
