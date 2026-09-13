@@ -918,11 +918,21 @@ export function bestHandoffForPick(
   // When the CTA is the same book as hero Now, offer the current/bettable
   // number — not the record chip. "Now −115 DK" beside "Bet DK −110" was
   // the lock next to the live number (UX review).
-  const useNow = hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book;
+  // Same-book CTA offers the current/bettable number — not the record
+  // chip. "Now −115 DK" beside "Bet DK −110" was the lock next to the
+  // live number (UX review). Narrow in the branch so price stays `number`.
+  if (hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book) {
+    return {
+      bookmaker: best.bookmaker,
+      price: hero.price,
+      link: hero.link,
+      verb,
+    };
+  }
   return {
     bookmaker: best.bookmaker,
-    price: useNow ? hero.price : best.price,
-    link: useNow ? hero.link : best.link,
+    price: best.price,
+    link: best.link,
     verb,
   };
 }

@@ -8,6 +8,7 @@
 import { hasPricedLine } from '../src/lib/decisionPrice';
 import {
   bestHandoffForPick,
+  formatSideLine,
   heroAmericanForPick,
   movementFromLatest,
   MODEL_BOOK,
@@ -200,6 +201,11 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   );
   check('FD lock vs FD snapshot is steam', m?.severity === 'caution' && m.scoredPrice === -110);
 }
+
+check(
+  'away spread Now line is side-flipped, not the home number',
+  formatSideLine(-4.5, 'away', 'spreads') === '+4.5',
+);
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);
 if (failed > 0) process.exit(1);

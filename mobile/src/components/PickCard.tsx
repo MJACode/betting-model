@@ -14,6 +14,7 @@ import {
   formatSideLine,
   gameMarketForModel,
   heroAmericanForPick,
+  marketForPick,
   movementFromLatest,
   pickTimingInfo,
   type Movement,
@@ -100,10 +101,20 @@ export function PickCard({
           : colors.textTertiary;
 
   const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
-  const quoteLine =
+  // Compare home-relative; print from the pick's side so an away spread
+  // that has moved (NYJ +5, scored −5, Now −4.5) never reads as “−4.5”.
+  const quoteLineRaw =
     heroPrice && heroPrice.line != null && pick.scored_line != null && heroPrice.line !== pick.scored_line
       ? heroPrice.line
       : null;
+  const quoteLine =
+    quoteLineRaw == null
+      ? null
+      : formatSideLine(
+          quoteLineRaw,
+          pick.pick_side,
+          gameMarketForModel(pick.model_id) ?? marketForPick(pick),
+        );
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
   const stake = stakeFor(pick.kelly_fraction, decisionOdds(pick), kelly);
@@ -242,7 +253,7 @@ export function PickCard({
       </View>
 
       {caption ? (
-        <Text style={styles.captionLine} numberOfLines={1}>
+        <Text style={styles.captionLine} numberOfLines={2}>
           {caption}
         </Text>
       ) : null}
@@ -348,7 +359,7 @@ export function PickCard({
               onPress={() => {
                 void openBookBetslip(handoff.bookmaker, handoff.link);
               }}
-              hitSlop={4}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               accessibilityRole="button"
               accessibilityLabel={`${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`}
               style={({ pressed }) => [

@@ -29,7 +29,8 @@ export function LineMovementCard({ pick, playerName }: Props) {
 
   useEffect(() => {
     let mounted = true;
-    if (decisionOdds(pick) == null || market == null || (isProp && !playerName)) {
+    // This table is DK history. An off-DK-only prop has no series to draw.
+    if (pick.dk_odds == null || market == null || (isProp && !playerName)) {
       setSnaps([]);
       return undefined;
     }
@@ -46,7 +47,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, pick.decision_odds, pick.dk_odds, market, isProp, playerName]);
+  }, [pick.pick_id, pick.game_id, pick.dk_odds, market, isProp, playerName]);
 
   if (!snaps || snaps.length === 0 || market == null) return null;
 
@@ -55,9 +56,13 @@ export function LineMovementCard({ pick, playerName }: Props) {
   // only the line is compared (isNflLineOnly / computeMovement).
   const lineOnly = isNflLineOnly(pick.model_id);
   const latest = snaps[snaps.length - 1];
-  const movement = computeMovement(pick, latest, market, { lineOnly });
+  const movement = computeMovement(pick, latest, market, {
+    lineOnly,
+    scoredPrice: pick.dk_odds,
+  });
   const currentPrice = priceForSide(latest, pick.pick_side);
   const currentLine = lineFromSnapshot(latest, market);
+  const decidedOffDk = storedQuoteBook(pick) !== MODEL_BOOK;
 
   const verdict = (() => {
     if (!movement) {
@@ -99,12 +104,23 @@ export function LineMovementCard({ pick, playerName }: Props) {
     <View style={styles.card}>
       <Text style={styles.heading}>Line Movement</Text>
       <View style={styles.headRow}>
-        <Text style={styles.prices}>
-          {lineOnly
-            ? `${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
-              `${formatSideLine(currentLine, pick.pick_side, market)}`
-            : `${formatAmerican(decisionOdds(pick))} → ${formatAmerican(currentPrice)}`}
-        </Text>
+        {lineOnly ? (
+          <Text style={styles.prices}>
+            {`${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
+              `${formatSideLine(currentLine, pick.pick_side, market)}`}
+          </Text>
+        ) : decidedOffDk ? (
+          <>
+            <Text style={styles.prices}>
+              {`Decided ${bookName(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`}
+            </Text>
+            <Text style={styles.dkNow}>{`DK now ${formatAmerican(currentPrice)}`}</Text>
+          </>
+        ) : (
+          <Text style={styles.prices}>
+            {`${formatAmerican(pick.dk_odds)} → ${formatAmerican(currentPrice)}`}
+          </Text>
+        )}
         <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
       </View>
 
@@ -166,6 +182,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  dkNow: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+    marginTop: 2,
   },
   verdict: {
     fontSize: font.size.footnote,
