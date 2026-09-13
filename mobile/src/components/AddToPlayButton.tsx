@@ -49,7 +49,7 @@ export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
             { color: inPlay ? colors.bet : colors.tint },
           ]}
         >
-          {inPlay ? 'In betslip' : 'Add to betslip'}
+          {inPlay ? (compact ? 'In slip' : 'In betslip') : compact ? 'Slip' : 'Add to betslip'}
         </Text>
       </View>
     </Pressable>

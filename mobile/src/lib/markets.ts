@@ -866,7 +866,9 @@ export function heroAmericanForPick(
       line: current.line,
       link: current.link,
       lockedPrice: locked,
-      showLockedCaption: false,
+      // Live always restates the lock as a caption (designer contract), even
+      // when Now equals it — the timing footer is not the price.
+      showLockedCaption: true,
     };
   }
   return {
@@ -909,10 +911,14 @@ export function bestHandoffForPick(
   const best = quotes.find((q) => q.isBest) ?? quotes[0];
   const verb: 'Best' | 'Bet' =
     best.isBest && quotes.length > 1 && !best.isRecord ? 'Best' : 'Bet';
+  // When the CTA is the same book as hero Now, offer the current/bettable
+  // number — not the record chip. "Now −115 DK" beside "Bet DK −110" was
+  // the lock next to the live number (UX review).
+  const useNow = hero?.kind === 'now' && best.bookmaker === hero.book;
   return {
     bookmaker: best.bookmaker,
-    price: best.price,
-    link: best.link,
+    price: useNow ? hero.price : best.price,
+    link: useNow ? hero.link : best.link,
     verb,
   };
 }

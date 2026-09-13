@@ -71,10 +71,13 @@ export function PickCard({
   // threshold (passesActionFilter), not at a flat ±5% — a 6% edge that doesn't
   // qualify for that model should not look like a green light. AVOID stays red.
   const qualifies = passesActionFilter(pick);
+  // gradeGood / gradeBad, not bet/avoid: Edge is now the hero number and
+  // colors.bet is 2.22:1 on bgCard (theme.ts). The ramp already exists for
+  // a readable good/bad (UX review).
   const edgeColor = qualifies
-    ? colors.bet
+    ? colors.gradeGood
     : pick.signal_type === 'AVOID'
-      ? colors.avoid
+      ? colors.gradeBad
       : colors.textSecondary;
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
   const ev = expectedValue(pick.model_probability, decisionOdds(pick));
@@ -163,7 +166,17 @@ export function PickCard({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${matchup}. ${pick.pick_label}. ${pick.signal_type}.`}
+      accessibilityLabel={[
+        matchup,
+        pick.pick_label,
+        pick.signal_type,
+        `Edge ${formatPctSigned(decisionEdge(pick))}`,
+        heroPrice
+          ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
+          : null,
+      ]
+        .filter((p): p is string => Boolean(p))
+        .join('. ')}
       accessibilityHint="Opens the full breakdown, including recent form and matchup context."
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
@@ -225,7 +238,7 @@ export function PickCard({
       </View>
 
       {caption ? (
-        <Text style={styles.captionLine} numberOfLines={2}>
+        <Text style={styles.captionLine} numberOfLines={1}>
           {caption}
         </Text>
       ) : null}
@@ -340,7 +353,10 @@ export function PickCard({
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}>
+              <Text
+                style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
+                numberOfLines={1}
+              >
                 {handoff.verb} {bookLabel(handoff.bookmaker)} {formatAmerican(handoff.price)}
               </Text>
             </Pressable>
@@ -525,7 +541,7 @@ const styles = StyleSheet.create({
   nowTag: {
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
   },
   heroPrice: {
     fontSize: font.size.callout,
@@ -541,12 +557,12 @@ const styles = StyleSheet.create({
   lockedCaption: {
     marginTop: 1,
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     fontVariant: ['tabular-nums'],
   },
   captionLine: {
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     marginBottom: spacing.xs,
   },
   extrasRow: {

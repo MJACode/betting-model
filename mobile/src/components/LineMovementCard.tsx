@@ -103,7 +103,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
           {lineOnly
             ? `${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
               `${formatSideLine(currentLine, pick.pick_side, market)}`
-            : `${formatAmerican(pick.dk_odds)} → ${formatAmerican(currentPrice)}`}
+            : `${formatAmerican(decisionOdds(pick))} → ${formatAmerican(currentPrice)}`}
         </Text>
         <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
       </View>
@@ -131,13 +131,12 @@ export function LineMovementCard({ pick, playerName }: Props) {
         {lineOnly
           ? `Your pick is locked at the number the card took — ` +
             `${formatSideLine(pick.scored_line, pick.pick_side, market)} at ` +
-            `${formatAmerican(pick.dk_odds)} (the book is named in the pick). The table shows ` +
+            `${formatAmerican(decisionOdds(pick))} (the book is named in the pick). The table shows ` +
             `DraftKings' line since, as the market reference. It doesn't change the pick or how ` +
             `it settles.`
-          : `Your pick was scored against DraftKings at ${formatAmerican(pick.dk_odds)}` +
-            `${storedQuoteBook(pick) !== MODEL_BOOK ? ` and decided at ${bookName(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` : ''}` +
+          : `Your pick was decided at ${bookName(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
-            `This just shows how DK's line has moved since, for or against you. It doesn't ` +
+            `This just shows how ${storedQuoteBook(pick) === MODEL_BOOK ? "that book's" : "DraftKings'"} line has moved since, for or against you. It doesn't ` +
             `change the pick or how it settles.`}
       </Text>
     </View>

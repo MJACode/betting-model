@@ -105,8 +105,8 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
     latest({ over_price: -110 }),
   );
   check(
-    'live Now equals lock → labeled Now, no Locked caption',
-    h?.kind === 'now' && h.price === -110 && !h.showLockedCaption,
+    'live Now equals lock → labeled Now, Locked caption still on',
+    h?.kind === 'now' && h.price === -110 && h.showLockedCaption,
   );
 }
 
@@ -120,6 +120,17 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   check(
     'pre-game CTA is Best FD when FD beats the record',
     h?.verb === 'Best' && h.bookmaker === 'fanduel' && h.price === 105,
+  );
+}
+{
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -125, total_line: 8.5 },
+  ];
+  const hero = heroAmericanForPick(mkPick(), latest({ over_price: -115 }));
+  const h = bestHandoffForPick(mkPick(), rows, hero);
+  check(
+    'pre-game same-book CTA uses Now, not the lock',
+    hero?.kind === 'now' && h?.bookmaker === MODEL_BOOK && h.price === -115,
   );
 }
 {
