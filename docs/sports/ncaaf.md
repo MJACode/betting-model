@@ -219,13 +219,14 @@ its opening number, which is rarely true by kickoff.
   twice. It keeps betting at its current cut. A session that finds the
   evidence below and proposes a pause or a per-day cap is proposing something
   already refused — write the evidence down instead.
-- **THE BEST BOOK ALWAYS DECIDES.** Not DraftKings. This is the standing rule
-  for the live models (mike: *"remove DK only - we want best lines for us
-  regardless"*, shipped in #634) and it is not reopened because a cut was
-  swept on DK-only history. If a cut and the decision price disagree,
-  re-sweep the cut — do not move the price basis back.
+- **THE BEST BOOK ALWAYS PLACES THE BET.** Not DraftKings. This is the
+  standing rule for the live models (mike: *"remove DK only - we want best
+  lines for us regardless"*, #634). What shipped in #694 (2026-09-12) is the
+  exact form: the models QUALIFY at DraftKings, the price every cut was swept
+  on, and the bet is placed and recorded at the best bettable quote. Do not
+  reopen either half.
 
-**What is measured, so it is not re-measured.** Four attempts, all on the 2025
+**What is measured, so it is not re-measured.** Six attempts, all on the 2025
 in-play replay, all first-signal-locked and read out of sample:
 
 | Attempt | Result |
@@ -234,6 +235,39 @@ in-play replay, all first-signal-locked and read out of sample:
 | Recalibrating the probability | Slope **0.135**. The whole 0.60–0.94 claimed range compresses to 0.51–0.59. Adding live-line deviation (+0.003) and time remaining (0.000) adds nothing |
 | Rebuilding stage 2 | The distribution IS ~70% too wide inside 10 min (width ratio 0.51, tails 15.7% vs 20%), and `shrink_k` repairs it (0.92, 18.8%) — but re-priced at real DK lines it gets **worse**: slope 0.268 → 0.145, Brier 0.2534 → 0.2552, log-loss 0.7009 → 0.7047 |
 | Per-day cap | Top-1/day is +11.4% on 21 bets, but taking the WORST 2–3 by EV returns +8.5%/+10.3%. The ranking does not discriminate, so the gain is from betting less, not choosing better |
+| Smoothing the probability (rolling median over k looks, k=2..7) | Every k is negative in the second half. Requiring the crossing to persist does not pick better bets |
+| Splitting by side or by quarter (2026-09-13) | Every split flips sign between the halves (over H2 −40.0% on 3, quarters 1–2 H2 −9.4% on 6). Not shipped |
+
+**What shipped 2026-09-13 (mike: *"there were 55+ live picks this week for
+NCAAF - no bueno. need only the best of the best"*).** Two changes, one PR:
+
+- **The live models price FBS-vs-FBS only**, by the pre-game models' own rule
+  (`_is_fbs`: SP+ necessary, classification may only veto), computed in
+  `gameday.load_context` and enforced in `serve.price`. The loop was the one
+  NCAAF surface without it. Week of 09-07: 24 of 43 `ncaaf_live_total` BETs
+  and 3 of 18 `ncaaf_live_win_prob` BETs were FBS-vs-FCS. 2025 replay,
+  `ncaaf_live_total`: those games fire 0.144 bets/game against 0.097 and
+  return −1.1% against +2.9%. 2026 production to 09-13: 15-15, −3.19u against
+  FBS-vs-FBS 36-31, −0.20u. The stage-1 training states DO include such games
+  (121 of 891 in 2025), so this is scope alignment, not an out-of-distribution
+  fix. All non-FBS replay bets fall in the first half, so no time split exists
+  for this one; 2026 production is the second read and agrees in direction.
+- **`ncaaf_live_total` 0.72 × EV 0.22 → 0.73 × EV 0.24.** FBS-vs-FBS replay:
+  39 bets +2.9% → 17 bets +21.3%, 0.097 → 0.042 per game. Of the 17, 14 are
+  first-half (+21.5%) and 3 second-half (+20.0%). Every cell in 0.725–0.73 ×
+  EV 0.20–0.28 is positive in the first half; the second-half column is the
+  same 3 bets in every one of them, so it is not a plateau read. **The replay
+  says not worse; it does not prove better, and there is no production
+  evidence of profit at this cut yet.**
+- **`ncaaf_live_win_prob` unchanged at 0.65 × EV 0.26.** Its stricter cells
+  (0.69 × 0.28, 15 bets) are peaks with 4 second-half bets, and its volume
+  fix is #694, which had four clean games behind it when this shipped.
+
+**Production runs 2–3× the replay's bet rate per game, and the reason is not
+fully measured.** DraftKings totals were snapshotted 141 times per in-play
+game on 2026-09-12 against the replay's 64, and the best-book gate that ran
+until #694 was 1.5–6pp looser. Neither has been shown to account for all of
+it. Project from production, not the replay.
 
 **Stage 1 is sound and was not changed.** Predicted remaining points are biased
 by +0.2..+1.2 at every time bucket and every predicted level, and the error on

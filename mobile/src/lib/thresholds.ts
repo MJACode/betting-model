@@ -133,8 +133,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Premium opener band [2.5, inf): 344 bets, 60.5%, +15.4% (2023-25,
   // positive every season). Disjoint from ncaaf_spread by construction.
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
-  // NCAAF live lanes — UNPAUSED 2026-09-12 (mike). ncaaf_live_total's
-  // 0.72/0.22 is the raw 2025 replay's both-halves-positive cell;
+  // NCAAF live lanes — UNPAUSED 2026-09-12 (mike). ncaaf_live_total moved
+  // 0.72/0.22 -> 0.73/0.24 on 2026-09-13 (mike, stricter for fewer bets;
+  // the EV half lives server-side in config.MODEL_MIN_EV);
   // ncaaf_live_win_prob's 0.65 is the CORRECTED-scale re-sweep described
   // three paragraphs down. Two different sweeps, so do not read them as one.
   //
@@ -166,7 +167,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // The 10-point dog CAP that briefly shipped earlier the same day is gone:
   // the correction prices that region rather than refusing it.
   ncaaf_live_win_prob: { min_prob: 0.65, min_edge: 0.1, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
-  ncaaf_live_total: { min_prob: 0.72, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
+  ncaaf_live_total: { min_prob: 0.73, min_edge: 0.12, min_odds: -200 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08, min_odds: -250 }, // cut per config.ACTION_THRESHOLDS + min_odds_for
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
