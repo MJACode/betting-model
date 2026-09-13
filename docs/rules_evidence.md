@@ -734,10 +734,13 @@ label. The Discord post (`push_sent`, 2026-09-06 21:37 ET) renders `pick_label`
 verbatim. The −1 was Houston's number, read as the Bills' — the §4 sign trap,
 in a reply instead of a model.
 
-**The app had the same bug in three places**, found by grepping every render of
-a stored line: ReasoningCard's "Line at score time" (`String(pick.scored_line)`),
-PickCard's book stat (`${quoteLine}`) and PickDetailScreen's "(line X)". All
-three now use `formatSideLine`.
+**The app had the same bug in four places.** A grep for raw renders of a stored
+line found three: ReasoningCard's "Line at score time"
+(`String(pick.scored_line)`), PickCard's book stat (`${quoteLine}`) and
+PickDetailScreen's "(line X)". The UX review found the fourth after that scan
+passed: the All books table, `{q.line != null ? q.line : '—'}`, on the same
+screen. A test written from the author's own picture of the bug missed a shape
+the author had not pictured (§7). All four now use `formatSideLine`.
 
 **Measured before the guard shipped, every BET ever written:** 83 spread labels
 (sign and team vs side), 4,042 over/under labels (side word and number) and

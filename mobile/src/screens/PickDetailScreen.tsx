@@ -46,6 +46,7 @@ import {
   displayQuoteForPick,
   formatSideLine,
   gameMarketForModel,
+  numOrNull,
   playerNameFromPickLabel,
   propMarketForModel,
   MODEL_BOOK,
@@ -171,7 +172,9 @@ function PickDetailContent({
       : live
         ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} · live picks are DraftKings only`
         : `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)}${
-            quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
+            numOrNull(quote.line) != null &&
+            numOrNull(pick.scored_line) != null &&
+            numOrNull(quote.line) !== numOrNull(pick.scored_line)
               ? // The HOME number for spreads; shown as the pick's side sees it.
                 ` (line ${formatSideLine(quote.line, pick.pick_side, gameMarketForModel(pick.model_id))})`
               : ''

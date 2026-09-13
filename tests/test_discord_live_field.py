@@ -45,6 +45,7 @@ _ROW = (
     None,                                    # best_bet_link
     -110.0,                                  # decision_odds = COALESCE(decision, dk)
     None,                                    # decision_book
+    50.5,                                    # scored_line     (2026-09-12)
 )
 
 

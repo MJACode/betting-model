@@ -14,6 +14,7 @@ import {
   formatSideLine,
   gameMarketForModel,
   movementFromLatest,
+  numOrNull,
   pickTimingInfo,
   MODEL_BOOK,
   type Movement,
@@ -101,11 +102,15 @@ export function PickCard({
   // Where to actually place the bet is the "Betting lines" row below, which
   // prices every book best first.
   const quote = displayQuoteForPick(pick, [], MODEL_BOOK);
-  // Their book can hang the same bet off a different number (FD 9.0 vs DK 8.5).
-  // Showing the price without the line would misrepresent the bet.
+  // A quote hung off a different number than the pick's needs the line beside
+  // the price. Compared as numbers: PostgREST can send NUMERIC as a string, and
+  // "-1" !== -1 would print a line on every card.
   const quoteLine =
-    quote && quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
-      ? quote.line
+    quote &&
+    numOrNull(quote.line) != null &&
+    numOrNull(pick.scored_line) != null &&
+    numOrNull(quote.line) !== numOrNull(pick.scored_line)
+      ? numOrNull(quote.line)
       : null;
 
   // Stake is a PAIR: what you lay, and what that wins. Computed off the price
