@@ -534,8 +534,26 @@ class LiveEngine:
                 c["pick_side"], c["scored_line"], ctx.game_id, now, score_seen_at)
             d_book, d_price, d_implied, d_edge = self._deciding(
                 p, c["dk_odds"], implied, best)
-            pick = self._decide(p, d_edge, min_prob, min_edge, d_price, min_ev,
-                                cap_edge=edge)
+            # QUALIFY AT THE PRICE THE CUT WAS SWEPT ON; BET AT THE BEST BOOK.
+            # These are two different questions and they were being answered
+            # with one number. `min_edge` / `min_ev` for both NCAAF live models
+            # were swept on the 2025 replay, which carries DRAFTKINGS in-play
+            # history only. Production decides at the best of thirteen books,
+            # and measured over this season's live BETs that price is a mean
+            # 6.21pp cheaper than DK for ncaaf_live_win_prob (median 5.23pp,
+            # 12 of 16 picks decided away from DK) and 1.54pp for
+            # ncaaf_live_total. An edge is p - implied, so a cheaper implied
+            # inflates the edge one-for-one: a 0.10 floor swept on DK is worth
+            # about 0.04 when applied to a best-of-13 price. Nobody chose that.
+            #
+            # So the GATE reads the DK numbers -- the ones the floors were
+            # validated against -- and the BET is still placed and recorded at
+            # the best bettable quote, which is the standing instruction
+            # (mike: "best book always"). The stale-line cap already worked
+            # this way, judging the DK edge rather than the decision edge, for
+            # the same reason; this extends that to the floors it sits beside.
+            pick = self._decide(p, edge, min_prob, min_edge, c["dk_odds"],
+                                min_ev, cap_edge=edge)
             pick = self._unless_paused(pick, c["model_id"])
             if not pick:
                 continue
