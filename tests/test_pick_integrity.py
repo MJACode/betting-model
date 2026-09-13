@@ -290,17 +290,23 @@ def test_health_check_is_crit_on_a_mismatched_label(health_db):
 _RAW = re.compile(
     r"String\(\s*pick\.(?:scored_line|closing_line)\s*\)"
     r"|\$\{\s*(?:pick\.(?:scored_line|closing_line)|quoteLine|quote\.line)\s*\}"
-    r"|[>{]\s*\{?\s*pick\.(?:scored_line|closing_line)\s*\}")
+    r"|[>{]\s*\{?\s*pick\.(?:scored_line|closing_line)\s*\}"
+    # A book row's line rendered straight out of a ternary: the All books
+    # table did `{q.line != null ? q.line : '—'}` and the first version of
+    # this pattern did not see it (UX review, 2026-09-12).
+    r"|\?\s*\w+\.line\s*:\s*'")
 
 
 def test_the_app_never_renders_a_pick_line_without_the_side_flip():
     offenders = []
     for path in (ROOT / "mobile" / "src").rglob("*.ts*"):
         src = path.read_text(encoding="utf-8")
-        picks_quote = "displayQuoteForPick(" in src
+        # A book quote only carries a pick's spread in a file that renders a
+        # pick; a prop board's own quote is not one.
+        about_a_pick = "displayQuoteForPick(" in src or "pick.pick_side" in src
         for m in _RAW.finditer(src):
-            # A prop board's own quote is not a pick's spread.
-            if "quote" in m.group(0) and not picks_quote:
+            if "scored_line" not in m.group(0) and "closing_line" not in m.group(0) \
+                    and not about_a_pick:
                 continue
             line_no = src.count("\n", 0, m.start()) + 1
             offenders.append(f"{path.relative_to(ROOT)}:{line_no}: {m.group(0)}")

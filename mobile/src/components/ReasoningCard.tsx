@@ -23,8 +23,7 @@ import {
   bookLabel,
   bookName,
   formatSideLine,
-  gameMarketForModel,
-  propMarketForModel,
+  marketForPick,
   storedQuoteBook,
 } from '@/lib/markets';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
@@ -47,9 +46,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
   // scored_line is the HOME number for spreads, so a Bills +1 pick stores
   // Houston's -1. Shown raw, this row read "-1" under a "BUF +1" label
   // (2026-09-12). It shows the pick's own side, as the label does.
-  const lineMarket = pick.model_id.includes('prop')
-    ? propMarketForModel(pick.model_id)
-    : gameMarketForModel(pick.model_id);
+  const lineMarket = marketForPick(pick);
   const implied = pick.decision_implied_prob ?? pick.dk_implied_prob;
   const stake = stakeFor(pick.kelly_fraction, odds, kelly);
   // isProbOnlyModel, not the strict config mirror: a retired prob-only model's
