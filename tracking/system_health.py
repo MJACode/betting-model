@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import MODELS, PROP_MODELS, PAPER_TRADING_START, today_et
 from data.db import get_connection
+from tracking.publish_keys import unique_row_sql
 
 # Models registered in config that intentionally have no trained artifact yet
 # (blocked on historical odds for their target, or a pending data subscription).
@@ -1201,17 +1202,19 @@ def run_system_health(run_date: str | None = None) -> dict:
         # against +5.68u real. It reached a member's screen before it reached a
         # dashboard. This is the check that would have caught it that morning.
         #
-        # The key is the pick lock's key. uq_picks_one_row_per_pick enforces it
-        # once the table is clean; this stays as the check that says so out
-        # loud, and that keeps working if the index is ever dropped.
+        # The key is unique_row_sql() — the same tuple as
+        # uq_picks_one_row_per_pick (player_id + player_key + prop_market).
+        # The narrow player_id-only grouping would flag every nfl_prop_market
+        # slate with two unders as a CRIT, which is the DAL@NYG collision
+        # wearing a health-check costume. This stays as the check that says
+        # so out loud, and that keeps working if the index is ever dropped.
         try:
-            dupes = _scalar(conn, """
+            dupes = _scalar(conn, f"""
                 SELECT COUNT(*) FROM (
                     SELECT game_date, model_id, COUNT(*) AS n
                     FROM picks
                     WHERE is_live IS NOT TRUE AND game_date >= ?
-                    GROUP BY game_date, model_id, game_id,
-                             COALESCE(player_id, ''), pick_side
+                    GROUP BY {unique_row_sql()}
                     HAVING COUNT(*) > 1
                 ) d
             """, (PAPER_TRADING_START,))

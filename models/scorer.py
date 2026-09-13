@@ -2316,10 +2316,14 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             %(decision_book)s, %(decision_odds)s, %(decision_implied_prob)s,
             %(decision_edge)s
         )
-        -- One row per pick (uq_picks_one_row_per_pick, migration
-        -- picks_one_row_per_pick.sql). A second copy of a pick that already
-        -- exists is dropped rather than raising: an IntegrityError here aborts
-        -- the transaction and costs the whole pass its picks, which is a far
+        -- One row per pick (uq_picks_one_row_per_pick, migrations
+        -- picks_one_row_per_pick.sql and
+        -- widen_picks_one_row_per_pick_2026_09_13.sql). The unique key is
+        -- unique_row_sql() — player_id + player_key + prop_market — so a
+        -- second nfl_prop_market under in the same game is a different row,
+        -- not a conflict. A second copy of a pick that already exists is
+        -- dropped rather than raising: an IntegrityError here aborts the
+        -- transaction and costs the whole pass its picks, which is a far
         -- worse failure than the duplicate this index exists to stop. The
         -- locks in this module are what PREVENT the conflict; this only makes
         -- the losing side of a race harmless. A no-op until the index exists.

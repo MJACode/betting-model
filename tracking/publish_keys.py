@@ -79,6 +79,29 @@ def key_partition_sql(alias: str = "p") -> str:
     return f"{alias}.game_id, {alias}.model_id, {cols}"
 
 
+def unique_row_sql(alias: str = "") -> str:
+    """The unique-row identity as a SQL tuple — `uq_picks_one_row_per_pick`.
+
+    THE BUG (2026-09-13, DAL@NYG IntegrityError). The index was
+    `(game_date, model_id, game_id, COALESCE(player_id, ''), pick_side)`.
+    `nfl_prop_market` writes `player_key` + `prop_market` and leaves
+    `player_id` NULL, so every under in a game collapsed onto one key and
+    the third INSERT aborted the card. Same trap as the publish lock_key
+    (2026-09-09), at the database instead of the ledger.
+
+    The publishing lock_key is deliberately COARSER than this (no
+    `pick_side`, no `game_date` — a side flip is one bet of record). The
+    unique index is this key: game_date + game_id + model_id + KEY_PARTS +
+    pick_side. Must move WITH KEY_PARTS. Empty alias is the table-level
+    form used by the health check; `alias="p"` is the PARTITION BY form
+    used by `scripts/dedupe_picks.py`.
+    """
+    prefix = f"{alias}." if alias else ""
+    parts = ", ".join(f"COALESCE({prefix}{c}, '')" for c in KEY_PARTS)
+    return (f"{prefix}game_date, {prefix}model_id, {prefix}game_id, "
+            f"{parts}, {prefix}pick_side")
+
+
 # ── The LIVE key ─────────────────────────────────────────────────────────────
 # In-play picks ledger under their own key -- `live:` prefixed, and carrying
 # pick_side, because a live lane can legitimately hold an over AND an under on

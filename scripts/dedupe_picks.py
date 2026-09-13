@@ -37,11 +37,14 @@ WHICH ROW SURVIVES, stated so it cannot quietly change:
      record, section 1c);
   3. ties broken by the lowest pick_id, so the choice is deterministic.
 
-The key is (game_date, model_id, game_id, player_id, pick_side) on PRE-GAME
-rows. Deliberately NOT keyed on scored_line: a re-score that moved the line is
-the same bug wearing a different number, and collapsing it is the point. Live
-rows are excluded -- the live lock and tracking/first_signal_repair own those,
-and they carry no duplicates on this key today (measured: 564 live BETs, 0).
+The key is tracking/publish_keys.unique_row_sql(): (game_date, model_id,
+game_id, player_id, player_key, prop_market, pick_side) on PRE-GAME rows.
+player_key and prop_market were added 2026-09-13 after nfl_prop_market's
+null player_id rows collapsed per side (DAL@NYG IntegrityError). Deliberately
+NOT keyed on scored_line: a re-score that moved the line is the same bug
+wearing a different number, and collapsing it is the point. Live rows are
+excluded -- the live lock and tracking/first_signal_repair own those, and
+they carry no duplicates on this key today (measured: 564 live BETs, 0).
 
 RECOVERY. picks_audit_trigger writes every DELETE to picks_log, so this is
 reversible from the database alone. The script ALSO writes a JSON snapshot of
@@ -64,17 +67,18 @@ from pathlib import Path
 from loguru import logger
 
 from data.db import get_connection
+from tracking.publish_keys import unique_row_sql
 
 # The identity of a pick, and the survivor rule, in one statement so the
 # preview and the delete cannot disagree about the set.
-SELECT_DUPLICATES = """
+# PARTITION BY is unique_row_sql() — the same tuple as uq_picks_one_row_per_pick.
+SELECT_DUPLICATES = f"""
 WITH ranked AS (
   SELECT p.pick_id, p.model_id, p.sport, p.game_id, p.game_date, p.pick_label,
          p.pick_side, p.signal_type, p.scored_line, p.dk_odds, p.result,
          p.profit_flat, p.created_at,
          ROW_NUMBER() OVER (
-           PARTITION BY p.game_date, p.model_id, p.game_id,
-                        COALESCE(p.player_id, ''), p.pick_side
+           PARTITION BY {unique_row_sql("p")}
            ORDER BY (p.signal_type = 'BET') DESC, p.created_at, p.pick_id
          ) AS rn
   FROM picks p

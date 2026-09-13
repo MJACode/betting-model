@@ -118,10 +118,12 @@ A surface with an extra GATE can only lose rows, and does it silently —
   it is gone. Mint it ONLY from `tracking/publish_keys.py`, and when a model
   writes a NEW identity column, add it there — `nfl_prop_market` writes
   `player_key` + `prop_market` and no `player_id`, so a whole game's props
-  collapsed onto one key (`docs/discord.md`). Changing the key is a data
-  migration, not a code change: re-ledger the already-published picks
-  (`scripts/backfill_publish_keys.py`) BEFORE the code ships, or every one of
-  them republishes.
+  collapsed onto one key (`docs/discord.md`). `uq_picks_one_row_per_pick` is
+  the same identity plus `game_date` and `pick_side` (`unique_row_sql`;
+  widened 2026-09-13 after DAL@NYG aborted on the third under). Changing the
+  publish key is a data migration, not a code change: re-ledger the
+  already-published picks (`scripts/backfill_publish_keys.py`) BEFORE the
+  code ships, or every one of them republishes.
 - **A VOIDED pick is not publishable and not displayable** (§1c). Excluded in
   the publishers' SQL and in the app's `passesActionFilter`. Only `'VOID'` —
   NCAAF's `'OK'` / `'GONE'` are live states on real picks.
