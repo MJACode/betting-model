@@ -12,8 +12,9 @@
  *    different line, or a row with no line on a lined market, is a different
  *    bet and never a leg price; reference-only books (Pinnacle, Bovada,
  *    ESPN BET) are never a leg price either — a tile is an invitation to bet.
- *  - DraftKings is always fully priced (a leg requires dk_odds), at the stored
- *    scored price — not a fresher snapshot.
+ *  - DraftKings-priced legs stay at the stored dk_odds — not a fresher
+ *    snapshot. A prop DK never listed (decision_odds set, dk_odds NULL) is
+ *    still a leg, marked dkPriced=false at line_book. Prob-only stays out.
  *  - A book pricing every leg gets combined odds = the product of its own
  *    per-leg decimals; a partial book gets null odds + a coverage count.
  *  - Fully-priced books sort best payout first (ties ALL starred), partial
@@ -374,6 +375,22 @@ const probKey = `${probOnly.game_id}|${probOnly.model_id}|${probOnly.player_id ?
 const probResolved = resolveSlipLegs([ep(probOnly, [])], [probKey]);
 check('prob-only selection never prices',
   probResolved.legs.length === 0 && betslipSummary(probResolved.legs, 1).americanOdds === null);
+
+const offDk = pick(14, {
+  dk_odds: null,
+  decision_odds: -115,
+  decision_book: 'fanduel',
+  line_book: 'fanduel',
+  model_id: 'mlb_prop_batter_hits',
+});
+const offLeg = legFromPick(ep(offDk, [
+  { bookmaker: 'fanduel', over_price: -115, over_link: 'fd://off', line: 1.5 },
+]));
+check(
+  'decision-priced non-DK prop becomes a slip leg',
+  offLeg != null && offLeg.dkPriced === false && offLeg.pricedAt === 'fanduel'
+    && offLeg.americanOdds === -115,
+);
 
 // ── Stale selections: pruned, not carried ──────────────────────────────────
 //

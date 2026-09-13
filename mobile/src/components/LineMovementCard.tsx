@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican, formatGameTimeET } from '@/lib/format';
-import { computeMovement, formatSideLine, gameMarketForModel, isNflLineOnly, lineForSide, lineFromSnapshot, priceForSide, propMarketForModel, type PricedSnapshot, MODEL_BOOK, bookName, storedQuoteBook } from '@/lib/markets';
+import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -18,24 +18,31 @@ interface Snap extends PricedSnapshot {
 }
 
 /**
- * DK price/line history since the pick was scored. Steam moving against the
- * pick is the single best "don't bet this anymore" signal between refreshes.
+ * Same-book price/line history since the pick was scored. Steam against
+ * the lock is the "don't bet this anymore" signal. Fetch is the deciding
+ * book (`historyBookForPick`), never a hard-coded DraftKings series.
  */
 export function LineMovementCard({ pick, playerName }: Props) {
   const [snaps, setSnaps] = useState<Snap[] | null>(null);
 
   const isProp = pick.model_id.includes('prop');
   const market = isProp ? propMarketForModel(pick.model_id) : gameMarketForModel(pick.model_id);
+  const historyBook = historyBookForPick(pick);
 
   useEffect(() => {
     let mounted = true;
-    if (pick.dk_odds == null || market == null || (isProp && !playerName)) {
+    if (
+      !canShowLineMovementHistory(pick) ||
+      historyBook == null ||
+      market == null ||
+      (isProp && !playerName)
+    ) {
       setSnaps([]);
       return undefined;
     }
     const load = isProp
-      ? fetchPropOddsHistory(pick.game_id, market, playerName!)
-      : fetchOddsHistory(pick.game_id, market);
+      ? fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook)
+      : fetchOddsHistory(pick.game_id, market, historyBook);
     load
       .then((rows) => {
         if (mounted) setSnaps(rows as Snap[]);
@@ -46,16 +53,16 @@ export function LineMovementCard({ pick, playerName }: Props) {
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, pick.dk_odds, market, isProp, playerName]);
+  }, [pick.pick_id, pick.game_id, historyBook, market, isProp, playerName]);
 
   if (!snaps || snaps.length === 0 || market == null) return null;
 
-  // NFL picks are priced at the card's best/soft book, not DraftKings, so a
-  // price comparison against the DK snapshots would be cross-book noise —
-  // only the line is compared (isNflLineOnly / computeMovement).
+  // NFL game lines compare LINE only (soft-book price is not the snapshot
+  // book). Props are not lineOnly — they steam at the deciding book.
   const lineOnly = isNflLineOnly(pick.model_id);
   const latest = snaps[snaps.length - 1];
-  const movement = computeMovement(pick, latest, market, { lineOnly });
+  const movement = movementFromSameBookHistory(pick, latest, market);
+  const lockedPrice = decisionOdds(pick);
   const currentPrice = priceForSide(latest, pick.pick_side);
   const currentLine = lineFromSnapshot(latest, market);
 
@@ -99,12 +106,16 @@ export function LineMovementCard({ pick, playerName }: Props) {
     <View style={styles.card}>
       <Text style={styles.heading}>Line Movement</Text>
       <View style={styles.headRow}>
-        <Text style={styles.prices}>
-          {lineOnly
-            ? `${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
-              `${formatSideLine(currentLine, pick.pick_side, market)}`
-            : `${formatAmerican(pick.dk_odds)} → ${formatAmerican(currentPrice)}`}
-        </Text>
+        {lineOnly ? (
+          <Text style={styles.prices}>
+            {`${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
+              `${formatSideLine(currentLine, pick.pick_side, market)}`}
+          </Text>
+        ) : (
+          <Text style={styles.prices}>
+            {`${formatAmerican(lockedPrice)} → ${formatAmerican(currentPrice)}`}
+          </Text>
+        )}
         <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
       </View>
 
@@ -131,13 +142,12 @@ export function LineMovementCard({ pick, playerName }: Props) {
         {lineOnly
           ? `Your pick is locked at the number the card took — ` +
             `${formatSideLine(pick.scored_line, pick.pick_side, market)} at ` +
-            `${formatAmerican(pick.dk_odds)} (the book is named in the pick). The table shows ` +
-            `DraftKings' line since, as the market reference. It doesn't change the pick or how ` +
+            `${formatAmerican(lockedPrice)} (the book is named in the pick). The table shows ` +
+            `${bookName(historyBook ?? storedQuoteBook(pick))}'s line since. It doesn't change the pick or how ` +
             `it settles.`
-          : `Your pick was scored against DraftKings at ${formatAmerican(pick.dk_odds)}` +
-            `${storedQuoteBook(pick) !== MODEL_BOOK ? ` and decided at ${bookName(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}` : ''}` +
+          : `Your pick was decided at ${bookName(historyBook ?? storedQuoteBook(pick))} ${formatAmerican(lockedPrice)}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
-            `This just shows how DK's line has moved since, for or against you. It doesn't ` +
+            `This just shows how that book's line has moved since, for or against you. It doesn't ` +
             `change the pick or how it settles.`}
       </Text>
     </View>

@@ -54,7 +54,7 @@ import { isModelRetired, isProbOnlyModel, type KellySizingOpts, isUnlockedPrevie
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
-import { decisionOdds } from '@/lib/decisionPrice';
+import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -342,7 +342,7 @@ function PickDetailContent({
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
-        {pick.dk_odds != null && pick.result == null && !preview && !retired
+        {hasPricedLine(pick) && pick.result == null && !preview && !retired
           && !voided ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>

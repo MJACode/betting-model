@@ -579,6 +579,7 @@ export function PicksHomeScreen() {
             inSlip={slip.has(slipKeyForPick(item.pick))}
             onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
             liveState={liveStates.get(item.pick.game_id) ?? null}
+            showSignalBadge={view === 'today'}
           />
         )}
         ListEmptyComponent={
@@ -847,12 +848,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
-    borderRadius: 8,
+    borderRadius: radii.sm,
   },
   liveNoteWrap: {
     flexDirection: 'row',
@@ -875,7 +876,7 @@ const styles = StyleSheet.create({
   rgBannerText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.med,
+    color: colors.textSecondary,
     fontWeight: font.weight.medium,
   },
 });
