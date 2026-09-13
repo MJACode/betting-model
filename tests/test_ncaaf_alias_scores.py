@@ -1,10 +1,12 @@
 """
 The ET/UTC duplicate games row, and the score mirroring that settles it.
 
-The odds ingestor dates a game by its EASTERN kickoff; cfbd_ingestor.parse_games
-dates it by CFBD's UTC start_date. A night game therefore exists twice, picks
-attach to the odds row and the final lands on the CFBD row — so an evening NCAAF
-pick could never settle. These pin the mirroring that closes that gap.
+The odds ingestor dates a game by its EASTERN kickoff. parse_games now does
+too for NEW rows (Matt, 2026-09-13), but night games ingested before that
+policy still exist twice: picks attach to the odds row and the final landed
+on the CFBD UTC row — so an evening NCAAF pick on an old twin could never
+settle. These pin the mirroring that closes that gap. The live-loop
+load_context guard (#701) is the consumer half; this is the score half.
 """
 
 import sys
