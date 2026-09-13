@@ -178,6 +178,50 @@ its opening number, which is rarely true by kickoff.
   the fit refuses to register if the walk-forward no longer clears the kill
   line.
 
+### `ncaaf_live_total` — what has been tried, and the standing instructions
+
+**STANDING INSTRUCTIONS (mike, 2026-09-12). Do not re-raise either of these.**
+
+- **`ncaaf_live_total` is NOT paused and NOT capped.** Asked and answered
+  twice. It keeps betting at its current cut. A session that finds the
+  evidence below and proposes a pause or a per-day cap is proposing something
+  already refused — write the evidence down instead.
+- **THE BEST BOOK ALWAYS DECIDES.** Not DraftKings. This is the standing rule
+  for the live models (mike: *"remove DK only - we want best lines for us
+  regardless"*, shipped in #634) and it is not reopened because a cut was
+  swept on DK-only history. If a cut and the decision price disagree,
+  re-sweep the cut — do not move the price basis back.
+
+**What is measured, so it is not re-measured.** Four attempts, all on the 2025
+in-play replay, all first-signal-locked and read out of sample:
+
+| Attempt | Result |
+|---|---|
+| Tighter prob/EV cut | No evidence above prob 0.72 — every cell there is first-half-only |
+| Recalibrating the probability | Slope **0.135**. The whole 0.60–0.94 claimed range compresses to 0.51–0.59. Adding live-line deviation (+0.003) and time remaining (0.000) adds nothing |
+| Rebuilding stage 2 | The distribution IS ~70% too wide inside 10 min (width ratio 0.51, tails 15.7% vs 20%), and `shrink_k` repairs it (0.92, 18.8%) — but re-priced at real DK lines it gets **worse**: slope 0.268 → 0.145, Brier 0.2534 → 0.2552, log-loss 0.7009 → 0.7047 |
+| Per-day cap | Top-1/day is +11.4% on 21 bets, but taking the WORST 2–3 by EV returns +8.5%/+10.3%. The ranking does not discriminate, so the gain is from betting less, not choosing better |
+
+**Stage 1 is sound and was not changed.** Predicted remaining points are biased
+by +0.2..+1.2 at every time bucket and every predicted level, and the error on
+the total matches the error on the margin (RMSE 6.38 vs 5.69 late, 15.57 vs
+15.03 early). The engine knows how much scoring is left.
+
+**Why the same engine is acceptable for `ncaaf_live_win_prob`:** margin errors
+partly cancel between the two sides and total errors do not, so the margin
+width ratio is 0.95+ everywhere except the last ten minutes while the total's
+falls to 0.51. That is also why the pregame-status correction worked there
+(slope 0.816) and recalibration failed here (0.135).
+
+**What would be a new attempt, as opposed to a repeat:** information the model
+does not have. Everything above re-arranges the same two-stage output. The
+harnesses are `scripts/ncaaf_live_total_rebuild.py` (stage-2 sweep, three
+out-of-sample read-outs) and `scripts/ncaaf_live_total_repricing.py` (the
+decisive one — re-prices held-out candidates at their OWN DK line under two
+distributions). A proxy line does not decide this: the rebuild script's own
+pregame-total read-out scores the shipped model at 1.30 where the real line
+scores it at 0.27.
+
 ### Session 280 (2026-09-10) — the pre-game board audited, and what changed
 
 Full detail in `docs/sessions/2026-09.md` (session 280). What a future
