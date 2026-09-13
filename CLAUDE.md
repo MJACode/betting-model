@@ -387,7 +387,8 @@ market (`docs/sports/nhl.md`).
   two calendar years, so the season is threaded explicitly, never derived from a
   game's date.
 - **Team ids are 3-letter abbrevs except NCAAF**, which uses the CFBD school name
-  (136 FBS programs collide badly in 3 letters). UFC uses fighter slugs.
+  (138 FBS programs collide badly in 3 letters — the count is CFBD's, re-pulled
+  2026-09-13; it moves as schools are promoted). UFC uses fighter slugs.
 - **`scored_line` is always the HOME number** for spreads. An away cover is
   `(away − home) − scored_line > 0`. Getting this sign wrong has produced a wrong
   threshold twice (sessions 74 and 87) — it flips every one-run game.

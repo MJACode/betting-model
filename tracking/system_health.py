@@ -1283,26 +1283,33 @@ def run_system_health(run_date: str | None = None) -> dict:
             getattr(conn, "rollback", lambda: None)()
             r.add("ncaaf_game_identity", ERROR, "CRIT", f"query failed: {exc}")
 
-        # ── The FBS registry agrees with SP+ ─────────────────────────────────
-        # A school `ncaaf_teams` calls FBS that SP+ has never rated is two of
-        # our own tables disagreeing, and the cost is a DK-priced game that
-        # leaves the board with NO row and no reason — the exact shape
+        # ── FBS schools SP+ has not rated ────────────────────────────────────
+        # An FBS school with no SP+ rating is a team we are supposed to be able
+        # to price and cannot, and the cost is a DK-priced game that leaves the
+        # board with NO row and no reason — the exact shape
         # .claude/rules/operations.md warns about, where an empty board and a
         # broken pipeline look identical.
         #
-        # Found 2026-09-12: `ncaaf_teams` and every 2026 `ncaaf_team_stats`
-        # snapshot carried North Dakota State [Mountain West] and Sacramento
-        # State [Mid-American] as `fbs`, both written in one 2026-08-29 pass
-        # and neither in the conference named. 138 schools classified fbs, 136
-        # with an SP+ rating — and 136 is the FBS count CLAUDE.md section 4
-        # states. Their two games that Saturday (NDSU @ Air Force, Sac State @
-        # Fresno State) produced nothing: `picks_log` holds zero rows for
-        # either id, so no model ever wrote and nothing was there to delete.
+        # Found 2026-09-12: North Dakota State and Sacramento State are `fbs`
+        # in `ncaaf_teams` and in all 15 of their 2026 `ncaaf_team_stats`
+        # snapshots, with no SP+ on any. Their two games that Saturday (NDSU @
+        # Air Force, Sac State @ Fresno State) produced nothing — `picks_log`
+        # holds zero rows for either id, so no model ever wrote and nothing was
+        # there to delete.
         #
-        # WARN, not CRIT: nothing is mispriced by it — `features.
-        # ncaaf_feature_engine._is_fbs` now requires the SP+ rating, so these
-        # decline at the gate. What is wrong is the registry, and the fix is a
-        # `ncaaf_teams_refresh` job, not a code change.
+        # THE REGISTRY IS NOT WRONG, AND THIS COMMENT FIRST SAID IT WAS
+        # (corrected 2026-09-13). A `ncaaf_teams_refresh` for 2026 ran on the
+        # worker (job 82908, 683 rows — the whole table) and `_TEAM_UPSERT`
+        # overwrites classification and conference unconditionally from CFBD.
+        # Both came back `fbs`; the count stayed 138. CFBD asserts they are FBS
+        # programs, so what this check finds is a NEWLY PROMOTED school: SP+
+        # needs FBS history and lags a promotion by a season.
+        #
+        # WARN, not CRIT, and NOT ACTIONABLE BY A RE-PULL: nothing is mispriced
+        # — `features.ncaaf_feature_engine._is_fbs` requires the SP+ rating, so
+        # these decline at the gate with a name. It clears when SP+ rates the
+        # school. Worth a row anyway: it is the standing answer to "why is that
+        # game not on the board?".
         # Season label = calendar year of the FALL (cfbd_ingestor.
         # ncaaf_season_for_date); never derived by hand — CLAUDE.md section 4.
         from data.ingestors.cfbd_ingestor import ncaaf_season_for_date
@@ -1323,10 +1330,11 @@ def run_system_health(run_date: str | None = None) -> dict:
                 named = "; ".join(f"{row[0]} [{row[1] or '?'}]" for row in unrated[:5])
                 more = f" (+{len(unrated) - 5} more)" if len(unrated) > 5 else ""
                 r.add("ncaaf_fbs_registry", STALE, "WARN",
-                      f"{len(unrated)} school(s) classified FBS with no {season_now} "
-                      f"SP+ rating — their games are declined at the FBS gate and "
-                      f"never reach the board: {named}{more}. Queue a "
-                      f"ncaaf_teams_refresh job to re-pull the registry")
+                      f"{len(unrated)} FBS school(s) with no {season_now} SP+ "
+                      f"rating — their games are declined at the FBS gate and "
+                      f"never reach the board: {named}{more}. Usually a newly "
+                      f"promoted program; clears when SP+ rates it. A "
+                      f"ncaaf_teams_refresh does NOT fix this (tried 2026-09-13)")
             else:
                 r.add("ncaaf_fbs_registry", OK, "WARN",
                       f"every FBS school carries a {season_now} SP+ rating")
