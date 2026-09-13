@@ -95,8 +95,8 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
 {
   const h = heroAmericanForPick(mkPick({ is_live: true }), null, []);
   check(
-    'live with no snapshot → hero is labeled Locked, not Now',
-    h?.kind === 'locked' && h.price === -110 && !h.showLockedCaption,
+    'live with no snapshot → Now empty, lock is caption only',
+    h?.kind === 'now' && h.price === null && h.showLockedCaption && h.lockedPrice === -110,
   );
 }
 {
@@ -156,6 +156,14 @@ check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision
   check(
     'live CTA ignores other books even if they are cheaper',
     liveQuotes?.bookmaker === MODEL_BOOK,
+  );
+}
+{
+  const hero = heroAmericanForPick(mkPick({ is_live: true }), null, []);
+  const h = bestHandoffForPick(mkPick({ is_live: true }), [], hero);
+  check(
+    'live CTA falls back to the lock when Now has no snapshot',
+    hero?.kind === 'now' && hero.price === null && h?.verb === 'Bet' && h.price === -110,
   );
 }
 

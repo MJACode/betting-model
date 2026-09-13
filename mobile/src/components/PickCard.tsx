@@ -172,7 +172,7 @@ export function PickCard({
         pick.signal_type,
         `Edge ${formatPctSigned(decisionEdge(pick))}`,
         heroPrice
-          ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
+          ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
           : null,
       ]
         .filter((p): p is string => Boolean(p))
@@ -184,6 +184,8 @@ export function PickCard({
         <Text style={styles.matchup} numberOfLines={1}>
           {matchup}
         </Text>
+        {/* Live clock stays on this pill (Fixtured-style score + period).
+            Do not invent a second clock chrome on the card. */}
         <GameStatusPill game={game} live={liveState} />
       </View>
 
@@ -195,7 +197,7 @@ export function PickCard({
         ) : showSignalBadge ? (
           <SignalBadge signal={pick.signal_type} small />
         ) : null}
-        <Text style={styles.label} numberOfLines={2}>
+        <Text style={styles.label} numberOfLines={1}>
           {pick.pick_label}
         </Text>
         {showSharp && sharp ? <SharpScorePill score={sharp.score} band={sharp.band} /> : null}
@@ -217,14 +219,16 @@ export function PickCard({
         </View>
         {heroPrice ? (
           <View style={styles.heroPriceBlock}>
-            <View style={styles.heroPriceRow}>
+            <View style={heroPrice.kind === 'now' ? styles.pricePill : styles.heroPriceRow}>
               {heroPrice.kind !== 'decision' ? (
                 <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? 'Now' : 'Locked'}</Text>
               ) : null}
               <Text style={styles.heroPrice}>
-                {quoteLine != null
-                  ? `${quoteLine} ${formatAmerican(heroPrice.price)}`
-                  : formatAmerican(heroPrice.price)}
+                {heroPrice.price == null
+                  ? '—'
+                  : quoteLine != null
+                    ? `${quoteLine} ${formatAmerican(heroPrice.price)}`
+                    : formatAmerican(heroPrice.price)}
               </Text>
               <Text style={styles.heroBook}>{bookLabel(heroPrice.book)}</Text>
             </View>
@@ -450,15 +454,11 @@ function tierFg(tier: 'HIGH' | 'MED' | 'LOW') {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.md,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
+    marginBottom: spacing.xs,
   },
   pressed: {
     opacity: 0.7,
@@ -486,13 +486,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.sm,
     rowGap: spacing.xs,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   label: {
     flexShrink: 1,
     flexGrow: 1,
     fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
+    fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
   tierChip: {
@@ -538,6 +538,19 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 4,
   },
+  // Public Options Hub analog: the bettable American lives in a pill so Now
+  // reads as the emphasized price, not another caption next to Edge.
+  pricePill: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 4,
+    backgroundColor: colors.bgGrouped,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
   nowTag: {
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
@@ -569,11 +582,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: spacing.md,
+    gap: spacing.sm,
     marginTop: spacing.xs,
-    paddingTop: spacing.xs,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
   },
   extraItem: {
     flexDirection: 'row',
@@ -612,7 +622,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   actionsRight: {
     flexDirection: 'row',
@@ -646,7 +656,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   // A single Text in a row container does not shrink by default, so the live
   // "Locked … — bet of record" label would overflow the card instead of

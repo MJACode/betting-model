@@ -778,17 +778,21 @@ export type HeroAmericanKind = 'now' | 'locked' | 'decision';
 /**
  * The American the list card prints next to Edge.
  *
- * `now`     — current/bettable at the deciding book (or DK on live). Label it.
- * `locked`  — live, and we have no current snapshot. Label it Locked so the
- *             live strip's "~45s old" claim cannot be read as this number.
- * `decision`— pre-game, unmoved. The lock IS the bettable number; no Now tag.
+ * `now`      — current/bettable. Live always uses this kind. `price` is null
+ *              when the in-play snapshot is missing — the card prints Now as
+ *              an em dash and keeps Locked as the caption. Designer rec
+ *              (2026-09-13): never show the lock as the lone big American
+ *              on Live.
+ * `locked`   — unused on Live (kept so a caller can still ask). Do not emit.
+ * `decision` — pre-game, unmoved. The lock IS the bettable number; no Now tag
+ *              (ASCII: Locked caption is Live and when moved).
  *
- * Edge / EV / stake stay on decisionOdds. This is display only (§1c: the
- * lock remains on the card as a caption whenever Now is a different number).
+ * Edge / EV / stake stay on decisionOdds. This is display only (§1c).
  */
 export interface HeroAmerican {
   kind: HeroAmericanKind;
-  price: number;
+  /** Null only on Live when the current DK snapshot has not landed. */
+  price: number | null;
   book: string;
   line: number | null;
   link: string | null;
@@ -838,13 +842,13 @@ export function heroAmericanForPick(
 
   if (live && current == null) {
     return {
-      kind: 'locked',
-      price: locked,
-      book: storedQuoteBook(pick),
-      line: lockedLine,
-      link: recordLink(pick, storedQuoteBook(pick)),
+      kind: 'now',
+      price: null,
+      book: MODEL_BOOK,
+      line: null,
+      link: pick.dk_bet_link ?? null,
       lockedPrice: locked,
-      showLockedCaption: false,
+      showLockedCaption: true,
     };
   }
   if (current != null && current.price !== locked) {
@@ -897,7 +901,7 @@ export function bestHandoffForPick(
   hero?: HeroAmerican | null,
 ): BoardHandoff | null {
   if (pick.is_live === true) {
-    const price = hero?.kind === 'now' ? hero.price : decisionOdds(pick);
+    const price = hero?.kind === 'now' && hero.price != null ? hero.price : decisionOdds(pick);
     if (price == null) return null;
     return {
       bookmaker: MODEL_BOOK,
@@ -914,7 +918,7 @@ export function bestHandoffForPick(
   // When the CTA is the same book as hero Now, offer the current/bettable
   // number — not the record chip. "Now −115 DK" beside "Bet DK −110" was
   // the lock next to the live number (UX review).
-  const useNow = hero?.kind === 'now' && best.bookmaker === hero.book;
+  const useNow = hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book;
   return {
     bookmaker: best.bookmaker,
     price: useNow ? hero.price : best.price,
