@@ -151,7 +151,10 @@ def _signal_row(lock_key="NCAAF_2026-09-06_louisville_ole-miss:ncaaf_over_under"
             None, "2026-09-06T16:29:04+00:00", None, None, 0.0, -200.0,
             "2026-09-06",
             # The price the pick was DECIDED at (2026-09-09): DraftKings here.
-            -115.0)
+            -115.0,
+            # pick_side and scored_line, which the label is checked against
+            # before anything is sent (tracking/pick_integrity, 2026-09-12).
+            "under", 55.5)
 
 
 def test_two_overlapping_discord_runs_post_the_card_once(monkeypatch):

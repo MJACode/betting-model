@@ -32,6 +32,8 @@ from data.db import get_connection
 from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
 from tracking.publish_filters import live_publishable_sql
 from tracking.publish_keys import key_partition_sql, live_lock_key_sql, lock_key_sql
+# Nothing is sent whose label disagrees with its side and line (2026-09-12).
+from tracking.pick_integrity import refuse_mismatched
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _MAX_LABELS = 3          # labels listed in a summary body before "+N more"
@@ -107,7 +109,9 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
         WITH bet AS (
             SELECT DISTINCT ON ({key_partition_sql()})
                    {lock_key_sql()} AS lock_key,
-                   p.pick_label, p.sport, p.created_at, p.pick_id
+                   p.pick_label, p.sport, p.created_at, p.pick_id,
+                   p.model_id, p.pick_side, p.scored_line,
+                   g.home_team, g.away_team
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -141,14 +145,17 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
         )
-        SELECT lock_key, pick_label, sport, pick_id FROM bet
+        SELECT lock_key, pick_label, sport, pick_id,
+               model_id, pick_side, scored_line, home_team, away_team FROM bet
         WHERE NOT EXISTS (
             SELECT 1 FROM push_sent s
             WHERE s.lock_key = bet.lock_key AND s.kind = 'new_bet'
         )
         ORDER BY created_at
     """, (target_date,)).fetchall()
-    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[3]}
+    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[3],
+             "model_id": r[4], "side": r[5], "line": r[6],
+             "home": r[7], "away": r[8]}
             for r in rows]
 
 
@@ -380,7 +387,8 @@ def notify_signal_changes(target_date: str | None = None, dry_run: bool = False)
 
 def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_signal_changes, under the publisher lock."""
-    new_bets = _new_bet_signals(conn, target_date)
+    # Refused picks are neither pushed nor ledgered (tracking/pick_integrity).
+    new_bets = refuse_mismatched(_new_bet_signals(conn, target_date), "Push")
     dropped = _dropped_signals(conn, target_date)
     if not new_bets and not dropped:
         logger.info(f"Push: no new/dropped signals for {target_date}")
@@ -560,7 +568,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     rows = conn.execute(f"""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label,
                p.inning_at_pick, p.sport, p.pick_id,
-               {live_lock_key_sql()} AS lock_key
+               {live_lock_key_sql()} AS lock_key, p.scored_line
         FROM picks p
         WHERE p.game_date = %s
           AND p.is_live = TRUE
@@ -580,6 +588,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "inning": r[4],
         "sport": r[5],
         "pick_id": r[6],
+        "model_id": r[1], "side": r[2], "line": r[8],
     } for r in rows]
 
 
@@ -593,7 +602,7 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
 
     conn = get_connection()
     try:
-        new = _new_live_signals(conn, target_date)
+        new = refuse_mismatched(_new_live_signals(conn, target_date), "Push(live)")
         if not new:
             return 0
 
