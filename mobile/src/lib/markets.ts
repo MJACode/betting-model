@@ -12,7 +12,7 @@
 import { americanImplied, americanToDecimal, formatStampET } from './format';
 import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
-import { decisionBook, decisionOdds, hasPricedLine } from './decisionPrice';
+import { decisionBook, decisionOdds, hasPricedLine, lineBook } from './decisionPrice';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -1009,7 +1009,7 @@ export function computeMovement(
   pick: Pick,
   latest: PricedSnapshot,
   market: string | null,
-  opts?: { lineOnly?: boolean; scoredPrice?: number | null },
+  opts?: { lineOnly?: boolean; scoredPrice?: number | null; skipLineDeltas?: boolean },
 ): Movement | null {
   const lineOnly = opts?.lineOnly ?? false;
   // Default is the deciding price, not dk_odds: a prop DK never listed still
@@ -1028,7 +1028,15 @@ export function computeMovement(
   const currentLine = lineFromSnapshot(latest, market);
   let lineMovedAgainst = false;
   let lineMovedFor = false;
-  if (market != null && !market.startsWith('h2h') && scoredLine != null && currentLine != null) {
+  // scored_line is the line-book's number. A FanDuel 9.0 vs a DK-scored 8.5
+  // is a different book's total, not steam — skip those deltas.
+  if (
+    !opts?.skipLineDeltas &&
+    market != null &&
+    !market.startsWith('h2h') &&
+    scoredLine != null &&
+    currentLine != null
+  ) {
     const delta = currentLine - scoredLine;
     if (market.startsWith('spreads')) {
       // scored_line is the HOME spread. The home side's entry worsens as the
@@ -1119,9 +1127,12 @@ export function movementFromSameBookHistory(
   if (!canShowLineMovementHistory(pick)) return null;
   const locked = decisionOdds(pick);
   if (locked == null) return null;
+  const historyBook = historyBookForPick(pick);
+  const lineAt = lineBook(pick) ?? MODEL_BOOK;
   return computeMovement(pick, latest, market, {
     lineOnly: isNflLineOnly(pick.model_id),
     scoredPrice: locked,
+    skipLineDeltas: historyBook != null && lineAt !== historyBook,
   });
 }
 

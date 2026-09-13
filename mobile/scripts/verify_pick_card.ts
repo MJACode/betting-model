@@ -251,6 +251,28 @@ check(
   );
 }
 {
+  const mlbFd = mkPick({
+    model_id: 'mlb_over_under',
+    pick_side: 'over',
+    scored_line: 8.5,
+    decision_odds: -110,
+    decision_book: 'fanduel',
+    line_book: null,
+    dk_odds: -110,
+  });
+  const fdTotalNine = latest({ total_line: 9.0, over_price: -110 });
+  const naiveLine = computeMovement(mlbFd, fdTotalNine, 'totals');
+  check(
+    'without the line-book gate, FD 9.0 vs scored 8.5 Over is SKIP',
+    naiveLine?.severity === 'skip',
+  );
+  const gated = movementFromSameBookHistory(mlbFd, fdTotalNine, 'totals');
+  check(
+    'MLB totals FD decision, line_book null, FD 9.0 vs scored 8.5 is not a line SKIP',
+    gated === null || gated.severity !== 'skip',
+  );
+}
+{
   const unpriced = mkPick({
     dk_odds: null,
     decision_odds: null,
