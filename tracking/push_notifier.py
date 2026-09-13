@@ -164,8 +164,10 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
     (flipped against us), still pre-settlement, not yet pushed as dropped."""
     rows = conn.execute(f"""
         SELECT DISTINCT os.lock_key, os.pick_label, os.sport, os.locked_at,
-               p.pick_id
+               p.pick_id, os.model_id, os.pick_side, os.scored_line,
+               g.home_team, g.away_team
         FROM opening_signals os
+        LEFT JOIN games g ON g.game_id = os.game_id
         JOIN push_sent prior
           ON prior.lock_key = os.lock_key AND prior.kind = 'new_bet'
         -- MATCHED ON THE LOCK_KEY, not on the component columns (2026-09-09).
@@ -190,7 +192,9 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
           )
         ORDER BY os.locked_at
     """, (target_date,)).fetchall()
-    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[4]}
+    return [{"lock_key": r[0], "label": r[1], "sport": r[2], "pick_id": r[4],
+             "model_id": r[5], "side": r[6], "line": r[7],
+             "home": r[8], "away": r[9]}
             for r in rows]
 
 
@@ -389,7 +393,7 @@ def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_signal_changes, under the publisher lock."""
     # Refused picks are neither pushed nor ledgered (tracking/pick_integrity).
     new_bets = refuse_mismatched(_new_bet_signals(conn, target_date), "Push")
-    dropped = _dropped_signals(conn, target_date)
+    dropped = refuse_mismatched(_dropped_signals(conn, target_date), "Push(dropped)")
     if not new_bets and not dropped:
         logger.info(f"Push: no new/dropped signals for {target_date}")
         return 0
@@ -449,7 +453,8 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
     now_utc = datetime.now(ZoneInfo("UTC")).isoformat()
     rows = conn.execute("""
         SELECT tb.device_id, tb.pick_id, tb.game_id, tb.model_id, tb.pick_side,
-               tb.locked_odds, tb.pick_label
+               tb.locked_odds, tb.pick_label, tb.locked_line,
+               g.home_team, g.away_team
         FROM tracked_bets tb
         JOIN games g ON g.game_id = tb.game_id
         WHERE tb.game_date = %s
@@ -459,7 +464,8 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
     """, (target_date, now_utc)).fetchall()
 
     alerts: list[dict] = []
-    for device_id, pick_id, game_id, model_id, pick_side, locked_odds, label in rows:
+    for (device_id, pick_id, game_id, model_id, pick_side, locked_odds, label,
+         locked_line, home, away) in rows:
         col = _SIDE_PRICE_COL.get(pick_side)
         if not col:
             continue
@@ -485,6 +491,10 @@ def _line_change_alerts(conn, target_date: str) -> list[dict]:
             "pick_id": pick_id,
             "label": label, "locked": int(locked_odds), "current": int(current),
             "against": shift > 0,
+            # locked_line is the pick's scored_line, the HOME number for spreads.
+            "model_id": model_id, "side": pick_side,
+            "line": None if locked_line is None else float(locked_line),
+            "home": home, "away": away,
         })
     return alerts
 
@@ -498,7 +508,8 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
 
     conn = get_connection()
     try:
-        alerts = _line_change_alerts(conn, target_date)
+        alerts = refuse_mismatched(_line_change_alerts(conn, target_date),
+                                   "Push(line-change)")
         if not alerts:
             logger.info(f"Push(line-change): nothing tracked moved for {target_date}")
             return 0

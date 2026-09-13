@@ -41,6 +41,7 @@ pass**, not just the daily one:
 | `refresh_pass_completion` | CRIT | no pass finished in 90 min inside the 7am–midnight ET window; or a run that started >2h ago and never finished (hang / OOM / killed worker) |
 | `refresh_pass_steps` | CRIT / WARN | a step failing in **all** of the last 3 passes = a real break (CRIT, names the step); failing in only some = flaky upstream (WARN) |
 | `signal_delivery` | CRIT | a signal was locked but never delivered — uses the notifier's own predicate (same thresholds join, same `:early` exclusion) so the two cannot disagree about what counts as postable |
+| `pick_label_integrity` | CRIT | an open BET (last 3 days) whose label disagrees with its side or line — the publishers refuse to send it (`tracking/pick_integrity.py`), and this makes that refusal visible. Added 2026-09-12 after "BUF +1" was relayed as "Bills −1" |
 
 Backed by **`pipeline_runs`** (one row per pipeline invocation, written by
 `tracking/run_ledger.py`). Before this, *nothing* recorded that a pass had run — the only
