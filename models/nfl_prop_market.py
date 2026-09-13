@@ -248,15 +248,25 @@ MARKET_STAT = {
 
 
 def best_per_prop(bets):
-    """One bet per (game, player, market, side), best edge first.
+    """One bet per (game, player, market), best edge first.
 
     The same proposition available at three books is three copies of ONE
     opinion. The backtest and the live card must select identically or the card
     shows a slate the measured ROI never described, so both call this.
+
+    NOT PER SIDE (2026-09-13, mike). Keyed on side, two soft books cheap on
+    OPPOSITE sides both survived: T.J. Hockenson Over 3.5 Rec at FanDuel and
+    Under 3.5 Rec at BetMGM, published in one run. Both sides of one line is a
+    hold paid twice, not two opinions. Across 2023-25 it was 75 of 2,273
+    propositions, and keeping only the bigger edge cost 3.1u while ROI rose
+    0.13pp. Those figures take the newest pre-game quote of ANY snapshot type,
+    so they are a before/after on one harness, not the record: they do not
+    reconcile with the pinned-snapshot numbers in find_bets above
+    (docs/sessions/2026-09.md, session 299). tests/test_prop_market_one_side_per_line.py
     """
     out, seen = [], set()
     for b in sorted(bets, key=lambda x: -x.edge):
-        prop = (b.game_id, b.player, b.market, b.side)
+        prop = (b.game_id, b.player, b.market)
         if prop in seen:
             continue
         seen.add(prop)
@@ -269,7 +279,7 @@ def grade(bets, actuals: dict, snapshots: dict, kickoffs: dict,
     """
     Settle `bets` against actuals, dropping post-kickoff quotes.
 
-    `dedupe` keeps ONE bet per (game, player, market, side), best edge first.
+    `dedupe` keeps ONE bet per (game, player, market), best edge first.
     The same proposition available at three books is three copies of one
     opinion; counting them separately inflates the sample and narrows the
     confidence interval around a bet you only really made once.

@@ -1186,7 +1186,7 @@ class TestMarketCardPublisher:
                     return R()
                 s.inserted.append(params)
                 s.rows.add((params["game_id"], params["model_id"], params["player_key"],
-                            params["prop_market"], params["pick_side"]))
+                            params["prop_market"]))
                 class R:
                     def fetchone(self_inner): return None
                 return R()

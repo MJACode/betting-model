@@ -135,8 +135,10 @@ def build(min_edge: float, snapshot: str | None = None,
     for (gid, player, market, line, book), r in latest.items():
         by_prop[(gid, player, market, line)][book] = r
 
-    # ONE BET PER PROPOSITION, exactly as models.nfl_prop_market.best_per_prop
-    # does for the live card. The same prop offered at eight books is EIGHT
+    # ONE BET PER PROPOSITION AND SIDE. NOT what models.nfl_prop_market.best_per_prop
+    # does since 2026-09-13: the card keeps one side per line, while this still
+    # stages both, so it includes the 75 (of 2,273) both-sides pairs the card now
+    # drops -- a 3.1u difference over 2023-25. The same prop offered at eight books is EIGHT
     # COPIES OF ONE OPINION, and counting them separately both inflates the bet
     # count and correlates the outcomes -- the first run of this script did that
     # and reported 1,083 "bets" that were really a few hundred propositions.
