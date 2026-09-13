@@ -1105,6 +1105,27 @@ export function movementFromLatest(
   return null;
 }
 
+/**
+ * Detail-card path: the history table is DraftKings-only. Price steam is
+ * same-book — require a stored DK price, and do not compare a FanDuel (or
+ * other) lock to a DK snapshot. That default (`computeMovement` →
+ * `decisionOdds`) is the cross-book false steam the board path already
+ * refuses. NFL line-only still compares lines (price is ignored).
+ */
+export function movementFromDkHistory(
+  pick: Pick,
+  latest: PricedSnapshot,
+  market: string | null,
+): Movement | null {
+  if (pick.dk_odds == null) return null;
+  const lineOnly = isNflLineOnly(pick.model_id);
+  if (!lineOnly && storedQuoteBook(pick) !== MODEL_BOOK) return null;
+  return computeMovement(pick, latest, market, {
+    lineOnly,
+    scoredPrice: numOrNull(pick.dk_odds),
+  });
+}
+
 // ── NFL pick timing ─────────────────────────────────────────────────────────
 
 export interface NflTiming {

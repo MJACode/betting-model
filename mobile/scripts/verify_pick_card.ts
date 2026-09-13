@@ -8,8 +8,10 @@
 import { hasPricedLine } from '../src/lib/decisionPrice';
 import {
   bestHandoffForPick,
+  computeMovement,
   formatSideLine,
   heroAmericanForPick,
+  movementFromDkHistory,
   movementFromLatest,
   MODEL_BOOK,
 } from '../src/lib/markets';
@@ -206,6 +208,49 @@ check(
   'away spread Now line is side-flipped, not the home number',
   formatSideLine(-4.5, 'away', 'spreads') === '+4.5',
 );
+
+// ── movementFromDkHistory: detail card must not cross-book steam ────────────
+{
+  const fd = mkPick({
+    dk_odds: -110,
+    decision_odds: -105,
+    decision_book: 'fanduel',
+    line_book: 'fanduel',
+  });
+  const snap = latest({ over_price: -140 });
+  const naive = computeMovement(fd, snap, 'totals');
+  check(
+    'naive computeMovement steams an FD lock vs a DK snapshot (the trap)',
+    naive?.severity === 'caution' && naive.scoredPrice === -105,
+  );
+  check(
+    'DK-history path does not steam an off-DK pick',
+    movementFromDkHistory(fd, snap, 'totals') === null,
+  );
+}
+{
+  const dk = mkPick({
+    dk_odds: -110,
+    decision_odds: -110,
+    decision_book: 'draftkings',
+  });
+  check(
+    'DK-history path still steams a DK pick against DK now',
+    movementFromDkHistory(dk, latest({ over_price: -140 }), 'totals')?.severity === 'caution',
+  );
+}
+{
+  const noDk = mkPick({
+    dk_odds: null,
+    decision_odds: -105,
+    decision_book: 'fanduel',
+    line_book: 'fanduel',
+  });
+  check(
+    'DK-history path hides when dk_odds is null',
+    movementFromDkHistory(noDk, latest({ over_price: -140 }), 'totals') === null,
+  );
+}
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);
 if (failed > 0) process.exit(1);

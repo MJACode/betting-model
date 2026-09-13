@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican, formatGameTimeET } from '@/lib/format';
-import { computeMovement, formatSideLine, gameMarketForModel, isNflLineOnly, lineForSide, lineFromSnapshot, priceForSide, propMarketForModel, type PricedSnapshot, MODEL_BOOK, bookName, storedQuoteBook } from '@/lib/markets';
+import { formatSideLine, gameMarketForModel, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromDkHistory, priceForSide, propMarketForModel, type PricedSnapshot, MODEL_BOOK, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -56,17 +56,21 @@ export function LineMovementCard({ pick, playerName }: Props) {
   // only the line is compared (isNflLineOnly / computeMovement).
   const lineOnly = isNflLineOnly(pick.model_id);
   const latest = snaps[snaps.length - 1];
-  const movement = computeMovement(pick, latest, market, {
-    lineOnly,
-    scoredPrice: pick.dk_odds,
-  });
+  // Same-book gate as the board chip. Never default computeMovement to
+  // decisionOdds against this DK-only table (cross-book false steam).
+  const movement = movementFromDkHistory(pick, latest, market);
   const currentPrice = priceForSide(latest, pick.pick_side);
   const currentLine = lineFromSnapshot(latest, market);
   const decidedOffDk = storedQuoteBook(pick) !== MODEL_BOOK;
 
   const verdict = (() => {
     if (!movement) {
-      return { label: 'Line steady since pick', color: colors.textSecondary };
+      return {
+        label: decidedOffDk && !lineOnly
+          ? 'DraftKings history — not your book'
+          : 'Line steady since pick',
+        color: colors.textSecondary,
+      };
     }
     if (movement.severity === 'skip') {
       return {
