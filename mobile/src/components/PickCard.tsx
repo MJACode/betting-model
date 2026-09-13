@@ -226,7 +226,8 @@ export function PickCard({
             quote == null
               ? '—'
               : quoteLine != null
-                ? `${quoteLine} ${formatAmerican(quote.price)}`
+                ? // A book row's line is the HOME number for spreads; show the side's.
+                  `${formatSideLine(quoteLine, pick.pick_side, gameMarketForModel(pick.model_id))} ${formatAmerican(quote.price)}`
                 : formatAmerican(quote.price)
           }
         />

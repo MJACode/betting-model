@@ -172,7 +172,8 @@ function PickDetailContent({
         ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} · live picks are DraftKings only`
         : `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)}${
             quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
-              ? ` (line ${quote.line})`
+              ? // The HOME number for spreads; shown as the pick's side sees it.
+                ` (line ${formatSideLine(quote.line, pick.pick_side, gameMarketForModel(pick.model_id))})`
               : ''
           } · the price this pick was decided at`;
 

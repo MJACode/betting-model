@@ -718,6 +718,41 @@ The nearest real signal is `mlb_live_total_runs` at **+15.94% over 87 settled
 bets, 95% CI [-2.8%, +34.7%]** — promising, unproven, and a game total rather
 than a prop.
 
+## A pick is quoted from its label, never rebuilt from its line (2026-09-12)
+
+Rule: CLAUDE.md §00, "QUOTE A PICK FROM ITS LABEL". mike: *"This is a
+catastrophe — I released this pick to my followers ... Minus one was the thing
+that was published ... I want error checking, error checking, error checking.
+You must check every pick that goes out."*
+
+**What happened.** Asked for tomorrow's NFL game picks, a reply gave the one
+standing `nfl_opener_spread` pick as "Bills −1". `picks_log` (INSERT at
+2026-09-07 01:37 UTC, pick 1730748) shows the pick was written as
+`BUF @ HOU — BUF +1 (Opener -2 vs Pinnacle, fanatics) · 0.98u`, `pick_side
+away`, `scored_line -1.0`, and every one of its ~100 later UPDATE rows keeps that
+label. The Discord post (`push_sent`, 2026-09-06 21:37 ET) renders `pick_label`
+verbatim. The −1 was Houston's number, read as the Bills' — the §4 sign trap,
+in a reply instead of a model.
+
+**The app had the same bug in three places**, found by grepping every render of
+a stored line: ReasoningCard's "Line at score time" (`String(pick.scored_line)`),
+PickCard's book stat (`${quoteLine}`) and PickDetailScreen's "(line X)". All
+three now use `formatSideLine`.
+
+**Measured before the guard shipped, every BET ever written:** 83 spread labels
+(sign and team vs side), 4,042 over/under labels (side word and number) and
+412 moneyline labels (team vs side) — zero disagreements; and the guard itself,
+run over all 4,543 BET rows across 44 models, flags zero. So the data was never
+wrong; what was missing was a check between the data and the reader.
+
+**What now holds it:** `tracking/pick_integrity.py` refuses, and does not
+ledger, any pick whose label disagrees with its side and line, on all six send
+paths (Discord pre-game, restate, live, free pick; push pre-game, live); the
+`pick_label_integrity` health check goes CRIT on any open one; and
+`tests/test_pick_integrity.py` pins the real row, each publisher, the health
+check, the app renders and this rule's place in CLAUDE.md — each watched to
+fail before its fix.
+
 ## Checking tool ACCESS, not assuming it (2026-09-12)
 
 Rule: CLAUDE.md §1b, "reachability and capability are two measurements" and "a

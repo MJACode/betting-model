@@ -53,6 +53,8 @@ from tracking.publish_lock import (
 from tracking.publish_filters import live_publishable_sql
 from tracking.publish_keys import live_lock_key_sql
 from tracking.publish_keys import key_partition_sql, lock_key_sql
+# Nothing is sent whose label disagrees with its side and line (2026-09-12).
+from tracking.pick_integrity import refuse_mismatched
 
 ET = ZoneInfo("America/New_York")
 
@@ -638,7 +640,8 @@ def _new_signals(conn, target_date: str) -> list[dict]:
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
-                   COALESCE(p.decision_odds, p.dk_odds) AS decision_odds
+                   COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
+                   p.pick_side, p.scored_line
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -706,6 +709,8 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         # one: "the game is earlier, if you mean tomorrow, need to say
         # september 7th, the post to discord says september 6th".
         "game_date": r[18],
+        # What tracking/pick_integrity checks the label against.
+        "side": r[20], "line": r[21],
     } for r in rows
         # Never post a game that has already started -- see _still_pre_game.
         # Belt and braces with the SQL bound above, and the only guard that
@@ -753,7 +758,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
-                   COALESCE(p.decision_odds, p.dk_odds) AS decision_odds
+                   COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
+                   p.pick_side, p.scored_line
             FROM picks p
             JOIN model_action_thresholds t ON t.model_id = p.model_id
             LEFT JOIN games g ON g.game_id = p.game_id
@@ -808,6 +814,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # one: "the game is earlier, if you mean tomorrow, need to say
         # september 7th, the post to discord says september 6th".
         "game_date": r[18],
+        "side": r[20], "line": r[21],
     } for r in rows]
 
 
@@ -1233,7 +1240,8 @@ def notify_discord_restate(target_date: str | None = None,
 
     conn = get_connection()
     try:
-        signals = _locked_signals(conn, target_date)
+        signals = refuse_mismatched(_locked_signals(conn, target_date),
+                                    "Discord(restate)")
         if not signals:
             return 0
 
@@ -1349,7 +1357,9 @@ def notify_discord_signals(target_date: str | None = None, dry_run: bool = False
 
 def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_discord_signals, under the publisher lock."""
-    signals = _new_signals(conn, target_date)
+    # Refused picks are not ledgered, so they retry and keep logging until the
+    # row is fixed; the pick_label_integrity health check turns that CRIT.
+    signals = refuse_mismatched(_new_signals(conn, target_date), "Discord")
     if not signals:
         logger.info(f"Discord: no new signals for {target_date}")
         return 0
@@ -1425,7 +1435,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
                -- headline through publish_price, like the pre-game cards.
                p.best_book, p.best_odds, p.best_bet_link,
                COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-               p.decision_book
+               p.decision_book, p.scored_line
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -1452,6 +1462,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "commence": r[13], "posted_at": r[14], "live": True,
         "best_book": r[18], "best_odds": r[19], "best_bet_link": r[20],
         "decision_odds": r[21], "decision_book": r[22],
+        "side": r[2], "line": r[23],
         # "good to" from the deciding price, the same way the pre-game
         # producers bound theirs.
         "good_to": price_bound(r[5], r[1], r[15], r[16], r[21]),
@@ -1483,7 +1494,7 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
 
 def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_discord_live, under the publisher lock."""
-    signals = _new_live_signals(conn, target_date)
+    signals = refuse_mismatched(_new_live_signals(conn, target_date), "Discord(live)")
     if not signals:
         return 0
 
@@ -1543,7 +1554,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
                pk.created_at, pk.best_book, pk.best_odds,
-               os.model_id, os.model_probability, t.min_edge, t.min_odds
+               os.model_id, os.model_probability, t.min_edge, t.min_odds,
+               os.pick_side, os.scored_line
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -1566,14 +1578,14 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
           AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
         ORDER BY os.lock_key
     """, (target_date,)).fetchall()
-    return [{
+    return refuse_mismatched([{
         "lock_key": r[0], "label": r[1], "sport": r[2], "dk_odds": r[3],
         "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
         "posted_at": r[8], "best_book": r[9], "best_odds": r[10],
-        "model_id": r[11],
+        "model_id": r[11], "side": r[15], "line": r[16],
         # Same "good to" the paid channels publish, from the same gates.
         "good_to": price_bound(r[12], r[11], r[13], r[14], r[3]),
-    } for r in rows]
+    } for r in rows], "Discord(free)")
 
 
 def _pick_free(candidates: list[dict], priority=None) -> dict | None:

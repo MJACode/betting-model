@@ -1144,6 +1144,41 @@ def run_system_health(run_date: str | None = None) -> dict:
                       f"every postable signal in the last 3 days was delivered "
                       f"({wired and ', '.join(sorted(wired)) or 'default channel'})")
 
+        # ── Published picks: the words agree with the numbers ───────────────
+        # tracking/pick_integrity refuses to SEND a pick whose label disagrees
+        # with its side and line (mike, 2026-09-12, after "BUF +1" reached his
+        # followers as "Bills -1"). A refusal is only a log line, and a log
+        # line is quiet, so this reads every open BET of the last three days
+        # through the same check and goes CRIT on any disagreement.
+        try:
+            from tracking.pick_integrity import pick_problems
+            label_rows = conn.execute("""
+                SELECT p.pick_label, p.pick_side, p.scored_line, p.model_id,
+                       g.home_team, g.away_team
+                FROM picks p
+                LEFT JOIN games g ON g.game_id = p.game_id
+                WHERE p.signal_type = 'BET' AND p.result IS NULL
+                  AND p.game_date >= ?
+            """, (d3,)).fetchall()
+            mismatched = []
+            for lbl, side, line, mid, home, away in label_rows:
+                probs = pick_problems(lbl, side, None if line is None else float(line),
+                                      mid, home, away)
+                if probs:
+                    mismatched.append((lbl, probs[0]))
+            if mismatched:
+                lbl, first = mismatched[0]
+                r.add("pick_label_integrity", STALE, "CRIT",
+                      f"{len(mismatched)} open pick(s) whose label disagrees with "
+                      f"its side or line - publishing refuses them. First: "
+                      f"{lbl!r}: {first}")
+            else:
+                r.add("pick_label_integrity", OK, "CRIT",
+                      f"all {len(label_rows)} open BET labels agree with their "
+                      f"side and line")
+        except Exception as exc:
+            r.add("pick_label_integrity", STALE, "CRIT", f"check failed to run: {exc}")
+
         # ── The published record: one population, two views ─────────────────
         # v_public_track_record feeds the hero card and the Models tab;
         # v_public_track_record_daily feeds the equity curve. They are two
