@@ -125,6 +125,10 @@ A surface with an extra GATE can only lose rows, and does it silently —
 - **A VOIDED pick is not publishable and not displayable** (§1c). Excluded in
   the publishers' SQL and in the app's `passesActionFilter`. Only `'VOID'` —
   NCAAF's `'OK'` / `'GONE'` are live states on real picks.
+- **NOTHING IS SENT WHOSE LABEL DISAGREES WITH ITS SIDE AND LINE.** Every
+  producer passes its rows through `tracking/pick_integrity.refuse_mismatched`
+  and supplies `side` and `line`, or the pick is refused. A new surface adds
+  itself to `tests/test_pick_integrity.py`.
 - **A new surface is a line in the parity tests**, not a copied query:
   `tests/test_{nfl_lookahead_signals,publish_key_identity,publisher_lock}.py`.
 - **LIVE PICKS POST TO THEIR SPORT'S LIVE CHANNEL.** (mike, 2026-09-09:

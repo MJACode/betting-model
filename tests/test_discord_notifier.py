@@ -644,7 +644,10 @@ def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00",
             # price when one beat DraftKings, DraftKings otherwise. The card's
             # "good to" is bounded from it.
             decision_odds if decision_odds is not None
-            else (best_odds if best_odds is not None else -150.0))
+            else (best_odds if best_odds is not None else -150.0),
+            # pick_side and scored_line, which the label is checked against
+            # before anything is sent (tracking/pick_integrity, 2026-09-12).
+            "home", None)
 
 
 def _setup(monkeypatch, conn, webhooks=None):
@@ -848,15 +851,17 @@ def _restate_env(monkeypatch, ledger: set, signals: list, ok=True):
 def _restate_signals():
     """The real 2026-08-28 slate that triggered this feature."""
     raw = [
-        ("MLB", "mlb_f5_moneyline", "LAA ML F5", 100.0, 0.03812),
-        ("MLB", "mlb_moneyline", "TB ML", -135.0, 0.03483),
-        ("WNBA", "wnba_prop_player_assists", "Erica Wheeler Over 3.5 Ast", -132.0, 0.03509),
+        ("MLB", "mlb_f5_moneyline", "LAA ML F5", 100.0, 0.03812, "away", None),
+        ("MLB", "mlb_moneyline", "TB ML", -135.0, 0.03483, "home", None),
+        ("WNBA", "wnba_prop_player_assists", "Erica Wheeler Over 3.5 Ast", -132.0,
+         0.03509, "over", 3.5),
     ]
+    # side and line: what the label is checked against before sending (2026-09-12).
     return [{"lock_key": f"k{i}", "label": lbl, "sport": sp, "model_id": mid,
              "prob": 0.7, "edge": 0.15, "dk_odds": o, "kelly": k, "tier": "HIGH",
-             "home": "TB", "away": "LAA",
+             "home": "TB", "away": "LAA", "side": side, "line": line,
              "commence": "2026-08-28T22:36:00+00:00", "bet_link": None}
-            for i, (sp, mid, lbl, o, k) in enumerate(raw)]
+            for i, (sp, mid, lbl, o, k, side, line) in enumerate(raw)]
 
 
 def test_restate_posts_a_labelled_correction_with_the_new_stakes(monkeypatch):
@@ -1541,7 +1546,8 @@ def _live_row(sport, game_id="G1", model="x_live", commence="2026-08-29T16:00:00
             0.662, 0.138, -110.0, 0.02, None, None, "HOME", "AWAY",
             commence, "2026-08-29T16:14:38+00:00", 0.08, None,
             f"live:{game_id}:{model}:over",
-            None, None, None, -110.0, None)   # best_*, decision_odds/book
+            None, None, None, -110.0, None,   # best_*, decision_odds/book
+            50.5)                             # scored_line (2026-09-12)
 
 
 def _live_setup(monkeypatch, *, live=None, shared="", sport=None):

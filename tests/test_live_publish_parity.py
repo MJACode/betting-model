@@ -53,7 +53,7 @@ PICKS_COLS = """
     inning_at_pick TEXT, dk_bet_link TEXT, created_at TEXT, is_live INTEGER,
     result TEXT, condition_status TEXT, player_id TEXT, player_key TEXT,
     prop_market TEXT, best_book TEXT, best_odds REAL, best_bet_link TEXT,
-    decision_odds REAL, decision_book TEXT
+    decision_odds REAL, decision_book TEXT, scored_line REAL
 """
 
 
