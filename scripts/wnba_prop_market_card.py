@@ -149,15 +149,19 @@ _INSERT = """
 
 
 def publish(conn, rows: list[dict]) -> int:
-    """Insert-once per (game, player, market, side) — the opener lock."""
+    """Insert-once per (game, player, market) — the opener lock.
+
+    Not per side (2026-09-13): the other side of a line already bet is never
+    added beside it. tests/test_prop_market_one_side_per_line.py
+    """
     written = 0
     for r in rows:
         got = conn.execute("""
             SELECT 1 FROM picks
             WHERE game_id = %s AND model_id = %s AND player_key = %s
-              AND prop_market = %s AND pick_side = %s
+              AND prop_market = %s
         """, (r["game_id"], r["model_id"], r["player_key"],
-              r["prop_market"], r["pick_side"])).fetchone()
+              r["prop_market"])).fetchone()
         if got:
             continue
         conn.execute(_INSERT, r)

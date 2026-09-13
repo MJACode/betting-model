@@ -194,9 +194,13 @@ def candidates(ref: str, soft_books: tuple[str, ...],
 
 
 def select(cands, min_edge: float):
-    """ONE BET PER PROPOSITION at this cut, as best_per_prop does for the live
-    card: the same prop at six books is six copies of one opinion, and counting
-    them separately inflates the bet count and correlates the outcomes.
+    """ONE BET PER PROPOSITION AND SIDE at this cut: the same prop at six books
+    is six copies of one opinion, and counting them separately inflates the bet
+    count and correlates the outcomes.
+
+    Keyed on side, so it is FINER-GRAINED than the live card since 2026-09-13,
+    when best_per_prop moved to one side per line; a line both sides of which
+    clear the cut counts twice here and once on the card.
     """
     best: dict = {}
     for gid, player, bm, side, edge, season, p in cands:

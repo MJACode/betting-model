@@ -153,9 +153,10 @@ class _FakeConn:
             def __init__(r, row): r._row = row
             def fetchone(r): return r._row
         if sql.strip().startswith("SELECT 1 FROM picks"):
-            key = (params[0], params[1], params[2], params[3], params[4])
+            # One side per line (2026-09-13): the lock no longer carries pick_side.
+            key = tuple(params)
             hit = any((i["game_id"], i["model_id"], i["player_key"],
-                       i["prop_market"], i["pick_side"]) == key for i in self.inserted)
+                       i["prop_market"]) == key for i in self.inserted)
             return R((1,) if hit else None)
         if sql.strip().startswith("INSERT INTO picks"):
             self.inserted.append(dict(params))

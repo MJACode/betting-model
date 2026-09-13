@@ -271,14 +271,17 @@ def publish(conn, rows: list[dict]) -> int:
                      "the nfl-props-data step: %s", len(absent), ", ".join(absent))
         rows = [r for r in rows if r["game_id"] in known]
 
+    # The lock is on the LINE, not the side (2026-09-13): a later tick where the
+    # other side has become the cheap one must not add it beside the bet that
+    # already stands. tests/test_prop_market_one_side_per_line.py
     written = 0
     for r in rows:
         got = conn.execute("""
             SELECT 1 FROM picks
             WHERE game_id = %s AND model_id = %s AND player_key = %s
-              AND prop_market = %s AND pick_side = %s
+              AND prop_market = %s
         """, (r["game_id"], r["model_id"], r["player_key"],
-              r["prop_market"], r["pick_side"])).fetchone()
+              r["prop_market"])).fetchone()
         if got:
             continue
         conn.execute(_INSERT, r)
