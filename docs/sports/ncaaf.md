@@ -111,29 +111,35 @@ its opening number, which is rarely true by kickoff.
   The opener rule has no limit either: its own preconditions are its window.
 - **THE FBS GATE TRUSTS SP+, NOT THE REGISTRY** (2026-09-12, matt: *"make sure
   we have the right NCAA picks"*). `_is_fbs` used to read `classification` and
-  consult `sp_overall` only as a FALLBACK when that column was NULL — so a row
-  whose classification WRONGLY said `fbs` sailed through, and the proof the
-  function's own docstring calls decisive was never looked at. SP+ is FBS-only,
-  so it is now REQUIRED and `classification` may only ever VETO.
-  Measured that day: `ncaaf_teams` held **138** schools classified `fbs`, **136**
-  with a 2026 SP+ rating — and 136 is the FBS count CLAUDE.md §4 states. The two
-  extras, **North Dakota State [Mountain West]** and **Sacramento State
-  [Mid-American]**, were written in one 2026-08-29 pass, are in neither
-  conference named, and carry no SP+ on any of their 15 snapshots. Their two
-  DK-priced games that Saturday (NDSU @ Air Force, Sac State @ Fresno State)
-  produced **no pick row at all** — `picks_log` holds zero rows for either id,
-  so no model ever wrote and nothing was there to delete. The same shape recurs
-  every season, always on a school moving between FCS and FBS: 2025 Delaware,
-  Idaho, Missouri State; 2024 those three plus Kennesaw State.
-  **Nothing priceable is lost:** `sp_overall` is itself a feature
-  (`d_sp_overall`), so a team without it yields a NULL the scorer must not
-  impute and the game was already being dropped — inside four models that each
-  returned `[]`. What moved is WHERE, and that it now has a name. A decline
-  where the registry and SP+ DISAGREE logs at WARNING (an ordinary FCS opponent
-  stays at debug, or 33 of a 98-game Saturday would bury the two that matter),
-  and `system_health`'s **`ncaaf_fbs_registry`** check reports any FBS-classified
-  school with no current-season rating. The data fix is a `ncaaf_teams_refresh`
-  job, not a code change — declared in `jobs/declared_jobs.json`.
+  consult `sp_overall` only as a FALLBACK when that column was NULL — so
+  whenever a classification existed, the proof the function's own docstring
+  calls decisive ("SP+ is FBS-only") was never reached. SP+ is now REQUIRED and
+  `classification` may only ever VETO.
+  The case that found it: **North Dakota State** and **Sacramento State** carry
+  `fbs` in `ncaaf_teams` and in all 15 of their 2026 `ncaaf_team_stats`
+  snapshots, with no SP+ on any. Their two DK-priced games that Saturday
+  (NDSU @ Air Force, Sac State @ Fresno State) produced **no pick row at all** —
+  `picks_log` holds zero rows for either id, because the gate passed them and
+  four models then each returned `[]`.
+  **THE REGISTRY IS NOT WRONG — this entry first said it was, corrected
+  2026-09-13.** The theory was a bad ingest default writing `fbs` over an FCS
+  school. It was tested: a `ncaaf_teams_refresh` for 2026 ran on the worker
+  (job 82908, 683 rows — the whole table) and `_TEAM_UPSERT` overwrites
+  classification and conference unconditionally from CFBD. Both came back
+  `fbs`; the count stayed **138**. CFBD asserts they are FBS programs for 2026,
+  so these are NEWLY PROMOTED schools and CLAUDE.md §4's "136" was the stale
+  number.
+  **The gate is still right, for a different reason:** a school SP+ has not
+  rated cannot be MODELLED whatever division it plays in, because `sp_overall`
+  is itself a feature (`d_sp_overall`) and a missing feature is not 0.0. SP+
+  needs FBS history, so it lags a promotion by a season. The same shape recurs
+  every season on schools crossing between the divisions: 2025 Delaware, Idaho,
+  Missouri State; 2024 those three plus Kennesaw State.
+  A decline where the school is FBS but unrated logs at WARNING (an ordinary
+  FCS opponent stays at debug, or 33 of a 98-game Saturday would bury the two
+  that matter), and `system_health`'s **`ncaaf_fbs_registry`** check reports any
+  FBS school with no current-season rating. **A re-pull does not clear it** —
+  it clears when SP+ rates the school.
   Tests: `tests/test_ncaaf_fbs_registry.py` (14; the two gate cases watched
   failing, and the check's FBS-only bound watched failing under mutation).
 - **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,

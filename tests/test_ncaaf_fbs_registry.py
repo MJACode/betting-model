@@ -1,31 +1,33 @@
-"""The FBS gate trusts SP+, not the registry — and a disagreement is reported.
+"""The FBS gate trusts SP+, not the registry — and an unrated school is named.
 
 THE BUG (2026-09-12, found from the board, not the code). `_is_fbs` consulted
 `sp_overall` only as a FALLBACK, when `classification` was NULL. Its own
-docstring calls SP+ the proof of FBS membership — SP+ is FBS-only — so a row
-whose classification WRONGLY said "fbs" sailed through the gate and the proof
-was never looked at.
+docstring calls SP+ the proof of FBS membership — SP+ is FBS-only — so whenever
+a classification existed the proof was never reached.
 
-Measured against production that day:
+The case that found it: **North Dakota State** and **Sacramento State** carry
+`fbs` in `ncaaf_teams` and in all 15 of their 2026 `ncaaf_team_stats`
+snapshots, and SP+ has rated neither. Their two DK-priced games that Saturday
+(NDSU @ Air Force, Sac State @ Fresno State) produced NO pick row at all —
+`picks_log` held zero rows for either id, because the gate passed them and four
+models then each returned an empty list.
 
-  * `ncaaf_teams` held 138 schools classified `fbs`; 136 carried a 2026 SP+
-    rating, and 136 is the FBS count CLAUDE.md section 4 states.
-  * The two extras — North Dakota State [Mountain West] and Sacramento State
-    [Mid-American] — were both written in ONE 2026-08-29 pass, and neither is
-    in the conference named. All 15 of each team's 2026 `ncaaf_team_stats`
-    snapshots said `fbs` with `sp_overall` NULL.
-  * Their two DK-priced games that Saturday (NDSU @ Air Force, Sac State @
-    Fresno State) produced NO pick row at all — `picks_log` held zero rows for
-    either game_id, so no model ever wrote and nothing was there to delete.
-    The gate passed them, and four models each returned an empty list.
+WHY, CORRECTED 2026-09-13. The first version of this file said the registry was
+wrong: a bad ingest default writing `fbs` over an FCS school. That was a theory,
+and it was tested rather than believed. A `ncaaf_teams_refresh` for 2026 ran on
+the worker (job 82908, 683 rows — the whole table), and `_TEAM_UPSERT`
+overwrites classification and conference unconditionally from CFBD. Both
+schools came back `fbs`; the FBS count stayed 138. **CFBD asserts they are FBS
+programs for 2026** — newly promoted ones — so the registry is right and
+CLAUDE.md section 4's "136" was the stale number.
 
-Nothing that could be priced is lost by requiring SP+: `sp_overall` is itself a
-feature (`d_sp_overall`), so a team without it yields a NULL the scorer must not
-impute. What moves is WHERE the decline happens — at the gate, with a name.
-
-The same shape appears in every season the registry covers, always on a school
-moving between FCS and FBS: 2025 Delaware, Idaho, Missouri State; 2024 those
-three plus Kennesaw State.
+The gate is still correct, for a different reason than first claimed: a school
+SP+ has not rated cannot be MODELLED whatever division it plays in, because
+`sp_overall` is itself a feature (`d_sp_overall`) and a missing feature is not
+0.0. SP+ lags a promotion because it needs FBS history. The same shape appears
+in every season the registry covers, always on a school crossing between the
+divisions: 2025 Delaware, Idaho, Missouri State; 2024 those three plus Kennesaw
+State.
 """
 from __future__ import annotations
 
@@ -168,7 +170,7 @@ def _rating(hdb, team, sp_overall):
 
 class TestRegistryHealthCheck:
     def test_an_unrated_fbs_school_is_reported_by_name(self, hdb):
-        """North Dakota State, as production held it on 2026-09-12."""
+        """North Dakota State: FBS per CFBD, unrated by SP+."""
         _team(hdb, "North Dakota State", "Mountain West", "fbs")
         _team(hdb, "Air Force", "Mountain West", "fbs")
         _rating(hdb, "Air Force", -3.2)

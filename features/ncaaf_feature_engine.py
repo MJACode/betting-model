@@ -110,24 +110,38 @@ def _is_fbs(stats: dict) -> bool:
     would otherwise happily price an FBS-vs-FCS game off a row of nulls.
 
     SP+ IS REQUIRED, NOT A FALLBACK (2026-09-12, matt). It used to be consulted
-    only when `classification` was NULL — so a row whose classification WRONGLY
-    said "fbs" sailed through the gate, and the proof the docstring above calls
-    decisive was never looked at. That is not hypothetical: `ncaaf_teams` and
-    `ncaaf_team_stats` both carried **North Dakota State** and **Sacramento
-    State** as `fbs` from a 2026-08-29 write (with conferences "Mountain West"
-    and "Mid-American", neither of which they belong to), and SP+ has no rating
-    for either. Measured the same day: of 138 schools classified `fbs` for
-    2026, exactly 136 carry an SP+ rating — and 136 is the FBS count CLAUDE.md
-    section 4 states. The same shape appears in every season the registry
-    covers, always on a school moving between FCS and FBS: 2025 Delaware,
-    Idaho, Missouri State; 2024 those three plus Kennesaw State.
+    only when `classification` was NULL, so the proof the paragraph above calls
+    decisive was never reached whenever a classification existed. The case that
+    found it: **North Dakota State** and **Sacramento State** carry `fbs` in
+    `ncaaf_teams` and in all 15 of their 2026 `ncaaf_team_stats` snapshots, and
+    SP+ has rated neither. Their two DK-priced games on 2026-09-12 (NDSU @ Air
+    Force, Sac State @ Fresno State) produced NO pick row at all — `picks_log`
+    held zero rows for either id, because the gate passed them and four models
+    then each returned an empty list.
+
+    THE CLASSIFICATION IS NOT WRONG, AND THE FIRST VERSION OF THIS DOCSTRING
+    SAID IT WAS (corrected 2026-09-13). The theory was a bad ingest default
+    writing `fbs` over an FCS school. It was tested rather than believed: a
+    `ncaaf_teams_refresh` for 2026 ran on the worker (job 82908, 683 rows — the
+    whole table) and `_TEAM_UPSERT` overwrites `classification` and
+    `conference` unconditionally from CFBD. Both schools came back `fbs`
+    again, and the FBS count stayed 138. **CFBD asserts these are FBS
+    programs for 2026** — newly promoted ones — so the registry is right and
+    CLAUDE.md section 4's "136" was the stale number (now 138).
+
+    That leaves the gate correct for a different reason than first claimed: a
+    school SP+ has not rated cannot be MODELLED, whatever division it plays in,
+    because `sp_overall` is itself a feature (`d_sp_overall`) and a missing
+    feature is not 0.0. SP+ lags a promotion — it needs FBS history — so a
+    newly promoted program is unpriceable until it has one. The same shape
+    appears in every season the registry covers, always on a school moving
+    between the divisions: 2025 Delaware, Idaho, Missouri State; 2024 those
+    three plus Kennesaw State.
 
     So the order is inverted: SP+ is NECESSARY, and `classification` may only
-    ever VETO. Nothing that could be priced is lost by this — `sp_overall` is
-    itself a feature (`d_sp_overall`), so a team without it produces a NULL the
-    scorer must not impute, and the game was already being dropped. What
-    changes is WHERE: at the gate, with a name, instead of somewhere inside
-    four models that each return an empty list.
+    ever VETO. Nothing that could be priced is lost — the game was already
+    being dropped. What changes is WHERE: at the gate, with a name, instead of
+    somewhere inside four models that each return an empty list.
     """
     if not stats:
         return False
@@ -142,14 +156,16 @@ def _is_fbs(stats: dict) -> bool:
 
 
 def unrated_fbs_claim(stats: dict) -> str | None:
-    """The registry claims FBS and SP+ has never rated the team — the
-    SURPRISING half of an FBS-gate decline, worth a name.
+    """An FBS school SP+ has never rated — the SURPRISING half of an FBS-gate
+    decline, worth a name.
 
     An ordinary FBS-vs-FCS matchup is not this: its snapshot says `fcs` (or
-    nothing) and no one expects a pick. This is the case where two sources
-    inside our own database disagree, which is how a game goes missing from the
-    board with nobody able to say why. Returns None when there is nothing
-    surprising to report.
+    nothing) and no one expects a pick. This is a team we are SUPPOSED to be
+    able to price and cannot, which is how a DK-priced game goes missing from
+    the board with nobody able to say why. In practice it means a NEWLY
+    PROMOTED program: SP+ needs FBS history, so it lags a promotion by a
+    season (2026-09-13 — confirmed against CFBD, which lists both of the 2026
+    cases as FBS). Returns None when there is nothing surprising to report.
     """
     if not stats or stats.get("sp_overall") is not None:
         return None
