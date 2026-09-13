@@ -96,11 +96,56 @@ def _fold(v: str) -> str:
     return "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
 
 
+def _has_pregame_lines(ctx: GameContext) -> bool:
+    """The first gate serve.price already applies before it will emit a pick."""
+    return ctx.pregame_spread is not None and ctx.pregame_total is not None
+
+
+def _choose_context(ctxs: list[GameContext]) -> GameContext | None:
+    """One GameContext for one folded (home, away), or none if we would guess.
+
+    Night-game twins are by design (docs/sports/ncaaf.md): the odds ingestor
+    dates by ET, CFBD by UTC, so a ~8pm-ET kick exists twice under the same
+    school names. load_context used to last-wins overwrite on that pair.
+    live_slate_dates() includes yesterday until LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET
+    — exactly when a Saturday night game is still live. A silent pick can
+    attach a BET to the CFBD id (no odds history) or keep the row with no
+    pregame line (serve.price then declines; the live game is not priced).
+
+    NFL live resolve_game_id refuses when it does not find exactly one row.
+    Same here when more than one context has pregame lines — that is not the
+    designed twin, and writing a BET to a guessed game_id is worse than
+    writing none. When exactly one of the rows has the lines serve.price
+    already requires, that one is the odds row the rest of the platform
+    attaches picks to. Not a new product rule; the other rows would return
+    [] at the existing gate.
+    """
+    if len(ctxs) == 1:
+        return ctxs[0]
+    ids = [c.game_id for c in ctxs]
+    home = ctxs[0].home
+    away = ctxs[0].away
+    log.warning("context: %d games rows for %s @ %s; not picking silently: %s",
+                len(ctxs), away, home, ids)
+    priceable = [c for c in ctxs if _has_pregame_lines(c)]
+    if len(priceable) == 1:
+        log.warning("context: using %s — the only row with pregame lines "
+                    "(picks attach to the odds row)", priceable[0].game_id)
+        return priceable[0]
+    log.error("context: dropping %s @ %s — %d of %d rows have pregame lines "
+              "(%s). Refusing rather than guessing a game_id",
+              away, home, len(priceable), len(ctxs), ids)
+    return None
+
+
 def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], GameContext]:
     """
     Today's (ET) NCAAF games from the platform: identity, pregame DK lines
     (latest PRE-KICKOFF snapshot - the post-start 'open' rows are the session
     106 leak and are excluded by timestamp), weather, dome flag.
+
+    Keyed by folded (home, away) because that is what the live feeds match
+    on. A (home, away) collision is not last-wins: see _choose_context.
     """
     from data.db import get_connection
 
@@ -159,7 +204,7 @@ def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], Ga
 
     from features.ncaaf_feature_engine import _is_fbs
 
-    out = {}
+    grouped: dict[tuple[str, str], list[GameContext]] = {}
     not_fbs = []
     for (gid, home, away, ct, gd, sp, tl, wind, dome,
          h_sp, h_cls, a_sp, a_cls) in rows:
@@ -173,7 +218,12 @@ def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], Ga
             pregame_total=None if tl is None else float(tl),
             wind_mph=None if wind is None else float(wind),
             is_dome=bool(dome), game_date=gd, fbs_matchup=fbs)
-        out[(_fold(home), _fold(away))] = ctx
+        grouped.setdefault((_fold(home), _fold(away)), []).append(ctx)
+    out = {}
+    for key, ctxs in grouped.items():
+        chosen = _choose_context(ctxs)
+        if chosen is not None:
+            out[key] = chosen
     if not_fbs:
         log.info("context: %d games are not FBS-vs-FBS and will not be priced "
                  "(same rule as the pre-game models): %s",

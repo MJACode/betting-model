@@ -152,7 +152,11 @@ its opening number, which is rarely true by kickoff.
   dates it by CFBD's UTC `start_date`, so a ~8pm-ET-or-later kick exists under
   two ids (`NCAAF_2026-08-29_memphis_unlv` and `..._2026-08-30_...`). PICKS
   ALWAYS ATTACH TO THE ODDS ROW — it is the one that exists when the board is
-  priced — and CFBD writes the final to its own. `mirror_scores_to_alias_rows`
+  priced — and CFBD writes the final to its own. `gameday.load_context` keys
+  the live loop by folded (home, away); a collision no longer last-wins (the
+  Reviewer follow-up after #696, 32 matchups 09-01..09-14). The designed twin
+  keeps the only row with pregame DK lines; two priceable rows for one pair
+  are dropped rather than guessed. `mirror_scores_to_alias_rows`
   (called from both `ingest_ncaaf_results_for_date` and `ingest_ncaaf_games`)
   writes the orientation-corrected final onto every row that is the same game,
   matched on the slug pair within ±1 day. Deliberately NOT a re-key: `game_id`
