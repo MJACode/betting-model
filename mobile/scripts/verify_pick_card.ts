@@ -1,0 +1,186 @@
+/**
+ * Denser PickCard helpers: Now vs Locked, the one-book CTA, and the
+ * decision-price slip / movement gates.
+ *
+ * Run: npx tsx scripts/verify_pick_card.ts
+ */
+
+import { hasPricedLine } from '../src/lib/decisionPrice';
+import {
+  bestHandoffForPick,
+  heroAmericanForPick,
+  movementFromLatest,
+  MODEL_BOOK,
+} from '../src/lib/markets';
+import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
+
+let failed = 0;
+function check(name: string, cond: boolean, detail = '') {
+  if (!cond) failed++;
+  console.log(`[${cond ? 'PASS' : 'FAIL'}] ${name}${detail ? ` — ${detail}` : ''}`);
+}
+
+function mkPick(over: Partial<Pick> = {}): Pick {
+  return {
+    pick_id: 1,
+    game_id: 'MLB_2026-09-13_NYJ_BUF',
+    model_id: 'mlb_over_under',
+    sport: 'MLB',
+    game_date: '2026-09-13',
+    pick_side: 'over' as PickSide,
+    pick_label: 'NYJ @ BUF Over 8.5',
+    model_probability: 0.58,
+    dk_implied_prob: 0.535,
+    edge: 0.082,
+    dk_odds: -110,
+    scored_line: 8.5,
+    signal_type: 'BET',
+    is_live: false,
+    dk_bet_link: 'dk://lock',
+    decision_odds: -110,
+    decision_edge: 0.082,
+    decision_book: 'draftkings',
+    line_book: null,
+    ...over,
+  } as Pick;
+}
+
+function latest(over: Partial<LatestDkOddsRow> = {}): LatestDkOddsRow {
+  return {
+    game_id: 'MLB_2026-09-13_NYJ_BUF',
+    game_date: '2026-09-13',
+    market: 'totals',
+    home_price: null,
+    away_price: null,
+    spread_home: null,
+    total_line: 8.5,
+    over_price: -115,
+    under_price: -105,
+    snapshot_at: '2026-09-13T17:00:00+00:00',
+    ...over,
+  };
+}
+
+// ── hasPricedLine ───────────────────────────────────────────────────────────
+check('DK-priced row is priced', hasPricedLine(mkPick()));
+check(
+  'decision-priced non-DK prop is priced',
+  hasPricedLine(mkPick({ dk_odds: null, decision_odds: -105, decision_book: 'fanduel', line_book: 'fanduel' })),
+);
+check('prob-only is not priced', !hasPricedLine(mkPick({ dk_odds: null, decision_odds: null })));
+
+// ── heroAmericanForPick ─────────────────────────────────────────────────────
+{
+  const h = heroAmericanForPick(mkPick(), latest({ over_price: -110 }));
+  check('pre-game unmoved → decision (no Now tag)', h?.kind === 'decision' && h.price === -110 && !h.showLockedCaption);
+}
+{
+  const h = heroAmericanForPick(mkPick(), latest({ over_price: -115 }));
+  check(
+    'pre-game moved → Now + Locked caption',
+    h?.kind === 'now' && h.price === -115 && h.showLockedCaption && h.lockedPrice === -110,
+  );
+}
+{
+  const h = heroAmericanForPick(
+    mkPick({ is_live: true }),
+    latest({ over_price: -115 }),
+    [{ bookmaker: 'draftkings', over_price: -115, total_line: 8.5, over_link: 'dk://now' }],
+  );
+  check(
+    'live with current → Now, lock is caption',
+    h?.kind === 'now' && h.price === -115 && h.showLockedCaption && h.lockedPrice === -110,
+  );
+}
+{
+  const h = heroAmericanForPick(mkPick({ is_live: true }), null, []);
+  check(
+    'live with no snapshot → hero is labeled Locked, not Now',
+    h?.kind === 'locked' && h.price === -110 && !h.showLockedCaption,
+  );
+}
+{
+  const h = heroAmericanForPick(
+    mkPick({ is_live: true }),
+    latest({ over_price: -110 }),
+  );
+  check(
+    'live Now equals lock → labeled Now, no Locked caption',
+    h?.kind === 'now' && h.price === -110 && !h.showLockedCaption,
+  );
+}
+
+// ── bestHandoffForPick ──────────────────────────────────────────────────────
+{
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -125, total_line: 8.5 },
+    { bookmaker: 'fanduel', over_price: 105, total_line: 8.5, over_link: 'fd://best' },
+  ];
+  const h = bestHandoffForPick(mkPick(), rows);
+  check(
+    'pre-game CTA is Best FD when FD beats the record',
+    h?.verb === 'Best' && h.bookmaker === 'fanduel' && h.price === 105,
+  );
+}
+{
+  const h = bestHandoffForPick(mkPick({ is_live: true }), [], {
+    kind: 'now',
+    price: -115,
+    book: MODEL_BOOK,
+    line: 8.5,
+    link: 'dk://now',
+    lockedPrice: -110,
+    showLockedCaption: true,
+  });
+  check(
+    'live CTA is Bet DK at the Now price',
+    h?.verb === 'Bet' && h.bookmaker === MODEL_BOOK && h.price === -115 && h.link === 'dk://now',
+  );
+}
+{
+  const liveQuotes = bestHandoffForPick(
+    mkPick({ is_live: true }),
+    [{ bookmaker: 'fanduel', over_price: 120, total_line: 8.5 }],
+  );
+  check(
+    'live CTA ignores other books even if they are cheaper',
+    liveQuotes?.bookmaker === MODEL_BOOK,
+  );
+}
+
+// ── movementFromLatest keys off decision price, same book ───────────────────
+{
+  const m = movementFromLatest(
+    mkPick({ dk_odds: null, decision_odds: -110, decision_book: 'draftkings' }),
+    latest({ over_price: -140 }),
+  );
+  check('DK decision without dk_odds still flags steam', m?.severity === 'caution');
+}
+{
+  const m = movementFromLatest(
+    mkPick({
+      dk_odds: null,
+      decision_odds: -110,
+      decision_book: 'fanduel',
+      line_book: 'fanduel',
+    }),
+    latest({ over_price: -140 }),
+  );
+  check('FD lock vs DK snapshot is not movement', m === null);
+}
+{
+  const m = movementFromLatest(
+    mkPick({
+      dk_odds: null,
+      decision_odds: -110,
+      decision_book: 'fanduel',
+      line_book: 'fanduel',
+    }),
+    null,
+    [{ bookmaker: 'fanduel', over_price: -140, total_line: 8.5 }],
+  );
+  check('FD lock vs FD snapshot is steam', m?.severity === 'caution' && m.scoredPrice === -110);
+}
+
+console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);
+if (failed > 0) process.exit(1);

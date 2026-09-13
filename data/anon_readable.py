@@ -60,6 +60,7 @@ ANON_READABLE: tuple[str, ...] = (
     # ── views ───────────────────────────────────────────────────────────────
     "v_fighter_season_totals_ufc",
     "v_latest_dk_odds",
+    "v_latest_inplay_odds_all_books",
     "v_latest_odds_all_books",
     "v_latest_prop_odds_all_books",
     "v_live_game_state_latest",

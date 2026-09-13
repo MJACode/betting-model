@@ -34,7 +34,7 @@ export function SignalBadge({ signal, small }: Props) {
         { backgroundColor: bg, paddingHorizontal: small ? 6 : 10 },
       ]}
     >
-      <Text style={[styles.label, { color: fg, fontSize: small ? 10 : 12 }]}>
+      <Text style={[styles.label, { color: fg, fontSize: small ? font.size.nano : font.size.caption }]}>
         {LABELS[signal]}
       </Text>
     </View>

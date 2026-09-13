@@ -11,8 +11,8 @@
 
 import { americanImplied, americanToDecimal, formatStampET } from './format';
 import { isUnlockedPreview } from './thresholds';
-import type { BookPricedRow, LatestDkOddsRow, OddsByBookRow, Pick, PickSide } from '@/types';
-import { decisionBook, decisionOdds } from '@/lib/decisionPrice';
+import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '@/types';
+import { decisionBook, decisionOdds, hasPricedLine } from './decisionPrice';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -770,6 +770,153 @@ export function selectLineChips(
   return { shown, hidden: quotes.length - shown.length };
 }
 
+// ── Board card: one hero American + one book CTA ────────────────────────────
+
+/** How the card's American number is labelled. */
+export type HeroAmericanKind = 'now' | 'locked' | 'decision';
+
+/**
+ * The American the list card prints next to Edge.
+ *
+ * `now`     — current/bettable at the deciding book (or DK on live). Label it.
+ * `locked`  — live, and we have no current snapshot. Label it Locked so the
+ *             live strip's "~45s old" claim cannot be read as this number.
+ * `decision`— pre-game, unmoved. The lock IS the bettable number; no Now tag.
+ *
+ * Edge / EV / stake stay on decisionOdds. This is display only (§1c: the
+ * lock remains on the card as a caption whenever Now is a different number).
+ */
+export interface HeroAmerican {
+  kind: HeroAmericanKind;
+  price: number;
+  book: string;
+  line: number | null;
+  link: string | null;
+  lockedPrice: number;
+  showLockedCaption: boolean;
+}
+
+function currentAtBook(
+  pick: Pick,
+  book: string,
+  latest: LatestDkOddsRow | null | undefined,
+  bookRows: BookPricedRow[] | undefined,
+): { price: number; line: number | null; link: string | null } | null {
+  const market = marketForPick(pick);
+  if (book === MODEL_BOOK && latest) {
+    const price = priceForSide(latest, pick.pick_side);
+    if (price != null) {
+      return {
+        price,
+        line: lineFromSnapshot(latest, latest.market ?? market),
+        link: pick.dk_bet_link ?? null,
+      };
+    }
+  }
+  const row = (bookRows ?? []).find((r) => r.bookmaker === book);
+  if (!row) return null;
+  const price = priceForSide(row, pick.pick_side);
+  if (price == null) return null;
+  return {
+    price,
+    line: lineFromSnapshot(row, market),
+    link: linkForSide(row, pick.pick_side) ?? (book === MODEL_BOOK ? pick.dk_bet_link ?? null : null),
+  };
+}
+
+export function heroAmericanForPick(
+  pick: Pick,
+  latest: LatestDkOddsRow | null | undefined,
+  bookRows?: BookPricedRow[],
+): HeroAmerican | null {
+  const locked = decisionOdds(pick);
+  if (locked == null) return null;
+  const live = pick.is_live === true;
+  const book = live ? MODEL_BOOK : storedQuoteBook(pick);
+  const current = currentAtBook(pick, book, latest, bookRows);
+  const lockedLine = numOrNull(pick.scored_line);
+
+  if (live && current == null) {
+    return {
+      kind: 'locked',
+      price: locked,
+      book: storedQuoteBook(pick),
+      line: lockedLine,
+      link: recordLink(pick, storedQuoteBook(pick)),
+      lockedPrice: locked,
+      showLockedCaption: false,
+    };
+  }
+  if (current != null && current.price !== locked) {
+    return {
+      kind: 'now',
+      price: current.price,
+      book,
+      line: current.line,
+      link: current.link,
+      lockedPrice: locked,
+      showLockedCaption: true,
+    };
+  }
+  if (live && current != null) {
+    return {
+      kind: 'now',
+      price: current.price,
+      book,
+      line: current.line,
+      link: current.link,
+      lockedPrice: locked,
+      showLockedCaption: false,
+    };
+  }
+  return {
+    kind: 'decision',
+    price: locked,
+    book: storedQuoteBook(pick),
+    line: lockedLine,
+    link: recordLink(pick, storedQuoteBook(pick)),
+    lockedPrice: locked,
+    showLockedCaption: false,
+  };
+}
+
+/** One book hand-off for the list card. Full shop stays on Pick Detail. */
+export interface BoardHandoff {
+  bookmaker: string;
+  price: number;
+  link: string | null;
+  /** "Best" when another book beats the record; "Bet" otherwise (and always on live). */
+  verb: 'Best' | 'Bet';
+}
+
+export function bestHandoffForPick(
+  pick: Pick,
+  bookRows: BookPricedRow[] | undefined,
+  hero?: HeroAmerican | null,
+): BoardHandoff | null {
+  if (pick.is_live === true) {
+    const price = hero?.kind === 'now' ? hero.price : decisionOdds(pick);
+    if (price == null) return null;
+    return {
+      bookmaker: MODEL_BOOK,
+      price,
+      link: hero?.link ?? pick.dk_bet_link ?? null,
+      verb: 'Bet',
+    };
+  }
+  const quotes = pickLineQuotes(pick, bookRows ?? []);
+  if (quotes.length === 0) return null;
+  const best = quotes.find((q) => q.isBest) ?? quotes[0];
+  const verb: 'Best' | 'Bet' =
+    best.isBest && quotes.length > 1 && !best.isRecord ? 'Best' : 'Bet';
+  return {
+    bookmaker: best.bookmaker,
+    price: best.price,
+    link: best.link,
+    verb,
+  };
+}
+
 /**
  * A line as the PICK'S SIDE sees it. Spreads are stored home-relative
  * (`scored_line` / `spread_home` are always the HOME number), so an away pick
@@ -842,10 +989,14 @@ export function computeMovement(
   pick: Pick,
   latest: PricedSnapshot,
   market: string | null,
-  opts?: { lineOnly?: boolean },
+  opts?: { lineOnly?: boolean; scoredPrice?: number | null },
 ): Movement | null {
   const lineOnly = opts?.lineOnly ?? false;
-  const scoredPrice = numOrNull(pick.dk_odds);
+  // Default is the deciding price, not dk_odds: a prop DK never listed still
+  // has a lock to compare. Callers that hold a DK snapshot pass the DK
+  // stored number (or rely on the fallback when decision_* is null).
+  const scoredPrice =
+    opts?.scoredPrice !== undefined ? numOrNull(opts.scoredPrice) : decisionOdds(pick);
   const currentPrice = priceForSide(latest, pick.pick_side);
 
   let priceShiftPp: number | null = null;
@@ -909,11 +1060,29 @@ export function computeMovement(
 export function movementFromLatest(
   pick: Pick,
   latest: LatestDkOddsRow | null | undefined,
+  bookRows?: BookPricedRow[] | null,
 ): Movement | null {
-  if (!latest || pick.dk_odds == null) return null;
-  return computeMovement(pick, latest, latest.market, {
-    lineOnly: isNflLineOnly(pick.model_id),
-  });
+  // Priced-line gate is the deciding price, not dk_odds: a prop DK never
+  // listed is still a lock. The snapshot we compare to must be the SAME book
+  // — a FanDuel lock vs a DraftKings snapshot is cross-book noise.
+  if (!hasPricedLine(pick)) return null;
+  const lineOnly = isNflLineOnly(pick.model_id);
+  const book = storedQuoteBook(pick);
+  const scored = decisionOdds(pick);
+  if (book === MODEL_BOOK && latest) {
+    return computeMovement(pick, latest, latest.market, { lineOnly, scoredPrice: scored });
+  }
+  const row = (bookRows ?? []).find((r) => r.bookmaker === book);
+  if (row) {
+    return computeMovement(pick, row, marketForPick(pick), { lineOnly, scoredPrice: scored });
+  }
+  if (latest && pick.dk_odds != null) {
+    return computeMovement(pick, latest, latest.market, {
+      lineOnly,
+      scoredPrice: numOrNull(pick.dk_odds),
+    });
+  }
+  return null;
 }
 
 // ── NFL pick timing ─────────────────────────────────────────────────────────

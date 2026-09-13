@@ -39,6 +39,15 @@ export function decisionEdge(p: DecisionPriced): number {
 }
 
 /**
+ * Does this row carry a priced line — the decision price, falling back to
+ * DraftKings. A prop DraftKings never listed (`dk_odds` NULL, `line_book`
+ * set) is still priced. Prob-only rows are not.
+ */
+export function hasPricedLine(p: DecisionPriced): boolean {
+  return decisionOdds(p) != null;
+}
+
+/**
  * The book the deciding price came from, or null when the row predates the
  * flip (callers fall back to the stored-book rule in markets.ts, which knows
  * about the NFL cards' soft books).

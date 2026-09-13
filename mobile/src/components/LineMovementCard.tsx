@@ -29,7 +29,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
 
   useEffect(() => {
     let mounted = true;
-    if (pick.dk_odds == null || market == null || (isProp && !playerName)) {
+    if (decisionOdds(pick) == null || market == null || (isProp && !playerName)) {
       setSnaps([]);
       return undefined;
     }
@@ -46,7 +46,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, pick.dk_odds, market, isProp, playerName]);
+  }, [pick.pick_id, pick.game_id, pick.decision_odds, pick.dk_odds, market, isProp, playerName]);
 
   if (!snaps || snaps.length === 0 || market == null) return null;
 
