@@ -90,7 +90,7 @@ def test_refresh_dispatch_observes_and_daily_does_not():
 
 def test_refresh_pass_still_invokes_health_check():
     """It must still RUN and WRITE; decoupling is the return value, not a skip."""
-    called = [ln.strip() for ln in _SH.splitlines()
+    called = [ln.split()[1] for ln in _SH.splitlines()
               if ln.strip().startswith("step ") and len(ln.split()) > 1]
     assert "health-check" in called
 
