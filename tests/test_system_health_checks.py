@@ -422,3 +422,104 @@ class TestSavantFreshnessQueryDoesNotAbortTheRun:
         assert "schema_drift" in names, (
             "schema_drift runs late in run_system_health(); its absence is "
             "exactly what the 08-31 cascade looked like")
+
+
+# ── mlb_bullpen_workload / mlb_team_stats / umpires overnight window ────────
+
+class _FrozenDatetime(datetime):
+    """Freezes datetime.now(); every other classmethod (strptime, etc.) is
+    inherited unchanged. Swapped into `sh.datetime` for one test only.
+    """
+    _frozen = None
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls._frozen.astimezone(tz) if tz else cls._frozen
+
+
+class TestDailyOnlyFeedsOvernightWindow:
+    """mlb_team_stats, mlb_bullpen_workload and umpires are written ONLY by
+    the once-daily 6am ET run (Steps 0d/3/3b/5c) — refresh_pass.sh's hourly
+    steps never touch them. This health check runs on every hourly pass too,
+    so before the daily run has had a chance to complete, checking "today" /
+    "yesterday" against a table that has not been touched yet is checking
+    something that cannot possibly be true. Measured 2026-09-08: all three
+    fired STALE/CRIT on 6 straight overnight hourly passes, self-healing
+    within minutes of the 6am run reaching their step every single time —
+    a false alarm, not a feed problem.
+    """
+
+    def _freeze(self, monkeypatch, et_hour: int):
+        from zoneinfo import ZoneInfo
+        today = today_et()
+        d = datetime.strptime(today, "%Y-%m-%d")
+        frozen = d.replace(hour=et_hour, tzinfo=ZoneInfo("America/New_York"))
+        _FrozenDatetime._frozen = frozen
+        monkeypatch.setattr(sh, "datetime", _FrozenDatetime)
+        return today
+
+    def _seed_yesterday_finals(self, db, today):
+        yday = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        db.execute(
+            "INSERT INTO games (game_id, sport, season, game_date, home_team,"
+            " away_team, home_score, away_score) VALUES (?,'MLB',2026,?,?,?,4,2)",
+            ("g1", yday, "NYY", "BOS"))
+        db.commit()
+        return yday
+
+    def test_bullpen_stale_two_days_is_not_an_overnight_false_alarm(self, db, monkeypatch):
+        """Data genuinely 3+ days behind must still CRIT, even inside the
+        overnight window — the relaxation covers exactly one day, not staleness
+        in general."""
+        today = self._freeze(monkeypatch, et_hour=3)
+        yday = self._seed_yesterday_finals(db, today)
+        stale_date = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=4)).strftime("%Y-%m-%d")
+        db.execute(
+            "INSERT INTO mlb_bullpen_stats (game_date, season, team, game_pk,"
+            " player_id, ip) VALUES (?,2026,'NYY',1,100,1.0)", (stale_date,))
+        db.commit()
+        assert _results("mlb_bullpen_workload")["status"] == sh.STALE
+
+    def test_bullpen_one_day_behind_is_ok_before_the_daily_run(self, db, monkeypatch):
+        """3am ET: yesterday's bullpen data has not been ingested yet (the 6am
+        run owns that), so 'the day before yesterday' is the honest floor."""
+        today = self._freeze(monkeypatch, et_hour=3)
+        self._seed_yesterday_finals(db, today)
+        day2 = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
+        db.execute(
+            "INSERT INTO mlb_bullpen_stats (game_date, season, team, game_pk,"
+            " player_id, ip) VALUES (?,2026,'NYY',1,100,1.0)", (day2,))
+        db.commit()
+        assert _results("mlb_bullpen_workload")["status"] == sh.OK
+
+    def test_bullpen_same_lag_is_stale_after_the_daily_run(self, db, monkeypatch):
+        """9am ET: the daily run has already had its chance. The exact same
+        'day before yesterday' data that was OK at 3am is stale now."""
+        today = self._freeze(monkeypatch, et_hour=9)
+        self._seed_yesterday_finals(db, today)
+        day2 = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
+        db.execute(
+            "INSERT INTO mlb_bullpen_stats (game_date, season, team, game_pk,"
+            " player_id, ip) VALUES (?,2026,'NYY',1,100,1.0)", (day2,))
+        db.commit()
+        assert _results("mlb_bullpen_workload")["status"] == sh.STALE
+
+    def test_team_stats_yesterday_is_ok_before_the_daily_run(self, db, monkeypatch):
+        today = self._freeze(monkeypatch, et_hour=3)
+        db.execute("INSERT INTO games (game_id, sport, season, game_date,"
+                   " home_team, away_team) VALUES ('g2','MLB',2026,?,'NYY','BOS')",
+                   (today,))
+        yday = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        db.execute("INSERT INTO mlb_team_stats (team, season, as_of_date)"
+                   " VALUES ('NYY',2026,?)", (yday,))
+        db.commit()
+        assert _results("mlb_team_stats")["status"] == sh.OK
+
+    def test_umpires_two_days_behind_is_ok_before_the_daily_run(self, db, monkeypatch):
+        today = self._freeze(monkeypatch, et_hour=3)
+        self._seed_yesterday_finals(db, today)
+        day2 = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
+        db.execute("INSERT INTO umpires (game_id, game_date, umpire_name)"
+                   " VALUES ('g-ump',?,'Test Ump')", (day2,))
+        db.commit()
+        assert _results("umpires")["status"] == sh.OK
