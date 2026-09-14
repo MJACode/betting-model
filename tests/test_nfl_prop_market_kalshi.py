@@ -32,6 +32,21 @@ def test_kalshi_is_a_reference_never_a_soft_book():
         "book that is never stored there")
 
 
+def test_kalshi_is_not_graded_until_settled_history_exists():
+    """Reference only. The historical grader must not join kalshi ladders.
+
+    Measured 2026-09-14: 278,568 ladder rungs, no resolved_at column.
+    docs/nfl_prop_market_2026.md.
+    """
+    import scripts.nfl_prop_two_sharps as ts
+    assert ts.REF_A == "pinnacle" and ts.REF_B == "betonlineag"
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "scripts"
+           / "nfl_prop_two_sharps.py").read_text(encoding="utf-8")
+    assert "kalshi_prop_ingestor" not in src
+    assert "from_kalshi" not in src
+
+
 def test_without_ladders_the_pinnacle_path_is_unchanged():
     """Fail closed: omit Kalshi and the two Odds API references behave as before."""
     quotes = {

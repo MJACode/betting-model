@@ -163,6 +163,10 @@ def _bets_from_kalshi(
     Unlike the Odds API references, a ladder prices ANY line inside its
     strikes, so a soft 252.5 against a sharp 249.5 is a comparison rather than
     a line_mismatch discard (docs/prop_market_research.md §1).
+
+    NOT GRADED. kalshi_prop_ladders has no settlement column. The historical
+    path (`scripts/nfl_prop_two_sharps.py`) does not read it. Do not add it
+    there until resolved contracts exist (docs/nfl_prop_market_2026.md).
     """
     by_side = min_edge_by_side or {}
     soft = soft_books or SOFT_BOOKS
