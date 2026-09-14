@@ -176,10 +176,13 @@ def test_the_streamlit_dashboard_fallback_excludes_retired_models():
 
 
 def test_the_app_mirrors_the_same_set():
-    """mobile/src/lib/thresholds.ts RETIRED_MODELS is the client half of the
-    same guard (its passesActionFilter refuses a retired model before the
-    server threshold row is consulted). The two must never drift."""
-    src = (ROOT / "mobile" / "src" / "lib" / "thresholds.ts").read_text(encoding="utf-8")
+    """mobile RETIRED_MODELS (thresholds.generated.ts, re-exported by
+    thresholds.ts) is the client half of the same guard. The two must never
+    drift after the generate-from-config split."""
+    wrapper = (ROOT / "mobile" / "src" / "lib" / "thresholds.ts").read_text(encoding="utf-8")
+    assert "RETIRED_MODELS" in wrapper
+    assert "thresholds.generated" in wrapper
+    src = (ROOT / "mobile" / "src" / "lib" / "thresholds.generated.ts").read_text(encoding="utf-8")
     block = re.search(r"export const RETIRED_MODELS = new Set<string>\(\[(.*?)\]\);", src, re.S).group(1)
     ids = set(re.findall(r"'([a-z_0-9]+)'", block))
     assert ids == set(config.RETIRED_MODELS)
