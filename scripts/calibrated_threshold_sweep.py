@@ -36,6 +36,13 @@ import math
 from datetime import date, datetime, timedelta
 
 import config
+
+def _guard_mlb(model_id: str) -> None:
+    """Phase 0: refuse MLB sweeps while the as-of rebuild is incomplete."""
+    # Game / prop / live MLB ids all start with mlb_
+    if model_id.startswith("mlb_"):
+        config.assert_retrain_allowed("MLB", what=f"threshold sweep ({model_id})")
+
 from data.db import get_connection
 from models.probability_calibration import (CLEAN_WINDOWS, HONEST_ERA_FROM,
                                             PAPER_START, apply_calibration,
@@ -263,6 +270,7 @@ def main() -> None:
         print(f"{'model':<28}{'P':>2}{'map':>4}{'now cut':>10}{'now':>16}"
               f"{'best cut':>10}{'best':>18}{'/wk':>6}  verdict")
         for m in models:
+            _guard_mlb(m)
             # Live models keep their own loop (tracking/live_calibration.py):
             # a cut that re-derives every pass is a different mechanism, and
             # judging it on this cadence would misreport both.

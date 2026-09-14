@@ -1,0 +1,11 @@
+# Rename (or copy) this file to:
+#   data/TEAM_STATS_ASOF_REBUILD_COMPLETE
+# to mark the team-stats as-of rebuild complete and lift the MLB
+# retrain/sweep freeze in config.assert_retrain_allowed.
+#
+# Only create the marker AFTER the rebuild is verified
+# (docs/team_stats_leak.md, docs/team_stats_rebuild_scope.md).
+# Contents are ignored; presence is the signal.
+#
+# Equivalent env override (no file needed):
+#   TEAM_STATS_ASOF_REBUILD_COMPLETE=1

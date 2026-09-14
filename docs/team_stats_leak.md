@@ -313,3 +313,16 @@ leaked seasons advertised lived in exactly the rows that no longer exist.
 **The "before" row predates BOTH rebuilds** — f5 was never re-walked per season
 between Phase 1 and Phase 2, because Phase 1 moved its aggregate barely at all
 (0.560 -> 0.562 on 2026).
+
+---
+
+## Phase 0 is now enforced in code (2026-09-14)
+
+`config.assert_retrain_allowed("MLB")` refuses MLB retrain and MLB threshold
+sweeps until the as-of rebuild is marked complete:
+
+* env `TEAM_STATS_ASOF_REBUILD_COMPLETE=1`, or
+* marker file `data/TEAM_STATS_ASOF_REBUILD_COMPLETE`
+  (see `data/TEAM_STATS_ASOF_REBUILD_COMPLETE.example`)
+
+Wired from `models.trainer` and the MLB sweep scripts. NCAAF is unaffected.

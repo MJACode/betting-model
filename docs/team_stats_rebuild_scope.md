@@ -91,6 +91,8 @@ or a rebuilt table quietly omits two clubs.
 
 **Phase 0 — freeze.** No MLB/NBA/NHL/WNBA retrains against the current tables.
 More Optuna trials on leaked features fit the leak better. (`ncaaf` is unaffected.)
+**Code gate (MLB only, 2026-09-14):** `config.assert_retrain_allowed` + env/marker
+`TEAM_STATS_ASOF_REBUILD_COMPLETE` — see `docs/team_stats_leak.md`.
 
 **Phase 1 — tier 1 rebuild, all four sports.** A backfill job that walks each
 season by date and writes cumulative counting stats. Deterministic, verifiable

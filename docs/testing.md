@@ -4,8 +4,10 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
-> There is no CI on pull requests. Run `python -m pytest -q tests/` by hand
-> before merging.
+> Pull requests run a **non-integration** pytest subset via
+> `.github/workflows/pr-ci.yml` (smoke + lock/settle/freshness/leakage +
+> threshold-parity). No live Odds API, no prod DB. Full suite:
+> `python -m pytest -q tests/` by hand before merging risky changes.
 
 ## 14. Tests
 A pytest test suite lives in `tests/`. Run after models are trained (earlier tests are
