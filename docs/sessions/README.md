@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, signal_delivery false CRIT: check still read opening_signals after Discord moved to picks. 9 NFL capture leftovers from the 09-11 26-row delete; standing picks fully delivered. Check aligned to _new_signals; no backfill |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, NCAAF SE Louisiana alias: Odds API "Southeastern Louisiana Lions" vs CFBD "SE Louisiana" minted a second UL Monroe 2026-09-19 games row. Map + worker migration onto the CFBD id |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, #710 leftover: git rm --cached 44 inactive models/saved pkls. Keep-list is model_registry is_active=1, not newest-filename (would have dropped live WNBA assists). Odds cache untouched |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, pause nfl_prop_sacks (#710 design-review follow-up). Same PAUSED_MODELS pattern as the ten; tackles/market/wind/live/opener stay live. Generated mobile thresholds regenerated |

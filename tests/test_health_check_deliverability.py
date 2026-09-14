@@ -28,7 +28,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tracking.system_health import _deliverable  # noqa: E402
+from tracking.system_health import (  # noqa: E402
+    _deliverable,
+    _in_signal_delivery_window,
+)
 
 START = "2026-08-31T23:41:00+00:00"          # 19:41 ET first pitch
 
@@ -83,3 +86,19 @@ def test_the_query_does_not_use_postgres_only_casts():
     src = (Path(__file__).parent.parent / "tracking"
            / "system_health.py").read_text(encoding="utf-8")
     assert "::timestamptz" not in src
+
+
+def test_a_game_date_inside_the_window_counts():
+    assert _in_signal_delivery_window("2026-09-13", START, "2026-09-11", "2026-09-14") is True
+
+
+def test_a_lookahead_commence_counts_even_when_game_date_is_outside():
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    assert _in_signal_delivery_window("2099-01-01", future, "2026-09-11", "2026-09-14") is True
+
+
+def test_a_started_game_outside_the_window_does_not_count():
+    """Aged out, and no longer postable. A NULL commence does not keep it red."""
+    past = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    assert _in_signal_delivery_window("2026-01-01", past, "2026-09-11", "2026-09-14") is False
+    assert _in_signal_delivery_window("2026-01-01", None, "2026-09-11", "2026-09-14") is False

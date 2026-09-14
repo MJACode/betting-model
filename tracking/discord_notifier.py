@@ -5,8 +5,8 @@ Three producers, each independently enabled by whether its webhook is configured
 
   • notify_discord_signals — a pick posts to its SPORT's channel the first time
     it clears the action thresholds (the same cut the app's Signals tab and the
-    §16 mobile query use). Reads the LOCKED opening_signals row, so what posts is
-    the bet of record, not a mid-refresh flicker.
+    §16 mobile query use). Reads `picks`, not `opening_signals`, so what posts is
+    the same set the app shows.
   • notify_discord_live    — in-play BET signals from the live loops (MLB,
     NCAAF, and the NFL in-play worker), to the SPORT'S live channel
     (DISCORD_WEBHOOK_LIVE_{SPORT}; mike, 2026-09-09), else the shared live
