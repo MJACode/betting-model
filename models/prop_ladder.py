@@ -28,11 +28,12 @@ TWO THINGS THIS IS NOT.
     margin; this replaces that assumption with a measurement. The spread is still
     a cost and is still gated on -- see MAX_SPREAD.
   * It is not validated. Kalshi's NFL prop markets are new: settled history
-    reaches back only to 2026 preseason (measured 2026-09-08). Nothing here is
-    wired into production scoring, and it must not be until it is graded on its
-    own record the way §5c graded Pinnacle -- with a placebo. This module and its
-    ingestor exist so that history starts accumulating now instead of when
-    somebody next asks.
+    reaches back only to 2026 preseason (measured 2026-09-08). The MARKET rule
+    may use a ladder mid as a fail-closed OR reference
+    (`models/nfl_prop_market`); that is coverage, not a §5c-grade claim. A
+    placebo on settled history is still required before treating Kalshi as a
+    replacement for Pinnacle. This module and its ingestor also exist so that
+    history keeps accumulating for that grade.
 
 THE MONOTONICITY PROBLEM IS REAL AND IS HANDLED. A survival function cannot
 increase, but quoted mids can: a thin rung goes stale, one side of the book

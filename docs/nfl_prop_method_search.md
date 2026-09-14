@@ -283,8 +283,10 @@ What is left is not a modelling problem:
   case for keeping them running is only that the tightened cuts limit the
   damage to a measured −1.9% on 2,133 bets.
 - The Kalshi ladder as a second exchange-grade reference for the MARKET rule
-  (`docs/prop_market_research.md` §1, §6b — built, unwired) is the one lead
-  in this area with an A grade that has not been graded yet.
+  (`docs/prop_market_research.md` §1, §6b — built, wired 2026-09-14 as a
+  fail-closed OR beside Pinnacle/betonlineag) is the one lead in this area
+  with an A grade that has not been graded yet. Wiring recovers line-mismatch
+  rows; it does not claim a placebo-cleared edge.
 
 Nothing further from this line of work should be built without a new source
 of information the book does not have.

@@ -215,11 +215,16 @@ That is **+16.5% more priceable propositions**, and it is concentrated:
 receptions, attempts or completions market at all**, and those are ~40% of our
 soft board, so this is a real and bounded gain rather than a transformation.
 
-**It is deliberately NOT wired into scoring.** Kalshi's NFL prop settled history
-reaches back only to 2026 preseason, so there is no record to validate a
-reference against, and Pinnacle only became one after a placebo on three
-seasons. The immediate next step is a recording job so that history starts
-accumulating; grading follows it, and production wiring follows the grade.
+**Wired 2026-09-14 as an OR reference in `models/nfl_prop_market`, fail
+closed.** The live card (`scripts/nfl_prop_market_card`) fetches public Kalshi
+ladders and passes them into `find_bets`; if the fetch fails or returns nothing,
+Pinnacle/betonlineag still run unchanged. Kalshi is a reference only — never in
+`SOFT_BOOKS`. Settled history still only reaches 2026 preseason, so this is
+coverage + a second exchange mid, not a graded replacement for Pinnacle; the
+recording job (`kalshi_prop_ingestor.record_ladders`) keeps accumulating for a
+later placebo. Still unwired: authenticated trading (API key), a durable
+market-map beyond `SERIES_MARKET`, and any path that spends Odds API credits on
+Kalshi (it does not — public Trade API).
 
 ## 7. Ranked recommendations
 

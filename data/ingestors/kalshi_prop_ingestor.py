@@ -15,12 +15,11 @@ Measured 2026-09-08: 1,333 open NFL prop markets across a full 16-game slate,
 149 player-games, median 9 strikes each, receiving-yards spreads of 1-2c against
 a sportsbook's ~7% prop hold.
 
-THIS DOES NOT SCORE ANYTHING, AND MUST NOT UNTIL IT IS GRADED. Kalshi's NFL prop
-markets are new -- settled history reaches back only to 2026 preseason -- so
-there is not yet a record to validate a reference against, and §5c's bar for
-Pinnacle was a placebo test on three seasons. The purpose of this module today is
-that history STARTS ACCUMULATING, so the grading is possible in weeks rather than
-starting from zero whenever someone next asks.
+SCORING USE IS FAIL-CLOSED AND UNGRADED. `models/nfl_prop_market` may read
+`ladders()` as an OR exchange reference beside Pinnacle/betonlineag; a missing
+board is a no-op, not an error. Kalshi's NFL prop settled history still only
+reaches 2026 preseason, so this is not a §5c-grade claim — recording via
+`record_ladders` remains the path to a placebo. Kalshi is never a soft book.
 
 KEYED ON (game_date, player, market), NOT ON A GAME ID. Kalshi's event code is
 `26SEP13ATLPIT` and ours is `NFL_2026_02_ATL_PIT`; mapping between them needs a
@@ -241,3 +240,18 @@ def record_ladders(conn=None, status: str = "open",
     finally:
         if owns:
             conn.close()
+
+
+def ladders_or_empty(status: str = "open",
+                     series_map: dict[str, str] | None = None) -> dict:
+    """`ladders()`, or {} on any failure.
+
+    The MARKET rule's fail-closed seam: a down Kalshi API must not kill the
+    Pinnacle/betonlineag card.
+    """
+    try:
+        return ladders(status=status, series_map=series_map) or {}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"kalshi ladders unavailable; continuing without: {exc}")
+        return {}
+
