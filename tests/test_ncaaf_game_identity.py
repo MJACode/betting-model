@@ -153,6 +153,18 @@ def test_an_fbs_split_is_still_reported_after_the_bound():
     assert _run(c, "2026-09-08") == [("2026-09-10", "Miami", 2)]
 
 
+def test_the_se_louisiana_ul_monroe_split_is_the_check_going_red():
+    """The 2026-09-19 production pair. UL Monroe is FBS; both rows share a
+    date and home, so the check must fire — this is the signature, not the
+    names."""
+    c = _conn(fbs=("UL Monroe",))
+    _add(c, "NCAAF_2026-09-19_se-louisiana_ul-monroe",
+         "2026-09-19", "UL Monroe", "SE Louisiana")
+    _add(c, "NCAAF_2026-09-19_southeastern-louisiana-lions_ul-monroe",
+         "2026-09-19", "UL Monroe", "Southeastern Louisiana Lions")
+    assert _run(c, "2026-09-14") == [("2026-09-19", "UL Monroe", 2)]
+
+
 # ── the resolver overrides that keep a matchup on one id ─────────────────────
 
 def test_the_odds_api_map_bridges_names_no_rule_can():
@@ -169,6 +181,10 @@ def test_the_odds_api_map_bridges_names_no_rule_can():
     assert m.get("Southern Mississippi Golden Eagles") == "Southern Miss"
     assert m.get("Appalachian State Mountaineers") == "App State"
     assert m.get("UMass Minutemen") == "Massachusetts"
+    # 2026-09-14: UL Monroe forward-slate CRIT. Same shape — CFBD abbreviates,
+    # The Odds API spells it out, and no automatic rule bridges them.
+    assert m.get("Southeastern Louisiana Lions") == "SE Louisiana"
+    assert m.get("Southeastern Louisiana") == "SE Louisiana"
 
 
 def test_every_override_target_is_a_canonical_school_shape():

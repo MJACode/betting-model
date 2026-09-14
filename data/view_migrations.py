@@ -113,6 +113,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # BETs, and corrects each label once. Every step guards on its own
     # property and no-ops forever after.
     "ncaaf_fcs_visitor_names_2026_09_07.sql",
+    # 2026-09-14: UL Monroe 2026-09-19 has two games rows for one matchup —
+    # CFBD's SE Louisiana vs The Odds API's Southeastern Louisiana Lions.
+    # Consolidates children onto the CFBD id and deletes the live alias.
+    # The resolver map that stops a new alias row is in config.py in the
+    # same PR. Guards on both names still being the measured split; no-ops
+    # after once. Never deletes a pick.
+    "ncaaf_se_louisiana_ul_monroe_alias_2026_09_14.sql",
     # 2026-09-07: three MLB games rows that are the previous night's game filed
     # again under its UTC date. Relabelled data_source='duplicate_utc', never
     # deleted or scored (five voided picks point at them). No-ops after once.

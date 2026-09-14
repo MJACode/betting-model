@@ -170,7 +170,11 @@ its opening number, which is rarely true by kickoff.
   Name-resolution phantoms (Tennessee vs Tennessee State) are a separate
   population — not this rule.
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
-  slugs. Historical lines under `cfbd_*` bookmakers (provider priority
+  slugs. Odds API names no fold / "school mascot" / prefix rule can bridge
+  (Southern Miss, App State, UMass, SE Louisiana) live in
+  `config.NCAAF_ODDS_API_MAP`; without an entry the odds ingest mints a
+  second `games` row and `ncaaf_game_identity` goes CRIT. Historical lines
+  under `cfbd_*` bookmakers (provider priority
   `NCAAF_LINE_BOOKMAKER_PRIORITY`; 2023-25 DK, 2019-22 Bovada, 2015-18
   consensus). Openers are protected from the pruner (earliest snapshot per
   proposition per book — `test_prune_preserves_openers.py`).
