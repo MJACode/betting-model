@@ -438,6 +438,11 @@ export function StatsScreen() {
     setQuery('');
     setTonightOnly(SLATE_ONLY_DEFAULT); // a different sport is a different slate
     setLineN(defaultLineN(next));
+    setMinGrade(null);
+    setIncludeUngraded(true);
+    setHitLow(HIT_RATE_MIN);
+    setHitHigh(HIT_RATE_MAX);
+    setBasis('perGame');
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
   }, [sport]);
@@ -1597,6 +1602,43 @@ export function StatsScreen() {
     if (first) pickStat(first);
   };
 
+  // Search lives below Games when there are fixtures. When there are none
+  // (UFC), it moves above so the Games empty note can name a control that is
+  // actually next to it — it used to say "search above" while Search sat
+  // under Availability and Matchup.
+  //
+  // Only hop when we KNOW there are no fixtures. An empty list during the
+  // slate read is "checking", not UFC — Availability already refuses to call
+  // that window "no games" (UX review, 2026-09-14).
+  const gamesEmpty =
+    sport === 'UFC' || (!slateChecking && pickableGames.length === 0);
+  const searchFilterSection = (
+    <FilterSection
+      title="Search"
+      summary={query.trim() ? `“${query.trim()}”` : 'Any player'}
+      defaultOpen={gamesEmpty || query.trim().length > 0}
+    >
+      <View style={styles.searchWrap}>
+        <Ionicons name="search" size={16} color={colors.textTertiary} />
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search players in this list…"
+          placeholderTextColor={colors.textTertiary}
+          autoCorrect={false}
+          autoCapitalize="words"
+          returnKeyType="search"
+        />
+        {query.length > 0 ? (
+          <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
+            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+          </Pressable>
+        ) : null}
+      </View>
+    </FilterSection>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -2101,13 +2143,15 @@ export function StatsScreen() {
         onReset={resetFilters}
         canReset={activeFilterCount > 0}
       >
-        {/* GAMES first, because it is the widest cut on the sheet and the one
-            Matt asked for by name. Shared with the Picks tab, so a game picked
-            here is the same game picked there. */}
+        {/* GAMES first among cuts when there are fixtures. Shared with the
+            Picks tab, so a game picked here is the same game picked there.
+            When there are no fixtures (UFC), Search is first so the empty
+            note names a control that is actually next to it. */}
+        {gamesEmpty ? searchFilterSection : null}
         <FilterSection
           title="Games"
-          summary={gameFilterSummary(pickableGames, gamePicker.selected)}
-          defaultOpen={gamePicker.selected.size > 0}
+          summary={gamesEmpty ? undefined : gameFilterSummary(pickableGames, gamePicker.selected)}
+          defaultOpen={gamesEmpty || gamePicker.selected.size > 0}
           onClear={gamePicker.selected.size > 0 ? gamePicker.clear : undefined}
         >
           <GameFilterSection
@@ -2116,8 +2160,10 @@ export function StatsScreen() {
             onToggle={gamePicker.toggle}
             emptyNote={
               sport === 'UFC'
-                ? 'A UFC card is fighters, not fixtures — filter by fighter with the search above.'
-                : `No ${sport} games scheduled in the next week.`
+                ? 'A UFC card is fighters, not fixtures — use Search to filter by fighter.'
+                : slateChecking
+                  ? 'Checking the schedule…'
+                  : `No ${sport} games scheduled in the next week.`
             }
           />
         </FilterSection>
@@ -2143,6 +2189,7 @@ export function StatsScreen() {
             sections (Klarna, Zalando, TheFork; UX review, 2026-09-12). */}
         <FilterSection
           title="Availability"
+          subtitle="This slate is the day’s card (or the next game day). Games above is specific fixtures — if both are on, Games wins."
           onClear={tonightActive && !gamesPicked ? () => setTonightOnly(false) : undefined}
         >
           <View style={styles.ungradedRow}>
@@ -2184,10 +2231,10 @@ export function StatsScreen() {
               : !hasSlate
                 ? `No ${sport} games in the next week, so there is nobody to narrow to.`
                 : gamesPicked
-                  ? 'A picked game is the narrower cut, so it wins. Clear Games to use this.'
+                  ? 'Clear Games to use Playing today'
                   : tonightActive
-                    ? 'Showing only players whose game is on this slate.'
-                    : 'Showing every player. Lines come from each one’s next game.'}
+                    ? 'Showing only players on this slate (the day’s card, not a specific fixture).'
+                    : 'Showing every player, not just this slate. Lines come from each one’s next game.'}
           </Text>
         </FilterSection>
 
@@ -2238,30 +2285,7 @@ export function StatsScreen() {
           </FilterSection>
         ) : null}
 
-        <FilterSection
-          title="Search"
-          summary={query.trim() ? `“${query.trim()}”` : 'Any player'}
-          defaultOpen={query.trim().length > 0}
-        >
-          <View style={styles.searchWrap}>
-            <Ionicons name="search" size={16} color={colors.textTertiary} />
-            <TextInput
-              style={styles.searchInput}
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search players in this list…"
-              placeholderTextColor={colors.textTertiary}
-              autoCorrect={false}
-              autoCapitalize="words"
-              returnKeyType="search"
-            />
-            {query.length > 0 ? (
-              <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search">
-                <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-              </Pressable>
-            ) : null}
-          </View>
-        </FilterSection>
+        {gamesEmpty ? null : searchFilterSection}
 
         {effectiveMode === 'totals' ? (
           <FilterSection
