@@ -16,7 +16,7 @@ import { decisionEdge, decisionOdds } from './decisionPrice';
 import { todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
-export {
+import {
   ACTION_THRESHOLDS,
   PAUSED_MODELS,
   PROB_ONLY_MODELS,
@@ -26,6 +26,17 @@ export {
   MAX_KELLY_FRACTION,
 } from './thresholds.generated';
 export type { ModelThreshold } from './thresholds.generated';
+// `export { X } from` re-exports without binding X in this module, so
+// isProbOnlyModel / thresholdFor / etc. cannot see the names (TS2304).
+export {
+  ACTION_THRESHOLDS,
+  PAUSED_MODELS,
+  PROB_ONLY_MODELS,
+  RETIRED_PROB_ONLY_MODELS,
+  RETIRED_MODELS,
+  KELLY_MULTIPLIER,
+  MAX_KELLY_FRACTION,
+};
 
 /**
  * The columns the action filter reads. Typed as a subset so it accepts both a
