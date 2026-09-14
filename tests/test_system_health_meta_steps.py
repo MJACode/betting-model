@@ -17,7 +17,8 @@ def _meta_steps() -> set[str]:
 
 
 def test_health_check_is_excluded():
-    """It returns False on any CRIT, so counting it closes a self-sustaining loop."""
+    """It is not a producer. Counting it closed a self-sustaining loop
+    (refresh used to return False on any CRIT)."""
     assert "health-check" in _meta_steps()
 
 

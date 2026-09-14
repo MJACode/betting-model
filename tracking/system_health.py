@@ -1125,14 +1125,16 @@ def run_system_health(run_date: str | None = None) -> dict:
                   f"need 3 to judge whether a failure is persistent")
         else:
             # `health-check` is EXCLUDED, and that exclusion is load-bearing.
-            # It is not a producer step: it fails whenever ANY CRIT check is
-            # bad, so counting it here creates a loop that can never clear --
-            # this check CRITs, which fails the health step, which makes this
-            # check CRIT on the next pass, forever, regardless of whether the
-            # original cause was fixed. Observed live 2026-08-27: an unrelated
-            # (and genuine) opening_signal_capture CRIT latched this on. Its
-            # failure is also pure duplication, since whatever CRIT caused it
-            # is already reported by that check's own row.
+            # It is not a producer step. Until 2026-09-14 the refresh --step
+            # path returned False on any CRIT, so counting it here created a
+            # loop that could never clear -- this check CRITs, which failed
+            # the health step, which made this check CRIT on the next pass,
+            # forever, regardless of whether the original cause was fixed.
+            # Observed live 2026-08-27 and again 2026-09-12..14. Refresh no
+            # longer fails the step; the exclusion stays for historical rows
+            # still inside the window. Its failure is also pure duplication,
+            # since whatever CRIT caused it is already reported by that
+            # check's own row.
             # health-check is not a producer step (see above). "aborted" is not
             # a step at all -- it is the sentinel run_ledger._abort_orphans
             # writes into failed_steps when it closes a run whose worker was

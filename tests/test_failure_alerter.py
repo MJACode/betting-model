@@ -295,3 +295,73 @@ class TestSilentJobs:
         # behaviour and must not alert.
         from tracking.job_heartbeat import MAX_SILENCE
         assert MAX_SILENCE["nfl_live_worker"] > 9 * 60
+
+
+class TestHealthCheckOnlyIsNotADirtyPass:
+    """Observability is not a producer. A refresh whose only failed step is
+    health-check is the identity of a clean pass: odds/score/settle ran.
+
+    Measured 2026-09-14 last-12 non-daily (Supabase `pipeline_runs`):
+    1 ok, 9 failed_steps='health-check', 2 'aborted' → 1/12 under the 0.50
+    floor. After this, that window is 10/12 and silent. `aborted` stays
+    dirty: deploy-replace and hang share one sentinel.
+    """
+
+    def test_health_check_only_is_identity_with_a_clean_pass(self):
+        runs = [(False, "health-check")] * 12
+        conn = FakeConn(health=[], runs=runs)
+        clean, total, ranked = fa._clean_rate(conn)
+        assert (clean, total) == (12, 12)
+        assert ranked == []
+        assert "pass:clean_rate" not in fa._conditions(conn)
+
+    def test_underscore_health_check_is_the_same_identity(self):
+        runs = [(False, "health_check")] * 12
+        clean, total, ranked = fa._clean_rate(FakeConn(health=[], runs=runs))
+        assert (clean, total) == (12, 12)
+        assert ranked == []
+
+    def test_a_real_step_alongside_health_check_is_still_dirty(self):
+        runs = [(False, "odds,health-check")] * 12
+        clean, total, ranked = fa._clean_rate(FakeConn(health=[], runs=runs))
+        assert (clean, total) == (0, 12)
+        assert ranked == [("odds", 12)]
+        assert "pass:clean_rate" in fa._conditions(FakeConn(health=[], runs=runs))
+
+    def test_aborted_still_counts_as_dirty(self):
+        """No column distinguishes deploy-replace from a hang; a pass that
+        did not finish did not produce what the pass produces."""
+        runs = [(False, "aborted")] * 12
+        conn = FakeConn(health=[], runs=runs)
+        clean, total, ranked = fa._clean_rate(conn)
+        assert (clean, total) == (0, 12)
+        assert ranked == [("aborted", 12)]
+        assert "pass:clean_rate" in fa._conditions(conn)
+
+    def test_an_empty_failed_steps_map_on_a_failed_row_is_dirty(self):
+        """Identity: we do not invent a health-check excuse for an unknown
+        failure."""
+        runs = [(False, None)] * 12
+        clean, total, ranked = fa._clean_rate(FakeConn(health=[], runs=runs))
+        assert (clean, total) == (0, 12)
+        assert ranked == []
+
+    def test_the_measured_2026_09_14_window_is_silent_after_decoupling(self):
+        # Last 12 as queried 2026-09-14T12:26Z: 1 clean, 2 aborted,
+        # 9 health-check-only.
+        runs = (
+            [(True, None)]
+            + [(False, "aborted")]
+            + [(False, "health-check")] * 9
+            + [(False, "aborted")]
+        )
+        assert len(runs) == 12
+        conn = FakeConn(health=[], runs=runs)
+        clean, total, ranked = fa._clean_rate(conn)
+        assert (clean, total) == (10, 12)
+        assert ranked == [("aborted", 2)]
+        assert 10 / 12 >= fa.CLEAN_RATE_FLOOR
+        assert "pass:clean_rate" not in fa._conditions(conn)
+
+    def test_an_empty_window_is_identity(self):
+        assert fa._clean_rate(FakeConn(health=[], runs=[])) == (0, 0, [])

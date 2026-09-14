@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, health-check no longer fails the refresh pass. `--step` observes; daily still fails on CRIT. `_clean_rate` ignores health-check-only; aborted stays dirty. Floor unchanged |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nothing autopauses. Review reports only; worker migration clears unauthorized mlb_prop_batter_runs / mlb_prop_pitcher_k rows from model_auto_pauses. No ACTION_THRESHOLDS / PAUSED_MODELS change |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, game-model starter/star/goalie gates (status_ts ≤ quote). ESPN NHL probable overlay; not an XGB feature; fail-open clocks; no RotoWire; opener/wind untouched |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, paper-track nfl_opener_spread / nfl_wind_totals through 2026: no unit bump, opener retire-if-flat, wind MAX_FIRE_LEAD stays 4. scripts/nfl_rule_2026_track.py |

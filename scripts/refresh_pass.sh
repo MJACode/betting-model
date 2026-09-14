@@ -213,6 +213,12 @@ step refresh-outcomes
 # daily 6am pipeline, so a break that only affected refresh passes was invisible
 # for up to 24 hours - exactly what happened 8/24-8/27. It is pure SQL over
 # tables already written, so running it hourly is cheap.
+#
+# Observe-only on this path: `--step health-check` writes system_health_checks
+# but does not return False on CRIT, so a standing WARN/CRIT cannot fail the
+# ingest pass or dirty the clean-rate board. Measured 2026-09-14: 20 of 32
+# non-daily runs failed ONLY health-check while odds/score/settle succeeded.
+# Daily still fails the step (run_pipeline.py Step 12, fail_on_crit=True).
 step health-check
 
 # Re-derive every live model's cutoff from its settled record and publish it to

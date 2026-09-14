@@ -107,12 +107,56 @@ def _latest_health_rows(conn) -> list:
     """, label="failure-alerter/health")
 
 
+def _is_health_check_step(name: str) -> bool:
+    """`health-check` (refresh_pass.sh) or `health_check` (daily results dict)."""
+    return name.replace("_", "-") == "health-check"
+
+
+def _step_names(failed) -> list:
+    return [s.strip() for s in (failed or "").split(",") if s.strip()]
+
+
+def _producer_failures(failed) -> list:
+    """Step names that mean the pass itself failed.
+
+    `health-check` / `health_check` are excluded: that step writes
+    system_health_checks and, until 2026-09-14, returned False on any
+    standing CRIT — reddening every refresh pass without a producer dying.
+    Observability is not a producer. The ranked map of a health-check-only
+    window is empty (identity).
+    """
+    return [s for s in _step_names(failed) if not _is_health_check_step(s)]
+
+
+def _pass_is_clean(ok, failed) -> bool:
+    """A refresh pass is clean when no producer step failed.
+
+    `ok` True is identity. `failed_steps` that are only health-check /
+    health_check are also clean: measured 2026-09-14 last-12 was 1 clean +
+    9 health-check-only + 2 aborted → 1/12 under the floor, while
+    odds/score/settle had succeeded.
+
+    `aborted` stays dirty. run_ledger writes it when a worker is replaced
+    mid-pass (usually a deploy) AND when a pass never finished. There is
+    no column that distinguishes those two, and a pass that did not
+    finish did not produce what the pass produces. An empty failed_steps
+    map on ok=False is also dirty — we do not invent a health-check
+    excuse for an unknown failure.
+    """
+    if ok:
+        return True
+    names = _step_names(failed)
+    return bool(names) and not _producer_failures(failed)
+
+
 def _clean_rate(conn) -> tuple:
     """(clean, total, failing_steps) over the last CLEAN_RATE_WINDOW passes.
 
-    `aborted` runs are counted as failures: run_ledger writes that sentinel
-    when a worker is replaced mid-pass, and a pass that did not finish did not
-    produce what the pass produces.
+    Health-check-only failures do not dirty a pass (see `_pass_is_clean`).
+    `aborted` runs still count as failures: run_ledger writes that sentinel
+    when a worker is replaced mid-pass, and a pass that did not finish did
+    not produce what the pass produces. Deploy-replace vs hang share the
+    same sentinel; they are not distinguished.
     """
     rows = query_rows(conn, """
         SELECT ok, failed_steps FROM pipeline_runs
@@ -121,13 +165,11 @@ def _clean_rate(conn) -> tuple:
     """, (CLEAN_RATE_WINDOW,), label="failure-alerter/ledger")
     if not rows:
         return (0, 0, [])
-    clean = sum(1 for ok, _ in rows if ok)
+    clean = sum(1 for ok, failed in rows if _pass_is_clean(ok, failed))
     steps: dict = {}
     for _, failed in rows:
-        for s in (failed or "").split(","):
-            s = s.strip()
-            if s:
-                steps[s] = steps.get(s, 0) + 1
+        for s in _producer_failures(failed):
+            steps[s] = steps.get(s, 0) + 1
     ranked = sorted(steps.items(), key=lambda kv: -kv[1])
     return (clean, len(rows), ranked)
 
@@ -179,8 +221,9 @@ def _conditions(conn, now: datetime | None = None) -> dict:
                 "CRIT",
                 f"Refresh pass degraded — {clean}/{total} clean",
                 (f"Only **{clean} of the last {total}** refresh passes "
-                 f"completed with no failed steps ({rate:.0%}, floor "
-                 f"{CLEAN_RATE_FLOOR:.0%}).\n\nFailing most often:\n{worst}"),
+                 f"completed with no producer-step failures ({rate:.0%}, floor "
+                 f"{CLEAN_RATE_FLOOR:.0%}). Health-check-only is not a "
+                 f"producer failure.\n\nFailing most often:\n{worst}"),
             )
     return out
 

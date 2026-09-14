@@ -12,8 +12,13 @@
 demand via `python run_pipeline.py --step health-check`. Results are upserted into
 **`system_health_checks`** (anon-readable; UNIQUE(run_date, check_name) — re-runs overwrite).
 
-- **CRIT** stale/empty feed → the step returns False → **the daily run fails** — since
-  2026-07-19 the daily pipeline runs on the Railway worker, so a red run is visible in the
+- **CRIT** stale/empty feed → **the daily run fails the step** (the original Actions-red
+  intent). Refresh passes (hourly / evening / overnight via `scripts/refresh_pass.sh`
+  `--step health-check`) still RUN and WRITE `system_health_checks`, but a CRIT does
+  **not** fail the pass — observability must not fail the thing it observes. Measured
+  2026-09-14: 20 of 32 non-daily runs failed ONLY `health-check` while odds/score/settle
+  succeeded, and that reddened the ops "Refresh pass degraded" board. Since 2026-07-19
+  the daily pipeline runs on the Railway worker, so a red daily run is visible in the
   Railway deploy logs (not GitHub mobile; a manually-dispatched break-glass Actions run
   still shows RED there). The "how's the system?" Supabase query below works the same
   either way. CRIT checks: DK odds snapshot, MLB team stats, bullpen
