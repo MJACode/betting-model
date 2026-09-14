@@ -428,9 +428,16 @@ def _load_nfl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
             "rushing_yards", "carries", "rushing_tds",
             "receiving_yards", "receptions", "receiving_tds",
             "def_sacks", "def_tackles_solo", "def_tackle_assists"]
+    # +/- 1 day, because a pick's game_date is not always its kickoff's: the
+    # live lane stamps the decision's UTC date, so a Sunday- or Monday-night bet
+    # is dated the next day. Safe to widen -- rows stay keyed on game_id, and
+    # one team never plays two games a day apart.
+    day = datetime.strptime(game_date, "%Y-%m-%d")
     rows = conn.execute(
-        f"SELECT {', '.join(cols)} FROM nfl_player_game_log WHERE game_date = %s",
-        (game_date,)).fetchall()
+        f"SELECT {', '.join(cols)} FROM nfl_player_game_log "
+        f"WHERE game_date BETWEEN %s AND %s",
+        ((day - timedelta(days=1)).strftime("%Y-%m-%d"),
+         (day + timedelta(days=1)).strftime("%Y-%m-%d"))).fetchall()
 
     out: dict = {}
     for row in rows:
@@ -501,7 +508,7 @@ def _prop_settle_window_days(conn: DBConnection, game_date: str) -> int:
               JOIN games g ON g.game_id = p.game_id
              WHERE p.signal_type = 'BET'
                AND p.result IS NULL
-               AND p.model_id LIKE '%%_prop_%%'
+               AND (p.model_id LIKE '%%_prop_%%' OR p.model_id = 'nfl_live_prop')
                AND g.home_score IS NOT NULL
         """).fetchone()
     except Exception as exc:
@@ -566,9 +573,13 @@ def _settle_prop_picks(
           AND p.result IS NULL
           AND p.signal_type = 'BET'
           AND (p.model_id LIKE 'mlb_prop_%%' OR p.model_id LIKE 'wnba_prop_%%'
-               OR p.model_id LIKE 'nba_prop_%%' OR p.model_id LIKE 'nfl_prop_%%')
+               OR p.model_id LIKE 'nba_prop_%%' OR p.model_id LIKE 'nfl_prop_%%'
+               OR p.model_id = 'nfl_live_prop')
           AND g.home_score IS NOT NULL
     """, (game_date,)).fetchall()
+    # nfl_live_prop is a prop (pass attempts, _PROP_STAT_MAP) whose id does not
+    # match 'nfl_prop_%'. Until 2026-09-13 it fell to the game path, was mapped
+    # to 'h2h' and stamped NO_ACTION -- all five of its BETs, 0.0 units.
 
     if not prop_picks:
         return 0, 0, 0, 0, 0.0, 0.0
@@ -677,7 +688,9 @@ def _settle_prop_picks(
             # fallback for rows written before that column existed — it works,
             # but it makes a display string load-bearing, which is why the
             # column exists.
-            key = player_key
+            # Normalised again here: the live lane writes "DRAKE MAYE", the
+            # actuals are keyed "drakemaye". Idempotent on an already-normal key.
+            key = norm_player_name(player_key) if player_key else None
             if not key:
                 m = _PICK_LABEL_RE.match(pick_label or "")
                 key = norm_player_name(m.group(1).strip()) if m else None
@@ -1811,6 +1824,7 @@ _GAME_LEVEL_MODEL_FILTER = """
           AND p.model_id NOT LIKE 'wnba_prop_%%'
           AND p.model_id NOT LIKE 'nba_prop_%%'
           AND p.model_id NOT LIKE 'nfl_prop_%%'
+          AND p.model_id <> 'nfl_live_prop'
           AND p.model_id NOT LIKE 'ufc_%%'
           AND p.model_id NOT LIKE 'golf_%%'
 """
@@ -2063,6 +2077,7 @@ def _settle_game_picks(
           AND p.model_id NOT LIKE 'wnba_prop_%%'
           AND p.model_id NOT LIKE 'nba_prop_%%'
           AND p.model_id NOT LIKE 'nfl_prop_%%'
+          AND p.model_id <> 'nfl_live_prop'
           AND p.model_id NOT LIKE 'ufc_%%'
           AND p.model_id NOT LIKE 'golf_%%'
           AND g.home_score IS NOT NULL
