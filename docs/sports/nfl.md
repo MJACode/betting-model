@@ -21,9 +21,11 @@ weekly routine).
 | **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
 
 **Critical data rules:**
-- **`nfl/data/odds_cache/` (2,632 snapshots, ~12MB) is IRREPLACEABLE — ~45,000 Odds API
-  credits of spend. Committed to git. Never delete, never gitignore.** Backup tarball:
-  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine).
+- **`nfl/data/odds_cache/` is IRREPLACEABLE — ~45,000 Odds API credits of spend.
+  Remains tracked in git. Never delete, never gitignore.** Snapshot counts and
+  on-disk size drift as the season accrues; do not treat a stale MB figure as
+  current. Backup tarball: `nfl-model-odds-cache.tar.gz` (keep a copy outside
+  this machine). See `nfl/data/odds_cache/README.md`.
 - `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
   `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
 - Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the

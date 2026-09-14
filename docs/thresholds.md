@@ -741,3 +741,20 @@ Production's own record on the new artifact (`picks`, BETs graded) is the
 number that supersedes all of this as it accrues. Two slates in it is 0
 BETs, with the loop alive (a scorer pass every ~7 s, AVOIDs emitted, the
 quote declined as stale on most passes -- pollers logs, 2026-09-11 01:25Z).
+
+
+---
+
+## Ten NFL distributional props PAUSED 2026-09-14
+
+Stopped BET emission for ten `nfl_prop_*` entries in `PROP_MODELS` (still score
+NONE rows; cuts kept). **Not paused:** `nfl_prop_tackles_assists` (clean record
+after the gamebook TOT fix), `nfl_prop_sacks` (thin / paper-only), plus the
+rule/market/live lanes `nfl_prop_market`, `nfl_wind_totals`, `nfl_live_prop`,
+`nfl_opener_spread`.
+
+Basis: `docs/nfl_props_model.md` §5b — walk-forward at real DraftKings prices
+loses on those markets; volume-control floors reduce exposure but do not
+create an edge.
+
+Updated-By: mike

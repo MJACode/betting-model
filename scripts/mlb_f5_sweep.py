@@ -57,6 +57,8 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+config.assert_retrain_allowed("MLB", what="threshold sweep")
+import config
 from data.db import get_connection
 from features.feature_engine import (
     FEATURE_MAP,

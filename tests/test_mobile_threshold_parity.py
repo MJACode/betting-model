@@ -24,11 +24,10 @@ That is CLAUDE.md §1b's parity rule -- "the app, Discord and push show the same
 picks, they are identical" -- failing on the one surface whose disagreement
 nobody can see, because it only shows before the fetch lands.
 
-This file is the tripwire. A cut changed in `config.py` now fails here until the
-mirror is changed with it. It deliberately does NOT generate the TS: that file's
-value comments carry the evidence for each cut ("2026-06-28 full-outcome: 77
-bets +8.3% (UNPAUSED)"), and a generator would strip the reasoning to keep the
-number.
+This file is the tripwire. A cut changed in `config.py` now fails here until
+`python -m scripts.generate_mobile_thresholds` is re-run. CI also runs that
+script with `--check`. Reasoning comments live in `config.py` / `docs/thresholds.md`;
+the generated mirror carries numbers only.
 """
 
 from __future__ import annotations
@@ -41,7 +40,8 @@ import pytest
 import config
 
 ROOT = Path(__file__).resolve().parents[1]
-MIRROR = ROOT / "mobile" / "src" / "lib" / "thresholds.ts"
+MIRROR = ROOT / "mobile" / "src" / "lib" / "thresholds.generated.ts"
+MIRROR_WRAPPER = ROOT / "mobile" / "src" / "lib" / "thresholds.ts"
 
 
 def _src() -> str:
@@ -199,3 +199,11 @@ def test_the_prob_only_set_matches_config():
     assert (app - retired_app) == canon, (
         f"prob-only drift -- app: {sorted(app - retired_app)}, config: {sorted(canon)}"
     )
+
+
+def test_wrapper_reexports_generated():
+    """thresholds.ts must re-export the generated constants, not redefine them."""
+    src = MIRROR_WRAPPER.read_text(encoding="utf-8")
+    assert "from './thresholds.generated'" in src or 'from "./thresholds.generated"' in src
+    assert "export const ACTION_THRESHOLDS" not in src
+    assert "export const PAUSED_MODELS" not in src

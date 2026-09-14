@@ -1,0 +1,70 @@
+# Non-integration pytest subset on every pull request.
+#
+# No live Odds API, no prod DATABASE_URL. Pure / SQLite-fixture tests only:
+# smoke (config + freeze guard), lock, settle, freshness, leakage,
+# threshold-parity (+ generated mobile thresholds --check).
+#
+# Full suite remains a hand run: python -m pytest -q tests/
+name: PR CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest-subset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install minimal test deps
+        run: |
+          python -m pip install -U pip
+          # Full requirements.txt pulls heavy ML stacks; the subset below
+          # only needs pytest + the modules those tests import. Install the
+          # declared test pin and the light runtime deps config/scorer need.
+          python -m pip install "pytest>=8.0.0" python-dotenv numpy pandas loguru psycopg2-binary requests scipy joblib scikit-learn xgboost-cpu optuna apscheduler beautifulsoup4
+
+      - name: Mobile thresholds drift check
+        run: python -m scripts.generate_mobile_thresholds --check
+
+      - name: Pytest non-integration subset
+        env:
+          # Ensure no accidental prod URL from a fork secret leak path.
+          DATABASE_URL: ""
+          ODDS_API_KEY: ""
+          SUPABASE_URL: ""
+          SUPABASE_KEY: ""
+        run: |
+          python -m pytest -q \
+            tests/test_config.py \
+            tests/test_mlb_retrain_freeze.py \
+            tests/test_retired_models.py \
+            tests/test_mobile_threshold_parity.py \
+            tests/test_nfl_prop_thresholds.py \
+            tests/test_pick_lock_is_on_picks.py \
+            tests/test_pick_lock_survives_settlement.py \
+            tests/test_publisher_lock.py \
+            tests/test_live_lock.py \
+            tests/test_settle_self_heal.py \
+            tests/test_settled_record_is_immutable.py \
+            tests/test_settlement_timing.py \
+            tests/test_intraday_freshness.py \
+            tests/test_dk_freshness_parse.py \
+            tests/test_savant_freshness.py \
+            tests/test_team_stats_asof_invariants.py \
+            tests/test_pitcher_stats_asof_invariants.py \
+            tests/test_cfbd_snapshot_leakage.py \
+            tests/test_paused_and_no_signal_rows.py
