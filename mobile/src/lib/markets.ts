@@ -383,6 +383,7 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
   BALLY: 'ballybet',
   PARX: 'betparx',
   REBET: 'rebet',
+  PIN: 'pinnacle',
 };
 
 /**
@@ -423,6 +424,34 @@ export function storedQuoteBook(
   if (!m) return MODEL_BOOK;
   const abbrev = m[2].toUpperCase();
   return BOOK_KEY_BY_ABBREV[abbrev] ?? abbrev;
+}
+
+/**
+ * Book whose American is `picks.dk_odds` — the CLV lock, not the deciding book.
+ *
+ * `storedQuoteBook` prefers `decision_book`, which is the bet of record and
+ * can be FanDuel on a pick whose `dk_odds` is still DraftKings. ClvCard must
+ * name the American it prints. Trailing `(FD)` matches
+ * tracking/paper_tracker._book_from_label (market-relative props). The NFL
+ * opener/wind comma form is the other place `dk_odds` is not DraftKings.
+ */
+export function clvLockBook(pick: {
+  model_id?: string;
+  pick_label?: string | null;
+}): string {
+  const suffix = /\(([A-Za-z_]+)\)\s*$/.exec(pick.pick_label ?? '');
+  if (suffix) {
+    const token = suffix[1];
+    return BOOK_KEY_BY_ABBREV[token.toUpperCase()] ?? token.toLowerCase();
+  }
+  if ((pick.model_id ?? '').startsWith('nfl_')) {
+    const nfl = /\(([^()]*?),\s*([A-Za-z]{2,5})\)/.exec(pick.pick_label ?? '');
+    if (nfl) {
+      const abbrev = nfl[2].toUpperCase();
+      return BOOK_KEY_BY_ABBREV[abbrev] ?? abbrev;
+    }
+  }
+  return MODEL_BOOK;
 }
 
 export interface BookPrice {

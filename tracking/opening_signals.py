@@ -235,7 +235,8 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
     Reuses paper_tracker's result + closing-line helpers. For each locked signal
     whose game is final, writes:
       - result / profit_flat / profit_kelly (vs our OPENING dk_odds + scored_line)
-      - closing_dk_odds / closing_line / clv_pct (close vs our opening price)
+      - closing_dk_odds / closing_line / clv_pct (no-vig close vs our opening
+        price, SAME-LINE ONLY — same formula as picks.clv_pct; docs/clv.md)
       - line_move_dir (toward | against | flat) — how the line moved after lock
       - public_side  (with_public | contrarian | even) — from the locked split
 
@@ -244,9 +245,10 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
     """
     # Lazy imports to avoid a circular import (paper_tracker imports this module).
     from tracking.paper_tracker import (
-        _compute_result, _closing_dk_odds, _market_for_pick, _SIDE_PRICE_COL,
+        _compute_result, _first_game_close, _market_for_pick, _SIDE_PRICE_COL,
+        _line_clv_pts,
     )
-    from models.scorer import american_to_implied_prob
+    from tracking.clv_math import other_side_prices, price_clv_pct
 
     # Trailing window (self-heal) — not just `game_date`. A day the morning settle
     # missed (pipeline hiccup, games not final yet) would otherwise stay pending
@@ -308,25 +310,41 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
             rec_bet or 0.0,
         )
 
-        # Line story: how the price moved from our opening lock to the close.
+        # Line story: no-vig close vs our opening lock, same formula as picks.
+        # Historical rows settled before 2026-09-14 used raw one-sided implied;
+        # this table is a shadow track, not the public pedigree.
         closing_dk = closing_line = clv_pct = line_move_dir = None
         if dk_odds is not None:
-            closing = _closing_dk_odds(conn, game_id, market, commence_time)
+            closing, close_book = _first_game_close(
+                conn, game_id, market, commence_time, pick_book="draftkings")
             if closing:
                 price_col = _SIDE_PRICE_COL.get(pick_side)
                 close_price = closing.get(price_col) if price_col else None
-                open_ip  = american_to_implied_prob(dk_odds)
-                close_ip = (american_to_implied_prob(close_price)
-                            if close_price is not None else None)
-                if open_ip is not None and close_ip is not None:
-                    clv_pct = round((close_ip - open_ip) * 100, 2)
-                    line_move_dir = ("toward" if clv_pct > 0.5
-                                     else "against" if clv_pct < -0.5 else "flat")
+                if "totals" in market:
+                    closing_line = closing.get("total_line")
+                elif "spreads" in market:
+                    closing_line = closing.get("spread_home")
+                line_moved = (
+                    closing_line is not None and scored_line is not None
+                    and abs(float(closing_line) - float(scored_line)) > 1e-9)
+                if close_price is not None and not line_moved:
+                    clv_pct, _method = price_clv_pct(
+                        dk_odds, close_price,
+                        other_side_prices(closing, pick_side),
+                        book=close_book)
+                    if clv_pct is not None:
+                        line_move_dir = ("toward" if clv_pct > 0.5
+                                         else "against" if clv_pct < -0.5
+                                         else "flat")
+                        closing_dk = close_price
+                elif close_price is not None:
                     closing_dk = close_price
-                    if "totals" in market:
-                        closing_line = closing.get("total_line")
-                    elif "spreads" in market:
-                        closing_line = closing.get("spread_home")
+                    line_pts = _line_clv_pts(
+                        market, None, pick_side, scored_line, closing_line)
+                    if line_pts is not None:
+                        line_move_dir = ("toward" if line_pts > 0.5
+                                         else "against" if line_pts < -0.5
+                                         else "flat")
 
         # Public side at lock (public_bet_pct is already on our pick side).
         public_side = None

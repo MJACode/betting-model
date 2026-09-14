@@ -23,7 +23,7 @@ scope unless asked.
 | Rule | Source | What to look for |
 |---|---|---|
 | A pick is a pick | CLAUDE.md §1c | A re-priced line shown where the locked line was. Movement belongs beside the pick (`LineMovementCard`, `PickTimingCard`), never in its place. |
-| Decided at the best bettable price at the DK line | CLAUDE.md §6 | Since 2026-09-09 `decision_*` is the deciding price (badge, edge, stake, P&L, the action filter); `dk_odds` / `edge` are the DraftKings reference and the CLV basis. Read both through `lib/decisionPrice.ts`, never the columns. Nothing shows `dk_odds` as the bet of record on a row another book decided; a chip labelled with one book must never carry another book's betslip link; parlays stay priced at DraftKings. |
+| Decided at the best bettable price at the DK line | CLAUDE.md §6 | Since 2026-09-09 `decision_*` is the deciding price (badge, edge, stake, P&L, the action filter); `dk_odds` / `edge` are the DraftKings reference. CLV grades the locked bet against the no-vig sharp close (`docs/clv.md`). Read both through `lib/decisionPrice.ts`, never the columns. Nothing shows `dk_odds` as the bet of record on a row another book decided; a chip labelled with one book must never carry another book's betslip link; parlays stay priced at DraftKings. |
 | LIVE, not paper trading | CLAUDE.md §2 | "paper", "simulated", "test mode" in copy. |
 | Access is one gate | CLAUDE.md §6 | `useSubscription().entitled` deciding what renders. Must be `useEntitlement()`. |
 | Today is ET | CLAUDE.md §7 | `toISOString().slice(0,10)` or a bare `new Date()` day. Must be `todayET()` / the `*ET` formatters in `src/lib/format.ts`. |

@@ -13,8 +13,9 @@ at COALESCE(picks.decision_odds, picks.dk_odds) -- the price the pick was
 DECIDED at: the best bettable price at the DraftKings line since the flip,
 DraftKings itself before it (decision_odds NULL). The variable is still
 called dk_odds below because every formula is unchanged; only the price
-feeding it moved. CLV stays DraftKings-to-DraftKings (closing_dk_odds vs
-dk_odds): there is no best-price closing history to measure against.
+feeding it moved. CLV grades the locked bet price (`dk_odds`) against the
+no-vig sharp close when a Pinnacle snapshot exists, else the pick's own
+book -- never a raw one-sided DK close. See docs/clv.md.
   5. Log performance summary
 
 Usage:
@@ -34,9 +35,15 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LIVE_MODELS, MODELS, RETIRED_MODELS
+from config import LIVE_MODELS, MODELS, RETIRED_MODELS, SHARP_BOOKMAKERS
 from data.db import get_connection, DBConnection
-from models.scorer import american_to_decimal, american_to_implied_prob
+from models.scorer import american_to_decimal
+from tracking.clv_math import (
+    CLV_METHOD_RAW_LEGACY,
+    close_book_candidates,
+    other_side_prices,
+    price_clv_pct,
+)
 
 try:
     import statsapi
@@ -1147,18 +1154,21 @@ _SIDE_PRICE_COL = {
 }
 
 
-def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
-                     commence_time: str | None) -> dict | None:
-    """
-    Closing DraftKings odds snapshot for a game+market.
+def _closing_odds(conn: DBConnection, game_id: str, market: str,
+                  commence_time: str | None,
+                  bookmaker: str = "draftkings") -> dict | None:
+    """Last pre-game snapshot at `bookmaker` at or before first pitch.
 
-    The hourly pipeline labels every snapshot 'open', so the last DK snapshot at
-    or before first pitch is effectively the closing line. Falls back to the
-    freshest DK snapshot if commence_time is missing or every snapshot landed
-    after the listed start.
+    No unbounded fallback. The evening refresh writes post-first-pitch rows as
+    snapshot_type='open' (the §106 leak), so "latest regardless of commence"
+    would take an in-play number as the close. A missing commence_time or a
+    book that never quoted this market is unmeasurable, not a reason to guess.
 
-    Returns a dict of the price columns, or None if no DK snapshot exists.
+    `snapshot_at` is TEXT in mixed forms; the timestamptz cast is the same
+    chronological bound `_closing_prop_odds` already uses.
     """
+    if not commence_time:
+        return None
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
     # Standard runline only (±1.5) for MLB/NHL — avoid alternate spread lines.
@@ -1168,37 +1178,61 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
     spread_filter = ("AND ABS(spread_home) = 1.5"
                      if market == "spreads"
                      and game_id.split("_", 1)[0] in ("MLB", "NHL") else "")
-
-    if commence_time:
-        row = conn.execute(f"""
-            SELECT home_price, away_price, draw_price,
-                   spread_home, total_line, over_price, under_price
-            FROM odds
-            WHERE game_id   = %s
-              AND market    = %s
-              AND bookmaker = 'draftkings'
-              AND snapshot_type != 'in_play'
-              {spread_filter}
-              AND snapshot_at <= %s
-            ORDER BY snapshot_at DESC
-            LIMIT 1
-        """, (game_id, market, commence_time)).fetchone()
-        if row:
-            return dict(zip(cols, row))
-
     row = conn.execute(f"""
         SELECT home_price, away_price, draw_price,
                spread_home, total_line, over_price, under_price
         FROM odds
         WHERE game_id   = %s
           AND market    = %s
-          AND bookmaker = 'draftkings'
+          AND bookmaker = %s
           AND snapshot_type != 'in_play'
           {spread_filter}
-        ORDER BY snapshot_at DESC
+          AND snapshot_at::timestamptz <= %s::timestamptz
+        ORDER BY snapshot_at::timestamptz DESC
         LIMIT 1
-    """, (game_id, market)).fetchone()
+    """, (game_id, market, bookmaker, commence_time)).fetchone()
     return dict(zip(cols, row)) if row else None
+
+
+def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
+                     commence_time: str | None) -> dict | None:
+    """Closing snapshot for a game market: Pinnacle when present, else DK.
+
+    Name is historical (`closing_dk_odds` on the row still holds the American
+    on our side). The book that actually closed is returned by
+    `_first_game_close` and stored as `clv_close_book`.
+    """
+    snap, _book = _first_game_close(conn, game_id, market, commence_time,
+                                    pick_book="draftkings")
+    return snap
+
+
+def _first_game_close(conn: DBConnection, game_id: str, market: str,
+                      commence_time: str | None, pick_book: str
+                      ) -> tuple[dict | None, str | None]:
+    """First pre-game close in sharp-then-pick-book order."""
+    for book in close_book_candidates(pick_book, SHARP_BOOKMAKERS):
+        snap = _closing_odds(conn, game_id, market, commence_time, book)
+        if snap:
+            return snap, book
+    return None, None
+
+
+def _first_prop_close(conn: DBConnection, game_id: str, player_name: str,
+                      market: str, commence_time: str, pick_book: str,
+                      pick_side: str) -> tuple[dict | None, str | None]:
+    """First pre-game prop close in sharp-then-pick-book order.
+
+    The snapshot has to carry a price on OUR side; a Pinnacle row that only
+    quotes the other side is not a close for this pick, so we keep walking.
+    """
+    price_key = "over_price" if pick_side == "over" else "under_price"
+    for book in close_book_candidates(pick_book, SHARP_BOOKMAKERS):
+        snap = _closing_prop_odds(conn, game_id, player_name, market,
+                                 commence_time, bookmaker=book)
+        if snap and snap.get(price_key) is not None:
+            return snap, book
+    return None, None
 
 
 def _as_utc(value) -> "datetime | None":
@@ -1289,6 +1323,33 @@ def _book_from_label(pick_label: str | None) -> str:
     return _LABEL_BOOK.get(token.upper(), token.lower())
 
 
+def _locked_other_prices(snap: dict | None, pick_side: str, locked_price) -> list:
+    """Other side of the two-way we actually bet, or [] if this snapshot is not that quote.
+
+    Capture looks up the pick-book snapshot at created_at. If that row's price
+    on our side is not the locked American, it is a different quote and must
+    not be de-vigged against — falling back to raw bet implied (OddsShopper's
+    Dodgers case) is honest; mixing two timestamps is not.
+    """
+    if not snap:
+        return []
+    col = _SIDE_PRICE_COL.get(pick_side)
+    if not col:
+        return []
+    side = snap.get(col)
+    try:
+        if side is None or locked_price is None:
+            return []
+        if int(side) != int(float(locked_price)):
+            return []
+    except (TypeError, ValueError):
+        return []
+    others = other_side_prices(snap, pick_side)
+    if not others or any(p is None for p in others):
+        return []
+    return others
+
+
 # How far back the self-healing CLV backfill walks on each settle. Bounded so a
 # single run cannot become a multi-minute scan; the untouched dates are simply
 # picked up by the following runs, which is why it converges rather than needing
@@ -1319,12 +1380,15 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
     created_at <= commence_time here mirrors the guard in _capture_clv and lets
     the queue drain.
 
-    THE GATE IS clv_captured_at, NOT clv_pct (2026-08-30). Recording the close
-    across a moved line means a captured pick can legitimately have a NULL
-    clv_pct -- the price comparison does not apply to it -- so the old gate
-    would have re-processed every one of those picks on every settle, forever.
-    Verified before the switch: clv_pct and clv_captured_at were 1:1 across all
-    1,795 already-captured picks, so nothing already measured is revisited.
+    THE GATE IS clv_captured_at, NOT clv_pct (2026-08-30), PLUS the formula
+    stamp (2026-09-14). Recording the close across a moved line means a
+    captured pick can legitimately have a NULL clv_pct -- the price comparison
+    does not apply to it -- so gating on clv_pct would re-process every one of
+    those picks on every settle, forever. Rows stamped `clv_method =
+    'raw_one_sided'` are the pre-2026-09-14 one-sided DK implied and ARE
+    revisited, once, so the published pedigree is not a mix of two definitions.
+    After recompute they carry `no_vig` / `zero_vig` / `raw_one_way` and the
+    scan leaves them alone.
 
     What the two changes are actually worth, measured rather than assumed: 203
     settled pre-game bets become newly capturable (68 of them on a line that
@@ -1338,15 +1402,17 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
         FROM picks p
         JOIN games g ON g.game_id = p.game_id
         WHERE p.signal_type = 'BET'
-          AND p.clv_captured_at IS NULL
           AND p.dk_odds IS NOT NULL
           AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
           AND g.commence_time IS NOT NULL
           AND p.created_at::timestamptz <= g.commence_time::timestamptz
+          AND (p.clv_captured_at IS NULL
+               OR p.clv_method IS NULL
+               OR p.clv_method = %s)
         ORDER BY p.game_date
         LIMIT %s
-    """, (_CLV_BACKFILL_DATES_PER_RUN,)).fetchall()
+    """, (CLV_METHOD_RAW_LEGACY, _CLV_BACKFILL_DATES_PER_RUN)).fetchall()
     if not rows:
         return 0
     filled = 0
@@ -1449,19 +1515,26 @@ def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
 
 def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
-    Record closing line value for each official (BET) game-level pick on game_date.
+    Record closing line value for each official (BET) pick on game_date.
 
-    For every BET pick that has a scored DK price but no CLV yet, find the closing
-    DK price on the pick side (last pre-game snapshot) and store:
-      - closing_dk_odds : closing American price on our side
-      - closing_line    : closing total/spread on our side (NULL for moneyline)
-      - clv_pct         : closing_implied_prob - bet_implied_prob, in pp
+    For every BET pick that has a scored price but no honest CLV yet, find the
+    last pre-game snapshot (Pinnacle when that snapshot exists, else the pick's
+    own book) and store:
+      - closing_dk_odds : closing American on our side (legacy column name;
+                          the book is `clv_close_book`)
+      - closing_line    : closing total/spread (NULL for moneyline)
+      - clv_pct         : (fair_close_p − fair_bet_p) × 100, in pp
                           (positive = we beat the close on the PRICE).
-                          SAME-LINE ONLY — see the guard below.
-      - line_clv_pts    : points the line moved toward our side (positive = we
-                          beat the close on the NUMBER). NULL for moneyline.
-      - clv_beat_close  : the one verdict — line_clv_pts > 0 where the number
-                          moved, clv_pct > 0 where it held.
+                          SAME-LINE ONLY. fair_close_p is the multiplicative
+                          no-vig close except on Kalshi/Polymarket (already
+                          no-vig) and one-way markets. fair_bet_p is no-vig
+                          at lock when the pick-book snapshot matches
+                          dk_odds, else raw bet implied. docs/clv.md.
+      - clv_method      : no_vig | zero_vig | raw_one_way
+      - clv_close_book  : the book whose snapshot was the close
+      - line_clv_pts    : points the line moved toward our side
+      - clv_beat_close  : line_clv_pts > 0 where the number moved, else
+                          clv_pct > 0
 
     THE CLOSE IS RECORDED EVEN WHEN THE LINE MOVED (2026-08-30, matt). It did
     not used to be: a moved line failed the same-line guard and the pick was
@@ -1471,7 +1544,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     scored_line !== closing_line, so that row could never render — the single
     thing a user most wants to see was structurally invisible. Now the close is
     always stored; what the guard still protects is clv_pct, which stays a
-    strict same-line price comparison and keeps its published meaning.
+    strict same-line price comparison.
 
     PLAYER PROPS ARE INCLUDED (2026-08-29, mike). They were skipped because
     their prices live in player_prop_odds rather than odds -- but props are the
@@ -1483,21 +1556,25 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     meaningful close to compare against. Golf too -- its prices live in
     golf_odds and a tournament has no single closing moment.
 
-    Idempotent: only fills picks where clv_pct IS NULL. Returns picks updated.
+    Idempotent on honest methods: fills clv_captured_at IS NULL and revisits
+    `raw_one_sided` (the pre-2026-09-14 one-sided implied) so the pedigree is
+    not a mix of two definitions. Returns picks updated.
     """
     rows = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.dk_odds,
                g.commence_time, p.pick_label, p.scored_line, p.created_at,
-               p.prop_market
+               p.prop_market, p.clv_method
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
           AND p.signal_type = 'BET'
           AND p.dk_odds IS NOT NULL
-          AND p.clv_captured_at IS NULL
           AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
-    """, (game_date,)).fetchall()
+          AND (p.clv_captured_at IS NULL
+               OR p.clv_method IS NULL
+               OR p.clv_method = %s)
+    """, (game_date, CLV_METHOD_RAW_LEGACY)).fetchall()
 
     if not rows:
         return 0
@@ -1505,15 +1582,17 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     now_utc = datetime.now(timezone.utc)
     updated = 0
     for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
-         pick_label, scored_line, created_at, row_prop_market) in rows:
-        # The game must have STARTED. _closing_dk_odds takes the newest snapshot
-        # at or before kickoff, so capturing while a game is still hours away
+         pick_label, scored_line, created_at, row_prop_market,
+         _row_clv_method) in rows:
+        # The game must have STARTED. The close is the newest snapshot at or
+        # before kickoff, so capturing while a game is still hours away
         # records that hour's price as "the close" — and since the fill is
-        # idempotent on clv_pct IS NULL, the wrong number is permanent. Harmless
-        # when settlement ran once a day after midnight; load-bearing the moment
-        # it runs hourly. Parsed rather than string-compared: commence_time is
-        # TEXT in mixed 'Z' and '+00:00' forms, which do not sort consistently
-        # against each other. Unparseable or absent -> leave for a later pass.
+        # idempotent on an honest clv_method, the wrong number is permanent.
+        # Harmless when settlement ran once a day after midnight; load-bearing
+        # the moment it runs hourly. Parsed rather than string-compared:
+        # commence_time is TEXT in mixed 'Z' and '+00:00' forms, which do not
+        # sort consistently against each other. Unparseable or absent -> leave
+        # for a later pass.
         ct = _as_utc(commence_time)
         if ct is None or ct > now_utc:
             continue
@@ -1556,7 +1635,8 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         bookmaker = "draftkings"
         if prop_market == "FROM_PROP_MARKET":
             # A market-relative pick: the market is on the row, the price on
-            # the row is the soft book's, and the book is in the label.
+            # the row is the soft book's, and the book is in the label. The
+            # close still prefers Pinnacle; the label book is the fallback.
             prop_market = row_prop_market
             bookmaker = _book_from_label(pick_label)
             if not prop_market:
@@ -1569,14 +1649,15 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             if not player_name:
                 continue                 # can't find the prop without the player
             market = prop_market
-            closing = _closing_prop_odds(conn, game_id, player_name,
-                                         prop_market, commence_time,
-                                         bookmaker=bookmaker)
+            closing, close_book = _first_prop_close(
+                conn, game_id, player_name, prop_market, commence_time,
+                pick_book=bookmaker, pick_side=pick_side)
             closing_price = (closing or {}).get(
                 "over_price" if pick_side == "over" else "under_price")
         else:
             market  = _market_for_pick(model_id)
-            closing = _closing_dk_odds(conn, game_id, market, commence_time)
+            closing, close_book = _first_game_close(
+                conn, game_id, market, commence_time, pick_book=bookmaker)
             price_col     = _SIDE_PRICE_COL.get(pick_side)
             closing_price = (closing or {}).get(price_col) if price_col else None
         if not closing or closing_price is None:
@@ -1604,28 +1685,33 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         line_clv = _line_clv_pts(market, prop_market, pick_side,
                                  scored_line, closing_line)
 
-        # THE PRICE COMPARISON REQUIRES THE LINE TO HAVE HELD. CLV differences
-        # two prices for the SAME proposition; Over 5.5 at -110 and Over 6.5 at
-        # -110 are different bets, and differencing their implied probabilities
-        # is arithmetic on nothing.
-        #
-        # Measured before this shipped: of 2,655 resolvable prop picks, 1,115
-        # (42%) closed on a different line. Including them gave -4.83pp average
-        # and 14.4% beating the close; restricted to the same line it is +1.33pp
-        # and 18.8%. The first number is fiction, and it is the one that would
-        # have been published. Totals and spreads move too, so the guard applies
-        # to every market that HAS a line -- moneyline has none and is
-        # unaffected.
-        #
-        # What changed on 2026-08-30 is only WHAT THE GUARD SKIPS. It used to
-        # skip the whole pick; now it skips clv_pct alone, and the moved line is
-        # measured in points instead. Nothing about the published clv_pct moves.
+        # THE PRICE COMPARISON REQUIRES THE LINE TO HAVE HELD. What changed
+        # on 2026-08-30 is only WHAT THE GUARD SKIPS. It used to skip the
+        # whole pick; now it skips clv_pct alone, and the moved line is
+        # measured in points instead. What changed on 2026-09-14 is the
+        # PRICE MATH: fair no-vig close vs fair no-vig bet (raw bet implied
+        # when the lock two-way is missing), not raw one-sided implied on
+        # the close.
         clv_pct = None
+        clv_method = None
+        close_others = other_side_prices(closing, pick_side)
         if not line_moved:
-            bet_ip   = american_to_implied_prob(dk_odds)
-            close_ip = american_to_implied_prob(closing_price)
-            if bet_ip is not None and close_ip is not None:
-                clv_pct = round((close_ip - bet_ip) * 100, 2)
+            if prop_market:
+                bet_snap = _closing_prop_odds(
+                    conn, game_id, player_name, prop_market, created_at,
+                    bookmaker=bookmaker)
+            else:
+                bet_snap = _closing_odds(
+                    conn, game_id, market, created_at, bookmaker)
+            clv_pct, clv_method = price_clv_pct(
+                dk_odds, closing_price, close_others,
+                book=close_book,
+                bet_other_prices=_locked_other_prices(
+                    bet_snap, pick_side, dk_odds),
+                bet_book=bookmaker)
+        else:
+            _, clv_method = price_clv_pct(
+                dk_odds, closing_price, close_others, book=close_book)
 
         # One verdict, from whichever measure applies. A moved number is the
         # stronger evidence and wins: the price attached to a line we no longer
@@ -1652,10 +1738,12 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
                 clv_pct         = %s,
                 line_clv_pts    = %s,
                 clv_beat_close  = %s,
-                clv_captured_at = %s
+                clv_captured_at = %s,
+                clv_method      = %s,
+                clv_close_book  = %s
             WHERE pick_id = %s
         """, (closing_price, closing_line, clv_pct, line_clv, beat_close,
-              captured_at, pick_id))
+              captured_at, clv_method, close_book, pick_id))
         updated += 1
 
     if updated:

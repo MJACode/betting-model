@@ -102,7 +102,7 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
   any book). `nfl_live_prop` stays DK-only (its feed carries no other book).
   Full story and the measured table: `docs/best_line.md`, "The live lanes join".
 - **`snapshot_type='in_play'` isolation:** the pre-game `_get_dk_odds`, the training bulk odds
-  lookup (`_build_bulk_mlb_lookups`), and CLV close capture (`_closing_dk_odds`) all EXCLUDE
+  lookup (`_build_bulk_mlb_lookups`), and CLV close capture (`_closing_odds`) all EXCLUDE
   in-play rows. In-play prices must never leak into pre-game scoring, training features, or
   closing-line math.
 - **Live picks are BET/AVOID only** (no NONE rows — a live game would write hundreds of dead rows

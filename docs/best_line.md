@@ -325,9 +325,10 @@ What shipped, in one change:
   once).
 - **What stays DraftKings:** the LINE a pick is scored at (until 2026-09-12,
   when a prop DraftKings does not list gained a line from the first bettable
-  book that does -- the last section of this file), training features, CLV
-  (`closing_dk_odds` vs `dk_odds`), the line-movement monitor, and the
-  opening-signal shadow track. The live lanes were fenced out on 2026-09-09
+  book that does -- the last section of this file), training features, and the
+  line-movement monitor. **CLV** grades the locked `dk_odds` against the
+  no-vig sharp close (Pinnacle when a pre-game snapshot exists) —
+  `docs/clv.md`. The live lanes were fenced out on 2026-09-09
   (his 2026-09-02 "only for pregame picks for now") and joined on 2026-09-10
   — the section below. `MAX_EDGE_CAP` is judged on the DraftKings edge in the
   builders and not re-applied at the best price.
@@ -343,8 +344,9 @@ What shipped, in one change:
    `tests/test_best_line.py` will fail — they are the tripwires being
    deliberately retired, and that failure is how you know it is the intended
    change rather than a leak.
-3. **CLV stays DK-to-DK** in either case: there is no best-price closing history
-   to measure against, and mixing the two would make the number meaningless.
+3. **CLV is the no-vig sharp close** (`docs/clv.md`): the locked bet vs
+   Pinnacle's de-vigged close when that snapshot exists, else the pick's book.
+   Same-line price CLV and moved-line `line_clv_pts` stay separate.
 
 ---
 

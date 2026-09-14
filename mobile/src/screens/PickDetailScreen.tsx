@@ -43,6 +43,7 @@ import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/f
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookName,
+  clvLockBook,
   displayQuoteForPick,
   formatSideLine,
   gameMarketForModel,
@@ -468,11 +469,11 @@ function PickDetailContent({
   );
 }
 
-// Closing line value, captured at settlement from the last pre-game DK snapshot
-// on the pick side.
+// Closing line value, captured at settlement from the last pre-game snapshot
+// on the pick side (Pinnacle when that snapshot exists — docs/clv.md).
 //
 // TWO MEASURES, and which one applies depends on whether the number moved:
-//   - the number HELD  → clv_pct, the price delta in pp
+//   - the number HELD  → clv_pct, the no-vig price delta in pp
 //   - the number MOVED → line_clv_pts, how far it moved toward our side
 // A price on a line we no longer hold is not a comparison (Over 44.5 at -110
 // and Over 46.5 at -110 are different bets), which is why clv_pct is NULL for
@@ -519,6 +520,14 @@ function ClvCard({ pick }: { pick: Pick }) {
       ? `${pick.clv_pct > 0 ? '+' : ''}${pick.clv_pct.toFixed(1)}pp`
       : '—';
 
+  const closeBook = (pick.clv_close_book || 'draftkings').toLowerCase();
+  const closeName = bookName(closeBook);
+  // The American on this card is picks.dk_odds. Do not use storedQuoteBook /
+  // decisionBook — those name the deciding book and would stamp FD on a DK
+  // price (CLAUDE.md §6 chip/price mismatch).
+  const lockBook = clvLockBook(pick);
+  const lockName = bookName(lockBook);
+
   return (
     <View style={styles.infoCard}>
       <Text style={styles.infoHeading}>Closing Line Value</Text>
@@ -529,11 +538,8 @@ function ClvCard({ pick }: { pick: Pick }) {
 
       {hasLines ? (
         <View style={styles.clvRow}>
-          {/* DraftKings close vs DraftKings signal, so this card does not
-              mount for a pick DraftKings never priced -- CLV capture is
-              gated on dk_odds (tracking/paper_tracker.py). */}
-          <Text style={styles.clvRowLabel}>Signal line (DK)</Text>
-          <Text style={styles.clvRowValue}>
+          <Text style={styles.clvRowLabel}>Signal line ({lockName})</Text>
+          <Text style={styles.clvRowValue} numberOfLines={1}>
             {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.dk_odds)}
           </Text>
@@ -541,15 +547,16 @@ function ClvCard({ pick }: { pick: Pick }) {
       ) : null}
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Closing line (DK)</Text>
-          <Text style={styles.clvRowValue}>
+          <Text style={styles.clvRowLabel}>Closing line ({closeName})</Text>
+          <Text style={styles.clvRowValue} numberOfLines={1}>
             {formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.closing_dk_odds)}
           </Text>
         </View>
       ) : (
         <Text style={styles.infoBody}>
-          DK {formatAmerican(pick.dk_odds)} at signal → DK {formatAmerican(pick.closing_dk_odds)} at close
+          {lockName} {formatAmerican(pick.dk_odds)} at signal → {closeName}{' '}
+          {formatAmerican(pick.closing_dk_odds)} at close
         </Text>
       )}
 
@@ -560,9 +567,7 @@ function ClvCard({ pick }: { pick: Pick }) {
             } ${lineCLV > 0 ? 'in your favor' : 'against you'} after we posted this — ` +
             `betting it later would have been ${lineCLV > 0 ? 'worse' : 'better'}. ` +
             `The prices aren't compared here because they're quoted on different numbers.`
-          : `The number held from signal to close, so the prices are directly comparable. ` +
-            `Closing line value is the market's own verdict on the bet, independent of ` +
-            `whether it won.`}
+          : `The number held. The pp is the fair (no-vig) ${closeName} close versus the ${lockName} signal — not a posted-price delta. Independent of whether the bet won.`}
       </Text>
     </View>
   );
@@ -622,11 +627,13 @@ const styles = StyleSheet.create({
   clvRowLabel: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
   clvRowValue: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+    flexShrink: 0,
   },
   clvNote: {
     fontSize: font.size.caption,

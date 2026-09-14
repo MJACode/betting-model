@@ -51,7 +51,7 @@ function mkPick(overrides: Partial<Pick>): Pick {
     closing_dk_odds: null,
     closing_line: null,
     clv_pct: null,
-    clv_captured_at: null,
+    clv_captured_at: null, clv_method: null, clv_close_book: null,
     dk_bet_link: null,
     ...overrides,
   } as Pick;

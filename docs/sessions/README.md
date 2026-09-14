@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, no-vig CLV: multiplicative two-way close, Pinnacle when present, Kalshi not de-vigged. Legacy raw_one_sided stamped; pedigree filters method. No unit/recut |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, batter_runs stale promoted map (+11.14pp cal vs +0.98pp raw); re-promote via worker job. pitcher_er helps but does not transfer (6.28>6.0); not promoted, not paused |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, health-check no longer fails the refresh pass. `--step` observes; daily still fails on CRIT. `_clean_rate` ignores health-check-only; aborted stays dirty. Floor unchanged |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nothing autopauses. Review reports only; worker migration clears unauthorized mlb_prop_batter_runs / mlb_prop_pitcher_k rows from model_auto_pauses. No ACTION_THRESHOLDS / PAUSED_MODELS change |

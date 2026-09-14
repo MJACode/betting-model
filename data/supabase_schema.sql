@@ -973,12 +973,14 @@ CREATE TABLE IF NOT EXISTS picks (
     confidence_tier    TEXT,
     public_bet_pct     NUMERIC,            -- % of public bets/tickets on this side (Action Network)
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
-    closing_dk_odds    NUMERIC,            -- DK American price on the pick side at close (CLV)
-    closing_line       NUMERIC,            -- DK total/spread on the pick side at close (NULL for moneyline)
-    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close). SAME-LINE ONLY: NULL when the number moved
+    closing_dk_odds    NUMERIC,            -- close American on the pick side (book in clv_close_book)
+    closing_line       NUMERIC,            -- close total/spread on the pick side (NULL for moneyline)
+    clv_pct            NUMERIC,            -- (fair_close_p - fair_bet_p) in pp, SAME-LINE ONLY. docs/clv.md
     line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for moneyline
     clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
+    clv_method         TEXT,               -- no_vig | zero_vig | raw_one_way | raw_one_sided (legacy)
+    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
@@ -1995,7 +1997,7 @@ CREATE TABLE IF NOT EXISTS opening_signals (
     locked_at          TEXT NOT NULL,
     closing_dk_odds    NUMERIC,
     closing_line       NUMERIC,
-    clv_pct            NUMERIC,              -- positive = line moved toward us after lock
+    clv_pct            NUMERIC,              -- no-vig close vs opening lock, SAME-LINE ONLY. docs/clv.md
     line_move_dir      TEXT,                 -- toward | against | flat
     public_side        TEXT,                 -- with_public | contrarian | even
     result             TEXT,                 -- WIN | LOSS | PUSH | NO_ACTION

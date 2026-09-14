@@ -6,7 +6,8 @@
  * best bettable price across the books at the DraftKings line, and records it
  * on the row as `decision_book` / `decision_odds` / `decision_implied_prob` /
  * `decision_edge`. `edge` and `dk_odds` keep their DraftKings meaning: the
- * reference line the model was scored at, and the basis of CLV.
+ * reference line the model was scored at. CLV grades that locked bet against
+ * the no-vig sharp close (`docs/clv.md`), not DK-to-DK.
  *
  * Rows from before the flip carry NULL in the decision columns. They were
  * decided at DraftKings, so falling back to `dk_odds` / `edge` is exact, not
