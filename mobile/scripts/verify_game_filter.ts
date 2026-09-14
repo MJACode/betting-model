@@ -178,8 +178,9 @@ function main() {
   check('the slate chip stands down while a specific game is picked',
     /disabled=\{gamesPicked\}/.test(stats) && /gamesPicked \|\| isOnSlate/.test(stats));
   check('the game cut is visible in the Picks bar, not just its sheet',
-    /key: 'games'/.test(pf) && /\+ \(gamesNarrowed \? 1 : 0\)/.test(pf));
-  check('and Clear all on that bar clears it too', /onChange\(freshFilter\(\)\);\s*\n\s*onClearGames\?\.\(\);/.test(pf));
+    /key: 'games'/.test(pf) && /\(gamesNarrowed \? 1 : 0\)/.test(pf));
+  check('and Clear all on that bar clears games and search',
+    /onClearGames\?\.\(\);\s*\n\s*onSearchChange\(''\);/.test(pf));
   check('the games list is grouped by day and searchable when long',
     /dayLabel\(group\.day\)/.test(gfs) && /SEARCHABLE_AT/.test(gfs));
   check('its rows truncate rather than wrap', (gfs.match(/numberOfLines=\{1\}/g) ?? []).length >= 2);

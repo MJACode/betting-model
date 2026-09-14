@@ -9,7 +9,7 @@
  *
  * Layout:
  *   row 1  search field ......................... [Filters (n)]
- *   row 2  caller-supplied quick chips (optional)
+ *   row 2  caller-supplied quick chips (optional — Picks no longer uses this)
  *   row 3  active filter pills + count + Clear all   (only when filtered)
  *
  * Every active filter gets a pill, not just some of them. The old bar only
@@ -77,10 +77,14 @@ export function FilterBar({
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
-              clearButtonMode="while-editing"
             />
             {(search?.length ?? 0) > 0 ? (
-              <Pressable onPress={() => onSearchChange?.('')} hitSlop={8}>
+              <Pressable
+                onPress={() => onSearchChange?.('')}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+                hitSlop={14}
+              >
                 <Ionicons name="close-circle" size={16} color={colors.textTertiary} />
               </Pressable>
             ) : null}
@@ -91,6 +95,7 @@ export function FilterBar({
 
         <Pressable
           onPress={onOpenFilters}
+          accessibilityRole="button"
           accessibilityLabel={
             activeCount > 0 ? `Filters, ${activeCount} active` : 'Filters'
           }
@@ -125,9 +130,10 @@ export function FilterBar({
               <Pressable
                 key={p.key}
                 onPress={p.onRemove}
+                accessibilityRole="button"
                 accessibilityLabel={`Remove filter ${p.label}`}
                 style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
-                hitSlop={6}
+                hitSlop={8}
               >
                 <Text style={styles.pillText}>{p.label}</Text>
                 <Ionicons name="close" size={12} color={colors.tint} />
@@ -136,6 +142,8 @@ export function FilterBar({
             {onClearAll ? (
               <Pressable
                 onPress={onClearAll}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
                 style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
                 hitSlop={6}
               >
@@ -184,6 +192,7 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
+    minHeight: 44,
     borderRadius: radii.pill,
     backgroundColor: colors.bgCard,
     borderWidth: 1,
@@ -207,7 +216,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeText: {
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.bold,
     color: colors.textInverse,
   },
