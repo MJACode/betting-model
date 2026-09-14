@@ -3260,6 +3260,16 @@ NCAAF_ODDS_API_MAP: dict = {
     # that will receive the final. The same shape as App State and UMass above.
     "Southern Mississippi Golden Eagles": "Southern Miss",
     "Southern Mississippi": "Southern Miss",
+    # 2026-09-14: ncaaf_game_identity CRIT on the forward slate. CFBD's school
+    # is "SE Louisiana"; The Odds API writes "Southeastern Louisiana Lions".
+    # No fold, no "school mascot" (that would need "SE Louisiana Lions"), and
+    # "SE Louisiana" does not prefix "Southeastern ...". alt_names is NULL.
+    # Same shape as Southern Miss above. Measured pair: UL Monroe 2026-09-19,
+    # CFBD row NCAAF_2026-09-19_se-louisiana_ul-monroe (created 2026-08-29)
+    # vs live row ..._southeastern-louisiana-lions_ul-monroe (created 2026-09-14),
+    # same commence_time 2026-09-19T20:30:00Z.
+    "Southeastern Louisiana Lions": "SE Louisiana",
+    "Southeastern Louisiana": "SE Louisiana",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.

@@ -34,6 +34,7 @@ from data.ingestors.cfbd_ingestor import (  # noqa: E402
     ("Texas A&M", "texas-a-m"),
     ("San José State", "san-jose-state"),
     ("UL Monroe", "ul-monroe"),
+    ("SE Louisiana", "se-louisiana"),
 ])
 def test_slug(school, expected):
     assert ncaaf_slug(school) == expected
@@ -974,3 +975,82 @@ def full_registry(monkeypatch):
 ])
 def test_with_the_visitor_in_the_registry_it_resolves_to_itself(full_registry, name, school):
     assert full_registry.resolve_odds_api_school(name) == school
+
+
+# ── SE Louisiana / Southeastern Louisiana Lions (2026-09-14) ────────────────
+#
+# ncaaf_game_identity CRIT: UL Monroe 2026-09-19 had two games rows, same
+# commence_time. CFBD's school is "SE Louisiana"; The Odds API writes
+# "Southeastern Louisiana Lions". alt_names is NULL. No automatic rule
+# bridges them — that is why the map entry exists.
+
+
+@pytest.fixture
+def se_louisiana_registry(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "SE Louisiana", "mascot": "Lions", "alt": []},
+        {"school": "UL Monroe", "mascot": "Warhawks", "alt": []},
+    ])
+    return cf
+
+
+def test_no_resolver_rule_bridges_southeastern_louisiana_to_se_louisiana(
+        se_louisiana_registry, monkeypatch):
+    """Watched failing shape: school in the registry, map empty, identity.
+
+    Exact school misses (SE Louisiana != Southeastern Louisiana Lions).
+    School+mascot misses (SE Louisiana Lions != Southeastern Louisiana Lions).
+    Prefix misses ("SE Louisiana" is not a prefix of "Southeastern ...").
+    Alt is empty. Without the map the odds ingest would mint the live id
+    that made ncaaf_game_identity CRIT.
+    """
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert se_louisiana_registry.resolve_odds_api_school(
+        "Southeastern Louisiana Lions") == "Southeastern Louisiana Lions"
+    assert se_louisiana_registry.resolve_odds_api_school(
+        "Southeastern Louisiana") == "Southeastern Louisiana"
+
+
+def test_the_map_resolves_southeastern_louisiana_to_the_cfbd_school(
+        se_louisiana_registry):
+    """This assertion fails if the map entry is removed."""
+    assert se_louisiana_registry.resolve_odds_api_school(
+        "Southeastern Louisiana Lions") == "SE Louisiana"
+    assert se_louisiana_registry.resolve_odds_api_school(
+        "Southeastern Louisiana") == "SE Louisiana"
+
+
+def test_the_resolved_id_is_the_cfbd_ul_monroe_row(se_louisiana_registry):
+    away = se_louisiana_registry.resolve_odds_api_school(
+        "Southeastern Louisiana Lions")
+    home = se_louisiana_registry.resolve_odds_api_school("UL Monroe Warhawks")
+    assert build_ncaaf_game_id("2026-09-19", away, home) == \
+        "NCAAF_2026-09-19_se-louisiana_ul-monroe"
+
+
+def test_odds_ingest_builds_the_cfbd_id_for_this_matchup(
+        se_louisiana_registry):
+    """_process_events is what minted the duplicate on 2026-09-14."""
+    from data.ingestors.odds_ingestor import _process_events
+    event = {
+        "id": "sel-ulm",
+        "commence_time": "2026-09-19T20:30:00Z",
+        "home_team": "UL Monroe Warhawks",
+        "away_team": "Southeastern Louisiana Lions",
+        "bookmakers": [{
+            "key": "draftkings",
+            "markets": [{"key": "totals", "outcomes": [
+                {"name": "Over", "price": -110, "point": 52.5},
+                {"name": "Under", "price": -110, "point": 52.5},
+            ]}],
+        }],
+    }
+    games, odds = _process_events(
+        [event], "NCAAF", "open", "2026-09-14T06:13:44Z")
+    assert [g["game_id"] for g in games] == [
+        "NCAAF_2026-09-19_se-louisiana_ul-monroe"]
+    assert games[0]["away_team"] == "SE Louisiana"
+    assert games[0]["home_team"] == "UL Monroe"
+    assert {o["game_id"] for o in odds} == {
+        "NCAAF_2026-09-19_se-louisiana_ul-monroe"}
