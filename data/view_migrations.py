@@ -63,6 +63,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-12: int32 was an arbitrary ceiling on a third-party feed's
     # numbers, and Postgres does not name the column when one overflows.
     "widen_ncaaf_plays_ints.sql",
+    # 2026-09-12: BIGINT was not enough either -- a CFBD value exceeds 2^63.
+    # NUMERIC has no ceiling, which ends the guessing rather than raising it.
+    "ncaaf_plays_numeric_not_bigint.sql",
     # 2026-09-10 (session 280, mike): point-in-time ISSUED weather forecasts
     # for NCAAF games, the train/serve repair for the totals model's wx_*
     # features (it trained on reanalysis and is served a forecast).

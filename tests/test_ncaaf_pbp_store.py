@@ -211,31 +211,37 @@ def test_a_one_season_build_gets_its_own_filename():
 
 # ── the column Postgres refuses to name ──────────────────────────────────────
 
-def test_an_out_of_range_value_names_its_column_and_its_play():
-    """The 2026-09-12 failure, pinned. `NumericValueOutOfRange: integer out of
-    range` arrives with no column, no value and no row, so the first run of the
-    worker job was undiagnosable from its own traceback."""
-    from ncaaf_live.backtest.pull_pbp import _check_ranges
+def test_a_value_past_bigint_is_seen_and_reported_not_silently_dropped():
+    """The 2026-09-12 failure, pinned. `NumericValueOutOfRange` arrives with no
+    column, no value and no row, so both failed runs were undiagnosable from
+    their own tracebacks. The scan has to SEE a value past 2^63 and carry it
+    into the job result -- a range report that loses the outlier is the one
+    thing worse than no report."""
+    from ncaaf_live.backtest.pull_pbp import BIGINT_MAX, _report_ranges
     df = _plays(3).rename(columns=DB_COLUMNS)
     df["play_id"] = df["play_id"].astype(str)
     df["game_id_cfbd"] = df["game_id_cfbd"].astype(str)
-    # int64 cannot hold a value BIGINT rejects, so the realistic shape is an
-    # object column carrying a Python int -- what a bad parse actually yields.
     df["yards_gained"] = df["yards_gained"].astype(object)
-    df.loc[1, "yards_gained"] = 2 ** 64
+    df.loc[1, "yards_gained"] = 2 ** 70
 
-    with pytest.raises(ValueError) as e:
-        _check_ranges(df, 2025)
-    msg = str(e.value)
-    assert "yards_gained" in msg          # the column Postgres would not name
-    assert "2025p1" in msg                # and which play it was
-    assert "2025" in msg
+    ranges = _report_ranges(df, 2025)
+    assert ranges["yards_gained"][1] == 2 ** 70      # exact, not a float
+    assert ranges["yards_gained"][1] > BIGINT_MAX
 
 
-def test_ordinary_values_pass_the_range_check():
-    from ncaaf_live.backtest.pull_pbp import _check_ranges
+def test_the_scan_survives_nulls_and_non_numeric_cells():
+    """It walks raw objects, so it must not die on what a feed actually sends."""
+    from ncaaf_live.backtest.pull_pbp import _extremes
+    assert _extremes([None, 3, float("nan"), "7", 1]) == (1, 7)
+    assert _extremes([None, None]) == (None, None)
+    assert _extremes([]) == (None, None)
+
+
+def test_ordinary_values_report_their_range_and_never_raise():
+    from ncaaf_live.backtest.pull_pbp import _report_ranges
     df = _plays(5).rename(columns=DB_COLUMNS)
-    _check_ranges(df, 2025)               # must not raise
+    got = _report_ranges(df, 2025)
+    assert got["period"] == [1, 1]
 
 
 def test_a_stored_season_reports_the_ranges_it_saw():
