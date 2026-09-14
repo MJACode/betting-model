@@ -75,16 +75,18 @@ def _game(raw, gid="MLB_2026-09-04_DET_CLE", date="2026-09-04",
 
 def _pick(raw, *, result=None, signal="BET", created="2026-09-04 17:21:01+00",
           side="over", player="671106", model="mlb_prop_pitcher_hits",
-          gid="MLB_2026-09-04_DET_CLE", date="2026-09-04", line=4.5, odds=116.0):
+          gid="MLB_2026-09-04_DET_CLE", date="2026-09-04", line=4.5, odds=116.0,
+          player_key=None, prop_market=None, sport="MLB"):
     raw.execute("""INSERT INTO picks (game_id, model_id, sport, game_date,
                    pick_side, pick_label, model_probability, dk_implied_prob,
                    edge, dk_odds, scored_line, kelly_fraction, recommended_bet,
-                   bankroll_at_pick, signal_type, player_id, result, created_at)
-                   VALUES (?,?, 'MLB', ?, ?, 'Logan Allen Over 4.5 Hits',
+                   bankroll_at_pick, signal_type, player_id, result, created_at,
+                   player_key, prop_market)
+                   VALUES (?,?, ?, ?, ?, 'Logan Allen Over 4.5 Hits',
                            0.6481, 0.4629, 0.1852, ?, ?, 0.02, 20.0, 1000.0,
-                           ?, ?, ?, ?)""",
-                (gid, model, date, side, odds, line, signal, player, result,
-                 created))
+                           ?, ?, ?, ?, ?, ?)""",
+                (gid, model, sport, date, side, odds, line, signal, player,
+                 result, created, player_key, prop_market))
 
 
 # ── The lock ────────────────────────────────────────────────────────────────
@@ -177,6 +179,11 @@ def test_the_unique_index_migration_is_active():
     from data import view_migrations as vm
     assert "picks_one_row_per_pick.sql" in vm.ACTIVE_MIGRATIONS
     assert (vm.MIGRATIONS_DIR / "picks_one_row_per_pick.sql").exists()
+    assert "widen_picks_one_row_per_pick_2026_09_13.sql" in vm.ACTIVE_MIGRATIONS
+    assert (vm.MIGRATIONS_DIR
+            / "widen_picks_one_row_per_pick_2026_09_13.sql").exists()
+    assert (vm.ACTIVE_MIGRATIONS.index("widen_picks_one_row_per_pick_2026_09_13.sql")
+            > vm.ACTIVE_MIGRATIONS.index("picks_one_row_per_pick.sql"))
 
 
 def test_the_index_waits_for_a_clean_table():
@@ -248,4 +255,36 @@ def test_a_re_scored_line_is_still_the_same_pick(conn):
     _game(conn, home_score=7)
     _pick(conn, result="WIN", created="2026-09-04 17:21:01+00", line=4.5)
     _pick(conn, result="WIN", created="2026-09-04 22:14:01+00", line=5.5)
+    assert len(_survivors(conn)) == 1
+
+
+def test_null_player_id_nfl_prop_rows_are_not_duplicates(conn):
+    """THE DAL@NYG COLLISION. Two unders in one game, player_id NULL, different
+    player_key + prop_market. The old PARTITION BY treated them as copies and
+    would have deleted one. They are two picks."""
+    _game(conn, gid="NFL_2026_01_DAL_NYG", date="2026-09-13")
+    _pick(conn, player=None, player_key="dakprescott",
+          prop_market="player_pass_yds", side="under",
+          model="nfl_prop_market", gid="NFL_2026_01_DAL_NYG",
+          date="2026-09-13", sport="NFL")
+    _pick(conn, player=None, player_key="ceedeelamb",
+          prop_market="player_receptions", side="under",
+          model="nfl_prop_market", gid="NFL_2026_01_DAL_NYG",
+          date="2026-09-13", sport="NFL")
+    assert len(_survivors(conn)) == 2
+
+
+def test_the_same_nfl_prop_proposition_is_still_one_pick(conn):
+    """Widening the key must not stop a true copy from being a copy."""
+    _game(conn, gid="NFL_2026_01_DAL_NYG", date="2026-09-13")
+    _pick(conn, player=None, player_key="dakprescott",
+          prop_market="player_pass_yds", side="under",
+          model="nfl_prop_market", gid="NFL_2026_01_DAL_NYG",
+          date="2026-09-13", sport="NFL",
+          created="2026-09-13 17:00:00+00")
+    _pick(conn, player=None, player_key="dakprescott",
+          prop_market="player_pass_yds", side="under",
+          model="nfl_prop_market", gid="NFL_2026_01_DAL_NYG",
+          date="2026-09-13", sport="NFL",
+          created="2026-09-13 17:10:00+00")
     assert len(_survivors(conn)) == 1

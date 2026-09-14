@@ -94,6 +94,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # NOTICE) until scripts/dedupe_picks.py has cleared the 63 rows a released
     # lock wrote, then creates the index on the next pass.
     "picks_one_row_per_pick.sql",
+    # 2026-09-13 (Matt / Reviewer #699 A2): the index above keyed only on
+    # player_id, so nfl_prop_market's null-player_id rows collapsed per side
+    # and DAL@NYG aborted the card. Widens with player_key + prop_market
+    # (publish_keys.KEY_PARTS). MUST run after picks_one_row_per_pick.sql,
+    # which owns the original name and would otherwise leave the narrow index.
+    "widen_picks_one_row_per_pick_2026_09_13.sql",
     # 2026-09-07: the promoted calibration slot, corrected on the day the
     # decision path reached player props. One-off; guards on "every promoted row
     # carries its own method" and skips forever after.

@@ -264,6 +264,7 @@ _INSERT = """
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s)
+    ON CONFLICT DO NOTHING
 """
 
 
@@ -273,6 +274,13 @@ def publish(conn, rows: list[dict]) -> int:
     delete-and-replace: an edge here is a disagreement that gets corrected, so
     re-pricing a locked pick at a number the market has since fixed would
     replace a bet that was taken with one that never existed.
+
+    ON CONFLICT DO NOTHING is the same backstop as models.scorer._insert_picks:
+    uq_picks_one_row_per_pick (widened 2026-09-13 with player_key +
+    prop_market) makes a true duplicate an IntegrityError, which would abort
+    the card the way DAL@NYG did when the index was still player_id-only. The
+    SELECT above is what PREVENTS the conflict; this only makes a race
+    harmless.
     """
     # picks.game_id is a FOREIGN KEY into games, and an NFL game only gets a
     # games row from the daily props-data step. The first production NFL prop
