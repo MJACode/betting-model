@@ -84,5 +84,6 @@ feature list.
 - Paid news feeds (`PLAYER_NEWS_PROVIDER`)
 - Unpausing paused distributional props / sacks
 - Teammate-volume (QB out → WR over) — §3a found no CLV
-- MLB ace / NHL goalie / NBA star DNP gates
+- MLB ace / NHL goalie / NBA star DNP gates — see
+  `docs/game_injury_gate.md` (landed after this PR)
 - Changing `nfl_opener_spread` / `nfl_wind_totals` units

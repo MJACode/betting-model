@@ -72,4 +72,6 @@ jobs:
             tests/test_nfl_prop_injury_veto.py \
             tests/test_nfl_injury_ingest.py \
             tests/test_injuries_status_ts_migration.py \
+            tests/test_game_injury_gate.py \
+            tests/test_espn_nhl_probables.py \
             tests/test_nfl_prop_two_sharps.py

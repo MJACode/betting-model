@@ -565,6 +565,9 @@ def score_game(conn: DBConnection,
     if no_signal:
         _apply_no_signal(picks, no_signal)
 
+    _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
+                            home_team, away_team, odds)
+
     # Write to DB
     if picks and not dry_run:
         _insert_picks(conn, picks)
@@ -854,6 +857,8 @@ def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
     # The best bettable price on each side, and the decision re-made there
     # (2026-09-09) -- the same step the two-way game path takes.
     _stamp_best_game_prices(conn, picks, "h2h_3way")
+    _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
+                            home_team, away_team, odds)
     for p in picks:
         p.update(_get_public_betting(conn, game_id, "h2h_3way", p["pick_side"]))
         p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
@@ -1090,6 +1095,38 @@ def _paused_signal(model_id: str, signal_type: str) -> tuple[str, str | None]:
 def _pause_note(model_id: str) -> str | None:
     """The persisted reason on every row a paused model writes."""
     return "model paused" if _is_paused(model_id) else None
+
+
+def _apply_game_injury_gate(conn, picks: list[dict], sport: str, game_id: str,
+                            game_date: str, home_team: str, away_team: str,
+                            odds: dict | None) -> None:
+    """Refuse a BET when the named starter/star/goalie is Out before the quote.
+
+    Same clock as models.nfl_prop_injury_veto. Fail-open on a missing conn,
+    a sport this gate does not cover, or a missing timestamp. A NONE here
+    is not locked (the game lock is BET-only), so a later pass that has
+    picked up the new starter can still fire — that is the reprice path.
+    """
+    if not picks or conn is None:
+        return
+    try:
+        from models.game_injury_gate import (
+            apply_to_picks, load_sport_injury_index, relevant_players,
+        )
+        relevant = relevant_players(conn, sport, game_date, home_team, away_team)
+        index = load_sport_injury_index(conn, sport, game_date)
+        quote_ts = None
+        for p in picks:
+            if p.get("_quote_snapshot_at"):
+                quote_ts = p["_quote_snapshot_at"]
+                break
+        if quote_ts is None and odds:
+            quote_ts = odds.get("snapshot_at")
+        diag = apply_to_picks(picks, quote_ts, relevant, index)
+        if diag.get("injury_gate"):
+            logger.info(f"  {game_id}: injury gate vetoed {diag['injury_gate']} BET(s)")
+    except Exception as exc:  # noqa: BLE001 — fail open
+        logger.debug(f"  {game_id}: injury gate skipped ({exc})")
 
 
 def _apply_no_signal(picks: list[dict], reason: str) -> list[dict]:
@@ -1920,6 +1957,7 @@ def _stamp_best_game_prices(conn: DBConnection, picks: list[dict],
             logger.debug(f"  best-price lookup failed for {p.get('pick_label')}: {exc}")
             best = None
         p.update(_best_fields(best, float(p["model_probability"])))
+        p["_quote_snapshot_at"] = (best or {}).get("snapshot_at")
         _requalify_at_best(p, best, is_prop=False)
 
 
@@ -2017,7 +2055,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     """
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price",
-            "home_link", "away_link", "draw_link", "over_link", "under_link"]
+            "home_link", "away_link", "draw_link", "over_link", "under_link",
+            "snapshot_at"]
 
     cutoff = _pregame_cutoff(conn, game_id)
     pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
@@ -2034,7 +2073,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
         row = conn.execute(f"""
             SELECT home_price, away_price, draw_price,
                    spread_home, total_line, over_price, under_price,
-                   home_link, away_link, draw_link, over_link, under_link
+                   home_link, away_link, draw_link, over_link, under_link,
+                   snapshot_at
             FROM odds
             WHERE game_id   = ?
               AND market    = ?
@@ -2063,7 +2103,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
         row = conn.execute(f"""
             SELECT home_price, away_price, draw_price,
                    spread_home, total_line, over_price, under_price,
-                   home_link, away_link, draw_link, over_link, under_link
+                   home_link, away_link, draw_link, over_link, under_link,
+                   snapshot_at
             FROM odds
             WHERE game_id   = ?
               AND market    = ?
@@ -2334,6 +2375,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     # prop scorers build picks in eleven places. Resolve it once here.
     for p in picks:
         live_ctx = p.pop("_live_ctx", None)
+        p.pop("_quote_snapshot_at", None)
         if live_ctx is not None and "best_book" not in p:
             lg_id, lmarket = live_ctx
             try:
