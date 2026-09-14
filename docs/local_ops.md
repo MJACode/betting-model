@@ -54,8 +54,11 @@ done
 artifact so the Railway worker can load it, and remove the superseded one.
 
 ```bash
-git add -f models/saved/<model_id>_2*.pkl
-git rm -f --ignore-unmatch models/saved/<old_version>.pkl
+git add -f models/saved/<model_id>_<new_timestamp>.pkl
+# Keep-list is model_registry.is_active=1, not newest-filename. Update both:
+#   .gitignore  !models/saved/<new>.pkl  (and drop the old ! line)
+#   models/saved/MANIFEST.md
+git rm --cached --ignore-unmatch models/saved/<old_version>.pkl
 git commit -m "Retrain <model_id>" && git push
 ```
 

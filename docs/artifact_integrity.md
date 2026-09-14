@@ -59,6 +59,12 @@ The restore happened to save it. **The check would have printed the identical
   the machine that has it. Ignore rules come from `git check-ignore`, so
   `models/saved/_baseline/` (throwaway `--no-register` comparison runs) stays
   excluded by `.gitignore` rather than by this test's memory of it.
+- `test_gitignore_keep_list_matches_tracked_timestamped_pkls` — after the
+  2026-09-14 diet, dated pkls that are not the live `model_registry` path are
+  gitignored **and** `git rm --cached`. The keep-list in `.gitignore` /
+  `models/saved/MANIFEST.md` must equal `git ls-files models/saved/*.pkl`.
+  Newest-filename is not the rule: #710 would have dropped the live WNBA
+  assists artifact. **Do not gitignore `nfl/data/odds_cache/`.**
 - `test_the_tripwire_can_actually_see_an_untracked_artifact` — plants a probe
   and asserts it is spotted. The real test passes on a clean tree, which looks
   identical to a test that inspects nothing.

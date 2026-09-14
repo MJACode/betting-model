@@ -239,7 +239,11 @@ def test_the_tripwire_can_actually_see_an_untracked_artifact():
     removes it.
     """
     saved = ROOT / "models" / "saved"
-    planted = saved / "_tripwire_probe_00000000_000000.pkl"
+    # Must NOT match models/saved/*_YYYYMMDD_HHMMSS.pkl — that pattern is the
+    # #710 repo-diet ignore, and a dated probe would be ignored, making this
+    # tripwire (and the one above) silently vacuous. Watched fail on master
+    # with `_tripwire_probe_00000000_000000.pkl`.
+    planted = saved / "_tripwire_probe.pkl"
     planted.write_bytes(b"not a real model")
     try:
         rel = planted.relative_to(ROOT).as_posix()
@@ -283,7 +287,80 @@ def test_more_than_one_ignored_path_survives_the_round_trip():
 def test_a_path_that_is_not_ignored_is_not_reported():
     """The other direction: over-reporting ignores would make the tripwire
     vacuous, which is the failure mode that actually matters."""
-    assert _ignored(["models/saved/definitely_tracked_00000000_000000.pkl"]) == set()
+    # A timestamped name matches the diet ignore (`*_YYYYMMDD_HHMMSS.pkl`).
+    # The property under test is "a path that is not ignored", so this must
+    # be a name the keep-list pattern does not swallow.
+    assert _ignored(["models/saved/definitely_tracked.pkl"]) == set()
+
+
+def _gitignore_keep_pkls() -> set[str]:
+    gi = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    return {ln[1:] for ln in gi.splitlines()
+            if ln.startswith("!models/saved/") and ln.endswith(".pkl")}
+
+
+def _manifest_keep_pkls() -> set[str]:
+    text = (ROOT / "models" / "saved" / "MANIFEST.md").read_text(encoding="utf-8")
+    start = text.index("```\n") + 4
+    end = text.index("\n```", start)
+    return {ln.strip() for ln in text[start:end].splitlines() if ln.strip()}
+
+
+def test_a_superseded_timestamped_pkl_is_ignored():
+    """The diet pattern: dated pkls that are not on the keep-list stay out
+    of a fresh clone. A name that is not the live path must match."""
+    rel = "models/saved/not_the_live_version_19990101_000000.pkl"
+    assert rel in _ignored([rel]), rel
+
+
+def test_gitignore_keep_list_matches_tracked_timestamped_pkls():
+    """#710 gitignored the dated pattern but left old files tracked.
+    After `git rm --cached`, every tracked dated pkl is on the keep-list
+    and vice versa — otherwise a retrain ships a file the next clone drops.
+    """
+    tracked = {ln.strip() for ln in _git("ls-files", "models/saved").splitlines()
+               if ln.strip().endswith(".pkl")}
+    keep = _gitignore_keep_pkls()
+    assert tracked == keep, (
+        f"tracked-not-kept {sorted(tracked - keep)}\n"
+        f"kept-not-tracked {sorted(keep - tracked)}"
+    )
+    assert tracked == _manifest_keep_pkls(), (
+        "models/saved/MANIFEST.md drifted from .gitignore keep-list / git ls-files"
+    )
+
+
+def test_the_live_wnba_assists_artifact_stays_tracked():
+    """#710 keep-list used newest-filename and kept the UNREGISTERED NB
+    artifact. Production `load_model` reads `model_registry.is_active = 1`,
+    which on 2026-09-14 was 20260531_125558. Both stay tracked: the live
+    path because scoring loads it (no model_artifacts blob), the NB file
+    because tests/test_wnba_prop_market.py asserts it remains on disk.
+    """
+    tracked = {ln.strip() for ln in _git("ls-files", "models/saved").splitlines()}
+    live = "models/saved/wnba_prop_player_assists_20260531_125558.pkl"
+    nb = "models/saved/wnba_prop_player_assists_20260831_213734.pkl"
+    assert live in tracked, live
+    assert nb in tracked, nb
+    assert live in _gitignore_keep_pkls()
+    assert nb in _gitignore_keep_pkls()
+
+
+def test_odds_cache_is_not_gitignored():
+    """The pkl diet is not a licence to drop the Odds API cache.
+    CLAUDE.md / #710: do NOT gitignore nfl/data/odds_cache/.
+    """
+    gi = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    for ln in gi.splitlines():
+        stripped = ln.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        assert "odds_cache" not in stripped, ln
+    files = [ln.strip() for ln in _git("ls-files", "nfl/data/odds_cache").splitlines()
+             if ln.strip()]
+    assert files, "nfl/data/odds_cache vanished from git"
+    sample = files[0]
+    assert sample not in _ignored([sample]), sample
 
 
 def test_the_health_check_reports_what_it_opened_not_what_it_enumerated():

@@ -69,14 +69,15 @@ data/local/*.csv
 data/local/over_lean*.csv
 
 # ── Repo diet (2026-09-14): inactive versioned model artifacts ───────────────
-# Keep the latest .pkl per model_id in the default checkout (active restore path
-# for Railway / local scoring). Older versioned pkls are gitignored so new clones
-# stay thin. They remain in git HISTORY until a pusher runs `git rm --cached`
-# (see MANIFEST.md). ACTIVE artifacts and models/saved/nfl_prop_params.json stay
-# tracked. Cloud restore for any missing active file is model_artifacts via
-# models.trainer._restore_artifact / model_registry.
+# Keep the LIVE scoring .pkl (model_registry.is_active = 1), not merely the
+# newest filename per model_id. Older versioned pkls are gitignored AND
+# `git rm --cached` so new clones stay thin; bytes remain in git history.
+# Canonical keep-list: models/saved/MANIFEST.md. ACTIVE artifacts and
+# models/saved/nfl_prop_params.json stay tracked. Cloud restore for a missing
+# active file is model_artifacts via models.trainer._restore_artifact — but
+# many live artifacts have NO blob, so git is still the worker's copy.
 #
-# Pattern: ignore all timestamped pkls, then un-ignore the active set.
+# Pattern: ignore all timestamped pkls, then un-ignore the keep set.
 models/saved/*_????????_??????.pkl
 !models/saved/mlb_f5_moneyline_20260903_163809.pkl
 !models/saved/mlb_f5_over_under_20260508_091542.pkl
@@ -128,6 +129,7 @@ models/saved/*_????????_??????.pkl
 !models/saved/ufc_total_rounds_20260619_211436.pkl
 !models/saved/wnba_moneyline_20260531_120224.pkl
 !models/saved/wnba_over_under_20260719_113025.pkl
+!models/saved/wnba_prop_player_assists_20260531_125558.pkl
 !models/saved/wnba_prop_player_assists_20260831_213734.pkl
 !models/saved/wnba_prop_player_points_20260719_114702.pkl
 !models/saved/wnba_prop_player_pra_20260719_115815.pkl
