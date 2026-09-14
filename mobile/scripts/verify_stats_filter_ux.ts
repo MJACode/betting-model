@@ -40,8 +40,8 @@ check('sport-change resets basis', /setBasis\('perGame'\)/.test(sportReset));
 
 check('Availability names slate vs fixtures',
   /This slate is the day.s card/.test(stats) && /Games above is specific fixtures/.test(stats));
-check('the Games-wins note names both grains',
-  /Games is specific fixtures; this switch is the whole slate/.test(stats));
+check('the Games-wins note tells the user how to undo',
+  /Clear Games to use the slate cut/.test(stats));
 
 check('UFC empty note does not say search above',
   !/filter by fighter with the search above/.test(stats));
@@ -50,6 +50,8 @@ check('UFC empty note points at Search without a false direction',
 check('Search is rendered first when Games is empty',
   /gamesEmpty \? searchFilterSection : null/.test(stats) &&
     /gamesEmpty \? null : searchFilterSection/.test(stats));
+check('Search does not hop during the slate read',
+  /sport === 'UFC' \|\| \(!slateChecking && pickableGames\.length === 0\)/.test(stats));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

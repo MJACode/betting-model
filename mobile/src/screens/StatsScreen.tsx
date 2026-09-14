@@ -1606,11 +1606,17 @@ export function StatsScreen() {
   // (UFC), it moves above so the Games empty note can name a control that is
   // actually next to it — it used to say "search above" while Search sat
   // under Availability and Matchup.
+  //
+  // Only hop when we KNOW there are no fixtures. An empty list during the
+  // slate read is "checking", not UFC — Availability already refuses to call
+  // that window "no games" (UX review, 2026-09-14).
+  const gamesEmpty =
+    sport === 'UFC' || (!slateChecking && pickableGames.length === 0);
   const searchFilterSection = (
     <FilterSection
       title="Search"
       summary={query.trim() ? `“${query.trim()}”` : 'Any player'}
-      defaultOpen={query.trim().length > 0}
+      defaultOpen={gamesEmpty || query.trim().length > 0}
     >
       <View style={styles.searchWrap}>
         <Ionicons name="search" size={16} color={colors.textTertiary} />
@@ -1632,7 +1638,6 @@ export function StatsScreen() {
       </View>
     </FilterSection>
   );
-  const gamesEmpty = pickableGames.length === 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -2224,7 +2229,7 @@ export function StatsScreen() {
               : !hasSlate
                 ? `No ${sport} games in the next week, so there is nobody to narrow to.`
                 : gamesPicked
-                  ? 'Games is specific fixtures; this switch is the whole slate. A picked game already narrows the board, so this stands down. Clear Games to use the slate cut.'
+                  ? 'A picked game already narrows the board. Clear Games to use the slate cut.'
                   : tonightActive
                     ? 'Showing only players on this slate (the day’s card, not a specific fixture).'
                     : 'Showing every player, not just this slate. Lines come from each one’s next game.'}
