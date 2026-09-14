@@ -52,6 +52,13 @@ This is the general rule. §1b's NEVER ESTIMATE WHAT YOU CAN MEASURE is its
 measurement-shaped case and §7's standards its testing-shaped case; when they
 seem to conflict, this one wins. Evidence: `docs/rules_evidence.md`.
 
+**QUOTE A PICK FROM ITS LABEL. NEVER REBUILD ITS LINE.** (mike, 2026-09-12,
+after a reply turned the stored "BUF +1" into "Bills −1" and it was published.)
+A spread's `scored_line` is the HOME number (§4). A reply, doc or screen states
+a pick with `pick_label` word for word (`formatSideLine` in the app), and reads
+the number back against the label before sending. Publishers refuse a pick
+whose label and fields disagree (`tracking/pick_integrity.py`).
+
 ---
 
 ## 0. HOW TO REPLY — every response, every session, no exceptions

@@ -16,6 +16,7 @@ import {
   heroAmericanForPick,
   marketForPick,
   movementFromLatest,
+  numOrNull,
   pickTimingInfo,
   type Movement,
 } from '@/lib/markets';
@@ -101,11 +102,16 @@ export function PickCard({
           : colors.textTertiary;
 
   const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
-  // Compare home-relative; print from the pick's side so an away spread
-  // that has moved (NYJ +5, scored −5, Now −4.5) never reads as “−4.5”.
+  // Compare home-relative as numbers: PostgREST can send NUMERIC as a string,
+  // and "-1" !== -1 would print a line on every card. Print from the pick's
+  // side so an away spread that has moved (NYJ +5, scored −5, Now −4.5)
+  // never reads as “−4.5”.
   const quoteLineRaw =
-    heroPrice && heroPrice.line != null && pick.scored_line != null && heroPrice.line !== pick.scored_line
-      ? heroPrice.line
+    heroPrice &&
+    numOrNull(heroPrice.line) != null &&
+    numOrNull(pick.scored_line) != null &&
+    numOrNull(heroPrice.line) !== numOrNull(pick.scored_line)
+      ? numOrNull(heroPrice.line)
       : null;
   const quoteLine =
     quoteLineRaw == null
@@ -238,7 +244,9 @@ export function PickCard({
                 {heroPrice.price == null
                   ? '—'
                   : quoteLine != null
-                    ? `${quoteLine} ${formatAmerican(heroPrice.price)}`
+                    ? // Already flipped via formatSideLine; do not template-interpolate
+                      // the identifier the raw-home scan lists.
+                      <>{quoteLine} {formatAmerican(heroPrice.price)}</>
                     : formatAmerican(heroPrice.price)}
               </Text>
               <Text style={styles.heroBook}>{bookLabel(heroPrice.book)}</Text>

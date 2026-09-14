@@ -151,7 +151,7 @@ When I ask "what are today's picks?" or similar:
 
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
    - Matchup: "AWY @ HOM"
-   - Pick: pick_label as stored
+   - Pick: pick_label as stored, word for word. NEVER rebuild the line from scored_line: for spreads it is the HOME team's number, so an away pick's line is its negation (a "BUF +1" pick stores -1)
    - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL)
    - Model %: model_probability × 100, 1 decimal (e.g. 67.3%)
    - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110).

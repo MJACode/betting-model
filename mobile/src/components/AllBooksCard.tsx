@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   allBookPrices,
   bookName,
+  formatSideLine,
   gameMarketForModel,
   isBettableBook,
   propMarketForModel,
@@ -72,7 +73,9 @@ export function AllBooksCard({
             accessibilityRole="button"
             accessibilityState={{ disabled: reference }}
             disabled={reference}
-            accessibilityLabel={`${reference ? '' : 'Open '}${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
+            accessibilityLabel={`${reference ? '' : 'Open '}${bookName(q.bookmaker)}, ${
+              q.line != null ? `${formatSideLine(q.line, pick.pick_side, market)} at ` : ''
+            }${formatAmerican(q.price)}${
               q.isBest ? ', best price' : ''
             }${reference ? ', reference price, not bettable' : ''}`}
             // The shared hand-off: the betslip link, else the book's app or
@@ -96,7 +99,9 @@ export function AllBooksCard({
 
             {showLine ? (
               <Text style={[styles.line, styles.colLine]}>
-                {q.line != null ? q.line : '—'}
+                {/* A book row's spread is the HOME number; show the pick's side,
+                    or a "BUF +1" pick reads "-1" on every row (2026-09-12). */}
+                {formatSideLine(q.line, pick.pick_side, market)}
               </Text>
             ) : null}
 
