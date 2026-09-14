@@ -42,6 +42,24 @@ from models.prop_ladder import Ladder, from_kalshi
 # Kalshi series -> the market name our board uses. Only per-GAME player series;
 # season-long, head-to-head, "most yards" and team series are deliberately absent
 # because they are different propositions that happen to share a stat name.
+#
+# Four series added 2026-09-14 after a public `/series?category=Sports` inventory
+# (3,766 series; 357 NFL-looking). Each had open markets that day with the same
+# "Player: N+ <stat>" title, `floor_strike`, and `KXNFL…-YYMONDDTEAMTEAM` event
+# ticker as the original six. The 2026-09-08 probe that found "Kalshi runs no
+# receptions, attempts or completions market at all" was true of that slate;
+# those series are live now. Coverage-only — settled Kalshi NFL prop history
+# still starts at 2026 preseason; this is not a §5c grade.
+#
+# Probed the same day and NOT mapped:
+#   KXNFLSACK / KXNFLTKL / KXNFLINT — series templates exist
+#     (FOOTBALLENTITYSTAT, last_updated 2026-09-10) but 0 events and 0 markets
+#     at any status. KXNFLTKL is also "Tackles", not player_tackles_assists.
+#   KXNFLANYTD — series exists; leftover events are 2026-01/02 playoff games
+#     with 0 nested markets; 0 open.
+#   KXNFLTD — open, but mixes player TD-count with D/ST; not player_anytime_td.
+#   KXNFLTEAMSACK / KXNFLGAMESACK / KXNFLFIRSTTD / *H2H / MOST* / SEASON* —
+#     team, game, first-TD, head-to-head, most-yards, or season-long.
 SERIES_MARKET = {
     "KXNFLPASSYDS": "player_pass_yds",
     "KXNFLRECYDS": "player_reception_yds",
@@ -49,6 +67,10 @@ SERIES_MARKET = {
     "KXNFLRRYDS": "player_rush_reception_yds",
     "KXNFLPASSTDS": "player_pass_tds",
     "KXNFLPASSINT": "player_pass_interceptions",
+    "KXNFLPASSATT": "player_pass_attempts",
+    "KXNFLPASSCOMP": "player_pass_completions",
+    "KXNFLREC": "player_receptions",
+    "KXNFLRSHATT": "player_rush_attempts",
 }
 
 _BASE = config.KALSHI_API_BASE.rstrip("/")
