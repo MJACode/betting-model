@@ -161,32 +161,43 @@ class TestPassSteps:
 
 def _add_signal(c, *, sport="MLB", model="mlb_moneyline", locked=200,
                 prob=0.80, edge=0.15, suffix="", delivered=False,
-                paused=0, prob_only=0, min_prob=0.70, min_edge=0.10):
+                paused=0, prob_only=0, min_prob=0.70, min_edge=0.10,
+                void=False, game_date=None, commence=None, opening_only=False):
     c.execute("INSERT OR REPLACE INTO model_action_thresholds"
               " (model_id, min_prob, min_edge, prob_only, paused, min_odds)"
               " VALUES (?,?,?,?,?,NULL)", (model, min_prob, min_edge, prob_only, paused))
-    lock_key = f"G1:{model}{suffix}"
-    # THE SAME CLOCK THE CHECK USES, and now that is ET by construction rather
-    # than by luck. Stamping the fixture in UTC made these tests fail every
-    # evening after 8pm ET and pass again after midnight: the row landed on
-    # TOMORROW's date, the check's `game_date <= run_date` bound dropped it, and
-    # an undelivered signal read as delivered.
-    #
-    # That was first "fixed" by matching the check's naive datetime.now() --
-    # which pinned the FIXTURE to the bug, and only worked because the machine
-    # running the suite happened to be ET. On a UTC container the two diverged
-    # again. run_system_health() now anchors run_date to config.today_et(), so
-    # both sides use one clock and the suite passes anywhere.
     today = today_et()
+    if game_date is None:
+        game_date = today
+    game_id = f"G1{suffix}"
+    lock_key = f"{game_id}:{model}"
+    created = _iso(locked)
+    if commence is not None:
+        c.execute(
+            "INSERT OR REPLACE INTO games (game_id, sport, season, game_date,"
+            " home_team, away_team, commence_time) VALUES (?,?,?,?,?,?,?)",
+            (game_id, sport, 2026, game_date, "HOME", "AWAY", commence))
+    if not opening_only:
+        c.execute(
+            "INSERT INTO picks (game_id, model_id, sport, game_date,"
+            " pick_side, pick_label, model_probability, dk_implied_prob,"
+            " edge, kelly_fraction, recommended_bet, bankroll_at_pick,"
+            " signal_type, condition_status, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (game_id, model, sport, game_date, "home", "Test pick",
+             prob, 0.50, edge, 0.02, 20.0, 1000.0, "BET",
+             "VOID" if void else None, created))
+    # Capture-table leftover: the 2026-09-14 false CRIT was nine opening_signals
+    # rows whose picks (and push_sent rows) mike deleted on 2026-09-11.
     c.execute(
         "INSERT INTO opening_signals (lock_key, game_id, model_id, sport,"
         " game_date, pick_side, pick_label, model_probability, edge, locked_at)"
         " VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (lock_key, None, model, sport, today, "home", "Test pick",
-         prob, edge, _iso(locked)))
+        (lock_key, game_id, model, sport, game_date, "home", "Test pick",
+         prob, edge, created))
     if delivered:
         c.execute("INSERT INTO push_sent (lock_key, kind, sent_at)"
-                  " VALUES (?, 'discord_signal', ?)", (lock_key, _iso(locked)))
+                  " VALUES (?, 'discord_signal', ?)", (lock_key, created))
     c.commit()
     return lock_key
 
@@ -242,11 +253,46 @@ class TestSignalDelivery:
         _add_signal(db, prob=0.55, delivered=False)
         assert _results("signal_delivery")["status"] == sh.OK
 
-    def test_early_shadow_rows_are_never_postable(self, db, mlb_wired):
-        """UFC first-signal shadow rows are measurement, never display -- the
-        notifier excludes them, so the delivery check must too."""
-        _add_signal(db, suffix=":early", delivered=False)
+    def test_capture_table_leftover_is_not_a_delivery_failure(self, db, mlb_wired):
+        """The 2026-09-14 CRIT. Nine opening_signals rows, no standing pick,
+        no discord_signal ledger row -- because mike deleted the picks and
+        cleared push_sent on 2026-09-11 so a re-fire would announce. Capture
+        is the CLV shadow track; Discord publishes from picks. A leftover
+        here is not an outage."""
+        _add_signal(db, opening_only=True, delivered=False)
         assert _results("signal_delivery")["status"] == sh.OK
+
+    def test_void_pick_is_not_postable(self, db, mlb_wired):
+        """A VOIDED pick is not publishable (CLAUDE.md §1c). The notifier
+        excludes it; the delivery check must too."""
+        _add_signal(db, void=True, delivered=False)
+        assert _results("signal_delivery")["status"] == sh.OK
+
+    def test_lookahead_pick_outside_the_game_date_window_still_counts(self, db, mlb_wired):
+        """The notifier has no date horizon. A pick written today for a game
+        next week is postable now; waiting for its game_date to enter the
+        3-day window is how a look-ahead outage stays green until kickoff."""
+        future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        _add_signal(db, game_date="2099-01-01", commence=future, delivered=False)
+        assert _results("signal_delivery")["status"] == sh.STALE
+
+    def test_pick_written_after_first_pitch_is_not_a_delivery_failure(self, db, mlb_wired):
+        """Same first-pitch guard as _deliverable, now on picks.created_at."""
+        _add_signal(db, locked=200, commence=_iso(400), delivered=False)
+        assert _results("signal_delivery")["status"] == sh.OK
+
+    def test_delivery_check_reads_picks_not_the_capture_table(self):
+        """Source pin. The check claimed it used the notifier predicate while
+        still SELECTing from opening_signals -- that is the disagreement this
+        file exists to stop. Scoped to the signal_delivery block so the
+        capture check, which should keep reading opening_signals, is free."""
+        src = (Path(__file__).parent.parent / "tracking"
+               / "system_health.py").read_text(encoding="utf-8")
+        start = src.index("# ── Signal delivery")
+        block = src[start:src.index("# ── Published picks", start)]
+        assert "FROM picks p" in block
+        assert "FROM opening_signals" not in block
+        assert "opening_signals" not in block.split("SELECT", 1)[1]
 
 
 # ── run_ledger ───────────────────────────────────────────────────────────────

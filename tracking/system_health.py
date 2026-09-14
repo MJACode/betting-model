@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import MODELS, PROP_MODELS, PAPER_TRADING_START, today_et
 from data.db import get_connection
-from tracking.publish_keys import unique_row_sql
+from tracking.publish_keys import lock_key_sql, unique_row_sql
 
 # Models registered in config that intentionally have no trained artifact yet
 # (blocked on historical odds for their target, or a pending data subscription).
@@ -248,6 +248,30 @@ def _deliverable(locked_at, commence_time) -> bool:
     if lock is None or start is None:
         return True
     return lock <= start
+
+
+def _in_signal_delivery_window(game_date, commence, d3: str, run_date: str) -> bool:
+    """Does this undelivered pick belong in the 3-day CRIT window?
+
+    Two ways in, because the notifier has no date horizon (2026-09-05) and the
+    check used to:
+
+    * game_date in [d3, run_date] -- a pick written last week for today's slate
+      still has to alarm on game day if it never posted.
+    * commence still in the future -- a look-ahead pick is postable NOW. Waiting
+      for its game_date to enter the window is how a look-ahead outage stays
+      green until kickoff (the Week 1 wind miss wearing a health-check costume).
+
+    A missing/unparseable commence_time has no look-ahead identity, so it is
+    bounded on game_date only. Failing open here would keep a NULL-commence
+    golf row red forever.
+    """
+    if game_date is not None and d3 <= str(game_date) <= run_date:
+        return True
+    start = _parse_ts(commence)
+    if start is None:
+        return False
+    return start > datetime.now(timezone.utc)
 
 
 def _scalar(conn, sql, params=()):
@@ -1132,11 +1156,14 @@ def run_system_health(run_date: str | None = None) -> dict:
                 r.add("refresh_pass_steps", OK, "CRIT",
                       "no step failures in the last 3 refresh passes")
 
-        # ── Signal delivery (captured -> actually pushed) ────────────────────
-        # opening_signal_capture proves a signal was LOCKED. This proves it was
-        # DELIVERED. Uses the notifier's own predicate (same thresholds join,
-        # same ':early' shadow-row exclusion) so the two cannot disagree about
-        # what counts as postable.
+        # ── Signal delivery (picks -> Discord ledger) ────────────────────────
+        # The notifier reads `picks`, not `opening_signals` (2026-09-05, Matt:
+        # the app and Discord show the same picks). This check kept reading the
+        # capture table, so a pick deleted from `picks` whose push_sent row was
+        # also cleared (2026-09-11, mike, 26 NFL rows) stayed CRIT the moment
+        # its game_date entered the 3-day window. Capture is the CLV shadow
+        # track; it is not the postable set. Same cut as `_new_signals` so the
+        # two cannot disagree about what counts as postable.
         try:
             from config import DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT
         except Exception:
@@ -1148,55 +1175,46 @@ def run_system_health(run_date: str | None = None) -> dict:
         else:
             # A sport only counts if its channel (or the catch-all) exists.
             sport_pred = ("" if DISCORD_WEBHOOK_DEFAULT
-                          else " AND os.sport IN (" +
+                          else " AND p.sport IN (" +
                                ",".join("?" for _ in wired) + ")")
-            grace = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
-            params = ([d3, run_date]
-                      + ([] if DISCORD_WEBHOOK_DEFAULT else sorted(wired))
-                      + [grace])
-            # A signal locked AFTER its own first pitch was never deliverable,
-            # so counting it as a delivery failure is a false alarm that cannot
-            # be actioned. Exactly one such row -- MIN vs DET Under 8.5, locked
-            # 2026-08-31 19:45 ET against a 19:41 first pitch -- held this CRIT
-            # check red on EVERY refresh pass for three days, and would have
-            # gone quiet on 09-04 by ageing out of the window rather than by
-            # anything being fixed.
-            #
-            # A permanent false alarm is how a check stops being read (§7, and
-            # the same reasoning as #401's cadence floor). Detection is
-            # unaffected: a genuine notifier outage shows up as TODAY's signals
-            # going undelivered past the 90-minute grace, and those are all
-            # locked pre-commence by construction.
-            #
-            # LEFT JOIN, and the NULL branch is deliberate: a signal whose game
-            # has no commence_time is treated as deliverable, so a missing
-            # timestamp can never silence the check. Fails toward noticing.
+            params = [] if DISCORD_WEBHOOK_DEFAULT else sorted(wired)
+            # created_at / commence_time are TEXT in mixed shapes; grace and
+            # the first-pitch bound are applied in Python after a parse, never
+            # as a string compare (§7). LEFT JOIN: a missing commence_time is
+            # treated as deliverable so a NULL cannot silence the check.
             undelivered_rows = conn.execute(f"""
-                SELECT os.locked_at, g.commence_time
-                FROM opening_signals os
-                JOIN model_action_thresholds t ON t.model_id = os.model_id
-                LEFT JOIN games g ON g.game_id = os.game_id
-                WHERE os.game_date >= ? AND os.game_date <= ?
-                  AND os.lock_key NOT LIKE '%%:early'
+                SELECT p.created_at, g.commence_time, p.game_date
+                FROM picks p
+                JOIN model_action_thresholds t ON t.model_id = p.model_id
+                LEFT JOIN games g ON g.game_id = p.game_id
+                WHERE p.signal_type = 'BET'
+                  AND (p.is_live IS NULL OR p.is_live = FALSE)
+                  AND p.model_id NOT LIKE '%%_live_%%'
+                  AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
                   AND t.paused = FALSE
-                  AND os.model_probability >= t.min_prob
-                  AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
-                  AND (t.min_odds IS NULL OR os.dk_odds IS NULL
-                       OR os.dk_odds >= t.min_odds)
+                  AND p.model_probability >= t.min_prob
+                  AND (t.prob_only = TRUE
+                       OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+                  AND (t.min_odds IS NULL
+                       OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+                       OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
                   {sport_pred}
-                  AND os.locked_at < ?          -- grace: a signal locked minutes
-                                                -- ago has not had a pass yet
                   AND NOT EXISTS (
                       SELECT 1 FROM push_sent s
-                      WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
+                      WHERE s.lock_key = {lock_key_sql()}
+                        AND s.kind = 'discord_signal'
                   )
             """, tuple(params)).fetchall()
-            # Parsed, never compared as strings: these columns are TEXT in
-            # mixed shapes ('Z' vs '-04:00' vs naive) and a string comparison
-            # silently keeps the wrong rows (§7).
-            pending = sum(
-                1 for locked_at, commence in undelivered_rows
-                if _deliverable(locked_at, commence))
+            grace_dt = datetime.now(timezone.utc) - timedelta(minutes=90)
+            pending = 0
+            for created_at, commence, game_date in undelivered_rows:
+                created = _parse_ts(created_at)
+                if created is not None and created >= grace_dt:
+                    continue
+                if not _deliverable(created_at, commence):
+                    continue
+                if _in_signal_delivery_window(game_date, commence, d3, run_date):
+                    pending += 1
             if pending > 0:
                 r.add("signal_delivery", STALE, "CRIT",
                       f"{pending} postable signal(s) in the last 3 days have no "

@@ -174,6 +174,16 @@ inside 36h. A game beyond the ceiling is SKIPPED, never dropped: it returns on a
 later hourly tick, and no pick is deleted or re-priced, so the §1c lock is
 untouched.
 
+The three early `nfl_prop_market` BETs that *were* written past the ceiling
+(Burrow comps, Shough attempts, Nix pass TDs) were DELETED with mike's
+2026-09-11 26-row one-off; their `opening_signals` captures stayed (`ON
+CONFLICT DO NOTHING`). mike, 2026-09-14: sweep those leftovers the same way
+as the voided wind captures.
+`drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql` in
+`ACTIVE_MIGRATIONS` deletes those three `lock_key`s. The standing-pick
+skip is `lock_key_sql` (player_key + prop_market), not player_id — that
+join false-matched other props on the same game. No Discord re-announce.
+
 **The scorer path got the same ceiling on 2026-09-11** (mike: "we revised
 prop models or should have, that was my earlier guidance"). #610 put it on
 `scripts/nfl_prop_market_card.py` only; the eleven `nfl_prop_*` models are

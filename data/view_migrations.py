@@ -135,6 +135,19 @@ ACTIVE_MIGRATIONS: list[str] = [
     # player's window. Applied to production the same evening; this is the
     # recoverable copy, and it guards on its own property so it runs once.
     "player_recent_games_slate_teams.sql",
+    # 2026-09-14 (mike): leftover nfl_wind_totals opening_signals rows whose
+    # picks were VOIDED 09-07 / DELETED 09-11 after MAX_FIRE_LEAD. Capture
+    # stayed (ON CONFLICT DO NOTHING). Deletes captures with no standing
+    # non-VOID BET; pins DEN@KC (pick_id 1969489). No-ops after once.
+    # Lands on the next Railway ACTIVE_MIGRATIONS pass after merge (Step 0c2
+    # / refresh_pass apply-view-migrations). Does not Discord re-announce.
+    "drop_voided_nfl_wind_opening_signals_2026_09_14.sql",
+    # 2026-09-14 (mike): same residue for nfl_prop_market — three captures
+    # whose picks were in the 09-11 26-row delete (written 137-180h early vs
+    # NFL_PROP_MAX_LEAD_HOURS=24). Deletes those exact lock_keys; standing
+    # skip is lock_key_sql (KEY_PARTS), never player_id — that join false-
+    # matched 3/2/2 other props on the same games. No Discord re-announce.
+    "drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql",
 ]
 
 
