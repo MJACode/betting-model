@@ -71,6 +71,10 @@ MIN_PROB = 0.55
 # A fitted map has to hold on data it was not fitted on, or it is describing
 # this half of the season rather than the model.
 MAX_TRANSFER_GAP_PP = 6.0
+# a or b moving by more than this is a different map, not fit noise. Measured
+# 2026-09-14 on mlb_prop_batter_runs: promoted (1.138, 0.377) vs candidate
+# (1.106, 0.012) — the b-shift alone is 0.36, an order of magnitude above this.
+MAP_PARAM_ATOL = 0.02
 
 # Contamination the repo documents, which would otherwise be fitted as if it
 # were the model talking: mlb_over_under's live probabilities before the
@@ -120,6 +124,45 @@ def fit_platt(probs: list[float], wins: list[int],
         a -= lr * ga / n
         b -= lr * gb / n
     return a, b
+
+
+def maps_materially_differ(a1, b1, a2, b2, atol: float = MAP_PARAM_ATOL) -> bool:
+    """True when two Platt maps are not the same decision.
+
+    A missing parameter on either side is a difference: a promoted row with
+    NULL a/b is not a map, and comparing it to a fitted candidate must not
+    read as 'already in sync'.
+    """
+    if a1 is None or b1 is None or a2 is None or b2 is None:
+        return True
+    return (abs(float(a1) - float(a2)) > atol
+            or abs(float(b1) - float(b2)) > atol)
+
+
+def eligibility_clause(model_id: str, *, helps: bool, transfers: bool,
+                       transfer_gap_pp: float | None,
+                       promoted: bool,
+                       cand_a, cand_b, prom_a, prom_b) -> str | None:
+    """One sentence for the health check: promote, re-promote, or not eligible.
+
+    `helps` alone is the publish bar (`applied`). Promotion still requires
+    `helps AND transfers`. A promoted map whose transferring candidate has
+    moved is the 2026-09-14 batter_runs failure: the 09-07 map inflated
+    claimed probabilities by ~10pp on a version that was already calibrated.
+    """
+    if not helps:
+        return None
+    if not transfers:
+        gap = (f"{float(transfer_gap_pp):.1f}pp"
+               if transfer_gap_pp is not None else "held-out")
+        return (f"{model_id} candidate helps but does not close "
+                f"({gap} > {MAX_TRANSFER_GAP_PP:.1f}pp); not eligible to promote")
+    if not promoted:
+        return f"{model_id} candidate helps+transfers and is not promoted"
+    if maps_materially_differ(cand_a, cand_b, prom_a, prom_b):
+        return (f"{model_id} promoted map has drifted from a transferring "
+                f"candidate; re-promote")
+    return None
 
 
 def apply_calibration(prob: float, params: dict | None) -> float:

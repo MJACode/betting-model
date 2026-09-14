@@ -773,6 +773,49 @@ def _validate_health_check(args: dict) -> dict:
     return {"run_date": run_date}
 
 
+def _job_promote_calibration(**kw):
+    """Copy named candidate maps into the promoted slot the scorer reads.
+
+    A model update (CLAUDE.md 1b). The nightly fit writes a CANDIDATE and must
+    never promote itself; this is the person-named path, same as
+    `python -m models.probability_calibration --promote --models ...`.
+    Refuses (raises) if any named model does not currently help AND transfer,
+    so a silent skip cannot look like success on the queue card.
+    """
+    from data.db import get_connection
+    from models.probability_calibration import promote
+
+    models = list(kw["models"])
+    conn = get_connection()
+    try:
+        done = promote(conn, models)
+        missing = [m for m in models if m not in done]
+        if missing:
+            conn.rollback()
+            raise RuntimeError(
+                f"promote_calibration refused {missing}: candidate must help "
+                f"AND transfer. Promoted: {done or '(none)'}"
+            )
+        conn.commit()
+        return {"promoted": done}
+    finally:
+        conn.close()
+
+
+def _validate_promote_calibration(args: dict) -> dict:
+    models = args.get("models")
+    if not isinstance(models, list) or not models:
+        raise ValueError("promote_calibration needs a non-empty list of model_ids")
+    cleaned = [str(m) for m in models]
+    known = set(config.ACTION_THRESHOLDS)
+    unknown = sorted(set(cleaned) - known)
+    if unknown:
+        raise ValueError(f"unknown model_id {unknown}; known ACTION_THRESHOLDS")
+    if len(cleaned) != len(set(cleaned)):
+        raise ValueError("duplicate model_ids")
+    return {"models": cleaned}
+
+
 def _job_backfill_publish_keys(**kw):
     """Re-ledger already-announced picks under the current publishing keys,
     from the worker (scripts/backfill_publish_keys.py, --apply).
@@ -906,6 +949,7 @@ JOBS = {
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),
+    "promote_calibration": (_job_promote_calibration, _validate_promote_calibration),
     "team_stats_asof_verify": (_job_team_stats_asof_verify,
                               _validate_team_stats_asof_verify),
     "ncaaf_teams_refresh": (_job_ncaaf_teams_refresh, _validate_ncaaf_teams_refresh),

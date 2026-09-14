@@ -120,3 +120,45 @@ def test_the_thresholds_are_still_the_documented_ones():
     block = block[:block.index('r.add("model_calibration", OK')]
     assert "g[0] >= 8.0" in block
     assert "5.0 <= g[0] < 8.0" in block
+
+
+def test_a_flagged_model_is_named_eligible_or_not():
+    """2026-09-14: CRIT named two models and said nothing about whether a
+    candidate could move the number. batter_runs needed a re-promote;
+    pitcher_er was not eligible. The clause is how those two stop looking
+    like the same problem."""
+    text = io.open(sh.__file__, encoding="utf-8").read()
+    assert "_calibration_eligibility_notes" in text
+    assert "eligibility_clause" in text
+
+
+def test_eligibility_notes_must_not_sink_the_gap_check():
+    """A broken model_calibration lookup used to be the whole check. The
+    follow-up is best-effort: roll back, return [], leave the gap standing."""
+    import inspect
+    src = inspect.getsource(sh._calibration_eligibility_notes)
+    assert "rollback" in src
+    assert "return []" in src
+
+
+def test_eligibility_notes_parse_the_payload_verdicts():
+    """Functional, not textual: a transferring drifted map and a helps-only
+    map produce different sentences from the same helper."""
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            self._params = params
+            return self
+
+        def fetchall(self):
+            return [
+                ("mlb_prop_batter_runs", True, 1.106, 0.012, 1.138, 0.377,
+                 '{"helps": true, "transfers": true, "transfer_gap_pp": 0.42}'),
+                ("mlb_prop_pitcher_er", False, 0.633, -0.196, None, None,
+                 '{"helps": true, "transfers": false, "transfer_gap_pp": 6.28}'),
+            ]
+
+    notes = sh._calibration_eligibility_notes(
+        _Conn(), ["mlb_prop_batter_runs", "mlb_prop_pitcher_er"])
+    assert any("re-promote" in n for n in notes)
+    assert any("not eligible" in n for n in notes)

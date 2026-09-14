@@ -471,6 +471,49 @@ def _published_record_problems(rec: dict, daily: dict, live_start: str) -> list[
     return problems
 
 
+def _calibration_eligibility_notes(conn, model_ids: list[str]) -> list[str]:
+    """What to do about each flagged model's candidate map, or nothing.
+
+    The gap query grades the number that decided the bet. This follow-up names
+    whether today's candidate is eligible to promote, has drifted from a
+    promoted map, or still fails transfer — so CRIT is not just an accusation.
+    Measured 2026-09-14: batter_runs +11.1pp was a stale promoted map (raw
+    +1.0pp); pitcher_er +11.1pp is raw, and its candidate helps but does not
+    close (6.28pp > 6.0pp). A failed lookup must not sink the gap check.
+    """
+    if not model_ids:
+        return []
+    import json as _json
+    from models.probability_calibration import eligibility_clause
+    placeholders = ",".join(["%s"] * len(model_ids))
+    try:
+        rows = conn.execute(
+            f"SELECT model_id, promoted, a, b, promoted_a, promoted_b, payload "
+            f"FROM model_calibration WHERE model_id IN ({placeholders})",
+            tuple(model_ids),
+        ).fetchall()
+    except Exception:
+        getattr(conn, "rollback", lambda: None)()
+        return []
+    notes = []
+    for mid, promoted, a, b, pa, pb, payload in rows:
+        try:
+            verdict = _json.loads(payload) if payload else {}
+        except (TypeError, ValueError):
+            verdict = {}
+        note = eligibility_clause(
+            str(mid),
+            helps=bool(verdict.get("helps")),
+            transfers=bool(verdict.get("transfers")),
+            transfer_gap_pp=verdict.get("transfer_gap_pp"),
+            promoted=bool(promoted),
+            cand_a=a, cand_b=b, prom_a=pa, prom_b=pb,
+        )
+        if note:
+            notes.append(note)
+    return notes
+
+
 def run_system_health(run_date: str | None = None) -> dict:
     """Run all checks, upsert results into system_health_checks, log a summary.
 
@@ -1542,15 +1585,18 @@ def run_system_health(run_date: str | None = None) -> dict:
             crit = [g for g in gaps if g[0] >= 8.0]
             warn = [g for g in gaps if 5.0 <= g[0] < 8.0]
             worst = ", ".join(f"{m} +{g:.1f}pp/{n}" for g, m, n in gaps[:4] if g >= 5.0)
+            flagged = [m for _, m, _ in crit + warn]
+            extra = _calibration_eligibility_notes(conn, flagged)
+            extra_txt = (" " + " ".join(extra) + ".") if extra else ""
             if crit:
                 r.add("model_calibration", STALE, "WARN",
                       f"{len(crit)} model(s) 8pp+ overconfident at the probability "
                       f"actually bet: {worst}. A threshold cannot fix a "
-                      f"calibration error.",
+                      f"calibration error.{extra_txt}",
                       reason=f"{crit[0][0]:.0f}pp overconfident")
             elif warn:
                 r.add("model_calibration", STALE, "WARN",
-                      f"{len(warn)} model(s) 5-8pp overconfident: {worst}",
+                      f"{len(warn)} model(s) 5-8pp overconfident: {worst}.{extra_txt}",
                       reason=f"{warn[0][0]:.0f}pp overconfident")
             else:
                 r.add("model_calibration", OK, "WARN",

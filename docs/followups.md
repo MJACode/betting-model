@@ -21,6 +21,17 @@
 
 ---
 
+## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)
+
+Measured 2026-09-14 against the health-check predicates: +11.06pp / 414 at
+raw p≥0.60 since the 2026-05-13 version (no promoted map). Candidate helps
+(12.33→6.28pp) and does not close. A post-08-09-only fit (n=353) is worse
+(13.39→9.34pp). Monthly raw gaps at p≥0.60: May +6.9, June +19.8, Aug +8.8,
+Sep +16.1. Not a bug in `promote()` — `applied` is `helps` alone. Do not
+lower `MAX_TRANSFER_GAP_PP`, pause, or cut `ACTION_THRESHOLDS`. Re-check when
+a nightly fit reports `transfers=true`, then `--promote --models
+mlb_prop_pitcher_er` (model update, `Updated-By`).
+
 ## [ ] The live model's play corpus includes SPRING TRAINING games
 
 Measured 2026-09-12 while backfilling 2019–2020: of 290 March 2019 games

@@ -127,6 +127,41 @@ Forward half: the `model_calibration` health check measures the LIVE graded
 record per model (WARN at 5pp, CRIT at 8pp, n≥150), because a training-time
 metric cannot see drift after shipping.
 
+### 2026-09-14 — two CRITs, two different problems (mike)
+
+Health check predicates (decision probability ≥ 0.60, later of version/promotion
+date, ≥150 graded):
+
+| model | n | claimed | realised | gap | regime |
+|---|---|---|---|---|---|
+| `mlb_prop_batter_runs` | 392 | 72.37% | 61.22% | **+11.14pp** | promoted 2026-09-07 |
+| `mlb_prop_pitcher_er` | 414 | 66.62% | 55.56% | **+11.06pp** | version 2026-05-13 (no promoted map) |
+
+**batter_runs was the map, not the model.** On the same window, RAW p≥0.60 is
++0.98pp / 251 (65.92% claimed, 64.94% realised). The 09-07 promoted map
+(a=1.138, b=0.377) inflates stamped `model_probability_cal` by ~10pp on the
+09-04 version, which is already calibrated. Today's candidate (a=1.106, b=0.012,
+n=571, era_from 2026-09-04) helps and transfers (1.79→0.42pp). Re-promoted via
+worker job `promote-batter-runs-map-2026-09-14`. After that job lands, the
+health-check window resets at the new `promoted_at`; it will SKIP until 150
+post-regime graded picks accrue (skip budget 45 days). Counterfactual on the
+09-08..09-13 window: candidate cal p≥0.60 is +3.11pp / 289.
+
+**pitcher_er is the gate working.** `applied=true` is `helps` alone. Promotion
+requires `helps AND transfers`. The 09-14 candidate helps (12.33→6.28pp) and
+does not close (6.28 > 6.0). `promoted_at` is set with `promoted=false` because
+`demote()` writes the timestamp; it was never in the decision path. A fit on
+the current clean window only (08-09+, n=353) is worse on transfer
+(13.39→9.34pp), so shrinking `era_from` is not a path. Monthly raw gaps at
+p≥0.60: May +6.9 / June +19.8 / Aug +8.8 / Sep +16.1 — the gap is not stable
+enough to map. Do not lower `MAX_TRANSFER_GAP_PP`. Do not pause. Do not
+tighten `ACTION_THRESHOLDS`. Re-check when a nightly fit reports
+`transfers=true`.
+
+The health check now appends an eligibility clause for every flagged model
+(re-promote / not eligible / candidate not yet promoted) so these two stop
+reading as the same failure.
+
 ---
 
 ## Phase 2 — the map decides (mike, 2026-08-31)
