@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, pause nfl_prop_sacks (#710 design-review follow-up). Same PAUSED_MODELS pattern as the ten; tackles/market/wind/live/opener stay live. Generated mobile thresholds regenerated |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, Kalshi SERIES_MARKET +4 live per-game player ladders (REC/PASSATT/PASSCOMP/RSHATT). Sacks/tackles/anytime TD probed, not mapped (0 markets or not 1:1). Coverage only, not a §5c grade |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, merge master into PR #702 so PR CI can run. Unique-index design unchanged (KEY_PARTS + swap via v2). Session notes from both sides kept (#716/#715 and session 303). No second PR |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, team_stats_asof_verify MLB twin false CRIT: job 90952 2967 rows actual None (WAS/CHW/AZ/ATH vs WSH/CWS/ARI/OAK). Alias in impossible_games_played; no spring-training skip (n_over_tol=0 after alias). New declared key team-stats-asof-verify-mlb-twins-2026-09-14 |

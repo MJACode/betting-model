@@ -1300,7 +1300,7 @@ PAUSED_MODELS: set = {
     # population that can actually discriminate comes back positive — not on a
     # retrain of the same features, which has now been tried twice.
 
-    # ── NFL distributional props — PAUSED 2026-09-14 (ten models) ────────
+    # ── NFL distributional props — PAUSED 2026-09-14 (eleven models) ─────
     # docs/nfl_props_model.md §5b: walk-forward at real DraftKings prices loses
     # on every market below. Volume-control floors (2026-09-07) reduce exposure
     # but do not create an edge ("no cut of a threshold turns -5% into +5%").
@@ -1312,6 +1312,8 @@ PAUSED_MODELS: set = {
     #     (unpaused 2026-09-09; docs/nfl_prop_profitability_search.md §4)
     #   nfl_prop_market, nfl_wind_totals, nfl_live_prop, nfl_opener_spread
     #     — rule / market / live lanes, not these distributional PROP_MODELS
+    # nfl_prop_sacks joined the pause 2026-09-14 (mike, design-review follow-up
+    # to #710): thin / paper-only, never a live BET lane.
     "nfl_prop_pass_yards",
     "nfl_prop_pass_attempts",
     "nfl_prop_pass_completions",
@@ -1322,8 +1324,7 @@ PAUSED_MODELS: set = {
     "nfl_prop_receptions",
     "nfl_prop_rush_rec_yards",
     "nfl_prop_anytime_td",
-    # nfl_prop_sacks stays out of this pause list (thin market — paper only in
-    # PROP_MODELS). Ten distributional props paused; tackles_assists stays LIVE.
+    "nfl_prop_sacks",
     "ufc_total_rounds",
     # 2026-09-11 (mike: "Still too many live ncaaf picks. Every game is getting
     # a live pick it seems. We need to only bet the absolute strongest picks
