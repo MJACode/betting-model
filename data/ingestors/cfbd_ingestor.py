@@ -68,6 +68,7 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
@@ -77,6 +78,7 @@ import config
 from data.db import get_connection
 
 SPORT = "NCAAF"
+_ET = ZoneInfo("America/New_York")
 
 # Season types CFBD uses. Postseason carries bowls + the playoff; both are
 # ingested (we need the results to settle) but bowls are excluded from TRAINING
@@ -135,6 +137,74 @@ def ncaaf_slug(school: str) -> str:
 
 def build_ncaaf_game_id(game_date: str, away: str, home: str) -> str:
     return f"NCAAF_{game_date}_{ncaaf_slug(away)}_{ncaaf_slug(home)}"
+
+
+def eastern_game_date(start) -> str:
+    """
+    Kickoff calendar date in America/New_York.
+
+    Same conversion the odds ingestor uses. CFBD's startDate is UTC; taking
+    [:10] files a ~8pm-ET kick on the next calendar day and twins the odds
+    row. A bare YYYY-MM-DD is already a calendar date (midnight UTC would
+    roll it back a day). A timestamp we cannot parse falls back to the UTC
+    prefix — the old behaviour — rather than inventing a date.
+    """
+    raw = str(start).strip()
+    if len(raw) == 10 and raw[4:5] == "-" and raw[7:8] == "-":
+        return raw
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return raw[:10]
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_ET).strftime("%Y-%m-%d")
+
+
+def _stamp_game_identity(row: dict, start, away: str, home: str) -> None:
+    """ET date/id on the row; UTC pair kept so ingest can retain a historical id."""
+    et_date = eastern_game_date(start)
+    utc_date = str(start)[:10]
+    row["game_date"] = et_date
+    row["game_id"] = build_ncaaf_game_id(et_date, away, home)
+    row["_utc_date"] = utc_date
+    row["_utc_game_id"] = build_ncaaf_game_id(utc_date, away, home)
+
+
+def retain_existing_cfbd_ids(rows: list[dict], existing_ids: set[str]) -> list[dict]:
+    """
+    Keep the historical UTC-dated game_id when that row already exists.
+
+    parse_games / parse_lines date by ET so a NEW night game shares the odds
+    ingestor's id. Re-deriving an already-written CFBD id would insert a
+    second row and orphan ncaaf_team_game_log / ncaaf_qb_game FKs. If the
+    UTC id is already in `games`, put the row back on it. New rows (UTC id
+    absent) keep the ET id. In-place; returns the same list.
+    """
+    for r in rows:
+        utc_id = r.get("_utc_game_id")
+        utc_date = r.get("_utc_date")
+        if not utc_id or not utc_date or utc_id == r.get("game_id"):
+            continue
+        if utc_id not in existing_ids:
+            continue
+        if r.get("snapshot_at") == r.get("game_date"):
+            r["snapshot_at"] = utc_date
+        r["game_id"] = utc_id
+        if "game_date" in r:
+            r["game_date"] = utc_date
+    return rows
+
+
+def _existing_ncaaf_ids(conn, rows: list[dict]) -> set[str]:
+    ids = [r["_utc_game_id"] for r in rows if r.get("_utc_game_id")]
+    if not ids:
+        return set()
+    found = conn.execute(
+        "SELECT game_id FROM games WHERE sport = %(s)s AND game_id = ANY(%(ids)s)",
+        {"s": SPORT, "ids": ids},
+    ).fetchall()
+    return {r[0] for r in found}
 
 
 def ncaaf_season_for_date(game_date: str) -> int:
@@ -240,6 +310,11 @@ def parse_games(payload: list) -> list[dict]:
 
     Only games with a start date are kept. Scores stay NULL until the game is
     complete, so an unplayed game upserts cleanly and gets filled in later.
+
+    game_date / game_id use the Eastern kickoff date (Matt, 2026-09-13: date
+    new CFBD games by ET going forward). The UTC-prefix pair is stamped as
+    `_utc_*` so ingest can retain an already-written historical id — this
+    parser does not rewrite one.
     """
     rows = []
     for g in payload or []:
@@ -248,19 +323,18 @@ def parse_games(payload: list) -> list[dict]:
         away  = _pick(g, "away_team", "awayTeam")
         if not (start and home and away):
             continue
-        game_date = str(start)[:10]
-        season = _int(g, "season", "year") or ncaaf_season_for_date(game_date)
+        row = {}
+        _stamp_game_identity(row, start, away, home)
+        season = _int(g, "season", "year") or ncaaf_season_for_date(row["game_date"])
         hs = _num(g, "home_points", "homePoints")
         as_ = _num(g, "away_points", "awayPoints")
         completed = _pick(g, "completed")
         home_win = None
         if hs is not None and as_ is not None and hs != as_:
             home_win = int(hs > as_)
-        rows.append({
-            "game_id":     build_ncaaf_game_id(game_date, away, home),
+        row.update({
             "sport":       SPORT,
             "season":      int(season),
-            "game_date":   game_date,
             "commence_time": str(start),
             "home_team":   home,
             "away_team":   away,
@@ -278,6 +352,7 @@ def parse_games(payload: list) -> list[dict]:
             "_home_classification": _pick(g, "home_classification", "homeClassification"),
             "_away_classification": _pick(g, "away_classification", "awayClassification"),
         })
+        rows.append(row)
     return rows
 
 
@@ -309,8 +384,10 @@ def parse_lines(payload: list, providers) -> list[dict]:
         away  = _pick(g, "away_team", "awayTeam")
         if not (start and home and away):
             continue
-        game_date = str(start)[:10]
-        game_id = build_ncaaf_game_id(game_date, away, home)
+        keys = {}
+        _stamp_game_identity(keys, start, away, home)
+        game_date = keys["game_date"]
+        game_id = keys["game_id"]
         for ln in _pick(g, "lines", default=[]) or []:
             key = str(_pick(ln, "provider", default="")).lower()
             if key not in wanted:
@@ -327,6 +404,9 @@ def parse_lines(payload: list, providers) -> list[dict]:
                 "bookmaker":     config.ncaaf_line_bookmaker(wanted[key]),
                 "snapshot_type": "open",
                 "snapshot_at":   game_date,
+                "game_date":     game_date,
+                "_utc_date":     keys["_utc_date"],
+                "_utc_game_id":  keys["_utc_game_id"],
             }
             if spread is not None:
                 rows.append({**base, "market": "spreads", "spread_home": spread,
@@ -1066,6 +1146,9 @@ def ingest_ncaaf_games(season: int, conn=None) -> tuple[int, dict, dict]:
         keep = [g for g in parsed
                 if "fbs" in {str(g.get("_home_classification") or "fbs").lower(),
                              str(g.get("_away_classification") or "fbs").lower()}]
+        # New rows get the ET id parse_games just built. A UTC id that already
+        # exists stays — rewriting it would orphan the 2015–2025 box-score FKs.
+        retain_existing_cfbd_ids(keep, _existing_ncaaf_ids(conn, keep))
 
         conn.executemany(_GAME_UPSERT, _norm(keep, _GAME_FIELDS))
         conn.commit()
@@ -1177,6 +1260,7 @@ def ingest_ncaaf_lines(season: int, conn=None) -> int:
         for stype in _SEASON_TYPES:
             payload = _get("/lines", year=season, seasonType=stype)
             rows.extend(parse_lines(payload, config.CFBD_LINES_PROVIDERS))
+        retain_existing_cfbd_ids(rows, _existing_ncaaf_ids(conn, rows))
         if rows:
             conn.executemany(_ODDS_INSERT, _norm(rows, _ODDS_FIELDS))
             conn.commit()
@@ -1479,22 +1563,21 @@ def _day_before(date_str: str) -> str:
 # Duplicate-row score mirroring (the ET/UTC game_id split)
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# The odds ingestor dates a game by its EASTERN kickoff; parse_games dates it by
-# CFBD's UTC start_date. A night game therefore gets TWO games rows under two
-# ids — e.g. a 10:19pm ET kick is NCAAF_2026-08-29_memphis_unlv (odds) and
-# NCAAF_2026-08-30_memphis_unlv (CFBD).
+# Night games ingested BEFORE the 2026-09-13 ET dating policy have TWO games
+# rows under two ids — e.g. a 10:19pm ET kick is NCAAF_2026-08-29_memphis_unlv
+# (odds, Eastern date) and NCAAF_2026-08-30_memphis_unlv (CFBD, UTC prefix).
+# New CFBD rows date by ET and share the odds id; those historical twins stay.
+# Re-keying them would orphan ncaaf_team_game_log / ncaaf_qb_game FKs 2015–2025.
 #
 # Picks always attach to the ODDS row: it is the one that exists when the board
-# is priced. CFBD writes the final to its OWN row. So without this the generic
+# is priced. CFBD wrote the final to its OWN row. So without this the generic
 # settle path — which requires g.home_score on the pick's own game_id — can
-# never grade an evening NCAAF pick, and the season stays permanently "pending"
-# in ingest_ncaaf_results_for_date, re-pulling every schedule every day.
+# never grade an evening NCAAF pick on an old twin, and the season stays
+# permanently "pending" in ingest_ncaaf_results_for_date.
 #
 # The fix mirrors ufc_stats_ingestor._resolve_game_rows: write the score,
-# orientation-corrected, to EVERY row that is the same game. Deliberately NOT a
-# re-key of the id — game_id is the foreign key for ncaaf_team_game_log and
-# ncaaf_qb_game across 2015-2025, so re-deriving the date would orphan a decade
-# of training rows for no modelling benefit.
+# orientation-corrected, to EVERY row that is the same game. The live-loop
+# load_context guard (#701) is still required for the same old twins.
 
 _ALIAS_MAX_DAY_SKEW = 1
 
@@ -1770,7 +1853,9 @@ def ingest_ncaaf_results_for_date(run_date: str | None = None,
         scored: list[dict] = []
         for season in seasons:
             for stype in _SEASON_TYPES:
-                rows = [g for g in parse_games(_get("/games", year=season, seasonType=stype))
+                parsed = parse_games(_get("/games", year=season, seasonType=stype))
+                retain_existing_cfbd_ids(parsed, _existing_ncaaf_ids(conn, parsed))
+                rows = [g for g in parsed
                         if g["home_score"] is not None and lo <= g["game_date"] <= run_date]
                 if rows:
                     conn.executemany(_GAME_UPSERT, _norm(rows, _GAME_FIELDS))
@@ -1977,33 +2062,41 @@ def backfill_ncaaf(start_year: int, end_year: int, with_lines: bool = True) -> d
 
 
 
-def _schedule_maps(season: int) -> tuple[dict, dict]:
+def _schedule_maps(season: int, conn=None) -> tuple[dict, dict]:
     """
     (id_map, games_by_id) for a season, WITHOUT writing anything.
 
     CFBD's numeric game id is transient — parse_games exposes it as `_cfbd_id`
     and it is never persisted — so any box-score pull has to rebuild the map
     from a fresh /games call. Two API calls, and it guarantees the ids line up
-    with what the games table already holds.
+    with what the games table already holds (including a historical UTC id
+    that parse_games would now date by ET).
     """
-    parsed: list[dict] = []
-    for stype in _SEASON_TYPES:
-        payload = _get("/games", year=season, seasonType=stype)
-        for row in parse_games(payload):
-            row.setdefault("_season_type", stype)
-            parsed.append(row)
-    keep = [g for g in parsed
-            if "fbs" in {str(g.get("_home_classification") or "fbs").lower(),
-                         str(g.get("_away_classification") or "fbs").lower()}]
-    id_map = {g["_cfbd_id"]: g["game_id"]
-              for g in keep if g.get("_cfbd_id") is not None}
-    games_by_id = {
-        g["game_id"]: {"season": g["season"], "week": g["week"],
-                       "season_type": g.get("_season_type"),
-                       "game_date": g["game_date"]}
-        for g in keep
-    }
-    return id_map, games_by_id
+    own = conn is None
+    conn = conn or get_connection()
+    try:
+        parsed: list[dict] = []
+        for stype in _SEASON_TYPES:
+            payload = _get("/games", year=season, seasonType=stype)
+            for row in parse_games(payload):
+                row.setdefault("_season_type", stype)
+                parsed.append(row)
+        keep = [g for g in parsed
+                if "fbs" in {str(g.get("_home_classification") or "fbs").lower(),
+                             str(g.get("_away_classification") or "fbs").lower()}]
+        retain_existing_cfbd_ids(keep, _existing_ncaaf_ids(conn, keep))
+        id_map = {g["_cfbd_id"]: g["game_id"]
+                  for g in keep if g.get("_cfbd_id") is not None}
+        games_by_id = {
+            g["game_id"]: {"season": g["season"], "week": g["week"],
+                           "season_type": g.get("_season_type"),
+                           "game_date": g["game_date"]}
+            for g in keep
+        }
+        return id_map, games_by_id
+    finally:
+        if own:
+            conn.close()
 
 
 def backfill_ncaaf_qb(start_year: int, end_year: int) -> int:
@@ -2018,7 +2111,7 @@ def backfill_ncaaf_qb(start_year: int, end_year: int) -> int:
     conn = get_connection()
     try:
         for season in range(start_year, end_year + 1):
-            id_map, games_by_id = _schedule_maps(season)
+            id_map, games_by_id = _schedule_maps(season, conn)
             if not id_map:
                 logger.warning(f"NCAAF QB backfill {season}: no games — skipping")
                 continue
@@ -2041,7 +2134,7 @@ def backfill_ncaaf_players(start_year: int, end_year: int) -> int:
     conn = get_connection()
     try:
         for season in range(start_year, end_year + 1):
-            id_map, games_by_id = _schedule_maps(season)
+            id_map, games_by_id = _schedule_maps(season, conn)
             if not id_map:
                 logger.warning(f"NCAAF player backfill {season}: no games — skipping")
                 continue

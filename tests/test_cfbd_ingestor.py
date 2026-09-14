@@ -19,10 +19,10 @@ import config  # noqa: E402
 
 from data.ingestors.cfbd_ingestor import (  # noqa: E402
     _local_aggregates, _possession_seconds, _split_ratio,
-    build_ncaaf_game_id, ncaaf_season_for_date, ncaaf_slug,
+    build_ncaaf_game_id, eastern_game_date, ncaaf_season_for_date, ncaaf_slug,
     parse_advanced_stats, parse_games, parse_lines, parse_ratings,
     parse_returning, parse_talent, parse_team_game_stats, parse_teams,
-    shrink_to_prior,
+    retain_existing_cfbd_ids, shrink_to_prior,
 )
 
 
@@ -108,6 +108,163 @@ def test_parse_games_skips_rows_without_a_start_date():
 def test_parse_games_leaves_home_win_null_on_a_tie():
     rows = parse_games([{**_GAMES[0], "homePoints": 21, "awayPoints": 21}])
     assert rows[0]["home_win"] is None
+
+
+# ── ET kickoff dating (Matt, 2026-09-13: new CFBD rows only) ──────────────────
+#
+# The odds ingestor dates by America/New_York. Taking CFBD's UTC startDate[:10]
+# filed a ~8pm-ET kick on the next calendar day and twinned the odds row.
+# parse_games now uses the same ET conversion. Historical UTC ids are retained
+# at ingest time, not rewritten here.
+
+
+def test_eastern_game_date_matches_the_odds_ingestor_for_a_night_kick():
+    """UNLV 2026-08-29, 10:19pm ET = 02:19 UTC the 30th — the reported twin."""
+    assert eastern_game_date("2026-08-30T02:19:00.000Z") == "2026-08-29"
+    # After DST ends, the same UTC clock is 9:19pm ET the previous evening.
+    assert eastern_game_date("2026-11-15T02:19:00.000Z") == "2026-11-14"
+
+
+def test_eastern_game_date_agrees_with_utc_before_8pm_et():
+    assert eastern_game_date("2025-09-06T16:00:00.000Z") == "2025-09-06"
+
+
+def test_eastern_game_date_leaves_a_bare_calendar_date_alone():
+    """Midnight UTC is the previous evening in ET — a date-only string is a date."""
+    assert eastern_game_date("2025-09-06") == "2025-09-06"
+
+
+def test_eastern_game_date_falls_back_to_the_utc_prefix_when_unparseable():
+    assert eastern_game_date("2025-09-06Tnot-a-time") == "2025-09-06"
+
+
+def test_parse_games_dates_a_night_kick_by_et_not_utc():
+    rows = parse_games([{
+        "id": 99, "season": 2026, "week": 1,
+        "startDate": "2026-08-30T02:19:00.000Z",
+        "homeTeam": "UNLV", "awayTeam": "Memphis",
+        "homeClassification": "fbs", "awayClassification": "fbs",
+    }])
+    assert len(rows) == 1
+    assert rows[0]["game_date"] == "2026-08-29"
+    assert rows[0]["game_id"] == "NCAAF_2026-08-29_memphis_unlv"
+    # UTC pair is on the row so ingest can retain a historical id.
+    assert rows[0]["_utc_date"] == "2026-08-30"
+    assert rows[0]["_utc_game_id"] == "NCAAF_2026-08-30_memphis_unlv"
+
+
+def test_parse_lines_dates_a_night_kick_by_et_not_utc():
+    rows = parse_lines([{
+        "startDate": "2026-08-30T02:19:00.000Z",
+        "homeTeam": "UNLV", "awayTeam": "Memphis",
+        "lines": [{"provider": "DraftKings", "spread": -3.5}],
+    }], ["DraftKings"])
+    assert rows[0]["game_id"] == "NCAAF_2026-08-29_memphis_unlv"
+    assert rows[0]["snapshot_at"] == "2026-08-29"
+    assert rows[0]["_utc_game_id"] == "NCAAF_2026-08-30_memphis_unlv"
+
+
+def test_retain_keeps_the_historical_utc_id_when_that_row_already_exists():
+    rows = parse_games([{
+        "id": 99, "season": 2026,
+        "startDate": "2026-08-30T02:19:00.000Z",
+        "homeTeam": "UNLV", "awayTeam": "Memphis",
+    }])
+    historical = "NCAAF_2026-08-30_memphis_unlv"
+    retain_existing_cfbd_ids(rows, {historical})
+    assert rows[0]["game_id"] == historical
+    assert rows[0]["game_date"] == "2026-08-30"
+
+
+def test_retain_leaves_the_et_id_when_the_utc_row_does_not_exist():
+    rows = parse_games([{
+        "id": 99, "season": 2026,
+        "startDate": "2026-08-30T02:19:00.000Z",
+        "homeTeam": "UNLV", "awayTeam": "Memphis",
+    }])
+    retain_existing_cfbd_ids(rows, set())
+    assert rows[0]["game_id"] == "NCAAF_2026-08-29_memphis_unlv"
+    assert rows[0]["game_date"] == "2026-08-29"
+
+
+def test_retain_is_a_noop_when_et_and_utc_already_agree():
+    rows = parse_games(_GAMES[:1])
+    gid = rows[0]["game_id"]
+    retain_existing_cfbd_ids(rows, {gid})
+    assert rows[0]["game_id"] == "NCAAF_2025-09-06_michigan_ohio-state"
+    assert rows[0]["game_date"] == "2025-09-06"
+
+
+def test_retain_moves_archive_line_snapshot_with_the_historical_id():
+    rows = parse_lines([{
+        "startDate": "2026-08-30T02:19:00.000Z",
+        "homeTeam": "UNLV", "awayTeam": "Memphis",
+        "lines": [{"provider": "DraftKings", "spread": -3.5}],
+    }], ["DraftKings"])
+    retain_existing_cfbd_ids(rows, {"NCAAF_2026-08-30_memphis_unlv"})
+    assert rows[0]["game_id"] == "NCAAF_2026-08-30_memphis_unlv"
+    assert rows[0]["snapshot_at"] == "2026-08-30"
+
+
+class _GamesConn:
+    def __init__(self, existing_ids):
+        self.existing_ids = existing_ids
+        self.upserts = []
+        self.commits = 0
+
+    def execute(self, sql, params=None):
+        class _Cur:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        ids = (params or {}).get("ids") or []
+        return _Cur([(i,) for i in ids if i in self.existing_ids])
+
+    def executemany(self, sql, rows):
+        self.upserts.extend(rows)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_ingest_games_retains_a_historical_utc_id_and_uses_et_for_a_new_row(
+        monkeypatch):
+    """The writer — not just the helper — is what would orphan the FKs."""
+    from data.ingestors import cfbd_ingestor as cf
+
+    night = {
+        "id": 1, "season": 2026, "week": 1,
+        "startDate": "2026-08-30T02:19:00.000Z",
+        "homeTeam": "UNLV", "awayTeam": "Memphis",
+        "homeClassification": "fbs", "awayClassification": "fbs",
+    }
+
+    def fake_get(path, **params):
+        if path == "/games" and params.get("seasonType") == "regular":
+            return [night]
+        return []
+
+    monkeypatch.setattr(cf, "_get", fake_get)
+    monkeypatch.setattr(cf, "mirror_scores_to_alias_rows", lambda *a, **k: 0)
+
+    historical = "NCAAF_2026-08-30_memphis_unlv"
+    conn = _GamesConn({historical})
+    n, id_map, games_by_id = cf.ingest_ncaaf_games(2026, conn)
+    assert n == 1
+    assert conn.upserts[0]["game_id"] == historical
+    assert conn.upserts[0]["game_date"] == "2026-08-30"
+    assert id_map[1] == historical
+    assert historical in games_by_id
+
+    fresh = _GamesConn(set())
+    n, id_map, games_by_id = cf.ingest_ncaaf_games(2026, fresh)
+    assert n == 1
+    assert fresh.upserts[0]["game_id"] == "NCAAF_2026-08-29_memphis_unlv"
+    assert fresh.upserts[0]["game_date"] == "2026-08-29"
+    assert id_map[1] == "NCAAF_2026-08-29_memphis_unlv"
 
 
 # ── Lines (the reason this sport is buildable) ────────────────────────────────

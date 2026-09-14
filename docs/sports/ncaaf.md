@@ -147,24 +147,28 @@ its opening number, which is rarely true by kickoff.
 
 ### Data / conventions (load-bearing)
 
-- **A night game has TWO `games` rows, and that is by design.** The odds
-  ingestor dates a game by its EASTERN kickoff; `cfbd_ingestor.parse_games`
-  dates it by CFBD's UTC `start_date`, so a ~8pm-ET-or-later kick exists under
-  two ids (`NCAAF_2026-08-29_memphis_unlv` and `..._2026-08-30_...`). PICKS
-  ALWAYS ATTACH TO THE ODDS ROW — it is the one that exists when the board is
-  priced — and CFBD writes the final to its own. `gameday.load_context` keys
-  the live loop by folded (home, away); a collision no longer last-wins (the
-  Reviewer follow-up after #696, 32 matchups 09-01..09-14). The designed twin
-  keeps the only row with pregame DK lines; two priceable rows for one pair
-  are dropped rather than guessed. `mirror_scores_to_alias_rows`
-  (called from both `ingest_ncaaf_results_for_date` and `ingest_ncaaf_games`)
-  writes the orientation-corrected final onto every row that is the same game,
-  matched on the slug pair within ±1 day. Deliberately NOT a re-key: `game_id`
-  is the FK for `ncaaf_team_game_log` and `ncaaf_qb_game` across 2015-2025, so
-  re-deriving the date would orphan a decade of training rows for no modelling
-  benefit. An existing final is never overwritten, and a candidate matched by
-  two conflicting finals is left unscored rather than guessed (`±1 day` is
-  load-bearing — an annual rivalry repeats the slug pair every season).
+- **New CFBD games are dated by Eastern kickoff** (Matt, 2026-09-13, the
+  option-2 call on the #701 reviewer handoff). `parse_games` / `parse_lines`
+  convert CFBD's UTC `startDate` the same way the odds ingestor does
+  (`America/New_York`), so a new night game shares the odds row's `game_id`
+  instead of creating an ET/UTC twin. **Already-written CFBD `game_id`s are
+  not rewritten.** If the historical UTC-prefix id already exists, ingest
+  keeps it (`retain_existing_cfbd_ids`). Re-keying would orphan
+  `ncaaf_team_game_log` and `ncaaf_qb_game` FKs across 2015–2025.
+- **Old ET/UTC twins stay.** Night games ingested before that policy still
+  have two rows (`NCAAF_2026-08-29_memphis_unlv` live and `..._2026-08-30_...`
+  cfbd). PICKS ALWAYS ATTACH TO THE ODDS ROW — it is the one that exists when
+  the board is priced — and CFBD wrote the final to its own.
+  `mirror_scores_to_alias_rows` (called from both
+  `ingest_ncaaf_results_for_date` and `ingest_ncaaf_games`) writes the
+  orientation-corrected final onto every row that is the same game, matched
+  on the slug pair within ±1 day. An existing final is never overwritten, and
+  a candidate matched by two conflicting finals is left unscored rather than
+  guessed (`±1 day` is load-bearing — an annual rivalry repeats the slug pair
+  every season). The live-loop `load_context` guard (#701) is still required
+  so a Saturday-night lookback cannot silently pick the unscored CFBD twin.
+  Name-resolution phantoms (Tennessee vs Tennessee State) are a separate
+  population — not this rule.
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
   slugs. Historical lines under `cfbd_*` bookmakers (provider priority
   `NCAAF_LINE_BOOKMAKER_PRIORITY`; 2023-25 DK, 2019-22 Bovada, 2015-18
