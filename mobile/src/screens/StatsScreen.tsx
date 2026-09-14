@@ -2150,8 +2150,8 @@ export function StatsScreen() {
         {gamesEmpty ? searchFilterSection : null}
         <FilterSection
           title="Games"
-          summary={gameFilterSummary(pickableGames, gamePicker.selected)}
-          defaultOpen={gamePicker.selected.size > 0}
+          summary={gamesEmpty ? undefined : gameFilterSummary(pickableGames, gamePicker.selected)}
+          defaultOpen={gamesEmpty || gamePicker.selected.size > 0}
           onClear={gamePicker.selected.size > 0 ? gamePicker.clear : undefined}
         >
           <GameFilterSection
@@ -2161,7 +2161,9 @@ export function StatsScreen() {
             emptyNote={
               sport === 'UFC'
                 ? 'A UFC card is fighters, not fixtures — use Search to filter by fighter.'
-                : `No ${sport} games scheduled in the next week.`
+                : slateChecking
+                  ? 'Checking the schedule…'
+                  : `No ${sport} games scheduled in the next week.`
             }
           />
         </FilterSection>

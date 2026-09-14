@@ -52,6 +52,10 @@ check('Search is rendered first when Games is empty',
     /gamesEmpty \? null : searchFilterSection/.test(stats));
 check('Search does not hop during the slate read',
   /sport === 'UFC' \|\| \(!slateChecking && pickableGames\.length === 0\)/.test(stats));
+check('Games stays open when there are no fixtures',
+  /summary=\{gamesEmpty \? undefined : gameFilterSummary/.test(stats));
+check('Games emptyNote does not claim a dead week while checking',
+  /slateChecking\s*\?\s*'Checking the schedule…'/.test(stats));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
