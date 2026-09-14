@@ -23,6 +23,11 @@ interface SortablePick {
   game?: { commence_time?: string | null } | null;
 }
 
+/** The only field Public sort reads — a board of stubs can answer "any splits?" */
+interface PublicSplitPick {
+  pick: { public_bet_pct?: unknown };
+}
+
 /** Sharp Score; non-BET picks (null) sink below any scored BET (0..100). */
 function sharpOf(it: SortablePick): number {
   return sharpScore(it.pick)?.score ?? -1;
@@ -35,10 +40,28 @@ function sharpOf(it: SortablePick): number {
  * prop-heavy board this sort degrades to plain edge order rather than shuffling
  * rows by a number the card cannot show.
  */
-function publicOf(it: SortablePick): number {
+function publicOf(it: PublicSplitPick): number {
   const v = it.pick.public_bet_pct;
-  const n = typeof v === 'string' ? Number(v) : v;
-  return n != null && Number.isFinite(n) ? n : -1;
+  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : -1;
+}
+
+/** How many picks on this board carry a captured public-ticket split. */
+export function publicSplitCount<T extends PublicSplitPick>(items: T[]): number {
+  let n = 0;
+  for (const it of items) if (publicOf(it) >= 0) n += 1;
+  return n;
+}
+
+/**
+ * Is Public a real sort on this board, or Edge by another name?
+ *
+ * Zero captured splits → every row is −1 → the comparator falls through to
+ * edge. That used to stay labelled Public on prop boards (and UFC / NCAAF
+ * game boards that never get Action Network splits), silently.
+ */
+export function publicSortAvailable<T extends PublicSplitPick>(items: T[]): boolean {
+  return publicSplitCount(items) > 0;
 }
 
 /**

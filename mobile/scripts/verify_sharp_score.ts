@@ -20,7 +20,7 @@ import {
   sharpScore,
   type ModelClv,
 } from '../src/lib/sharpScore';
-import { sortPicks } from '../src/lib/pickSort';
+import { publicSortAvailable, publicSplitCount, sortPicks } from '../src/lib/pickSort';
 import { ACTION_THRESHOLDS } from '../src/lib/thresholds';
 import type { Pick } from '../src/types';
 
@@ -185,6 +185,10 @@ const tieA = { pick: mkPick({ pick_id: 14, public_bet_pct: 60, edge: 0.12 }) };
 const tieB = { pick: mkPick({ pick_id: 15, public_bet_pct: 60, edge: 0.30 }) };
 check('public sort: equal public shares break on edge',
   sortPicks([tieA, tieB], 'public')[0].pick.pick_id === 15);
+check('public sort is unavailable when every split is NULL',
+  !publicSortAvailable([noSplit, { pick: mkPick({ pick_id: 16, edge: 0.2 }) }]));
+check('public sort is available once one split is captured',
+  publicSortAvailable([noSplit, heavy]) && publicSplitCount([noSplit, heavy]) === 1);
 
 // 7. Determinism.
 const a = sharpScore(mkPick({ edge: 0.2, public_bet_pct: 35 }))!.score;

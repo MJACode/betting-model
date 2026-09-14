@@ -1,13 +1,14 @@
 /**
  * Picks / Signals filtering — one bar, one sheet.
  *
- * Previously this shipped as two components stacked on top of each other
- * (QuickFilters for search + category + sort, PicksFilterBar for the modal,
- * count and threshold pills). They edited the same state but looked and behaved
- * differently, and category was settable from both places. Now there is a single
- * `PickFilters` that owns the whole surface:
+ * Idle chrome is search + Filters only. Sort and the Game/Props (Market) cut
+ * live in the sheet: the old quick-chip row (~150pt plus SORT) sat on every
+ * board and undid the denser PickCard. Game/Props-always-visible in the bar
+ * was for a positional SORT row that no longer exists; on UFC/NCAAF those
+ * chips were disabled-but-visible dead controls. The sheet already hides
+ * Market when it cannot cut (`marketCutBites`).
  *
- *   search + Filters(n)  →  quick chips (category + sort)  →  active pills
+ *   search + Filters(n)  →  active pills (when anything is narrowing)
  *
  * The sheet applies live (see FilterSheet) rather than behind an Apply button.
  *
@@ -16,8 +17,8 @@
  *
  * There is deliberately NO per-model filter. It listed every model across every
  * sport in one flat list (four unlabeled "Moneyline" chips, and so on), and the
- * cut people actually want — regular betting lines vs player props — is what the
- * Market section and the Game/Props quick chips express.
+ * cut people actually want — regular betting lines vs player props — is what
+ * the Market section expresses.
  *
  * THE MARKET CUT IS SCOPED TO THE BOARD ON SCREEN (2026-09-09). `pitcher_prop`
  * and `batter_prop` are MLB-only markets and this offered all four categories
@@ -29,7 +30,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { SORT_OPTIONS, type SortKey } from '@/lib/pickSort';
 import {
   ALL_CATEGORIES,
@@ -47,7 +48,7 @@ import {
 } from '@/lib/pickFilterState';
 import { colors, font, spacing } from '@/lib/theme';
 import { FilterBar, type ActivePill } from './FilterBar';
-import { FilterChip, chipRowStyle } from './FilterChip';
+import { FilterChip } from './FilterChip';
 import { FilterField } from './FilterField';
 import { FilterSection, FilterSheet } from './FilterSheet';
 import { GameFilterSection } from './GameFilterSection';
@@ -71,6 +72,12 @@ interface Props {
   onChange: (next: PicksFilterState) => void;
   sortKey: SortKey;
   onSortChange: (key: SortKey) => void;
+  /**
+   * False when this board has no captured public-ticket split. Public then
+   * ranks every row −1 and falls through to Edge — the chip is disabled and
+   * relabelled rather than silently matching Edge.
+   */
+  publicSortAvailable: boolean;
   search: string;
   onSearchChange: (v: string) => void;
   totalShown: number;
@@ -104,6 +111,7 @@ export function PickFilters({
   onChange,
   sortKey,
   onSortChange,
+  publicSortAvailable,
   search,
   onSearchChange,
   totalShown,
@@ -125,10 +133,6 @@ export function PickFilters({
   const categoryCounts = useMemo(
     () => categoryCountsFor(availableModelIds),
     [availableModelIds],
-  );
-  const presentProps = useMemo(
-    () => presentCategories.filter((c) => c !== 'game'),
-    [presentCategories],
   );
 
   const patch = (fn: (draft: PicksFilterState) => void) => {
@@ -156,38 +160,17 @@ export function PickFilters({
     });
   };
 
-  // Quick chips: whole-category shortcuts for the two cuts people actually use.
-  // Both are judged on what is PRESENT — "Props only" on an NFL board means the
-  // one prop category it has, not all three (two of which are baseball).
-  const shownCategories = selectedCategories(state, presentCategories);
-  const gameOnly = shownCategories.length === 1 && shownCategories[0] === 'game';
-  const propsOnly =
-    presentProps.length > 0 &&
-    !shownCategories.includes('game') &&
-    shownCategories.length === presentProps.length;
-
-  const setCategories = (cats: ModelCategory[]) =>
-    patch((d) => {
-      d.categories = new Set(cats);
-    });
-
   // A cut with nothing to cut is a dead control: NCAAF and UFC boards are 100%
-  // game models, so Game/Props and the Market section did nothing there. The
-  // two surfaces answer that differently, on purpose (UX review, 2026-09-09):
+  // game models, so the Market section did nothing there. The sheet HIDES it —
+  // a faceted filter that drops a facet with nothing behind it is the standard
+  // shape, and the sheet is a vertical list, so removing a section moves
+  // nothing the user is aiming at.
   //
-  //  - IN THE SHEET, the section is HIDDEN. A faceted filter that drops a facet
-  //    with nothing behind it is the standard shape, and the sheet is a
-  //    vertical list, so removing a section moves nothing the user is aiming at.
-  //  - IN THE BAR, the chips stay and go DISABLED. That row is positional and
-  //    shared with SORT: removing ~150pt of leading content slides every sort
-  //    chip left under a thumb already on the row, so a tap meaning "Game"
-  //    silently re-sorts the board. SportToggle one row above already mutes
-  //    rather than removes, and FilterChip has carried a `disabled` prop for
-  //    exactly this since it was written.
-  //
-  // Both stay live while the state IS narrowed, so the control that produced a
-  // filter is always reachable to undo it (the state survives a Today→Signals
-  // switch, and those two segments can hold different markets).
+  // It stays live while the state IS narrowed, so the control that produced a
+  // filter is reachable to undo it when the destination board still holds that
+  // market. An impossible Market (selected ∩ present is empty) is cleared by
+  // the screen when leaving Today — the Signal section is hidden on
+  // Signals/Live, and a hidden cut with no undo empties the board.
   const marketIsNarrowed = categoriesAreNarrowed(state, presentCategories);
   const marketCutBites = presentCategories.length > 1 || marketIsNarrowed;
 
@@ -198,8 +181,16 @@ export function PickFilters({
   // Clear all — the exact blindness the pill row was added to end. It also made
   // Reset look like it cleared something that had never been shown as set.
   const gamesNarrowed = selectedGames.size > 0;
+  const searchActive = search.trim().length > 0;
   const pills = useMemo(() => {
     const out = buildPills(state, onChange, presentCategories);
+    if (searchActive) {
+      out.unshift({
+        key: 'search',
+        label: `"${search.trim()}"`,
+        onRemove: () => onSearchChange(''),
+      });
+    }
     if (gamesNarrowed && onClearGames) {
       out.push({
         key: 'games',
@@ -208,9 +199,29 @@ export function PickFilters({
       });
     }
     return out;
-  }, [state, onChange, presentCategories, gamesNarrowed, games, selectedGames, onClearGames]);
+  }, [
+    state,
+    onChange,
+    presentCategories,
+    searchActive,
+    search,
+    onSearchChange,
+    gamesNarrowed,
+    games,
+    selectedGames,
+    onClearGames,
+  ]);
 
-  const count = activeFilterCount(state, presentCategories) + (gamesNarrowed ? 1 : 0);
+  const count =
+    activeFilterCount(state, presentCategories) +
+    (gamesNarrowed ? 1 : 0) +
+    (searchActive ? 1 : 0);
+
+  const clearAll = () => {
+    onChange(freshFilter());
+    onClearGames?.();
+    onSearchChange('');
+  };
 
   // Collapsed-row summaries. "All" rather than an exhaustive list when nothing
   // is excluded — the row exists to say what is NARROWING the board.
@@ -229,6 +240,9 @@ export function PickFilters({
     return parts.length ? parts.join(' · ') : 'None';
   }, [state.minProb, state.minEdge, state.minEV]);
 
+  const sortSummary =
+    SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? 'Edge';
+
   return (
     <>
       <FilterBar
@@ -238,53 +252,9 @@ export function PickFilters({
         onOpenFilters={() => setOpen(true)}
         activeCount={count}
         pills={pills}
-        onClearAll={
-          count > 0
-            ? () => {
-                onChange(freshFilter());
-                onClearGames?.();
-              }
-            : undefined
-        }
+        onClearAll={count > 0 ? clearAll : undefined}
         countLabel={totalShown === totalAll ? undefined : `${totalShown}/${totalAll}`}
-      >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={chipRowStyle}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Always rendered, so the row's geometry never changes under a
-              thumb — see marketCutBites. */}
-          <FilterChip
-            label="Game"
-            active={gameOnly}
-            disabled={!marketCutBites}
-            onPress={() => setCategories(gameOnly ? ALL_CATEGORIES : ['game'])}
-          />
-          <FilterChip
-            label="Props"
-            active={propsOnly}
-            disabled={!marketCutBites || presentProps.length === 0}
-            // The PRESENT props, not all three: one tap used to write
-            // pitcher_prop and batter_prop into the state on an NFL board —
-            // invisible today because every read intersects with
-            // presentCategories, but that is the bug masked rather than absent,
-            // and the next surface to read the state raw re-ships it.
-            onPress={() => setCategories(propsOnly ? ALL_CATEGORIES : presentProps)}
-          />
-          <View style={styles.divider} />
-          <Text style={styles.sortLabel}>SORT</Text>
-          {SORT_OPTIONS.map((o) => (
-            <FilterChip
-              key={o.key}
-              label={o.label}
-              active={sortKey === o.key}
-              onPress={() => onSortChange(o.key)}
-            />
-          ))}
-        </ScrollView>
-      </FilterBar>
+      />
 
       <FilterSheet
         visible={open}
@@ -292,16 +262,43 @@ export function PickFilters({
         title={`Filter ${itemNoun}s`}
         resultCount={totalShown}
         itemNoun={itemNoun}
-        onReset={() => {
-          onChange(freshFilter());
-          onClearGames?.();
-        }}
-        canReset={count > 0 || selectedGames.size > 0}
+        onReset={clearAll}
+        canReset={count > 0}
       >
-        {/* GAMES first — the widest cut on the sheet, and the same control the
-            Stats tab renders from the same selection (Matt, 2026-09-09). Only
-            where there are fixtures to pick: a UFC card is fighters, and the
-            section would be an empty box. */}
+        <FilterSection
+          title="Sort"
+          subtitle={
+            publicSortAvailable
+              ? 'Order the board. Does not hide any picks.'
+              : 'Public needs captured ticket splits — none on this board, so it would match Edge.'
+          }
+          summary={sortSummary}
+        >
+          <View style={styles.chipWrap}>
+            {SORT_OPTIONS.map((o) => {
+              const publicDead = o.key === 'public' && !publicSortAvailable;
+              return (
+                <FilterChip
+                  key={o.key}
+                  label={publicDead ? 'Public (no splits)' : o.label}
+                  active={sortKey === o.key}
+                  disabled={publicDead}
+                  accessibilityLabel={
+                    publicDead
+                      ? 'Public, unavailable: no betting splits on this board'
+                      : o.label
+                  }
+                  onPress={() => onSortChange(o.key)}
+                />
+              );
+            })}
+          </View>
+        </FilterSection>
+
+        {/* GAMES first among CUTS — the widest cut on the sheet, and the same
+            control the Stats tab renders from the same selection (Matt,
+            2026-09-09). Only where there are fixtures to pick: a UFC card is
+            fighters, and the section would be an empty box. */}
         {onToggleGame && games.length > 0 ? (
           <FilterSection
             title="Games"
@@ -365,7 +362,11 @@ export function PickFilters({
 
         <FilterSection
           title="Minimums"
-          subtitle="Only show picks at or above these."
+          subtitle={
+            showSignals
+              ? 'Only show picks at or above these.'
+              : 'Optional extra floor — this board already only shows picks that cleared the action line.'
+          }
           summary={minimumsSummary}
         >
           <View style={styles.fieldRow}>
@@ -373,7 +374,7 @@ export function PickFilters({
               label="Model probability"
               value={pctText(state.minProb)}
               onChange={(t) => setThreshold('minProb', t)}
-              placeholder="65"
+              placeholder="e.g. 65"
               suffix="%"
               decimal
             />
@@ -381,7 +382,7 @@ export function PickFilters({
               label="Edge"
               value={pctText(state.minEdge)}
               onChange={(t) => setThreshold('minEdge', t)}
-              placeholder="10"
+              placeholder="e.g. 10"
               suffix="%"
               decimal
             />
@@ -391,7 +392,7 @@ export function PickFilters({
               label="Expected value"
               value={pctText(state.minEV)}
               onChange={(t) => setThreshold('minEV', t)}
-              placeholder="2"
+              placeholder="e.g. 2"
               suffix="%"
               decimal
             />
@@ -479,17 +480,4 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   fieldSpacer: { flex: 1 },
-  divider: {
-    width: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
-    marginVertical: 2,
-    marginHorizontal: spacing.xs,
-    backgroundColor: colors.separator,
-  },
-  sortLabel: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.3,
-  },
 });

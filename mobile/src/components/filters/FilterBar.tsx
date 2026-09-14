@@ -9,7 +9,7 @@
  *
  * Layout:
  *   row 1  search field ......................... [Filters (n)]
- *   row 2  caller-supplied quick chips (optional)
+ *   row 2  caller-supplied quick chips (optional — Picks no longer uses this)
  *   row 3  active filter pills + count + Clear all   (only when filtered)
  *
  * Every active filter gets a pill, not just some of them. The old bar only

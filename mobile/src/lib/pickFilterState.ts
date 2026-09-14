@@ -16,8 +16,8 @@
  * boards are 100% game models today, so Game/Props were dead controls there.
  *
  * So `presentCategoriesFor` derives the offered set from the picks actually on
- * screen, and every comparison below — the count, the pills, the quick-chip
- * states — is relative to THAT, not to the four-category universe.
+ * screen, and every comparison below — the count, the pills, the sheet's
+ * Market chips — is relative to THAT, not to the four-category universe.
  */
 
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';

@@ -65,6 +65,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import {
   applyFilter,
+  cloneFilter,
   freshFilter,
   PickFilters,
   type PicksFilterState,
@@ -87,9 +88,15 @@ import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
-import { isGameSelected, selectableGames } from '@/lib/gameFilter';
+import { gameFilterSummary, isGameSelected, selectableGames } from '@/lib/gameFilter';
 import { slipKeyForPick } from '@/lib/parlay';
-import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
+import {
+  ALL_CATEGORIES,
+  ALL_SIGNALS,
+  presentCategoriesFor,
+  selectedCategories,
+} from '@/lib/pickFilterState';
+import { publicSortAvailable, searchPicks, sortPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import {
   isModelPaused,
@@ -330,8 +337,9 @@ export function PicksHomeScreen() {
   // widen back to the whole league. Tapping Today -> Signals did the same thing
   // inside this screen alone (UX review, 2026-09-09).
   //
-  // A picked game with no picks in this view is a legitimate empty list, and
-  // the existing "no picks match your filter" state is the honest answer.
+  // A picked game with no picks in this view is a legitimate empty list. The
+  // empty state names Games and that it is shared with Stats, because the
+  // generic "widen signals / thresholds" copy never mentioned this cut.
 
   const filtered = useMemo(
     () =>
@@ -343,7 +351,40 @@ export function PicksHomeScreen() {
       ),
     [activeItems, filter, search, gamePicker.selected],
   );
+  const publicSortLive = useMemo(() => publicSortAvailable(activeItems), [activeItems]);
+  useEffect(() => {
+    if (!publicSortLive && sortKey === 'public') setSortKey('edge');
+  }, [publicSortLive, sortKey]);
   const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
+
+  // Games is shared with Stats. A game picked there (or here) can empty THIS
+  // board while Today still has picks — the generic "widen signals / thresholds"
+  // empty state never named the shared cut, so the board read as broken.
+  const emptiedByGames = useMemo(() => {
+    if (activeItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
+      return false;
+    }
+    return searchPicks(applyFilter(activeItems, filter), search).length > 0;
+  }, [activeItems, filtered.length, filter, search, gamePicker.selected]);
+
+  // Signal is hidden on Signals/Live (those boards are all BET). A Today cut
+  // to AVOID/NONE would empty them with undo only via a pill the user may not
+  // recognise. Same for a Market that cannot exist on the destination board.
+  // Clear both when leaving Today — the section that set them is gone.
+  useEffect(() => {
+    if (view === 'today') return;
+    setFilter((prev) => {
+      const present = presentCategoriesFor(availableModelIds);
+      const signalNarrowed = prev.signals.size < ALL_SIGNALS.length;
+      const marketImpossible =
+        present.length > 0 && selectedCategories(prev, present).length === 0;
+      if (!signalNarrowed && !marketImpossible) return prev;
+      const next = cloneFilter(prev);
+      if (signalNarrowed) next.signals = new Set(ALL_SIGNALS);
+      if (marketImpossible) next.categories = new Set(ALL_CATEGORIES);
+      return next;
+    });
+  }, [view, availableModelIds]);
 
   // Today: BET/AVOID/NONE counts. Daily exposure guardrail (over the opt-in cap).
   const todayStats = useMemo(() => {
@@ -539,6 +580,7 @@ export function PicksHomeScreen() {
           onChange={setFilter}
           sortKey={sortKey}
           onSortChange={setSortKey}
+          publicSortAvailable={publicSortLive}
           search={search}
           onSearchChange={setSearch}
           totalShown={filtered.length}
@@ -588,7 +630,14 @@ export function PicksHomeScreen() {
               <ActivityIndicator />
             </View>
           ) : (
-            <EmptyForView view={view} sport={sport} date={date} hasAny={activeItems.length > 0} />
+            <EmptyForView
+              view={view}
+              sport={sport}
+              date={date}
+              hasAny={activeItems.length > 0}
+              emptiedByGames={emptiedByGames}
+              gameSummary={gameFilterSummary(pickableGames, gamePicker.selected)}
+            />
           )
         }
         contentContainerStyle={styles.list}
@@ -618,17 +667,29 @@ function EmptyForView({
   sport,
   date,
   hasAny,
+  emptiedByGames,
+  gameSummary,
 }: {
   view: PicksView;
   sport: string;
   date: string;
   hasAny: boolean;
+  emptiedByGames: boolean;
+  gameSummary: string;
 }) {
+  if (hasAny && emptiedByGames) {
+    return (
+      <EmptyState
+        title="No picks for this game"
+        subtitle={`Games is shared with Stats — ${gameSummary} has no picks on this board. Clear the Games pill above to see every ${sport} pick.`}
+      />
+    );
+  }
   if (hasAny) {
     return (
       <EmptyState
         title="No picks match your filter"
-        subtitle="Try widening signals, categories, or lowering the thresholds."
+        subtitle="Try widening signals, categories, or lowering the thresholds. Search and Games also narrow this list — they show as pills above."
       />
     );
   }
