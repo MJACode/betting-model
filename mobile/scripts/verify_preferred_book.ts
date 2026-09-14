@@ -26,6 +26,7 @@ import {
   lineShopForPick,
   priceForBook,
   storedQuoteBook,
+  clvLockBook,
   LINE_SHOP_BOOKS,
   MODEL_BOOK,
 } from '../src/lib/markets';
@@ -339,6 +340,32 @@ check(
 check(
   'non-NFL picks are always DraftKings-priced',
   storedQuoteBook({ ...pick('home', -110), model_id: 'mlb_moneyline' } as Pick) === MODEL_BOOK,
+);
+
+check(
+  'CLV lock book is the trailing (FD) on a market-relative label, not decision_book',
+  clvLockBook({
+    model_id: 'nfl_prop_market',
+    pick_label: 'Jadarian Price Over 1.5 Rec (FD)',
+  }) === 'fanduel',
+);
+check(
+  'CLV lock book is DraftKings when the label has no book suffix',
+  clvLockBook({ model_id: 'mlb_moneyline', pick_label: 'NYY ML' }) === MODEL_BOOK,
+);
+check(
+  'CLV lock book names the NFL wind/opener comma book that owns dk_odds',
+  clvLockBook({
+    model_id: 'nfl_wind_totals',
+    pick_label: 'NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u',
+  }) === 'fanduel',
+);
+check(
+  'CLV lock book ignores a deciding book — dk_odds is still DraftKings',
+  clvLockBook({
+    model_id: 'mlb_moneyline',
+    pick_label: 'NYY ML',
+  }) === MODEL_BOOK,
 );
 
 // A DK user on an NFL pick priced at MGM, with no DK row: show MGM's number and

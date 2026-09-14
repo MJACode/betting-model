@@ -43,7 +43,7 @@ import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/f
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookName,
-  bookLabel,
+  clvLockBook,
   displayQuoteForPick,
   formatSideLine,
   gameMarketForModel,
@@ -520,8 +520,13 @@ function ClvCard({ pick }: { pick: Pick }) {
       ? `${pick.clv_pct > 0 ? '+' : ''}${pick.clv_pct.toFixed(1)}pp`
       : '—';
 
-  const closeBook = pick.clv_close_book || 'draftkings';
-  const closeTag = bookLabel(closeBook);
+  const closeBook = (pick.clv_close_book || 'draftkings').toLowerCase();
+  const closeName = bookName(closeBook);
+  // The American on this card is picks.dk_odds. Do not use storedQuoteBook /
+  // decisionBook — those name the deciding book and would stamp FD on a DK
+  // price (CLAUDE.md §6 chip/price mismatch).
+  const lockBook = clvLockBook(pick);
+  const lockName = bookName(lockBook);
 
   return (
     <View style={styles.infoCard}>
@@ -533,8 +538,8 @@ function ClvCard({ pick }: { pick: Pick }) {
 
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Signal line</Text>
-          <Text style={styles.clvRowValue}>
+          <Text style={styles.clvRowLabel}>Signal line ({lockName})</Text>
+          <Text style={styles.clvRowValue} numberOfLines={1}>
             {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.dk_odds)}
           </Text>
@@ -542,15 +547,15 @@ function ClvCard({ pick }: { pick: Pick }) {
       ) : null}
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Closing line ({closeTag})</Text>
-          <Text style={styles.clvRowValue}>
+          <Text style={styles.clvRowLabel}>Closing line ({closeName})</Text>
+          <Text style={styles.clvRowValue} numberOfLines={1}>
             {formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.closing_dk_odds)}
           </Text>
         </View>
       ) : (
         <Text style={styles.infoBody}>
-          {formatAmerican(pick.dk_odds)} at signal → {closeTag}{' '}
+          {lockName} {formatAmerican(pick.dk_odds)} at signal → {closeName}{' '}
           {formatAmerican(pick.closing_dk_odds)} at close
         </Text>
       )}
@@ -562,9 +567,7 @@ function ClvCard({ pick }: { pick: Pick }) {
             } ${lineCLV > 0 ? 'in your favor' : 'against you'} after we posted this — ` +
             `betting it later would have been ${lineCLV > 0 ? 'worse' : 'better'}. ` +
             `The prices aren't compared here because they're quoted on different numbers.`
-          : `The number held from signal to close, so the prices are directly comparable. ` +
-            `Closing line value is the market's own verdict on the bet, independent of ` +
-            `whether it won.`}
+          : `The number held. The pp is the fair (no-vig) ${closeName} close versus the ${lockName} signal — not a posted-price delta. Independent of whether the bet won.`}
       </Text>
     </View>
   );
@@ -624,11 +627,13 @@ const styles = StyleSheet.create({
   clvRowLabel: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
   clvRowValue: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+    flexShrink: 0,
   },
   clvNote: {
     fontSize: font.size.caption,
