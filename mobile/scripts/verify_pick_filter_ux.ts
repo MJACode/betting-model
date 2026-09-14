@@ -4,7 +4,7 @@
  * Run with:  npx tsx scripts/verify_pick_filter_ux.ts
  *
  * Designer locks (Matt greenlit 2026-09-14): idle chrome is search + Filters;
- * Public hides under a 20% split share; search is in the badge / pills /
+ * Public hides when under 20% of on-screen rows have a split; search is in the badge / pills /
  * Clear all; leaving Today resets Signal; any segment change resets an
  * impossible Market; Games-empty copy names the board and offers Clear games.
  */
@@ -84,6 +84,8 @@ check('leaving Today resets Signal to all three',
   /leaveToday/.test(screen) && /next\.signals = new Set\(ALL_SIGNALS\)/.test(screen));
 check('any segment change resets an impossible Market',
   /resetImpossibleMarket/.test(screen));
+check('Public share is measured on on-screen rows',
+  /publicSortAvailable\(filtered\)/.test(screen));
 check('Games-empty copy names the board',
   /No picks for \$\{gameSummary\} on \$\{boardLabel\(view\)\}/.test(screen));
 check('and offers Clear games',

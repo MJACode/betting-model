@@ -337,8 +337,9 @@ export function PicksHomeScreen() {
   // inside this screen alone (UX review, 2026-09-09).
   //
   // A picked game with no picks in this view is a legitimate empty list. The
-  // empty state names Games and that it is shared with Stats, because the
-  // generic "widen signals / thresholds" copy never mentioned this cut.
+  // empty state names the game and the board (Today / Signals / Live) and
+  // offers Clear games — the generic "widen signals / thresholds" copy never
+  // mentioned this cut.
 
   const filtered = useMemo(
     () =>
@@ -350,7 +351,7 @@ export function PicksHomeScreen() {
       ),
     [activeItems, filter, search, gamePicker.selected],
   );
-  const publicSortLive = useMemo(() => publicSortAvailable(activeItems), [activeItems]);
+  const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
     if (!publicSortLive && sortKey === 'public') setSortKey('edge');
   }, [publicSortLive, sortKey]);
