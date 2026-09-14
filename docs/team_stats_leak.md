@@ -346,8 +346,11 @@ retrains stayed blocked against already-rebuilt tables.
 lifts `assert_retrain_allowed` for MLB. Ongoing integrity:
 
 * worker job `team_stats_asof_verify` (declared
-  `team-stats-asof-verify-after-marker-2026-09-14`) — wraps
-  `python -m data.team_stats_rebuild --verify-only`; raises on breach; never
-  DELETE/rebuilds
+  `team-stats-asof-verify-mlb-twins-2026-09-14`; earlier keys
+  `...-after-marker-2026-09-14` / `...-after-715-2026-09-14` are spent) —
+  wraps `python -m data.team_stats_rebuild --verify-only`; raises on
+  breach; never DELETE/rebuilds. Hist `mlb_team_stats` stores WAS/CHW/AZ/ATH
+  where `games` stores WSH/CWS/ARI/OAK; `impossible_games_played` resolves
+  those twins so a missing key is not a 2967-row false CRIT.
 * `system_health` check `team_stats_asof_integrity` (CRIT) — same two
   invariants (impossible `games_played`, thin snapshots)
