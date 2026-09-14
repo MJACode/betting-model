@@ -43,6 +43,7 @@ import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/f
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookName,
+  bookLabel,
   displayQuoteForPick,
   formatSideLine,
   gameMarketForModel,
@@ -468,11 +469,11 @@ function PickDetailContent({
   );
 }
 
-// Closing line value, captured at settlement from the last pre-game DK snapshot
-// on the pick side.
+// Closing line value, captured at settlement from the last pre-game snapshot
+// on the pick side (Pinnacle when that snapshot exists — docs/clv.md).
 //
 // TWO MEASURES, and which one applies depends on whether the number moved:
-//   - the number HELD  → clv_pct, the price delta in pp
+//   - the number HELD  → clv_pct, the no-vig price delta in pp
 //   - the number MOVED → line_clv_pts, how far it moved toward our side
 // A price on a line we no longer hold is not a comparison (Over 44.5 at -110
 // and Over 46.5 at -110 are different bets), which is why clv_pct is NULL for
@@ -519,6 +520,9 @@ function ClvCard({ pick }: { pick: Pick }) {
       ? `${pick.clv_pct > 0 ? '+' : ''}${pick.clv_pct.toFixed(1)}pp`
       : '—';
 
+  const closeBook = pick.clv_close_book || 'draftkings';
+  const closeTag = bookLabel(closeBook);
+
   return (
     <View style={styles.infoCard}>
       <Text style={styles.infoHeading}>Closing Line Value</Text>
@@ -529,10 +533,7 @@ function ClvCard({ pick }: { pick: Pick }) {
 
       {hasLines ? (
         <View style={styles.clvRow}>
-          {/* DraftKings close vs DraftKings signal, so this card does not
-              mount for a pick DraftKings never priced -- CLV capture is
-              gated on dk_odds (tracking/paper_tracker.py). */}
-          <Text style={styles.clvRowLabel}>Signal line (DK)</Text>
+          <Text style={styles.clvRowLabel}>Signal line</Text>
           <Text style={styles.clvRowValue}>
             {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.dk_odds)}
@@ -541,7 +542,7 @@ function ClvCard({ pick }: { pick: Pick }) {
       ) : null}
       {hasLines ? (
         <View style={styles.clvRow}>
-          <Text style={styles.clvRowLabel}>Closing line (DK)</Text>
+          <Text style={styles.clvRowLabel}>Closing line ({closeTag})</Text>
           <Text style={styles.clvRowValue}>
             {formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
             {formatAmerican(pick.closing_dk_odds)}
@@ -549,7 +550,8 @@ function ClvCard({ pick }: { pick: Pick }) {
         </View>
       ) : (
         <Text style={styles.infoBody}>
-          DK {formatAmerican(pick.dk_odds)} at signal → DK {formatAmerican(pick.closing_dk_odds)} at close
+          {formatAmerican(pick.dk_odds)} at signal → {closeTag}{' '}
+          {formatAmerican(pick.closing_dk_odds)} at close
         </Text>
       )}
 

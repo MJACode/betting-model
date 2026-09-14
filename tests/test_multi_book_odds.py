@@ -143,14 +143,18 @@ def test_scorer_prop_odds_reads_one_named_book_at_a_time():
     assert "SCORE_OFF_ANY_BOOK_LINE" in fb, "the fallback must be switchable off"
 
 
-def test_closing_line_reads_filter_draftkings():
-    """CLV must be measured against DK's close, not whichever book is best."""
+def test_closing_line_reads_name_the_book():
+    """CLV close is parameterized (sharp first, then the pick's book).
+    An unfiltered odds read would let any book's number become the close."""
     src = _source("tracking/paper_tracker.py")
     for block in src.split("FROM odds")[1:]:
-        window = block[:400]
-        assert re.search(r"bookmaker\s*=\s*'draftkings'", window), (
-            "a paper_tracker odds read lost its draftkings filter"
+        window = block[:500]
+        assert re.search(r"bookmaker\s*=\s*%s", window), (
+            "a paper_tracker odds read names no bookmaker — any book's "
+            "price could become the close"
         )
+    assert "close_book_candidates" in src
+    assert "SHARP_BOOKMAKERS" in src
 
 
 def test_feature_engines_whitelist_draftkings():

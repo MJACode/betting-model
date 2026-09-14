@@ -65,7 +65,27 @@ def test_the_market_relative_rules_take_their_market_from_the_row():
     assert "p.prop_market" in src, "the SELECT must fetch the row's market"
     assert 'if prop_market == "FROM_PROP_MARKET":' in src
     assert "bookmaker = _book_from_label(pick_label)" in src
-    assert "bookmaker=bookmaker" in src, "the close must be read at the pick's book"
+    assert "_first_prop_close(" in src
+    assert "pick_book=bookmaker" in src, (
+        "the close prefers Pinnacle then the pick's book, never a silent DK")
+
+
+def _book_from_label_fn():
+    """`_book_from_label` without importing paper_tracker (that module
+    pulls models.scorer → trainer → optuna/sklearn)."""
+    text = SRC.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    chunks = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            name = getattr(node.targets[0], "id", "")
+            if name in ("_LABEL_BOOK", "_LABEL_BOOK_RE"):
+                chunks.append(ast.get_source_segment(text, node))
+        elif isinstance(node, ast.FunctionDef) and node.name == "_book_from_label":
+            chunks.append(ast.get_source_segment(text, node))
+    ns = {"re": re}
+    exec("\n".join(chunks), ns)
+    return ns["_book_from_label"]
 
 
 @pytest.mark.parametrize("label, book", [
@@ -80,8 +100,7 @@ def test_the_market_relative_rules_take_their_market_from_the_row():
     (None, "draftkings"),
 ])
 def test_the_book_is_read_from_the_label_suffix(label, book):
-    from tracking.paper_tracker import _book_from_label
-    assert _book_from_label(label) == book
+    assert _book_from_label_fn()(label) == book
 
 
 def test_the_label_book_map_is_the_inverse_of_both_cards():

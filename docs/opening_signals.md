@@ -16,7 +16,7 @@ totals, or the go-live gate.**
 |---|---|---|
 | `opening_signals` table | schema (SQLite + Supabase) | one locked row per `lock_key` (`game:model` for game markets, `game:model:player` for props); UNIQUE → first BET cross wins, later refreshes + side flips can't overwrite |
 | Capture | `tracking/opening_signals.capture_opening_signals` | `INSERT … SELECT … ON CONFLICT (lock_key) DO NOTHING` from current live BET picks; **excludes live (in-play) picks**. Pipeline `--step opening-signals`, runs **last** (after all game + prop scoring) in the daily flow and every hourly refresh |
-| Settle | `tracking/opening_signals.settle_opening_signals` | called inside `paper_tracker.settle_picks` (game-level markets only). Reuses `_compute_result` + `_closing_dk_odds`. Fills result/P&L (vs the **opening** dk_odds + scored_line), `clv_pct` (close vs open), `line_move_dir` (toward/against/flat, ±0.5pp), `public_side` (with_public ≥55 / contrarian ≤45 / even, from the locked split). **NOT folded into the live settle totals.** |
+| Settle | `tracking/opening_signals.settle_opening_signals` | called inside `paper_tracker.settle_picks` (game-level markets only). Reuses `_compute_result` + `_first_game_close`. Fills result/P&L (vs the **opening** dk_odds + scored_line), `clv_pct` (no-vig close vs open, same-line only; `docs/clv.md`), `line_move_dir` (toward/against/flat, ±0.5pp), `public_side` (with_public ≥55 / contrarian ≤45 / even, from the locked split). **NOT folded into the live settle totals.** |
 | Report | `python -m tracking.opening_report [--since 2026-04-14]` | opening-track vs live-track win%/ROI/units/CLV, plus the opening track sliced by line-move direction and public side |
 
 **Conventions / caveats:**

@@ -57,7 +57,7 @@ function pick(over: Partial<Pick>): Pick {
     pitcher_throw_hand: null, is_live: true, inning_at_pick: 5,
     score_diff_at_pick: 1, public_bet_pct: null, public_money_pct: null,
     closing_dk_odds: null, closing_line: null, clv_pct: null,
-    clv_captured_at: null, dk_bet_link: null, ...over,
+    clv_captured_at: null, clv_method: null, clv_close_book: null, dk_bet_link: null, ...over,
   } as Pick;
 }
 

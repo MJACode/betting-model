@@ -59,10 +59,12 @@ and qualification flipped over deliberately, in one change.
 
 Two invariants that must not be broken:
 - **The models only ever DECIDE on DraftKings.** `ODDS_API_BOOKMAKER` is the scoring book;
-  `scorer._get_dk_odds` / `_get_prop_dk_odds`, `paper_tracker._closing_dk_odds`, and all four
+  `scorer._get_dk_odds` / `_get_prop_dk_odds` and all four
   feature engines hard-filter to it (feature engines whitelist `('draftkings','sbr_consensus')`
   so extra books can't multiply training rows). `tests/test_multi_book_odds.py` asserts each of
-  these — if you refactor one of those queries, that test is the tripwire. The scorer's
+  these — if you refactor one of those queries, that test is the tripwire. CLV capture
+  (`paper_tracker._closing_odds`) prefers Pinnacle's last pre-game snapshot when it
+  exists (`docs/clv.md`); that is a grade of the bet, not a decision. The scorer's
   best-line helpers DO read other books, but only to fill the `best_*` columns after the pick is
   decided; `tests/test_best_line.py` asserts `_make_pick` / `_make_prop_pick` never see them.
 - **A bad book key must never cost us a fetch.** Both ingestors retry with DraftKings alone on a

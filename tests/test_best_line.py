@@ -227,8 +227,8 @@ def test_the_builders_decide_at_draftkings_and_the_stamp_requalifies():
 
 def test_settlement_reads_the_deciding_price():
     """Settlement grades at the price the pick was DECIDED at: the decision
-    price since the flip, DraftKings (decision_odds NULL) before it. CLV stays
-    DraftKings-to-DraftKings."""
+    price since the flip, DraftKings (decision_odds NULL) before it. CLV grades
+    the locked bet against the no-vig sharp close (docs/clv.md)."""
     src = _source("tracking/paper_tracker.py")
     assert src.count("COALESCE(p.decision_odds, p.dk_odds)") == 4, (
         "every settle path (props, UFC, golf, game) grades at the decision price")

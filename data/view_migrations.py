@@ -159,6 +159,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # listed in config.PAUSED_MODELS. The review still reports; it never
     # writes this table.
     "clear_unauthorized_auto_pauses_2026_09_14.sql",
+    # 2026-09-14: CLV is no-vig two-way close, sharp book when present.
+    # Columns first so the view filter cannot run against a missing clv_method.
+    "add_clv_method_2026_09_14.sql",
+    "track_record_clv_no_vig_2026_09_14.sql",
 ]
 
 

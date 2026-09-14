@@ -58,13 +58,12 @@ export interface Pick {
   // full-game pick where splits weren't available at score time.
   public_bet_pct: number | null;
   public_money_pct: number | null;
-  // Closing line value (CLV) — captured at settlement from the last pre-game DK
-  // snapshot on the pick side. NULL until the game has started and settled.
+  // Closing line value (CLV) — last pre-game snapshot on the pick side
+  // (Pinnacle when present). NULL until the game has started and settled.
   closing_dk_odds: number | null;
   closing_line: number | null;
-  // Price CLV, in pp: closing_implied_prob - bet_implied_prob (positive = beat
-  // the close). SAME-LINE ONLY — NULL when the number moved, because two prices
-  // on different numbers are two different bets, not a comparison.
+  // Price CLV, in pp: fair_close_p − fair_bet_p (positive = beat the
+  // close). SAME-LINE ONLY — NULL when the number moved. docs/clv.md.
   clv_pct: number | null;
   // Line CLV, in points: how far the number moved toward our side between the
   // signal and the close (positive = we beat the close on the number). This is
@@ -74,6 +73,10 @@ export interface Pick {
   // the number moved, clv_pct > 0 where it held.
   clv_beat_close: boolean | null;
   clv_captured_at: string | null;
+  // How clv_pct was computed. Pedigree averages no_vig / zero_vig only.
+  clv_method: string | null;
+  // Book whose snapshot is the close. closing_dk_odds is that book's American.
+  clv_close_book: string | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
   inning_at_pick: number | null;

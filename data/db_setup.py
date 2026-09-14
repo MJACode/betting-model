@@ -683,12 +683,14 @@ CREATE TABLE IF NOT EXISTS picks (
     confidence_tier    TEXT,
     public_bet_pct     REAL,
     public_money_pct   REAL,
-    closing_dk_odds    REAL,               -- DK American price on the pick side at close (CLV)
-    closing_line       REAL,               -- DK total/spread on the pick side at close (NULL for ML)
-    clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close). SAME-LINE ONLY: NULL when the number moved
+    closing_dk_odds    REAL,               -- close American on the pick side (book in clv_close_book)
+    closing_line       REAL,               -- close total/spread on the pick side (NULL for ML)
+    clv_pct            REAL,               -- (fair_close_p - fair_bet_p) in pp, SAME-LINE ONLY. docs/clv.md
     line_clv_pts       REAL,               -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for ML
     clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
+    clv_method         TEXT,               -- no_vig | zero_vig | raw_one_way | raw_one_sided (legacy)
+    clv_close_book     TEXT,               -- book whose last pre-game snapshot is the close
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
     -- The model probability mapped to what it is actually worth
     -- (models/probability_calibration.py). DISPLAY ONLY: edge, the signal,
@@ -1109,7 +1111,7 @@ CREATE TABLE IF NOT EXISTS opening_signals (
     -- filled at settlement (game-level markets, Phase 1)
     closing_dk_odds    REAL,                 -- DK price on our side at close
     closing_line       REAL,                 -- DK total/spread on our side at close
-    clv_pct            REAL,                 -- close_ip - open_ip, pp (positive = line moved toward us)
+    clv_pct            REAL,                 -- no-vig close vs opening lock, SAME-LINE ONLY. docs/clv.md
     line_move_dir      TEXT,                 -- toward | against | flat
     public_side        TEXT,                 -- with_public | contrarian | even
     result             TEXT,                 -- WIN | LOSS | PUSH | NO_ACTION
@@ -1407,6 +1409,8 @@ _MIGRATIONS = [
     ("picks", "line_clv_pts",        "NUMERIC"),
     ("picks", "clv_beat_close",      "BOOLEAN"),
     ("picks", "clv_captured_at",     "TEXT"),
+    ("picks", "clv_method",          "TEXT"),
+    ("picks", "clv_close_book",      "TEXT"),
     # DraftKings betslip deep links (The Odds API includeLinks/includeSids)
     ("odds", "home_link",  "TEXT"),
     ("odds", "away_link",  "TEXT"),
