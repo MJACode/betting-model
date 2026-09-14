@@ -41,7 +41,7 @@ check('sport-change resets basis', /setBasis\('perGame'\)/.test(sportReset));
 check('Availability names slate vs fixtures',
   /This slate is the day.s card/.test(stats) && /Games above is specific fixtures/.test(stats));
 check('the Games-wins note tells the user how to undo',
-  /Clear Games to use the slate cut/.test(stats));
+  /Clear Games to use Playing today/.test(stats));
 
 check('UFC empty note does not say search above',
   !/filter by fighter with the search above/.test(stats));

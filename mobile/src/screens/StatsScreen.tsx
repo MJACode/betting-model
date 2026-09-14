@@ -2229,7 +2229,7 @@ export function StatsScreen() {
               : !hasSlate
                 ? `No ${sport} games in the next week, so there is nobody to narrow to.`
                 : gamesPicked
-                  ? 'A picked game already narrows the board. Clear Games to use the slate cut.'
+                  ? 'Clear Games to use Playing today'
                   : tonightActive
                     ? 'Showing only players on this slate (the day’s card, not a specific fixture).'
                     : 'Showing every player, not just this slate. Lines come from each one’s next game.'}
