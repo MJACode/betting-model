@@ -60,10 +60,12 @@ check('Player-only on an NFL board is a real cut and is kept',
   resetImpossibleMarket(playerOnly, nflBoard) === playerOnly);
 
 const pf = read('src/components/filters/PickFilters.tsx');
+const bar = read('src/components/filters/FilterBar.tsx');
 const screen = read('src/screens/PicksHomeScreen.tsx');
 const empty = read('src/components/EmptyState.tsx');
 
 check('idle bar has no quick-chip ScrollView', !/<FilterBar[\s\S]*?<ScrollView/.test(pf));
+check('search field is 44pt next to Filters', /searchWrap:[\s\S]*minHeight: 44/.test(bar));
 check('Sort lives in the sheet', /title="Sort"/.test(pf));
 check('Public chip is hidden, not disabled-on-bar',
   /o\.key !== 'public' \|\| publicSortAvailable/.test(pf) && !/Public \(no splits\)/.test(pf));
@@ -81,7 +83,9 @@ check('Signals/Live Minimums name the action-filter overlap',
 check('Market section still hides when it cannot cut', /\{marketCutBites \? \(/.test(pf));
 
 check('leaving Today resets Signal to all three',
-  /leaveToday/.test(screen) && /next\.signals = new Set\(ALL_SIGNALS\)/.test(screen));
+  /view !== 'today'/.test(screen) && /next\.signals = new Set\(ALL_SIGNALS\)/.test(screen));
+check('Signal\/Market locks apply on the first paint',
+  /displayFilter/.test(screen) && /applyFilter\(activeItems, displayFilter\)/.test(screen));
 check('any segment change resets an impossible Market',
   /resetImpossibleMarket/.test(screen));
 check('Public share is measured on on-screen rows',
