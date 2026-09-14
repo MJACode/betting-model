@@ -35,7 +35,7 @@ jobs:
           # Full requirements.txt pulls heavy ML stacks; the subset below
           # only needs pytest + the modules those tests import. Install the
           # declared test pin and the light runtime deps config/scorer need.
-          python -m pip install "pytest>=8.0.0" python-dotenv numpy pandas loguru psycopg2-binary requests scipy joblib scikit-learn xgboost-cpu optuna
+          python -m pip install "pytest>=8.0.0" python-dotenv numpy pandas loguru psycopg2-binary requests scipy joblib scikit-learn xgboost-cpu optuna apscheduler beautifulsoup4
 
       - name: Mobile thresholds drift check
         run: python -m scripts.generate_mobile_thresholds --check
