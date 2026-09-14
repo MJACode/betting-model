@@ -1,5 +1,5 @@
 """
-The live NFL player-prop card: de-vig Pinnacle, bet the soft outlier.
+The live NFL player-prop card: de-vig sharp/exchange refs, bet the soft outlier.
 
 This is the deployment of the rule measured in docs/nfl_props_model.md §5c
 (954 bets, +10.33% ROI at a 5pp threshold, positive in all three seasons, and
@@ -97,10 +97,17 @@ def _slate_rows(rows) -> dict[str, dict]:
     return out
 
 
+def _kalshi_ladders_or_empty() -> dict:
+    """Live Kalshi ladders, or {} if the public API is unreachable."""
+    from data.ingestors.kalshi_prop_ingestor import ladders_or_empty
+    return ladders_or_empty()
+
+
 def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
          games: dict | None = None,
          now: datetime | None = None,
-         snapshot_types: tuple[str, ...] | None = None) -> tuple[list, dict, dict]:
+         snapshot_types: tuple[str, ...] | None = None,
+         kalshi_ladders: dict | None = None) -> tuple[list, dict, dict]:
     """`now` overrides the clock, which is what makes a past slate replayable
     exactly as the card would have seen it (the §28 replay harness pattern).
     Everything else — the started-game guard, the quote filter — is unchanged,
@@ -146,10 +153,19 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     if snapshot_types:          # replay only; live takes the pre-game default
         kw["snapshot_types"] = snapshot_types
     quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS), **kw)
+    # Exchange reference. None means "fetch now" on a LIVE run; a replay must
+    # not mix today's Kalshi board with a past soft book (fail closed -> {}).
+    # Explicit {} / a passed dict skips the network (tests, offline).
+    if kalshi_ladders is None:
+        kalshi_ladders = {} if replay else _kalshi_ladders_or_empty()
+    game_dates = {g: str(d.get("date", ""))[:10] for g, d in games.items()
+                  if g in open_games and d.get("date")}
     # The over side is held to a stricter floor than the under side; the lean
     # that justifies it is measured in config.NFL_PROP_MARKET_SIDE_EDGE.
-    bets, diag = mk.find_bets(quotes, min_edge=min_edge, soft_books=SOFT_BOOKS,
-                              min_edge_by_side=config.NFL_PROP_MARKET_SIDE_EDGE)
+    bets, diag = mk.find_bets(
+        quotes, min_edge=min_edge, soft_books=SOFT_BOOKS,
+        min_edge_by_side=config.NFL_PROP_MARKET_SIDE_EDGE,
+        kalshi_ladders=kalshi_ladders, game_dates=game_dates)
     diag["games"] = len(open_games)
     diag["started_skipped"] = len(live)
     diag["too_early"] = len(too_early)
@@ -164,8 +180,9 @@ def render(bets, diag, games, names=None) -> str:
         # Both references, because the card claimed "sharp pinnacle" for the
         # first hours after nfl_prop_market moved to two (#568) and a card is
         # read by a person deciding whether to trust the slate.
-        f"NFL prop card — sharp {', '.join(mk.SHARP_BOOKS)} "
-        f"| min edge {MIN_EDGE:.0%}",
+        f"NFL prop card — sharp {', '.join(mk.SHARP_BOOKS)}"
+        + (f", {mk.KALSHI_BOOK}" if diag.get(f"{mk.KALSHI_BOOK}_sharp_quotes") else "")
+        + f" | min edge {MIN_EDGE:.0%}",
         f"{diag.get('games', 0)} open games | {diag.get('sharp_quotes', 0)} sharp quotes | "
         f"{diag.get('compared', 0)} compared | {len(bets)} bets",
     ]
