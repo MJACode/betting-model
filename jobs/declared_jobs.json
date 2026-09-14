@@ -755,5 +755,12 @@
         "mlb_prop_batter_runs"
       ]
     }
+  },
+  {
+    "key": "clv-no-vig-backfill-2026-09-14",
+    "job_type": "clv_backfill",
+    "requested_by": "mike",
+    "note": "ONE-SHOT. #729 (9fb77ee) already live; _backfill_clv rewrites 40 dates of clv_method='raw_one_sided' per settle and there is no settle job_type. Prod had 2419 such rows across 151 dates (2026-09-14). This loops the ordinary paper_tracker._backfill_clv until a pass fills 0 (cap 40 passes) so the no-vig pedigree is complete now rather than over many scheduled settles. mike: force Railway pickup and backfill everything. No model/threshold change.",
+    "args": {}
   }
 ]
