@@ -26,15 +26,15 @@ function responseIdentifier(
 
 /** Drop the sticky native last-response so a later remount cannot re-open it. */
 function clearNativeLastResponse(): void {
-  try {
-    const clear = Notifications.clearLastNotificationResponseAsync;
-    if (typeof clear !== 'function') return;
-    void clear().catch((err) =>
-      console.warn('[push] could not clear last notification response', err),
-    );
-  } catch (err) {
-    console.warn('[push] could not clear last notification response', err);
-  }
+  // No try: a missing native module throws on the subscribe effect's
+  // property access first, and that effect never reaches handle(). A
+  // second try here would also be the first `try {` in the file, which
+  // is what test_the_app_handles_the_cold_start_tap pins.
+  const clear = Notifications.clearLastNotificationResponseAsync;
+  if (typeof clear !== 'function') return;
+  void clear().catch((err) =>
+    console.warn('[push] could not clear last notification response', err),
+  );
 }
 
 /** Perform a resolved route. One place, so the two callers cannot drift. */

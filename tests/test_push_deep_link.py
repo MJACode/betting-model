@@ -250,7 +250,13 @@ def test_the_app_handles_the_cold_start_tap():
 
     # The cold-start call belongs inside the same try as the listener: without a
     # native module the property access throws synchronously, past .catch.
-    body = re.search(r"try \{(.*?)\} catch", src, re.S)
+    # Scoped to the subscribe try (the one that assigns `sub`) so a helper
+    # try elsewhere in the file cannot satisfy this.
+    body = re.search(
+        r"try \{(.*?sub = Notifications.addNotificationResponseReceivedListener.*?)\} catch",
+        src,
+        re.S,
+    )
     assert body and "getLastNotificationResponseAsync" in body.group(1), (
         "the cold-start native call sits outside the try that guards the "
         "listener -- a launch crash on a build without expo-notifications"
