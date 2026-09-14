@@ -334,6 +334,10 @@ check(
   storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, BR) · 1.00u')) === 'betrivers',
 );
 check(
+  'REBET in an NFL label is still ReBet after PIN was added to the map',
+  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, REBET) · 1.00u')) === 'rebet',
+);
+check(
   'an unparseable NFL label falls back to DraftKings rather than inventing a book',
   storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5')) === MODEL_BOOK,
 );

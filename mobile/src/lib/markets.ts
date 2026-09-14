@@ -382,6 +382,7 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
   HRB: 'hardrockbet',
   BALLY: 'ballybet',
   PARX: 'betparx',
+  REBET: 'rebet',
   PIN: 'pinnacle',
 };
 
