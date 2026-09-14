@@ -334,3 +334,20 @@ Wired from `models.trainer` and the MLB sweep scripts:
   `player_prop_odds` + `player_game_log`, not team-stats tables
 
 NCAAF is unaffected.
+
+### Marker set 2026-09-14 — freeze lifted; verify-only is the ongoing gate
+
+Phase 1 team-stats rebuild and Phase 2 pitcher rebuild both landed
+**2026-09-03** (evidence above: `mlb_moneyline` 2026 AUC 0.529→0.566; pitcher
+rebuild Done same day). The #710 freeze landed later without the marker, so
+retrains stayed blocked against already-rebuilt tables.
+
+`data/TEAM_STATS_ASOF_REBUILD_COMPLETE` is now in tree (presence-only). That
+lifts `assert_retrain_allowed` for MLB. Ongoing integrity:
+
+* worker job `team_stats_asof_verify` (declared
+  `team-stats-asof-verify-after-marker-2026-09-14`) — wraps
+  `python -m data.team_stats_rebuild --verify-only`; raises on breach; never
+  DELETE/rebuilds
+* `system_health` check `team_stats_asof_integrity` (CRIT) — same two
+  invariants (impossible `games_played`, thin snapshots)

@@ -1,0 +1,11 @@
+# Team-stats as-of rebuild COMPLETE.
+#
+# Presence of this file lifts config.assert_retrain_allowed for MLB
+# (TEAM_STATS_ASOF_REBUILD_COMPLETE). Contents are ignored.
+#
+# Verified 2026-09-03 per docs/team_stats_leak.md:
+#   - Phase 1 team-stats rebuild ran; mlb_moneyline 2026 AUC 0.529 → 0.566
+#   - Phase 2 pitcher rebuild Done 2026-09-03 (data/pitcher_stats_rebuild.py)
+# Marker committed 2026-09-14 so the PR #710 freeze no longer blocks retrains
+# on already-rebuilt tables. Ongoing gate: team_stats_asof_verify job
+# (verify-only) + system_health team_stats_asof_integrity check.
