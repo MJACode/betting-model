@@ -148,6 +148,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # skip is lock_key_sql (KEY_PARTS), never player_id — that join false-
     # matched 3/2/2 other props on the same games. No Discord re-announce.
     "drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql",
+    # 2026-09-14: ESPN injury `date` on injuries.status_ts. The NFL prop
+    # Out/Doubtful veto compares this to the quote's snapshot_at; NULL
+    # fails open. ADD COLUMN IF NOT EXISTS.
+    "add_injuries_status_ts_2026_09_14.sql",
 ]
 
 

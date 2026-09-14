@@ -132,6 +132,7 @@ def test_injuries_table_columns(db_conn):
     required = {
         "sport", "team", "player_name", "status", "scenario",
         "severity_weight", "return_ramp_factor", "report_date",
+        "status_ts",
     }
     assert required.issubset(cols)
 

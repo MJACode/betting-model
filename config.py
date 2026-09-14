@@ -2555,6 +2555,7 @@ ESPN_INJURY_URLS = {
     "NHL": "https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl/teams/{team_id}/injuries",
     "WNBA": "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba/teams/{team_id}/injuries",
     "NBA": "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams/{team_id}/injuries",
+    "NFL": "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/teams/{team_id}/injuries",
 }
 
 # ESPN team ID maps — ESPN uses numeric IDs
@@ -2690,6 +2691,22 @@ ESPN_NBA_TEAM_IDS = {
     "LAC": 12, "LAL": 13, "MEM": 29, "MIA": 14, "MIL": 15, "MIN": 16,
     "NOP": 3,  "NYK": 18, "OKC": 25, "ORL": 19, "PHI": 20, "PHX": 21,
     "POR": 22, "SAC": 23, "SAS": 24, "TOR": 28, "UTA": 26, "WAS": 27,
+}
+
+# ESPN numeric team IDs for NFL injuries, keyed on OUR 3-letter abbrevs
+# (nflverse / NFL_ODDS_API_MAP), not ESPN's. Measured 2026-09-14 from
+# sports.core.api.espn.com/v2/sports/football/leagues/nfl/teams (32 items):
+# ESPN prints LAR for the Rams and WSH for Washington; those ids are stored
+# here as LA=14 and WAS=28. The injury ingestor overlays live core ids by
+# full team name via NFL_ODDS_API_MAP as a self-heal; this map is the
+# offline fallback and is complete (no expansion-team hole like WNBA).
+ESPN_NFL_TEAM_IDS = {
+    "ARI": 22, "ATL": 1,  "BAL": 33, "BUF": 2,  "CAR": 29, "CHI": 3,
+    "CIN": 4,  "CLE": 5,  "DAL": 6,  "DEN": 7,  "DET": 8,  "GB": 9,
+    "HOU": 34, "IND": 11, "JAX": 30, "KC": 12, "LAC": 24, "LA": 14,
+    "LV": 13,  "MIA": 15, "MIN": 16, "NE": 17,  "NO": 18,  "NYG": 19,
+    "NYJ": 20, "PHI": 21, "PIT": 23, "SF": 25,  "SEA": 26, "TB": 27,
+    "TEN": 10, "WAS": 28,
 }
 
 # ── Player Props ─────────────────────────────────────────────────────────────
