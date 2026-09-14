@@ -419,14 +419,27 @@ def step_savant(run_date: str) -> bool:
         return False
 
 
-def step_health_check(run_date: str) -> bool:
+def step_health_check(run_date: str, *, fail_on_crit: bool = True) -> bool:
     """
-    Daily system health check — verifies every API feed / data table is fresh
+    System health check — verifies every API feed / data table is fresh
     (odds, prop odds, MLB stats/bullpen/weather/logs, basketball local-job
     output, final scores, model artifacts, picks, settlement). Cadence-aware:
-    offseason/off-day sports are SKIPPED. A CRITICAL stale feed fails this
-    step so the Actions run shows red. Results are written to
+    offseason/off-day sports are SKIPPED. Results are always written to
     system_health_checks (anon-readable — query from Claude mobile).
+
+    TWO MODES, because observability must not fail the thing it observes.
+    Measured 2026-09-14: 20 of 32 non-daily pipeline_runs failed ONLY
+    `health-check` while odds/score/settle succeeded; a standing CRIT
+    reddened every hourly/evening pass for ~2 days and tripped
+    "Refresh pass degraded".
+
+    * Daily pipeline (`fail_on_crit=True`, the default) — a CRITICAL
+      stale feed fails this step so the run shows red. That is the
+      original Actions-red intent.
+    * Refresh / `--step health-check` (`fail_on_crit=False`) — still
+      RUNS and WRITES, but a CRIT cannot fail the pass. Verified:
+      `scripts/refresh_pass.sh` is hourly/evening/overnight only; the
+      daily pipeline calls this function directly, not via --step.
     """
     try:
         from tracking.system_health import run_system_health
@@ -436,10 +449,16 @@ def step_health_check(run_date: str) -> bool:
             return True
         logger.error(f"✗ System health: {result['crit']} CRITICAL failure(s), "
                      f"{result['warn']} warning(s) — see system_health_checks")
-        return False
+        if fail_on_crit:
+            return False
+        logger.warning("health-check: observing only — not failing this pass")
+        return True
     except Exception as exc:
         logger.error(f"✗ System health check failed to run: {exc}")
-        return False
+        if fail_on_crit:
+            return False
+        logger.warning("health-check: observing only — not failing this pass")
+        return True
 
 
 def step_bullpen(run_date: str) -> bool:
@@ -1682,8 +1701,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["prune_odds"] = step_prune_odds(run_date)
 
     # ── Step 12: System health check (feed freshness — after all ingestion) ────
-    # CRIT failure returns False → the Actions run shows red. Results land in
+    # Daily: CRIT failure returns False → the run shows red. Results land in
     # system_health_checks (anon-readable) for Claude mobile / the app.
+    # Refresh uses --step health-check with fail_on_crit=False so a standing
+    # CRIT cannot redden the ingest pass (2026-09-14: 20/32 non-daily runs).
     logger.info("Step 12: Running system health check (all API + data feeds)...")
     results["health_check"] = step_health_check(run_date)
 
@@ -1988,7 +2009,11 @@ Examples:
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
             "prune-odds":   lambda: step_prune_odds(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
-            "health-check": lambda: step_health_check(run_date),
+            # Observe-only: refresh_pass.sh (hourly/evening/overnight) is the
+            # caller. A standing CRIT still WRITES system_health_checks; it
+            # must not fail the pass. Daily calls step_health_check(run_date)
+            # directly, default fail_on_crit=True.
+            "health-check": lambda: step_health_check(run_date, fail_on_crit=False),
             # TODAY, not yesterday. settle_picks walks a 14-day trailing window
             # for both game and prop picks, so "today" is a strict superset of
             # "yesterday" — passing yesterday only ever excluded games that had

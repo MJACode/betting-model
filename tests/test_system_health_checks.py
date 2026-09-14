@@ -404,10 +404,13 @@ class TestRunLedger:
 
 
 class TestHealthCheckIsNotCountedAsAFailingStep:
-    """`health-check` fails whenever ANY CRIT check is bad, so counting it in
-    refresh_pass_steps creates a loop that can never clear: the check CRITs ->
-    the health step fails -> the check CRITs again next pass, forever, whether
-    or not the original cause was fixed. Observed live on 2026-08-27."""
+    """`health-check` is not a producer. Until 2026-09-14 the refresh --step
+    path returned False on any CRIT, so counting it in refresh_pass_steps
+    created a loop that could never clear: the check CRITs -> the health
+    step fails -> the check CRITs again next pass, forever, whether or not
+    the original cause was fixed. Observed live on 2026-08-27 and again
+    2026-09-12..14. Refresh no longer fails the step; this exclusion stays
+    for historical rows still inside the window."""
 
     def test_health_check_alone_does_not_trip_the_persistent_failure_alarm(self, db):
         for i in range(3):
