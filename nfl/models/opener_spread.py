@@ -75,8 +75,10 @@ sample, so it is partly in-sample. The direction - bet more when the edge is
 bigger - is not in doubt; the magnitude is not validated.
 
 WHAT WOULD RETIRE IT: a 2026 season at or below flat. The profit across six
-seasons is nearly all 2024, and 2025 was +0.32%. Watch the paper track, and do
-not raise the unit on a good month.
+seasons is nearly all 2024, and 2025 was +0.32%. Paper-track through 2026
+(`python -m scripts.nfl_rule_2026_track`, `docs/nfl_rule_2026_track.md`). Do
+not raise the unit on a good month — UNIT_PCT stays 0.01, MAX_UNITS stays 4.
+Do not unpause the paused XGB / distributional NFL props off this track.
 """
 
 from __future__ import annotations
@@ -241,7 +243,7 @@ EDGE_TIERS = ((3.0, "SMALL"), (5.5, "MEDIUM"), (float("inf"), "LARGE"))
 # find. Bets under MIN_UNITS are SKIPPED, not floored — a 0.5u floor tested
 # out-of-sample added 132u of risk for -0.34u of profit.
 # ---------------------------------------------------------------------------
-UNIT_PCT = 0.01          # 1 unit = 1% of bankroll, same unit as the wind model
+UNIT_PCT = 0.01          # 1 unit = 1% of bankroll. No unit bump (2026 paper-track).
 REF_KELLY = 0.0911       # wind's reference bet: lead 3, threshold 11, -110
 STAKE_SCALE = 2.0
 MAX_UNITS = 4.0          # must be >= 2 * STAKE_SCALE

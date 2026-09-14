@@ -63,6 +63,14 @@ they are untouched until someone measures them.
 so the MLB arm is a small change; MLB Pinnacle prop coverage starts 2026-08-27,
 so the window is thin.
 
+## [ ] Re-score nfl_opener_spread and nfl_wind_totals 2026 paper-track (October)
+
+mike / design review 2026-09-14: paper-track through 2026 with **no unit bump**.
+Opener retires if 2026 ≤ flat. Wind keeps the physical residual and
+`MAX_FIRE_LEAD=4` (deployed Open-Meteo population). Do not unpause paused XGB
+props. Command: `python -m scripts.nfl_rule_2026_track` (`--settle` runs the
+existing grader first). `docs/nfl_rule_2026_track.md`.
+
 ## [ ] Re-measure the NFL prop lead curve inside 24 h on the 2026 hourly polls (October)
 
 First look 2026-09-14 (`docs/nfl_prop_market_2026.md`): production first-signal

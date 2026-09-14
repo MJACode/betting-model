@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, paper-track nfl_opener_spread / nfl_wind_totals through 2026: no unit bump, opener retire-if-flat, wind MAX_FIRE_LEAD stays 4. scripts/nfl_rule_2026_track.py |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nfl_prop_market 2026 remeasure: 15 settled +9.1%; board 6/5 −21.2% on 22; 0-4h weakest. No cut/ceiling change. Kalshi still ungraded. `--season` / `--by-lead-hourly` |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, ESPN NFL injury ingest + Out/Doubtful prop veto (status_ts ≤ quote snapshot_at). Same ESPN core path; Active skipped; not an XGB feature; no paid news; no unpause |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nfl_prop_market leftover sweep: standing skip is lock_key_sql not player_id (naive join false-matched 3/2/2). Exact three keys. Zero Burrow/Shough/Nix picks |

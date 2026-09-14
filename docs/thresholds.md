@@ -497,6 +497,11 @@ app and Discord apply it before the 6am sync. The seven open Week-1 picks
 below 2.0 were voided (`scripts/void_picks.py`, reason on each row); the
 settled SF @ LA win stands; BUF @ HOU at |dev| 2.0 stands.
 
+**2026 paper-track:** no unit bump. Retire if 2026 finishes ≤ flat. Command:
+`python -m scripts.nfl_rule_2026_track`. `docs/nfl_rule_2026_track.md`. Wind
+(`nfl_wind_totals`) is the sibling track: `MAX_FIRE_LEAD` stays 4, physical
+residual, deployed Open-Meteo population. Do not unpause paused XGB props.
+
 ## `mlb_live_total_runs` cut, 2026-09-09 (mike): 0.70 → 0.72
 
 > **Superseded 2026-09-10.** The replay this was swept on paired quotes

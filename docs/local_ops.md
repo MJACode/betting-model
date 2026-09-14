@@ -36,6 +36,20 @@ python run_pipeline.py --step scoring     # or any single step
 
 ---
 
+## NFL 2026 paper-track (opener + wind)
+
+Not a retrain and not a unit bump. Re-score the two fragile §28 rules:
+
+```bash
+python -m scripts.nfl_rule_2026_track              # 2026 settled record
+python -m scripts.nfl_rule_2026_track --settle     # existing grader, then record
+```
+
+Policy and current counts: [`docs/nfl_rule_2026_track.md`](nfl_rule_2026_track.md).
+Opener retires if 2026 ≤ flat. Wind `MAX_FIRE_LEAD` stays 4.
+
+---
+
 ## Model retrains
 
 ```bash

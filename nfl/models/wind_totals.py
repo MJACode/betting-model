@@ -46,7 +46,12 @@ LIVE RISK
 terms; -3.64u and -3.55u in the published nflverse terms). Two readings remain
 live: ordinary variance at ~35 bets a season, or the market finally pricing
 wind correctly. They cannot be separated yet. The unit stays at 1% and the
-2-unit per-bet cap stays binding.
+2-unit per-bet cap stays binding — no unit bump. 2026 is graded on the
+DEPLOYED Open-Meteo issued-forecast population inside MAX_FIRE_LEAD=4, which
+is a different sample than those observed-wind seasons
+(`docs/nfl_wind_lead_evidence.md`, `docs/nfl_rule_2026_track.md`).
+`python -m scripts.nfl_rule_2026_track` re-scores it. Do not widen the fire
+window to chase volume.
 """
 
 from __future__ import annotations
@@ -109,7 +114,7 @@ FLAT_CAP = 0.01          # 1% of bankroll. Keep this binding.
 # is what actually determines growth. They are different numbers and conflating
 # them silently inflates every stake by roughly half a unit.
 # ---------------------------------------------------------------------------
-UNIT_PCT = 0.01          # 1 unit = 1% of bankroll
+UNIT_PCT = 0.01          # 1 unit = 1% of bankroll. No unit bump (2026 paper-track).
 REF_KELLY = 0.0911       # full Kelly on the reference bet: lead 3, thr 11, -110
 MAX_UNITS = 2.0          # hard per-bet cap
 SLATE_UNIT_CAP = 3.0     # total units live on any one day
@@ -163,6 +168,10 @@ MAX_CALIBRATED_LEAD = 7
 # 4 is the window the runbook's Thursday scan actually used and the closest
 # honest match to where the day-3 headline validation lives. Leads 5-7 are
 # measured, so this is deliberately tighter than the data strictly requires.
+#
+# MAX_FIRE_LEAD stays 4. Do not widen it because 2024/2025 lost or because a
+# week looks calm. A standing BET locked past this window is an emission bug,
+# not a reason to move the gate (docs/nfl_rule_2026_track.md).
 #
 # This gates FIRING only. The stake still clips past `MAX_CALIBRATED_LEAD` --
 # Matt's 2026-09-05 change stands, and the eval board still prices every game in

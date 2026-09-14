@@ -1749,6 +1749,8 @@ _NFL_MODEL_MARKETS = {
     "nfl_wind_totals": "totals",       # under vs scored_line (the card's total)
     "nfl_opener_spread": "spreads",    # scored_line = soft book's HOME spread
 }
+# 2026 paper-track for these two: python -m scripts.nfl_rule_2026_track
+# (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
 
 # Models removed from the registries but whose picks still live in the picks
 # table. A pick that existed is the bet of record and must keep grading on the
