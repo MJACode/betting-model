@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, batter_runs stale promoted map (+11.14pp cal vs +0.98pp raw); re-promote via worker job. pitcher_er helps but does not transfer (6.28>6.0); not promoted, not paused |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, health-check no longer fails the refresh pass. `--step` observes; daily still fails on CRIT. `_clean_rate` ignores health-check-only; aborted stays dirty. Floor unchanged |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nothing autopauses. Review reports only; worker migration clears unauthorized mlb_prop_batter_runs / mlb_prop_pitcher_k rows from model_auto_pauses. No ACTION_THRESHOLDS / PAUSED_MODELS change |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, game-model starter/star/goalie gates (status_ts ≤ quote). ESPN NHL probable overlay; not an XGB feature; fail-open clocks; no RotoWire; opener/wind untouched |

@@ -744,5 +744,16 @@
     "requested_by": "mike",
     "note": "Re-run verify-only after aliasing MLB SBR/Stats-API twins (WAS/CHW/AZ/ATH vs WSH/CWS/ARI/OAK). Job 90952 (dedupe team-stats-asof-verify-after-715-2026-09-14, not this file) failed 2967 rows, all actual is None on those hist codes. Does NOT DELETE/rebuild.",
     "args": {}
+  },
+  {
+    "key": "promote-batter-runs-map-2026-09-14",
+    "job_type": "promote_calibration",
+    "requested_by": "mike",
+    "note": "model_calibration WARN 2026-09-14: mlb_prop_batter_runs +11.14pp/392 at stamped cal p>=0.60 since the 09-07 promotion. RAW on the same window is +0.98pp/251. The 09-07 promoted map (a=1.138, b=0.377) inflates claimed p by ~10pp on the 09-04 version, which is already calibrated. Today's candidate (a=1.106, b=0.012, n=571, era_from 2026-09-04) helps+transfers (1.79->0.42pp). Re-promote that candidate. Does NOT promote mlb_prop_pitcher_er (helps 12.33->6.28, transfers=false). No pause, no ACTION_THRESHOLDS change. Updated-By: mike.",
+    "args": {
+      "models": [
+        "mlb_prop_batter_runs"
+      ]
+    }
   }
 ]

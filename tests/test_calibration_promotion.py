@@ -172,3 +172,75 @@ def test_the_promoted_columns_are_in_the_schema_guard():
     only the CREATE TABLE knows about goes missing on every existing database."""
     assert {"promoted_method", "promoted_helps",
             "promoted_transfers"} <= set(pc._COLUMNS)
+
+
+# ── candidate vs promoted, the 2026-09-14 health-check pair ──────────────────
+#
+# batter_runs was CRIT +11.1pp with a PROMOTED map. The map was the error: raw
+# on the same window is +1.0pp. pitcher_er was CRIT on RAW because it has no
+# promoted map, and its candidate still fails transfer (6.28pp > 6.0pp).
+
+
+def test_a_missing_parameter_is_a_different_map():
+    assert pc.maps_materially_differ(1.0, 0.0, None, 0.0)
+
+
+def test_fit_noise_is_not_a_different_map():
+    assert not pc.maps_materially_differ(1.10, 0.01, 1.11, 0.02)
+
+
+def test_batter_runs_2026_09_14_is_a_re_promote():
+    """The 09-07 promoted (a=1.138, b=0.377) vs the 09-14 candidate
+    (a=1.106, b=0.012). Helps and transfers; params moved."""
+    note = pc.eligibility_clause(
+        "mlb_prop_batter_runs",
+        helps=True, transfers=True, transfer_gap_pp=0.42,
+        promoted=True,
+        cand_a=1.105872, cand_b=0.011578,
+        prom_a=1.138253, prom_b=0.376525,
+    )
+    assert note is not None and "re-promote" in note
+
+
+def test_pitcher_er_2026_09_14_is_not_eligible():
+    """helps 12.33 -> 6.28, which is still above MAX_TRANSFER_GAP_PP. Not a
+    bug in the gate — the monthly gap is unstable (May +6.9, June +19.8,
+    Aug +8.8, Sep +16.1)."""
+    note = pc.eligibility_clause(
+        "mlb_prop_pitcher_er",
+        helps=True, transfers=False, transfer_gap_pp=6.28,
+        promoted=False,
+        cand_a=0.632661, cand_b=-0.195753,
+        prom_a=None, prom_b=None,
+    )
+    assert note is not None
+    assert "not eligible" in note
+    assert "6.3pp" in note
+
+
+def test_a_map_that_does_not_help_is_silent():
+    assert pc.eligibility_clause(
+        "m", helps=False, transfers=True, transfer_gap_pp=1.0,
+        promoted=False, cand_a=1.0, cand_b=0.0, prom_a=None, prom_b=None,
+    ) is None
+
+
+def test_an_unpromoted_transferring_candidate_is_named():
+    note = pc.eligibility_clause(
+        "mlb_prop_batter_tb",
+        helps=True, transfers=True, transfer_gap_pp=0.34,
+        promoted=False,
+        cand_a=0.55, cand_b=0.09, prom_a=None, prom_b=None,
+    )
+    assert note is not None and "not promoted" in note
+
+
+def test_the_nightly_fit_does_not_promote():
+    """A refit that promoted itself would re-cut every mapped model overnight
+    with nobody deciding. Re-promotion is the worker job / --promote CLI."""
+    import inspect
+    src = inspect.getsource(pc.run_calibration_fit)
+    assert "promote(" not in src
+    persist_src = inspect.getsource(pc.persist)
+    assert "DELIBERATELY not updated" in persist_src
+    assert "promoted / promoted_a / promoted_b are DELIBERATELY not updated" in persist_src
