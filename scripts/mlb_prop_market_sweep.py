@@ -9,6 +9,12 @@ default threshold because "there is nothing to pre-commit against here yet."
 
 This grades it, so the threshold is measured rather than borrowed from NFL.
 
+PHASE 0 EXEMPT (docs/team_stats_leak.md). This is a market-relative rule
+(Pinnacle de-vig vs DraftKings) graded on `player_prop_odds` +
+`player_game_log`. It does not read `mlb_team_stats` / `mlb_pitcher_stats`
+and does not re-cut a leaked statistical model. The freeze is for retrain
+and cut work on those tables.
+
 WHAT IT DOES NOT CLAIM. Pinnacle MLB prop coverage in player_prop_odds starts
 2026-08-27. That is a very short window, it is one slice of one season, and it
 is IN-SAMPLE in the only sense that matters here: it is the same period anyone

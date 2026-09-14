@@ -69,10 +69,11 @@ def test_the_tick_returns_free_outside_the_window(monkeypatch):
 
 
 def test_the_twelve_distributional_models_score_off_the_ticks_own_fetch(monkeypatch):
-    """The unpaused twelve have no fetch of their own — the card's `--fetch` is
-    the only NFL prop odds producer. If the scoring step is ever dropped from
-    this tick they go dark without erroring, because a model with no odds
-    simply writes no pick."""
+    """The twelve distributional models (ten paused, tackles + sacks live)
+    have no fetch of their own — the card's `--fetch` is the only NFL prop
+    odds producer. Pause does not drop the scoring step: NONE rows still
+    score. If scoring is ever dropped from this tick they go dark without
+    erroring, because a model with no odds simply writes no pick."""
     calls = []
     monkeypatch.setattr(scheduler, "_nfl_lead_hours", lambda: 100.0)
     monkeypatch.setattr(scheduler, "_run", lambda argv, label: calls.append((argv, label)))
@@ -87,65 +88,74 @@ def test_the_twelve_distributional_models_score_off_the_ticks_own_fetch(monkeypa
     assert labels.index("nfl-prop-card") < labels.index("nfl-prop-scoring")
 
 
+# Same ten / keep-live sets as tests/test_retired_models.py. Duplicated here
+# so this file still fails in isolation if the pause set drifts.
+_NFL_DISTRIBUTIONAL_PAUSED = frozenset({
+    "nfl_prop_pass_yards",
+    "nfl_prop_pass_attempts",
+    "nfl_prop_pass_completions",
+    "nfl_prop_pass_tds",
+    "nfl_prop_rush_yards",
+    "nfl_prop_rush_attempts",
+    "nfl_prop_rec_yards",
+    "nfl_prop_receptions",
+    "nfl_prop_rush_rec_yards",
+    "nfl_prop_anytime_td",
+})
+
+_NFL_PROP_KEEP_LIVE = frozenset({
+    "nfl_prop_tackles_assists",
+    "nfl_prop_sacks",
+    "nfl_prop_market",
+})
+
+
 def test_twelve_are_live_and_none_is_paused():
-    """The pause set, and why it is empty rather than one or five.
+    """Ten distributional nfl_prop_* models are paused (2026-09-14, mike).
 
-    tackles_assists was UNPAUSED on 2026-09-09 (mike) once the condition its
-    pause named was met: the stat is now the box-score total the book grades
-    (nflverse solo + with_assist + assists, matching ESPN on 100.0% / 99.2%
-    of two full game days), and on it the model backtests to +53.03u over
-    340 bets with every season positive and the placebo at +0.6%
-    (docs/nfl_prop_profitability_search.md §4). The history below is why it
-    was paused, kept because the defect it describes is the kind that returns.
+    KEEP LIVE: tackles_assists (clean record after the gamebook TOT fix;
+    docs/nfl_prop_profitability_search.md §4), sacks (thin / paper-only;
+    not in the pause list), and nfl_prop_market (rule lane, not these
+    PROP_MODELS). Pause ≠ retire: NONE rows still score; cuts stay in
+    ACTION_THRESHOLDS for the unpause.
 
-    Four were re-paused on 2026-09-07 on the gap between our P(over) and
-    DraftKings' de-vigged number (<= -6pp), then unpaused the same day when the
-    models were graded out-of-sample on 2025 at real prices
-    (scripts/nfl_prop_regrade.py). Three of the four graded POSITIVE:
-    rush_rec_yards +4.15%, rush_yards +3.92%, sacks +2.40%, rush_attempts
-    -15.61% -- all straddling zero.
-
-    DISTANCE FROM THE BOOK IS NOT EDGE. Being far from DraftKings means either
-    we are wrong or it is, and only outcomes separate those. The same run shows
-    DK's de-vigged price sitting 2.4-8.1pp above the realized over-rate on
-    nearly every market while three of our models are calibrated to within 1pp
-    of reality -- so a criterion that cannot tell those apart cannot pause on
-    them.
-
-    tackles_assists is not part of that reversal. Its case is a measured defect
-    in the TARGET (we count 7.7pp fewer tackles than the book grades), and the
-    re-grade confirms it from the other side: +22.43%, CI (+12.0, +32.6), the
-    only interval in the table excluding zero -- and fake, because the backtest
-    grades against our own undercount.
+    The pause is the walk-forward at real DraftKings prices
+    (docs/nfl_props_model.md §5b): every market below loses, and a volume
+    floor does not create an edge. The name of this test is the 2026-09-09
+    empty-pause assertion it replaced — kept so the full-suite failure
+    that named it still greps here.
     """
     import config
 
     paused = {m for m in config.PAUSED_MODELS if m.startswith("nfl_prop")}
-    assert paused == set(), f"pause set changed: {sorted(paused)}"
+    assert paused == _NFL_DISTRIBUTIONAL_PAUSED, (
+        f"pause set changed: {sorted(paused)}"
+    )
+    assert len(paused) == 10
 
     live = {m for m in config.ACTION_THRESHOLDS
             if m.startswith("nfl_prop_")
-            and m not in config.PAUSED_MODELS
-            and m != "nfl_prop_market"}
-    assert len(live) == 12, sorted(live)
+            and m not in config.PAUSED_MODELS}
+    assert live == _NFL_PROP_KEEP_LIVE, sorted(live)
 
 
 def test_the_live_ten_are_not_a_clean_bill_of_health():
-    """Stated so the empty pause list does not read as "these all work". On the
-    2025 re-grade every interval straddles zero: the pooled number excluding
-    tackles is -1.18% over 564 bets, CI (-7.7, +5.3). They are unpaused because
-    the REASON for pausing them failed, not because they were shown to win.
+    """The two live distributional ids are not a clean bill of health.
 
-    The cuts are the top decile of each market's edge distribution (f4bd516f),
-    which is a volume control, not a swept edge. This pins that they are tight,
-    so nobody reads "unpaused" as "loosened".
+    On the 2025 re-grade every interval straddled zero: the pooled number
+    excluding tackles was -1.18% over 564 bets, CI (-7.7, +5.3). Ten of
+    those twelve are now paused (2026-09-14). The two that stay live
+    (tackles_assists, sacks) still carry the volume-control floors
+    (f4bd516f), not a swept edge — so nobody reads "still live" as
+    "loosened".
     """
     import config
 
     live = {m for m in config.ACTION_THRESHOLDS
             if m.startswith("nfl_prop_") and m not in config.PAUSED_MODELS
             and m != "nfl_prop_market"}
-    for m in live - {"nfl_prop_anytime_td"}:
+    assert live == {"nfl_prop_tackles_assists", "nfl_prop_sacks"}, sorted(live)
+    for m in live:
         assert config.MODEL_PROB_THRESHOLDS[m] >= 0.60, (m, config.MODEL_PROB_THRESHOLDS[m])
         assert config.MODEL_EDGE_THRESHOLDS[m] >= 0.10, (m, config.MODEL_EDGE_THRESHOLDS[m])
 

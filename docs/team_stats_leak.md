@@ -325,4 +325,12 @@ sweeps until the as-of rebuild is marked complete:
 * marker file `data/TEAM_STATS_ASOF_REBUILD_COMPLETE`
   (see `data/TEAM_STATS_ASOF_REBUILD_COMPLETE.example`)
 
-Wired from `models.trainer` and the MLB sweep scripts. NCAAF is unaffected.
+Wired from `models.trainer` and the MLB sweep scripts:
+
+* gated: `calibrated_threshold_sweep`, `mlb_runline_sweep`, `mlb_f5_sweep`,
+  `best_line_threshold_sweep` (per `mlb_*` id), `live_cut_sweep`,
+  `live_calibration_sweep`
+* exempt: `mlb_prop_market_sweep` — market-relative rule on
+  `player_prop_odds` + `player_game_log`, not team-stats tables
+
+NCAAF is unaffected.

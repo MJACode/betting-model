@@ -37,7 +37,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-from config import LIVE_MAX_EDGE_CAP
+from config import LIVE_MAX_EDGE_CAP, assert_retrain_allowed
 from data.db import get_connection
 from features.live_game_features import build_live_state_row
 from models.live_scorer import expected_value
@@ -195,6 +195,7 @@ def short(rr):
 
 def main():
     global SINCE, SPLIT, CACHE
+    assert_retrain_allowed("MLB", what="threshold sweep (mlb_live_total_runs)")
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--since", default=SINCE)
