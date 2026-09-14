@@ -34,8 +34,10 @@ pass, and judging one mechanism on the other's cadence misreports both.
 
 **It changes nothing.** No threshold, no pause, no promotion — each is a model
 update needing a person and an `Updated-By` trailer. The agent's job is to make
-the decision unavoidable, not to make it. The single automatic action in the
-system is the one-way 250-bet pause rule in `tracking/threshold_review.py`.
+the decision unavoidable, not to make it. **Nothing autopauses** (mike,
+2026-09-14): `tracking/threshold_review.py` still measures at 250-bet milestones
+and posts; it never writes `model_auto_pauses`. A pause is `config.PAUSED_MODELS`
+with his approval.
 
 **Why weekly and unconditional.** Every threshold here decays, and each time one
 did, a person found it by noticing a bad number: `mlb_f5_moneyline` ran at −9.3%

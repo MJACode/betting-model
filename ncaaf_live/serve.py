@@ -209,9 +209,10 @@ def correct_for_pregame(p: float, dog_points: float | None) -> float:
 def _is_paused(model_id: str) -> bool:
     """config.PAUSED_MODELS, read at CALL time so a pause (or a test) lands
     without a restart of this module. Same source the MLB live loop reads
-    (models/live_scorer.py); the pre-game scorer additionally honours the
-    auto-pause table, which no live lane does -- deliberately the same across
-    live lanes. Standalone use (no platform config) is never paused."""
+    (models/live_scorer.py). The pre-game scorer still reads leftover
+    `model_auto_pauses` rows (empty-map identity after the 2026-09-14
+    clear); no live lane does. Standalone use (no platform config) is
+    never paused."""
     try:
         import config as _c
     except Exception:  # pragma: no cover - standalone/offline use

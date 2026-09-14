@@ -30,24 +30,24 @@ THE RULE, PRE-REGISTERED
   epoch, then 500, 750, and so on. NOT continuously -- a rule re-evaluated
   every day is a rule that eventually fires on noise, which is the same
   multiple-comparison mistake as the sweep it is checking.
-* At a review, a model is PAUSED if it has >= 50 settled bets of its own since
-  the epoch AND its ROI over them is worse than -5%.
-* No auto-unpause. Coming back is a decision with a person's name on it
-  (CLAUDE.md 1b), and a rule that pauses and unpauses on the same noisy
+* At a review, a model is FLAGGED (Discord + `threshold_reviews` ledger) if
+  it has >= 50 settled bets of its own since the epoch AND its ROI over them
+  is worse than -5%. A person decides whether to pause.
+* THIS MODULE NEVER PAUSES A MODEL. Real money is on every live model
+  (mike, 2026-09-14). A pause is written into `config.PAUSED_MODELS` with
+  `Updated-By:` after explicit approval. There is no insert into
+  `model_auto_pauses` here, and `RUN_THRESHOLD_REVIEW=1` cannot create one:
+  the write path is gone, not gated.
+* No auto-unpause either. Coming back is a decision with a person's name on
+  it (CLAUDE.md 1b), and a rule that pauses and unpauses on the same noisy
   number just oscillates.
 * No re-sweeping at the review. Finding a better cell in the data that just
   failed is fitting the noise twice.
 
-WHY IT WRITES ITS OWN TABLE RATHER THAN config.py
--------------------------------------------------
-config.py is canonical and version-controlled; a job cannot edit it. Writing
-`paused` into model_action_thresholds would not work either -- the scorer reads
-config.py directly, so a table pause hides picks in the app while the model
-keeps betting, and the next threshold_sync overwrites it anyway (CLAUDE.md 6).
-So the pause lives in `model_auto_pauses`, which models/scorer.py consults
-alongside config.PAUSED_MODELS. That keeps config the record of DELIBERATE
-pauses and this table the record of AUTOMATIC ones, without either silently
-undoing the other.
+The 2026-09-11 milestone 250 wrote unauthorized pauses for
+`mlb_prop_batter_runs` and `mlb_prop_pitcher_k`. Those rows are deleted by
+the worker migration `clear_unauthorized_auto_pauses_2026_09_14.sql`; after
+that pass the two models are live again unless listed in PAUSED_MODELS.
 """
 
 from __future__ import annotations
@@ -92,9 +92,11 @@ CREATE TABLE IF NOT EXISTS threshold_reviews (
 
 
 def _enabled() -> bool:
-    """Kill switch. An automatic pause path must be switchable off from the
-    dashboard without a deploy, because the failure mode is a model going
-    quiet and nobody knowing which of several mechanisms did it."""
+    """Kill switch for the MEASURE-AND-REPORT job, not a pause switch.
+
+    This module cannot pause a model even when the flag is on: there is no
+    write to `model_auto_pauses`. The flag only stops looking and posting.
+    """
     return os.environ.get("RUN_THRESHOLD_REVIEW", "1") not in ("0", "false", "False")
 
 
@@ -144,12 +146,16 @@ def ensure_schema(conn) -> None:
 
 
 def auto_paused(conn) -> set[str]:
-    """Model ids currently paused by a review. Empty on any failure.
+    """Model ids currently in `model_auto_pauses`. Empty on any failure.
+
+    The review no longer WRITES this table (mike, 2026-09-14). The scorer still
+    reads it so leftover rows pause until the worker migration clears them;
+    after that pass the map is identity (empty) unless a person listed the
+    model in `config.PAUSED_MODELS`.
 
     FAILS OPEN deliberately: if this table cannot be read, models keep behaving
     exactly as config.py says. The alternative -- failing closed -- would turn a
-    transient database error into every model on the platform going silent,
-    which is a bigger outage than the one this guard prevents.
+    transient database error into every model on the platform going silent.
     """
     try:
         rows = conn.execute("SELECT model_id FROM model_auto_pauses").fetchall()
@@ -182,7 +188,7 @@ def _slate(conn) -> list[tuple[str, int, float]]:
         GROUP BY model_id
     """, (EPOCH,)).fetchall()
     # A retired model's picks stay in the table (§1c) but it is out of every
-    # total, and it must never be judged, milestoned or auto-paused again.
+    # total, and it must never be judged or milestoned again.
     return [(r[0], int(r[1]), float(r[2])) for r in rows
             if r[0] not in config.RETIRED_MODELS]
 
@@ -219,7 +225,7 @@ def run_review(conn, now: datetime | None = None, dry_run: bool = False) -> dict
         return {"status": "not_due", "slate_bets": slate_bets}
 
     already = auto_paused(conn)
-    to_pause = [
+    flagged = [
         (mid, n, roi) for mid, n, roi in slate
         if n >= MIN_BETS_PER_MODEL and roi < PAUSE_ROI_PCT
         and mid not in already and mid not in config.PAUSED_MODELS
@@ -227,61 +233,54 @@ def run_review(conn, now: datetime | None = None, dry_run: bool = False) -> dict
     slate_roi = (sum(n * roi for _, n, roi in slate) / slate_bets) if slate_bets else None
 
     if not dry_run:
-        for mid, n, roi in to_pause:
-            conn.execute("""
-                INSERT INTO model_auto_pauses
-                    (model_id, paused_at, milestone, bets, roi_pct, reason)
-                VALUES (%(m)s, %(at)s, %(k)s, %(n)s, %(roi)s, %(why)s)
-                ON CONFLICT (model_id) DO NOTHING
-            """, {"m": mid, "at": now.isoformat(), "k": milestone, "n": n,
-                  "roi": round(roi, 2),
-                  "why": (f"{REVIEW_EVERY_N_BETS}-bet review at milestone {milestone}: "
-                          f"{roi:.1f}% over {n} settled bets since {EPOCH}, "
-                          f"worse than the pre-registered {PAUSE_ROI_PCT}% floor")})
+        # Ledger only. A pause is a person's call (CLAUDE.md 1b). The
+        # `paused` column names who MET the criterion, not who was paused.
         conn.execute("""
             INSERT INTO threshold_reviews (milestone, reviewed_at, slate_bets, slate_roi, paused)
             VALUES (%(k)s, %(at)s, %(n)s, %(roi)s, %(p)s)
             ON CONFLICT (milestone) DO NOTHING
         """, {"k": milestone, "at": now.isoformat(), "n": slate_bets,
               "roi": round(slate_roi, 2) if slate_roi is not None else None,
-              "p": ",".join(m for m, _, _ in to_pause)})
+              "p": ",".join(m for m, _, _ in flagged)})
         conn.commit()
 
     result = {
         "status": "reviewed", "milestone": milestone, "slate_bets": slate_bets,
         "slate_roi": slate_roi,
-        "paused": [{"model_id": m, "bets": n, "roi": roi} for m, n, roi in to_pause],
+        "paused": [{"model_id": m, "bets": n, "roi": roi} for m, n, roi in flagged],
         "kept": sorted(m for m, n, _ in slate if n >= MIN_BETS_PER_MODEL
-                       and not any(m == p for p, _, _ in to_pause)),
+                       and not any(m == p for p, _, _ in flagged)),
     }
     _announce(result)
     return result
 
 
 def _announce(result: dict) -> None:
-    """Post the verdict. A pause nobody hears about is the outage it prevents.
+    """Post the verdict. A flag nobody hears about is a review that did not run.
 
-    Logged at CRITICAL when the webhook is unset, because "paused three models
+    Logged at CRITICAL when the webhook is unset, because "flagged three models
     and told no one" must not look the same in the logs as a quiet review.
+    This post never claims a model was paused: the review does not pause.
     """
     from tracking.discord_notifier import _post
 
-    paused = result["paused"]
+    flagged = result["paused"]
     lines = [
         f"Milestone **{result['milestone']}** settled bets since {EPOCH}.",
         f"Slate: {result['slate_bets']} bets, "
         + (f"{result['slate_roi']:+.1f}%" if result["slate_roi"] is not None else "n/a"),
         "",
     ]
-    if paused:
-        lines.append("**PAUSED** (>= "
-                     f"{MIN_BETS_PER_MODEL} bets and worse than {PAUSE_ROI_PCT}%):")
+    if flagged:
+        lines.append("**FLAGGED** (>= "
+                     f"{MIN_BETS_PER_MODEL} bets and worse than {PAUSE_ROI_PCT}%)"
+                     " — not paused; a person decides:")
         lines += [f"• `{p['model_id']}` — {p['roi']:+.1f}% over {p['bets']} bets"
-                  for p in paused]
+                  for p in flagged]
         lines.append("")
-        lines.append("Unpausing is a person's call — this rule never does it.")
+        lines.append("This review never pauses a model. Real money is on every live model.")
     else:
-        lines.append("No model met the pause rule.")
+        lines.append("No model met the pause criterion.")
 
     url = config.DISCORD_WEBHOOK_OPS
     body = "\n".join(lines)
@@ -289,10 +288,10 @@ def _announce(result: dict) -> None:
         logger.critical(f"THRESHOLD REVIEW (no DISCORD_WEBHOOK_OPS set)\n{body}")
         return
     _post(url, {"embeds": [{
-        "title": ("⏸️ Threshold review — models paused" if paused
-                  else "✅ Threshold review — no action"),
+        "title": ("📊 Threshold review — models flagged" if flagged
+                  else "✅ Threshold review — no models flagged"),
         "description": body,
-        "color": 0xE67E22 if paused else 0x2ECC71,
+        "color": 0xE67E22 if flagged else 0x2ECC71,
     }]})
 
 

@@ -228,12 +228,11 @@ def main() -> int:
     elif a.all:
         models = sorted(config.ACTION_THRESHOLDS)
     else:
-        # BOTH pause registers: config.PAUSED_MODELS is what a person chose,
-        # model_auto_pauses is what the 250-bet review decided on its own
-        # (tracking/threshold_review.py). Sweeping only the first missed
-        # mlb_prop_batter_runs and mlb_prop_pitcher_k on 2026-09-12, the day
-        # after the review paused them -- exactly the two models most in need
-        # of the assessment.
+        # BOTH pause registers: config.PAUSED_MODELS is what a person chose;
+        # model_auto_pauses may still hold leftover rows until the 2026-09-14
+        # worker migration clears them (the review no longer writes pauses).
+        # Sweeping only the first missed mlb_prop_batter_runs and
+        # mlb_prop_pitcher_k on 2026-09-12. Empty auto-pause set is identity.
         from models.scorer import _auto_paused_models
         models = sorted(set(config.PAUSED_MODELS) | set(_auto_paused_models()))
 

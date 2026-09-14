@@ -54,10 +54,12 @@ and push read, so the prompt now cannot disagree with them. **Paste it once.**
 reading the cuts at a glance; it is no longer part of this prompt.
 
 **The table mirrors BOTH pause registers** — `config.PAUSED_MODELS` (a person's
-call) and `model_auto_pauses` (the 250-bet review's). Until 2026-09-12 it
-carried only the first, so an auto-paused model read `paused = false` to every
-reader above; on the two busiest recent slates that was 4 `mlb_prop_pitcher_k`
-picks the scorer's own register excludes.
+call) and leftover `model_auto_pauses` rows. The 250-bet review no longer writes
+that table (mike, 2026-09-14: nothing autopauses). Until 2026-09-12 the sync
+carried only the first register, so an auto-paused model read `paused = false`
+to every reader above; on the two busiest recent slates that was 4
+`mlb_prop_pitcher_k` picks the scorer's own register excludes. After the
+2026-09-14 worker migration the auto-pause set is empty (identity).
 
 Zero picks on a given day is valid — it means no high-conviction plays.
 

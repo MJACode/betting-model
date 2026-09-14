@@ -80,17 +80,17 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
                 # apply the same juice rule the scorer applied.
                 "min_odds":  min_odds_for(mid),
                 "prob_only": mid in PROB_ONLY_MODELS,
-                # BOTH registers. config.PAUSED_MODELS is what a person chose;
-                # model_auto_pauses is what the 250-bet review decided on its
-                # own (tracking/threshold_review.py). Until 2026-09-12 this
-                # wrote only the first, so an auto-paused model read
-                # `paused = false` to every reader of this table -- the app's
-                # action filter, Discord, push and the Claude-mobile prompt --
-                # and a hand UPDATE to correct it was erased by the next 6am
-                # sync, which is exactly the trap CLAUDE.md section 6 warns
-                # about. Measured that day: mlb_prop_pitcher_k and
-                # mlb_prop_batter_runs were auto-paused and the table said
-                # false for both.
+                # BOTH registers, empty-map identity after 2026-09-14.
+                # config.PAUSED_MODELS is what a person chose. model_auto_pauses
+                # is leftover rows the review no longer writes (mike:
+                # nothing autopauses). Until 2026-09-12 this wrote only the
+                # first, so an auto-paused model read `paused = false` to every
+                # reader of this table -- the app's action filter, Discord,
+                # push and the Claude-mobile prompt -- and a hand UPDATE to
+                # correct it was erased by the next 6am sync. Measured that
+                # day: mlb_prop_pitcher_k and mlb_prop_batter_runs were
+                # auto-paused and the table said false for both. After the
+                # 2026-09-14 migration the auto-pause set is empty.
                 "paused":    mid in PAUSED_MODELS or mid in auto_paused_set,
                 # "artifact" | "rule" | "engine" — see config.SCORING_METHODS.
                 # A reader that judges a model by its registry row alone calls

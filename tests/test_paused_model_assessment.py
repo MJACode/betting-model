@@ -22,9 +22,10 @@ def _rows(n, roi_each, date="2026-09-01"):
 
 
 def test_it_sweeps_both_pause_registers():
-    """config.PAUSED_MODELS is what a person chose; model_auto_pauses is what
-    the 250-bet review decided. Sweeping only the first missed the two models
-    auto-paused the day before this shipped."""
+    """config.PAUSED_MODELS is what a person chose; leftover model_auto_pauses
+    rows (the review no longer writes them) are the other register. Sweeping
+    only the first missed the two models auto-paused the day before this
+    shipped."""
     assert "_auto_paused_models" in SRC
     assert "set(config.PAUSED_MODELS) | set(_auto_paused_models())" in SRC
 
