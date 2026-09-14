@@ -404,6 +404,11 @@ ACTION_THRESHOLDS: dict = {
     # these floors just mirror it so the app's action filter can't hide a
     # card-qualified pick. 0.52 ~ the -110 breakeven; calibrated under-probs
     # run 0.56-0.60.
+    #
+    # 2026 paper-track (not a cut move): keep the physical residual. MAX_FIRE_LEAD stays 4.
+    # No unit bump (UNIT_PCT 0.01, MAX_UNITS 2). Measure the deployed
+    # Open-Meteo issued-forecast population; 2024 and 2025 lost on observed wind.
+    # Do not widen the fire window. docs/nfl_rule_2026_track.md.
     "nfl_wind_totals":          {"min_prob": 0.52, "min_edge": 0.03},
     # NFL opener-spread (§28) — the sharp-vs-soft stale-line rule, published by
     # scripts/nfl_wind_publisher.py --opener. The card is the real gate
@@ -413,6 +418,11 @@ ACTION_THRESHOLDS: dict = {
     # measured -0.03% over 728 bets on bettable books, |dev| >= 2.0 is +3.97%
     # on 125 (CI spans zero — see the model file). edge >= 0 drops quotes
     # whose juice already eats the edge.
+    #
+    # 2026 paper-track (no unit bump, not a cut move): paper-track through
+    # 2026; retire if 2026 finishes <= flat. Six-season restatement spans zero.
+    # Do not unpause paused XGB / distributional NFL props off this track.
+    # python -m scripts.nfl_rule_2026_track. docs/nfl_rule_2026_track.md.
     "nfl_opener_spread":        {"min_prob": 0.55, "min_edge": 0.00},
     # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
     # LIVE MLB, re-cut 2026-08-29 (mike) from the settled live record (70 BETs).
@@ -1314,6 +1324,10 @@ PAUSED_MODELS: set = {
     #     — rule / market / live lanes, not these distributional PROP_MODELS
     # nfl_prop_sacks joined the pause 2026-09-14 (mike, design-review follow-up
     # to #710): thin / paper-only, never a live BET lane.
+    #
+    # Do not unpause these because opener/wind are being paper-tracked through
+    # 2026. The distributional pause is docs/nfl_props_model.md §5b, independent
+    # of the two rules. docs/nfl_rule_2026_track.md.
     "nfl_prop_pass_yards",
     "nfl_prop_pass_attempts",
     "nfl_prop_pass_completions",
@@ -1592,7 +1606,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_puckline":             0.05,
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
-    "nfl_opener_spread":        0.00,   # card gates on |dev| >= 1.0; edge >= 0 drops juice-eaten quotes
+    "nfl_opener_spread":        0.00,   # card gates on |dev| >= 2.0; edge >= 0 drops juice-eaten quotes
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.08,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
     "mlb_prop_pitcher_hits":     0.08,  # 2026-08-31 (mike): UNPAUSED at 0.54/0.08 on the calibrated sweep = 49-46 +11.0%
@@ -1683,10 +1697,12 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
+                                       # 2026 paper-track: MAX_FIRE_LEAD stays 4; no unit bump
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.55,   # mirrors the card's |dev| >= 2.0 (2026-09-11, mike): 0.5557 at
                                     # 2.0 clears, 0.5470 at 1.0 does not. Was lowered to 0.52 on
                                     # 2026-08-22, which let the 1-point picks through (§28)
+                                    # 2026 paper-track: no unit bump; retire if 2026 finishes <= flat
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.58,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
     "mlb_prop_pitcher_hits":     0.54,  # 2026-08-31 (mike): UNPAUSED at 0.54/0.08 on the calibrated sweep = 49-46 +11.0%

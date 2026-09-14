@@ -142,6 +142,11 @@ in-week during the season.
   lowered to 0.52 on 2026-08-22). The seven open Week-1 picks under 2.0 were
   VOIDED, not deleted (`scripts/void_picks.py`); BUF @ HOU at |dev| 2.0
   stands. Full table: `docs/thresholds.md`.
+
+  **2026 paper-track (no unit bump):** live through 2026; retire if the season
+  finishes ≤ flat. Wind: `MAX_FIRE_LEAD` stays 4; measure the deployed
+  Open-Meteo population. Do not unpause paused XGB props off this track.
+  `python -m scripts.nfl_rule_2026_track`. `docs/nfl_rule_2026_track.md`.
 - **DK line snapshots + pick-timing display (2026-08-19, session 121):** every
   LIVE card run also dumps DraftKings' totals/spreads for every game within 8
   days (`nfl/data_ingest/line_snapshots.py`, reusing the payload the card

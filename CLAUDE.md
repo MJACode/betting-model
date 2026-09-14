@@ -589,6 +589,7 @@ to be known BEFORE deciding which file to open.
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | **Model artifacts: present, tracked, and loadable** | `docs/artifact_integrity.md` |
 | **NFL wind: how far out it may fire, and the lead evidence** | `docs/nfl_wind_lead_evidence.md` |
+| **NFL 2026 paper-track (opener retire-if-flat, wind MAX_FIRE_LEAD=4, no unit bump)** | `docs/nfl_rule_2026_track.md` |
 | **NFL props: near kickoff is the only well-evidenced regime** | `docs/nfl_prop_offset_evidence.md` |
 | Best line on pre-game picks | `docs/best_line.md` |
 | Which prop markets the feed actually serves | `docs/market_coverage.md` |

@@ -79,6 +79,12 @@ def test_the_same_game_fires_once_it_is_inside_the_window(wind):
     assert bets.iloc[0].units > 0, "inside the window and sized at zero"
 
 
+def test_max_fire_lead_is_four_and_stays_four(wind):
+    """2026 paper-track: do not widen the fire window. Pin the number, not just the name."""
+    assert wind.MAX_FIRE_LEAD == 4.0
+    assert wind.UNIT_PCT == 0.01
+
+
 def test_waiting_is_worth_more_than_firing_early(wind):
     """Why the gate costs nothing: the calibrated rate RISES as the lead falls.
 
