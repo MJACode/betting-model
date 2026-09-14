@@ -64,10 +64,16 @@ def test_declared_job_is_present_and_validates():
         encoding="utf-8"))
     match = [e for e in entries if e["job_type"] == "team_stats_asof_verify"]
     assert match, "declared_jobs.json missing team_stats_asof_verify entry"
-    entry = match[0]
-    assert entry["key"].startswith("team-stats-asof-verify")
-    _, validate = jq.JOBS[entry["job_type"]]
-    validate(entry.get("args") or {})
+    spent = {
+        "team-stats-asof-verify-after-marker-2026-09-14",  # job 90631
+        "team-stats-asof-verify-after-715-2026-09-14",     # job 90952
+    }
+    live = [e for e in match if e["key"] not in spent]
+    assert live, "need a fresh dedupe_key; spent keys will not re-enqueue"
+    _, validate = jq.JOBS["team_stats_asof_verify"]
+    for entry in match:
+        assert entry["key"].startswith("team-stats-asof-verify")
+        validate(entry.get("args") or {})
 
 
 def test_system_health_wires_asof_integrity_check():

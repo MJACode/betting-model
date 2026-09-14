@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, team_stats_asof_verify MLB twin false CRIT: job 90952 2967 rows actual None (WAS/CHW/AZ/ATH vs WSH/CWS/ARI/OAK). Alias in impossible_games_played; no spring-training skip (n_over_tol=0 after alias). New declared key team-stats-asof-verify-mlb-twins-2026-09-14 |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, #710 follow-up: test_twelve_are_live_and_none_is_paused now pins the ten-model NFL prop pause (tackles/sacks/market live). mobile/README no longer says hand-edit generated TS. Phase 0 freeze wired into best_line / live_cut / live_calibration sweeps; mlb_prop_market_sweep documented exempt |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, OTA red after #710: `export { X } from './thresholds.generated'` did not bind X locally (11 TS2304/TS2552). Import then re-export. PR #711 |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, session 307 - Picks/Stats filter UX (Designer audit): idle Picks chrome is search+Filters; Public hides under 20% splits; search in badge/pills/Clear all; Games-empty helper; Stats sport-change actually clears filters; Availability names slate vs fixtures; UFC Search order |

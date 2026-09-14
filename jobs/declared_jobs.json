@@ -735,7 +735,14 @@
     "key": "team-stats-asof-verify-after-marker-2026-09-14",
     "job_type": "team_stats_asof_verify",
     "requested_by": "mike",
-    "note": "After committing data/TEAM_STATS_ASOF_REBUILD_COMPLETE (rebuild landed 2026-09-03 per docs/team_stats_leak.md; Phase 2 pitcher rebuild Done same day). verify-only: fail loud on impossible games_played or thin snapshots. Does NOT DELETE/rebuild \u2014 the ongoing gate after the #710 freeze lifts.",
+    "note": "After committing data/TEAM_STATS_ASOF_REBUILD_COMPLETE (rebuild landed 2026-09-03 per docs/team_stats_leak.md; Phase 2 pitcher rebuild Done same day). verify-only: fail loud on impossible games_played or thin snapshots. Does NOT DELETE/rebuild \u2014 the ongoing gate after the #710 freeze lifts. SPENT: job 90631 failed on live-season MIN 2026-05-05 (fixed in #715).",
+    "args": {}
+  },
+  {
+    "key": "team-stats-asof-verify-mlb-twins-2026-09-14",
+    "job_type": "team_stats_asof_verify",
+    "requested_by": "mike",
+    "note": "Re-run verify-only after aliasing MLB SBR/Stats-API twins (WAS/CHW/AZ/ATH vs WSH/CWS/ARI/OAK). Job 90952 (dedupe team-stats-asof-verify-after-715-2026-09-14, not this file) failed 2967 rows, all actual is None on those hist codes. Does NOT DELETE/rebuild.",
     "args": {}
   }
 ]

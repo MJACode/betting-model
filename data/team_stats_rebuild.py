@@ -101,6 +101,32 @@ RATE_COLUMNS: dict[str, tuple[str, ...]] = {
 # A +1 mismatch is noise; games_played=162 in April is still impossible.
 BOUNDARY_TOLERANCE = 1
 
+# Hist mlb_team_stats stores the SBR twin; `games` stores the Stats-API form.
+# Same four pairs as sbr_loader.SBR_ABBREV_CANON / merge_mlb_twin_games.CANON.
+# Job 90952 (2026-09-14): 2967 MLB rows, every one actual is None — WAS/CHW/
+# AZ/ATH hist (live ATH 2026 skipped) looking up WSH/CWS/ARI/OAK keys.
+# WNBA/NBA WAS is an exact-key hit first and never reaches this map.
+MLB_TEAM_CODE_ALIASES = {"AZ": "ARI", "CHW": "CWS", "ATH": "OAK", "WAS": "WSH"}
+_MLB_TEAM_TWIN = {}
+for _a, _b in MLB_TEAM_CODE_ALIASES.items():
+    _MLB_TEAM_TWIN[_a] = _b
+    _MLB_TEAM_TWIN[_b] = _a
+
+
+def _played_actual(played: dict, team, season, as_of_date):
+    """Games completed before as_of_date, resolving MLB SBR/Stats-API twins.
+
+    A missing key stays None — unverifiable is not fine. The twin lookup only
+    substitutes a known alias; it does not invent a zero.
+    """
+    key = (team, season, as_of_date)
+    if key in played:
+        return played[key]
+    other = _MLB_TEAM_TWIN.get(team)
+    if other is None:
+        return None
+    return played.get((other, season, as_of_date))
+
 
 def impossible_games_played(rows: list[dict], played: dict,
                             tolerance: int = BOUNDARY_TOLERANCE) -> list[dict]:
@@ -114,12 +140,13 @@ def impossible_games_played(rows: list[dict], played: dict,
 
     A MISSING count is reported, not skipped. "I could not verify this" is not
     "this is fine", and a checker that quietly passes what it cannot check is
-    how the original leak survived seven seasons.
+    how the original leak survived seven seasons. MLB SBR/Stats-API twins
+    (WAS↔WSH, CHW↔CWS, AZ↔ARI, ATH↔OAK) share a count; an unmatched team
+    with no alias is still None.
     """
     bad = []
     for r in rows:
-        key = (r["team"], r["season"], r["as_of_date"])
-        actual = played.get(key)
+        actual = _played_actual(played, r["team"], r["season"], r["as_of_date"])
         if actual is None or r["games_played"] > actual + tolerance:
             bad.append({**r, "claimed": r["games_played"], "actual": actual})
     return bad
