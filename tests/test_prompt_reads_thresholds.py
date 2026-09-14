@@ -49,9 +49,10 @@ def test_the_prompt_joins_the_thresholds_table_and_applies_every_gate():
 
 
 def test_the_sync_mirrors_both_pause_registers():
-    """config.PAUSED_MODELS is what a person chose; model_auto_pauses is what
-    the review decided. A table that carries only the first tells the app,
-    Discord, push and the prompt that a paused model is live."""
+    """config.PAUSED_MODELS is what a person chose; leftover model_auto_pauses
+    rows are the other register (the review no longer writes them). A table
+    that carries only the first tells the app, Discord, push and the prompt
+    that a paused model is live."""
     assert "mid in PAUSED_MODELS or mid in auto_paused_set" in SYNC
     assert "from tracking.threshold_review import auto_paused" in SYNC
 

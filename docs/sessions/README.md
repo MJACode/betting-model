@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nothing autopauses. Review reports only; worker migration clears unauthorized mlb_prop_batter_runs / mlb_prop_pitcher_k rows from model_auto_pauses. No ACTION_THRESHOLDS / PAUSED_MODELS change |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, game-model starter/star/goalie gates (status_ts ≤ quote). ESPN NHL probable overlay; not an XGB feature; fail-open clocks; no RotoWire; opener/wind untouched |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, paper-track nfl_opener_spread / nfl_wind_totals through 2026: no unit bump, opener retire-if-flat, wind MAX_FIRE_LEAD stays 4. scripts/nfl_rule_2026_track.py |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nfl_prop_market 2026 remeasure: 15 settled +9.1%; board 6/5 −21.2% on 22; 0-4h weakest. No cut/ceiling change. Kalshi still ungraded. `--season` / `--by-lead-hourly` |

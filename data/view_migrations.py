@@ -152,6 +152,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Out/Doubtful veto compares this to the quote's snapshot_at; NULL
     # fails open. ADD COLUMN IF NOT EXISTS.
     "add_injuries_status_ts_2026_09_14.sql",
+    # 2026-09-14 (mike): NOTHING AUTOPAUSES. The 250-bet review wrote
+    # mlb_prop_batter_runs and mlb_prop_pitcher_k into model_auto_pauses
+    # on 2026-09-11 with no approval. Measured: those two were the only
+    # rows. Clears the table. After this pass they are live again unless
+    # listed in config.PAUSED_MODELS. The review still reports; it never
+    # writes this table.
+    "clear_unauthorized_auto_pauses_2026_09_14.sql",
 ]
 
 

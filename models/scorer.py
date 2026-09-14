@@ -1043,19 +1043,15 @@ _AUTO_PAUSE_CACHE: set[str] | None = None
 
 
 def _auto_paused_models() -> set[str]:
-    """Models paused by the pre-registered threshold review, cached per process.
+    """Leftover ids in `model_auto_pauses`, cached per process.
 
-    config.PAUSED_MODELS holds pauses a PERSON chose; this holds pauses the
-    250-bet review made on its own (tracking/threshold_review.py). They are kept
-    in separate places on purpose -- a job cannot edit config.py, and writing
-    into model_action_thresholds would not stop a pick being generated at all,
-    because the scorer reads config directly and the nightly threshold_sync
-    overwrites that table from it.
+    The 250-bet review no longer WRITES this table (mike, 2026-09-14:
+    nothing autopauses). config.PAUSED_MODELS is the only pause register a
+    person uses. This reader stays so leftover rows pause until the worker
+    migration clears them; after that the map is identity (empty).
 
-    Cached because this is called once per pick and the answer changes at most
-    once every few hundred bets. Fails OPEN: an unreadable table leaves every
-    model behaving exactly as config.py says, since turning a database blip into
-    a platform-wide silence is a worse outage than the one the review prevents.
+    Cached because this is called once per pick. Fails OPEN: an unreadable
+    table leaves every model behaving exactly as config.py says.
     """
     global _AUTO_PAUSE_CACHE
     if _AUTO_PAUSE_CACHE is None:

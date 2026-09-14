@@ -222,6 +222,10 @@ and here is what would have to change" is a complete answer; "shall I unpause
 it?" is not.** `scripts/paused_model_assessment.py`,
 `docs/paused_model_assessment.md`.
 
+**NOTHING AUTOPAUSES.** (mike, 2026-09-14.) Real money is on every live model. A
+pause or unpause needs his explicit approval in `config.PAUSED_MODELS` with
+`Updated-By:`. The 250-bet review reports; it never writes `model_auto_pauses`.
+
 **EVERY MODEL UPDATE IS STAMPED WITH WHO ASKED FOR IT** — the git trailer
 `Updated-By: mike` (or `matt`) on the commit that lands it, and **if you do not
 know whose call it is, ASK before committing.** A retrain, a registry swap, a

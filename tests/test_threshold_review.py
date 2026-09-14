@@ -1,8 +1,9 @@
-"""The pre-registered forward test of the 2026-08-31 cuts, and its pause rule.
+"""The pre-registered forward test of the 2026-08-31 cuts.
 
-These pin the parts that make the rule a rule rather than a preference: it acts
-on a fixed schedule instead of continuously, it needs a real sample per model,
-it never unpauses on its own, and the pause it writes is one the SCORER can see.
+These pin the parts that make the rule a rule rather than a preference: it
+reports on a fixed schedule instead of continuously, it needs a real sample
+per model, it never pauses a model (and never unpauses one), and a losing
+model is reported with empty-map identity on `model_auto_pauses`.
 """
 
 from __future__ import annotations
@@ -26,7 +27,8 @@ def rule_only(monkeypatch):
     even with the bet floor deleted, because its model was paused anyway).
 
     These tests are about the RULE — the bet floor, the -5% boundary, the
-    never-unpause property — not about which models happen to be paused today.
+    never-pause-and-never-unpause property — not about which models happen to
+    be paused today.
     `test_an_already_paused_model_is_not_paused_again` covers the interaction
     on purpose, and it is deliberately NOT autouse — two tests below assert
     against the real `config.PAUSED_MODELS` and must keep seeing it.
@@ -114,13 +116,15 @@ def test_the_next_milestone_does_fire():
     assert out["milestone"] == 500
 
 
-# ── the pause rule itself ────────────────────────────────────────────────────
+# ── the flag rule itself (report, never pause) ───────────────────────────────
 
-def test_a_losing_model_with_enough_bets_is_paused(rule_only):
+def test_a_losing_model_with_enough_bets_is_flagged(rule_only):
     conn = _Conn(_slate(("mlb_moneyline", 200, -12.0), ("mlb_over_under", 60, 3.0)))
     out = tr.run_review(conn)
     assert [p["model_id"] for p in out["paused"]] == ["mlb_moneyline"]
     assert conn.committed
+    assert conn.auto_paused == set()
+    assert not any(kind == "pause" for kind, _ in conn.inserts)
 
 
 def test_a_losing_model_with_too_few_bets_is_left_alone(rule_only):
@@ -132,17 +136,16 @@ def test_a_losing_model_with_too_few_bets_is_left_alone(rule_only):
 
 
 def test_the_boundary_is_exactly_minus_five_percent(rule_only):
-    """-5.0% is kept, -5.1% is paused. An off-by-one here quietly changes the
+    """-5.0% is kept, -5.1% is flagged. An off-by-one here quietly changes the
     rule that was agreed before the data arrived."""
     conn = _Conn(_slate(("mlb_moneyline", 130, -5.0), ("mlb_over_under", 130, -5.1)))
     out = tr.run_review(conn)
     assert [p["model_id"] for p in out["paused"]] == ["mlb_over_under"]
 
 
-def test_an_already_paused_model_is_not_paused_again(monkeypatch):
-    """A model paused deliberately in config.py must not also be auto-paused:
-    that would write a second, automatic record of a decision a human already
-    made, and the two pause sources are deliberately kept separate."""
+def test_an_already_paused_model_is_not_flagged_again(monkeypatch):
+    """A model paused deliberately in config.py must not also be restated as an
+    automatic finding: that would misattribute a decision a human already made."""
     monkeypatch.setattr(config, "PAUSED_MODELS", {"mlb_over_under"})
     conn = _Conn(_slate(("mlb_moneyline", 130, 4.0), ("mlb_over_under", 130, -30.0)))
     assert tr.run_review(conn)["paused"] == []
@@ -167,12 +170,49 @@ def test_a_model_paused_in_config_is_not_reported_again():
 
 
 def test_it_never_unpauses():
-    """The rule has no path back. Coming off the bench needs a person, and a
-    rule that pauses and unpauses on the same noisy number just oscillates."""
+    """The rule has no path back, and no path into the pause table either."""
     import inspect
     src = inspect.getsource(tr)
     assert "DELETE FROM model_auto_pauses" not in src
     assert "UPDATE model_auto_pauses" not in src
+    assert "INSERT INTO model_auto_pauses" not in src
+
+
+def test_the_review_cannot_write_a_pause_even_when_enabled():
+    """Kill switch alone is too easy to leave on. The write path must be gone
+    from the module, not gated by RUN_THRESHOLD_REVIEW."""
+    import inspect
+    src = inspect.getsource(tr.run_review)
+    assert "INSERT INTO model_auto_pauses" not in src
+    assert "INSERT INTO threshold_reviews" in src
+
+
+def test_empty_map_identity_when_a_model_meets_the_pause_criterion(rule_only):
+    """Same shape as calibration with no map: reporting a loser must not move
+    the pause set. RUN_THRESHOLD_REVIEW=1 is the default in this module."""
+    conn = _Conn(_slate(("mlb_moneyline", 250, -30.0)))
+    out = tr.run_review(conn)
+    assert out["status"] == "reviewed"
+    assert [p["model_id"] for p in out["paused"]] == ["mlb_moneyline"]
+    assert conn.auto_paused == set()
+    assert [kind for kind, _ in conn.inserts] == ["ledger"]
+    assert "mlb_moneyline" in conn.inserts[0][1]["p"]
+
+
+def test_the_announce_does_not_claim_a_pause():
+    """Read the file: the autouse fixture replaces `_announce` with a lambda."""
+    src = (config.ROOT / "tracking" / "threshold_review.py").read_text(encoding="utf-8")
+    body = src[src.index("def _announce"):]
+    body = body.split("\nif __name__")[0]
+    assert "models paused" not in body.lower()
+    assert "never pauses" in body.lower()
+    assert "**PAUSED**" not in body
+
+
+def test_the_no_autopause_rule_is_in_claude_md():
+    rules = (config.ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "NOTHING AUTOPAUSES" in rules
+    assert "never writes `model_auto_pauses`" in rules
 
 
 def test_the_kill_switch_stops_it(monkeypatch):
@@ -191,11 +231,9 @@ def test_dry_run_decides_without_writing():
 
 # ── the pause has to reach the thing that makes picks ────────────────────────
 
-def test_the_scorer_treats_an_auto_pause_as_a_pause():
-    """The whole mechanism is worthless if the scorer cannot see it. Writing
-    `paused` into model_action_thresholds would NOT work -- the scorer reads
-    config.py, so that only hides picks in the app while the model keeps
-    betting, and the nightly threshold_sync overwrites it anyway."""
+def test_the_scorer_still_honours_a_leftover_auto_pause_row():
+    """Until the worker migration clears leftover rows, the scorer still reads
+    the table. After that pass the map is identity (empty)."""
     from models import scorer
 
     before = scorer._AUTO_PAUSE_CACHE

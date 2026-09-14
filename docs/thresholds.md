@@ -41,32 +41,37 @@ do not close it.
 So `tracking/threshold_review.py` runs the test that was agreed **before** the data
 arrived, on the Railway worker, daily at 7:45am ET:
 
-- **Milestones, not days.** It acts when the slate crosses 250 settled bets since
+- **Milestones, not days.** It looks when the slate crosses 250 settled bets since
   `EPOCH = 2026-08-31`, then 500, 750… A rule re-evaluated every morning is a rule
   that eventually fires on noise — the same multiple-comparison mistake as the
   sweep it checks. The daily cadence is when it *looks*; the milestone is when it
-  *decides*.
-- **Pause rule.** At a review, a model with ≥ 50 settled bets of its own and ROI
-  worse than −5% is paused.
-- **No auto-unpause.** Coming back is a person's call with an `Updated-By` trailer.
-  A rule that pauses and unpauses on the same noisy number just oscillates.
+  *reports*.
+- **Report, do not pause.** At a review, a model with ≥ 50 settled bets of its own
+  and ROI worse than −5% is **flagged** on Discord and in the `threshold_reviews`
+  ledger. A person decides whether to pause. **Nothing autopauses** (mike,
+  2026-09-14): real money is on every live model, and a pause needs explicit
+  approval in `config.PAUSED_MODELS` with `Updated-By:`.
+- **No auto-unpause either.** Coming back is a person's call with an `Updated-By`
+  trailer. A rule that pauses and unpauses on the same noisy number just oscillates.
 - **No re-sweeping at the review.** Finding a better cell in the data that just
   failed is fitting the noise twice.
 - **Judge the slate, not the winners.** Keeping only the models that worked is the
   same selection bias one level up.
 
-**Where the pause lives.** `model_auto_pauses`, read by `models/scorer.py` through
-`_is_paused()` alongside `config.PAUSED_MODELS`. Not in config (a job cannot edit a
-version-controlled file) and not in `model_action_thresholds` (the scorer reads
-config directly, so a table pause would hide picks in the app while the model kept
-betting — and the nightly `threshold_sync` overwrites that table anyway). Reading
-the table fails **open**: an unreadable table leaves every model behaving as config
-says, because turning a database blip into a platform-wide silence is a worse
-outage than the one this prevents.
+The review used to write `model_auto_pauses`, which `models/scorer.py` still reads
+through `_is_paused()` alongside `config.PAUSED_MODELS`. That write path is gone —
+not gated by `RUN_THRESHOLD_REVIEW`, removed — so an empty table is identity (no
+auto-pause). The 2026-09-11 milestone 250 wrote unauthorized rows for
+`mlb_prop_batter_runs` (−13.0% / 63) and `mlb_prop_pitcher_k` (−20.5% / 68); the
+worker migration `clear_unauthorized_auto_pauses_2026_09_14.sql` deletes them.
+After merge + the next Railway `ACTIVE_MIGRATIONS` pass those two models are live
+again unless listed in `config.PAUSED_MODELS`. Reading the table still fails
+**open**: an unreadable table leaves every model behaving as config says.
 
-Kill switch: `RUN_THRESHOLD_REVIEW=0`. Verdicts post to `DISCORD_WEBHOOK_OPS`, and
-log at CRITICAL if that is unset — "paused three models and told no one" must not
-look like a quiet review.
+Kill switch: `RUN_THRESHOLD_REVIEW=0` stops looking and posting; it is not what
+prevents a pause. Verdicts post to `DISCORD_WEBHOOK_OPS`, and log at CRITICAL if
+that is unset — "flagged three models and told no one" must not look like a quiet
+review.
 
 ---
 

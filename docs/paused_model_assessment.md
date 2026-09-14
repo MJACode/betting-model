@@ -9,7 +9,10 @@ CLAUDE.md §1b now carries that as a standing rule: a losing model is an
 assessment to run, not a model to pause, and "shall we unpause it?" is never
 the question. This file is the first run of that assessment, over **seventeen**
 models — the fifteen in `config.PAUSED_MODELS` and the two the 250-bet review
-paused on its own the day before.
+had auto-paused the day before (`mlb_prop_batter_runs`, `mlb_prop_pitcher_k`).
+Those two pauses were never approved. As of 2026-09-14 the review reports only
+and the unauthorized `model_auto_pauses` rows are deleted by worker migration;
+this file is the 2026-09-12 snapshot.
 
 ```bash
 python -m scripts.paused_model_assessment                      # both pause registers
@@ -67,9 +70,12 @@ forecast.
 | `wnba_prop_player_threes` | 1,381 | 680 | 50-40 −15.5% | 0.74/0.12 clears pooled (21-9, +6.1%); **8** settled since the retrain |
 | `wnba_spread` | 6 BETs only | 6 | 2-4 −35.8% | nothing to sweep |
 
-*(auto)* = paused by `tracking/threshold_review.py` at the 250-bet milestone on
-2026-09-11, not by a person. Both registers are swept; sweeping only
-`config.PAUSED_MODELS` had missed exactly the two models most in need of it.
+*(auto)* = was in `model_auto_pauses` from the 250-bet milestone on 2026-09-11,
+not a person's pause. Both registers were swept that day; sweeping only
+`config.PAUSED_MODELS` had missed exactly these two. **Those rows were
+unauthorized** (mike, 2026-09-14: nothing autopauses) and are cleared by
+`clear_unauthorized_auto_pauses_2026_09_14.sql`. After that pass they are live
+unless listed in `config.PAUSED_MODELS`.
 
 ## Why the era check changed the answer
 
@@ -82,7 +88,7 @@ happens to `mlb_runline` (27 → 3) and `wnba_prop_player_threes` (30 → 8).
 
 So the pooled numbers are not evidence about the models we are running. They
 are evidence that this shape of cut is worth watching on the next few hundred
-settled bets, which is what `tracking/threshold_review.py` is for.
+settled bets, which is what `tracking/threshold_review.py` still reports on.
 
 ## What the "no cut" models are telling us
 

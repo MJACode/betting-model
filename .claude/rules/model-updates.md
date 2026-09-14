@@ -8,6 +8,7 @@ paths:
   - "nfl/live_model/**"
   - "docs/thresholds.md"
   - "docs/paused_model_assessment.md"
+  - "tracking/threshold_review.py"
 ---
 
 # Model updates — attribution and scope
@@ -44,7 +45,8 @@ whether it fires:
 - a retrain, or a `model_registry` version swap / rollback
 - a threshold change in `MODEL_PROB_THRESHOLDS` / `MODEL_EDGE_THRESHOLDS` /
   `ACTION_THRESHOLDS` / `MODEL_MIN_ODDS`
-- a pause or unpause (`PAUSED_MODELS`)
+- a pause or unpause (`PAUSED_MODELS` only — nothing writes `model_auto_pauses`;
+  mike, 2026-09-14: nothing autopauses)
 - a feature-list change, a new model, or a retired one
 
 **Not** a model update: cadence, plumbing, notifications, mobile UI, docs. Those
