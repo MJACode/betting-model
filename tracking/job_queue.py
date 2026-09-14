@@ -942,10 +942,76 @@ def _job_team_stats_asof_verify(**kw):
     return {"ok": True, "sports": summaries}
 
 
+_CLV_BACKFILL_MAX_PASSES = 40
+
+
+def _validate_clv_backfill(args: dict) -> dict:
+    """Empty args is the one-shot: 40 passes of the ordinary 40-date walk."""
+    raw = args.get("max_passes")
+    if raw in (None, ""):
+        return {"max_passes": _CLV_BACKFILL_MAX_PASSES}
+    n = int(raw)
+    if not (1 <= n <= _CLV_BACKFILL_MAX_PASSES):
+        raise ValueError(
+            f"max_passes out of range: {n} (1..{_CLV_BACKFILL_MAX_PASSES})")
+    return {"max_passes": n}
+
+
+def _job_clv_backfill(**kw):
+    """Drain the CLV no-vig rewrite now, not 40 dates per scheduled settle.
+
+    WHY THIS EXISTS. #729 (9fb77ee) already live: `_backfill_clv` revisits
+    `clv_method='raw_one_sided'` on each settle, 40 dates per run, and there
+    is no `settle` job_type. Prod held 2419 such rows across 151 dates the
+    day this shipped, so waiting on the hourly settle would take many
+    cycles. mike: force Railway pickup and backfill everything.
+
+    Opens the same `data.db.get_connection()` path as the other DB jobs.
+    Loops `tracking.paper_tracker._backfill_clv` until a pass fills nothing
+    or `max_passes` (default 40) is hit. Commits after each pass so a killed
+    job keeps progress. Does not change a model, a threshold, or a pick's
+    lock.
+    """
+    from zoneinfo import ZoneInfo
+
+    from data.db import get_connection
+    from tracking.paper_tracker import _backfill_clv
+
+    max_passes = int(kw.get("max_passes") or _CLV_BACKFILL_MAX_PASSES)
+    now_iso = datetime.now(ZoneInfo("America/New_York")).isoformat()
+    conn = get_connection()
+    filled_per_pass: list[int] = []
+    try:
+        for n in range(1, max_passes + 1):
+            filled = int(_backfill_clv(conn, now_iso) or 0)
+            conn.commit()
+            filled_per_pass.append(filled)
+            logger.info(
+                f"CLV backfill pass {n}/{max_passes}: {filled} pick(s)")
+            if filled == 0:
+                return {
+                    "passes": n,
+                    "filled": sum(filled_per_pass),
+                    "filled_per_pass": filled_per_pass,
+                    "stopped": "empty",
+                }
+        return {
+            "passes": max_passes,
+            "filled": sum(filled_per_pass),
+            "filled_per_pass": filled_per_pass,
+            "stopped": "cap",
+        }
+    finally:
+        conn.close()
+
+
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
     "backfill_publish_keys": (_job_backfill_publish_keys, lambda a: {}),
+    # ONE-SHOT. Loops the ordinary settle backfill until the raw_one_sided
+    # pedigree is gone (or 40 passes). See _job_clv_backfill.
+    "clv_backfill": (_job_clv_backfill, _validate_clv_backfill),
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),
