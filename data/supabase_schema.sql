@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS injuries (
     games_since_return INTEGER,
     activation_date    TEXT,
     report_date        TEXT NOT NULL,
+    status_ts          TEXT,                 -- ESPN injury `date` (ISO); NULL if the source had none
     created_at         TEXT DEFAULT (NOW()::TEXT)
 );
 

@@ -30,6 +30,7 @@ SOURCES = [
     "scripts/nfl_prop_market_card.py",
     "scripts/nfl_wind_publisher.py",
     "scripts/wnba_prop_market_card.py",
+    "data/ingestors/injury_ingestor.py",
 ]
 
 _INSERT = re.compile(

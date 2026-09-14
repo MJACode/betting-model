@@ -2,8 +2,12 @@
 injury_ingestor.py — Daily injury report fetcher.
 
 Sources (in priority order):
-  1. ESPN Hidden API  — near real-time, covers MLB, NHL, and WNBA
+  1. ESPN Hidden API  — near real-time, covers MLB, NHL, WNBA, NBA, NFL
   2. MLB Stats API    — transactions endpoint (MLB only, backup)
+
+NFL rows carry ESPN's injury `date` as `status_ts`. That stamp is the
+clock `models.nfl_prop_injury_veto` compares to the quote: Out/Doubtful
+before the line suppresses the prop; news after the line is ignored.
 
 Run daily at ~07:00 AM before odds/stats pulls.
 Usage:
@@ -11,6 +15,7 @@ Usage:
     python -m data.ingestors.injury_ingestor --sport MLB
     python -m data.ingestors.injury_ingestor --sport NHL
     python -m data.ingestors.injury_ingestor --sport WNBA
+    python -m data.ingestors.injury_ingestor --sport NFL
 """
 
 import argparse
@@ -33,10 +38,12 @@ from config import (
     ESPN_NHL_TEAM_IDS,
     ESPN_WNBA_TEAM_IDS,
     ESPN_NBA_TEAM_IDS,
+    ESPN_NFL_TEAM_IDS,
     RETURN_RAMP,
     SPORTS,
     WNBA_ODDS_API_MAP,
     NBA_ODDS_API_MAP,
+    NFL_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
 
@@ -64,7 +71,7 @@ ESPN_STATUS_MAP = {
     "Day-To-Day":    "Day-To-Day",
     "Questionable":  "Questionable",
     "Probable":      "Questionable",   # treat Probable as Questionable
-    "Doubtful":      "Day-To-Day",
+    "Doubtful":      "Doubtful",    # NFL veto key; same 0.7 weight as Day-To-Day
     "10-Day IL":     "IL10",
     "15-Day IL":     "IL15",
     "60-Day IL":     "IL60",
@@ -74,7 +81,7 @@ ESPN_STATUS_MAP = {
     "day-to-day":    "Day-To-Day",
     "questionable":  "Questionable",
     "probable":      "Questionable",
-    "doubtful":      "Day-To-Day",
+    "doubtful":      "Doubtful",
     "10-day IL":     "IL10",
     "15-day IL":     "IL15",
     "60-day IL":     "IL60",
@@ -88,6 +95,18 @@ ESPN_STATUS_MAP = {
     "available":     "Questionable",
     "Suspension":    "Out",
     "suspension":    "Out",
+    # NFL designations (measured 2026-09-14 on sports.core team injury lists).
+    # "Active" is on the report as cleared — storing it as Out (the old
+    # unmapped default) would veto healthy players. IR is absence.
+    "Active":            "Active",
+    "active":            "Active",
+    "Injured Reserve":   "Out",
+    "injured reserve":   "Out",
+    "IR":                "Out",
+    "PUP":               "Out",
+    "NFI":               "Out",
+    "Physically Unable to Perform": "Out",
+    "Non-Football Injury":          "Out",
 }
 
 # Severity weights per status (used in feature engineering)
@@ -96,8 +115,10 @@ SEVERITY_WEIGHTS = {
     "IL15":       0.9,
     "IL10":       0.8,
     "Out":        0.7,
+    "Doubtful":   0.7,   # same weight Day-To-Day had; kept distinct for the NFL veto
     "Day-To-Day": 0.7,
     "Questionable": 0.5,
+    "Active":     0.0,
 }
 
 # ── ESPN Helpers ──────────────────────────────────────────────────────────────
@@ -115,6 +136,14 @@ CORE_WNBA_TEAMS_URL = (
     "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba/teams"
     "?limit=50"
 )
+# NFL teams list: site.api 403s from this sandbox (measured 2026-09-14) the
+# same way WNBA site.api does from the worker. Core listed all 32 and the
+# per-team injuries endpoint returned 200, so NFL resolves ids from core
+# first and uses ESPN_NFL_TEAM_IDS only when that host is down.
+CORE_NFL_TEAMS_URL = (
+    "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/teams"
+    "?limit=50"
+)
 
 
 def _normalize_team_name(name: str) -> str:
@@ -130,6 +159,9 @@ _WNBA_NAME_TO_ABBREV = {
 }
 _NBA_NAME_TO_ABBREV = {
     _normalize_team_name(full): abbrev for full, abbrev in NBA_ODDS_API_MAP.items()
+}
+_NFL_NAME_TO_ABBREV = {
+    _normalize_team_name(full): abbrev for full, abbrev in NFL_ODDS_API_MAP.items()
 }
 
 
@@ -298,6 +330,75 @@ def _fetch_nba_espn_team_ids() -> dict:
     return resolved
 
 
+def _nfl_espn_team_to_abbrev(team: dict) -> str | None:
+    """Resolve one ESPN NFL team object to our 3-letter abbrev via its name.
+
+    ESPN prints LAR/WSH; we store LA/WAS. Joining on displayName (via
+    NFL_ODDS_API_MAP) is the same trick WNBA uses for expansion abbrevs.
+    """
+    candidates = [
+        team.get("displayName"),
+        f"{team.get('location', '')} {team.get('name', '')}".strip(),
+        team.get("shortDisplayName"),
+        team.get("name"),
+    ]
+    for cand in candidates:
+        abbrev = _NFL_NAME_TO_ABBREV.get(_normalize_team_name(cand))
+        if abbrev:
+            return abbrev
+    return None
+
+
+def _fetch_nfl_espn_team_ids_core(fetch=None) -> dict:
+    """
+    Resolve {our_abbrev: espn_numeric_id} from sports.core NFL teams.
+
+    Measured 2026-09-14: core listed 32 teams and the injuries endpoint
+    for team 12 (KC) returned 200 with a `date` stamp per row. site.api
+    403'd. Returns {} on any failure so the caller keeps ESPN_NFL_TEAM_IDS.
+
+    `fetch` is injectable for tests; default GET forces https on http:// $refs.
+    """
+    def _get(url: str) -> dict:
+        resp = requests.get(url, headers=ESPN_HEADERS, timeout=10)
+        resp.raise_for_status()
+        time.sleep(0.1)
+        return resp.json()
+
+    fetch = fetch or _get
+
+    try:
+        listing = fetch(CORE_NFL_TEAMS_URL)
+    except Exception as exc:
+        logger.warning(f"ESPN core NFL teams list fetch failed ({exc}); "
+                       f"using static ESPN_NFL_TEAM_IDS")
+        return {}
+
+    resolved: dict = {}
+    for item in (listing or {}).get("items", []) or []:
+        ref = item.get("$ref") if isinstance(item, dict) else (
+            item if isinstance(item, str) else None)
+        if not ref:
+            continue
+        if ref.startswith("http://"):
+            ref = "https://" + ref[len("http://"):]
+        try:
+            team = fetch(ref) or {}
+        except Exception:
+            continue
+        espn_id = team.get("id")
+        abbrev  = _nfl_espn_team_to_abbrev(team)
+        if espn_id and abbrev:
+            try:
+                resolved[abbrev] = int(espn_id)
+            except (TypeError, ValueError):
+                continue
+
+    if resolved:
+        logger.info(f"ESPN core NFL: resolved {len(resolved)} team ids")
+    return resolved
+
+
 def _espn_team_ids(sport: str) -> dict:
     if sport == "MLB":
         return ESPN_MLB_TEAM_IDS
@@ -316,6 +417,10 @@ def _espn_team_ids(sport: str) -> dict:
         # overlay it as a self-heal when the teams endpoint is reachable.
         ids = dict(ESPN_NBA_TEAM_IDS)
         ids.update(_fetch_nba_espn_team_ids())
+        return ids
+    if sport == "NFL":
+        ids = dict(ESPN_NFL_TEAM_IDS)
+        ids.update(_fetch_nfl_espn_team_ids_core())
         return ids
     return {}
 
@@ -392,6 +497,10 @@ def _fetch_espn_team_injuries(sport: str, team_abbrev: str, team_id: int) -> lis
     Each dict has: player_name, player_id, status, injury_type.
     """
     url = ESPN_INJURY_URLS[sport].format(team_id=team_id)
+    # Default pageSize is 25. NFL team lists ran 54-70 rows (measured
+    # 2026-09-14, KC/BUF/DAL/SF); without a raised limit the later pages
+    # — including Out/Doubtful — would be silently dropped.
+    url = url + ("&" if "?" in url else "?") + "limit=200"
     try:
         resp = requests.get(url, headers=ESPN_HEADERS, timeout=10)
         if resp.status_code == 404:
@@ -463,12 +572,14 @@ def _fetch_espn_team_injuries(sport: str, team_abbrev: str, team_id: int) -> lis
             injury_type = raw_status
 
         comment = injury_data.get("longComment", "")
+        status_ts = injury_data.get("date") or None
 
         injuries.append({
             "player_name": player_name,
             "player_id":   player_id,
             "raw_status":  raw_status,
             "injury_type": injury_type or comment or "Unknown",
+            "status_ts":   status_ts,
         })
 
     return injuries
@@ -515,7 +626,20 @@ def fetch_espn_injuries(sport: str, report_date: str) -> list[dict]:
     for abbrev in team_ids:
         raw_list = results.get(abbrev, [])
         for raw in raw_list:
-            canonical_status = ESPN_STATUS_MAP.get(raw["raw_status"], "Out")
+            raw_status = raw["raw_status"]
+            if sport == "NFL":
+                # Unmapped NFL labels stay themselves. The historical default
+                # of "Out" would turn ESPN's "Active" (cleared, on the report)
+                # into a veto. Measured 2026-09-14: Active was the majority
+                # status on every team list sampled.
+                canonical_status = ESPN_STATUS_MAP.get(
+                    raw_status,
+                    ESPN_STATUS_MAP.get(str(raw_status).lower(), raw_status),
+                )
+                if str(canonical_status).lower() == "active":
+                    continue
+            else:
+                canonical_status = ESPN_STATUS_MAP.get(raw_status, "Out")
             severity         = SEVERITY_WEIGHTS.get(canonical_status, 0.7)
 
             all_injuries.append({
@@ -531,6 +655,7 @@ def fetch_espn_injuries(sport: str, report_date: str) -> list[dict]:
                 "games_since_return": None,
                 "activation_date":  None,
                 "report_date":      report_date,
+                "status_ts":        raw.get("status_ts"),
             })
 
     logger.info(f"ESPN {sport}: fetched {len(all_injuries)} injuries "
@@ -631,6 +756,7 @@ def fetch_mlb_transactions(report_date: str) -> list[dict]:
             "games_since_return": None,
             "activation_date":    None,
             "report_date":        report_date,
+            "status_ts":          None,
         })
 
     logger.info(f"MLB Stats API transactions: {len(injuries)} IL placements")
@@ -703,6 +829,7 @@ def fetch_return_ramp_players(conn: sqlite3.Connection, sport: str,
             "games_since_return":  games_since,
             "activation_date":     activation_date,
             "report_date":         report_date,
+            "status_ts":           None,
         })
 
     logger.info(f"{sport}: {len(ramp_injuries)} players on return ramp (scenario B)")
@@ -724,11 +851,11 @@ def _upsert_injuries(conn: DBConnection, injuries: list[dict]) -> int:
         INSERT INTO injuries (
             sport, team, player_name, player_id, status, injury_type,
             scenario, severity_weight, return_ramp_factor,
-            games_since_return, activation_date, report_date
+            games_since_return, activation_date, report_date, status_ts
         ) VALUES (
             %(sport)s, %(team)s, %(player_name)s, %(player_id)s, %(status)s, %(injury_type)s,
             %(scenario)s, %(severity_weight)s, %(return_ramp_factor)s,
-            %(games_since_return)s, %(activation_date)s, %(report_date)s
+            %(games_since_return)s, %(activation_date)s, %(report_date)s, %(status_ts)s
         )
     """
     conn.executemany(sql, injuries)
@@ -751,13 +878,13 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     Full injury pull for a given date. Returns summary dict.
 
     Args:
-        sport:       'MLB', 'NHL', or None (runs both)
+        sport:       'MLB', 'NHL', 'WNBA', 'NBA', 'NFL', or None (runs all)
         report_date: ISO date string; defaults to today
     """
     if report_date is None:
         report_date = date.today().isoformat()
 
-    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA"]
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "NFL"]
     start  = datetime.now()
     total_inserted = 0
 
@@ -872,7 +999,7 @@ def query_injuries_for_game(conn: sqlite3.Connection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run injury ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA"],
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "NFL"],
                         help="Sport to ingest (default: all)")
     parser.add_argument("--date", dest="report_date",
                         help="Report date YYYY-MM-DD (default: today)")

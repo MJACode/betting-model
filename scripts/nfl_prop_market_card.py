@@ -166,6 +166,14 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
         quotes, min_edge=min_edge, soft_books=SOFT_BOOKS,
         min_edge_by_side=config.NFL_PROP_MARKET_SIDE_EDGE,
         kalshi_ladders=kalshi_ladders, game_dates=game_dates)
+    # Out/Doubtful veto: ESPN status_ts must predate the quote. Applied
+    # HERE, after selection and before one-per-prop, so a scratched player
+    # cannot survive as the "best" book of a line we should not have bet.
+    # Missing injury rows fail open (the card as it was yesterday).
+    as_of = (now.date().isoformat() if now.tzinfo else now.strftime("%Y-%m-%d"))
+    injuries = mk.load_nfl_injury_index(conn, as_of)
+    bets, veto_diag = mk.apply_injury_veto(bets, quotes, injuries)
+    diag.update(veto_diag)
     diag["games"] = len(open_games)
     diag["started_skipped"] = len(live)
     diag["too_early"] = len(too_early)
@@ -195,6 +203,9 @@ def render(bets, diag, games, names=None) -> str:
         # Not decoration: if most soft quotes sit on a different number than the
         # sharp book, a thin card is about coverage, not about a quiet market.
         lines.append(f"({diag['line_mismatch']} soft quotes dropped on line mismatch)")
+    if diag.get("injury_veto"):
+        lines.append(f"({diag['injury_veto']} bet(s) vetoed — player Out/Doubtful "
+                     f"before the quote)")
     if not bets:
         lines.append(f"\nNo qualifying edges. {diag.get('reason', '')}".rstrip())
         return "\n".join(lines)

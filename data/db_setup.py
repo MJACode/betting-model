@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS injuries (
     games_since_return INTEGER,
     activation_date    TEXT,
     report_date        TEXT NOT NULL,
+    status_ts          TEXT,
     created_at         TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_injuries_team_date ON injuries(sport, team, report_date);

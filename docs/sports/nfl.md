@@ -163,4 +163,12 @@ in-week during the season.
   for the opener the note says outright that the model only endorsed the
   locked number.
 
+## NFL player-prop injury veto
+
+Pre-game props (`nfl_prop_market`, and `run_nfl_prop_scorer` for any live
+distributional sibling) refuse a player listed **Out** or **Doubtful**
+when ESPN's injury `date` (`injuries.status_ts`) is ≤ the quote's
+`snapshot_at`. News after the line is ignored. Not an XGB feature.
+Detail: `docs/nfl_prop_injury_veto.md`.
+
 ---

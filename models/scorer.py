@@ -4706,6 +4706,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     from features.nfl_prop_feature_engine import build_nfl_prop_scoring_rows
     from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_odds
     from data.ingestors.nfl_props_data_ingestor import norm_player_name
+    from models.nfl_prop_injury_veto import load_nfl_injury_index, player_is_vetoed
 
     if target_date is None:
         target_date = today_et()
@@ -4749,6 +4750,11 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     if claimed:
         logger.info(f"  nfl_prop_market holds {len(claimed)} proposition(s) "
                     f"on {target_date} — the twelve will not re-price them")
+    # Same Out/Doubtful gate the market card applies. Paused distributional
+    # models still SCORE NONE rows; a live sibling (tackles_assists) would
+    # otherwise bet a scratched player. Fail-open if the table has no NFL
+    # rows yet (status_ts column lands on the next worker migration pass).
+    injury_index = load_nfl_injury_index(conn, target_date)
     total_picks = total_bets = 0
     skipped_dupes = 0
 
@@ -4810,6 +4816,14 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 # book's spelling against nflverse's.
                 if (game_id, norm_player_name(player_name), market) in claimed:
                     skipped_dupes += 1
+                    continue
+                quote_row = prop_odds_by_key.get(
+                    (game_id, norm_player_name(player_name), market))
+                if player_is_vetoed(
+                    player_name,
+                    (quote_row or {}).get("snapshot_at"),
+                    injury_index,
+                ):
                     continue
 
                 line = float(prop_odds["line"])

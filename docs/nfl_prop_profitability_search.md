@@ -105,6 +105,12 @@ flagged). **No offensive market shows a cell positive in more than one
 season, in either direction.** DK has priced the Friday report by Sunday
 morning.
 
+That measurement is why the designation is a **veto, not a feature**.
+Live scoring refuses Out/Doubtful when ESPN's injury `date` predates the
+quote (`docs/nfl_prop_injury_veto.md`) so a stale line after a late
+scratch cannot become a BET. It does not retrain the eleven, and it does
+not unpause them.
+
 ### 3b. Next Gen Stats, and the leak that made it look like a model
 
 Weekly NGS receiving (separation, cushion, intended air yards, YAC over

@@ -22,6 +22,11 @@ manufacture one out of thin air — it is the same class of error as the
 tackles definitional mismatch, which produced a significant, two-season,
 +13% result that was entirely a measurement artifact. Only equal lines are
 compared, and how many rows that discards is reported rather than hidden.
+
+OUT/DOUBTFUL IS A VETO, NOT A FEATURE. ESPN injury statuses gate whether a
+bet is written (`apply_injury_veto`); they do not enter the XGB models.
+The clock is ESPN's injury `date` vs the quote's snapshot_at — news after
+the line is ignored. See models/nfl_prop_injury_veto.py.
 """
 from __future__ import annotations
 
@@ -122,6 +127,10 @@ from models.market_relative import (  # noqa: E402
     devig,
     implied,
     find_bets as _find_bets_generic,
+)
+from models.nfl_prop_injury_veto import (  # noqa: E402, F401
+    apply_injury_veto,
+    load_nfl_injury_index,
 )
 
 
