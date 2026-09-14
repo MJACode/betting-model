@@ -47,6 +47,18 @@ from data.ingestors.nfl_props_data_ingestor import norm_player_name
 
 REF_A, REF_B = "pinnacle", "betonlineag"
 
+# Kalshi is a live OR-reference on the card (models.nfl_prop_market) and is
+# NEVER graded here. kalshi_prop_ladders has no settlement column — 278k
+# snapshots / 0 resolved contracts as of 2026-09-14 — so a Kalshi-only
+# comparison has no outcome to score. Keep it off this grader until that
+# history exists. tests/test_nfl_prop_two_sharps.py pins the import list.
+
+
+def season_of(game_id) -> str:
+    """NFL_2026_01_NE_SEA -> 2026. The token the rest of this file already uses."""
+    parts = str(game_id).split("_")
+    return parts[1] if len(parts) > 1 else "?"
+
 
 # The SHARED implementations, not local copies. The local ones drifted exactly
 # as §1b predicts: they guarded `is None` and not NaN, so a one-way quote from
@@ -72,7 +84,8 @@ def _actuals(df):
 def build(min_edge: float, snapshot: str | None = None,
           refs: tuple[str, str] = (REF_A, REF_B),
           only_games_with: str | None = None,
-          soft: tuple[str, ...] | None = None):
+          soft: tuple[str, ...] | None = None,
+          season: str | None = None):
     """-> {selection: [(season, profit)]} plus a diagnostic count.
 
     `snapshot` pins the board to ONE offset. Without it the grader takes the
@@ -108,6 +121,12 @@ def build(min_edge: float, snapshot: str | None = None,
     # GAME SETS as well: the production `open` series covers 868 games, the
     # T-48h backfill 433. Restricting both arms to the games that carry the
     # named series makes the offset the only thing that differs.
+    if season is not None:
+        token = str(season)
+        odds = odds[odds.game_id.map(season_of) == token]
+        if odds.empty:
+            raise SystemExit(f"no nfl_prop_odds rows for season {token}")
+
     if only_games_with:
         keep = set(odds.loc[odds.snapshot_type == only_games_with, "game_id"])
         odds = odds[odds.game_id.isin(keep)]
@@ -156,7 +175,7 @@ def build(min_edge: float, snapshot: str | None = None,
         if actual is None or float(actual) == line:
             continue
         went_over = float(actual) > line
-        season = str(gid).split("_")[1] if "_" in str(gid) else "?"
+        season = season_of(gid)
 
         fair = {}
         for ref in refs:
@@ -234,6 +253,12 @@ def _lead_hours(snapshot_at, kickoff) -> float | None:
 # lead-time label. Read it as both.
 LEAD_BUCKETS = ((0.0, 4.0), (4.0, 8.0), (8.0, 12.0), (12.0, 24.0), (24.0, 48.0))
 
+# 1-hour buckets inside the 24h production ceiling, plus the 24-48h band the
+# 2023-25 Saturday-morning read lived in. Used by --by-lead-hourly. 4h buckets
+# remain the default --by-lead report because a 1h cell on two weeks of 2026
+# data is 0-3 bets (docs/nfl_prop_market_2026.md).
+LEAD_HOURLY = tuple((float(h), float(h + 1)) for h in range(24)) + ((24.0, 48.0),)
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -263,11 +288,20 @@ def main() -> None:
     ap.add_argument("--by-lead", action="store_true",
                     help="split each selection by the bet's own lead hours "
                          "(soft quote taken -> kickoff), LEAD_BUCKETS")
+    ap.add_argument("--by-lead-hourly", action="store_true",
+                    help="same split as --by-lead but 1h buckets inside 24h "
+                         "(LEAD_HOURLY). The 2026-09-14 remeasure: too thin to "
+                         "move NFL_PROP_MAX_LEAD_HOURS; this is the October "
+                         "command. docs/nfl_prop_market_2026.md")
+    ap.add_argument("--season", default=None,
+                    help="restrict to one NFL season token (e.g. 2026). "
+                         "Filters game_id, not snapshot_type.")
     a = ap.parse_args()
     rng = np.random.default_rng(42)
     refs = tuple(x.strip() for x in a.refs.split(","))
     soft = tuple(x.strip() for x in a.soft.split(',')) if a.soft else None
-    sel, diag = build(a.min_edge, a.snapshot, refs, a.only_games_with, soft)
+    sel, diag = build(a.min_edge, a.snapshot, refs, a.only_games_with, soft,
+                      season=a.season)
     if a.over_edge is not None:
         # Tighten only the overs, exactly as models.market_relative.find_bets
         # does in production: the floor can rise, never fall.
@@ -276,7 +310,8 @@ def main() -> None:
                for k, v in sel.items()}
         print(f"\nOVER side held to {floor:.0%} (under stays at {a.min_edge:.0%})")
 
-    print(f"\nNFL props — two sharp references, min edge {a.min_edge:.0%}")
+    print(f"\nNFL props — two sharp references, min edge {a.min_edge:.0%}"
+          + (f"  season {a.season}" if a.season else ""))
     print(f"soft books: {len(mk.SOFT_BOOKS)}   markets: {len(mk.SHARP_MARKETS)}\n")
     print(f"{'selection':16s} {'bets':>6} {'win%':>6} {'units':>9} {'ROI':>8} "
           f"{'90% CI':>18}  by season")
@@ -285,15 +320,25 @@ def main() -> None:
         rows = sel.get(name) or []
         if len(rows) < 40:
             print(f"{name:16s} {len(rows):>6}   (thin)")
+        else:
+            _report(name, rows, rng)
+        if not rows:
             continue
-        _report(name, rows, rng)
         if a.by_side:
             for sd in ("over", "under"):
                 _report(f"  {sd}", [r for r in rows if r[3] == sd], rng, thin=20)
-        if a.by_lead:
-            for lo_h, hi_h in LEAD_BUCKETS:
+        if a.by_lead or a.by_lead_hourly:
+            buckets = LEAD_HOURLY if a.by_lead_hourly else LEAD_BUCKETS
+            # Hourly cells are expected to be thin; drop the 40-bet floor to 5
+            # so an empty hour still prints a count rather than disappearing.
+            thin = 5 if a.by_lead_hourly else 20
+            for lo_h, hi_h in buckets:
                 sub = [r for r in rows if r[2] is not None and lo_h <= r[2] < hi_h]
-                _report(f"  {lo_h:>4.0f}-{hi_h:<4.0f}h", sub, rng, thin=20)
+                if a.by_lead_hourly and hi_h - lo_h <= 1:
+                    label = f"  {lo_h:4.0f}h"
+                else:
+                    label = f"  {lo_h:>4.0f}-{hi_h:<4.0f}h"
+                _report(label, sub, rng, thin=thin)
             unk = [r for r in rows if r[2] is None]
             if unk:
                 print(f"  (no lead: {len(unk)})")

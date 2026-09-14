@@ -2197,6 +2197,14 @@ NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "24
 # separate t24 series (Saturday ~1pm ET) reads only +2.12% on 187, so the
 # 24-36h region is not resolved. Evidence: docs/nfl_prop_offset_evidence.md,
 # the correction banner at the top.
+#
+# Re-measured 2026-09-14 on the first two weeks of hourly polls
+# (docs/nfl_prop_market_2026.md). Production's first-signal lock writes
+# Sunday 1pm games at 18-24h, not in the last four hours. The 0-4h in-band
+# sample is the weakest populated cell (n=9, −33%), matching 2023-25
+# direction; 36+ is worse, not better. Too thin to tighten to 12h or widen
+# to 36h. Ceiling stays 24. October command: two_sharps --season 2026
+# --by-lead-hourly.
 NFL_PROP_MAX_LEAD_HOURS: float = float(
     os.environ.get("NFL_PROP_MAX_LEAD_HOURS", "24"))
 
@@ -2230,7 +2238,9 @@ NFL_PROP_MAX_LEAD_HOURS: float = float(
 # §7 warns about; the bound on being wrong is that overs revert to their 5pp
 # behaviour (+4.11%), which still leaves the pairing ahead of one floor on ROI.
 # 2025 overs at 6pp are -4.2% on 73 bets, the one cell that argues against.
-# Re-measure with 2026 settled. Evidence: docs/nfl_prop_over_lean.md.
+# Re-measured 2026-09-14 on 15 settled production BETs + the 15-game 2026
+# board: too thin to move a cut (docs/nfl_prop_market_2026.md). 6/5 stays.
+# Evidence: docs/nfl_prop_over_lean.md.
 NFL_PROP_MARKET_SIDE_EDGE: dict = {
     "over":  float(os.environ.get("NFL_PROP_MARKET_OVER_EDGE", "0.06")),
     "under": float(os.environ.get("NFL_PROP_MARKET_UNDER_EDGE", "0.05")),

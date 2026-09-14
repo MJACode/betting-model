@@ -42,18 +42,13 @@ belongs in the ingest (`game_type == 'R'` and the postseason codes, as
 `data/ingestors/mlb_inplay_history.GAME_TYPES` already lists) or only in the
 training select. A retrain is a model update either way.
 
-## [ ] Re-measure the `nfl_prop_market` over cut on 2026 settled bets
+## [x] Re-measure the `nfl_prop_market` over cut on 2026 settled bets
 
-Shipped 2026-09-12 (mike): the over side is held to 6pp, the under to 5pp
-(`config.NFL_PROP_MARKET_SIDE_EDGE`, `docs/nfl_prop_over_lean.md`). The
-MECHANISM is measured on 27,976 propositions and replicates in three seasons and
-at three snapshot offsets; the NUMBER 6 is fitted on the same 2023-25 grid it is
-quoted on, and one cell argues against it -- 2025 overs at 6pp are -4.2% on 73
-bets against +2.1% on 283 at 5pp. 2026 is the first season graded out of sample
-on it. Re-run `nfl_prop_two_sharps --min-edge 0.05 --over-edge 0.06 --by-side`
-with 2026 settled and check: is the over curve still monotone in the cut, and is
-the under side still the stronger one? If the over side reverts, the fallback is
-a single 5pp floor -- the pre-committed number -- which costs ~3pp of ROI.
+Done 2026-09-14 (`docs/nfl_prop_market_2026.md`). 15 settled production BETs
+(+9.1%; inside 24h 11 bets +10.3%). Full 15-game board at the shipped pairing:
+22 bets −21.2%. Over curve not monotone; under side not stronger. **No cut
+change** — under the plateau / 25-bet / time-split bar. Revisit when the
+production lock has ~50 settled BETs.
 
 ## [ ] Does the over-lean exist in the OTHER sports' prop markets?
 
@@ -70,18 +65,23 @@ so the window is thin.
 
 ## [ ] Re-measure the NFL prop lead curve inside 24 h on the 2026 hourly polls (October)
 
+First look 2026-09-14 (`docs/nfl_prop_market_2026.md`): production first-signal
+lock writes Sunday 1pm games at 18–24h; in-band 0-4h is the weakest populated
+cell (9 bets −33%), matching 2023-25; 36+ is worse, not the Saturday-morning
++17%. **Ceiling stays 24.** Too thin for 12 vs 36. October command:
+
+```
+python -m scripts.nfl_prop_two_sharps --season 2026 --snapshot open \
+       --min-edge 0.05 --over-edge 0.06 --by-side --by-lead-hourly
+```
+
 mike, 2026-09-11: the ceiling STAYS at 24 h (`config.NFL_PROP_MAX_LEAD_HOURS`)
 and is re-measured in October. The 2023-25 evidence is one snapshot a day at
 13:55 UTC, so its "lead bands" are kickoff-slot proxies
 (`docs/nfl_prop_offset_evidence.md`, correction banner): last 4 h +2.96% on
 450 (spans zero), 4-8 h +9.30% on 971 (clear), Saturday-morning read of Sunday
 games +17.45% on 173 (clear), the separate t24 series +2.12% on 187. Production
-has polled hourly since 2026-09-06 (`NFL_PROP_WINDOW_HOURS` 240), so by
-mid-October there are ~5 weeks of settled `nfl_prop_market` propositions at
-every hour inside 24 h. Grade the rule by the hour the soft quote was taken
-(`scripts/nfl_prop_two_sharps.py --by-lead` on the 2026 rows, or a per-hour
-variant) and decide 12 / 24 / 36 on that, not on the slot proxies. The open
-question is whether to WIDEN to 36 h to reach the Saturday-morning band.
+has polled hourly since 2026-09-06 (`NFL_PROP_WINDOW_HOURS` 240).
 
 ## [ ] [needs-decision] Buy the 2025 NCAAF in-play snapshots and run the live-lane replay
 

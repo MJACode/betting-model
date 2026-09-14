@@ -85,6 +85,24 @@ sides, and under the first-signal lock with hourly polling a 36 h ceiling would
 lock Sunday games on Saturday morning, exactly where the +17.45% was measured.
 That is mike's call; nothing was changed.
 
+### 2026 hourly polls, first look (2026-09-14)
+
+Production has polled hourly since 2026-09-06. Two weeks of settled games,
+graded in-band (latest quote inside each lead bucket, 5pp, four games:
+ARI@LAC, ATL@PIT, NE@SEA, BAL@IND):
+
+| band | bets | ROI |
+|---|---|---|
+| 0-4 h | 9 | −33.3% |
+| 12-24 h | 4 | −3.6% |
+| 36+ h | 4 | −54.5% |
+
+The last four hours are still the weakest populated band. 36+ is worse, not
+the Saturday-morning +17.45%. Production's first-signal lock writes Sunday
+1pm games at **18–24h**, so the operating sample is that band, not 0-4h.
+**Ceiling stays 24.** Full write-up: `docs/nfl_prop_market_2026.md`.
+`--by-lead-hourly` on `scripts/nfl_prop_two_sharps.py` is the October command.
+
 ---
 
 ## The finding

@@ -128,7 +128,8 @@ Stated plainly, because §7 exists for exactly this.
   while 2025 overs at 5pp are +2.1% on 283. On the newest season, tightening the
   overs made them worse. 73 bets is thin, and the pooled and per-season totals
   are positive anyway, but it is the one reading pointing the other way.
-- **Re-measure on 2026 settled bets.** `docs/followups.md` carries it.
+- **Re-measure on 2026 settled bets.** Done 2026-09-14:
+  `docs/nfl_prop_market_2026.md`. No cut change. October still wants volume.
 
 ## 6. What this does NOT rescue
 
@@ -151,6 +152,8 @@ python -m scripts.nfl_prop_lean_concentration             # where it concentrate
 python -m scripts.nfl_prop_lean_gradient                  # line vs price, per season
 python -m scripts.nfl_prop_two_sharps --min-edge 0.05 --snapshot open --by-side
 python -m scripts.nfl_prop_two_sharps --min-edge 0.05 --over-edge 0.06 --snapshot open
+python -m scripts.nfl_prop_two_sharps --season 2026 --min-edge 0.05 --over-edge 0.06 \
+       --by-side --by-lead-hourly   # 2026 remeasure; docs/nfl_prop_market_2026.md
 ```
 
 Zero Odds API credits: every input is already in `data/local`.

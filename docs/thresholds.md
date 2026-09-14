@@ -427,8 +427,10 @@ offsets (`open` +8.3pp, `t48` +5.2pp, `t72` +2.2pp).
 
 WHAT IS FITTED: the number 6, off this grid. The mechanism is not. If the over
 cut is noise, overs revert to +4.11% and the pairing still returns ~+10.0%.
-The one cell against it: 2025 overs at 6pp are −4.2% on 73 bets. Re-measure on
-2026 settled bets (`docs/followups.md`). Full evidence:
+The one cell against it: 2025 overs at 6pp are −4.2% on 73 bets. **Re-measured
+2026-09-14: no cut change.** 15 settled production BETs +9.1%; the 15-game
+board at 6/5 is 22 bets −21.2% and the over curve is not monotone. Too thin
+to overrule 2023-25. `docs/nfl_prop_market_2026.md`. Full evidence:
 `docs/nfl_prop_over_lean.md`.
 
 NOT COPIED ACROSS SPORTS. `min_edge_by_side` is opt-in on the shared
