@@ -63,8 +63,8 @@ from data.db import get_connection
 # whichever price basis is underneath, and a second copy would drift from it.
 from scripts.calibrated_threshold_sweep import (EDGE_GRID, MIN_SETTLED,
                                                 PROB_GRID, REGIME_DAYS,
-                                                _apply_price_floor, grade,
-                                                sweep)
+                                                _apply_price_floor, _guard_mlb,
+                                                grade, sweep)
 
 BEST_LINE_FROM = "2026-08-28"          # first day picks carry best_* at all
 
@@ -245,6 +245,7 @@ def main() -> None:
 
         thin = []
         for model_id in models:
+            _guard_mlb(model_id)
             r = analyse(conn, model_id, today, args.min_rows)
             if r is None:
                 continue

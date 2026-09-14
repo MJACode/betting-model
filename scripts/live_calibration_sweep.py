@@ -34,7 +34,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-from config import LIVE_MAX_EDGE_CAP
+from config import LIVE_MAX_EDGE_CAP, assert_retrain_allowed
 from models.live_scorer import expected_value
 from models.probability_calibration import (MAX_TRANSFER_GAP_PP, _gap_pp,
                                             apply_calibration, fit_platt)
@@ -93,6 +93,7 @@ def table(games: list[dict], title: str, probs, edges, evs) -> None:
 
 
 def main() -> None:
+    assert_retrain_allowed("MLB", what="threshold sweep (mlb_live_total_runs calibration)")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cache-2025", default=str(CACHE_2025))
     ap.add_argument("--cache-2026", default=None, help="live_cut_sweep candidate cache (2026, dense feed)")

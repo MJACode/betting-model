@@ -41,3 +41,39 @@ def test_trainer_calls_the_guard():
 
 def test_frozen_sports_set_is_mlb_only():
     assert set(config.FROZEN_RETRAIN_SPORTS) == {"MLB"}
+
+
+_GATED_SWEEPS = (
+    "scripts/calibrated_threshold_sweep.py",
+    "scripts/mlb_runline_sweep.py",
+    "scripts/mlb_f5_sweep.py",
+    "scripts/best_line_threshold_sweep.py",
+    "scripts/live_cut_sweep.py",
+    "scripts/live_calibration_sweep.py",
+)
+
+_EXEMPT_SWEEPS = (
+    "scripts/mlb_prop_market_sweep.py",
+)
+
+
+def test_mlb_threshold_sweeps_call_the_guard():
+    """A future edit that drops the call would re-open the leak window."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    for rel in _GATED_SWEEPS:
+        src = (root / rel).read_text(encoding="utf-8")
+        assert "assert_retrain_allowed" in src or "_guard_mlb" in src, (
+            f"{rel} lost the freeze guard"
+        )
+
+
+def test_mlb_prop_market_sweep_is_documented_exempt():
+    """Market-relative rule: player_prop_odds + player_game_log, not team-stats."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    src = (root / _EXEMPT_SWEEPS[0]).read_text(encoding="utf-8")
+    assert "PHASE 0 EXEMPT" in src
+    assert "assert_retrain_allowed" not in src

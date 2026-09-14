@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, #710 follow-up: test_twelve_are_live_and_none_is_paused now pins the ten-model NFL prop pause (tackles/sacks/market live). mobile/README no longer says hand-edit generated TS. Phase 0 freeze wired into best_line / live_cut / live_calibration sweeps; mlb_prop_market_sweep documented exempt |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, OTA red after #710: `export { X } from './thresholds.generated'` did not bind X locally (11 TS2304/TS2552). Import then re-export. PR #711 |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, session 307 - Picks/Stats filter UX (Designer audit): idle Picks chrome is search+Filters; Public hides under 20% splits; search in badge/pills/Clear all; Games-empty helper; Stats sport-change actually clears filters; Availability names slate vs fixtures; UFC Search order |
 | 2026-09-13 | [2026-09](./2026-09.md) | 2026-09-13, NFL live pass-attempts lane had never graded a bet: all five BETs NO_ACTION. nfl_live_prop missed the prop settler's 'nfl_prop_%' and fell to the game path ('h2h' -> NO_ACTION); its player_key "DRAKE MAYE" never matched the "drakemaye" actuals; its UTC game_date missed evening box scores. All three fixed in the settler (the writer's key is in push_sent.lock_key). Five NO_ACTION rows reset and re-grade after merge, on the worker. Flagged: Purdy's BET never reached Discord |
