@@ -109,6 +109,7 @@ export const PAUSED_MODELS = new Set<string>([
   'nfl_prop_rush_attempts',
   'nfl_prop_rush_rec_yards',
   'nfl_prop_rush_yards',
+  'nfl_prop_sacks',
   'ufc_total_rounds',
   'wnba_over_under',
   'wnba_prop_player_points',

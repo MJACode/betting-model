@@ -204,11 +204,11 @@ NFL_DISTRIBUTIONAL_PAUSED = frozenset({
     "nfl_prop_receptions",
     "nfl_prop_rush_rec_yards",
     "nfl_prop_anytime_td",
+    "nfl_prop_sacks",
 })
 
 NFL_KEEP_LIVE = frozenset({
     "nfl_prop_tackles_assists",
-    "nfl_prop_sacks",  # thin / paper-only; not in the ten-model pause
     "nfl_prop_market",
     "nfl_wind_totals",
     "nfl_live_prop",
@@ -217,9 +217,13 @@ NFL_KEEP_LIVE = frozenset({
 
 
 def test_ten_nfl_distributional_props_are_paused():
-    """BET emission stopped for the ten losing PROP_MODELS distributional ids."""
+    """BET emission stopped for the eleven PROP_MODELS distributional ids.
+
+    Ten from #710 plus nfl_prop_sacks (2026-09-14, mike, design-review
+    follow-up). Pause ≠ retire: NONE rows still score; cuts stay.
+    """
     assert NFL_DISTRIBUTIONAL_PAUSED <= set(config.PAUSED_MODELS)
-    assert len(NFL_DISTRIBUTIONAL_PAUSED) == 10
+    assert len(NFL_DISTRIBUTIONAL_PAUSED) == 11
 
 
 def test_nfl_tackles_and_rule_lanes_stay_live():

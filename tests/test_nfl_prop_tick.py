@@ -88,7 +88,7 @@ def test_the_twelve_distributional_models_score_off_the_ticks_own_fetch(monkeypa
     assert labels.index("nfl-prop-card") < labels.index("nfl-prop-scoring")
 
 
-# Same ten / keep-live sets as tests/test_retired_models.py. Duplicated here
+# Same eleven / keep-live sets as tests/test_retired_models.py. Duplicated here
 # so this file still fails in isolation if the pause set drifts.
 _NFL_DISTRIBUTIONAL_PAUSED = frozenset({
     "nfl_prop_pass_yards",
@@ -101,22 +101,23 @@ _NFL_DISTRIBUTIONAL_PAUSED = frozenset({
     "nfl_prop_receptions",
     "nfl_prop_rush_rec_yards",
     "nfl_prop_anytime_td",
+    "nfl_prop_sacks",
 })
 
 _NFL_PROP_KEEP_LIVE = frozenset({
     "nfl_prop_tackles_assists",
-    "nfl_prop_sacks",
     "nfl_prop_market",
 })
 
 
 def test_twelve_are_live_and_none_is_paused():
-    """Ten distributional nfl_prop_* models are paused (2026-09-14, mike).
+    """Eleven distributional nfl_prop_* models are paused (2026-09-14, mike).
 
     KEEP LIVE: tackles_assists (clean record after the gamebook TOT fix;
-    docs/nfl_prop_profitability_search.md §4), sacks (thin / paper-only;
-    not in the pause list), and nfl_prop_market (rule lane, not these
-    PROP_MODELS). Pause ≠ retire: NONE rows still score; cuts stay in
+    docs/nfl_prop_profitability_search.md §4) and nfl_prop_market (rule
+    lane, not these PROP_MODELS). nfl_prop_sacks joined the pause the
+    same day as a #710 design-review follow-up (thin / paper-only).
+    Pause ≠ retire: NONE rows still score; cuts stay in
     ACTION_THRESHOLDS for the unpause.
 
     The pause is the walk-forward at real DraftKings prices
@@ -131,7 +132,7 @@ def test_twelve_are_live_and_none_is_paused():
     assert paused == _NFL_DISTRIBUTIONAL_PAUSED, (
         f"pause set changed: {sorted(paused)}"
     )
-    assert len(paused) == 10
+    assert len(paused) == 11
 
     live = {m for m in config.ACTION_THRESHOLDS
             if m.startswith("nfl_prop_")
@@ -140,21 +141,20 @@ def test_twelve_are_live_and_none_is_paused():
 
 
 def test_the_live_ten_are_not_a_clean_bill_of_health():
-    """The two live distributional ids are not a clean bill of health.
+    """The remaining live distributional id is not a clean bill of health.
 
     On the 2025 re-grade every interval straddled zero: the pooled number
-    excluding tackles was -1.18% over 564 bets, CI (-7.7, +5.3). Ten of
-    those twelve are now paused (2026-09-14). The two that stay live
-    (tackles_assists, sacks) still carry the volume-control floors
-    (f4bd516f), not a swept edge — so nobody reads "still live" as
-    "loosened".
+    excluding tackles was -1.18% over 564 bets, CI (-7.7, +5.3). Eleven of
+    those twelve are now paused (2026-09-14). tackles_assists still carries
+    the volume-control floors (f4bd516f), not a swept edge — so nobody
+    reads "still live" as "loosened".
     """
     import config
 
     live = {m for m in config.ACTION_THRESHOLDS
             if m.startswith("nfl_prop_") and m not in config.PAUSED_MODELS
             and m != "nfl_prop_market"}
-    assert live == {"nfl_prop_tackles_assists", "nfl_prop_sacks"}, sorted(live)
+    assert live == {"nfl_prop_tackles_assists"}, sorted(live)
     for m in live:
         assert config.MODEL_PROB_THRESHOLDS[m] >= 0.60, (m, config.MODEL_PROB_THRESHOLDS[m])
         assert config.MODEL_EDGE_THRESHOLDS[m] >= 0.10, (m, config.MODEL_EDGE_THRESHOLDS[m])

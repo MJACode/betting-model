@@ -745,13 +745,14 @@ quote declined as stale on most passes -- pollers logs, 2026-09-11 01:25Z).
 
 ---
 
-## Ten NFL distributional props PAUSED 2026-09-14
+## Eleven NFL distributional props PAUSED 2026-09-14
 
-Stopped BET emission for ten `nfl_prop_*` entries in `PROP_MODELS` (still score
-NONE rows; cuts kept). **Not paused:** `nfl_prop_tackles_assists` (clean record
-after the gamebook TOT fix), `nfl_prop_sacks` (thin / paper-only), plus the
-rule/market/live lanes `nfl_prop_market`, `nfl_wind_totals`, `nfl_live_prop`,
-`nfl_opener_spread`.
+Stopped BET emission for eleven `nfl_prop_*` entries in `PROP_MODELS` (still
+score NONE rows; cuts kept). Ten from #710, then `nfl_prop_sacks` the same
+day as a design-review follow-up (thin / paper-only; never a live BET lane).
+**Not paused:** `nfl_prop_tackles_assists` (clean record after the gamebook
+TOT fix), plus the rule/market/live lanes `nfl_prop_market`,
+`nfl_wind_totals`, `nfl_live_prop`, `nfl_opener_spread`.
 
 Basis: `docs/nfl_props_model.md` §5b — walk-forward at real DraftKings prices
 loses on those markets; volume-control floors reduce exposure but do not
