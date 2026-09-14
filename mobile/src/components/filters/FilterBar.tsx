@@ -80,7 +80,12 @@ export function FilterBar({
               clearButtonMode="while-editing"
             />
             {(search?.length ?? 0) > 0 ? (
-              <Pressable onPress={() => onSearchChange?.('')} hitSlop={8}>
+              <Pressable
+                onPress={() => onSearchChange?.('')}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+              >
                 <Ionicons name="close-circle" size={16} color={colors.textTertiary} />
               </Pressable>
             ) : null}
@@ -91,6 +96,7 @@ export function FilterBar({
 
         <Pressable
           onPress={onOpenFilters}
+          accessibilityRole="button"
           accessibilityLabel={
             activeCount > 0 ? `Filters, ${activeCount} active` : 'Filters'
           }
@@ -136,6 +142,8 @@ export function FilterBar({
             {onClearAll ? (
               <Pressable
                 onPress={onClearAll}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
                 style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
                 hitSlop={6}
               >
@@ -207,7 +215,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeText: {
-    fontSize: 11,
+    fontSize: font.size.micro,
     fontWeight: font.weight.bold,
     color: colors.textInverse,
   },
