@@ -78,7 +78,13 @@ in-week during the season.
   DELETED on 2026-09-11**, both on mike's instruction (the second overriding,
   for those rows, his own §1c "voided, never deleted" corollary — the rule
   stands). `picks_log` holds all six; see `docs/sessions/2026-09.md`,
-  session 281.
+  session 281. Their `opening_signals` captures stayed (`ON CONFLICT DO
+  NOTHING`). mike, 2026-09-14: delete those leftovers (BUF@HOU, CLE@JAX,
+  BAL@IND, NYJ@TEN, DAL@NYG, TB@CIN) and any other `nfl_wind_totals` capture
+  with no standing pick; **keep DEN@KC Under 43.5 (pick_id 1969489)**. Worker
+  migration `drop_voided_nfl_wind_opening_signals_2026_09_14.sql` in
+  `ACTIVE_MIGRATIONS` applies on the next Railway pipeline/refresh pass
+  after merge. No Discord re-announce.
 - 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
 - First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
   shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.

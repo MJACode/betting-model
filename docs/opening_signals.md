@@ -29,5 +29,12 @@ totals, or the go-live gate.**
   best-effort) — props/F5/golf/UFC have no public split → `public_side` NULL.
 - Migration `add_opening_signals_shadow_track` (applied 2026-06-20); SQL also at
   `data/migrations/add_opening_signals_shadow_track.sql`. RLS on + anon read.
+- **Deleting a pick does not retract its capture.** `ON CONFLICT (lock_key)
+  DO NOTHING` is the first-cross lock, so a later VOID/DELETE leaves the
+  shadow row. The six Week-1 `nfl_wind_totals` leftovers (long-lead void,
+  picks gone 2026-09-11) are swept by
+  `drop_voided_nfl_wind_opening_signals_2026_09_14.sql` on the next Railway
+  `ACTIVE_MIGRATIONS` pass; DEN@KC (standing pick 1969489) is pinned to stay.
+  Not a Discord event.
 
 ---
