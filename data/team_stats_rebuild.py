@@ -322,6 +322,7 @@ def main() -> None:
 
     sports = [args.sport] if args.sport else list(SPORTS)
     conn = get_connection()
+    failed = False
     try:
         for sport in sports:
             if args.seasons:
@@ -347,12 +348,16 @@ def main() -> None:
                 if bad:
                     logger.error(f"{sport}: {len(bad)} row(s) claim games that had "
                                  f"not been played, e.g. {bad[0]}")
+                    failed = True
                 if thin:
                     logger.error(f"{sport}: seasons with too few snapshots: {thin}")
+                    failed = True
                 if not bad and not thin:
                     logger.success(f"{sport}: {v['rows']} rows pass both invariants")
     finally:
         conn.close()
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -819,6 +819,81 @@ def _job_verify_checks(conn=None, checks: list[str] | None = None, **kw) -> dict
             conn.close()
 
 
+
+def _validate_team_stats_asof_verify(args: dict) -> dict:
+    """Args for the as-of integrity gate. Never rebuilds — verify only.
+
+    Empty args = every sport in data.team_stats_rebuild.SPORTS, every season
+    that has finals in `games`. Optional sport / seasons narrow the pass.
+    """
+    from data.team_stats_rebuild import SPORTS
+
+    out: dict = {}
+    sport = args.get("sport")
+    if sport not in (None, ""):
+        sport = str(sport).upper()
+        if sport not in SPORTS:
+            raise ValueError(f"unknown sport {sport!r}; known: {sorted(SPORTS)}")
+        out["sport"] = sport
+    seasons = args.get("seasons")
+    if seasons is not None:
+        if not isinstance(seasons, list) or not seasons:
+            raise ValueError("seasons must be a non-empty list of ints")
+        out["seasons"] = [int(s) for s in seasons]
+    return out
+
+
+def _job_team_stats_asof_verify(**kw):
+    """Fail loud if team_stats as-of invariants break. Never DELETE/rebuild.
+
+    Wraps `data.team_stats_rebuild.verify` (the same two checks as
+    `python -m data.team_stats_rebuild --verify-only`). A breach raises so the
+    queue's ❌ card carries the detail. The rebuild itself already ran
+    2026-09-03; this job is the ongoing gate after the marker lifts the freeze.
+    """
+    from data.db import get_connection
+    from data.team_stats_rebuild import SPORTS, verify
+
+    sports = [kw["sport"]] if kw.get("sport") else list(SPORTS)
+    conn = get_connection()
+    summaries = []
+    failures = []
+    try:
+        for sport in sports:
+            if kw.get("seasons"):
+                seasons = list(kw["seasons"])
+            else:
+                seasons = [r[0] for r in conn.execute(
+                    "SELECT DISTINCT season FROM games WHERE sport = ? "
+                    "AND home_score IS NOT NULL ORDER BY season",
+                    (sport,)).fetchall()]
+            if not seasons:
+                summaries.append({"sport": sport, "rows": 0, "skipped": "no finals"})
+                continue
+            v = verify(conn, sport, seasons)
+            summaries.append({
+                "sport": sport, "rows": v["rows"],
+                "impossible": len(v["impossible"]),
+                "thin_seasons": v["thin_seasons"],
+            })
+            if v["impossible"]:
+                eg = v["impossible"][0]
+                failures.append(
+                    f"{sport}: {len(v['impossible'])} impossible games_played "
+                    f"row(s), e.g. {eg}")
+            if v["thin_seasons"]:
+                failures.append(
+                    f"{sport}: thin snapshot seasons {v['thin_seasons']}")
+    finally:
+        conn.close()
+
+    if failures:
+        raise RuntimeError(
+            "team_stats as-of integrity failed (verify-only, no rebuild): "
+            + "; ".join(failures))
+    return {"ok": True, "sports": summaries}
+
+
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
@@ -826,6 +901,8 @@ JOBS = {
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),
+    "team_stats_asof_verify": (_job_team_stats_asof_verify,
+                              _validate_team_stats_asof_verify),
     "ncaaf_teams_refresh": (_job_ncaaf_teams_refresh, _validate_ncaaf_teams_refresh),
     # 2026-09-12: the worker holds CFBD_API_KEY and the laptop does not, so the
     # play-by-play fetch runs here and lands in Supabase for everyone else.

@@ -30,13 +30,21 @@ def test_marker_or_env_lifts_the_freeze(monkeypatch):
 
 
 def test_trainer_calls_the_guard():
-    """A future edit that drops the call would re-open the leak window."""
-    import inspect
-    import models.trainer as trainer
+    """A future edit that drops the call would re-open the leak window.
 
-    for fn in (trainer.train_model, trainer.train_prop_model, trainer.train_live_model):
-        src = inspect.getsource(fn)
-        assert "assert_retrain_allowed" in src, f"{fn.__name__} lost the freeze guard"
+    Read the source file rather than importing models.trainer (heavy deps).
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "models" / "trainer.py").read_text(
+        encoding="utf-8")
+    for name in ("def train_model(", "def train_prop_model(", "def train_live_model("):
+        assert name in src, f"{name} missing from models/trainer.py"
+        i = src.index(name)
+        # Body until the next top-level def at column 0 roughly — enough to see the guard.
+        nxt = src.find("\ndef ", i + 10)
+        body = src[i:nxt if nxt != -1 else i + 4000]
+        assert "assert_retrain_allowed" in body, f"{name} lost the freeze guard"
 
 
 def test_frozen_sports_set_is_mlb_only():
@@ -77,3 +85,24 @@ def test_mlb_prop_market_sweep_is_documented_exempt():
     src = (root / _EXEMPT_SWEEPS[0]).read_text(encoding="utf-8")
     assert "PHASE 0 EXEMPT" in src
     assert "assert_retrain_allowed" not in src
+
+
+def test_repo_marker_file_is_present():
+    """Rebuild landed 2026-09-03; marker must be in tree so the freeze lifts."""
+    assert config._TEAM_STATS_ASOF_MARKER.is_file(), (
+        "data/TEAM_STATS_ASOF_REBUILD_COMPLETE missing — MLB retrain stays frozen "
+        "against already-rebuilt tables (docs/team_stats_leak.md)"
+    )
+
+
+def test_import_time_flag_follows_marker_file(monkeypatch):
+    """Presence of the marker file is enough; no env var required."""
+    monkeypatch.delenv("TEAM_STATS_ASOF_REBUILD_COMPLETE", raising=False)
+    # Recompute the same expression config uses at import time.
+    complete = (
+        "".strip().lower() in ("1", "true", "yes")
+        or config._TEAM_STATS_ASOF_MARKER.is_file()
+    )
+    assert complete is True
+    monkeypatch.setattr(config, "TEAM_STATS_ASOF_REBUILD_COMPLETE", complete)
+    config.assert_retrain_allowed("MLB", what="retrain")

@@ -93,6 +93,8 @@ or a rebuilt table quietly omits two clubs.
 More Optuna trials on leaked features fit the leak better. (`ncaaf` is unaffected.)
 **Code gate (MLB only, 2026-09-14):** `config.assert_retrain_allowed` + env/marker
 `TEAM_STATS_ASOF_REBUILD_COMPLETE` — see `docs/team_stats_leak.md`.
+**Marker set 2026-09-14** after the 2026-09-03 rebuild verification; ongoing
+gate is `team_stats_asof_verify` (verify-only) + `team_stats_asof_integrity`.
 
 **Phase 1 — tier 1 rebuild, all four sports.** A backfill job that walks each
 season by date and writes cumulative counting stats. Deterministic, verifiable

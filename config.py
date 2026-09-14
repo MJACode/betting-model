@@ -50,14 +50,13 @@ PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-09-01")
 # ── Team-stats as-of rebuild freeze (docs/team_stats_leak.md Phase 0) ─────────
 # Historical mlb/nba/nhl/wnba_team_stats (and mlb_pitcher_stats before Phase 2)
 # leaked season-final numbers into in-season rows. Retraining or sweeping on
-# those tables fits the leak. Phase 0 freezes MLB retrain/sweep until the
-# as-of rebuild is marked complete.
+# those tables fits the leak. Phase 0 froze MLB retrain/sweep until the
+# as-of rebuild was marked complete.
 #
-# Mark complete by EITHER:
-#   * setting TEAM_STATS_ASOF_REBUILD_COMPLETE=1 in the environment, OR
-#   * creating the marker file data/TEAM_STATS_ASOF_REBUILD_COMPLETE
-#     (empty file is enough; see data/TEAM_STATS_ASOF_REBUILD_COMPLETE.example)
-# Flip only after the rebuild is verified (docs/team_stats_rebuild_scope.md).
+# Marked complete 2026-09-14: data/TEAM_STATS_ASOF_REBUILD_COMPLETE is in
+# tree (rebuild verified 2026-09-03 per docs/team_stats_leak.md). Equivalent
+# env override: TEAM_STATS_ASOF_REBUILD_COMPLETE=1. Ongoing gate is the
+# team_stats_asof_verify worker job + system_health team_stats_asof_integrity.
 # NCAAF is unaffected (its snapshots were already a real series).
 _TEAM_STATS_ASOF_MARKER: Path = ROOT / "data" / "TEAM_STATS_ASOF_REBUILD_COMPLETE"
 TEAM_STATS_ASOF_REBUILD_COMPLETE: bool = (
