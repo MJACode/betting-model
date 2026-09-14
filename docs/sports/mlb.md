@@ -154,7 +154,9 @@ scoring before lineups exist — it logs "no confirmed lineups" and exits cleanl
 Fix: added `python run_pipeline.py --step prop-scoring` to `refresh_picks.yml` after the lineups
 step. Now every refresh attempt batter scoring — it's a no-op if lineups aren't confirmed yet, and
 fires picks on the first refresh after they post. Pitcher K props are unaffected (use MLB Stats API
-probable starters, not lineup_slots).
+probable starters, not lineup_slots). Game-model BETs are refused when that probable is Out/IL with
+`status_ts` ≤ the quote (`docs/game_injury_gate.md`); the next pass that sees a new probable in
+`mlb_pitcher_stats` reprices. `home_starter_out` remains the trained average — it is not this gate.
 
 **DK HR market availability:** `batter_home_runs` market is not always listed by DK on a given day.
 When absent from `player_prop_odds`, HR picks produce 0 picks (no error). HR picks are

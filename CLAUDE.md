@@ -604,6 +604,7 @@ to be known BEFORE deciding which file to open.
 | **NFL prop lines lean over — the measured bias, and the per-side cut it bought** | `docs/nfl_prop_over_lean.md` |
 | **nfl_prop_market 2026 remeasure — no cut change, no 24h-ceiling change** | `docs/nfl_prop_market_2026.md` |
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
+| **Game-model starter/star/goalie gate (same clock)** | `docs/game_injury_gate.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,nfl,ncaaf}.md` — each
 (`golf.md` is kept as the revival runbook for the retired sport) —

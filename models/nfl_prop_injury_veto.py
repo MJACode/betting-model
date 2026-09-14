@@ -50,19 +50,20 @@ def _as_dt(v) -> datetime | None:
         return None
     return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
-# Canonical statuses that mean the player will not play. Lowercased so a
-# stored "Out" and ESPN's type.description "out" compare as one.
-VETO_STATUSES = frozenset({"out", "doubtful"})
 
+def should_veto(status: str | None, status_ts, quote_ts,
+                statuses: frozenset[str] | None = None) -> bool:
+    """True iff this designation was in `statuses` before (or at) the quote.
 
-def should_veto(status: str | None, status_ts, quote_ts) -> bool:
-    """True iff this designation was Out/Doubtful before (or at) the quote.
+    Default `statuses` is Out/Doubtful (NFL props). Game-model gates pass
+    a sport-specific set (MLB IL codes, NBA Out-only).
 
     Equal timestamps veto: ESPN stamps second-precision (`2026-09-12T18:14Z`)
     and a quote taken at that instant already had the news in the world.
-    Strictly-after does not.
+    Strictly-after does not. Missing either clock fails OPEN.
     """
-    if not status or str(status).strip().lower() not in VETO_STATUSES:
+    allowed = statuses if statuses is not None else VETO_STATUSES
+    if not status or str(status).strip().lower() not in allowed:
         return False
     st = _as_dt(status_ts)
     qt = _as_dt(quote_ts)

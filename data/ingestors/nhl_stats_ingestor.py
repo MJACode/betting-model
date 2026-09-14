@@ -579,6 +579,9 @@ def _build_goalie_rows(season: int, as_of_date: str,
         logger.info(f"No NHL games scheduled for {as_of_date}")
         return []
 
+    from data.ingestors.espn_probables import fetch_espn_nhl_probables
+    espn_probables = fetch_espn_nhl_probables(as_of_date)
+
     # Build lookup: team abbrev → starting goalie name
     # NHL API schedule includes probable starter info in game objects
     goalie_lookup: dict[str, dict] = {}
@@ -600,6 +603,16 @@ def _build_goalie_rows(season: int, as_of_date: str,
             probable = game.get(team_key, {}).get("probableGoalie", {})
             goalie_name = probable.get("fullName", "")
             goalie_id   = str(probable.get("playerId", ""))
+
+            # ESPN core probableStartingGoalie (NHL schedule has no
+            # probableGoalie — measured 2026-09-14, 43 games, 0 populated).
+            espn = espn_probables.get(team_abbrev) or {}
+            if espn.get("player_name"):
+                goalie_name = espn["player_name"]
+                for g in goalie_stats:
+                    if (g.get("goalieFullName") or "").lower() == goalie_name.lower():
+                        goalie_id = str(g.get("goalieId", "") or "")
+                        break
 
             # Fall back to team's season leader if no probable listed
             if not goalie_name and team_abbrev in goalie_lookup:

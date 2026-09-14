@@ -77,7 +77,7 @@ load-bearing daily during the season.
 | NBA prop odds (`nba-prop-odds`) | GitHub Actions | 9 DK player-prop markets via the event-level endpoint |
 | NBA team stats (`nba_stats`) | **Local machine** | season-to-date team ratings → game scorer features |
 | NBA game log (`nba-game-log`) | **Local machine** | yesterday's box scores → settlement + rolling prop features |
-| NBA injuries | GitHub Actions (`step_injuries`) | ESPN hidden API (`run_injury_ingestor` defaults include NBA) |
+| NBA injuries | GitHub Actions (`step_injuries`) | ESPN hidden API (`run_injury_ingestor` defaults include NBA). Game-model star DNP gate: top-2 by recent minutes, Out with `status_ts` ≤ quote (`docs/game_injury_gate.md`) |
 | NBA game scoring | GitHub Actions (`step_scoring`) | `run_scorer` NBA branch → picks |
 | NBA prop scoring (`nba-prop-scoring`) | GitHub Actions | `run_nba_prop_scorer` (9 markets, Poisson + logistic DD) → picks |
 | Settlement | GitHub Actions (`settle`) | game picks via the generic path; props via `_settle_prop_picks` (`nba_player`, trailing 14-day window) |
