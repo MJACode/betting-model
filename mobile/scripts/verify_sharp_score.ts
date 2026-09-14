@@ -187,8 +187,18 @@ check('public sort: equal public shares break on edge',
   sortPicks([tieA, tieB], 'public')[0].pick.pick_id === 15);
 check('public sort is unavailable when every split is NULL',
   !publicSortAvailable([noSplit, { pick: mkPick({ pick_id: 16, edge: 0.2 }) }]));
-check('public sort is available once one split is captured',
-  publicSortAvailable([noSplit, heavy]) && publicSplitCount([noSplit, heavy]) === 1);
+check('public sort is hidden when under 20% of rows have a split',
+  !publicSortAvailable([
+    heavy,
+    noSplit,
+    { pick: mkPick({ pick_id: 16, edge: 0.2 }) },
+    { pick: mkPick({ pick_id: 17, edge: 0.2 }) },
+    { pick: mkPick({ pick_id: 18, edge: 0.2 }) },
+    { pick: mkPick({ pick_id: 19, edge: 0.2 }) },
+  ]));
+check('public sort is offered at a 20% share',
+  publicSortAvailable([heavy, noSplit, noSplit, noSplit, { pick: mkPick({ pick_id: 20, public_bet_pct: 30 }) }]) &&
+    publicSplitCount([heavy, noSplit]) === 1);
 
 // 7. Determinism.
 const a = sharpScore(mkPick({ edge: 0.2, public_bet_pct: 35 }))!.score;

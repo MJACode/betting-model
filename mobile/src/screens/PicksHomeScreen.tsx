@@ -91,10 +91,9 @@ import { signalCountsBySport } from '@/lib/lineMovementBoard';
 import { gameFilterSummary, isGameSelected, selectableGames } from '@/lib/gameFilter';
 import { slipKeyForPick } from '@/lib/parlay';
 import {
-  ALL_CATEGORIES,
   ALL_SIGNALS,
   presentCategoriesFor,
-  selectedCategories,
+  resetImpossibleMarket,
 } from '@/lib/pickFilterState';
 import { publicSortAvailable, searchPicks, sortPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -368,20 +367,17 @@ export function PicksHomeScreen() {
   }, [activeItems, filtered.length, filter, search, gamePicker.selected]);
 
   // Signal is hidden on Signals/Live (those boards are all BET). A Today cut
-  // to AVOID/NONE would empty them with undo only via a pill the user may not
-  // recognise. Same for a Market that cannot exist on the destination board.
-  // Clear both when leaving Today — the section that set them is gone.
+  // to AVOID/NONE would empty them with undo only via a pill. Designer lock:
+  // leaving Today resets Signal to all three. Market is reset on ANY segment
+  // change if selected ∩ present is empty. Games stays (shared with Stats).
   useEffect(() => {
-    if (view === 'today') return;
     setFilter((prev) => {
       const present = presentCategoriesFor(availableModelIds);
-      const signalNarrowed = prev.signals.size < ALL_SIGNALS.length;
-      const marketImpossible =
-        present.length > 0 && selectedCategories(prev, present).length === 0;
-      if (!signalNarrowed && !marketImpossible) return prev;
-      const next = cloneFilter(prev);
-      if (signalNarrowed) next.signals = new Set(ALL_SIGNALS);
-      if (marketImpossible) next.categories = new Set(ALL_CATEGORIES);
+      const afterMarket = resetImpossibleMarket(prev, present);
+      const leaveToday = view !== 'today' && afterMarket.signals.size < ALL_SIGNALS.length;
+      if (!leaveToday && afterMarket === prev) return prev;
+      const next = afterMarket === prev ? cloneFilter(prev) : afterMarket;
+      if (leaveToday) next.signals = new Set(ALL_SIGNALS);
       return next;
     });
   }, [view, availableModelIds]);
@@ -637,6 +633,7 @@ export function PicksHomeScreen() {
               hasAny={activeItems.length > 0}
               emptiedByGames={emptiedByGames}
               gameSummary={gameFilterSummary(pickableGames, gamePicker.selected)}
+              onClearGames={gamePicker.clear}
             />
           )
         }
@@ -662,6 +659,12 @@ export function PicksHomeScreen() {
   );
 }
 
+function boardLabel(view: PicksView): string {
+  if (view === 'today') return 'Today';
+  if (view === 'signals') return 'Signals';
+  return 'Live';
+}
+
 function EmptyForView({
   view,
   sport,
@@ -669,6 +672,7 @@ function EmptyForView({
   hasAny,
   emptiedByGames,
   gameSummary,
+  onClearGames,
 }: {
   view: PicksView;
   sport: string;
@@ -676,12 +680,14 @@ function EmptyForView({
   hasAny: boolean;
   emptiedByGames: boolean;
   gameSummary: string;
+  onClearGames: () => void;
 }) {
   if (hasAny && emptiedByGames) {
     return (
       <EmptyState
-        title="No picks for this game"
-        subtitle={`Games is shared with Stats — ${gameSummary} has no picks on this board. Clear the Games pill above to see every ${sport} pick.`}
+        title={`No picks for ${gameSummary} on ${boardLabel(view)}`}
+        actionLabel="Clear games"
+        onAction={onClearGames}
       />
     );
   }

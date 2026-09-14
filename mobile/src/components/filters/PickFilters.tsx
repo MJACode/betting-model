@@ -73,9 +73,10 @@ interface Props {
   sortKey: SortKey;
   onSortChange: (key: SortKey) => void;
   /**
-   * False when this board has no captured public-ticket split. Public then
-   * ranks every row −1 and falls through to Edge — the chip is disabled and
-   * relabelled rather than silently matching Edge.
+   * False when fewer than 20% of on-screen rows have a public-ticket split
+   * (`PUBLIC_SORT_MIN_SHARE`). Public is then hidden — ranking those boards
+   * would fall through to Edge for most rows. Sharp stays offered on every
+   * view (the score is computed for every pick; a 0 is a real 0).
    */
   publicSortAvailable: boolean;
   search: string;
@@ -267,32 +268,19 @@ export function PickFilters({
       >
         <FilterSection
           title="Sort"
-          subtitle={
-            publicSortAvailable
-              ? 'Order the board. Does not hide any picks.'
-              : 'Public needs captured ticket splits — none on this board, so it would match Edge.'
-          }
+          subtitle="Order the board. Does not hide any picks."
           summary={sortSummary}
           defaultOpen
         >
           <View style={styles.chipWrap}>
-            {SORT_OPTIONS.map((o) => {
-              const publicDead = o.key === 'public' && !publicSortAvailable;
-              return (
-                <FilterChip
-                  key={o.key}
-                  label={publicDead ? 'Public (no splits)' : o.label}
-                  active={sortKey === o.key}
-                  disabled={publicDead}
-                  accessibilityLabel={
-                    publicDead
-                      ? 'Public, unavailable: no betting splits on this board'
-                      : o.label
-                  }
-                  onPress={() => onSortChange(o.key)}
-                />
-              );
-            })}
+            {SORT_OPTIONS.filter((o) => o.key !== 'public' || publicSortAvailable).map((o) => (
+              <FilterChip
+                key={o.key}
+                label={o.label}
+                active={sortKey === o.key}
+                onPress={() => onSortChange(o.key)}
+              />
+            ))}
           </View>
         </FilterSection>
 

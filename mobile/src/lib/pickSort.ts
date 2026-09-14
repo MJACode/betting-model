@@ -53,15 +53,19 @@ export function publicSplitCount<T extends PublicSplitPick>(items: T[]): number 
   return n;
 }
 
+/** Designer lock: hide Public when fewer than this share of rows have a split. */
+export const PUBLIC_SORT_MIN_SHARE = 0.2;
+
 /**
  * Is Public a real sort on this board, or Edge by another name?
  *
- * Zero captured splits → every row is −1 → the comparator falls through to
- * edge. That used to stay labelled Public on prop boards (and UFC / NCAAF
- * game boards that never get Action Network splits), silently.
+ * Splits are Action Network consensus on full-game markets only — props, F5
+ * and golf store NULL. Under 20% of on-screen rows with a captured % → the
+ * chip is hidden (Designer lock). Default sort stays Edge.
  */
 export function publicSortAvailable<T extends PublicSplitPick>(items: T[]): boolean {
-  return publicSplitCount(items) > 0;
+  if (items.length === 0) return false;
+  return publicSplitCount(items) / items.length >= PUBLIC_SORT_MIN_SHARE;
 }
 
 /**

@@ -131,6 +131,23 @@ export function categoriesAreNarrowed(
   return selectedCategories(state, present).length < present.length;
 }
 
+/**
+ * After a segment or sport change: if the selected ∩ present set is empty
+ * (an impossible Market on this board), reset to all present. Otherwise leave
+ * the state alone — a Game-only cut that still exists on the destination is
+ * a real filter. Games selection is not in this object.
+ */
+export function resetImpossibleMarket(
+  state: PicksFilterState,
+  present: ModelCategory[],
+): PicksFilterState {
+  if (present.length === 0) return state;
+  if (selectedCategories(state, present).length > 0) return state;
+  const next = cloneFilter(state);
+  next.categories = new Set(ALL_CATEGORIES);
+  return next;
+}
+
 export function activeFilterCount(
   state: PicksFilterState,
   present: ModelCategory[] = ALL_CATEGORIES,
