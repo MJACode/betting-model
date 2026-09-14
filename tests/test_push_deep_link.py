@@ -257,6 +257,44 @@ def test_the_app_handles_the_cold_start_tap():
     )
 
 
+def test_the_last_response_is_consumed_so_a_remount_cannot_reopen_it():
+    """The comment used to say 'consumed exactly once'. The code did not.
+
+    Expo keeps returning the same tap from getLastNotificationResponseAsync
+    until clearLastNotificationResponseAsync runs. This app reloads its JS
+    on launch and on foreground whenever an OTA bundle is waiting
+    (useOtaUpdates → Updates.reloadAsync), and that is a NEW runtime: a
+    module-level once-guard dies with it. Without the native clear, a tap
+    that opened a pick is replayed after the reload and the user cannot
+    leave the screen.
+
+    The identifier set is the same-runtime half (listener + getLast both
+    fire; Fast Refresh remounts the hook). Both halves have to be present.
+    """
+    src = _code(HOOK_TS)
+    assert "clearLastNotificationResponseAsync" in src, (
+        "the sticky native last-response is never cleared, so an OTA reload "
+        "re-opens the pick the previous tap already opened"
+    )
+    assert "handledResponseIds" in src, (
+        "the same tap can arrive from the listener AND getLast; without an "
+        "identifier set it is dispatched twice"
+    )
+    assert "notification.request.identifier" in src, (
+        "the once-guard must key off the notification identifier, not a "
+        "boolean — a boolean would also swallow the NEXT tap"
+    )
+    # The clear belongs in the same handle as the route, so a tap that
+    # launched the app (getLast) and a tap that arrived while running
+    # (listener) both consume it. A clear only next to getLast leaves the
+    # warm path sticky.
+    handle = re.search(r"const handle = \(response.*?=> \{(.*?)\n    \};", src, re.S)
+    assert handle, "the response handle moved"
+    body = handle.group(1)
+    assert "clearNativeLastResponse" in body or "clearLastNotificationResponseAsync" in body
+    assert "handledResponseIds" in body
+
+
 def test_the_router_is_mounted_at_the_app_root():
     src = _code(APP_TSX)
     assert "usePushDeepLink(navRef" in src, "the deep-link hook is not mounted"

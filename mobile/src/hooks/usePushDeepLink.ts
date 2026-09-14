@@ -8,6 +8,35 @@ import type { RootStackParamList } from '@/types';
 
 type NavRef = NavigationContainerRef<RootStackParamList>;
 
+/**
+ * Identifiers already acted on in THIS JS runtime. Survives a remount of the
+ * hook (Fast Refresh, a parent re-create). Does NOT survive
+ * `Updates.reloadAsync()` — that starts a new runtime, which is why the
+ * native last-response must also be cleared. `useOtaUpdates` reloads on
+ * launch and on foreground whenever a bundle is waiting.
+ */
+const handledResponseIds = new Set<string>();
+
+function responseIdentifier(
+  response: Notifications.NotificationResponse,
+): string | null {
+  const id = response.notification.request.identifier;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/** Drop the sticky native last-response so a later remount cannot re-open it. */
+function clearNativeLastResponse(): void {
+  try {
+    const clear = Notifications.clearLastNotificationResponseAsync;
+    if (typeof clear !== 'function') return;
+    void clear().catch((err) =>
+      console.warn('[push] could not clear last notification response', err),
+    );
+  } catch (err) {
+    console.warn('[push] could not clear last notification response', err);
+  }
+}
+
 /** Perform a resolved route. One place, so the two callers cannot drift. */
 function navigateTo(navRef: NavRef, route: PushRoute): void {
   switch (route.kind) {
@@ -42,9 +71,11 @@ function navigateTo(navRef: NavRef, route: PushRoute): void {
  *     open — and silently do nothing for the user who taps a notification on a
  *     locked phone, which is most of them.
  *
- * The cold-start response is sticky: it keeps being returned for the life of
- * the process, so it is consumed exactly once or a remount would re-navigate
- * and the user could never leave the screen.
+ * The cold-start response is sticky on the native side: Expo keeps returning
+ * it until `clearLastNotificationResponseAsync` runs. Consume it exactly
+ * once — identifier de-dupe in this runtime, native clear for the next —
+ * or a remount (this app's OTA reload, Fast Refresh) re-opens the pick
+ * and the user can never leave it.
  *
  * Navigation goes through the container ref, not a screen's `navigation` prop,
  * because this is mounted at the app root — where BetslipBar sits, outside
@@ -76,6 +107,16 @@ export function usePushDeepLink(navRef: NavRef, ready: boolean): void {
 
     const handle = (response: Notifications.NotificationResponse | null) => {
       if (!response) return;
+      // The listener AND getLast can both deliver the same tap (Android
+      // cold start; a remount while the native last-response is still set).
+      // Act once. An empty identifier is rare; we still clear the native
+      // copy so the next runtime cannot replay it.
+      const id = responseIdentifier(response);
+      if (id != null) {
+        if (handledResponseIds.has(id)) return;
+        handledResponseIds.add(id);
+      }
+      clearNativeLastResponse();
       const route = routeForPush(response.notification.request.content.data);
       // null is the deliberate outcome for a payload this build cannot read:
       // the app simply opens, which is what tapping a notification did before
