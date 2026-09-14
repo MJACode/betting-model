@@ -111,7 +111,9 @@ def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], Ga
             SELECT g.game_id, g.home_team, g.away_team, g.commence_time,
                    g.game_date,
                    sp.spread_home, tl.total_line,
-                   w.wind_mph, COALESCE(v.dome, 0)
+                   w.wind_mph, COALESCE(v.dome, 0),
+                   hs.sp_overall, hs.classification,
+                   aw.sp_overall, aw.classification
             FROM games g
             LEFT JOIN ncaaf_venues v ON v.venue_id = g.venue_id
             LEFT JOIN game_weather w ON w.game_id = g.game_id
@@ -133,6 +135,21 @@ def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], Ga
                   AND o.snapshot_at <= g.commence_time
                 ORDER BY o.snapshot_at DESC LIMIT 1
             ) tl ON TRUE
+            -- Each team's latest rating snapshot on or before the game: the
+            -- row the pre-game FBS gate reads (_get_ncaaf_team_stats takes
+            -- this season's latest, else last season's).
+            LEFT JOIN LATERAL (
+                SELECT s.sp_overall, s.classification FROM ncaaf_team_stats s
+                WHERE s.team = g.home_team
+                  AND s.as_of_date <= CAST(g.game_date AS TEXT)
+                ORDER BY s.season DESC, s.as_of_date DESC LIMIT 1
+            ) hs ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT s.sp_overall, s.classification FROM ncaaf_team_stats s
+                WHERE s.team = g.away_team
+                  AND s.as_of_date <= CAST(g.game_date AS TEXT)
+                ORDER BY s.season DESC, s.as_of_date DESC LIMIT 1
+            ) aw ON TRUE
             WHERE g.sport = 'NCAAF'
               AND g.game_date = ANY(%(d)s)
         """, {"d": [date] if date else live_slate_dates()}).fetchall()
@@ -140,15 +157,27 @@ def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], Ga
         if owned:
             conn.close()
 
+    from features.ncaaf_feature_engine import _is_fbs
+
     out = {}
-    for gid, home, away, ct, gd, sp, tl, wind, dome in rows:
+    not_fbs = []
+    for (gid, home, away, ct, gd, sp, tl, wind, dome,
+         h_sp, h_cls, a_sp, a_cls) in rows:
+        fbs = (_is_fbs({"sp_overall": h_sp, "classification": h_cls})
+               and _is_fbs({"sp_overall": a_sp, "classification": a_cls}))
+        if not fbs:
+            not_fbs.append(f"{away} @ {home}")
         ctx = GameContext(
             game_id=gid, home=home, away=away, commence_time=ct,
             pregame_spread=None if sp is None else float(sp),
             pregame_total=None if tl is None else float(tl),
             wind_mph=None if wind is None else float(wind),
-            is_dome=bool(dome), game_date=gd)
+            is_dome=bool(dome), game_date=gd, fbs_matchup=fbs)
         out[(_fold(home), _fold(away))] = ctx
+    if not_fbs:
+        log.info("context: %d games are not FBS-vs-FBS and will not be priced "
+                 "(same rule as the pre-game models): %s",
+                 len(not_fbs), "; ".join(sorted(not_fbs)[:40]))
     log.info("context: %d platform games today, %d with a pregame total",
              len(out), sum(1 for c in out.values() if c.pregame_total is not None))
     return out

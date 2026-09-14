@@ -36,6 +36,13 @@ SHARP_BOOK = "pinnacle"
 # 48 outcomes against Pinnacle's 42 on the same event, 2026-09-08.
 SHARP_BOOKS = ("pinnacle", "betonlineag")
 
+# Exchange-grade ladder reference (docs/prop_market_research.md §1, §6b).
+# NOT in SHARP_BOOKS: those keys are Odds API bookmakers stored in
+# player_prop_odds and protected by the prop-odds pruner. Kalshi lives in
+# kalshi_prop_ladders / the public Trade API and is joined by
+# (game_date, player, market). Reference only — never a soft book to bet into.
+KALSHI_BOOK = "kalshi"
+
 # Markets Pinnacle was measured to quote. Kept explicit rather than discovered
 # at runtime so a silent coverage change shows up as a missing market instead of
 # a quietly smaller bet set.
@@ -118,11 +125,107 @@ from models.market_relative import (  # noqa: E402
 )
 
 
+def _zero_vig_american(p: float) -> float | None:
+    """Probability -> American price with no overround.
+
+    Used only so MarketBet.sharp_price stays an American number when the
+    reference is a Kalshi mid (already a fair probability, no de-vig).
+    """
+    if not (0.0 < p < 1.0):
+        return None
+    if p >= 0.5:
+        return -100.0 * p / (1.0 - p)
+    return 100.0 * (1.0 - p) / p
+
+
+def _bets_from_kalshi(
+    quotes: dict,
+    ladders: dict,
+    game_dates: dict[str, str],
+    min_edge: float,
+    soft_books: tuple[str, ...] | None,
+    min_edge_by_side: dict[str, float] | None,
+) -> tuple[list[MarketBet], dict]:
+    """OR-reference path: price each soft quote off a Kalshi ladder mid.
+
+    Fail-closed callers pass empty ladders / empty game_dates and get zero
+    bets with an empty diagnostic — the Pinnacle/betonlineag path is untouched.
+
+    Unlike the Odds API references, a ladder prices ANY line inside its
+    strikes, so a soft 252.5 against a sharp 249.5 is a comparison rather than
+    a line_mismatch discard (docs/prop_market_research.md §1).
+    """
+    by_side = min_edge_by_side or {}
+    soft = soft_books or SOFT_BOOKS
+    diag = {"sharp_quotes": 0, "compared": 0, "line_mismatch": 0,
+            "one_way": 0, "no_sharp": 0, "bets": 0}
+    if not ladders:
+        return [], diag
+
+    # Count usable ladders once; "sharp_quotes" for an Odds API book is rows,
+    # for Kalshi it is ladders that could answer at least one soft line.
+    diag["sharp_quotes"] = len(ladders)
+    out: list[MarketBet] = []
+    for (gid, player, market, book), q in quotes.items():
+        if book == KALSHI_BOOK or book in SHARP_BOOKS:
+            continue
+        if book not in soft:
+            continue
+        date = game_dates.get(gid)
+        if not date:
+            diag["no_sharp"] += 1
+            continue
+        lad = ladders.get((str(date)[:10], player, market))
+        if lad is None:
+            diag["no_sharp"] += 1
+            continue
+        line = q.get("line")
+        if line is None:
+            diag["line_mismatch"] += 1
+            continue
+        fair_over = lad.p_over(float(line))
+        if fair_over is None:
+            # Outside the quoted strikes — refuse rather than extrapolate.
+            diag["line_mismatch"] += 1
+            continue
+        b_over, b_under = devig(q.get("over_price"), q.get("under_price"))
+        if b_over is None:
+            diag["one_way"] += 1
+            continue
+        fair_under = 1.0 - fair_over
+        diag["compared"] += 1
+        for side, fair, book_p, price in (
+            ("over", fair_over, b_over, q.get("over_price")),
+            ("under", fair_under, b_under, q.get("under_price")),
+        ):
+            if price is None:
+                continue
+            # NaN soft prices: same guard as market_relative.implied.
+            try:
+                px = float(price)
+            except (TypeError, ValueError):
+                continue
+            if px != px:
+                continue
+            edge = fair - book_p
+            if edge >= max(min_edge, by_side.get(side, min_edge)):
+                sharp_am = _zero_vig_american(fair)
+                if sharp_am is None:
+                    continue
+                out.append(MarketBet(
+                    gid, player, market, side, book,
+                    float(line), px, fair, edge, float(sharp_am)))
+    diag["bets"] = len(out)
+    return out, diag
+
+
 def find_bets(quotes: dict, min_edge: float = 0.02,
               soft_books: tuple[str, ...] | None = None,
-              min_edge_by_side: dict[str, float] | None = None
+              min_edge_by_side: dict[str, float] | None = None,
+              kalshi_ladders: dict | None = None,
+              game_dates: dict[str, str] | None = None,
               ) -> tuple[list[MarketBet], dict]:
-    """NFL binding: a bet if EITHER sharp reference disagrees by min_edge.
+    """NFL binding: a bet if EITHER sharp/exchange reference disagrees by min_edge.
 
     TWO REFERENCES, TAKEN AS AN OR AND NOT AN AND. Measured 2026-09-08 over
     2023-2025 with the shipped guards (equal lines, pre-game, one bet per
@@ -150,6 +253,12 @@ def find_bets(quotes: dict, min_edge: float = 0.02,
     +10.04 at 3/4/5/6pp. The cut is untouched; only the reference set moves.
 
     betonlineag is a REFERENCE, never a book we bet -- SOFT_BOOKS is unchanged.
+
+    KALSHI IS THE SAME KIND OF REFERENCE, via a ladder mid rather than a
+    de-vigged two-way quote (docs/prop_market_research.md §6b). Pass
+    `kalshi_ladders` + `game_dates` to include it in the OR; omit them (or pass
+    empty) and this path is a no-op — fail closed, Pinnacle/betonlineag still
+    work. Kalshi is never added to SOFT_BOOKS.
 
     THE TWO SIDES ARE NOT HELD TO THE SAME FLOOR (2026-09-12, mike). NFL prop
     lines lean over, measured with no model in the loop: across 27,976
@@ -179,6 +288,18 @@ def find_bets(quotes: dict, min_edge: float = 0.02,
             prev = best.get(key)
             if prev is None or b.edge > prev.edge:
                 best[key] = b
+    # Optional third OR reference. Empty/None ladders leave `best` unchanged.
+    kalshi_bets, kalshi_diag = _bets_from_kalshi(
+        quotes, kalshi_ladders or {}, game_dates or {},
+        min_edge, soft_books, min_edge_by_side)
+    for k, v in kalshi_diag.items():
+        diag_out[f"{KALSHI_BOOK}_{k}"] = v
+    for b in kalshi_bets:
+        key = (b.game_id, b.player, b.market, b.side, b.book)
+        prev = best.get(key)
+        if prev is None or b.edge > prev.edge:
+            best[key] = b
+
     out = list(best.values())
 
     # THE FLAT KEYS ARE A CONTRACT, not decoration. The card logs them, the
@@ -203,15 +324,19 @@ def find_bets(quotes: dict, min_edge: float = 0.02,
     #                             reports zero of both. Max is exact for a single
     #                             reference and truthful for two.
     #   sharp_quotes              MAX -- the same propositions seen twice.
+    # Include Kalshi in the flat aggregates when its path ran (even if it
+    # found nothing): its counters are always written above, so a missing
+    # ladder still contributes no_sharp/line_mismatch rather than vanishing.
+    refs = SHARP_BOOKS + (KALSHI_BOOK,)
     for name in ("compared", "line_mismatch"):
         diag_out[name] = sum(diag_out.get(f"{ref}_{name}", 0)
-                             for ref in SHARP_BOOKS)
+                             for ref in refs)
     for name in ("one_way", "no_sharp"):
         diag_out[name] = max(
-            (diag_out.get(f"{ref}_{name}", 0) for ref in SHARP_BOOKS),
+            (diag_out.get(f"{ref}_{name}", 0) for ref in refs),
             default=0)
     diag_out["sharp_quotes"] = max(
-        (diag_out.get(f"{ref}_sharp_quotes", 0) for ref in SHARP_BOOKS),
+        (diag_out.get(f"{ref}_sharp_quotes", 0) for ref in refs),
         default=0)
     diag_out["bets"] = len(out)
     return out, diag_out

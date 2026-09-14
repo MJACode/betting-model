@@ -55,13 +55,29 @@ def test_claiming_fewer_games_than_played_is_fine():
     assert impossible_games_played(rows, {("BOS", 2023, "2023-01-15"): 41}) == []
 
 
-def test_one_game_of_lookahead_is_still_caught():
-    """The failure does not have to be a whole season to matter: a row that
-    knows one game it should not is a leak of that game's result."""
+def test_one_game_date_boundary_mismatch_is_tolerated():
+    """Rebuild vs live ingest can disagree by one game on the date boundary
+    (TEXT as_of_date / strict `<`). claimed == actual + 1 is noise, not a leak."""
+    rows = [{"team": "LAD", "season": 2025, "as_of_date": "2025-09-28",
+             "games_played": 162}]
+    assert impossible_games_played(rows, {("LAD", 2025, "2025-09-28"): 161}) == []
+
+
+def test_two_games_of_lookahead_is_still_caught():
+    """Beyond the 1-game boundary tolerance, extra GP is still impossible —
+    and the original leak (162 in April vs ~0 played) fails by a mile."""
     rows = [{"team": "BOS", "season": 2023, "as_of_date": "2023-01-15",
-             "games_played": 41}]
+             "games_played": 42}]
     bad = impossible_games_played(rows, {("BOS", 2023, "2023-01-15"): 40})
     assert len(bad) == 1
+
+
+def test_season_final_in_april_is_still_caught():
+    """The original leak shape: games_played=162 stamped before the season."""
+    rows = [{"team": "NYY", "season": 2024, "as_of_date": "2024-04-01",
+             "games_played": 162}]
+    bad = impossible_games_played(rows, {("NYY", 2024, "2024-04-01"): 0})
+    assert len(bad) == 1 and bad[0]["claimed"] == 162
 
 
 def test_a_missing_count_is_reported_not_silently_passed():
@@ -72,6 +88,76 @@ def test_a_missing_count_is_reported_not_silently_passed():
              "games_played": 40}]
     bad = impossible_games_played(rows, {})
     assert len(bad) == 1 and bad[0]["actual"] is None
+
+
+# ── 1b. MLB SBR / Stats-API twin codes ───────────────────────────────────────
+# Job 90952 (2026-09-14): 2967 "impossible" MLB rows, all actual is None.
+# Hist mlb_team_stats stores WAS/CHW/AZ/ATH; games stores WSH/CWS/ARI/OAK.
+# WAS 2019-02-24 GP=1 failed because the played key was missing, not because
+# 1 > 0+1. After aliasing, that row is claimed=1 / actual=1 (measured).
+
+_MLB_TWINS = (("WAS", "WSH"), ("CHW", "CWS"), ("AZ", "ARI"), ("ATH", "OAK"))
+
+
+def test_mlb_twin_alias_map_matches_sbr_canon():
+    """Drift here re-opens the 2967-row false CRIT; the four pairs are the
+    same ones sbr_loader / merge_mlb_twin_games already canonicalise."""
+    from data.team_stats_rebuild import MLB_TEAM_CODE_ALIASES
+    from scripts.merge_mlb_twin_games import CANON
+    assert MLB_TEAM_CODE_ALIASES == CANON
+    sbr = (Path(__file__).parent.parent / "data" / "ingestors"
+           / "sbr_loader.py").read_text(encoding="utf-8")
+    assert 'SBR_ABBREV_CANON = {"AZ": "ARI", "CHW": "CWS", "ATH": "OAK", "WAS": "WSH"}' in sbr
+
+
+@pytest.mark.parametrize("stats_team,games_team", _MLB_TWINS)
+def test_mlb_twin_codes_do_not_false_crit(stats_team, games_team):
+    """A hist stats row under the SBR twin must resolve to the games count."""
+    rows = [{"team": stats_team, "season": 2019, "as_of_date": "2019-02-24",
+             "games_played": 1}]
+    played = {(games_team, 2019, "2019-02-24"): 1}
+    assert impossible_games_played(rows, played) == []
+
+
+@pytest.mark.parametrize("stats_team,games_team", _MLB_TWINS)
+def test_mlb_twin_reverse_lookup_also_resolves(stats_team, games_team):
+    """Games-side code in stats, SBR code in played — either direction."""
+    rows = [{"team": games_team, "season": 2019, "as_of_date": "2019-06-15",
+             "games_played": 40}]
+    played = {(stats_team, 2019, "2019-06-15"): 40}
+    assert impossible_games_played(rows, played) == []
+
+
+@pytest.mark.parametrize("stats_team,games_team", _MLB_TWINS)
+def test_season_final_in_april_still_caught_on_twin_code(stats_team, games_team):
+    """Aliasing must not hide the original leak: 162 GP stamped in April."""
+    rows = [{"team": stats_team, "season": 2019, "as_of_date": "2019-04-01",
+             "games_played": 162}]
+    played = {(games_team, 2019, "2019-04-01"): 0}
+    bad = impossible_games_played(rows, played)
+    assert len(bad) == 1 and bad[0]["claimed"] == 162 and bad[0]["actual"] == 0
+
+
+def test_unmatched_team_with_no_alias_still_fails():
+    """A missing team that is not one of the four twins stays unverifiable."""
+    rows = [{"team": "XXX", "season": 2019, "as_of_date": "2019-02-24",
+             "games_played": 1}]
+    played = {("WSH", 2019, "2019-02-24"): 1}
+    bad = impossible_games_played(rows, played)
+    assert len(bad) == 1 and bad[0]["actual"] is None
+
+
+def test_feb_gp_climbing_vs_zero_regular_season_still_fails():
+    """Spring-training-shaped dates are not a skip. Measured 2026-09-14: after
+    alias, every WAS/CHW/AZ/ATH hist row and every MLB Feb–Mar snapshot is
+    within +1 of aliased actual (1845 Feb–Mar, n_over_tol=0) because 2019–20
+    `games` include those dates. If claimed GP climbed 3 vs 0 scored, that is
+    still the leak shape and must CRIT — do not special-case February."""
+    rows = [{"team": "WAS", "season": 2021, "as_of_date": "2021-02-24",
+             "games_played": 3}]
+    played = {("WSH", 2021, "2021-02-24"): 0}
+    bad = impossible_games_played(rows, played)
+    assert len(bad) == 1 and bad[0]["actual"] == 0
 
 
 # ── 2. a season is not a season if it has two snapshots ──────────────────────
@@ -302,3 +388,148 @@ def test_every_emitted_column_exists_in_the_real_table():
         missing = sorted(emitted - real)
         assert not missing, (
             sport + " writes columns " + cfg["table"] + " lacks: " + str(missing))
+
+
+# ── 6. verify() skips live season + normalizes TEXT dates ────────────────────
+
+def test_verify_skips_live_season_for_impossible_but_keeps_thin_check():
+    """Current max season is live ingest; comparing GP to scored games alone
+    false-CRITs (stats ahead of games). Thin snapshots still cover every season
+    so a 1–2 row leak in the live year would still fail."""
+    from data.team_stats_rebuild import verify
+
+    class _Conn:
+        def __init__(self):
+            self._q = None
+
+        def execute(self, sql, params=None):
+            self._q = (sql, params)
+            return self
+
+        def fetchall(self):
+            sql, params = self._q
+            if "FROM mlb_team_stats" in sql and "games_played" in sql:
+                return [
+                    # Live: would be false CRIT (35 claimed, 0 scored in fixtures).
+                    ("MIN", 2026, "2026-05-05", 35),
+                    # Honest hist: claimed == scored-before.
+                    ("LAD", 2025, "2025-09-28", 10),
+                    # Thin leak shape (2 snapshots) — still must CRIT via thin.
+                    ("NYY", 2024, "2024-01-01", 0),
+                    ("NYY", 2024, "2024-10-01", 0),
+                ]
+            if "FROM games" in sql:
+                # Hist seasons only (live skipped for impossible).
+                # 10 LAD games strictly before 2025-09-28; one late NYY game so
+                # the 2024 thin rows resolve actual=0 (claimed 0) and are not
+                # "unverifiable".
+                return [
+                    (f"2025-04-{i:02d}", 2025, "LAD", "SF", 5, 3, 1, None, None)
+                    for i in range(1, 11)
+                ] + [
+                    ("2024-11-01", 2024, "NYY", "BOS", 1, 0, 1, None, None),
+                ]
+            return []
+
+    v = verify(_Conn(), "MLB", [2024, 2025, 2026])
+    assert v["skipped_live_season"] == 2026
+    assert not any(r["season"] == 2026 for r in v["impossible"])
+    assert (2024, 2) in v["thin_seasons"]
+    assert v["impossible"] == []
+
+
+def test_verify_tolerates_one_game_boundary_on_hist_season():
+    """2025 LAD-style: claimed == actual_scored + 1 must not CRIT."""
+    from data.team_stats_rebuild import verify
+
+    class _Conn:
+        def __init__(self):
+            self._q = None
+
+        def execute(self, sql, params=None):
+            self._q = (sql, params)
+            return self
+
+        def fetchall(self):
+            sql, _ = self._q
+            if "FROM mlb_team_stats" in sql:
+                return [("LAD", 2025, "2025-09-28", 11)]
+            if "FROM games" in sql:
+                return [
+                    (f"2025-04-{i:02d}", 2025, "LAD", "SF", 5, 3, 1, None, None)
+                    for i in range(1, 11)
+                ]
+            return []
+
+    v = verify(_Conn(), "MLB", [2025, 2026])
+    assert v["impossible"] == []
+    assert v["skipped_live_season"] == 2026
+
+
+def test_verify_normalizes_as_of_date_to_yyyy_mm_dd():
+    """as_of_date and game_date are TEXT; timestamps must not break `<`."""
+    from data.team_stats_rebuild import verify
+
+    class _Conn:
+        def __init__(self):
+            self._q = None
+
+        def execute(self, sql, params=None):
+            self._q = (sql, params)
+            return self
+
+        def fetchall(self):
+            sql, _ = self._q
+            if "FROM mlb_team_stats" in sql:
+                return [("LAD", 2025, "2025-06-15 00:00:00", 10)]
+            if "FROM games" in sql:
+                games = [
+                    (f"2025-04-{i:02d}", 2025, "LAD", "SF", 4, 2, 1, None, None)
+                    for i in range(1, 11)
+                ]
+                # Same-calendar-day game must NOT count (strictly before).
+                games.append(("2025-06-15", 2025, "LAD", "SF", 1, 0, 1, None, None))
+                return games
+            return []
+
+    v = verify(_Conn(), "MLB", [2025, 2026])
+    assert v["impossible"] == []
+    assert v["skipped_live_season"] == 2026
+
+
+def test_verify_aliases_mlb_twins_and_still_catches_april_leak():
+    """Job 90952: WAS hist row, WSH games. Alias must clear the None actual
+    without skipping a 162-in-April leak on the same twin."""
+    from data.team_stats_rebuild import verify
+
+    class _Conn:
+        def __init__(self):
+            self._q = None
+
+        def execute(self, sql, params=None):
+            self._q = (sql, params)
+            return self
+
+        def fetchall(self):
+            sql, _ = self._q
+            if "FROM mlb_team_stats" in sql:
+                return [
+                    # Production false CRIT shape: SBR code, spring date, GP=1.
+                    ("WAS", 2019, "2019-02-24", 1),
+                    # Original leak on the same twin: season-final in April.
+                    ("CHW", 2019, "2019-04-01", 162),
+                ]
+            if "FROM games" in sql:
+                return [
+                    ("2019-02-23", 2019, "WSH", "NYM", 3, 2, 1, None, None),
+                    ("2019-04-15", 2019, "CWS", "KC", 4, 1, 1, None, None),
+                ]
+            return []
+
+    v = verify(_Conn(), "MLB", [2019, 2026])
+    assert v["skipped_live_season"] == 2026
+    was = [r for r in v["impossible"] if r["team"] == "WAS"]
+    chw = [r for r in v["impossible"] if r["team"] == "CHW"]
+    assert was == [], was
+    assert len(chw) == 1 and chw[0]["claimed"] == 162 and chw[0]["actual"] == 0
+    assert (2019, 2) in v["thin_seasons"]

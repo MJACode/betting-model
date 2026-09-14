@@ -558,6 +558,45 @@ def run_system_health(run_date: str | None = None) -> dict:
         # ── MLB stat feeds (MLB Stats API / Savant / Open-Meteo / ESPN) ─────
         r.date_check(conn, "mlb_team_stats", "CRIT", "mlb_team_stats", "as_of_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
+
+        # ── Team-stats as-of integrity (docs/team_stats_leak.md) ─────────────
+        # The two invariants that would have caught the leak on day one:
+        # impossible games_played (row claims games not yet played) and thin
+        # snapshot seasons (< MIN_SNAPSHOTS_PER_SEASON distinct as_of_dates).
+        # Rebuild landed 2026-09-03; marker set 2026-09-14. This is the ongoing
+        # health gate — same checks as `python -m data.team_stats_rebuild
+        # --verify-only` / the team_stats_asof_verify worker job. Never rebuilds.
+        try:
+            from data.team_stats_rebuild import SPORTS, verify as _asof_verify
+            asof_bits = []
+            asof_bad = False
+            for _sport in SPORTS:
+                _seasons = [row[0] for row in conn.execute(
+                    "SELECT DISTINCT season FROM games WHERE sport = ? "
+                    "AND home_score IS NOT NULL ORDER BY season",
+                    (_sport,)).fetchall()]
+                if not _seasons:
+                    asof_bits.append(f"{_sport}: no finals")
+                    continue
+                _v = _asof_verify(conn, _sport, _seasons)
+                if _v["impossible"] or _v["thin_seasons"]:
+                    asof_bad = True
+                    asof_bits.append(
+                        f"{_sport}: impossible={len(_v['impossible'])} "
+                        f"thin={_v['thin_seasons']}")
+                else:
+                    asof_bits.append(f"{_sport}: {_v['rows']} rows ok")
+            if asof_bad:
+                r.add("team_stats_asof_integrity", STALE, "CRIT",
+                      "as-of invariants breached (verify-only; do not retrain "
+                      "until fixed) — " + "; ".join(asof_bits))
+            else:
+                r.add("team_stats_asof_integrity", OK, "CRIT",
+                      "; ".join(asof_bits))
+        except Exception as exc:                            # noqa: BLE001
+            getattr(conn, "rollback", lambda: None)()
+            r.add("team_stats_asof_integrity", ERROR, "CRIT",
+                  f"query failed: {exc}")
         r.date_check(conn, "mlb_bullpen_workload", "CRIT", "mlb_bullpen_stats", "game_date",
                      yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "mlb_pitcher_stats", "WARN", "mlb_pitcher_stats", "game_date",

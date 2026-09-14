@@ -12,6 +12,7 @@ import {
 import {
   gameMarketForModel,
   lineShopForPick,
+  numOrNull,
   playerNameFromPickLabel,
   propMarketForModel,
   type BookPrice,
@@ -1185,14 +1186,15 @@ export async function fetchUpcomingNcaafPicks(
 // not yet settled — so yesterday's finished games drop out on their own and the
 // wider window costs nothing.
 //
-// DraftKings only (Matt, 2026-09-03): the in-play model reads DK's line and the
-// bet is placed there, so the Live board shows the stored DK number and one DK
-// hand-off. The per-book in-play view (v_latest_inplay_odds_all_books) that
-// used to feed a "your book" price and a line-shop chip here is no longer
-// read by the app — one fewer query every 30s poll. The view itself is kept.
+// DraftKings only (Matt, 2026-09-03): the in-play model reads DK's line and
+// the bet is placed there. The lock stays the bet of record (§1c). The card
+// still needs the CURRENT DK number so "Now" and "Locked" cannot be confused
+// while the board strip says the feed is ~45s old — so we re-read the in-play
+// view, DK rows only, for the slate dates. All-books shopping stays off
+// (pickLineQuotes still returns the record chip on live; detail is unchanged).
 export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   const nowIso = new Date().toISOString();
-  const [picksRes, gamesRes, weatherRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes, inplayRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -1215,15 +1217,26 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
       .lte('commence_time', nowIso)
       .is('home_score', null),
     supabase.from('game_weather').select(WEATHER_COLUMNS).in('game_date', dates),
+    supabase
+      .from('v_latest_inplay_odds_all_books')
+      .select(ODDS_BY_BOOK_COLUMNS)
+      .in('game_date', dates)
+      .eq('bookmaker', 'draftkings'),
   ]);
 
   if (picksRes.error) throw picksRes.error;
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
+  // In-play odds are enrichment: a miss leaves Now empty and the card labels
+  // the lock Locked. Do not fail the board for it.
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
   const weather = (weatherRes.data ?? []) as GameWeather[];
+  const inplay = (
+    inplayRes.error ? [] : (inplayRes.data ?? [])
+  ) as unknown as OddsByBookRow[];
+  const inplayByGameMarket = groupBooksByGameMarket(inplay);
 
   // Restrict picks to games we just confirmed are in-progress.
   const liveGameIds = new Set(games.map((g) => g.game_id));
@@ -1234,13 +1247,32 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
 
   return picks
     .filter((p) => liveGameIds.has(p.game_id))
-    .map((pick) => ({
-      pick,
-      game: gameById.get(pick.game_id) ?? null,
-      weather: weatherByGame.get(pick.game_id) ?? null,
-      bookRows: [],
-      bestOdds: null,
-    }));
+    .map((pick) => {
+      const market = gameMarketForModel(pick.model_id);
+      const rows = market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
+      const dk = rows[0];
+      return {
+        pick,
+        game: gameById.get(pick.game_id) ?? null,
+        weather: weatherByGame.get(pick.game_id) ?? null,
+        bookRows: rows,
+        latestOdds: dk
+          ? {
+              game_id: dk.game_id,
+              game_date: dk.game_date,
+              market: dk.market,
+              home_price: numOrNull(dk.home_price),
+              away_price: numOrNull(dk.away_price),
+              spread_home: numOrNull(dk.spread_home),
+              total_line: numOrNull(dk.total_line),
+              over_price: numOrNull(dk.over_price),
+              under_price: numOrNull(dk.under_price),
+              snapshot_at: dk.snapshot_at,
+            }
+          : null,
+        bestOdds: null,
+      };
+    });
 }
 
 // Every is_live pick row (settled AND unsettled) for a set of games. Used to
@@ -1853,32 +1885,37 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
 
 // ── Line movement ───────────────────────────────────────────────────────────
 
-/** All DK snapshots for one game+market, oldest first (line movement history). */
-export async function fetchOddsHistory(gameId: string, market: string): Promise<OddsSnapshotRow[]> {
+/** Snapshots for one game+market at one book, oldest first (line movement history). */
+export async function fetchOddsHistory(
+  gameId: string,
+  market: string,
+  bookmaker: string,
+): Promise<OddsSnapshotRow[]> {
   const { data, error } = await supabase
     .from('odds')
     .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
     .eq('game_id', gameId)
     .eq('market', market)
-    .eq('bookmaker', 'draftkings')
+    .eq('bookmaker', bookmaker)
     .order('snapshot_at', { ascending: true })
     .limit(50);
   if (error) throw error;
   return (data ?? []) as OddsSnapshotRow[];
 }
 
-/** All DK prop-line snapshots for one player+market in a game, oldest first. */
+/** Prop-line snapshots for one player+market in a game at one book, oldest first. */
 export async function fetchPropOddsHistory(
   gameId: string,
   market: string,
   playerName: string,
+  bookmaker: string,
 ): Promise<PropOddsSnapshotRow[]> {
   const { data, error } = await supabase
     .from('player_prop_odds')
     .select('snapshot_at, line, over_price, under_price')
     .eq('game_id', gameId)
     .eq('market', market)
-    .eq('bookmaker', 'draftkings')
+    .eq('bookmaker', bookmaker)
     .eq('player_name', playerName)
     .order('snapshot_at', { ascending: true })
     .limit(50);

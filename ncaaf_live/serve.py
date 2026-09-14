@@ -15,18 +15,21 @@ pregame bucket 1.78pp, buckets 4-5 ~2.85pp, final two minutes 8.84pp). So:
     and the engine has no distribution for it.
   * Alt lines / team totals / quarters / final-two-minute anything: OFF.
 
-EDGE FLOORS ARE PLACEHOLDERS AND SAY SO. No historical in-play NCAAF edge has
-been measured (that is the phase-3 snapshot harness). Week 1 output is a
-CALIBRATION SET at minimum size; the floors are set high on purpose so the
-loop is quiet rather than busy.
+CUTS ARE CANONICAL IN config.py / docs/thresholds.md, not placeholders.
+BOTH LANES ARE LIVE (not in config.PAUSED_MODELS):
 
-BOTH LANES ARE PAUSED (config.PAUSED_MODELS, 2026-09-11, mike). The
-calibration set spoke: ncaaf_live_total 55 settled 28-27 -2.99u, claiming
-67.5% and winning 50.9%; 31 BETs on the 36 priceable games of 09-05. A paused
-lane still prices every pass and its polled quotes still land in `odds`
-(live_price_log), so the forward record is replayed from stored snapshots --
-it just never writes a BET. The unpause is the phase-3 replay in
-data/ingestors/ncaaf_inplay_history.py, not a threshold.
+  * ncaaf_live_total: 0.73 x EV 0.24, FBS-vs-FBS only (mike, 2026-09-13).
+    Unpaused 09-12 at 0.72 x 0.22; tightened after 43 BETs in one week,
+    24 of them FBS-vs-FCS. Replay FBS-vs-FBS 17 bets +21.3%, only 3 in
+    the second half -- not proven better. Re-sweep on production once
+    ~50 BETs settle under these rules.
+  * ncaaf_live_win_prob: 0.65 x EV 0.26 on the pregame-corrected scale,
+    FBS-vs-FBS only from 2026-09-13. Qualifies at DK, bets at the best
+    book (#694).
+
+A pause (if one is added) still prices every pass and its polled quotes
+still land in `odds` (live_price_log); it just never writes a BET.
+`_is_paused` reads config.PAUSED_MODELS at call time.
 """
 
 from __future__ import annotations
@@ -343,6 +346,11 @@ class GameContext:
     wind_mph: float | None
     is_dome: bool
     game_date: str = ""
+    # BOTH teams proven FBS by the pre-game models' own rule
+    # (features.ncaaf_feature_engine._is_fbs: an SP+ rating is NECESSARY, a
+    # classification may only veto). False by default, so a context nobody
+    # checked is not priced -- "not proven FBS" declines, it does not pass.
+    fbs_matchup: bool = False
 
 
 class LiveEngine:
@@ -487,6 +495,17 @@ class LiveEngine:
             return []                                   # OT: declined
         if ctx.pregame_total is None or ctx.pregame_spread is None:
             log.info("%s: no pregame line context - not pricing", ctx.game_id)
+            return []
+        # THE PLATFORM'S NCAAF IS FBS, AND THE LIVE MODELS WERE THE ONE PLACE
+        # IT WASN'T (2026-09-13, mike: "only the best of the best"). Every
+        # pre-game NCAAF model declines an FBS-vs-FCS game at _is_fbs; this
+        # loop priced every game with a DK pregame line. Measured: 24 of 43
+        # ncaaf_live_total BETs in the week of 09-07 were FBS-vs-FCS, and on
+        # the 2025 replay those games fired 0.144 bets/game against 0.097 for
+        # FBS-vs-FBS and returned -1.1% (at 0.73/0.24: -5.8%) where FBS-vs-FBS
+        # returned +2.9% (+21.3%). Logged once per gameday in load_context.
+        if not ctx.fbs_matchup:
+            log.debug("%s: not FBS-vs-FBS - not pricing", ctx.game_id)
             return []
 
         row = self.feature_row(state, ctx)

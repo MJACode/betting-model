@@ -9,27 +9,27 @@ import {
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
 import {
+  bestHandoffForPick,
   bookLabel,
-  displayQuoteForPick,
   formatSideLine,
   gameMarketForModel,
+  heroAmericanForPick,
+  marketForPick,
   movementFromLatest,
   pickTimingInfo,
-  MODEL_BOOK,
   type Movement,
 } from '@/lib/markets';
-import { modelShort } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
+import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
-import { BookLinesRow } from './BookLinesRow';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
-import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
 
 interface Props {
   item: EnrichedPick;
@@ -45,20 +45,21 @@ interface Props {
   inSlip?: boolean;
   /** Toggle betslip membership. When set, an "Add to betslip" button renders on
    * priced, unsettled, non-preview picks — a betslip leg needs a payout, so
-   * prob-only picks (null dk_odds) never offer it. */
+   * prob-only picks (no decision price) never offer it. */
   onToggleSlip?: () => void;
   /** Freshest live snapshot for this pick's game — drives the score + inning
    * beside the LIVE badge. Omitted (or null) falls back to a bare badge. */
   liveState?: LiveGameStateRow | null;
+  /** Today board only: BET/AVOID/NONE sits immediately before the label.
+   * Signals and Live are already BET-only, so the small badge is omitted. */
+  showSignalBadge?: boolean;
 }
 
 export function PickCard({
   item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
+  showSignalBadge = false,
 }: Props) {
   const { pick, game } = item;
-  // Live picks are DraftKings only (Matt, 2026-09-03): the in-play model reads
-  // DK's line and the bet is placed there, so the user's book never applies.
-  const live = pick.is_live === true;
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -71,10 +72,13 @@ export function PickCard({
   // threshold (passesActionFilter), not at a flat ±5% — a 6% edge that doesn't
   // qualify for that model should not look like a green light. AVOID stays red.
   const qualifies = passesActionFilter(pick);
+  // gradeGood / gradeBad, not bet/avoid: Edge is now the hero number and
+  // colors.bet is 2.22:1 on bgCard (theme.ts). The ramp already exists for
+  // a readable good/bad (UX review).
   const edgeColor = qualifies
-    ? colors.bet
+    ? colors.gradeGood
     : pick.signal_type === 'AVOID'
-      ? colors.avoid
+      ? colors.gradeBad
       : colors.textSecondary;
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
   const ev = expectedValue(pick.model_probability, decisionOdds(pick));
@@ -83,7 +87,7 @@ export function PickCard({
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   const movement =
     gameStatus(game, liveState).kind === 'pre'
-      ? movementFromLatest(pick, item.latestOdds)
+      ? movementFromLatest(pick, item.latestOdds, item.bookRows)
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
   const showClv = pick.clv_pct != null;
@@ -95,32 +99,28 @@ export function PickCard({
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
-  // The headline price is always the modeled DraftKings number — the price this
-  // pick's edge, EV and stake were computed from. The boards do not follow a
-  // book preference (Matt, 2026-09-04: that picker belongs to the Stats page).
-  // Where to actually place the bet is the "Betting lines" row below, which
-  // prices every book best first.
-  const quote = displayQuoteForPick(pick, [], MODEL_BOOK);
-  // Their book can hang the same bet off a different number (FD 9.0 vs DK 8.5).
-  // Showing the price without the line would misrepresent the bet.
-  const quoteLine =
-    quote && quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
-      ? quote.line
-      : null;
 
-  // Stake is a PAIR: what you lay, and what that wins. Computed off the price
-  // the card actually shows, which is now always the modeled DraftKings number
-  // — so the stake beside an edge is derived from the same price the edge was,
-  // which §6 requires and the old per-book quote quietly broke.
-  const stake = stakeFor(pick.kelly_fraction, quote?.price ?? decisionOdds(pick), kelly);
+  const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
+  // Compare home-relative; print from the pick's side so an away spread
+  // that has moved (NYJ +5, scored −5, Now −4.5) never reads as “−4.5”.
+  const quoteLineRaw =
+    heroPrice && heroPrice.line != null && pick.scored_line != null && heroPrice.line !== pick.scored_line
+      ? heroPrice.line
+      : null;
+  const quoteLine =
+    quoteLineRaw == null
+      ? null
+      : formatSideLine(
+          quoteLineRaw,
+          pick.pick_side,
+          gameMarketForModel(pick.model_id) ?? marketForPick(pick),
+        );
+
+  // Stake stays on the deciding price, never the Now snapshot — §6.
+  const stake = stakeFor(pick.kelly_fraction, decisionOdds(pick), kelly);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
-  // Line shopping lives in the "Betting lines" row below (BookLinesRow): every
-  // bettable book, best first, each a hand-off. The old single "Best FD +145"
-  // chip is gone — the row says it with buttons.
-  // Sharp Score (BET only) + the contrarian/sharp-money tag (a smarter, derived
-  // replacement for the raw public-split chip demoted in Phase 2).
   const sharp = preview ? null : sharpScore(pick);
   const contra = contrarianTag(pick);
   // Where the crowd is, for every pick that carries a split. contrarianTag only
@@ -129,50 +129,45 @@ export function PickCard({
   // number, so a card it ranks has to print it. Neutral grey, no verdict: the
   // green/amber judged version above owns the cases it covers.
   const crowd = contra ? null : publicSplit(pick);
-  // Two-tier card: show at most TWO "hero" chips, in value order
-  // (movement steam/skip > contrarian sharp-money > line-shop savings > CLV).
-  // Weather is demoted to the detail screen so the differentiating signals
-  // aren't drowned out; the public split now shows on the card, because the
-  // Public sort ranks by it. Injury always shows (safety).
+  // Two-tier extras: show at most TWO chips besides injury / preview / contra.
   const heroOrder: string[] = [];
   if (movementSummary) heroOrder.push('movement');
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
-  // The public/sharp callout (green "Sharp side · X% public", amber when
-  // public-heavy) always shows when present — it's the differentiating signal
-  // Matt wants surfaced, so it's exempt from the 2-chip hero cap above.
-  // A fallback price used to get its own "No MGM line — showing DK" note here.
-  // Removed (Matt, 2026-09-03): the stat's own book label already says whose
-  // price it is, and the board header explains the fallback once.
-  // WHEN this bet posted. Timing is part of the pick, not metadata (§1c): a
-  // live number is minutes old, an NFL opener is days old, and a morning game
-  // pick is the number that was on offer at lock. Always shown on an unsettled
-  // BET, as the card's last line — under the action buttons (Matt, 2026-09-03)
-  // so the signals and the hand-off sit together and the stamp reads as a
-  // footer rather than competing with them.
+  // WHEN this bet posted. Timing is part of the pick, not metadata (§1c).
   const timing = pick.result == null ? pickTimingInfo(pick) : null;
-  // Why this card carries no signal: it hasn't locked yet. Always shown on
-  // previews (exempt from the hero cap, like injury/pick timing).
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
       : 'Preview — locks fight-day morning'
     : null;
   const hasExtras =
-    Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag);
-  // "Betting lines" — actionable BET picks list every bettable book's price for
-  // this exact bet, best first, each chip a hand-off to that book. Renders
-  // nothing for prob-only picks (no price to hand off), same as the old button.
-  const showLines = pick.signal_type === 'BET' && !preview;
-  // Track — any pick (props, started games, and live in-play picks) until it
-  // settles. Line-change alerts still only fire for game-level pre-game picks
-  // with a DK price (the notifier filters server-side); everything tracked
-  // scores on the Performance tab. Live picks are tracked by a stable
-  // proposition key (useTrackedBets) so the delete+rescore churn can't drop them.
+    Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
+  // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
+  const handoff = !preview && pick.signal_type === 'BET'
+    ? bestHandoffForPick(pick, item.bookRows, heroPrice)
+    : null;
   const canTrack = Boolean(onToggleTrack) && pick.result == null;
-  // Betslip — only priced, unsettled, non-preview picks can be a parlay leg.
+  // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
   const canSlip =
-    Boolean(onToggleSlip) && pick.dk_odds != null && pick.result == null && !preview;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && pick.result == null && !preview;
+  // Sharp or confidence — not both, and never stacked on top of a badge-less
+  // BET-only board as a third equal chip. Sharp wins when both exist.
+  const showSharp = Boolean(sharp);
+  const showTier = Boolean(pick.confidence_tier) && !showSharp;
+  const stakeCaption =
+    pick.signal_type !== 'BET' || preview
+      ? null
+      : stake.priced
+        ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
+        : formatUnits(stake.conviction);
+  const caption = [
+    `Model ${formatPct(pick.model_probability)}`,
+    ev == null ? null : `EV ${formatPctSigned(ev)}`,
+    stakeCaption,
+  ]
+    .filter((p): p is string => p != null)
+    .join(' · ');
 
   return (
     // The card tap is the only route to the pick's breakdown now that the
@@ -182,7 +177,17 @@ export function PickCard({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${matchup}. ${pick.pick_label}. ${pick.signal_type}.`}
+      accessibilityLabel={[
+        matchup,
+        pick.pick_label,
+        pick.signal_type,
+        `Edge ${formatPctSigned(decisionEdge(pick))}`,
+        heroPrice
+          ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
+          : null,
+      ]
+        .filter((p): p is string => Boolean(p))
+        .join('. ')}
       accessibilityHint="Opens the full breakdown, including recent form and matchup context."
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
@@ -190,60 +195,68 @@ export function PickCard({
         <Text style={styles.matchup} numberOfLines={1}>
           {matchup}
         </Text>
+        {/* Live clock stays on this pill (Fixtured-style score + period).
+            Do not invent a second clock chrome on the card. */}
         <GameStatusPill game={game} live={liveState} />
       </View>
 
-      <Text style={styles.label}>{pick.pick_label}</Text>
-
-      <View style={styles.metaRow}>
-        <View style={styles.modelChip}>
-          <Text style={styles.modelChipText}>{modelShort(pick.model_id)}</Text>
-        </View>
+      <View style={styles.labelRow}>
         {preview ? (
           <View style={styles.previewBadge}>
             <Text style={styles.previewBadgeText}>PREVIEW</Text>
           </View>
-        ) : (
+        ) : showSignalBadge ? (
           <SignalBadge signal={pick.signal_type} small />
-        )}
-        {pick.confidence_tier ? (
+        ) : null}
+        <Text style={styles.label} numberOfLines={1}>
+          {pick.pick_label}
+        </Text>
+        {showSharp && sharp ? <SharpScorePill score={sharp.score} band={sharp.band} /> : null}
+        {showTier && pick.confidence_tier ? (
           <View style={[styles.tierChip, tierBg(pick.confidence_tier)]}>
             <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
               {pick.confidence_tier}
             </Text>
           </View>
         ) : null}
-        {sharp ? <SharpScorePill score={sharp.score} band={sharp.band} /> : null}
       </View>
 
-      <View style={styles.statsRow}>
-        <Stat label="Model" value={formatPct(pick.model_probability)} />
-        <Stat label="Edge" value={formatPctSigned(decisionEdge(pick))} color={edgeColor} />
-        <Stat label="EV" value={ev == null ? '—' : formatPctSigned(ev)} color={evColor} />
-        <Stat
-          label={bookLabel(quote?.bookmaker ?? MODEL_BOOK)}
-          value={
-            quote == null
-              ? '—'
-              : quoteLine != null
-                ? `${quoteLine} ${formatAmerican(quote.price)}`
-                : formatAmerican(quote.price)
-          }
-        />
-        <Stat
-          label="Stake"
-          // Widest cell in the row: stakes are published to two decimals, so
-          // "1.15u → 1u" needs more than an even fifth or it wraps.
-          wide
-          value={
-            pick.signal_type !== 'BET' || preview
-              ? '—'
-              : stake.priced
-                ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
-                : formatUnits(stake.conviction)
-          }
-        />
+      <View style={styles.heroRow}>
+        <View style={styles.heroEdgeBlock}>
+          <Text style={[styles.heroEdge, { color: edgeColor }]}>
+            {formatPctSigned(decisionEdge(pick))}
+          </Text>
+          <Text style={styles.heroEdgeLabel}>Edge</Text>
+        </View>
+        {heroPrice ? (
+          <View style={styles.heroPriceBlock}>
+            <View style={heroPrice.kind === 'now' ? styles.pricePill : styles.heroPriceRow}>
+              {heroPrice.kind !== 'decision' ? (
+                <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? 'Now' : 'Locked'}</Text>
+              ) : null}
+              <Text style={styles.heroPrice}>
+                {heroPrice.price == null
+                  ? '—'
+                  : quoteLine != null
+                    ? `${quoteLine} ${formatAmerican(heroPrice.price)}`
+                    : formatAmerican(heroPrice.price)}
+              </Text>
+              <Text style={styles.heroBook}>{bookLabel(heroPrice.book)}</Text>
+            </View>
+            {heroPrice.showLockedCaption ? (
+              <Text style={styles.lockedCaption}>
+                Locked {formatAmerican(heroPrice.lockedPrice)}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
       </View>
+
+      {caption ? (
+        <Text style={styles.captionLine} numberOfLines={2}>
+          {caption}
+        </Text>
+      ) : null}
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
@@ -339,22 +352,40 @@ export function PickCard({
         </View>
       ) : null}
 
-      {showLines ? (
-        <BookLinesRow
-          pick={pick}
-          bookRows={item.bookRows}
-          onMore={onPress}
-        />
-      ) : null}
-
-      {canTrack || canSlip ? (
+      {handoff || canTrack || canSlip ? (
         <View style={styles.actionsRow}>
-          {canSlip ? (
-            <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} compact />
-          ) : null}
-          {canTrack ? (
-            <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
-          ) : null}
+          {handoff ? (
+            <Pressable
+              onPress={() => {
+                void openBookBetslip(handoff.bookmaker, handoff.link);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel={`${handoff.verb} at ${bookLabel(handoff.bookmaker)}, ${formatAmerican(handoff.price)}`}
+              style={({ pressed }) => [
+                styles.handoff,
+                handoff.bookmaker === 'draftkings' && styles.handoffDk,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[styles.handoffText, handoff.bookmaker === 'draftkings' && styles.handoffTextDk]}
+                numberOfLines={1}
+              >
+                {handoff.verb} {bookLabel(handoff.bookmaker)} {formatAmerican(handoff.price)}
+              </Text>
+            </Pressable>
+          ) : (
+            <View />
+          )}
+          <View style={styles.actionsRight}>
+            {canSlip ? (
+              <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} compact />
+            ) : null}
+            {canTrack ? (
+              <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
+            ) : null}
+          </View>
         </View>
       ) : null}
 
@@ -385,7 +416,7 @@ export function PickCard({
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
-// Line movement since the pick was scored (latest DK snapshot vs scored odds).
+// Line movement since the pick was scored (latest snapshot vs scored odds).
 // Steam against the pick is the "re-check before betting" warning; a move in
 // the bettor's favor is highlighted as extra value.
 function summarizeMovement(
@@ -419,21 +450,9 @@ function formatClv(clvPct: number): string {
   return `${sign}${clvPct.toFixed(1)}pp`;
 }
 
-function Stat(
-  { label, value, color, wide }:
-  { label: string; value: string; color?: string; wide?: boolean },
-) {
-  return (
-    <View style={[styles.stat, wide ? styles.statWide : null]}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
-    </View>
-  );
-}
-
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
   if (tier === 'HIGH') return { backgroundColor: colors.betSoft };
-  if (tier === 'MED') return { backgroundColor: '#FFF4E5' };
+  if (tier === 'MED') return { backgroundColor: colors.medSoft };
   return { backgroundColor: colors.noneSoft };
 }
 
@@ -446,15 +465,11 @@ function tierFg(tier: 'HIGH' | 'MED' | 'LOW') {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
+    marginBottom: spacing.xs,
   },
   pressed: {
     opacity: 0.7,
@@ -474,36 +489,22 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
   },
-  label: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  // WRAPS, because the model chip is a label of unbounded length and the three
-  // things beside it (signal badge, confidence chip, SharpScorePill) are not
-  // optional. The longest chip in the app is an NFL prop's — at an
-  // accessibility text size on a 375pt screen a non-wrapping row pushed the
-  // sharp pill off the right edge with no way to reach it (UX review,
-  // 2026-09-09). Apple HIG: a Dynamic Type layout adapts, it does not clip.
-  metaRow: {
+  // Signal-first on Today: badge immediately before the label. Wraps so a
+  // long NFL prop + sharp pill cannot clip at accessibility sizes (HIG).
+  labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: spacing.sm,
     rowGap: spacing.xs,
-    marginBottom: spacing.md,
+    marginBottom: spacing.xs,
   },
-  modelChip: {
-    backgroundColor: colors.noneSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.pill,
-  },
-  modelChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
+  label: {
+    flexShrink: 1,
+    flexGrow: 1,
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
   },
   tierChip: {
     paddingHorizontal: 8,
@@ -511,39 +512,89 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
   },
   tierText: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
   },
-  statsRow: {
+  heroRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    marginBottom: spacing.xs,
   },
-  stat: {
-    flex: 1,
+  heroEdgeBlock: {
+    flexShrink: 0,
   },
-  statWide: {
-    flex: 1.4,
+  heroEdge: {
+    fontSize: font.size.title3,
+    fontWeight: font.weight.bold,
+    fontVariant: ['tabular-nums'],
+    color: colors.textPrimary,
   },
-  statLabel: {
+  heroEdgeLabel: {
+    marginTop: 1,
     fontSize: font.size.caption,
     color: colors.textTertiary,
-    marginBottom: 2,
+    fontWeight: font.weight.medium,
   },
-  statValue: {
+  heroPriceBlock: {
+    flexShrink: 1,
+    alignItems: 'flex-end',
+  },
+  heroPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 4,
+  },
+  // Public Options Hub analog: the bettable American lives in a pill so Now
+  // reads as the emphasized price, not another caption next to Edge.
+  pricePill: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 4,
+    backgroundColor: colors.bgGrouped,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  nowTag: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  heroPrice: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
+    fontVariant: ['tabular-nums'],
     color: colors.textPrimary,
+  },
+  heroBook: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  lockedCaption: {
+    marginTop: 1,
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+  },
+  captionLine: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
   },
   extrasRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: spacing.md,
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
+    gap: spacing.sm,
+    marginTop: spacing.xs,
   },
   extraItem: {
     flexDirection: 'row',
@@ -568,7 +619,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   previewBadgeText: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
     color: colors.none,
@@ -580,16 +631,43 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: spacing.sm,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  actionsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexShrink: 0,
+  },
+  handoff: {
+    flexShrink: 1,
+    minHeight: 36,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgGrouped,
+    justifyContent: 'center',
+  },
+  handoffDk: {
+    backgroundColor: DK_GREEN,
+  },
+  handoffText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  handoffTextDk: {
+    color: colors.textPrimary,
   },
   // The post-time footer: last line of the card, under the action buttons.
   timingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   // A single Text in a row container does not shrink by default, so the live
   // "Locked … — bet of record" label would overflow the card instead of

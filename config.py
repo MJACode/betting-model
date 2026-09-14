@@ -47,6 +47,45 @@ BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
 # (CLAUDE.md 7, THE EVALUATION RULE).
 PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-09-01")
 
+# ── Team-stats as-of rebuild freeze (docs/team_stats_leak.md Phase 0) ─────────
+# Historical mlb/nba/nhl/wnba_team_stats (and mlb_pitcher_stats before Phase 2)
+# leaked season-final numbers into in-season rows. Retraining or sweeping on
+# those tables fits the leak. Phase 0 froze MLB retrain/sweep until the
+# as-of rebuild was marked complete.
+#
+# Marked complete 2026-09-14: data/TEAM_STATS_ASOF_REBUILD_COMPLETE is in
+# tree (rebuild verified 2026-09-03 per docs/team_stats_leak.md). Equivalent
+# env override: TEAM_STATS_ASOF_REBUILD_COMPLETE=1. Ongoing gate is the
+# team_stats_asof_verify worker job + system_health team_stats_asof_integrity.
+# NCAAF is unaffected (its snapshots were already a real series).
+_TEAM_STATS_ASOF_MARKER: Path = ROOT / "data" / "TEAM_STATS_ASOF_REBUILD_COMPLETE"
+TEAM_STATS_ASOF_REBUILD_COMPLETE: bool = (
+    os.environ.get("TEAM_STATS_ASOF_REBUILD_COMPLETE", "").strip().lower()
+    in ("1", "true", "yes")
+    or _TEAM_STATS_ASOF_MARKER.is_file()
+)
+# Sports whose trainer + threshold sweeps must refuse while the freeze holds.
+# Scoped to MLB for this guard (the ask); NBA/NHL/WNBA remain documented in
+# docs/team_stats_rebuild_scope.md Phase 0 but are not code-gated here.
+FROZEN_RETRAIN_SPORTS: frozenset = frozenset({"MLB"})
+
+
+def assert_retrain_allowed(sport: str, *, what: str = "retrain") -> None:
+    """Raise RuntimeError when a frozen sport would train or sweep on leaked stats.
+
+    Called from models.trainer and from MLB threshold-sweep scripts. A deliberate
+    bypass is TEAM_STATS_ASOF_REBUILD_COMPLETE=1 (or the marker file), not a
+    code edit — so the decision is greppable in the environment that ran it.
+    """
+    if sport in FROZEN_RETRAIN_SPORTS and not TEAM_STATS_ASOF_REBUILD_COMPLETE:
+        raise RuntimeError(
+            f"Refusing MLB {what}: team-stats as-of rebuild is not marked complete "
+            f"(docs/team_stats_leak.md Phase 0). Set TEAM_STATS_ASOF_REBUILD_COMPLETE=1 "
+            f"or create data/TEAM_STATS_ASOF_REBUILD_COMPLETE after the rebuild is verified."
+        )
+
+
+
 # ── EXPLICIT RECORD REMOVALS — the ONLY way a settled pick leaves the record ──
 # mike, 2026-09-12: "Pausing a model should not erase settled record unless I
 # explicitly say so ... If I didn't explicitly say to remove a settled record,
@@ -442,7 +481,7 @@ ACTION_THRESHOLDS: dict = {
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
     "ncaaf_live_win_prob": {"min_prob": 0.65, "min_edge": 0.10},  # 2026-09-12 mike: RE-SWEPT ON THE CORRECTED SCALE. Stage 3 (ncaaf_live/serve.correct_for_pregame) changed what this number means, so the 0.62/0.68 cuts swept on raw probabilities were the wrong number on the wrong scale -- 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities 0.65 x EV 0.26 is 33 bets +25.7%, halves +23.8%/+34.2%, and its four neighbours are ALL positive in both halves: a plateau, where the raw scale only ever had islands
-    "ncaaf_live_total":    {"min_prob": 0.72, "min_edge": 0.12},  # 2026-09-12 mike: UNPAUSED at the 2025 replay's both-halves-positive cell (0.72 prob x 0.22 EV) — see MODEL_MIN_EV + PAUSED_MODELS
+    "ncaaf_live_total":    {"min_prob": 0.73, "min_edge": 0.12},  # 2026-09-13 mike ("only the best of the best"): 0.72 x EV 0.22 -> 0.73 x EV 0.24, shipped WITH the FBS-only gate in ncaaf_live/serve.price. 2025 replay, first signal per game, FBS-vs-FBS: 39 bets +2.9% -> 17 bets +21.3% (0.097 -> 0.042 per game). Of those 17, 14 are first-half (+21.5%) and 3 second-half (+20.0%): the replay says NOT WORSE, it does not prove better, and there is no production evidence of profit yet. 0.735 flips negative on one second-half bet. A stricter cut, not a pause and not a cap
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -680,7 +719,7 @@ MODEL_MIN_EV: dict = {
     # EV cut on that sample is still negative overall; these are the cells that
     # lose least while keeping more than one bet. Re-sweep after ~3 more
     # Saturdays and expect these numbers to move.
-    "ncaaf_live_total": 0.22,
+    "ncaaf_live_total": 0.24,  # 2026-09-13 mike: 0.22 -> 0.24 with min_prob 0.73 (see ACTION_THRESHOLDS). EV 0.24 sits mid-plateau: 0.20-0.28 all positive in both halves at prob 0.73
     "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: EV floor unchanged. It is now applied to the PREGAME-CORRECTED probability (ncaaf_live/serve.correct_for_pregame), and min_prob 0.65 was swept on that same scale -- the briefly-shipped pregame-dog cap is gone, superseded by the correction
 }
 
@@ -1260,6 +1299,31 @@ PAUSED_MODELS: set = {
     # UNPAUSE when the history coverage is fixed and a fresh grid over a
     # population that can actually discriminate comes back positive — not on a
     # retrain of the same features, which has now been tried twice.
+
+    # ── NFL distributional props — PAUSED 2026-09-14 (ten models) ────────
+    # docs/nfl_props_model.md §5b: walk-forward at real DraftKings prices loses
+    # on every market below. Volume-control floors (2026-09-07) reduce exposure
+    # but do not create an edge ("no cut of a threshold turns -5% into +5%").
+    # Still score as NONE rows so forward performance keeps accruing; cuts stay
+    # in ACTION_THRESHOLDS for the unpause.
+    #
+    # KEEP LIVE (not in this list):
+    #   nfl_prop_tackles_assists — clean record after the gamebook TOT fix
+    #     (unpaused 2026-09-09; docs/nfl_prop_profitability_search.md §4)
+    #   nfl_prop_market, nfl_wind_totals, nfl_live_prop, nfl_opener_spread
+    #     — rule / market / live lanes, not these distributional PROP_MODELS
+    "nfl_prop_pass_yards",
+    "nfl_prop_pass_attempts",
+    "nfl_prop_pass_completions",
+    "nfl_prop_pass_tds",
+    "nfl_prop_rush_yards",
+    "nfl_prop_rush_attempts",
+    "nfl_prop_rec_yards",
+    "nfl_prop_receptions",
+    "nfl_prop_rush_rec_yards",
+    "nfl_prop_anytime_td",
+    # nfl_prop_sacks stays out of this pause list (thin market — paper only in
+    # PROP_MODELS). Ten distributional props paused; tackles_assists stays LIVE.
     "ufc_total_rounds",
     # 2026-09-11 (mike: "Still too many live ncaaf picks. Every game is getting
     # a live pick it seems. We need to only bet the absolute strongest picks
@@ -1669,8 +1733,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
-    "ncaaf_live_win_prob": 0.62,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
-    "ncaaf_live_total":    0.72,  # 2026-09-12 mike: the 2025 replay cell that is positive in both halves
+    "ncaaf_live_win_prob": 0.65,  # 2026-09-13: aligned to ACTION_THRESHOLDS; the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
+    "ncaaf_live_total":    0.73,  # 2026-09-13 mike: aligned to ACTION_THRESHOLDS (0.73 x EV 0.24); the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────

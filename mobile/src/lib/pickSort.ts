@@ -23,6 +23,11 @@ interface SortablePick {
   game?: { commence_time?: string | null } | null;
 }
 
+/** The only field Public sort reads — a board of stubs can answer "any splits?" */
+interface PublicSplitPick {
+  pick: { public_bet_pct?: unknown };
+}
+
 /** Sharp Score; non-BET picks (null) sink below any scored BET (0..100). */
 function sharpOf(it: SortablePick): number {
   return sharpScore(it.pick)?.score ?? -1;
@@ -35,10 +40,32 @@ function sharpOf(it: SortablePick): number {
  * prop-heavy board this sort degrades to plain edge order rather than shuffling
  * rows by a number the card cannot show.
  */
-function publicOf(it: SortablePick): number {
+function publicOf(it: PublicSplitPick): number {
   const v = it.pick.public_bet_pct;
-  const n = typeof v === 'string' ? Number(v) : v;
-  return n != null && Number.isFinite(n) ? n : -1;
+  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : -1;
+}
+
+/** How many picks on this board carry a captured public-ticket split. */
+export function publicSplitCount<T extends PublicSplitPick>(items: T[]): number {
+  let n = 0;
+  for (const it of items) if (publicOf(it) >= 0) n += 1;
+  return n;
+}
+
+/** Designer lock: hide Public when fewer than this share of rows have a split. */
+export const PUBLIC_SORT_MIN_SHARE = 0.2;
+
+/**
+ * Is Public a real sort on this board, or Edge by another name?
+ *
+ * Splits are Action Network consensus on full-game markets only — props, F5
+ * and golf store NULL. Under 20% of on-screen rows with a captured % → the
+ * chip is hidden (Designer lock). Default sort stays Edge.
+ */
+export function publicSortAvailable<T extends PublicSplitPick>(items: T[]): boolean {
+  if (items.length === 0) return false;
+  return publicSplitCount(items) / items.length >= PUBLIC_SORT_MIN_SHARE;
 }
 
 /**

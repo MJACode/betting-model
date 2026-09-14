@@ -16,8 +16,8 @@
  * boards are 100% game models today, so Game/Props were dead controls there.
  *
  * So `presentCategoriesFor` derives the offered set from the picks actually on
- * screen, and every comparison below — the count, the pills, the quick-chip
- * states — is relative to THAT, not to the four-category universe.
+ * screen, and every comparison below — the count, the pills, the sheet's
+ * Market chips — is relative to THAT, not to the four-category universe.
  */
 
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
@@ -129,6 +129,23 @@ export function categoriesAreNarrowed(
   present: ModelCategory[],
 ): boolean {
   return selectedCategories(state, present).length < present.length;
+}
+
+/**
+ * After a segment or sport change: if the selected ∩ present set is empty
+ * (an impossible Market on this board), reset to all present. Otherwise leave
+ * the state alone — a Game-only cut that still exists on the destination is
+ * a real filter. Games selection is not in this object.
+ */
+export function resetImpossibleMarket(
+  state: PicksFilterState,
+  present: ModelCategory[],
+): PicksFilterState {
+  if (present.length === 0) return state;
+  if (selectedCategories(state, present).length > 0) return state;
+  const next = cloneFilter(state);
+  next.categories = new Set(ALL_CATEGORIES);
+  return next;
 }
 
 export function activeFilterCount(

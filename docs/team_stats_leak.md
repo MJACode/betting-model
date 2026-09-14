@@ -313,3 +313,44 @@ leaked seasons advertised lived in exactly the rows that no longer exist.
 **The "before" row predates BOTH rebuilds** — f5 was never re-walked per season
 between Phase 1 and Phase 2, because Phase 1 moved its aggregate barely at all
 (0.560 -> 0.562 on 2026).
+
+---
+
+## Phase 0 is now enforced in code (2026-09-14)
+
+`config.assert_retrain_allowed("MLB")` refuses MLB retrain and MLB threshold
+sweeps until the as-of rebuild is marked complete:
+
+* env `TEAM_STATS_ASOF_REBUILD_COMPLETE=1`, or
+* marker file `data/TEAM_STATS_ASOF_REBUILD_COMPLETE`
+  (see `data/TEAM_STATS_ASOF_REBUILD_COMPLETE.example`)
+
+Wired from `models.trainer` and the MLB sweep scripts:
+
+* gated: `calibrated_threshold_sweep`, `mlb_runline_sweep`, `mlb_f5_sweep`,
+  `best_line_threshold_sweep` (per `mlb_*` id), `live_cut_sweep`,
+  `live_calibration_sweep`
+* exempt: `mlb_prop_market_sweep` — market-relative rule on
+  `player_prop_odds` + `player_game_log`, not team-stats tables
+
+NCAAF is unaffected.
+
+### Marker set 2026-09-14 — freeze lifted; verify-only is the ongoing gate
+
+Phase 1 team-stats rebuild and Phase 2 pitcher rebuild both landed
+**2026-09-03** (evidence above: `mlb_moneyline` 2026 AUC 0.529→0.566; pitcher
+rebuild Done same day). The #710 freeze landed later without the marker, so
+retrains stayed blocked against already-rebuilt tables.
+
+`data/TEAM_STATS_ASOF_REBUILD_COMPLETE` is now in tree (presence-only). That
+lifts `assert_retrain_allowed` for MLB. Ongoing integrity:
+
+* worker job `team_stats_asof_verify` (declared
+  `team-stats-asof-verify-mlb-twins-2026-09-14`; earlier keys
+  `...-after-marker-2026-09-14` / `...-after-715-2026-09-14` are spent) —
+  wraps `python -m data.team_stats_rebuild --verify-only`; raises on
+  breach; never DELETE/rebuilds. Hist `mlb_team_stats` stores WAS/CHW/AZ/ATH
+  where `games` stores WSH/CWS/ARI/OAK; `impossible_games_played` resolves
+  those twins so a missing key is not a 2967-row false CRIT.
+* `system_health` check `team_stats_asof_integrity` (CRIT) — same two
+  invariants (impossible `games_played`, thin snapshots)

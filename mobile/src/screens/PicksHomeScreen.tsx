@@ -65,6 +65,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import {
   applyFilter,
+  cloneFilter,
   freshFilter,
   PickFilters,
   type PicksFilterState,
@@ -87,9 +88,14 @@ import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
-import { isGameSelected, selectableGames } from '@/lib/gameFilter';
+import { gameFilterSummary, isGameSelected, selectableGames } from '@/lib/gameFilter';
 import { slipKeyForPick } from '@/lib/parlay';
-import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
+import {
+  ALL_SIGNALS,
+  presentCategoriesFor,
+  resetImpossibleMarket,
+} from '@/lib/pickFilterState';
+import { publicSortAvailable, searchPicks, sortPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import {
   isModelPaused,
@@ -330,8 +336,10 @@ export function PicksHomeScreen() {
   // widen back to the whole league. Tapping Today -> Signals did the same thing
   // inside this screen alone (UX review, 2026-09-09).
   //
-  // A picked game with no picks in this view is a legitimate empty list, and
-  // the existing "no picks match your filter" state is the honest answer.
+  // A picked game with no picks in this view is a legitimate empty list. The
+  // empty state names the game and the board (Today / Signals / Live) and
+  // offers Clear games — the generic "widen signals / thresholds" copy never
+  // mentioned this cut.
 
   const filtered = useMemo(
     () =>
@@ -343,7 +351,37 @@ export function PicksHomeScreen() {
       ),
     [activeItems, filter, search, gamePicker.selected],
   );
+  const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
+  useEffect(() => {
+    if (!publicSortLive && sortKey === 'public') setSortKey('edge');
+  }, [publicSortLive, sortKey]);
   const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
+
+  // Games is shared with Stats. A game picked there (or here) can empty THIS
+  // board while Today still has picks — the generic "widen signals / thresholds"
+  // empty state never named the shared cut, so the board read as broken.
+  const emptiedByGames = useMemo(() => {
+    if (activeItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
+      return false;
+    }
+    return searchPicks(applyFilter(activeItems, filter), search).length > 0;
+  }, [activeItems, filtered.length, filter, search, gamePicker.selected]);
+
+  // Signal is hidden on Signals/Live (those boards are all BET). A Today cut
+  // to AVOID/NONE would empty them with undo only via a pill. Designer lock:
+  // leaving Today resets Signal to all three. Market is reset on ANY segment
+  // change if selected ∩ present is empty. Games stays (shared with Stats).
+  useEffect(() => {
+    setFilter((prev) => {
+      const present = presentCategoriesFor(availableModelIds);
+      const afterMarket = resetImpossibleMarket(prev, present);
+      const leaveToday = view !== 'today' && afterMarket.signals.size < ALL_SIGNALS.length;
+      if (!leaveToday && afterMarket === prev) return prev;
+      const next = afterMarket === prev ? cloneFilter(prev) : afterMarket;
+      if (leaveToday) next.signals = new Set(ALL_SIGNALS);
+      return next;
+    });
+  }, [view, availableModelIds]);
 
   // Today: BET/AVOID/NONE counts. Daily exposure guardrail (over the opt-in cap).
   const todayStats = useMemo(() => {
@@ -539,6 +577,7 @@ export function PicksHomeScreen() {
           onChange={setFilter}
           sortKey={sortKey}
           onSortChange={setSortKey}
+          publicSortAvailable={publicSortLive}
           search={search}
           onSearchChange={setSearch}
           totalShown={filtered.length}
@@ -579,6 +618,7 @@ export function PicksHomeScreen() {
             inSlip={slip.has(slipKeyForPick(item.pick))}
             onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
             liveState={liveStates.get(item.pick.game_id) ?? null}
+            showSignalBadge={view === 'today'}
           />
         )}
         ListEmptyComponent={
@@ -587,7 +627,15 @@ export function PicksHomeScreen() {
               <ActivityIndicator />
             </View>
           ) : (
-            <EmptyForView view={view} sport={sport} date={date} hasAny={activeItems.length > 0} />
+            <EmptyForView
+              view={view}
+              sport={sport}
+              date={date}
+              hasAny={activeItems.length > 0}
+              emptiedByGames={emptiedByGames}
+              gameSummary={gameFilterSummary(pickableGames, gamePicker.selected)}
+              onClearGames={gamePicker.clear}
+            />
           )
         }
         contentContainerStyle={styles.list}
@@ -612,22 +660,43 @@ export function PicksHomeScreen() {
   );
 }
 
+function boardLabel(view: PicksView): string {
+  if (view === 'today') return 'Today';
+  if (view === 'signals') return 'Signals';
+  return 'Live';
+}
+
 function EmptyForView({
   view,
   sport,
   date,
   hasAny,
+  emptiedByGames,
+  gameSummary,
+  onClearGames,
 }: {
   view: PicksView;
   sport: string;
   date: string;
   hasAny: boolean;
+  emptiedByGames: boolean;
+  gameSummary: string;
+  onClearGames: () => void;
 }) {
+  if (hasAny && emptiedByGames) {
+    return (
+      <EmptyState
+        title={`No picks for ${gameSummary} on ${boardLabel(view)}`}
+        actionLabel="Clear games"
+        onAction={onClearGames}
+      />
+    );
+  }
   if (hasAny) {
     return (
       <EmptyState
         title="No picks match your filter"
-        subtitle="Try widening signals, categories, or lowering the thresholds."
+        subtitle="Try widening signals, categories, or lowering the thresholds. Search and Games also narrow this list — they show as pills above."
       />
     );
   }
@@ -847,12 +916,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
-    borderRadius: 8,
+    borderRadius: radii.sm,
   },
   liveNoteWrap: {
     flexDirection: 'row',
@@ -875,7 +944,7 @@ const styles = StyleSheet.create({
   rgBannerText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.med,
+    color: colors.textSecondary,
     fontWeight: font.weight.medium,
   },
 });

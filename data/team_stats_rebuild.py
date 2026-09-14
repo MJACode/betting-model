@@ -96,21 +96,58 @@ RATE_COLUMNS: dict[str, tuple[str, ...]] = {
 
 # ── the two invariants ───────────────────────────────────────────────────────
 
-def impossible_games_played(rows: list[dict], played: dict) -> list[dict]:
+# Date-boundary: live/rebuild stamps can disagree by one game on whether the
+# game on D-1 is included when as_of_date is D (TEXT dates, strict `<`).
+# A +1 mismatch is noise; games_played=162 in April is still impossible.
+BOUNDARY_TOLERANCE = 1
+
+# Hist mlb_team_stats stores the SBR twin; `games` stores the Stats-API form.
+# Same four pairs as sbr_loader.SBR_ABBREV_CANON / merge_mlb_twin_games.CANON.
+# Job 90952 (2026-09-14): 2967 MLB rows, every one actual is None — WAS/CHW/
+# AZ/ATH hist (live ATH 2026 skipped) looking up WSH/CWS/ARI/OAK keys.
+# WNBA/NBA WAS is an exact-key hit first and never reaches this map.
+MLB_TEAM_CODE_ALIASES = {"AZ": "ARI", "CHW": "CWS", "ATH": "OAK", "WAS": "WSH"}
+_MLB_TEAM_TWIN = {}
+for _a, _b in MLB_TEAM_CODE_ALIASES.items():
+    _MLB_TEAM_TWIN[_a] = _b
+    _MLB_TEAM_TWIN[_b] = _a
+
+
+def _played_actual(played: dict, team, season, as_of_date):
+    """Games completed before as_of_date, resolving MLB SBR/Stats-API twins.
+
+    A missing key stays None — unverifiable is not fine. The twin lookup only
+    substitutes a known alias; it does not invent a zero.
+    """
+    key = (team, season, as_of_date)
+    if key in played:
+        return played[key]
+    other = _MLB_TEAM_TWIN.get(team)
+    if other is None:
+        return None
+    return played.get((other, season, as_of_date))
+
+
+def impossible_games_played(rows: list[dict], played: dict,
+                            tolerance: int = BOUNDARY_TOLERANCE) -> list[dict]:
     """Rows claiming more games than the team had actually played by that date.
 
     `played` maps (team, season, as_of_date) -> games actually completed before
     that date, computed from `games`.
 
+    `tolerance` allows a 1-game date-boundary mismatch (claimed == actual + 1).
+    The original leak (season-final GP stamped in April) still fails loudly.
+
     A MISSING count is reported, not skipped. "I could not verify this" is not
     "this is fine", and a checker that quietly passes what it cannot check is
-    how the original leak survived seven seasons.
+    how the original leak survived seven seasons. MLB SBR/Stats-API twins
+    (WAS↔WSH, CHW↔CWS, AZ↔ARI, ATH↔OAK) share a count; an unmatched team
+    with no alias is still None.
     """
     bad = []
     for r in rows:
-        key = (r["team"], r["season"], r["as_of_date"])
-        actual = played.get(key)
-        if actual is None or r["games_played"] > actual:
+        actual = _played_actual(played, r["team"], r["season"], r["as_of_date"])
+        if actual is None or r["games_played"] > actual + tolerance:
             bad.append({**r, "claimed": r["games_played"], "actual": actual})
     return bad
 
@@ -288,25 +325,41 @@ def rebuild_sport(conn: DBConnection, sport: str, seasons: list[int],
 
 
 def verify(conn: DBConnection, sport: str, seasons: list[int]) -> dict:
-    """Run both invariants against what is actually stored."""
+    """Run both invariants against what is actually stored.
+
+    The current max season is skipped for the impossible-games check: it is
+    live daily ingest with real rate stats (see `already_a_series`), and the
+    stats feed is routinely ahead of `games` final scores. Comparing it to
+    scored rows alone yields thousands of false CRITs (e.g. MIN 2026-05-05
+    claimed 35 / scored 27). Thin-snapshot detection still covers every
+    season — that is what catches the original 1–2 row leak shape.
+    """
     table = SPORTS[sport]["table"]
     marks = ",".join("?" for _ in seasons)
-    stored = [{"team": r[0], "season": r[1], "as_of_date": r[2],
+    # Both game_date and as_of_date are TEXT; compare as YYYY-MM-DD only.
+    stored = [{"team": r[0], "season": r[1],
+               "as_of_date": str(r[2])[:10],
                "games_played": r[3]}
               for r in conn.execute(
                   f"SELECT team, season, as_of_date, games_played FROM {table} "
                   f"WHERE season IN ({marks})", tuple(seasons)).fetchall()]
 
+    live_season = max(seasons) if seasons else None
+    hist_stored = [r for r in stored if r["season"] != live_season]
+
     played: dict = defaultdict(int)
-    per_team = _team_games(_games(conn, sport, seasons))
-    dates = {r["as_of_date"] for r in stored}
-    for (team, season), tg in per_team.items():
-        for d in dates:
-            played[(team, season, d)] = sum(1 for x in tg if x["date"] < d)
+    hist_seasons = [s for s in seasons if s != live_season]
+    if hist_seasons:
+        per_team = _team_games(_games(conn, sport, hist_seasons))
+        dates = {r["as_of_date"] for r in hist_stored}
+        for (team, season), tg in per_team.items():
+            for d in dates:
+                played[(team, season, d)] = sum(1 for x in tg if x["date"] < d)
 
     return {"sport": sport, "rows": len(stored),
-            "impossible": impossible_games_played(stored, played),
-            "thin_seasons": seasons_with_too_few_snapshots(stored)}
+            "impossible": impossible_games_played(hist_stored, played),
+            "thin_seasons": seasons_with_too_few_snapshots(stored),
+            "skipped_live_season": live_season}
 
 
 def main() -> None:
@@ -322,6 +375,7 @@ def main() -> None:
 
     sports = [args.sport] if args.sport else list(SPORTS)
     conn = get_connection()
+    failed = False
     try:
         for sport in sports:
             if args.seasons:
@@ -347,12 +401,16 @@ def main() -> None:
                 if bad:
                     logger.error(f"{sport}: {len(bad)} row(s) claim games that had "
                                  f"not been played, e.g. {bad[0]}")
+                    failed = True
                 if thin:
                     logger.error(f"{sport}: seasons with too few snapshots: {thin}")
+                    failed = True
                 if not bad and not thin:
                     logger.success(f"{sport}: {v['rows']} rows pass both invariants")
     finally:
         conn.close()
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -211,6 +211,8 @@ def train_model(model_id: str,
                          f"Available: {list(MODELS.keys())}")
 
     sport, market, description = MODELS[model_id]
+    from config import assert_retrain_allowed
+    assert_retrain_allowed(sport, what="retrain")
     sport_cfg  = SPORTS[sport]
 
     # 3-class problems: 'method' (UFC method of victory: 0=decision, 1=ko_tko,
@@ -1122,6 +1124,8 @@ def train_prop_model(model_id: str,
                          f"Available: {list(PROP_MODELS.keys())}")
 
     sport, market, model_type, note = PROP_MODELS[model_id]
+    from config import assert_retrain_allowed
+    assert_retrain_allowed(sport, what="prop retrain")
     sport_cfg = SPORTS[sport]
 
     # WNBA/NBA props use their own feature map + dataset builder; MLB uses the
@@ -1545,6 +1549,8 @@ def train_live_model(model_id: str,
                          f"Available: {list(LIVE_MODELS.keys())}")
 
     sport, market, model_type, description = LIVE_MODELS[model_id]
+    from config import assert_retrain_allowed
+    assert_retrain_allowed(sport, what="live retrain")
     sport_cfg = SPORTS[sport]
 
     train_seasons  = train_seasons  or sport_cfg["train_seasons"]

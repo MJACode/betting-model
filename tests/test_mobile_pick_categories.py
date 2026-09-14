@@ -202,32 +202,29 @@ def test_the_market_categories_are_never_the_hardcoded_four():
     assert "ALL_CATEGORIES.length" not in _read(FILTER_STATE)
 
 
-def test_the_quick_chip_row_never_changes_shape():
-    """Game/Props are disabled in the bar, never removed from it.
+def test_picks_idle_chrome_is_search_and_filters_only():
+    """Sort and Market live in the sheet; the idle bar is search + Filters.
 
-    That row is positional and shared with SORT, so dropping ~150pt of leading
-    content slides every sort chip left under a thumb already on the row and a
-    tap meaning "Game" silently re-sorts the board. The sheet is a vertical
-    list and hides its Market section instead -- a faceted filter dropping an
-    empty facet moves nothing anyone is aiming at (UX review, 2026-09-09).
+    The quick-chip row (Game/Props + SORT) was ~150pt on every board and undid
+    the denser PickCard. Game/Props stayed visible-but-disabled so a positional
+    SORT row would not slide under a thumb -- that row is gone, so the dead
+    UFC/NCAAF chips go with it. The sheet still hides Market when it cannot
+    cut (UX review 2026-09-09, restated 2026-09-14).
     """
     src = _read(MOBILE / "src" / "components" / "filters" / "PickFilters.tsx")
-    bar = _block(src, "<ScrollView", "</ScrollView>")
-    assert 'label="Game"' in bar and 'label="Props"' in bar, "the quick chips left the bar"
-    assert "disabled={!marketCutBites" in bar, (
-        "the quick chips must go disabled, not disappear -- removing them "
-        "reflows the shared SORT row under the user's thumb"
-    )
+    bar = _block(src, "<FilterBar", "/>")
+    assert "<ScrollView" not in bar
+    assert 'label="Game"' not in bar and 'label="Props"' not in bar
     sheet = _block(src, "<FilterSheet", "</FilterSheet>")
+    assert 'title="Sort"' in sheet
     assert "{marketCutBites ? (" in sheet, "the sheet's Market section is hidden, not disabled"
 
 
-def test_the_props_chip_never_writes_a_market_the_board_cannot_hold():
-    """One tap used to put pitcher_prop and batter_prop into the state on an
-    NFL board. Invisible today because every read intersects with
-    presentCategories -- which is the bug masked, not absent."""
+def test_the_market_chips_never_write_a_market_the_board_cannot_hold():
+    """The old Props quick chip wrote pitcher_prop and batter_prop into the
+    state on an NFL board. Market now maps presentCategories only."""
     src = _read(MOBILE / "src" / "components" / "filters" / "PickFilters.tsx")
-    assert "setCategories(propsOnly ? ALL_CATEGORIES : presentProps)" in src
+    assert "presentCategories.map" in src
     assert "PROP_CATEGORIES" not in src, (
         "PickFilters must not reach for the all-sports prop list at all"
     )
@@ -248,3 +245,11 @@ def test_the_behavioural_checks_pass():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    ux = subprocess.run(
+        [str(tsx), "scripts/verify_pick_filter_ux.ts"],
+        cwd=MOBILE,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert ux.returncode == 0, ux.stdout + ux.stderr

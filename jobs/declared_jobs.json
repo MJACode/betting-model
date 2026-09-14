@@ -3,7 +3,7 @@
     "key": "mlb-historical-pilot-2024-06-01",
     "job_type": "historical_odds",
     "requested_by": "mike",
-    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 — 205 rows over 48 games — two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
+    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 \u2014 205 rows over 48 games \u2014 two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
     "args": {
       "sport": "MLB",
       "start": "2024-06-01",
@@ -28,7 +28,7 @@
     "key": "mlb-relabel-in-play-2024-pilot",
     "job_type": "relabel_in_play",
     "requested_by": "mike",
-    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game — ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
+    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game \u2014 ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
     "args": {
       "sport": "MLB",
       "since": "2024-06-01"
@@ -730,5 +730,19 @@
         "Fresno State Bulldogs"
       ]
     }
+  },
+  {
+    "key": "team-stats-asof-verify-after-marker-2026-09-14",
+    "job_type": "team_stats_asof_verify",
+    "requested_by": "mike",
+    "note": "After committing data/TEAM_STATS_ASOF_REBUILD_COMPLETE (rebuild landed 2026-09-03 per docs/team_stats_leak.md; Phase 2 pitcher rebuild Done same day). verify-only: fail loud on impossible games_played or thin snapshots. Does NOT DELETE/rebuild \u2014 the ongoing gate after the #710 freeze lifts. SPENT: job 90631 failed on live-season MIN 2026-05-05 (fixed in #715).",
+    "args": {}
+  },
+  {
+    "key": "team-stats-asof-verify-mlb-twins-2026-09-14",
+    "job_type": "team_stats_asof_verify",
+    "requested_by": "mike",
+    "note": "Re-run verify-only after aliasing MLB SBR/Stats-API twins (WAS/CHW/AZ/ATH vs WSH/CWS/ARI/OAK). Job 90952 (dedupe team-stats-asof-verify-after-715-2026-09-14, not this file) failed 2967 rows, all actual is None on those hist codes. Does NOT DELETE/rebuild.",
+    "args": {}
   }
 ]

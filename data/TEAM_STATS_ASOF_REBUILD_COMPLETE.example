@@ -1,0 +1,11 @@
+# The real marker now lives at:
+#   data/TEAM_STATS_ASOF_REBUILD_COMPLETE
+# Presence of that file (committed 2026-09-14) lifts the MLB retrain/sweep
+# freeze in config.assert_retrain_allowed after the 2026-09-03 rebuild
+# verification documented in docs/team_stats_leak.md.
+#
+# This .example file is kept so older docs/comments that point here still
+# resolve. Contents of the real marker are ignored; presence is the signal.
+#
+# Equivalent env override (no file needed):
+#   TEAM_STATS_ASOF_REBUILD_COMPLETE=1

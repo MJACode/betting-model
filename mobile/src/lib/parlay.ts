@@ -22,10 +22,10 @@
 import { americanToDecimal } from '@/lib/format';
 import { stakeFor, effectiveKellyFraction, KELLY_MULTIPLIER,
          type KellySizingOpts, type UnitStake } from '@/lib/thresholds';
-import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
+import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
-import { decisionEdge } from '@/lib/decisionPrice';
+import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
 
 /** Best across-book price for a leg's side (line shopping). Present only when a
  * non-DK book strictly beats DK for this side (game markets only — props aren't
@@ -144,18 +144,16 @@ export function slipKeyForPick(p: Pick): string {
  */
 export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
   const p = ep.pick;
-  // A parlay is a DRAFTKINGS hand-off ("Every leg is priced at DraftKings",
-  // legPriceAtBook, the "Bet on DraftKings" button), so the leg stays at the
-  // DraftKings price even though the pick itself is decided at the best
-  // bettable price since 2026-09-09 -- a slip DK cannot price is worse than
-  // a slip at DK's own number. Only the pool ranking (legEdge) reads the
-  // decision edge. UX review, 2026-09-09.
-  // dk_odds, NOT the deciding price: a parlay is ONE DraftKings slip, so a
-  // leg needs a DraftKings price. Since 2026-09-12 that also excludes a prop
-  // DraftKings does not list at all (line_book set, dk_odds NULL), which is
-  // right: DraftKings cannot take a bet it does not post.
-  const odds = p.dk_odds == null ? null : Number(p.dk_odds);
-  if (odds == null) return null; // prob-only — no payout
+  // A parlay is a DRAFTKINGS hand-off when DK priced the leg. Legs that have
+  // a DraftKings number stay at dk_odds (a slip DK cannot price is worse than
+  // a slip at DK's own number). A prop DraftKings never listed (line_book set,
+  // dk_odds NULL) is still a priced bet at the deciding book — same shape as
+  // a Stats LINE leg (dkPriced / pricedAt). Prob-only rows stay out.
+  const dkOdds = p.dk_odds == null ? null : Number(p.dk_odds);
+  const decided = decisionOdds(p);
+  if (decided == null) return null;
+  const odds = dkOdds ?? decided;
+  const offDk = dkOdds == null;
   // bestOdds is already the best non-DK price that STRICTLY beats DK for this
   // side (game markets only — prop picks carry no bestOdds).
   const best = ep.bestOdds ?? null;
@@ -199,6 +197,9 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     bookPrices,
     pick: p,
     game: ep.game,
+    ...(offDk
+      ? { dkPriced: false as const, pricedAt: lineBook(p) ?? storedQuoteBook(p) }
+      : {}),
   };
 }
 

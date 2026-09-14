@@ -88,6 +88,9 @@ export const colors = {
   // Confidence
   high: '#34C759',
   med: '#FF9500',
+  // MED wash — chips, caution banners. Never body text (`med` is 1.97:1 on
+  // white). Replaces the `#FFF4E5` literals the scan used to tolerate.
+  medSoft: '#FFF4E5',
   low: '#8E8E93',
 
   // "Best payout" marker — the star on the betslip's Open-with tiles. A dark

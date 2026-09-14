@@ -176,13 +176,60 @@ def test_the_streamlit_dashboard_fallback_excludes_retired_models():
 
 
 def test_the_app_mirrors_the_same_set():
-    """mobile/src/lib/thresholds.ts RETIRED_MODELS is the client half of the
-    same guard (its passesActionFilter refuses a retired model before the
-    server threshold row is consulted). The two must never drift."""
-    src = (ROOT / "mobile" / "src" / "lib" / "thresholds.ts").read_text(encoding="utf-8")
+    """mobile RETIRED_MODELS (thresholds.generated.ts, re-exported by
+    thresholds.ts) is the client half of the same guard. The two must never
+    drift after the generate-from-config split."""
+    wrapper = (ROOT / "mobile" / "src" / "lib" / "thresholds.ts").read_text(encoding="utf-8")
+    assert "RETIRED_MODELS" in wrapper
+    assert "thresholds.generated" in wrapper
+    src = (ROOT / "mobile" / "src" / "lib" / "thresholds.generated.ts").read_text(encoding="utf-8")
     block = re.search(r"export const RETIRED_MODELS = new Set<string>\(\[(.*?)\]\);", src, re.S).group(1)
     ids = set(re.findall(r"'([a-z_0-9]+)'", block))
     assert ids == set(config.RETIRED_MODELS)
     # and no bundled threshold survives for any of them
     for m in config.RETIRED_MODELS:
         assert not re.search(rf"^\s*{m}: \{{", src, re.M), f"{m} still has a bundled threshold"
+
+
+# ── NFL distributional pause (2026-09-14) ──────────────────────────────────
+
+NFL_DISTRIBUTIONAL_PAUSED = frozenset({
+    "nfl_prop_pass_yards",
+    "nfl_prop_pass_attempts",
+    "nfl_prop_pass_completions",
+    "nfl_prop_pass_tds",
+    "nfl_prop_rush_yards",
+    "nfl_prop_rush_attempts",
+    "nfl_prop_rec_yards",
+    "nfl_prop_receptions",
+    "nfl_prop_rush_rec_yards",
+    "nfl_prop_anytime_td",
+})
+
+NFL_KEEP_LIVE = frozenset({
+    "nfl_prop_tackles_assists",
+    "nfl_prop_sacks",  # thin / paper-only; not in the ten-model pause
+    "nfl_prop_market",
+    "nfl_wind_totals",
+    "nfl_live_prop",
+    "nfl_opener_spread",
+})
+
+
+def test_ten_nfl_distributional_props_are_paused():
+    """BET emission stopped for the ten losing PROP_MODELS distributional ids."""
+    assert NFL_DISTRIBUTIONAL_PAUSED <= set(config.PAUSED_MODELS)
+    assert len(NFL_DISTRIBUTIONAL_PAUSED) == 10
+
+
+def test_nfl_tackles_and_rule_lanes_stay_live():
+    for mid in NFL_KEEP_LIVE:
+        assert mid not in config.PAUSED_MODELS, mid
+        assert mid not in config.RETIRED_MODELS, mid
+
+
+def test_paused_nfl_props_still_in_prop_models_and_thresholds():
+    """Pause ≠ retire: still train/score/sync; only BET emission stops."""
+    for mid in NFL_DISTRIBUTIONAL_PAUSED:
+        assert mid in config.PROP_MODELS, mid
+        assert mid in config.ACTION_THRESHOLDS, mid

@@ -54,7 +54,7 @@ to clear the Metro bundler cache.
 App.tsx                  Navigation root (5 tabs + 2 stack screens)
 src/lib/
   supabase.ts            createClient (anon key)
-  thresholds.ts          MIRROR of config.py ACTION_THRESHOLDS — keep in sync
+  thresholds.ts          re-exports generated ACTION_THRESHOLDS from config.py
   format.ts              American odds, percent, currency, ET dates
   modelMeta.ts           Friendly labels per model_id + stat keys for trends
   theme.ts               iOS-style design tokens (light mode)
@@ -89,12 +89,20 @@ src/components/
 
 ## Keeping thresholds synced with `config.py`
 
-`src/lib/thresholds.ts` mirrors `config.MODEL_PROB_THRESHOLDS`,
-`MODEL_EDGE_THRESHOLDS`, `ACTION_THRESHOLDS`, and `PROB_ONLY_MODELS`. When
-those change on the Python side, update the TS file by hand. Each entry has
-a short comment matching the rationale in `CLAUDE.md`. The Signals tab
-filter (`passesActionFilter`) must produce the same picks as the Section 16
-SQL in `CLAUDE.md` — if they diverge, you'll bet on the wrong things.
+`src/lib/thresholds.generated.ts` is **generated** from `config.py`:
+
+```bash
+python -m scripts.generate_mobile_thresholds           # write
+python -m scripts.generate_mobile_thresholds --check   # CI drift gate
+```
+
+`thresholds.ts` re-exports those constants and keeps the runtime helpers.
+`tests/test_mobile_threshold_parity.py` still pins equality. When
+`config.py` thresholds change, regenerate — do not hand-edit
+`thresholds.generated.ts`. CI `--check` fails on drift. The Signals tab
+filter (`passesActionFilter`) must produce the same picks as the generated
+action-filter SQL (`python -m scripts.emit_threshold_sql`) — if they
+diverge, you'll bet on the wrong things.
 
 ## Supabase RLS / permissions
 

@@ -21,7 +21,7 @@ export function SharpScorePill({ score, band }: { score: number; band: SharpBand
 
 const TONE: Record<SharpBand, { bg: string; fg: string }> = {
   high: { bg: colors.betSoft, fg: colors.bet },
-  med: { bg: '#FFF4E5', fg: colors.med },
+  med: { bg: colors.medSoft, fg: colors.med },
   low: { bg: colors.noneSoft, fg: colors.low },
 };
 
