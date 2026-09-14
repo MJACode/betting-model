@@ -142,6 +142,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Lands on the next Railway ACTIVE_MIGRATIONS pass after merge (Step 0c2
     # / refresh_pass apply-view-migrations). Does not Discord re-announce.
     "drop_voided_nfl_wind_opening_signals_2026_09_14.sql",
+    # 2026-09-14 (mike): same residue for nfl_prop_market — three captures
+    # whose picks were in the 09-11 26-row delete (written 137-180h early vs
+    # NFL_PROP_MAX_LEAD_HOURS=24). Match on lock_key_sql, not game+model, so
+    # a standing BET on the same game cannot hide a leftover. 18 standing
+    # captures stay. No Discord re-announce.
+    "drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql",
 ]
 
 

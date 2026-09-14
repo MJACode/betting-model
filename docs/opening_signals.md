@@ -31,10 +31,16 @@ totals, or the go-live gate.**
   `data/migrations/add_opening_signals_shadow_track.sql`. RLS on + anon read.
 - **Deleting a pick does not retract its capture.** `ON CONFLICT (lock_key)
   DO NOTHING` is the first-cross lock, so a later VOID/DELETE leaves the
-  shadow row. The six Week-1 `nfl_wind_totals` leftovers (long-lead void,
-  picks gone 2026-09-11) are swept by
-  `drop_voided_nfl_wind_opening_signals_2026_09_14.sql` on the next Railway
-  `ACTIVE_MIGRATIONS` pass; DEN@KC (standing pick 1969489) is pinned to stay.
-  Not a Discord event.
+  shadow row. Two worker `ACTIVE_MIGRATIONS` files sweep those leftovers on
+  the next Railway pass after merge; neither is a Discord event:
+  - `drop_voided_nfl_wind_opening_signals_2026_09_14.sql` — six Week-1
+    `nfl_wind_totals` captures (long-lead void, picks gone 2026-09-11);
+    DEN@KC (standing pick 1969489) is pinned to stay.
+  - `drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql` — three
+    `nfl_prop_market` captures from the same 09-11 delete (Burrow comps,
+    Shough attempts, Nix pass TDs; written 137–180h early vs the 24h
+    ceiling). Deletes any `nfl_prop_market` capture with no standing
+    non-VOID BET, matched on the synthesised `lock_key` so a same-game
+    standing prop cannot hide a leftover. 18 standing captures stay.
 
 ---
