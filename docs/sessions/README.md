@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, nfl_prop_market leftover sweep: standing skip is lock_key_sql not player_id (naive join false-matched 3/2/2). Exact three keys. Zero Burrow/Shough/Nix picks |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, sweep leftover nfl_prop_market opening_signals (Burrow/Shough/Nix; 24h-ceiling deletes). lock_key match so same-game standing props stay. Worker ACTIVE_MIGRATIONS; no Discord re-announce |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, delete leftover Week-1 nfl_wind_totals opening_signals captures (MAX_FIRE_LEAD void). Keep DEN@KC pick_id 1969489. Worker ACTIVE_MIGRATIONS; no Discord re-announce |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, signal_delivery false CRIT: check still read opening_signals after Discord moved to picks. 9 NFL capture leftovers from the 09-11 26-row delete; standing picks fully delivered. Check aligned to _new_signals; no backfill |

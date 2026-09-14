@@ -11,16 +11,23 @@
 --     NFL_2026_01_NO_DET:nfl_prop_market:tylershough:player_pass_attempts
 --     NFL_2026_01_DEN_KC:nfl_prop_market:bonix:player_pass_tds
 --
--- Exactly those three leftovers; 18 other nfl_prop_market captures still have
--- a standing non-VOID BET and MUST stay. Match on the synthesised lock_key
--- (tracking.publish_keys.lock_key_sql), not game_id+model_id: this model
--- writes one pick per proposition (player_key + prop_market, player_id NULL),
--- so a standing BET on the same game would otherwise hide a leftover.
+-- Zero picks rows for Burrow/Shough/Nix on those games. The three captures
+-- are safe to delete. 18 other nfl_prop_market captures still have a
+-- standing non-VOID BET and MUST stay.
 --
--- Guard: model is nfl_prop_market and no standing (non-VOID) BET shares
--- os.lock_key. A second pass deletes 0. Any later leftover of the same shape
--- goes too. Does not touch picks. Does not restore the 26 deleted rows.
--- Does not write push_sent or Discord.
+-- THE WRONG JOIN. nfl_prop_market leaves player_id NULL and identifies via
+-- player_key + prop_market (tracking.publish_keys.KEY_PARTS / lock_key_sql).
+-- game_id + model_id + COALESCE(player_id,'') matches ANY other prop on the
+-- same game (both sides NULL). Measured on these three leftovers, 2026-09-14:
+--     DEN@KC Nix     naive_player_id_matches=3  lock_key_matches=0
+--     NO@DET Shough  naive_player_id_matches=2  lock_key_matches=0
+--     TB@CIN Burrow  naive_player_id_matches=2  lock_key_matches=0
+-- That join would have refused the delete. Do not use it.
+--
+-- Guard: exact lock_key list (these three) AND no standing non-VOID BET
+-- whose synthesised lock_key_sql equals os.lock_key. A second pass deletes
+-- 0. Does not touch picks. Does not restore the 26 deleted rows. Does not
+-- write push_sent or Discord.
 --
 -- Applied by the worker ACTIVE_MIGRATIONS pass (pipeline Step 0c2 /
 -- refresh_pass apply-view-migrations), not by the read-only Supabase MCP.
@@ -29,7 +36,11 @@ DECLARE
     n INTEGER;
 BEGIN
     DELETE FROM opening_signals os
-     WHERE os.model_id = 'nfl_prop_market'
+     WHERE os.lock_key IN (
+               'NFL_2026_01_TB_CIN:nfl_prop_market:joeburrow:player_pass_completions',
+               'NFL_2026_01_NO_DET:nfl_prop_market:tylershough:player_pass_attempts',
+               'NFL_2026_01_DEN_KC:nfl_prop_market:bonix:player_pass_tds'
+           )
        AND NOT EXISTS (
            SELECT 1
              FROM picks p

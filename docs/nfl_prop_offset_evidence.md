@@ -180,8 +180,9 @@ The three early `nfl_prop_market` BETs that *were* written past the ceiling
 CONFLICT DO NOTHING`). mike, 2026-09-14: sweep those leftovers the same way
 as the voided wind captures.
 `drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql` in
-`ACTIVE_MIGRATIONS` deletes any `nfl_prop_market` capture with no standing
-non-VOID BET. No Discord re-announce.
+`ACTIVE_MIGRATIONS` deletes those three `lock_key`s. The standing-pick
+skip is `lock_key_sql` (player_key + prop_market), not player_id — that
+join false-matched other props on the same game. No Discord re-announce.
 
 **The scorer path got the same ceiling on 2026-09-11** (mike: "we revised
 prop models or should have, that was my earlier guidance"). #610 put it on

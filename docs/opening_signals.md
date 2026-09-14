@@ -39,8 +39,9 @@ totals, or the go-live gate.**
   - `drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql` — three
     `nfl_prop_market` captures from the same 09-11 delete (Burrow comps,
     Shough attempts, Nix pass TDs; written 137–180h early vs the 24h
-    ceiling). Deletes any `nfl_prop_market` capture with no standing
-    non-VOID BET, matched on the synthesised `lock_key` so a same-game
-    standing prop cannot hide a leftover. 18 standing captures stay.
+    ceiling). Deletes those exact `lock_key`s. A standing-pick skip uses
+    `lock_key_sql` (player_key + prop_market), never
+    `game_id+model_id+player_id` — that join false-matched other props on
+    the same game (measured 3/2/2 vs 0). 18 standing captures stay.
 
 ---

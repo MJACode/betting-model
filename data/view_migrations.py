@@ -144,9 +144,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     "drop_voided_nfl_wind_opening_signals_2026_09_14.sql",
     # 2026-09-14 (mike): same residue for nfl_prop_market — three captures
     # whose picks were in the 09-11 26-row delete (written 137-180h early vs
-    # NFL_PROP_MAX_LEAD_HOURS=24). Match on lock_key_sql, not game+model, so
-    # a standing BET on the same game cannot hide a leftover. 18 standing
-    # captures stay. No Discord re-announce.
+    # NFL_PROP_MAX_LEAD_HOURS=24). Deletes those exact lock_keys; standing
+    # skip is lock_key_sql (KEY_PARTS), never player_id — that join false-
+    # matched 3/2/2 other props on the same games. No Discord re-announce.
+    "drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql",
     "drop_voided_nfl_prop_market_opening_signals_2026_09_14.sql",
 ]
 
