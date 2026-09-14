@@ -273,6 +273,7 @@ export function PickFilters({
               : 'Public needs captured ticket splits — none on this board, so it would match Edge.'
           }
           summary={sortSummary}
+          defaultOpen
         >
           <View style={styles.chipWrap}>
             {SORT_OPTIONS.map((o) => {

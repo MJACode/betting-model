@@ -77,14 +77,13 @@ export function FilterBar({
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
-              clearButtonMode="while-editing"
             />
             {(search?.length ?? 0) > 0 ? (
               <Pressable
                 onPress={() => onSearchChange?.('')}
-                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel="Clear search"
+                hitSlop={14}
               >
                 <Ionicons name="close-circle" size={16} color={colors.textTertiary} />
               </Pressable>
@@ -131,9 +130,10 @@ export function FilterBar({
               <Pressable
                 key={p.key}
                 onPress={p.onRemove}
+                accessibilityRole="button"
                 accessibilityLabel={`Remove filter ${p.label}`}
                 style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
-                hitSlop={6}
+                hitSlop={8}
               >
                 <Text style={styles.pillText}>{p.label}</Text>
                 <Ionicons name="close" size={12} color={colors.tint} />
@@ -192,6 +192,7 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
+    minHeight: 44,
     borderRadius: radii.pill,
     backgroundColor: colors.bgCard,
     borderWidth: 1,
