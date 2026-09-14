@@ -35,6 +35,24 @@ def test_every_recorded_series_maps_to_one_of_our_markets():
         assert market.startswith("player_"), (series, market)
 
 
+def test_the_recorder_walks_every_mapped_series(monkeypatch):
+    """A series in SERIES_MARKET that record_ladders never fetches is a
+    coverage collapse that looks like Kalshi having no board."""
+    seen = []
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            return self
+        def commit(self): pass
+        def close(self): pass
+
+    monkeypatch.setattr(
+        kpi, "fetch_series",
+        lambda s, status="open": seen.append(s) or [])
+    kpi.record_ladders(conn=_Conn())
+    assert seen == list(kpi.SERIES_MARKET)
+
+
 def test_the_recorder_keeps_raw_prices_not_a_filtered_ladder(monkeypatch):
     """RAW RUNGS, NOT LADDERS. The spread gate and the monotone repair are
     choices models/prop_ladder makes today; freezing them into the stored

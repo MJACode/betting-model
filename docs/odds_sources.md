@@ -37,9 +37,14 @@ Ladder depth on one event, measured:
 | `player_receptions_alternate` | 11 | -- | 12 | 12 | -- |
 
 **betonlineag -- one of our two sharp de-vig references -- posts an 88-rung
-ladder**, against Kalshi's median of 9. And the alternates cover
-`player_receptions`, `player_pass_attempts` and `player_pass_completions`, none
-of which Kalshi runs at all and which are ~40% of our soft board.
+ladder**, against Kalshi's median of 9. The Odds API alternates also cover
+`player_receptions`, `player_pass_attempts` and `player_pass_completions`.
+Kalshi listed none of those as open series on the 2026-09-08 slate; a 2026-09-14
+public `/series` probe found `KXNFLREC` / `KXNFLPASSATT` / `KXNFLPASSCOMP` /
+`KXNFLRSHATT` as live per-game player ladders (mapped in
+`data/ingestors/kalshi_prop_ingestor.SERIES_MARKET`). The unread-alternates
+finding here is unchanged: we already store those Odds API rungs and nothing
+in `nfl_prop_market` reads the `_alternate` keys.
 
 ### The cost, measured on a live event
 

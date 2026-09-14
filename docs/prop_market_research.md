@@ -211,9 +211,33 @@ That is **+16.5% more priceable propositions**, and it is concentrated:
 | `player_rush_attempts` | 175 | 120 | **0** | 0 |
 | `player_pass_completions` | 96 | 91 | **0** | 0 |
 
-`player_pass_yds` more than doubles (64 to 151 priceable). But **Kalshi runs no
-receptions, attempts or completions market at all**, and those are ~40% of our
-soft board, so this is a real and bounded gain rather than a transformation.
+`player_pass_yds` more than doubles (64 to 151 priceable). But **on that slate
+Kalshi ran no receptions, attempts or completions market at all**, and those
+are ~40% of our soft board, so this was a real and bounded gain rather than a
+transformation.
+
+**Re-probed 2026-09-14 against the live public Trade API** (`GET /series?category=Sports`,
+3,766 series, then `GET /markets?series_ticker=` per candidate; no trading key,
+no Odds API credits). Four more per-game player ladders were open on DEN@KC,
+same title / `floor_strike` / event-ticker shape as the original six, and are
+now in `SERIES_MARKET`:
+
+| series | board market | open markets that day | players |
+|---|---|---|---|
+| `KXNFLPASSATT` | `player_pass_attempts` | 22 | 2 |
+| `KXNFLPASSCOMP` | `player_pass_completions` | 22 | 2 |
+| `KXNFLREC` | `player_receptions` | 81 | 12 |
+| `KXNFLRSHATT` | `player_rush_attempts` | 28 | 4 |
+
+Not mapped, with the reason measured the same day: `KXNFLSACK` / `KXNFLTKL` /
+`KXNFLINT` (series templates, 0 events and 0 markets at any status; `KXNFLTKL`
+is also "Tackles", not `player_tackles_assists`); `KXNFLANYTD` (0 open; leftover
+Jan/Feb playoff events, 0 nested markets); `KXNFLTD` (open, but mixes player
+TD-count with D/ST — not `player_anytime_td`); team / game / first-TD / H2H /
+most-yards / season series. This is still **coverage, not a §5c grade** —
+settled Kalshi NFL prop history starts at 2026 preseason. Re-run
+`python -m scripts.kalshi_ladder_probe` against a full Sunday slate before
+quoting a recovered-row number for the new four; Monday night is not that slate.
 
 **Wired 2026-09-14 as an OR reference in `models/nfl_prop_market`, fail
 closed.** The live card (`scripts/nfl_prop_market_card`) fetches public Kalshi
@@ -222,9 +246,9 @@ Pinnacle/betonlineag still run unchanged. Kalshi is a reference only — never i
 `SOFT_BOOKS`. Settled history still only reaches 2026 preseason, so this is
 coverage + a second exchange mid, not a graded replacement for Pinnacle; the
 recording job (`kalshi_prop_ingestor.record_ladders`) keeps accumulating for a
-later placebo. Still unwired: authenticated trading (API key), a durable
-market-map beyond `SERIES_MARKET`, and any path that spends Odds API credits on
-Kalshi (it does not — public Trade API).
+later placebo. Still unwired: authenticated trading (API key), and any path
+that spends Odds API credits on Kalshi (it does not — public Trade API). The
+series map is the live 1:1 set above, not an open-ended ticker scrape.
 
 ## 7. Ranked recommendations
 
