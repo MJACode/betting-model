@@ -30,7 +30,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { SORT_OPTIONS, type SortKey } from '@/lib/pickSort';
 import {
   ALL_CATEGORIES,
@@ -46,7 +46,7 @@ import {
   type ModelCategory,
   type PicksFilterState,
 } from '@/lib/pickFilterState';
-import { colors, font, spacing } from '@/lib/theme';
+import { spacing } from '@/lib/theme';
 import { FilterBar, type ActivePill } from './FilterBar';
 import { FilterChip } from './FilterChip';
 import { FilterField } from './FilterField';

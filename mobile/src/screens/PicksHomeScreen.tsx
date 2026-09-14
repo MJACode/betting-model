@@ -341,15 +341,32 @@ export function PicksHomeScreen() {
   // offers Clear games — the generic "widen signals / thresholds" copy never
   // mentioned this cut.
 
+  // Apply Signal/Market locks on the first paint of the destination board.
+  // A useEffect write-back alone flashes the empty list (and a Signal pill
+  // on a board with no Signal section) — the case locks 3/4 exist to stop.
+  const displayFilter = useMemo(() => {
+    const present = presentCategoriesFor(availableModelIds);
+    const afterMarket = resetImpossibleMarket(filter, present);
+    if (view !== 'today' && afterMarket.signals.size < ALL_SIGNALS.length) {
+      const next = afterMarket === filter ? cloneFilter(filter) : afterMarket;
+      next.signals = new Set(ALL_SIGNALS);
+      return next;
+    }
+    return afterMarket;
+  }, [filter, view, availableModelIds]);
+  useEffect(() => {
+    if (displayFilter !== filter) setFilter(displayFilter);
+  }, [displayFilter, filter]);
+
   const filtered = useMemo(
     () =>
       searchPicks(
-        applyFilter(activeItems, filter).filter((d) =>
+        applyFilter(activeItems, displayFilter).filter((d) =>
           isGameSelected(d.pick.game_id, gamePicker.selected),
         ),
         search,
       ),
-    [activeItems, filter, search, gamePicker.selected],
+    [activeItems, displayFilter, search, gamePicker.selected],
   );
   const publicSortLive = useMemo(() => publicSortAvailable(filtered), [filtered]);
   useEffect(() => {
@@ -364,24 +381,8 @@ export function PicksHomeScreen() {
     if (activeItems.length === 0 || filtered.length > 0 || gamePicker.selected.size === 0) {
       return false;
     }
-    return searchPicks(applyFilter(activeItems, filter), search).length > 0;
-  }, [activeItems, filtered.length, filter, search, gamePicker.selected]);
-
-  // Signal is hidden on Signals/Live (those boards are all BET). A Today cut
-  // to AVOID/NONE would empty them with undo only via a pill. Designer lock:
-  // leaving Today resets Signal to all three. Market is reset on ANY segment
-  // change if selected ∩ present is empty. Games stays (shared with Stats).
-  useEffect(() => {
-    setFilter((prev) => {
-      const present = presentCategoriesFor(availableModelIds);
-      const afterMarket = resetImpossibleMarket(prev, present);
-      const leaveToday = view !== 'today' && afterMarket.signals.size < ALL_SIGNALS.length;
-      if (!leaveToday && afterMarket === prev) return prev;
-      const next = afterMarket === prev ? cloneFilter(prev) : afterMarket;
-      if (leaveToday) next.signals = new Set(ALL_SIGNALS);
-      return next;
-    });
-  }, [view, availableModelIds]);
+    return searchPicks(applyFilter(activeItems, displayFilter), search).length > 0;
+  }, [activeItems, filtered.length, displayFilter, search, gamePicker.selected]);
 
   // Today: BET/AVOID/NONE counts. Daily exposure guardrail (over the opt-in cap).
   const todayStats = useMemo(() => {
@@ -573,7 +574,7 @@ export function PicksHomeScreen() {
 
       {activeItems.length > 0 && !signalsLocked ? (
         <PickFilters
-          state={filter}
+          state={displayFilter}
           onChange={setFilter}
           sortKey={sortKey}
           onSortChange={setSortKey}
