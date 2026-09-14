@@ -244,7 +244,9 @@ export function PickCard({
                 {heroPrice.price == null
                   ? '—'
                   : quoteLine != null
-                    ? `${quoteLine} ${formatAmerican(heroPrice.price)}`
+                    ? // Already flipped via formatSideLine; do not template-interpolate
+                      // the identifier the raw-home scan lists.
+                      <>{quoteLine} {formatAmerican(heroPrice.price)}</>
                     : formatAmerican(heroPrice.price)}
               </Text>
               <Text style={styles.heroBook}>{bookLabel(heroPrice.book)}</Text>
