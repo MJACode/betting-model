@@ -55,6 +55,8 @@ def test_job_calls_verify_and_never_rebuilds():
     assert "rebuild_sport" not in src
     assert "DELETE FROM" not in src
     assert "RuntimeError" in src
+    # Surfaces verify()'s live-season skip in the job summary (not a rebuild).
+    assert "skipped_live_season" in src
 
 
 def test_declared_job_is_present_and_validates():

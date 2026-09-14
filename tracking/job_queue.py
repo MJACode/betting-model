@@ -850,6 +850,10 @@ def _job_team_stats_asof_verify(**kw):
     `python -m data.team_stats_rebuild --verify-only`). A breach raises so the
     queue's ❌ card carries the detail. The rebuild itself already ran
     2026-09-03; this job is the ongoing gate after the marker lifts the freeze.
+
+    verify() skips the current max (live) season for impossible-games and
+    tolerates a 1-game date-boundary mismatch — see that function. This wrapper
+    only reports what verify returns; it never rebuilds or DELETE.
     """
     from data.db import get_connection
     from data.team_stats_rebuild import SPORTS, verify
@@ -875,6 +879,7 @@ def _job_team_stats_asof_verify(**kw):
                 "sport": sport, "rows": v["rows"],
                 "impossible": len(v["impossible"]),
                 "thin_seasons": v["thin_seasons"],
+                "skipped_live_season": v.get("skipped_live_season"),
             })
             if v["impossible"]:
                 eg = v["impossible"][0]
