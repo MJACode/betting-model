@@ -207,3 +207,18 @@ def test_wrapper_reexports_generated():
     assert "from './thresholds.generated'" in src or 'from "./thresholds.generated"' in src
     assert "export const ACTION_THRESHOLDS" not in src
     assert "export const PAUSED_MODELS" not in src
+    # `export { X } from` re-exports without binding X in the wrapper, so
+    # isProbOnlyModel / thresholdFor / etc. hit TS2304 (OTA red after #710).
+    # The import must be its own statement: a loose `import \{[\s\S]*ACTION`
+    # also matches `import { decisionEdge` plus a later `export { ACTION… } from`.
+    import_blocks = re.findall(
+        r"(?:^|\n)import\s*\{([^}]*)\}\s*from\s*['\"]\./thresholds\.generated['\"]",
+        src,
+    )
+    assert any("ACTION_THRESHOLDS" in block for block in import_blocks), (
+        "wrapper must import generated names so local helpers can bind them"
+    )
+    assert not re.search(
+        r"export\s*\{[^}]*ACTION_THRESHOLDS[^}]*\}\s*from\s*['\"]\./thresholds\.generated['\"]",
+        src,
+    ), "export-from does not bind names locally — import then re-export"
