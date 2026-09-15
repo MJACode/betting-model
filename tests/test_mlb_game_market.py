@@ -7,6 +7,8 @@ that publishes under the wall default.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import config
@@ -44,6 +46,8 @@ def test_soft_books_are_exactly_the_bettable_set():
     assert not missing, missing
     assert "draftkings" in mk.SOFT_BOOKS
     assert "fanduel" in mk.SOFT_BOOKS
+    assert mk.TOTALS_SOFT_BOOKS == ("draftkings",)
+    assert mk.TOTALS_SOFT_BOOKS[0] in mk.SOFT_BOOKS
 
 
 def test_equal_lines_only():
@@ -166,7 +170,37 @@ def test_totals_pin_lean_does_not_fade_pinnacle():
     assert fade[0].side == "under"
 
 
-def test_totals_shops_the_best_soft_book_not_dk_only():
+def test_totals_card_is_grok_dk_only():
+    """INSERT path is GROK: Pin lean vs DK implied, not best-soft / not de-vig."""
+    assert mk.TOTALS_SOFT_BOOKS == ("draftkings",)
+    src = (Path(__file__).resolve().parents[1] / "scripts"
+           / "mlb_game_market_card.py").read_text(encoding="utf-8")
+    assert '"soft_books": mk.TOTALS_SOFT_BOOKS' in src
+    assert '"vs": "implied"' in src
+    assert '"pin_lean": True' in src
+    assert "soft_books=lane[\"soft_books\"]" in src
+    quotes = {
+        ("G1", "pinnacle"): {
+            "total_line": 8.5, "over_price": -150, "under_price": 130,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+        ("G1", "draftkings"): {
+            "total_line": 8.5, "over_price": -110, "under_price": -110,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+        ("G1", "fanduel"): {
+            "total_line": 8.5, "over_price": -102, "under_price": -118,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+    }
+    grok, _ = mk.find_total_bets(quotes, min_edge=0.02)
+    assert len(grok) == 1
+    assert grok[0].book == "draftkings"
+    assert grok[0].side == "over"
+
+
+def test_totals_sweep_can_shop_other_books_when_asked():
+    """Library still shops when a sweep passes books; the card does not."""
     quotes = {
         ("G1", "pinnacle"): {
             "total_line": 8.5, "over_price": -150, "under_price": 130,
@@ -189,7 +223,7 @@ def test_totals_shops_the_best_soft_book_not_dk_only():
 
 
 def test_totals_default_is_a_wall():
-    """2026 totals are negative at every threshold. The default must not fire."""
+    """Accidental callers hit the 1.0 wall; the paper card passes 0.02."""
     assert mk.MIN_EDGE_TOTALS >= 1.0
     quotes = {
         ("G1", "pinnacle"): {

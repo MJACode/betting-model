@@ -41,8 +41,8 @@ converging on the same place from the other side.
   not a threshold — no cut rescues a classifier that does not rank.
   2026-09-15: Pinnacle-vs-bettable-soft totals lose (May–Jun 2pp −11.13% / 79).
   GROK Pin-open vs DK-open ≥2pp Apr–Jul ~+11% n≈103 is paper `mlb_total_market`
-  (`MLB_TOTAL_MARKET_PUBLISH` default 0). Do not resurrect 0.50/0.06.
-  `docs/mlb_runline_ou_edge_search.md`.
+  (DK-only Pin-lean vs DK implied; `MLB_TOTAL_MARKET_PUBLISH` default 0).
+  Do not resurrect 0.50/0.06. `docs/mlb_runline_ou_edge_search.md`.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
   base rate moving 0.364 → 0.495, so the target mix is itself changing. The
   folds do not agree and the mean is not actionable. 2026-09-15: `mlb_spread_market`

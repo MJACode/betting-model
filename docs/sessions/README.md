@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, MLB RL/OU follow-up: `mlb_total_market` paper 2pp (GROK +11% n≈103 Pin-vs-DK, unreproduced on bettable-soft); spreads INSERT gated (GROK ≥2pp −5%); worker `game_line_market_sweep` 2/3/4pp; RL/OU stay paused |
+| 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, #734 reviewer: `mlb_total_market` INSERT is GROK Pin-lean vs DK implied (DK-only), not Pin-vs-soft-devig / not best-soft; env flip waits on worker GROK job; paper/gated, not going live |
+| 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, MLB RL/OU follow-up: `mlb_total_market` paper 2pp GROK Pin-lean vs DK implied; spreads INSERT gated (GROK ≥2pp −5%); worker `game_line_market_sweep` 2/3/4pp; RL/OU stay paused |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, MLB RL/OU edge search: ship `mlb_spread_market` at 1.8pp (328 bets through Aug +4.16%, both halves +). Totals no cut. `mlb_runline`/`mlb_over_under` stay paused. Ask: approve going live of mlb_spread_market |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, signal_delivery CRIT: five Sep-14 MLB props unposted. Root cause stale `model_action_thresholds.paused` after #727 until 10:02Z sync. Sync on refresh + before Discord; health check only currently-postable; no backfill |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, one-shot `clv_backfill` worker job + declared `clv-no-vig-backfill-2026-09-14`. Loops `_backfill_clv` until empty (cap 40). No model/threshold change |

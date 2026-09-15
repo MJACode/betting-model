@@ -1,4 +1,4 @@
-"""Live MLB game-line cards: de-vig Pinnacle, bet the bettable soft outlier.
+"""MLB game-line cards: spreads Pin-vs-soft-devig; totals GROK Pin-vs-DK.
 
 Deployment of models/mlb_game_market. This script is plumbing: load today's
 unstarted games, take the latest OPEN quotes, call find_spread_bets /
@@ -11,10 +11,11 @@ Deliberate and load-bearing:
   BEST_LINE_BOOKMAKERS. GROK Pin-vs-DK ≥2pp was ~−5% n≈200 — do not live
   INSERT until MLB_SPREAD_MARKET_PUBLISH=1.
 
-  TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). Pin no-vig lean minus
-  the best bettable soft implied, equal total. GROK vs DK only: Apr–Jul
-  ~+11% n≈103. find_total_bets' default wall stays 1.0; this card passes
-  0.02 explicitly. MLB_TOTAL_MARKET_PUBLISH default 0.
+  TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). GROK construction:
+  Pin no-vig lean minus DraftKings juiced implied, equal total, DK-only.
+  Apr–Jul ~+11% n≈103. Not Pin-vs-soft-devig (−11% / 79 at 2pp) and not
+  best-soft implied (unmeasured). find_total_bets' default wall stays 1.0;
+  this card passes 0.02 explicitly. MLB_TOTAL_MARKET_PUBLISH default 0.
 
   ONE BET PER GAME. The same game at three books is one opinion.
 
@@ -59,6 +60,10 @@ LANES = {
         "model_id": "mlb_total_market",
         "market": "totals",
         "min_edge": mk.MIN_EDGE_TOTALS_PAPER,
+        # GROK: Pin lean vs DK implied. Do not shop BEST_LINE here.
+        "soft_books": mk.TOTALS_SOFT_BOOKS,
+        "vs": "implied",
+        "pin_lean": True,
     },
 }
 # Back-compat for tests that imported the spreads constants.
@@ -131,9 +136,9 @@ def pick_rows(bets, games, quotes, bankroll: float,
             "game_date": g.get("game_date"),
             "game_time": g.get("commence_time"),
             "pick_side": b.side, "pick_label": label,
-            # model_probability IS Pinnacle's de-vigged number; edge is vs
-            # the soft book's own de-vigged prob — the quantities the cut
-            # was measured on.
+            # model_probability IS Pinnacle's de-vigged number. Spreads
+            # edge is vs the soft book's own de-vig; totals (GROK) edge
+            # is vs DK's juiced implied.
             "model_probability": round(b.fair, 4),
             "dk_implied_prob": round(implied, 4),
             "edge": round(b.edge, 4),
@@ -261,7 +266,12 @@ def run_card(game_date: str | None = None, do_publish: bool = False,
         if market == "spreads":
             bets, diag = mk.find_spread_bets(quotes, min_edge=min_edge)
         else:
-            bets, diag = mk.find_total_bets(quotes, min_edge=min_edge)
+            bets, diag = mk.find_total_bets(
+                quotes, min_edge=min_edge,
+                soft_books=lane["soft_books"],
+                vs=lane["vs"],
+                pin_lean=lane["pin_lean"],
+            )
         logger.info("\n" + render(bets, diag, market))
         published = 0
         will_insert = bool(do_publish) and mk.publish_enabled(market)
