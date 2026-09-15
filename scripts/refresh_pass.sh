@@ -85,6 +85,13 @@ par_wait() {
 # after a deploy rather than waiting for the 6am daily run; a cheap no-op
 # once applied (each migration skips itself). See data/view_migrations.py.
 step apply-view-migrations
+# Mirror config.py -> model_action_thresholds on every pass, not just 6am.
+# The scorer pauses from config; Discord/app/push pause from this table.
+# #727 cleared model_auto_pauses on the next refresh but left the table's
+# paused flag true until the next daily sync, so five MLB props written
+# that afternoon never posted. Must follow apply-view-migrations (a
+# migration can change the auto-pause set this sync then mirrors).
+step sync-thresholds
 
 # GROUP 1 — market + model inputs. Every one of these is an independent
 # producer writing its own table (odds, player_prop_odds, lineups, injuries,

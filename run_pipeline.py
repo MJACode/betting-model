@@ -1536,17 +1536,22 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["settle"] = step_settle(yesterday)
     time.sleep(1)
 
-    # ── Step 0c: Sync config thresholds → model_action_thresholds ────────────
-    # Keeps the table (public track record + mobile action filter) in lockstep
-    # with config.py so a threshold change never needs a mobile rebuild.
-    logger.info("Step 0c: Syncing action thresholds...")
-    results["sync_thresholds"] = step_sync_thresholds(run_date)
-
-    # ── Step 0c2: Apply idempotent view migrations ───────────────────────────
-    # Runs before anything reads the record views. No-op once applied.
-    logger.info("Step 0c2: Applying view migrations...")
+    # ── Step 0c: Apply idempotent view/column migrations ─────────────────────
+    # BEFORE threshold_sync. A migration can change the pause register
+    # (clear_unauthorized_auto_pauses_2026_09_14 deleted the two unapproved
+    # rows); if sync runs first, the table keeps paused=true until tomorrow.
+    # Measured 2026-09-14/15: #727's migration landed on refresh, the table
+    # stayed paused, five MLB props never reached Discord.
+    logger.info("Step 0c: Applying view migrations...")
     results["column_migrations"] = step_apply_column_migrations(run_date)
     results["view_migrations"] = step_apply_view_migrations(run_date)
+
+    # ── Step 0c2: Sync config thresholds → model_action_thresholds ───────────
+    # Keeps the table (public track record + mobile action filter + Discord)
+    # in lockstep with config.py so a threshold/pause change never needs a
+    # mobile rebuild and never waits overnight after a migration.
+    logger.info("Step 0c2: Syncing action thresholds...")
+    results["sync_thresholds"] = step_sync_thresholds(run_date)
 
     # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
     # Right after settle so yesterday's finals are graded into

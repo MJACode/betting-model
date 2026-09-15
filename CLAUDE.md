@@ -444,9 +444,9 @@ silently fails to reach production.
   **Railway env edits only take effect on redeploy.** `docs/cloud_worker.md` is
   the source of truth for the variable list.
 - **Thresholds → canonical in `config.py`, mirrored to Supabase** by
-  `data.threshold_sync` (Step 0c of the daily pipeline). The scorer reads
+  `data.threshold_sync` (every refresh + daily after migrations). The scorer reads
   `config.py`, so the BET decision is config-canonical wherever it runs. **A hand
-  edit to `model_action_thresholds` is temporary** — the next 6am run overwrites
+  edit to `model_action_thresholds` is temporary** — the next sync overwrites
   it from `config.py` on master.
 - **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` is what
   gets fetched; `BEST_LINE_BOOKMAKERS` is the set a pick may be DECIDED at.

@@ -276,6 +276,16 @@ class TestSignalDelivery:
         _add_signal(db, game_date="2099-01-01", commence=future, delivered=False)
         assert _results("signal_delivery")["status"] == sh.STALE
 
+    def test_a_started_undelivered_pick_is_not_a_standing_crit(self, db, mlb_wired):
+        """The 2026-09-15 CRIT. Five MLB props (Lodolo / Alcantara / Campusano /
+        Bogaerts / Cronenworth) were written pre-commence, never posted, then
+        first pitch passed. `_new_signals` will not announce a started game, so
+        holding CRIT until the 3-day window ages out is a false alarm nobody
+        can action. A live outage still CRITs via the pre-commence cases
+        above."""
+        _add_signal(db, locked=200, commence=_iso(50), delivered=False)
+        assert _results("signal_delivery")["status"] == sh.OK
+
     def test_pick_written_after_first_pitch_is_not_a_delivery_failure(self, db, mlb_wired):
         """Same first-pitch guard as _deliverable, now on picks.created_at."""
         _add_signal(db, locked=200, commence=_iso(400), delivered=False)
@@ -293,6 +303,7 @@ class TestSignalDelivery:
         assert "FROM picks p" in block
         assert "FROM opening_signals" not in block
         assert "opening_signals" not in block.split("SELECT", 1)[1]
+        assert "still_pre_game" in block
 
 
 # ── run_ledger ───────────────────────────────────────────────────────────────

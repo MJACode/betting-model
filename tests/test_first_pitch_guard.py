@@ -95,3 +95,12 @@ def test_the_restatement_path_is_deliberately_not_guarded():
     src = inspect.getsource(dn._locked_signals)
     assert "_still_pre_game" not in src
     assert "_still_pre_game" in inspect.getsource(dn._new_signals)
+
+
+def test_health_check_uses_the_same_first_pitch_bound_as_discord():
+    """signal_delivery counting a started game as postable is how a one-time
+    miss holds CRIT after nobody can announce it (2026-09-15)."""
+    from tracking.postable import still_pre_game
+    from tracking import system_health as sh
+    assert dn._still_pre_game is still_pre_game
+    assert sh.still_pre_game is still_pre_game

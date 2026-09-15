@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import MODELS, PROP_MODELS, PAPER_TRADING_START, today_et
 from data.db import get_connection
 from tracking.publish_keys import lock_key_sql, unique_row_sql
+from tracking.postable import still_pre_game
 
 # Models registered in config that intentionally have no trained artifact yet
 # (blocked on historical odds for their target, or a pending data subscription).
@@ -1209,6 +1210,14 @@ def run_system_health(run_date: str | None = None) -> dict:
         # its game_date entered the 3-day window. Capture is the CLV shadow
         # track; it is not the postable set. Same cut as `_new_signals` so the
         # two cannot disagree about what counts as postable.
+        #
+        # CURRENTLY postable, not "was ever postable". `_new_signals` refuses a
+        # started game, so a one-time miss that has already commenced cannot be
+        # announced and must not hold CRIT until the 3-day window ages out.
+        # Measured 2026-09-15: five finished MLB props (Lodolo / Alcantara /
+        # Campusano / Bogaerts / Cronenworth) flipped signal_delivery STALE
+        # after the 10:02Z threshold_sync, hours after first pitch. A genuine
+        # notifier outage still alarms: those picks are pre-commence.
         try:
             from config import DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT
         except Exception:
@@ -1257,6 +1266,12 @@ def run_system_health(run_date: str | None = None) -> dict:
                 if created is not None and created >= grace_dt:
                     continue
                 if not _deliverable(created_at, commence):
+                    continue
+                # Same first-pitch bound as `_new_signals` / `_still_pre_game`.
+                # A finished game is no longer announcable; counting it as a
+                # delivery failure holds CRIT until the 3-day window ages out
+                # and nobody can post the pick to clear it.
+                if not still_pre_game(commence):
                     continue
                 if _in_signal_delivery_window(game_date, commence, d3, run_date):
                     pending += 1

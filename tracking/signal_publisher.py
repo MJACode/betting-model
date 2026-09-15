@@ -85,6 +85,15 @@ def publish_new_signals(target_date: str | None = None,
     if target_date is None:
         target_date = config.today_et()
 
+    # The scorer pauses from config; Discord/push/app pause from the table.
+    # Sync first so a BET just written is visible to the two notifiers below.
+    # Fail-open: a sync error must not skip delivery.
+    try:
+        from data.threshold_sync import sync_action_thresholds
+        sync_action_thresholds()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"publish: threshold sync failed: {exc}", exc_info=True)
+
     out = {"locked": 0, "pushed": 0, "discord": 0}
 
     # 1. Lock the cross into the opening-signal / CLV shadow track.

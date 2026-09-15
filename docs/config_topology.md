@@ -34,7 +34,7 @@ The **same** keys also live in two other places, each for a different purpose:
 **Thresholds — canonical in the repo, mirrored to Supabase (NOT stored in Railway):**
 Model prob/edge cuts + `MODEL_MIN_ODDS` price floors + `PAUSED_MODELS`/`PROB_ONLY_MODELS` are **canonical in `config.py`** (version-controlled). They are NOT a Railway variable. The flow (session 65):
 - The **scorer reads `config.py` directly** — so the server-side BET decision is always config-canonical wherever the code runs (Railway, Actions, local).
-- `data.threshold_sync` mirrors `config.py` → the Supabase **`model_action_thresholds`** table, which the app's action filter + the track-record views read. This sync runs as **Step 0c of the daily pipeline on the Railway worker** (and can be run manually: `python -m data.threshold_sync`).
+- `data.threshold_sync` mirrors `config.py` → the Supabase **`model_action_thresholds`** table, which the app's action filter, Discord, push, and the track-record views read. This sync runs on every refresh pass (after view migrations), as daily Step 0c2 (after migrations), immediately before a Discord post, and can be run manually: `python -m data.threshold_sync`. A 6am-only sync left Discord a day behind the scorer after #727.
 - The mobile offline fallback `mobile/src/lib/thresholds.generated.ts` is regenerated from `config.py` via `python -m scripts.generate_mobile_thresholds` (CI `--check` fails on drift).
 - So "thresholds are stored in Railway" is really: **config.py (repo) → Supabase table, and Railway is just the host that runs the daily sync.** A table edit made by hand is temporary — the next Railway daily run overwrites it from `config.py` on master. To change a threshold permanently, edit `config.py` and merge.
 
