@@ -238,6 +238,37 @@ def test_live_mode_downgrades_a_steamed_bet():
     assert pick["_market_gate"].verdict == gmg.PASS_STEAMED
 
 
+def test_live_mode_downgrades_public_steam():
+    pick = _pick(model_probability=0.62, public_bet_pct=68.0, public_money_pct=55.0)
+    opening = _h2h(-110, -110)
+    current = _h2h(-125, 105)
+    gmg.apply_to_picks(
+        [pick], market="h2h", current_odds=current, opening_odds=opening,
+        mode="live", min_no_vig_edge=None,
+        enabled_models={"mlb_moneyline"},
+    )
+    assert pick["signal_type"] == "NONE"
+    assert pick["recommended_bet"] == 0.0
+    assert pick["downgrade_reason"].startswith("market:")
+    assert pick["_market_gate"].applied is True
+    assert pick["_market_gate"].verdict == gmg.PASS_PUBLIC_STEAM
+
+
+def test_live_mode_does_not_pass_edge_when_the_extra_floor_is_off():
+    """MIN_NO_VIG_EDGE unset (production default): a thin no-vig edge is
+    still CLEAR. PASS_EDGE is not a live downgrade unless that floor is set."""
+    pick = _pick(model_probability=0.59)
+    current = _h2h(-150, 130)          # no-vig home ≈ 0.580; edge ≈ +1pp
+    gmg.apply_to_picks(
+        [pick], market="h2h", current_odds=current, opening_odds=None,
+        mode="live", min_no_vig_edge=None,
+        enabled_models={"mlb_moneyline"},
+    )
+    assert pick["signal_type"] == "BET"
+    assert pick["_market_gate"].verdict == gmg.CLEAR
+    assert pick["_market_gate"].applied is False
+
+
 def test_shadow_mode_does_not_change_signal_type():
     pick = _pick()
     opening = _h2h(-110, -110)
@@ -343,10 +374,10 @@ def test_load_opening_odds_drops_rows_after_as_of():
     assert out["home_price"] == -110
 
 
-def test_config_defaults_are_shadow_on_the_four_mlb_game_models():
+def test_config_defaults_are_live_on_the_four_mlb_game_models():
     import config
     assert config.GAME_MARKET_GATE_ENABLED is True
-    assert config.GAME_MARKET_GATE_MODE == "shadow"
+    assert config.GAME_MARKET_GATE_MODE == "live"
     assert config.GAME_MARKET_GATE_MIN_NO_VIG_EDGE is None
     assert config.GAME_MARKET_GATE_MODELS <= set(config.MODELS)
     assert config.GAME_MARKET_GATE_MODELS == frozenset({

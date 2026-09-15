@@ -66,9 +66,10 @@ price). They did **not** call `market_relative.py` (that's props), did not
 consume `features/market_movement.py`, and stamped Action Network splits
 without reading them. As of 2026-09-15 a leak-bounded overlay
 (`models/game_market_gate.py`) computes no-vig fair, PASS-when-steamed, and
-optional public-steam when `public_betting` has tickets. Default **shadow**
-(no live-artifact cut cleared: moneyline 0 BETs on the 2026-09-03 artifact).
-`GAME_MARKET_GATE_MODE=live` actually downgrades. No pause/unpause, no retrain.
+optional public-steam when `public_betting` has tickets. Default **live**
+(mike, 2026-09-15, despite no §7 cut: moneyline 0 BETs on the 2026-09-03
+artifact). New BETs that steam or public-steam become NONE; fail-open; never
+upgrades. Extra no-vig floor off. No pause/unpause, no retrain.
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
