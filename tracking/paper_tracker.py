@@ -1837,6 +1837,11 @@ _NFL_MODEL_MARKETS = {
     "nfl_wind_totals": "totals",       # under vs scored_line (the card's total)
     "nfl_opener_spread": "spreads",    # scored_line = soft book's HOME spread
 }
+_RULE_MODEL_MARKETS = {
+    **_NFL_MODEL_MARKETS,
+    # MLB run-line sharp-vs-soft. scored_line is the HOME number (§4).
+    "mlb_spread_market": "spreads",
+}
 # 2026 paper-track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).
 
@@ -1864,12 +1869,11 @@ def _market_for_pick(model_id: str) -> str:
     """Map model_id to its odds market key (pre-game and live registries)."""
     if model_id in _RETIRED_MODEL_MARKETS:
         return _RETIRED_MODEL_MARKETS[model_id]
-    if model_id in _NFL_MODEL_MARKETS:
-        # The standalone NFL card models (§28) — not in MODELS (never trained
-        # by the platform), but their picks settle on the standard totals/
-        # spreads math: games scores vs the pick's scored_line. Without this
-        # they would fall to 'h2h' and stamp NO_ACTION.
-        return _NFL_MODEL_MARKETS[model_id]
+    if model_id in _RULE_MODEL_MARKETS:
+        # Standalone rule cards — not in MODELS (never trained), but their
+        # picks settle on the standard totals/spreads math vs scored_line.
+        # Without this they fall to 'h2h' and stamp NO_ACTION.
+        return _RULE_MODEL_MARKETS[model_id]
     if model_id in MODELS:
         return MODELS[model_id][1]
     if model_id in LIVE_MODELS:

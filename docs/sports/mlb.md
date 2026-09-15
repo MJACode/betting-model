@@ -39,9 +39,14 @@ converging on the same place from the other side.
 * **`mlb_over_under` PAUSED.** Below a coin flip in the only honest season
   (0.486), zero of six folds clearing 0.55. Its unpause path is a rebuilt model,
   not a threshold — no cut rescues a classifier that does not rank.
+  2026-09-15 edge search: Pinnacle-vs-soft totals also lose (May–Jun 1pp
+  −1.43% / 420). `docs/mlb_runline_ou_edge_search.md`.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
   base rate moving 0.364 → 0.495, so the target mix is itself changing. The
-  folds do not agree and the mean is not actionable.
+  folds do not agree and the mean is not actionable. 2026-09-15: the
+  **publish path** for this market is `mlb_spread_market` at 1.8pp (Pinnacle
+  vs bettable soft, equal ±1.5). That is not an unpause of this id.
+  `docs/mlb_runline_ou_edge_search.md`.
 * **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last
   three starts), shared by the daily ingest and the rebuild via
   `data/pitcher_rates.py`. It used to be `AVG(era)` over the last three stored
