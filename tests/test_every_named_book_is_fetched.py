@@ -34,6 +34,7 @@ def _param_books(param: str) -> set[str]:
 
 # (label, the books a model names, the pull that must supply them)
 def _cases():
+    import models.mlb_game_market as mlb_game
     import models.mlb_prop_market as mlb
     import models.nfl_prop_market as nfl
     import models.wnba_prop_market as wnba
@@ -48,6 +49,8 @@ def _cases():
         ("wnba sharp", (wnba.SHARP_BOOK,), general),
         ("mlb soft", mlb.SOFT_BOOKS, general),
         ("mlb sharp", (mlb.SHARP_BOOK,), general),
+        ("mlb game-line soft", mlb_game.SOFT_BOOKS, general),
+        ("mlb game-line sharp", (mlb_game.SHARP_BOOK,), general),
     ]
     return out
 
@@ -65,6 +68,7 @@ def test_every_named_book_is_in_the_pull_that_serves_it(label, named, param):
 def test_a_sharp_reference_is_never_also_a_soft_book():
     """The reference is the estimate of truth. Betting into it is betting into
     our own number, and §5c's placebo depends on the sets being disjoint."""
+    import models.mlb_game_market as mlb_game
     import models.mlb_prop_market as mlb
     import models.nfl_prop_market as nfl
     import models.wnba_prop_market as wnba
@@ -73,6 +77,7 @@ def test_a_sharp_reference_is_never_also_a_soft_book():
         ("nfl", set(nfl.SHARP_BOOKS), set(nfl.SOFT_BOOKS)),
         ("wnba", {wnba.SHARP_BOOK}, set(wnba.SOFT_BOOKS)),
         ("mlb", {mlb.SHARP_BOOK}, set(mlb.SOFT_BOOKS)),
+        ("mlb_game", {mlb_game.SHARP_BOOK}, set(mlb_game.SOFT_BOOKS)),
     ):
         assert not (sharp & soft), f"{label}: {sorted(sharp & soft)} is both"
 

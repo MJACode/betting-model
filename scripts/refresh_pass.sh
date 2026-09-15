@@ -150,6 +150,7 @@ step umpires
 # stay sequential: concurrent deletes over overlapping windows is exactly how
 # a board gets emptied (§7), and the measured cost here is ~25s, not minutes.
 step scoring
+step mlb-game-market
 step prop-scoring
 step wnba-prop-scoring
 step wnba-prop-market

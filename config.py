@@ -578,6 +578,13 @@ ACTION_THRESHOLDS: dict = {
     # Pinned by tests/test_nfl_prop_thresholds.py so a placeholder reset cannot
     # silently loosen them again.
     "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
+    # MLB run-line market-relative rule (models/mlb_game_market). Replaces
+    # the paused mlb_runline *publish path* — mlb_runline stays paused
+    # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
+    # (367 bets +4.80%, both halves +, 5/6 months +). min_prob 0 because
+    # model_probability is Pinnacle's de-vigged number, near 0.5 by
+    # construction. Docs: docs/mlb_runline_ou_edge_search.md.
+    "mlb_spread_market":          {"min_prob": 0.0, "min_edge": 0.018},
     # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
     # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
     # paper trading and delay this being an available feature") -- taken with
@@ -878,6 +885,9 @@ PAUSED_MODELS: set = {
     # weeks; a dormant model that nobody paused is indistinguishable from a
     # broken feed. Unpause path is the retrain in the ACTION_THRESHOLDS note
     # (2019-2025, 2026 held out) followed by scripts/mlb_runline_sweep.py.
+    # 2026-09-15: the *publish path* for this market is mlb_spread_market
+    # (1.8pp Pinnacle-vs-bettable-soft). This id stays paused until mike
+    # unpauses it with Updated-By. docs/mlb_runline_ou_edge_search.md.
     "mlb_runline",
     # 2026-09-03 (mike): PAUSED. The pitcher-stats leak repair
     # (docs/team_stats_leak.md) removed the only thing holding this model up.
@@ -1322,6 +1332,7 @@ PAUSED_MODELS: set = {
     #     (unpaused 2026-09-09; docs/nfl_prop_profitability_search.md §4)
     #   nfl_prop_market, nfl_wind_totals, nfl_live_prop, nfl_opener_spread
     #     — rule / market / live lanes, not these distributional PROP_MODELS
+    #   mlb_spread_market — MLB run-line sharp-vs-soft rule (not mlb_runline)
     # nfl_prop_sacks joined the pause 2026-09-14 (mike, design-review follow-up
     # to #710): thin / paper-only, never a live BET lane.
     #
@@ -1441,6 +1452,46 @@ MODEL_BET_SIZE_MULTIPLIER: dict = {
 DECIDE_ON_CALIBRATED_PROB: bool = (
     os.environ.get("DECIDE_ON_CALIBRATED_PROB", "1").strip() not in ("0", "false", "False")
 )
+
+# MLB GAME-MARKET GATE (mike, 2026-09-15). Decision overlay, not a retrain.
+# After `_decide` (vig-included edge vs the posted price) the scorer asks
+# models/game_market_gate.py whether the CURRENT two-way — the same quote
+# `_get_dk_odds` already bounded at first pitch — still disagrees with the
+# model, or has already steamed through it / run with ticket-heavy public.
+# `market_relative.py` / `mlb_game_market.py` is the sharp-vs-soft rule and
+# is not this; mlb_spread_market applies the gate in SHADOW on its card so
+# the 1.8pp cut is not silently vetoed by an unmeasured overlay.
+#
+# Live-artifact record queried 2026-09-15 (docs/mlb_game_market_gate.md):
+# mlb_moneyline 0 settled BETs since the 2026-09-03 artifact; f5 8 settled
+# 4-4 −1.22u; runline 4; over_under paused and 11-26 −16.08u. No cut clears
+# §7 (25+ on the live artifact, plateau, both halves). mike, 2026-09-15:
+# MODE defaults to live anyway — new BETs that PASS_STEAMED / PASS_PUBLIC_STEAM
+# become NONE. Extra no-vig floor (PASS_EDGE) stays OFF until a cut clears.
+# Fail-open; never upgrades NONE; a locked BET is still a pick (§1c).
+# Env GAME_MARKET_GATE_MODE=shadow restores persist-only. Do not pause/unpause
+# from this flag.
+GAME_MARKET_GATE_ENABLED: bool = (
+    os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
+)
+GAME_MARKET_GATE_MODE: str = os.environ.get("GAME_MARKET_GATE_MODE", "live").strip().lower()
+GAME_MARKET_GATE_MODELS: frozenset = frozenset({
+    "mlb_moneyline", "mlb_runline", "mlb_over_under", "mlb_f5_moneyline",
+})
+# None = do not add a floor on top of `_decide`. Set a float to require
+# model_prob − no-vig-fair >= that number in addition to the model cut.
+_GAME_MARKET_MIN_EDGE_RAW = os.environ.get("GAME_MARKET_GATE_MIN_NO_VIG_EDGE", "").strip()
+GAME_MARKET_GATE_MIN_NO_VIG_EDGE = (
+    float(_GAME_MARKET_MIN_EDGE_RAW) if _GAME_MARKET_MIN_EDGE_RAW else None
+)
+GAME_MARKET_GATE_STEAM_THROUGH: bool = (
+    os.environ.get("GAME_MARKET_GATE_STEAM_THROUGH", "1").strip() not in ("0", "false", "False")
+)
+GAME_MARKET_GATE_PUBLIC_STEAM_PASS: bool = (
+    os.environ.get("GAME_MARKET_GATE_PUBLIC_STEAM_PASS", "1").strip() not in ("0", "false", "False")
+)
+GAME_MARKET_GATE_PUBLIC_HEAVY: float = float(os.environ.get("GAME_MARKET_GATE_PUBLIC_HEAVY", "55"))
+GAME_MARKET_GATE_LINE_STEAM_PTS: float = float(os.environ.get("GAME_MARKET_GATE_LINE_STEAM_PTS", "0.5"))
 
 # THE HOUSE JUICE FLOOR. Applies to every model that does not name its own.
 #
@@ -1570,6 +1621,7 @@ SCORING_METHODS: dict = {
     "nfl_live_prop":       "rule",    # nfl/live_model/models/pass_attempt_bias.py — frozen bias
     "nfl_prop_market":     "rule",    # models/nfl_prop_market.py — de-vig Pinnacle, bet the outlier
     "wnba_prop_market":    "rule",    # models/wnba_prop_market.py — the same rule, pointed at WNBA
+    "mlb_spread_market":   "rule",    # models/mlb_game_market.py — the same rule, pointed at MLB run lines
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
     "ncaaf_live_total":    "engine",
@@ -1669,6 +1721,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # 27%, not 50%.
     "wnba_prop_market":            0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
+    "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":           0.15,
     "nfl_prop_pass_attempts":        0.19,
     "nfl_prop_pass_completions":     0.16,
@@ -1764,6 +1817,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # 27%, not 50%.
     "wnba_prop_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
+    "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":           0.68,
     "nfl_prop_pass_attempts":        0.73,
     "nfl_prop_pass_completions":     0.68,
