@@ -5,8 +5,8 @@
 -- that quote had already steamed through the model's number, or whether the
 -- Action Network ticket share sat on our side while the line moved with it.
 -- `models/game_market_gate.py` computes that verdict. This table is the
--- system of record so a SHADOW week can be graded on CLV / ROI without
--- changing published signal_type.
+-- system of record so CLEAR vs PASS_* can be graded on CLV / ROI even
+-- when live mode has already written NONE on picks.
 --
 -- One row per (game_id, model_id, pick_side). Re-scores overwrite; a locked
 -- BET on `picks` is never deleted by this (CLAUDE.md §1c). The close is not

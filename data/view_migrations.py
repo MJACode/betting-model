@@ -163,8 +163,8 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Columns first so the view filter cannot run against a missing clv_method.
     "add_clv_method_2026_09_14.sql",
     "track_record_clv_no_vig_2026_09_14.sql",
-    # 2026-09-15 (mike): MLB game-market gate log. Shadow by default —
-    # no live-artifact cut cleared. Does not touch picks.
+    # 2026-09-15 (mike): MLB game-market gate log. Live default (despite
+    # no §7 cut) — does not ALTER picks; the scorer writes NONE itself.
     "add_game_market_gate_2026_09_15.sql",
 ]
 

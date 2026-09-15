@@ -1452,14 +1452,16 @@ DECIDE_ON_CALIBRATED_PROB: bool = (
 # Live-artifact record queried 2026-09-15 (docs/mlb_game_market_gate.md):
 # mlb_moneyline 0 settled BETs since the 2026-09-03 artifact; f5 8 settled
 # 4-4 −1.22u; runline 4; over_under paused and 11-26 −16.08u. No cut clears
-# §7 (25+ on the live artifact, plateau, both halves), so MODE defaults to
-# shadow: persist `game_market_gate`, do not change signal_type. `live`
-# actually downgrades BET → NONE. Extra no-vig floor is OFF until a cut
-# clears. Do not pause/unpause from this flag.
+# §7 (25+ on the live artifact, plateau, both halves). mike, 2026-09-15:
+# MODE defaults to live anyway — new BETs that PASS_STEAMED / PASS_PUBLIC_STEAM
+# become NONE. Extra no-vig floor (PASS_EDGE) stays OFF until a cut clears.
+# Fail-open; never upgrades NONE; a locked BET is still a pick (§1c).
+# Env GAME_MARKET_GATE_MODE=shadow restores persist-only. Do not pause/unpause
+# from this flag.
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
 )
-GAME_MARKET_GATE_MODE: str = os.environ.get("GAME_MARKET_GATE_MODE", "shadow").strip().lower()
+GAME_MARKET_GATE_MODE: str = os.environ.get("GAME_MARKET_GATE_MODE", "live").strip().lower()
 GAME_MARKET_GATE_MODELS: frozenset = frozenset({
     "mlb_moneyline", "mlb_runline", "mlb_over_under", "mlb_f5_moneyline",
 })

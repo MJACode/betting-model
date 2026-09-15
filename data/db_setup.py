@@ -784,9 +784,10 @@ CREATE TABLE IF NOT EXISTS public_betting (
 CREATE INDEX IF NOT EXISTS idx_public_betting_game ON public_betting(game_id, market, side);
 CREATE INDEX IF NOT EXISTS idx_public_betting_date ON public_betting(game_date);
 
--- Shadow/live log for models/game_market_gate.py. Postgres copy is the
--- worker migration add_game_market_gate_2026_09_15.sql; this is the
--- sqlite twin so tests can persist without a server.
+-- Verdict log for models/game_market_gate.py (live default; shadow is the
+-- env override). Postgres copy is the worker migration
+-- add_game_market_gate_2026_09_15.sql; this is the sqlite twin so tests
+-- can persist without a server.
 CREATE TABLE IF NOT EXISTS game_market_gate (
     game_id            TEXT NOT NULL,
     model_id           TEXT NOT NULL,

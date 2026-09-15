@@ -38,8 +38,8 @@ O/U 70-92 −28.58u; runline 23-21 −0.87u; F5 119-88 −3.95u.
 
 **No cut is wired.** Section 7 needs 25+ settled on the *live* artifact, a
 plateau, and both time halves. Moneyline has zero BETs on the honest artifact;
-F5 has eight; runline has four; O/U is paused and negative. Conservative
-default is **shadow**.
+F5 has eight; runline has four; O/U is paused and negative. mike, 2026-09-15:
+default is **live** anyway. Extra no-vig floor stays off.
 
 ## What the gate does
 
@@ -58,11 +58,13 @@ At score time, after `_decide` / best-price requalify / injury gate:
    toward us) is stored as `rlm=true` and is **not** required to CLEAR.
 4. One-way / missing opener: fail-open (no invented fair, no invented steam).
 
-`GAME_MARKET_GATE_MODE=shadow` (default) writes `game_market_gate` and leaves
-`signal_type` alone. `live` downgrades BET → NONE with
+`GAME_MARKET_GATE_MODE=live` (default; mike, 2026-09-15, despite no §7 cut)
+downgrades a **new** BET → NONE on PASS_STEAMED / PASS_PUBLIC_STEAM, with
 `downgrade_reason` like `market: market steamed through the model — no chase`.
-A locked BET is still a pick (§1c); this only affects the pass that would
-*write* a new BET.
+PASS_EDGE only if `GAME_MARKET_GATE_MIN_NO_VIG_EDGE` is set (it is not).
+Fail-open; never upgrades NONE. A locked BET is still a pick (§1c); this
+only affects the pass that would *write* a new BET. `shadow` restores
+persist-only.
 
 ## How to evaluate the next week
 
@@ -76,3 +78,5 @@ for `game_date` since this shipped:
   (b) the full graded universe (`BET`/`AVOID`/`NONE` with a result), (c) the
   counterfactual of BETs whose gate was CLEAR.
 - Do not recut from a BET-only sample. Do not pause/unpause from this file.
+  `GAME_MARKET_GATE_MODE=shadow` is the env override if a week of live
+  downgrades needs to be measured without changing `signal_type`.

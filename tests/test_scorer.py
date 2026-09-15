@@ -365,6 +365,53 @@ def test_apply_game_market_gate_fail_open_without_conn(monkeypatch):
     assert picks[0]["signal_type"] == "BET"
 
 
+def test_scorer_live_default_downgrades_steamed_and_public_steam(monkeypatch):
+    """config.GAME_MARKET_GATE_MODE defaults to live — the scorer hook must
+    actually BET → NONE on PASS_STEAMED and PASS_PUBLIC_STEAM."""
+    import config
+    from models import scorer
+
+    assert config.GAME_MARKET_GATE_MODE == "live"
+    assert config.GAME_MARKET_GATE_MIN_NO_VIG_EDGE is None
+
+    opening = {"home_price": -110, "away_price": -110,
+               "snapshot_at": "2026-09-15T16:00:00Z", "book": "draftkings"}
+    monkeypatch.setattr("models.game_market_gate.load_opening_odds",
+                        lambda *a, **k: opening)
+    monkeypatch.setattr("models.game_market_gate.persist", lambda *a, **k: None)
+
+    steamed = {
+        "game_id": "MLB_2026-09-15_NYY_BOS", "model_id": "mlb_moneyline",
+        "pick_side": "home", "model_probability": 0.55,
+        "signal_type": "BET", "kelly_fraction": 0.03, "recommended_bet": 300,
+        "downgrade_reason": None, "public_bet_pct": None, "public_money_pct": None,
+    }
+    scorer._apply_game_market_gate(
+        object(), [steamed], "h2h",
+        {"home_price": -150, "away_price": 130,
+         "snapshot_at": "2026-09-15T20:00:00Z"},
+        "2026-09-15T23:00:00Z")
+    assert steamed["signal_type"] == "NONE"
+    assert steamed["downgrade_reason"].startswith("market:")
+    assert steamed["_market_gate"].verdict == "PASS_STEAMED"
+    assert steamed["_market_gate"].applied is True
+
+    public = {
+        "game_id": "MLB_2026-09-15_NYY_BOS", "model_id": "mlb_moneyline",
+        "pick_side": "home", "model_probability": 0.62,
+        "signal_type": "BET", "kelly_fraction": 0.03, "recommended_bet": 300,
+        "downgrade_reason": None, "public_bet_pct": 68.0, "public_money_pct": 55.0,
+    }
+    scorer._apply_game_market_gate(
+        object(), [public], "h2h",
+        {"home_price": -125, "away_price": 105,
+         "snapshot_at": "2026-09-15T20:00:00Z"},
+        "2026-09-15T23:00:00Z")
+    assert public["signal_type"] == "NONE"
+    assert public["_market_gate"].verdict == "PASS_PUBLIC_STEAM"
+    assert public["_market_gate"].applied is True
+
+
 # ── _feature_value (serve-time encoding) ──────────────────────────────────────
 
 class TestFeatureValue:

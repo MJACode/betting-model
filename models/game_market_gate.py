@@ -39,10 +39,11 @@ honouring `config.GAME_MARKET_GATE_MODE`. What this module owns: the
 arithmetic and the PASS reasons.
 
 SHADOW vs LIVE. No live-artifact-era cut cleared the section-7 standards
-for these models (n too small or the grid is negative). Default mode is
-shadow: persist the verdict, do not change `signal_type`. `live` actually
-downgrades BET → NONE. Env `GAME_MARKET_GATE_MODE=live` flips it without
-a retrain.
+for these models (n too small or the grid is negative). mike, 2026-09-15:
+default mode is live anyway — new BETs that PASS_STEAMED or
+PASS_PUBLIC_STEAM become NONE. PASS_EDGE only fires if
+`GAME_MARKET_GATE_MIN_NO_VIG_EDGE` is set (it is not). Fail-open; never
+upgrades NONE. Env `GAME_MARKET_GATE_MODE=shadow` restores persist-only.
 
 PCG / extra split sources: pass them through `PublicSplits.source`. This
 file never synthesises a percentage.

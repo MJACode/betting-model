@@ -1135,9 +1135,10 @@ def _apply_game_market_gate(conn, picks: list[dict], market: str,
 
     Runs AFTER `_decide` / best-price requalify / the injury gate so a
     cheaper book cannot resurrect a steamed number and an injury NONE is
-    not overwritten. Shadow mode (the default — no live-artifact cut
-    cleared) persists the verdict and leaves signal_type alone. Live mode
-    downgrades BET → NONE. Never upgrades. The close is not an input:
+    not overwritten. Live is the default (mike, 2026-09-15, despite no
+    §7 cut): new BETs that PASS_STEAMED / PASS_PUBLIC_STEAM become NONE.
+    Shadow (`GAME_MARKET_GATE_MODE=shadow`) persists only. Never upgrades.
+    The close is not an input:
     current is the scorer's already-bounded quote; open is the first
     pre-game snapshot at or before that quote and first pitch.
     """
