@@ -568,6 +568,9 @@ def score_game(conn: DBConnection,
     _apply_game_injury_gate(conn, picks, sport, game_id, game_date,
                             home_team, away_team, odds)
 
+    _apply_game_market_gate(conn, picks, market, odds, commence_time,
+                            dry_run=dry_run)
+
     # Write to DB
     if picks and not dry_run:
         _insert_picks(conn, picks)
@@ -1123,6 +1126,56 @@ def _apply_game_injury_gate(conn, picks: list[dict], sport: str, game_id: str,
             logger.info(f"  {game_id}: injury gate vetoed {diag['injury_gate']} BET(s)")
     except Exception as exc:  # noqa: BLE001 — fail open
         logger.debug(f"  {game_id}: injury gate skipped ({exc})")
+
+
+def _apply_game_market_gate(conn, picks: list[dict], market: str,
+                            odds: dict | None, commence_time: str | None,
+                            dry_run: bool = False) -> None:
+    """Model-vs-market overlay for MLB game picks. Fail-open.
+
+    Runs AFTER `_decide` / best-price requalify / the injury gate so a
+    cheaper book cannot resurrect a steamed number and an injury NONE is
+    not overwritten. Live is the default (mike, 2026-09-15, despite no
+    §7 cut): new BETs that PASS_STEAMED / PASS_PUBLIC_STEAM become NONE.
+    Shadow (`GAME_MARKET_GATE_MODE=shadow`) persists only. Never upgrades.
+    The close is not an input:
+    current is the scorer's already-bounded quote; open is the first
+    pre-game snapshot at or before that quote and first pitch.
+    """
+    if not picks or not config.GAME_MARKET_GATE_ENABLED:
+        return
+    models = set(config.GAME_MARKET_GATE_MODELS)
+    if not any(p.get("model_id") in models for p in picks):
+        return
+    try:
+        from models import game_market_gate as gmg
+        as_of = (odds or {}).get("snapshot_at")
+        opening = gmg.load_opening_odds(
+            conn, picks[0]["game_id"], market, as_of,
+            commence=commence_time, book=ODDS_API_BOOKMAKER,
+        )
+        applied = gmg.apply_to_picks(
+            picks, market=market, current_odds=odds, opening_odds=opening,
+            mode=config.GAME_MARKET_GATE_MODE,
+            min_no_vig_edge=config.GAME_MARKET_GATE_MIN_NO_VIG_EDGE,
+            steam_through=config.GAME_MARKET_GATE_STEAM_THROUGH,
+            public_steam_pass=config.GAME_MARKET_GATE_PUBLIC_STEAM_PASS,
+            public_heavy=config.GAME_MARKET_GATE_PUBLIC_HEAVY,
+            line_steam_pts=config.GAME_MARKET_GATE_LINE_STEAM_PTS,
+            enabled_models=models,
+        )
+        n_pass = sum(1 for v in applied if v.verdict in gmg.LIVE_PASS)
+        n_live = sum(1 for v in applied if v.applied)
+        if n_pass:
+            logger.info(
+                f"  {picks[0]['game_id']}/{market}: market gate "
+                f"{n_pass} PASS ({config.GAME_MARKET_GATE_MODE}"
+                f"{', applied' if n_live else ''})"
+            )
+        if not dry_run:
+            gmg.persist(conn, picks, mode=config.GAME_MARKET_GATE_MODE)
+    except Exception as exc:  # noqa: BLE001 — fail open
+        logger.debug(f"  market gate skipped ({exc})")
 
 
 def _apply_no_signal(picks: list[dict], reason: str) -> list[dict]:
@@ -2372,6 +2425,8 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     for p in picks:
         live_ctx = p.pop("_live_ctx", None)
         p.pop("_quote_snapshot_at", None)
+        p.pop("_market_gate", None)
+        p.pop("_market_as_of", None)
         if live_ctx is not None and "best_book" not in p:
             lg_id, lmarket = live_ctx
             try:

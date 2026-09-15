@@ -1101,6 +1101,25 @@ def step_wnba_prop_market(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_mlb_game_market(run_date: str, dry_run: bool = False) -> bool:
+    """MLB game-line market-relative cards: de-vig Pinnacle, flag the soft outlier.
+
+    Logs both spreads (`mlb_spread_market`) and totals (`mlb_total_market`)
+    every pass. Totals construction is Pin-vs-soft-devig (measured −11%
+    at 2pp). INSERT is gated by MLB_SPREAD_MARKET_PUBLISH /
+    MLB_TOTAL_MARKET_PUBLISH (default 0). A pass with no Pinnacle quotes or
+    no MLB slate is a clean no-op.
+    """
+    try:
+        from scripts.mlb_game_market_card import run_both
+        result = run_both(run_date, do_publish=not dry_run)
+        logger.success(f"✓ MLB game market card: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ MLB game market card failed: {exc}")
+        return False
+
+
 def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score WNBA player props (points/reb/ast/threes/PRA) and write picks to DB."""
     try:
@@ -1658,6 +1677,8 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 6: Scoring ────────────────────────────────────────────────────────
     logger.info("Step 6/10: Generating game picks...")
     results["scoring"] = step_scoring(run_date, dry_run=dry_run)
+    logger.info("Step 6b: MLB spread market card (Pinnacle vs bettable soft)...")
+    results["mlb_game_market"] = step_mlb_game_market(run_date, dry_run=dry_run)
 
     # ── Step 7: Game log ingestion ────────────────────────────────────────────
     # Moved to Step 0d (pre-settle) so yesterday's props settle same-day. Logs
@@ -1919,7 +1940,7 @@ Examples:
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
-                                 "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "nba-prop-scoring",
+                                 "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
@@ -1991,6 +2012,7 @@ Examples:
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-market": lambda: step_wnba_prop_market(run_date, dry_run=args.dry_run),
+            "mlb-game-market": lambda: step_mlb_game_market(run_date, dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),

@@ -757,6 +757,43 @@
     }
   },
   {
+    "key": "mlb-game-line-market-sweep-open-bettable-2026-09-15",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT. Error Handler 2026-09-15: fill the 2/3/4pp MLB spreads+totals grid on odds.snapshot_type=open (commence_time is on games), bettable BEST_LINE books, Pin de-vig vs soft de-vig, equal line, 300s, by month. MCP timed out on unbounded joins. Result lands in worker_jobs.result. Does not publish, pause, or unpause. Next if totals 2pp is still negative: the companion dk-implied pin-lean job.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["spreads", "totals"],
+      "edges": [0.02, 0.03, 0.04],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2026-03-20",
+      "date_to": "2026-09-16"
+    }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-open-dk-implied-2026-09-15",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT. GROK_BOT 2026-09-15 construction: Pin open no-vig lean vs DraftKings open implied, equal line, 2/3/4pp, snapshot_type=open. GROK reported totals Apr-Jul ~+11% n~103 and spreads ~-5% n~200; this remeasures on the worker (MCP timed out). Does not publish, pause, or unpause.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["spreads", "totals"],
+      "edges": [0.02, 0.03, 0.04],
+      "snapshot_type": "open",
+      "bettable": false,
+      "soft_books": ["draftkings"],
+      "by_month": true,
+      "vs": "implied",
+      "pin_lean": true,
+      "date_from": "2026-03-20",
+      "date_to": "2026-09-16"
+    }
+  },
+  {
     "key": "clv-no-vig-backfill-2026-09-14",
     "job_type": "clv_backfill",
     "requested_by": "mike",
