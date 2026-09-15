@@ -463,19 +463,41 @@ def _score_rows(player: pd.DataFrame, team: pd.DataFrame, snaps: pd.DataFrame,
         return pd.DataFrame()
     cutoff = (pd.to_datetime(game_date) - pd.Timedelta(days=45)).strftime("%Y-%m-%d")
     recent = hist[hist["game_date"] >= cutoff]
-    if recent.empty:
-        # Week 1: the 45-day window cannot bridge the off-season, so fall back
-        # to each player's LAST appearance in the prior season. Off-season
-        # roster moves mean some of these carry the wrong team — which costs a
-        # missed pick, never a wrong one: the scorer looks a prop price up by
-        # (game_id, player), so a moved player simply has no line in his old
-        # team's game and is skipped. Nflverse rosters would remove the guess
-        # entirely; that is the documented follow-up.
-        recent = hist[hist["season"] >= _nfl_season(game_date) - 1]
+    # Week 1: the 45-day window cannot bridge the off-season, so fall back to
+    # each player's LAST appearance in the prior season. Off-season roster
+    # moves mean some of these carry the wrong team — which costs a missed
+    # pick, never a wrong one: the scorer looks a prop price up by (game_id,
+    # player), so a moved player simply has no line in his old team's game and
+    # is skipped. Nflverse rosters would remove the guess entirely; that is the
+    # documented follow-up.
+    #
+    # THE FALLBACK IS PER TEAM, NOT PER SLATE (2026-09-13). It was gated on the
+    # whole 45-day window being empty, which is true only until the FIRST game
+    # of week 1 kicks off. From that moment `recent` holds the four teams that
+    # have played and the gate never opens again, so the other 28 teams get an
+    # empty candidate pool, `synth` comes out empty and the builder returns no
+    # rows at all — which the scorer reports as "no scoring rows" and writes
+    # nothing, not a BET, not an AVOID, not a NONE.
+    #
+    # Measured on production for 2026-09-13: 26 slate teams, 16,489 rows of
+    # 2025 history sitting unused, `recent` non-empty at 115 rows covering 4
+    # teams, and ZERO of the 26 slate teams with a candidate. All twelve
+    # nfl_prop_* models had logged "no scoring rows" on every tick since the
+    # first week-1 kickoff on 2026-09-10 — three days, the whole opening
+    # weekend. It is the slate-wide gate that is wrong: the candidate pool is
+    # built per team, so its fallback belongs at the same scope.
+    #
+    # Subsumes the old behaviour rather than changing it: when nobody has
+    # played, every team's `recent` pool is empty and every team falls back,
+    # which is exactly what the slate-wide branch did.
+    fallback = hist[hist["season"] >= _nfl_season(game_date) - 1]
 
     synth = []
     for _, g in slate.iterrows():
-        for _, p in recent[recent["team"] == g["team"]].sort_values(
+        pool = recent[recent["team"] == g["team"]]
+        if pool.empty:
+            pool = fallback[fallback["team"] == g["team"]]
+        for _, p in pool.sort_values(
                 "game_date").drop_duplicates("player_id", keep="last").iterrows():
             row = {c: 0.0 for c in player.columns}
             row.update({
