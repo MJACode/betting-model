@@ -596,10 +596,11 @@ ACTION_THRESHOLDS: dict = {
     # spreads ~−5% n≈200 — do not live-INSERT until
     # MLB_SPREAD_MARKET_PUBLISH=1. Docs: docs/mlb_runline_ou_edge_search.md.
     "mlb_spread_market":          {"min_prob": 0.0, "min_edge": 0.018},
-    # MLB totals market-relative rule. PAPER at 2pp (GROK Pin-open vs DK-open
-    # Apr–Jul ~+11% n≈103). mlb_over_under stays paused. Default does not
-    # INSERT until MLB_TOTAL_MARKET_PUBLISH=1. The find_total_bets wall
-    # (MIN_EDGE_TOTALS=1.0) stays; the card passes 0.02 explicitly.
+    # MLB totals market-relative rule. PAPER at 2pp: Pin no-vig lean minus
+    # the best bettable soft implied (GROK vs DK Apr–Jul ~+11% n≈103).
+    # mlb_over_under stays paused. Default does not INSERT until
+    # MLB_TOTAL_MARKET_PUBLISH=1. The find_total_bets wall (MIN_EDGE_TOTALS=1.0)
+    # stays; the card passes 0.02 explicitly.
     "mlb_total_market":           {"min_prob": 0.0, "min_edge": 0.02},
     # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
     # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do

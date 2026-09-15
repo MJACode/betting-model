@@ -7,6 +7,8 @@ that publishes under the wall default.
 """
 from __future__ import annotations
 
+import pytest
+
 import config
 import models.mlb_game_market as mk
 from tracking.pick_integrity import pick_problems
@@ -136,6 +138,54 @@ def test_totals_paper_cut_is_two_pp_and_not_the_wall():
         quotes, min_edge=mk.MIN_EDGE_TOTALS_PAPER, soft_books=("fanduel",))
     assert len(paper) == 1
     assert paper[0].side == "over"
+    # Edge is Pin fair − FD juiced implied, not FD de-vig.
+    pin_fair = paper[0].fair
+    fd_implied = mk.implied(-110)
+    assert paper[0].edge == pytest.approx(pin_fair - fd_implied)
+
+
+def test_totals_pin_lean_does_not_fade_pinnacle():
+    """De-vig vs de-vig would take the fade; GROK's path takes Pin's lean only."""
+    quotes = {
+        ("G1", "pinnacle"): {
+            "total_line": 8.5, "over_price": -150, "under_price": 130,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+        ("G1", "fanduel"): {
+            "total_line": 8.5, "over_price": -200, "under_price": 170,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+    }
+    lean, _ = mk.find_total_bets(
+        quotes, min_edge=0.02, soft_books=("fanduel",))
+    fade, _ = mk.find_total_bets(
+        quotes, min_edge=0.02, soft_books=("fanduel",),
+        vs="devig", pin_lean=False)
+    assert lean == []
+    assert len(fade) == 1
+    assert fade[0].side == "under"
+
+
+def test_totals_shops_the_best_soft_book_not_dk_only():
+    quotes = {
+        ("G1", "pinnacle"): {
+            "total_line": 8.5, "over_price": -150, "under_price": 130,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+        ("G1", "draftkings"): {
+            "total_line": 8.5, "over_price": -110, "under_price": -110,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+        ("G1", "fanduel"): {
+            "total_line": 8.5, "over_price": -102, "under_price": -118,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+    }
+    bets, _ = mk.find_total_bets(
+        quotes, min_edge=0.02, soft_books=("draftkings", "fanduel"))
+    assert len(bets) == 1
+    assert bets[0].book == "fanduel"
+    assert bets[0].side == "over"
 
 
 def test_totals_default_is_a_wall():

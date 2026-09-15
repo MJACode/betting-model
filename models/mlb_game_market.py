@@ -30,13 +30,13 @@ Aug +8.68 / Sep +11.19 (5 of 6 months positive). Both sides positive
 (away +3.25% / 175, home +7.19% / 192). Every matching line in the
 sample is the run line (±1.5).
 
-TOTALS. May–Jun 2026 Pinnacle-vs-bettable-soft was negative at every
-threshold (2pp −11.13% / 79). GROK_BOT 2026-09-15 reported a DIFFERENT
-construction — Pin OPEN no-vig vs DK OPEN implied, equal total, ≥2pp —
-Apr–Jul ~+11% n≈103. That grid is the leading O/U replacement and is
-the paper `mlb_total_market` at 0.02. It does not INSERT until
-`MLB_TOTAL_MARKET_PUBLISH=1`. Accidental callers of find_total_bets
-still hit MIN_EDGE_TOTALS = 1.0 (a wall).
+TOTALS. The paper publisher is GROK's measured construction, shopped at
+the best bettable book: Pin OPEN no-vig lean minus the soft book's
+juiced implied, equal total, ≥2pp. GROK vs DK only: Apr–Jul ~+11%
+n≈103. May–Jun Pin-de-vig vs bettable-soft-de-vig was the loser
+(2pp −11.13% / 79) and is not what the card fires. Accidental callers
+of find_total_bets still hit MIN_EDGE_TOTALS = 1.0 (a wall). INSERT
+waits on `MLB_TOTAL_MARKET_PUBLISH=1`. `mlb_over_under` stays paused.
 
 PUBLISH. Both cards default to log-only. Spreads: GROK Pin-vs-DK ≥2pp
 ~−5% n≈200 — do not live-publish without the worker remeasure.
@@ -81,7 +81,7 @@ class GameMarketBet:
     line: float          # HOME spread, or the total
     price: float         # soft book's American price on `side`
     fair: float          # Pinnacle de-vigged probability of `side`
-    edge: float          # fair − soft book's own de-vigged probability
+    edge: float          # spreads: fair − soft de-vig; totals: fair − soft implied
     sharp_price: float
     snap: str | None = None
 
@@ -230,10 +230,23 @@ def find_spread_bets(quotes: dict, min_edge: float = MIN_EDGE_SPREADS,
 
 def find_total_bets(quotes: dict, min_edge: float = MIN_EDGE_TOTALS,
                     soft_books: tuple[str, ...] | None = None,
-                    max_gap_s: float = MAX_GAP_S
+                    max_gap_s: float = MAX_GAP_S,
+                    vs: str = "implied",
+                    pin_lean: bool = True,
                     ) -> tuple[list[GameMarketBet], dict]:
-    """Same construction on totals. Default min_edge is a wall: 2026 is
-    negative at every measured threshold. Pass a floor explicitly to sweep."""
+    """Totals: Pin no-vig lean vs the best soft implied, equal total_line.
+
+    GROK_BOT 2026-09-15 measured Pin OPEN fair − DK OPEN implied ≥2pp,
+    pin-lean, Apr–Jul ~+11% n≈103. SHIP THIS: same edge, but the best
+    bettable soft price (not DK-only). Default min_edge is a wall so an
+    accidental caller cannot fire; the paper card passes 0.02.
+
+    vs='implied' is the measured construction. vs='devig' is the May–Jun
+    loser (−11.13% / 79 at 2pp) and is kept only so a sweep can name it.
+    pin_lean=True bets only the side Pinnacle's no-vig prefers.
+    """
+    if vs not in ("implied", "devig"):
+        raise ValueError(f"vs must be implied|devig, got {vs!r}")
     soft = tuple(soft_books) if soft_books is not None else SOFT_BOOKS
     diag = defaultdict(int)
     by_game: dict[str, dict] = defaultdict(dict)
@@ -252,6 +265,9 @@ def find_total_bets(quotes: dict, min_edge: float = MIN_EDGE_TOTALS,
             diag["sharp_one_way"] += 1
             continue
         su = 1.0 - sf
+        sides = (("over", sf, "over_price"), ("under", su, "under_price"))
+        if pin_lean:
+            sides = (max(sides, key=lambda s: s[1]),)
         best: GameMarketBet | None = None
         for bk in soft:
             q = books.get(bk)
@@ -266,17 +282,22 @@ def find_total_bets(quotes: dict, min_edge: float = MIN_EDGE_TOTALS,
                 diag["not_simultaneous"] += 1
                 continue
             fa, fb = devig(q.get("over_price"), q.get("under_price"))
-            if fa is None:
+            if vs == "devig" and fa is None:
                 diag["soft_one_way"] += 1
                 continue
             diag["compared"] += 1
-            for side, fair, book_p, price, sharp_p in (
-                ("over", sf, fa, q.get("over_price"), sharp.get("over_price")),
-                ("under", su, fb, q.get("under_price"), sharp.get("under_price")),
-            ):
+            for side, fair, price_key in sides:
+                price = q.get(price_key)
+                sharp_p = sharp.get(price_key)
                 if price is None or implied(price) is None:
                     continue
-                edge = fair - book_p
+                if vs == "implied":
+                    soft_p = implied(price)
+                else:
+                    soft_p = fa if side == "over" else fb
+                    if soft_p is None:
+                        continue
+                edge = fair - soft_p
                 if edge < min_edge:
                     continue
                 cand = GameMarketBet(
