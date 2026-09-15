@@ -65,6 +65,7 @@ READ THE OUTPUT LIKE THIS
 """
 
 import argparse
+import pickle
 from pathlib import Path
 import sys
 
@@ -86,6 +87,30 @@ from models.scorer import american_to_implied_prob, american_to_decimal
 from models.trainer import load_model
 
 MODEL_ID = "mlb_runline"
+
+
+def _load_artifact(path: str | None = None) -> dict:
+    """Active registry model, or a just-trained pickle that was not registered.
+
+    A `--no-register` retrain writes to `models/saved/_baseline/` and leaves
+    `model_registry` alone. The honest 2019-2025 / holdout-2026 sweep has to
+    score THAT pickle, not the live in-sample artifact `load_model` would
+    return. `--artifact` is how; omitting it keeps the GitHub Action path.
+    """
+    if path:
+        p = Path(path)
+        if not p.is_absolute():
+            p = Path(__file__).resolve().parent.parent / p
+        if not p.is_file():
+            raise SystemExit(f"artifact not found: {p}")
+        with open(p, "rb") as f:
+            artifact = pickle.load(f)
+        logger.info(f"loaded candidate artifact {p}")
+        return artifact
+    artifact = load_model(MODEL_ID)
+    if not artifact:
+        raise SystemExit(f"No active model artifact for {MODEL_ID} — train it first.")
+    return artifact
 
 
 def _fetch_games(conn, seasons: list[int]) -> list[dict]:
@@ -191,11 +216,10 @@ def _side_rows(game: dict, prob_home: float, odds: dict) -> list[dict]:
     return rows
 
 
-def build_side_table(seasons: list[int]) -> pd.DataFrame:
+def build_side_table(seasons: list[int],
+                     artifact_path: str | None = None) -> pd.DataFrame:
     """Score every completed game and return one row per bettable side."""
-    artifact = load_model(MODEL_ID)
-    if not artifact:
-        raise SystemExit(f"No active model artifact for {MODEL_ID} — train it first.")
+    artifact = _load_artifact(artifact_path)
     clf = artifact["model"]
     feature_cols = FEATURE_MAP[MODEL_ID]
 
@@ -313,9 +337,12 @@ def main() -> None:
                     help="cells thinner than this are excluded from the "
                          "recommendation (default 30)")
     ap.add_argument("--csv", help="also write the raw side table here")
+    ap.add_argument("--artifact", default=None,
+                    help="measure this .pkl instead of the registered active "
+                         "one — for a --no-register retrain that must not swap live")
     args = ap.parse_args()
 
-    df = build_side_table(args.seasons)
+    df = build_side_table(args.seasons, artifact_path=args.artifact)
     if df.empty:
         raise SystemExit("No gradable sides — check that games have pre-game run lines.")
 
