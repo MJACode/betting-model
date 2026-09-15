@@ -30,10 +30,17 @@ Aug +8.68 / Sep +11.19 (5 of 6 months positive). Both sides positive
 (away +3.25% / 175, home +7.19% / 192). Every matching line in the
 sample is the run line (±1.5).
 
-TOTALS. The same construction is negative at every threshold on 2026
-MLB totals (1pp −2.35% / 1099, both halves negative). This module
-exposes find_total_bets for the sweep and for a future cut; it does
-not publish totals.
+TOTALS. May–Jun 2026 Pinnacle-vs-bettable-soft was negative at every
+threshold (2pp −11.13% / 79). GROK_BOT 2026-09-15 reported a DIFFERENT
+construction — Pin OPEN no-vig vs DK OPEN implied, equal total, ≥2pp —
+Apr–Jul ~+11% n≈103. That grid is the leading O/U replacement and is
+the paper `mlb_total_market` at 0.02. It does not INSERT until
+`MLB_TOTAL_MARKET_PUBLISH=1`. Accidental callers of find_total_bets
+still hit MIN_EDGE_TOTALS = 1.0 (a wall).
+
+PUBLISH. Both cards default to log-only. Spreads: GROK Pin-vs-DK ≥2pp
+~−5% n≈200 — do not live-publish without the worker remeasure.
+`MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` (default 0).
 
 Soft books are BEST_LINE_BOOKMAKERS, not LINE_SHOP. Betting Bovada or
 Pinnacle manufactured the 1pp plateau that disappeared once the
@@ -51,9 +58,11 @@ SHARP_BOOK = "pinnacle"
 MAX_GAP_S = 300.0
 # The measured cut. Do not chase a neighbour; 2.0pp fails the early half.
 MIN_EDGE_SPREADS = 0.018
-# Totals: no cut cleared. Callers that still want the comparison pass
-# an explicit floor; this default is a wall, not a recommendation.
+# Totals: accidental callers must not fire. The paper card passes
+# MIN_EDGE_TOTALS_PAPER (0.02) explicitly. GROK Pin-vs-DK ≥2pp Apr–Jul
+# ~+11% n≈103 is the candidate; worker sweep must confirm.
 MIN_EDGE_TOTALS = 1.0
+MIN_EDGE_TOTALS_PAPER = 0.02
 
 # Bettable retail books. Pinnacle is the reference; Bovada and espnbet
 # are in LINE_SHOP on purpose and out of BEST_LINE on purpose.
@@ -91,12 +100,22 @@ def _is_runline(line) -> bool:
     return abs(abs(float(line)) - 1.5) < 1e-9
 
 
+def publish_enabled(market: str) -> bool:
+    """INSERT gate. Default off: cards log, they do not write picks."""
+    if market == "spreads":
+        return bool(config.MLB_SPREAD_MARKET_PUBLISH)
+    if market == "totals":
+        return bool(config.MLB_TOTAL_MARKET_PUBLISH)
+    return False
+
+
 def load_latest_quotes(conn, sport: str, market: str, game_ids: list[str],
                        as_of=None) -> dict:
-    """Latest PRE-GAME quote per (game, book) for the given games.
+    """Latest OPEN quote per (game, book) for the given games.
 
-    Bounded on commence_time and, when `as_of` is set, on that clock so a
-    later tick cannot become "current". in_play excluded.
+    `odds.snapshot_type` is open|in_play|close. `odds` has no commence_time
+    — that lives on `games`. We still leak-bound snapshot_at <= commence_time
+    because the evening refresh has written post-start rows as open.
     """
     if not game_ids:
         return {}
@@ -114,7 +133,7 @@ def load_latest_quotes(conn, sport: str, market: str, game_ids: list[str],
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s AND o.market = %s
           AND o.game_id = ANY(%s)
-          AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+          AND o.snapshot_type = 'open'
           AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
           {extra}
         ORDER BY o.game_id, o.bookmaker, o.snapshot_at DESC

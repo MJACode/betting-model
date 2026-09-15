@@ -3,11 +3,19 @@
 Mike rejected “keep `mlb_runline` and `mlb_over_under` paused until someday.”
 Standing rule (CLAUDE.md §1b): a losing model is an **assessment to run**, not
 a model to pause. This file is the assessment. It names a shippable cut where
-one exists, and names what failed where one does not.
+one exists, and names what failed where one does not. **It does not conclude
+“stay paused forever.”**
 
 **Pause/unpause is Mike’s.** This search does **not** edit `PAUSED_MODELS`.
-The ask in the PR is: **approve going live of `mlb_spread_market` (not an
-unpause of `mlb_runline`).**
+`mlb_runline` and `mlb_over_under` stay paused. Do **not** resurrect the
+2026-09-02 O/U RE-CUT 0.50/0.06 (+15.7%) — it did not survive later sweeps
+(`model_calibration_sweeps` 2026-09-14: `mlb_over_under` NO CUT, cur −11.6%
+n=107; `mlb_runline` NO CUT, cur −15.5% n=9).
+
+The ask in the PR is: **set `MLB_TOTAL_MARKET_PUBLISH=1` on Railway (and
+redeploy) to start the paper totals record — not an unpause of
+`mlb_over_under`, not live money until you say so.** Spreads stay log-only
+until the worker 2/3/4pp grid is read (`MLB_SPREAD_MARKET_PUBLISH` default 0).
 
 ---
 
@@ -15,77 +23,69 @@ unpause of `mlb_runline`).**
 
 | Market | Verdict |
 |---|---|
-| Run line | **Replace the publish path.** New rule `mlb_spread_market` at **1.8pp** (Pinnacle de-vig vs bettable soft books, equal ±1.5 only, pre-game, simultaneous quotes, one bet per game). `mlb_runline` stays paused. |
-| Totals | **No cut.** Same construction is negative at every measured threshold. `mlb_over_under` stays paused. Predictive AUC 0.486 in the only honest season (`docs/sports/mlb.md` §11a). Unpause path is a rebuilt model, not a bar. |
-| Hybrid steam/public overlay | **Shadow on the new rule** (do not veto a cut that has not been re-measured under it). **Live** on the four predictive MLB game models (`mlb_moneyline`, `mlb_runline`, `mlb_over_under`, `mlb_f5_moneyline`) per mike 2026-09-15 on the gate PR — those models are paused or thin on the live artifact, so the live default writes NONE on steamed/public-steam rather than betting them. |
+| Totals | **Paper publisher `mlb_total_market` at 2pp**, equal `total_line`, best bettable soft book (not DK-only). GROK_BOT 2026-09-15: Pin OPEN no-vig vs DK OPEN implied ≥2pp, Apr–Jul ~**+11% n≈103**. This pass did **not** reproduce that number on Pinnacle-vs-bettable-soft de-vig (May–Jun 2pp **−11.13% / 79**). Construction differs. Worker job `game_line_market_sweep` remeasures both constructions on `snapshot_type='open'`. `mlb_over_under` stays paused. |
+| Run line | **Do not live-publish pure Pin-vs-soft spreads.** GROK Pin-open vs DK-open ≥2pp: ~**−5% n≈200**. Earlier same-day bettable-soft de-vig at **1.8pp** was +4.16% / 328 through Aug (both halves +) — a different construction, and GROK’s ≥2pp result is the one that says “more work.” Code for `mlb_spread_market` at 1.8pp remains; INSERT is gated off. `mlb_runline` stays paused. |
+| Hybrid | GROK on existing `mlb_over_under` BETs: disagree with Pin lean **−17.7u / 71**; agree any **−5.1u / 53**; agree ≥1.5pp **−0.5u / 8**. Stops the hemorrhage, is **not +EV**. Steam/public overlay stays **shadow** on the market cards. Live gate stays on the four predictive MLB game models. |
+| Retrain | **Not run here** (no `DATABASE_URL`). Next only if the worker totals 2pp cell is still negative. Commands at the bottom. |
 
-Approve: **going live of `mlb_spread_market`.** Updated-By required. Do not
+Approve: **`MLB_TOTAL_MARKET_PUBLISH=1`** to start writing paper totals
+picks (Updated-By required to treat them as live money). Do not set
+`MLB_SPREAD_MARKET_PUBLISH=1` until the worker grid is read. Do not
 silently unpause `mlb_runline` / `mlb_over_under`.
 
 ---
 
-## What was measured (2026-09-15, Supabase `execute_sql`, project Betting Model)
+## Production facts (Error Handler, 2026-09-15 — do not re-litigate calibration cuts)
 
-How each number was produced is named. An hour-old value is a memory; these
-are from this pass unless labelled otherwise.
+`model_calibration_sweeps` latest 2026-09-14:
 
-### Predictive models, settled BET record (not live, not VOID)
+| model | verdict | current ROI |
+|---|---|---|
+| `mlb_over_under` | NO CUT | −11.6% n=107, paused=true |
+| `mlb_runline` | NO CUT | −15.5% n=9, paused=true |
 
-`picks` where `signal_type='BET'` and `result IN ('WIN','LOSS')` and
-`COALESCE(condition_status,'') <> 'VOID'` and `COALESCE(is_live,false) IS NOT TRUE`.
-Units = `SUM(profit_flat)/100`.
+All-era pregame BET: O/U 70-92 **−16.6%**; runline 23-21 **−2.0%**.
 
-| model | n | W-L | units | avg `clv_pct` (n with CLV) |
+Honest era ≥2026-07-05 O/U: ~39 BETs, −16u, avg edge negative, avg CLV
+negative — the model is the wrong side of the market.
+
+This pass’s own `picks` query (settled BET, not VOID, not live):
+
+| model | n | W-L | units | avg `clv_pct` |
 |---|---|---|---|---|
 | `mlb_over_under` | 162 | 70-92 | **−28.58** | −0.127 (108) |
 | `mlb_runline` | 44 | 23-21 | **−0.87** | +0.029 (40) |
 
-2026 settled MLB games (`home_score`/`away_score` not null, `game_date` in
-`[2026-03-01, 2026-09-16)`): **2044**. Of those, **1991** have at least one
-pre-game Pinnacle spread quote.
+---
 
-The 2026-09-12 paused-model assessment (`docs/paused_model_assessment.md`)
-already said: no §7 cut on the **live artifact** for either model. Runline is
-dormant (cannot reach its 0.68 floor). O/U honest-era walk-forward AUC **0.486**.
-This pass did not retrain — no `DATABASE_URL` in the cloud agent; the marker
-`data/TEAM_STATS_ASOF_REBUILD_COMPLETE` is present, so a Railway retrain is
-allowed. Commands at the bottom.
+## Odds schema (load-bearing)
 
-### A. Market-relative (the construction that printed)
+`odds.snapshot_type` is `open` | `in_play` | `close`. `odds.snapshot_at` is
+the quote clock. **`odds` has no `commence_time`** — that column lives on
+`games`. The sweep and the live card filter `snapshot_type = 'open'` and
+still leak-bound `snapshot_at <= games.commence_time` because the evening
+refresh has written post-start rows as `open` (session 106).
 
-Same rule as `models/nfl_prop_market`, pointed at game lines:
+`scripts/game_line_market_sweep.py` month-chunks on `game_date` so the odds
+scan stays inside an index-friendly window. Unbounded joins time out on
+MCP `execute_sql`.
 
-- de-vig Pinnacle (proportional)
-- bet a **bettable** soft book (`config.BEST_LINE_BOOKMAKERS`, i.e. LINE_SHOP
-  minus `pinnacle` / `bovada` / `espnbet`)
-- **equal lines only**
-- **pre-game only** (`snapshot_at <= commence_time`, `in_play` excluded)
-- **simultaneous** (quote clocks ≤ 300s apart)
-- **one bet per game** (largest edge)
-- run line only (`|spread_home| = 1.5`)
-- house juice floor **−200** (the default that ships)
+---
 
-**Including Bovada / espnbet as “soft” manufactured a 1pp plateau that
-disappeared on the bettable set.** That is why SOFT_BOOKS is BEST_LINE, not
-LINE_SHOP.
+## What was measured
 
-Query shape: latest pre-game quote per `(game_id, bookmaker)` joined through
-`games` with `snapshot_at` bounded to the month (unbounded `odds` scans time
-out). One bet per game = `DISTINCT ON (game_id) ORDER BY edge DESC`. Grade:
-away cover `(away − home) − scored_line > 0` (CLAUDE.md §4; `scored_line` is
-the HOME number).
+### A. Market-relative — two constructions, they disagree
 
-#### Spreads — monthly cells (price ≥ −200)
+Same traps as `models/nfl_prop_market`: equal lines only, simultaneous
+(≤300s), one bet per game, house juice −200.
 
-| window | 1.0pp n / ROI | 1.5pp n / ROI | **1.8pp n / ROI** | 2.0pp n / ROI |
-|---|---|---|---|---|
-| 2026-03-20 → 04-30 | 213 / −3.74% | 127 / −6.58% | **77 / −0.19%** | 49 / +1.01% |
-| 2026-05-01 → 06-30 | 480 / +0.21% | 226 / +1.67% | **133 / +2.53%** | 88 / +0.38% |
-| 2026-07-01 → 07-31 | 180 / −10.82% | 80 / +2.13% | **46 / +9.10%** | 27 / +16.77% |
-| 2026-08-01 → 08-31 | 210 / +11.42% | 116 / +15.28% | **72 / +8.68%** | 41 / +16.33% |
-| 2026-09-01 → 09-15 | MCP timeout this pass | | | |
+#### Construction 1 — Pin de-vig vs **bettable** soft de-vig (this pass, MCP)
 
-Pooled **without September** (the window that timed out):
+Soft books = `BEST_LINE_BOOKMAKERS` (not Bovada / espnbet / Pinnacle as a
+price to take). Including those manufactured a fake 1pp plateau.
+
+**Spreads** (run line ±1.5), latest pre-game ≠ in_play, 300s, price ≥ −200,
+2026 through August (September timed out on this pass):
 
 | cut | n | ROI | early (through 06-30) | late (Jul–Aug) |
 |---|---|---|---|---|
@@ -93,21 +93,10 @@ Pooled **without September** (the window that timed out):
 | **1.8pp** | **328** | **+4.16%** | **+1.53% / 210** | **+8.84% / 118** |
 | 2.0pp | 205 | +5.88% | +0.61% / 137 | +16.51% / 68 |
 
-**1.8pp is the cell that clears the standards on this remeasure:** n ≫ 25,
-both time halves positive, neighbours (1.5pp pooled and 2.0pp pooled) also
-positive. 1.5pp fails the early half. 2.0pp’s early half is +0.61% on 137 —
-thin, and the unfloored reconstruction the same day had it at −0.05% / 139.
-Do not chase 2.0pp.
+1.8pp is the only cell in **this** construction with both halves clearly +.
+GROK’s later Pin-vs-DK ≥2pp result (below) is why this is **not** live.
 
-July +9.10% / 46 and August +8.68% / 72 on this query **match the same-day
-full-season reconstruction of those two months exactly**, so the construction
-is stable. September’s 15-day window timed out on this pass; it is not filled
-in from memory.
-
-#### Totals — no cut
-
-May–Jun 2026, same construction (Pinnacle vs the eight us-region bettable
-books that returned in time, equal total, 300s, one per game):
+**Totals**, May–Jun 2026, same construction:
 
 | cut | n | ROI |
 |---|---|---|
@@ -115,20 +104,56 @@ books that returned in time, equal total, 300s, one per game):
 | 1.5pp | 187 | **−3.49%** |
 | 2.0pp | 79 | **−11.13%** |
 
-Negative, and more negative as the cut tightens. `find_total_bets` exists
-with `MIN_EDGE_TOTALS = 1.0` (a wall). The card does **not** publish totals.
+Negative, and more negative as the cut tightens. This is **not** GROK’s
+totals number.
 
-`public_betting` is present (Action Network, from 2026-05-31) but a
-public-fade join on totals timed out; it is not a shipped totals cut.
+#### Construction 2 — Pin OPEN no-vig lean vs DK OPEN implied (GROK_BOT 2026-09-15)
 
-### B. Predictive repair — not run here
+Month-chunked on production. This agent did **not** re-query these cells;
+they are GROK’s measurements, labelled as such.
+
+**TOTALS** ≥2pp, equal `total_line`:
+
+| month | ROI | n | units |
+|---|---|---|---|
+| Apr | +34.3% | 16 | +5.48u |
+| May | −8.8% | 26 | −2.28u |
+| Jun | +16.4% | 27 | +4.43u |
+| Jul | +11.1% | 34 | +3.76u |
+| Aug/Sep | still running | | |
+
+Apr–Jul combined ~+11.4u / ~103 ≈ **~+11% ROI**. Leading O/U replacement.
+
+**SPREADS** ≥2pp, equal line:
+
+| month | ROI | n |
+|---|---|---|
+| Apr | −15.9% | 23 |
+| May | −13.0% | 35 |
+| Jun | +3.4% | 27 |
+| Jul | −10.1% | 62 |
+| Aug | +5.7% | 57 |
+
+Overall ~**−5% on ~200**. Do **not** ship pure Pin-vs-soft spreads as the
+runline fix without more work (timing alignment, best soft book, close vs
+open, higher threshold, optional model-agree after retrain).
+
+### B. Hybrid on existing `mlb_over_under` BETs (GROK_BOT)
+
+| filter | units / n |
+|---|---|
+| disagree with Pin lean | **−17.7u / 71** |
+| agree any | **−5.1u / 53** |
+| agree ≥1.5pp | **−0.5u / 8** |
+
+A disagreement filter stops the bleed. It does not create +EV. Not a
+publish path.
+
+### C. Predictive repair — not run here
 
 No `DATABASE_URL` in this environment. The freeze marker
 `data/TEAM_STATS_ASOF_REBUILD_COMPLETE` **is** in tree, so the trainer will
-not refuse.
-
-Railway / Matt’s machine (leak-repaired stats only; 2026 is the only season
-with real DK run-line prices):
+not refuse. Run **after** the worker sweep if totals 2pp is still negative.
 
 ```bash
 python -m models.trainer --model mlb_runline \
@@ -141,19 +166,31 @@ python -m models.trainer --model mlb_over_under \
 python -m scripts.calibrated_threshold_sweep --model mlb_over_under
 ```
 
-Feature ideas **if** that grid is still flat, leak-safe at pick time only:
-park / weather (already in the feature map), bullpen workload (already),
-starter FIP/xERA diffs, `public_betting` ticket/handle. **Do not use the
-close as a feature.** Opener-vs-current belongs in `game_market_gate`, which
-is already wired.
+Do **not** use the close as a feature. Opener-vs-current belongs in
+`game_market_gate`.
 
-### C. Hybrid
+---
 
-`mlb_spread_market` persists `game_market_gate` in **shadow** (`mode=shadow`).
-PASS_STEAMED / PASS_PUBLIC_STEAM do **not** change `signal_type` on this rule
-until the overlay is re-measured on its own record. The four predictive MLB
-game models apply the gate **live** (mike, 2026-09-15): steamed / public-steam
-BETs become NONE. Extra no-vig floor (`PASS_EDGE`) stays off.
+## Next concrete experiment (not “stay paused”)
+
+1. **Worker jobs already declared** (this PR). After merge the worker
+   enqueues them from `jobs/declared_jobs.json`:
+   - `mlb-game-line-market-sweep-open-bettable-2026-09-15` — Pin de-vig vs
+     bettable soft de-vig, `snapshot_type=open`, edges 0.02/0.03/0.04,
+     by month, spreads + totals.
+   - `mlb-game-line-market-sweep-open-dk-implied-2026-09-15` — GROK
+     construction: Pin lean vs DK implied, same edges.
+   Result JSON lands in `worker_jobs.result`. If Error Handler needs to
+   fire them before merge, open a one-off worker-job PR; this branch
+   already registers `job_type=game_line_market_sweep`.
+2. **If GROK totals 2pp holds** on `snapshot_type=open` (both halves +,
+   n≥25, neighbours not a lone peak): set `MLB_TOTAL_MARKET_PUBLISH=1`,
+   keep `mlb_over_under` paused, paper until §2’s go-live gate.
+3. **If it does not hold:** best-soft + `snapshot_type=close`-aligned
+   quotes (CLV, not a feature) + optional model-agree after the 2019–2025
+   retrain. Spreads: same three knobs; do not ship ≥2pp Pin-vs-DK as-is.
+4. **Hybrid steam gate** stays shadow on the cards until the overlay is
+   re-measured on the market-relative record.
 
 ---
 
@@ -161,14 +198,15 @@ BETs become NONE. Extra no-vig floor (`PASS_EDGE`) stays off.
 
 | piece | where |
 |---|---|
-| Rule | `models/mlb_game_market.py` (`MIN_EDGE_SPREADS = 0.018`) |
-| Card | `scripts/mlb_game_market_card.py` — insert-once, `model_id=mlb_spread_market` |
-| Pipeline | `run_pipeline.py --step mlb-game-market`; daily after scoring; `scripts/refresh_pass.sh` |
-| Gate (PR #732, incorporated) | `models/game_market_gate.py` live on the four predictive MLB game models; shadow on this card |
-| Cut | `config.ACTION_THRESHOLDS["mlb_spread_market"] = {min_prob: 0.0, min_edge: 0.018}` |
-| Scoring method | `rule` (no artifact) |
-| Settlement | `tracking/paper_tracker._RULE_MODEL_MARKETS["mlb_spread_market"] = "spreads"` |
-| App label | `mobile/src/lib/modelMeta.ts` shortLabel `RL Mkt` |
+| Sweep | `scripts/game_line_market_sweep.py` — `snapshot_type=open`, 2/3/4pp, `--by-month`, `--vs devig\|implied`, `--pin-lean`, month-chunked load. Thin n still prints. |
+| Worker job | `tracking/job_queue.py` `game_line_market_sweep` + two keys in `jobs/declared_jobs.json` |
+| Spreads rule | `models/mlb_game_market.py` `MIN_EDGE_SPREADS = 0.018`; INSERT gated by `MLB_SPREAD_MARKET_PUBLISH` (default 0) |
+| Totals paper | `mlb_total_market` at 0.02; `find_total_bets` wall stays 1.0; INSERT gated by `MLB_TOTAL_MARKET_PUBLISH` (default 0) |
+| Card | `scripts/mlb_game_market_card.py --market spreads\|totals\|both` |
+| Pipeline | `run_pipeline.py --step mlb-game-market` logs both lanes; INSERT only if env=1 |
+| Gate | `game_market_gate` live on the four predictive MLB game models; **shadow** on both cards |
+| Settlement | `_RULE_MODEL_MARKETS` spreads + totals |
+| App labels | `RL Mkt` / `O/U Mkt` |
 
 `mlb_runline` and `mlb_over_under` remain in `PAUSED_MODELS`. Nothing
 autopauses. No settled pick is touched.
@@ -179,5 +217,6 @@ autopauses. No settled pick is touched.
 
 This is **not** “Grok picked CLE −1.5.” It is the class of edge that number
 belongs to: **money divergence** (Pinnacle’s de-vigged price vs a bettable
-soft book at the **same** run line), with a steamed-through pass sitting next
-to it in shadow so the next assessment can split the record.
+soft book at the **same** line). GROK’s ≥2pp Pin-vs-DK spread sample lost.
+GROK’s ≥2pp Pin-vs-DK totals sample is the candidate, paper until the
+worker confirms it on `snapshot_type=open`.

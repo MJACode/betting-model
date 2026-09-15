@@ -68,6 +68,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Market-relative totals: de-vig Pinnacle, bet a bettable soft book
+  // at the same total. Replaces the paused mlb_over_under *publish path*;
+  // mlb_over_under itself stays paused. Paper until MLB_TOTAL_MARKET_PUBLISH=1.
+  mlb_total_market: {
+    shortLabel: 'O/U Mkt',
+    longLabel: 'Total Runs (market-relative)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   mlb_f5_moneyline: {
     shortLabel: 'F5 ML',
     longLabel: 'First 5 Moneyline',
