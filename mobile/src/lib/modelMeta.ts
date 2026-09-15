@@ -74,7 +74,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   },
   mlb_f5_runline: {
     shortLabel: 'F5 RL',
-    longLabel: 'First 5 Runline',
+    longLabel: 'First 5 Runline (−0.5)',
     type: 'game',
     statKey: null,
     statLabel: '',
