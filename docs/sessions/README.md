@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, MLB game-market gate default **live** (mike, despite no §7 cut). Steam/public-steam downgrade new BETs; extra no-vig floor off; persist `game_market_gate`; no pause/retrain |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, signal_delivery CRIT: five Sep-14 MLB props unposted. Root cause stale `model_action_thresholds.paused` after #727 until 10:02Z sync. Sync on refresh + before Discord; health check only currently-postable; no backfill |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, one-shot `clv_backfill` worker job + declared `clv-no-vig-backfill-2026-09-14`. Loops `_backfill_clv` until empty (cap 40). No model/threshold change |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, no-vig CLV: multiplicative two-way close, Pinnacle when present, Kalshi not de-vigged. Legacy raw_one_sided stamped; pedigree filters method. No unit/recut |
