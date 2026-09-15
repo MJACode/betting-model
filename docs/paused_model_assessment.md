@@ -141,6 +141,21 @@ Two things worth keeping from the run:
 So the pause stands on evidence now rather than on a slate, and the next move
 for NCAAF in play is a better model, not a better cut.
 
+## Addendum 2026-09-15 — F5 O/U and F5 RL join the pause register
+
+Not a cut-clearing unpause of `mlb_runline` / `mlb_over_under`. Those two stay
+paused on the evidence above (runline honest-era −6.93% both sides negative,
+3 settled on the live artifact at the pooled 0.70/0.08 cell; over/under
+honest-era AUC 0.486). A human CLE −1.5 is a market/PCG handicap, not
+`mlb_runline` output.
+
+`mlb_f5_over_under` and `mlb_f5_runline` were disabled on the false claim that
+DraftKings does not carry F5 totals/spreads. Measured 2026-09-15: 0 DK Odds-API
+rows ever; FanDuel/BetMGM priced 18 of today's games. The scoring path now
+reads those books. BET is paused because the 2026-05-08 artifacts are
+leak-mismatched and synthetic-line trained — the same leak that paused
+`mlb_over_under`. Unpause path is a retrain, not a threshold.
+
 ## Re-run cadence
 
 Run this whenever a paused or losing model comes up, and at minimum whenever

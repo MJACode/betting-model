@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, F5 O/U and F5 RL scoring path on against first bettable book (FanDuel/BetMGM). "DK does not carry" disable was false. BET paused (leak-era 2026-05-08 artifacts). mlb_runline / mlb_over_under stay paused; human CLE −1.5 is not an unpause |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, MLB game-market gate default **live** (mike, despite no §7 cut). Steam/public-steam downgrade new BETs; extra no-vig floor off; persist `game_market_gate`; no pause/retrain |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, MLB measure-only worker jobs: game_line_market_sweep + combined mlb_runline_retrain_sweep (register=false, --artifact). No recut, pause, or publish change |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, signal_delivery CRIT: five Sep-14 MLB props unposted. Root cause stale `model_action_thresholds.paused` after #727 until 10:02Z sync. Sync on refresh + before Discord; health check only currently-postable; no backfill |

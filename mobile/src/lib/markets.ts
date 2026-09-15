@@ -1312,6 +1312,8 @@ export const MODEL_TOP_FEATURES: Record<string, string[]> = {
   mlb_over_under: ['home_starter_era', 'away_starter_era', 'total_line', 'is_dome_game', 'temp_f'],
   mlb_runline: ['d_starter_era', 'd_starter_era_last3', 'd_bullpen_era', 'd_team_whip', 'd_woba'],
   mlb_f5_moneyline: ['d_starter_era', 'd_starter_era_last3', 'd_iso', 'd_woba'],
+  mlb_f5_over_under: ['away_starter_era', 'home_starter_era', 'total_line', 'away_team_era', 'home_runs_last_5'],
+  mlb_f5_runline: ['d_starter_era_last3', 'd_starter_era', 'd_iso', 'd_ops', 'd_woba'],
   mlb_prop_pitcher_k: ['season_k_avg', 'k_last10_avg', 'k_last5_avg', 'savant_k_pct', 'k_last3_avg'],
   mlb_prop_pitcher_hits: ['season_hits_avg'],
   mlb_prop_pitcher_er: ['opp_team_woba'],

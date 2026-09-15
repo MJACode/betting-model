@@ -85,7 +85,11 @@ at, and it excludes the books a member cannot bet.
   its source is a retrain question. **These picks are a new population — no cut
   was swept on it — so report them separately, by `line_book`.**
   `SCORE_OFF_ANY_BOOK_LINE=0` restores "no DraftKings quote, no pick".
-  Test: `tests/test_score_off_any_book_line.py`.
+  GAME markets DraftKings lists stay DK-lined (the line is a feature). MLB
+  F5 totals/spreads are the exception: DK's Odds API feed returns none
+  (measured 2026-09-15) and other books do, so those two use the same first-
+  bettable-book walk. Test: `tests/test_score_off_any_book_line.py`,
+  `tests/test_f5_any_book_line.py`.
 - **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO PRICE.** (2026-09-03.)
   A win with `dk_odds IS NULL` (and, since 2026-09-09, `decision_odds IS NULL`)
   is stored as +$90.91 on a $100 stake — exactly the payout of -110 — so

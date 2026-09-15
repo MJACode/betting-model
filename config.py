@@ -360,7 +360,16 @@ ACTION_THRESHOLDS: dict = {
     # the bar looking for a better cell, because the grid already says there
     # isn't one. Clearing §2 needs positive ROI and calibration <=5% as well.
     "mlb_f5_moneyline":   {"min_prob": 0.58, "min_edge": 0.02},
-    # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
+    # mlb_f5_over_under / mlb_f5_runline — scoring path is LIVE against the
+    # first bettable book that prices the market (FanDuel/BetMGM/etc.;
+    # measured 2026-09-15: 0 DraftKings Odds-API rows ever, 18 of today's
+    # games priced at FanDuel and BetMGM). BET is PAUSED: artifacts are
+    # 2026-05-08, leak-mismatched (starter ERA on leaked mlb_pitcher_stats),
+    # trained on synthetic F5 lines (fg_total × 0.62 / spread −0.5). No §7
+    # cut on real multi-book F5 prices. Unpause path is a REBUILD on the
+    # as-of tables + real F5 quotes, then a sweep. Cut kept for that sweep.
+    "mlb_f5_over_under":  {"min_prob": 0.65, "min_edge": 0.15},
+    "mlb_f5_runline":     {"min_prob": 0.65, "min_edge": 0.15},
     # mlb_prop_batter_hr + mlb_prop_batter_rbi RETIRED 2026-09-02 (matt) -- see the RETIRED block above PROP_MODELS.
     "mlb_prop_batter_runs":   {"min_prob": 0.62, "min_edge": 0.10},  # 2026-08-31 (mike): 0.47/0.16 -> 0.62/0.10 on the floor-corrected calibrated sweep = 27 bets 18-9 +25.6%, and the halves are +25.6% / +25.6% -- the flattest split on the board. ~9.9/wk. Supersedes the 2026-08-09 unpause cut, which was chosen on raw probabilities.
     "mlb_prop_batter_hits":   {"min_prob": 0.78, "min_edge": 0.17},  # 2026-06-28 full-outcome re-sweep: 0.78/0.17 = 77 bets 56-21 +8.3% (genuine combo found — UNPAUSED from the 2026-06-21 pause)
@@ -878,6 +887,11 @@ PAUSED_MODELS: set = {
     # weeks; a dormant model that nobody paused is indistinguishable from a
     # broken feed. Unpause path is the retrain in the ACTION_THRESHOLDS note
     # (2019-2025, 2026 held out) followed by scripts/mlb_runline_sweep.py.
+    # 2026-09-15: a human CLE -1.5 is a market/PCG handicap, not this model's
+    # output, and is not a reason to unpause. Honest-era −6.93% both sides
+    # negative; 0.68 floor unreachable; no live-artifact §7 cut clears
+    # (paused_model_assessment: 0.70/0.08 pooled 17-10 +5.7%, 3 settled on
+    # the live artifact).
     "mlb_runline",
     # 2026-09-03 (mike): PAUSED. The pitcher-stats leak repair
     # (docs/team_stats_leak.md) removed the only thing holding this model up.
@@ -893,6 +907,17 @@ PAUSED_MODELS: set = {
     # classifier that does not rank -- moving a bar on a 0.50 AUC only changes
     # how many coin flips get bet.
     "mlb_over_under",
+    # 2026-09-15 (mike): scoring path ENABLED (the "DK does not carry
+    # totals/spreads_1st_5_innings" disable was false — other books do, and
+    # the platform decides at the best bettable price). BET stays paused.
+    # Artifacts are 2026-05-08, leak-mismatched (same starter-ERA leak that
+    # paused mlb_over_under), trained on synthetic F5 lines. No §7 cut on
+    # real FanDuel/BetMGM F5 prices. Unpause path is a retrain on the as-of
+    # tables + real F5 quotes, then a sweep. A human CLE -1.5 is a market
+    # handicap, not mlb_runline output, and is not a reason to unpause
+    # full-game runline either.
+    "mlb_f5_over_under",
+    "mlb_f5_runline",
     # The five golf models were paused here on 2026-09-03 (mike) and RETIRED on
     # 2026-09-08 -- they are gone from MODELS entirely, so there is nothing left
     # to pause. See the RETIRED block above. The 09-03 pause asked WHY nothing
@@ -1636,8 +1661,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_over_under":           0.04,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "mlb_runline":              0.11,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-08-21: DORMANT (model can no longer reach 0.68 — see ACTION_THRESHOLDS note); cut held pending the 2019-2025/holdout-2026 retrain + scripts/mlb_runline_sweep.py
     "mlb_f5_moneyline":         0.02,   # 2026-09-03 (mike): 0.00 -> 0.02 with the retrained artifact. See ACTION_THRESHOLDS for the sweep, the plateau failure, and the kill criterion.
-    "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
-    "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
+    "mlb_f5_over_under":        0.15,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
+    "mlb_f5_runline":           0.15,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
     "nhl_moneyline":            0.05,   # placeholder — tune after 50+ settled picks
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.05,
@@ -1728,8 +1753,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_over_under":           0.5,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "mlb_runline":              0.68,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-08-21: DORMANT — max live prob in Aug 2026 was 0.625, so this floor is unreachable; cut held pending the retrain + re-sweep (see ACTION_THRESHOLDS note)
     "mlb_f5_moneyline":         0.58,   # 2026-09-03 (mike): 0.74 -> 0.58. The old bar fired ZERO bets (max raw prob 0.734) and was swept on CALIBRATED probabilities while the scorer decides on RAW. See ACTION_THRESHOLDS.
-    "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
-    "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets
+    "mlb_f5_over_under":        0.65,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
+    "mlb_f5_runline":           0.65,   # PAUSED (leak-era 2026-05-08 artifact; scoring path on, BET waits retrain)
     "nhl_moneyline":            0.55,
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.55,
@@ -2509,10 +2534,12 @@ BEST_LINE_MAX_LAG_MIN: float = float(os.environ.get("BEST_LINE_MAX_LAG_MIN", "30
 # ordinary best-price check then runs at THAT line. Choosing the book by whose
 # number the model likes best would be choosing the bet to suit the model.
 #
-# Game markets are deliberately NOT included: DraftKings lists every game we
-# model, the handful it does not (MLB first-five spreads and totals) have no
-# model, and a game-level DraftKings line is a model FEATURE, so changing its
-# source is a retrain question rather than a config one.
+# Game markets DraftKings lists stay DK-lined (the line is a model FEATURE).
+# MLB first-five spreads and totals are the exception: DraftKings' Odds API
+# feed does not return them (measured 2026-09-15: 0 DK rows ever) and
+# FanDuel/BetMGM/WilliamHill do. Those two markets use the same first-
+# bettable-book walk as a player prop DK does not list. A game-level DK
+# line that DOES exist is still a retrain question, not a config one.
 #
 # picks.line_book records the book; NULL means DraftKings. These picks are a
 # NEW population -- every cut was swept on DraftKings-lined picks -- so they
