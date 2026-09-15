@@ -23,7 +23,7 @@ until the worker 2/3/4pp grid is read (`MLB_SPREAD_MARKET_PUBLISH` default 0).
 
 | Market | Verdict |
 |---|---|
-| Totals | **Paper publisher `mlb_total_market` at 2pp**, equal `total_line`, best bettable soft book (not DK-only). GROK_BOT 2026-09-15: Pin OPEN no-vig vs DK OPEN implied ≥2pp, Apr–Jul ~**+11% n≈103**. This pass did **not** reproduce that number on Pinnacle-vs-bettable-soft de-vig (May–Jun 2pp **−11.13% / 79**). Construction differs. Worker job `game_line_market_sweep` remeasures both constructions on `snapshot_type='open'`. `mlb_over_under` stays paused. |
+| Totals | **Paper publisher `mlb_total_market` at 2pp**: Pin no-vig **lean** minus the **best bettable soft implied** (not DK-only), equal `total_line`. GROK vs DK only: Apr–Jul ~**+11% n≈103**. `mlb_over_under` stays paused. |
 | Run line | **Do not live-publish pure Pin-vs-soft spreads.** GROK Pin-open vs DK-open ≥2pp: ~**−5% n≈200**. Earlier same-day bettable-soft de-vig at **1.8pp** was +4.16% / 328 through Aug (both halves +) — a different construction, and GROK’s ≥2pp result is the one that says “more work.” Code for `mlb_spread_market` at 1.8pp remains; INSERT is gated off. `mlb_runline` stays paused. |
 | Hybrid | GROK on existing `mlb_over_under` BETs: disagree with Pin lean **−17.7u / 71**; agree any **−5.1u / 53**; agree ≥1.5pp **−0.5u / 8**. Stops the hemorrhage, is **not +EV**. Steam/public overlay stays **shadow** on the market cards. Live gate stays on the four predictive MLB game models. |
 | Retrain | **Not run here** (no `DATABASE_URL`). Next only if the worker totals 2pp cell is still negative. Commands at the bottom. |
@@ -201,7 +201,7 @@ Do **not** use the close as a feature. Opener-vs-current belongs in
 | Sweep | `scripts/game_line_market_sweep.py` — `snapshot_type=open`, 2/3/4pp, `--by-month`, `--vs devig\|implied`, `--pin-lean`, month-chunked load. Thin n still prints. |
 | Worker job | `tracking/job_queue.py` `game_line_market_sweep` + two keys in `jobs/declared_jobs.json` |
 | Spreads rule | `models/mlb_game_market.py` `MIN_EDGE_SPREADS = 0.018`; INSERT gated by `MLB_SPREAD_MARKET_PUBLISH` (default 0) |
-| Totals paper | `mlb_total_market` at 0.02; `find_total_bets` wall stays 1.0; INSERT gated by `MLB_TOTAL_MARKET_PUBLISH` (default 0) |
+| Totals paper | `mlb_total_market` at 0.02; **Pin fair − soft implied, pin-lean, best soft book**; `find_total_bets` wall stays 1.0; INSERT gated by `MLB_TOTAL_MARKET_PUBLISH` (default 0) |
 | Card | `scripts/mlb_game_market_card.py --market spreads\|totals\|both` |
 | Pipeline | `run_pipeline.py --step mlb-game-market` logs both lanes; INSERT only if env=1 |
 | Gate | `game_market_gate` live on the four predictive MLB game models; **shadow** on both cards |

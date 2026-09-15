@@ -11,9 +11,10 @@ Deliberate and load-bearing:
   BEST_LINE_BOOKMAKERS. GROK Pin-vs-DK ≥2pp was ~−5% n≈200 — do not live
   INSERT until MLB_SPREAD_MARKET_PUBLISH=1.
 
-  TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). GROK Pin-open vs DK-open
-  Apr–Jul ~+11% n≈103 is the candidate. find_total_bets' default wall stays
-  1.0; this card passes 0.02 explicitly. MLB_TOTAL_MARKET_PUBLISH default 0.
+  TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). Pin no-vig lean minus
+  the best bettable soft implied, equal total. GROK vs DK only: Apr–Jul
+  ~+11% n≈103. find_total_bets' default wall stays 1.0; this card passes
+  0.02 explicitly. MLB_TOTAL_MARKET_PUBLISH default 0.
 
   ONE BET PER GAME. The same game at three books is one opinion.
 
