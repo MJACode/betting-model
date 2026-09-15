@@ -297,7 +297,7 @@ def score_game(conn: DBConnection,
     # override below (it also derives is_five_rounds from the line).
     feat = features
     if (market in ("totals", "spreads") and sport != "UFC") or "1st_5_innings" in market:
-        mkt_odds = _get_dk_odds(conn, game_id, market)
+        mkt_odds = _get_scoring_odds(conn, game_id, market)
         if mkt_odds:
             feat = dict(features)  # shallow copy to avoid mutating shared dict
             if mkt_odds.get("total_line") is not None:
@@ -441,15 +441,17 @@ def score_game(conn: DBConnection,
             logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
             return []
 
-    # Get DK odds
-    odds = _get_dk_odds(conn, game_id, market)
+    # Game-market quote: DraftKings first, then (for F5 totals/spreads that
+    # DK's Odds API feed does not list) the first bettable book with a real
+    # price. Never a synthetic sbr_consensus row, never a 0.50 "fair" line.
+    odds = _get_scoring_odds(conn, game_id, market)
 
-    # F5 models — only score against real DK odds.
-    # h2h_1st_5_innings: DK carries this, fetched at 11am. Score normally when present.
-    # totals/spreads_1st_5_innings: DK does not carry these at any tier. Disabled until
-    # real lines are available. Do not use prob-only fallback for any F5 market.
-    if not odds and "1st_5_innings" in market:
-        logger.debug(f"  {game_id}/{model_id}: no real DK F5 odds — skipping")
+    # F5 — only score against a real book price. h2h_1st_5_innings is on DK;
+    # totals/spreads_1st_5_innings are on FanDuel/BetMGM/etc. (measured
+    # 2026-09-15: 0 DK rows ever, 18 of today's games priced at FanDuel and
+    # BetMGM). Do not use _score_f5_prob_only for live BET publish.
+    if "1st_5_innings" in market and not _has_real_game_price(odds, market):
+        logger.debug(f"  {game_id}/{model_id}: no real F5 book price — skipping")
         return []
 
     # UFC round totals without DK lines — prob-only vs the synthetic line the
@@ -489,6 +491,7 @@ def score_game(conn: DBConnection,
                     bankroll=bankroll,
                     features=features,
                     commence_time=commence_time,
+                    line_book=(odds or {}).get("line_book"),
                 )
                 if pick:
                     picks.append(pick)
@@ -511,6 +514,7 @@ def score_game(conn: DBConnection,
                     bankroll=bankroll,
                     features=features,
                     commence_time=commence_time,
+                    line_book=(odds or {}).get("line_book"),
                 )
                 if pick:
                     picks.append(pick)
@@ -543,6 +547,7 @@ def score_game(conn: DBConnection,
                 bankroll=bankroll,
                 features=features,
                 commence_time=commence_time,
+                line_book=(odds or {}).get("line_book"),
             )
             if pick:
                 picks.append(pick)
@@ -552,7 +557,9 @@ def score_game(conn: DBConnection,
     # Also stamp the DK betslip deep link for the picked selection.
     for p in picks:
         p.update(_get_public_betting(conn, game_id, market, p["pick_side"]))
-        p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
+        # A DraftKings slip for a market DraftKings does not list opens empty.
+        p["dk_bet_link"] = (
+            None if p.get("line_book") else _link_for_side(odds, p["pick_side"]))
     # The price the bettor should actually take, and where. Stamped after the
     # pick is decided so it can never influence the BET/AVOID call.
     _stamp_best_game_prices(conn, picks, market)
@@ -609,7 +616,9 @@ def _score_f5_prob_only(
     Edge is stored as model_prob - 0.50 for record-keeping.
     Kelly sizing uses implied_prob=0.5 (fair line) — same formula as full-game models.
     """
-    # F5 markets DK does not carry. Same rule: no market price, no bet.
+    # F5 markets with no book price. Live scoring never calls this
+    # (_get_scoring_odds + the real-price skip sit in front). Kept so a
+    # REQUIRE_DK_PRICE=0 experiment can still run the old 0.50-fair path.
     if REQUIRE_DK_PRICE:
         logger.debug(f"  {game_id}/{model_id}: no DK F5 line — skipped "
                      f"(REQUIRE_DK_PRICE)")
@@ -1317,7 +1326,8 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                model_prob: float, dk_implied_prob: float, edge: float,
                dk_odds: float, bankroll: float,
                features: dict, scored_line: float | None = None,
-               commence_time: str | None = None) -> dict | None:
+               commence_time: str | None = None,
+               line_book: str | None = None) -> dict | None:
     """
     Classify edge and build pick dict. Returns None only if edge exceeds noise cap.
     BET/AVOID/NONE rows are all written to DB so the website can display every game.
@@ -1335,6 +1345,9 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     # The RAW numbers are what gets STORED -- picks.edge and
     # picks.model_probability keep their DraftKings meaning, so every
     # historical comparison and every past threshold sweep stays readable.
+    # When the LINE came from another book (F5 totals/spreads DraftKings
+    # does not list), those three columns stay NULL / 0.0 and decision_*
+    # names the book, same as _make_prop_pick.
     signal_type = _decide(model_id, model_prob, dk_implied_prob, edge, dk_odds,
                           is_prop=False)
     kelly_frac, rec_bet = _size(model_id, model_prob, dk_implied_prob, bankroll,
@@ -1352,9 +1365,10 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "pick_side":         pick_side,
         "pick_label":        pick_label,
         "model_probability": round(model_prob, 4),
-        "dk_implied_prob":   round(dk_implied_prob, 4),
-        "edge":              round(edge, 4),
-        "dk_odds":           dk_odds,
+        "dk_implied_prob":   0.0 if (line_book or dk_implied_prob is None)
+                             else round(dk_implied_prob, 4),
+        "edge":              0.0 if (line_book or edge is None) else round(edge, 4),
+        "dk_odds":           None if line_book else dk_odds,
         "scored_line":       scored_line,
         "kelly_fraction":    kelly_frac,
         "recommended_bet":   rec_bet,
@@ -1365,7 +1379,9 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "confidence_tier":   conf_tier,
         "game_time":         commence_time,
         "downgrade_reason":  _pause_note(model_id),
-        **_decision_fields(ODDS_API_BOOKMAKER, dk_odds, dk_implied_prob, edge),
+        **_decision_fields(line_book or ODDS_API_BOOKMAKER, dk_odds,
+                           dk_implied_prob, edge),
+        "line_book":         line_book,
     }
 
 
@@ -2014,6 +2030,107 @@ def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
     return str(ct)[:19] if ct else None
 
 
+# F5 totals/spreads DraftKings' Odds API feed does not list. Other books do
+# (measured 2026-09-15: 0 DK rows ever; FanDuel/BetMGM priced 18 of today's
+# games). Score those off the first bettable book, same rule as a prop
+# DraftKings does not list. h2h_1st_5_innings stays DK-first because DK
+# carries it.
+F5_ANY_BOOK_MARKETS = frozenset({
+    "totals_1st_5_innings",
+    "spreads_1st_5_innings",
+})
+
+_GAME_ODDS_COLS = [
+    "home_price", "away_price", "draw_price",
+    "spread_home", "total_line", "over_price", "under_price",
+    "home_link", "away_link", "draw_link", "over_link", "under_link",
+    "snapshot_at",
+]
+
+
+def _game_spread_filter_sql(game_id: str, market: str) -> str:
+    """±1.5 only on full-game MLB/NHL spreads. F5 runline is typically -0.5."""
+    if market == "spreads" and game_id.split("_", 1)[0] in ("MLB", "NHL"):
+        return "AND ABS(spread_home) = 1.5"
+    return ""
+
+
+def _has_real_game_price(odds: dict | None, market: str) -> bool:
+    """A quote with a line but no price is not a market (sbr_consensus F5)."""
+    if not odds:
+        return False
+    if market.startswith("totals"):
+        return odds.get("over_price") is not None or odds.get("under_price") is not None
+    return odds.get("home_price") is not None or odds.get("away_price") is not None
+
+
+def _latest_book_game_odds(conn: DBConnection, game_id: str, market: str,
+                           bookmaker: str, cutoff: str | None) -> dict | None:
+    """Newest pre-game snapshot for one book, bounded at first pitch."""
+    spread_filter = _game_spread_filter_sql(game_id, market)
+    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
+    row = conn.execute(f"""
+            SELECT home_price, away_price, draw_price,
+                   spread_home, total_line, over_price, under_price,
+                   home_link, away_link, draw_link, over_link, under_link,
+                   snapshot_at
+            FROM odds
+            WHERE game_id   = ?
+              AND market    = ?
+              AND bookmaker = ?
+              AND snapshot_type != 'in_play'
+              {spread_filter}
+              {pregame_filter}
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        """, (game_id, market, bookmaker) + ((cutoff,) if cutoff else ())
+        ).fetchone()
+    if not row:
+        return None
+    return dict(zip(_GAME_ODDS_COLS, row))
+
+
+def _fallback_game_line_quote(conn: DBConnection, game_id: str, market: str,
+                              cutoff: str | None = None) -> dict | None:
+    """The line for an F5 total/spread DraftKings does not list, from the
+    first bettable book that does.
+
+    Book taken in BEST_LINE_BOOKMAKERS order, never by price -- the line is
+    the proposition. `_stamp_best_game_prices` then shops the same number.
+    Synthetic sbr_consensus rows have NULL prices and cannot win this walk.
+    """
+    if not SCORE_OFF_ANY_BOOK_LINE or market not in F5_ANY_BOOK_MARKETS:
+        return None
+    if conn is None:
+        return None
+    for book in BEST_LINE_BOOKMAKERS:
+        if book == ODDS_API_BOOKMAKER:
+            continue
+        odds = _latest_book_game_odds(conn, game_id, market, book, cutoff)
+        if _has_real_game_price(odds, market):
+            odds["line_book"] = book
+            return odds
+    return None
+
+
+def _get_scoring_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
+    """The quote a pre-game pick is built at: DraftKings when it priced the
+    market, else (F5 totals/spreads only) the first bettable book that did.
+    """
+    odds = _get_dk_odds(conn, game_id, market)
+    if _has_real_game_price(odds, market):
+        if odds is not None:
+            odds.setdefault("line_book", None)
+        return odds
+    cutoff = None
+    if conn is not None:
+        try:
+            cutoff = _pregame_cutoff(conn, game_id)
+        except Exception:  # noqa: BLE001 - fail open, same as the DK read
+            cutoff = None
+    return _fallback_game_line_quote(conn, game_id, market, cutoff)
+
+
 def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     """
     Get most recent PRE-GAME odds snapshot for a game+market.
@@ -2049,42 +2166,12 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     rows), which prefixes shorter and sorts BEFORE any same-day timestamp —
     included, which is the fail-open direction.
     """
-    cols = ["home_price", "away_price", "draw_price",
-            "spread_home", "total_line", "over_price", "under_price",
-            "home_link", "away_link", "draw_link", "over_link", "under_link",
-            "snapshot_at"]
-
     cutoff = _pregame_cutoff(conn, game_id)
-    pregame_filter = "AND substr(snapshot_at, 1, 19) <= ?" if cutoff else ""
-
-    # For MLB runline / NHL puckline, filter to the standard ±1.5 to avoid
-    # alternate spread lines returned by the Odds API. Basketball spreads
-    # (WNBA/NBA) are game-specific numbers (-1.5 .. -15.5) — the ±1.5 filter
-    # would discard nearly every row, so it only applies to MLB/NHL game ids.
-    spread_filter = ""
-    if market == "spreads" and game_id.split("_", 1)[0] in ("MLB", "NHL"):
-        spread_filter = "AND ABS(spread_home) = 1.5"
 
     for bookmaker in ("draftkings", "sbr_consensus"):
-        row = conn.execute(f"""
-            SELECT home_price, away_price, draw_price,
-                   spread_home, total_line, over_price, under_price,
-                   home_link, away_link, draw_link, over_link, under_link,
-                   snapshot_at
-            FROM odds
-            WHERE game_id   = ?
-              AND market    = ?
-              AND bookmaker = ?
-              AND snapshot_type != 'in_play'
-              {spread_filter}
-              {pregame_filter}
-            ORDER BY snapshot_at DESC
-            LIMIT 1
-        """, (game_id, market, bookmaker) + ((cutoff,) if cutoff else ())
-        ).fetchone()
-
-        if row:
-            return dict(zip(cols, row))
+        odds = _latest_book_game_odds(conn, game_id, market, bookmaker, cutoff)
+        if odds:
+            return odds
 
     # UFC only: the same fight can exist as TWO games rows with home/away
     # swapped, because game_id is built from The Odds API's home_team and that
@@ -2096,23 +2183,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     # and zero on the other, and all three picks landed on the empty one.
     sibling = _sibling_ufc_game_id(game_id)
     if sibling:
-        row = conn.execute(f"""
-            SELECT home_price, away_price, draw_price,
-                   spread_home, total_line, over_price, under_price,
-                   home_link, away_link, draw_link, over_link, under_link,
-                   snapshot_at
-            FROM odds
-            WHERE game_id   = ?
-              AND market    = ?
-              AND bookmaker = 'draftkings'
-              AND snapshot_type != 'in_play'
-              {spread_filter}
-              {pregame_filter}
-            ORDER BY snapshot_at DESC
-            LIMIT 1
-        """, (sibling, market) + ((cutoff,) if cutoff else ())).fetchone()
-        if row:
-            odds = dict(zip(cols, row))
+        odds = _latest_book_game_odds(conn, sibling, market, "draftkings", cutoff)
+        if odds:
             # totals are orientation-independent (over/under/line); h2h is NOT,
             # so home/away must be swapped to match THIS row's orientation.
             if market != "totals":

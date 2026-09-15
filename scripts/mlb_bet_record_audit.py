@@ -57,8 +57,8 @@ away-side spread grading once survived a threshold change and turned a -20.6%
 cut into a phantom +15%. Run this before quoting any number above.
 
 Rows the script cannot re-grade are reported, never silently dropped —
-`mlb_f5_over_under` and `mlb_f5_runline` have no independent grading path (DK
-does not carry those markets) and a handful of props have no game log.
+a handful of props have no game log. F5 O/U and F5 RL re-grade from
+`home_score_f5` / `away_score_f5` and `scored_line` (HOME number).
 
 READ THE OUTPUT LIKE THIS
 -------------------------
@@ -187,6 +187,25 @@ def _regrade(r: dict) -> str | None:
             return "PUSH"
         return "WIN" if (side == "home") == (fh > fa) else "LOSS"
 
+    if m == "mlb_f5_over_under":
+        fh, fa = r["home_score_f5"], r["away_score_f5"]
+        if fh is None or fa is None or line is None:
+            return None
+        total = fh + fa
+        if total == line:
+            return "PUSH"
+        return "WIN" if (side == "over") == (total > line) else "LOSS"
+
+    if m == "mlb_f5_runline":
+        fh, fa = r["home_score_f5"], r["away_score_f5"]
+        if fh is None or fa is None or line is None:
+            return None
+        # scored_line is always the HOME number (§4).
+        margin = (fh - fa) + line if side == "home" else (fa - fh) - line
+        if margin == 0:
+            return "PUSH"
+        return "WIN" if margin > 0 else "LOSS"
+
     if m.startswith("mlb_prop_"):
         actual = r["actual"]
         if actual is None or line is None:
@@ -195,7 +214,7 @@ def _regrade(r: dict) -> str | None:
             return "PUSH"
         return "WIN" if (side == "over") == (actual > line) else "LOSS"
 
-    return None  # f5_over_under / f5_runline: DK carries no such market
+    return None
 
 
 def _expected_profit(result: str, odds) -> float | None:

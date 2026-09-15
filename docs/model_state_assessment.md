@@ -40,7 +40,7 @@ retrained.**
 | `wnba_over_under`, `wnba_spread` | 2026-07-19 | mismatched (both paused) |
 | `nba_moneyline` | 2026-06-19 | **mismatched — season starts October** |
 | `nhl_moneyline`, `nhl_moneyline_regulation` | 2026-06-21 | **mismatched — season starts October** |
-| `mlb_f5_over_under`, `mlb_f5_runline` | 2026-05-08 | mismatched (produce no picks) |
+| `mlb_f5_over_under`, `mlb_f5_runline` | 2026-05-08 | mismatched — scoring path enabled 2026-09-15 against real multi-book F5 prices; BET paused pending retrain |
 | `mlb_prop_pitcher_k`, `pitcher_hits`, `pitcher_outs` | **2026-09-03** | matched — retrained |
 | `mlb_prop_batter_runs`, `batter_walks` | **2026-09-03/04** | matched — retrained |
 | `mlb_prop_*` (the 5 PAUSED ones) | various | mismatched — must be retrained BEFORE any unpause |
@@ -308,8 +308,9 @@ inflates every number by 100x.
   aggregate. Tier-1 counting stats are fine; rate stats are not.
 * `injuries` starts 2026-04-05, so four injury features are dead in training.
 
-**Never measured:** `mlb_f5_over_under`, `mlb_f5_runline` — both read the
-rebuilt pitcher table, both produce no picks, both hold active registry rows.
+**Never measured on real F5 prices:** `mlb_f5_over_under`, `mlb_f5_runline` —
+both read the rebuilt pitcher table, both hold 2026-05-08 artifacts. Scoring
+path enabled 2026-09-15 against FanDuel/BetMGM quotes; BET paused until retrain.
 
 **Questions for a person:** the five GOLF models that have never fired; whether
 `mlb_prop_pitcher_k` should be paused on its record.

@@ -485,11 +485,14 @@ What shipped:
 - **The app** carries `line_book`, says whose line it is on the pick's detail
   and line-movement copy, and bumps the settled-pick cache key (a cached row
   from before would claim DraftKings' line).
-- **GAME markets are deliberately out.** DraftKings lists every game we
-  model; the markets it does not list (MLB first-five spreads and totals, 114
-  each since 08-28) have no model; and a game-level DraftKings line is a model
-  FEATURE, so changing its source is a retrain question rather than a config
-  one.
+- **F5 totals and F5 spreads are in.** DraftKings' Odds API feed still
+  returns none (measured 2026-09-15: 0 DK rows ever). FanDuel, BetMGM and
+  William Hill do — 18 of today's games, priced. `mlb_f5_over_under` and
+  `mlb_f5_runline` score off the first bettable book in
+  `BEST_LINE_BOOKMAKERS` order (the line is the proposition), then shop the
+  same number. Other game markets stay DK-lined: a game-level DraftKings
+  line that DOES exist is a model FEATURE, so changing its source is a
+  retrain question.
 - **Flag:** `SCORE_OFF_ANY_BOOK_LINE=0` restores "no DraftKings quote, no
   pick".
 

@@ -381,15 +381,20 @@ maximum**, which is the check 0.74 failed.
 | Model | AUC | CalError | Gate (≤5%) | Holdout rows | Notes |
 |---|---|---|---|---|---|
 | `mlb_f5_moneyline` | 0.691 | 5.78% | borderline | 1,470 | v3 retrain 2026-05-12 — train 2019-2025 excl. 2024 holdout |
-| `mlb_f5_over_under` | 0.582 | 1.5% | PASS | 1,875 | v1 trained 2026-05-08 — DISABLED (no DK lines) |
-| `mlb_f5_runline` | 0.643 | 3.2% | PASS | 1,711 | v1 trained 2026-05-08 — DISABLED (no DK lines) |
+| `mlb_f5_over_under` | 0.582 | 1.5% | PASS | 1,875 | v1 trained 2026-05-08 — **PAUSED** (leak-era artifact; scoring path on against real multi-book F5 totals) |
+| `mlb_f5_runline` | 0.643 | 3.2% | PASS | 1,711 | v1 trained 2026-05-08 — **PAUSED** (same; F5 spreads) |
 
 **F5 O/U feature set (top 5):** away_starter_era (12.1%), home_starter_era (10.3%), total_line (7.0%), away_team_era (5.8%), home_runs_last_5 (5.7%)
 **F5 RL feature set (top 5):** d_starter_era_last3 (19.9%), d_starter_era (16.1%), d_iso (6.8%), d_ops (6.7%), d_woba (5.9%)
 
 **F5 O/U and F5 RL backtests use SYNTHETIC lines** (full_game_total × 0.62, calibrated from 26,443 games).
-CalError is measured vs. synthetic lines — will improve once real DK F5 O/U/RL lines accumulate.
-The Odds API does not carry F5 O/U or RL for DraftKings — all F5 scoring is prob-only (edge = model_prob − 0.50).
+CalError is measured vs. synthetic lines. Those AUCs were also fit on leaked `mlb_pitcher_stats` (season-final ERA on every start) — the same leak that paused `mlb_over_under` at honest-era AUC 0.486.
+
+**2026-09-15 (mike): the "DK does not carry these markets" disable was false.** DraftKings' Odds API feed still returns 0 rows for `totals_1st_5_innings` / `spreads_1st_5_innings` (re-queried that day). FanDuel, BetMGM and William Hill do — 18 of today's games, priced. Ingest already fetched all three F5 markets from every shopped book (`MLB_F5_MARKETS`). The scorer now prices F5 O/U and F5 RL off the first bettable book in `BEST_LINE_BOOKMAKERS` order (then shops the same line). No synthetic DK line for live BET. Historical `sbr_consensus` synthesizer rows stay for training features.
+
+**BET stays paused.** Artifacts are 2026-05-08, leak-mismatched, trained on synthetic lines, never swept on real F5 prices. Unpause path is a retrain on the as-of tables + real F5 quotes, then a §7 sweep. Scoring writes NONE rows so that sweep has a universe.
+
+**Full-game `mlb_runline` / `mlb_over_under` stay paused independently.** Honest-era runline −6.93% both sides negative, 0.68 floor unreachable, no live-artifact §7 cut (3 settled at the pooled 0.70/0.08 cell). Over/under honest-era AUC 0.486, zero of six folds clearing 0.55. A human CLE −1.5 is a market/PCG handicap, not `mlb_runline` output.
 
 **v1 F5 O/U backtest:**
 
@@ -412,7 +417,7 @@ The Odds API does not carry F5 O/U or RL for DraftKings — all F5 scoring is pr
 - F5 RL: prob ≥ 58%, edge ≥ 8% (action filter same)
 
 **Caveat on pick volume:** F5 O/U at 57%/7% generates ~1,300 picks/season vs ~300 for full-game O/U.
-High volume + synthetic lines = backtest ROI should be treated as directional only until real DK F5 lines accumulate.
+High volume + synthetic lines = backtest ROI is directional only until a retrain on real F5 prices.
 F5 RL -0.5 has the same binary outcome as F5 ML (home wins F5). Both can fire on the same game — this doubles
 exposure on the same outcome. Monitor correlation when reviewing live results.
 

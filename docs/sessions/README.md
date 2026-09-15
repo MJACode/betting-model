@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, F5 O/U and F5 RL scoring path on against first bettable book (FanDuel/BetMGM). "DK does not carry" disable was false. BET paused (leak-era 2026-05-08 artifacts). mlb_runline / mlb_over_under stay paused; human CLE −1.5 is not an unpause |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, signal_delivery CRIT: five Sep-14 MLB props unposted. Root cause stale `model_action_thresholds.paused` after #727 until 10:02Z sync. Sync on refresh + before Discord; health check only currently-postable; no backfill |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, one-shot `clv_backfill` worker job + declared `clv-no-vig-backfill-2026-09-14`. Loops `_backfill_clv` until empty (cap 40). No model/threshold change |
 | 2026-09-14 | [2026-09](./2026-09.md) | 2026-09-14, no-vig CLV: multiplicative two-way close, Pinnacle when present, Kalshi not de-vigged. Legacy raw_one_sided stamped; pedigree filters method. No unit/recut |
