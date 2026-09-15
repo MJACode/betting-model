@@ -30,6 +30,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_pitcher_walks: { min_prob: 0.6, min_edge: 0.08, min_odds: -140 },
   mlb_runline: { min_prob: 0.68, min_edge: 0.11, min_odds: -200 },
   mlb_spread_market: { min_prob: 0, min_edge: 0.018, min_odds: -200 },
+  mlb_total_market: { min_prob: 0, min_edge: 0.02, min_odds: -200 },
   nba_moneyline: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
   nba_over_under: { min_prob: 0.66, min_edge: 0.12, min_odds: -200 },
   nba_prop_player_assists: { min_prob: 0.6, min_edge: 0.08, min_odds: -200 },

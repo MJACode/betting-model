@@ -66,9 +66,11 @@ Fail-open; never upgrades NONE. A locked BET is still a pick (§1c); this
 only affects the pass that would *write* a new BET. `shadow` restores
 persist-only.
 
-`mlb_spread_market` (the 1.8pp Pinnacle-vs-soft run-line rule) is **not** in
-`GAME_MARKET_GATE_MODELS`. Its card applies this module in **shadow** so the
-measured cut is not silently vetoed. `docs/mlb_runline_ou_edge_search.md`.
+`mlb_spread_market` and `mlb_total_market` are **not** in
+`GAME_MARKET_GATE_MODELS`. Their cards apply this module in **shadow** so a
+cut that has not been re-measured under the overlay is not silently vetoed.
+INSERT itself is gated by `MLB_SPREAD_MARKET_PUBLISH` /
+`MLB_TOTAL_MARKET_PUBLISH` (default 0). `docs/mlb_runline_ou_edge_search.md`.
 
 ## How to evaluate the next week
 

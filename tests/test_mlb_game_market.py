@@ -105,6 +105,37 @@ def test_the_measured_cut_is_eighteen_tenths():
     assert "mlb_runline" in config.PAUSED_MODELS
     assert "mlb_over_under" in config.PAUSED_MODELS
     assert "mlb_spread_market" not in config.GAME_MARKET_GATE_MODELS
+    # Paper-first: a missing env must not INSERT live BETs.
+    assert config.MLB_SPREAD_MARKET_PUBLISH is False
+    assert config.MLB_TOTAL_MARKET_PUBLISH is False
+    assert mk.publish_enabled("spreads") is False
+    assert mk.publish_enabled("totals") is False
+
+
+def test_totals_paper_cut_is_two_pp_and_not_the_wall():
+    assert mk.MIN_EDGE_TOTALS_PAPER == 0.02
+    assert config.ACTION_THRESHOLDS["mlb_total_market"] == {
+        "min_prob": 0.0, "min_edge": 0.02,
+    }
+    assert config.scoring_method("mlb_total_market") == "rule"
+    assert "mlb_total_market" not in config.PAUSED_MODELS
+    assert "mlb_total_market" not in config.GAME_MARKET_GATE_MODELS
+    quotes = {
+        ("G1", "pinnacle"): {
+            "total_line": 8.5, "over_price": -150, "under_price": 130,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+        ("G1", "fanduel"): {
+            "total_line": 8.5, "over_price": -110, "under_price": -110,
+            "snapshot_at": "2026-09-15T16:00:00Z",
+        },
+    }
+    wall, _ = mk.find_total_bets(quotes, soft_books=("fanduel",))
+    assert wall == []
+    paper, _ = mk.find_total_bets(
+        quotes, min_edge=mk.MIN_EDGE_TOTALS_PAPER, soft_books=("fanduel",))
+    assert len(paper) == 1
+    assert paper[0].side == "over"
 
 
 def test_totals_default_is_a_wall():
@@ -169,8 +200,45 @@ def test_settlement_grades_spreads_not_h2h():
     """Without this map the generic settler falls to h2h and stamps NO_ACTION."""
     from tracking.paper_tracker import _market_for_pick
     assert _market_for_pick("mlb_spread_market") == "spreads"
+    assert _market_for_pick("mlb_total_market") == "totals"
     fetched = {b.strip().lower()
                for b in config.ODDS_API_BOOKMAKERS_PARAM.split(",") if b.strip()}
     missing = [b for b in mk.SOFT_BOOKS if b not in fetched]
     assert not missing, missing
     assert mk.SHARP_BOOK in fetched
+
+
+def test_open_quotes_do_not_read_commence_time_on_odds():
+    """Error Handler 2026-09-15: commence_time is on games, not odds."""
+    import inspect
+    src = inspect.getsource(mk.load_latest_quotes)
+    assert "o.snapshot_type = 'open'" in src
+    assert "o.commence_time" not in src
+    assert "g.commence_time" in src
+
+
+def test_totals_pick_label_quotes_the_line():
+    from scripts.mlb_game_market_card import pick_rows
+    from models.mlb_game_market import GameMarketBet
+
+    bet = GameMarketBet(
+        game_id="MLB_2026-09-15_NYY_BOS", market="totals",
+        side="over", book="fanduel", line=8.5, price=-102.0,
+        fair=0.56, edge=0.03, sharp_price=-150.0,
+    )
+    games = {"MLB_2026-09-15_NYY_BOS": {
+        "home": "NYY", "away": "BOS", "game_date": "2026-09-15",
+        "commence_time": "2026-09-15T23:00:00Z",
+    }}
+    rows = pick_rows([bet], games, {}, bankroll=10_000,
+                     model_id="mlb_total_market", market="totals")
+    assert len(rows) == 1
+    r = rows[0]
+    assert "Over 8.5" in r["pick_label"]
+    assert r["scored_line"] == 8.5
+    assert r["pick_side"] == "over"
+    assert r["model_id"] == "mlb_total_market"
+    problems = pick_problems(
+        r["pick_label"], r["pick_side"], r["scored_line"],
+        r["model_id"], "NYY", "BOS")
+    assert problems == [], problems

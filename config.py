@@ -583,8 +583,15 @@ ACTION_THRESHOLDS: dict = {
     # until mike unpauses it. 1.8pp is the 2026 BETTABLE-book plateau
     # (367 bets +4.80%, both halves +, 5/6 months +). min_prob 0 because
     # model_probability is Pinnacle's de-vigged number, near 0.5 by
-    # construction. Docs: docs/mlb_runline_ou_edge_search.md.
+    # construction. PAPER-FIRST 2026-09-15 follow-up: GROK Pin-vs-DK ≥2pp
+    # spreads ~−5% n≈200 — do not live-INSERT until
+    # MLB_SPREAD_MARKET_PUBLISH=1. Docs: docs/mlb_runline_ou_edge_search.md.
     "mlb_spread_market":          {"min_prob": 0.0, "min_edge": 0.018},
+    # MLB totals market-relative rule. PAPER at 2pp (GROK Pin-open vs DK-open
+    # Apr–Jul ~+11% n≈103). mlb_over_under stays paused. Default does not
+    # INSERT until MLB_TOTAL_MARKET_PUBLISH=1. The find_total_bets wall
+    # (MIN_EDGE_TOTALS=1.0) stays; the card passes 0.02 explicitly.
+    "mlb_total_market":           {"min_prob": 0.0, "min_edge": 0.02},
     # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
     # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
     # paper trading and delay this being an available feature") -- taken with
@@ -886,8 +893,10 @@ PAUSED_MODELS: set = {
     # broken feed. Unpause path is the retrain in the ACTION_THRESHOLDS note
     # (2019-2025, 2026 held out) followed by scripts/mlb_runline_sweep.py.
     # 2026-09-15: the *publish path* for this market is mlb_spread_market
-    # (1.8pp Pinnacle-vs-bettable-soft). This id stays paused until mike
-    # unpauses it with Updated-By. docs/mlb_runline_ou_edge_search.md.
+    # (1.8pp Pinnacle-vs-bettable-soft), gated by MLB_SPREAD_MARKET_PUBLISH
+    # (default 0). This id stays paused until mike unpauses it with
+    # Updated-By. Do not resurrect the 2026-09-02 0.50/0.06 RE-CUT.
+    # docs/mlb_runline_ou_edge_search.md.
     "mlb_runline",
     # 2026-09-03 (mike): PAUSED. The pitcher-stats leak repair
     # (docs/team_stats_leak.md) removed the only thing holding this model up.
@@ -901,7 +910,9 @@ PAUSED_MODELS: set = {
     #
     # Unpause path is a REBUILT MODEL, not a threshold. No cut rescues a
     # classifier that does not rank -- moving a bar on a 0.50 AUC only changes
-    # how many coin flips get bet.
+    # how many coin flips get bet. The 2026-09-02 RE-CUT 0.50/0.06 (+15.7%)
+    # did NOT survive later sweeps — do not resurrect it. Publish path is
+    # mlb_total_market at 2pp, paper until MLB_TOTAL_MARKET_PUBLISH=1.
     "mlb_over_under",
     # The five golf models were paused here on 2026-09-03 (mike) and RETIRED on
     # 2026-09-08 -- they are gone from MODELS entirely, so there is nothing left
@@ -1333,6 +1344,7 @@ PAUSED_MODELS: set = {
     #   nfl_prop_market, nfl_wind_totals, nfl_live_prop, nfl_opener_spread
     #     — rule / market / live lanes, not these distributional PROP_MODELS
     #   mlb_spread_market — MLB run-line sharp-vs-soft rule (not mlb_runline)
+    #   mlb_total_market  — MLB totals sharp-vs-soft rule (not mlb_over_under)
     # nfl_prop_sacks joined the pause 2026-09-14 (mike, design-review follow-up
     # to #710): thin / paper-only, never a live BET lane.
     #
@@ -1471,6 +1483,20 @@ DECIDE_ON_CALIBRATED_PROB: bool = (
 # Fail-open; never upgrades NONE; a locked BET is still a pick (§1c).
 # Env GAME_MARKET_GATE_MODE=shadow restores persist-only. Do not pause/unpause
 # from this flag.
+#
+# PAPER-FIRST INSERT GATE (2026-09-15 follow-up). Cards log every pass.
+# They INSERT picks only when the matching flag is 1. Default 0 so Discord
+# / the app / push do not see a live BET until mike sets the Railway
+# variable and redeploys. Spreads: GROK Pin-vs-DK ≥2pp ~−5% n≈200 — do
+# not ship live. Totals: GROK Pin-vs-DK ≥2pp Apr–Jul ~+11% n≈103 is the
+# leading O/U replacement; still paper until the worker sweep confirms
+# and mike sets MLB_TOTAL_MARKET_PUBLISH=1.
+MLB_SPREAD_MARKET_PUBLISH: bool = (
+    os.environ.get("MLB_SPREAD_MARKET_PUBLISH", "0").strip() not in ("0", "false", "False")
+)
+MLB_TOTAL_MARKET_PUBLISH: bool = (
+    os.environ.get("MLB_TOTAL_MARKET_PUBLISH", "0").strip() not in ("0", "false", "False")
+)
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
 )
@@ -1622,6 +1648,7 @@ SCORING_METHODS: dict = {
     "nfl_prop_market":     "rule",    # models/nfl_prop_market.py — de-vig Pinnacle, bet the outlier
     "wnba_prop_market":    "rule",    # models/wnba_prop_market.py — the same rule, pointed at WNBA
     "mlb_spread_market":   "rule",    # models/mlb_game_market.py — the same rule, pointed at MLB run lines
+    "mlb_total_market":    "rule",    # models/mlb_game_market.py — totals at 2pp, paper until env=1
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
     "ncaaf_live_total":    "engine",
@@ -1722,6 +1749,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_prop_market":            0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
+    "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":           0.15,
     "nfl_prop_pass_attempts":        0.19,
     "nfl_prop_pass_completions":     0.16,
@@ -1818,6 +1846,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_prop_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
+    "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":           0.68,
     "nfl_prop_pass_attempts":        0.73,
     "nfl_prop_pass_completions":     0.68,

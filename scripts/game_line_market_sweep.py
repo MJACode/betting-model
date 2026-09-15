@@ -22,22 +22,33 @@ THE TRAPS, all three carried over deliberately.
   when it is skipped. h2h has no line and is compared directly; spreads and
   totals must match to the point.
 
-  PRE-GAME ONLY. Bounded on commence_time and in_play excluded. The prop version
-  of this leak (#534) manufactured seven of every eight "edges".
+PRE-GAME ONLY. `odds.snapshot_type` is `open` | `in_play` | `close`
+  (some rows NULL). `odds` has no commence_time — that column lives on
+  `games`. This sweep reads `snapshot_type = 'open'` and `snapshot_at`,
+  and still leak-bounds `snapshot_at <= games.commence_time` because the
+  evening refresh has written post-start rows as `open` (session 106).
+  `close` is CLV; `in_play` is live. The prop version of this leak (#534)
+  manufactured seven of every eight "edges".
 
   ONE BET PER PROPOSITION. The same game at three books is one opinion.
 
 Grading is the game result, so there is no player-name join and no stat-mapping
 question -- the two things that made the prop backtests fragile.
 
+Thin cells still print (Error Handler 2026-09-15: document ROI at 2/3/4pp even
+when n is small). A cell with n < 25 is labelled thin; it is not dropped.
+
     python -m scripts.game_line_market_sweep
-    python -m scripts.game_line_market_sweep --sport MLB --market h2h
+    python -m scripts.game_line_market_sweep --sport MLB --market totals --bettable --edges 0.02 0.03 0.04 --by-month
+    python -m scripts.game_line_market_sweep --sport MLB --market spreads --bettable --edges 0.02 0.03 0.04 --by-month
+    python -m scripts.game_line_market_sweep --sport MLB --market totals --soft-books draftkings --vs implied --pin-lean --edges 0.02 0.03 0.04 --by-month
 """
 from __future__ import annotations
 
 import argparse
 import sys
 from collections import defaultdict
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -49,6 +60,14 @@ from data.db import get_connection
 SHARP = "pinnacle"
 SOFT = ("draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
         "betrivers", "hardrockbet", "bovada")
+SNAPSHOT_TYPES = ("open", "in_play", "close")
+VS_MODES = ("devig", "implied")
+DEFAULT_EDGES = (0.02, 0.03, 0.04)
+# Unbounded odds scans time out on MCP. Month windows keep each SELECT inside
+# an index-friendly range. Pad snapshot_at 14 days before the game_date window
+# so an opener posted in March for an April game is not dropped.
+SNAPSHOT_PAD_DAYS = 14
+THIN_N = 25
 
 
 def implied(a):
@@ -74,9 +93,49 @@ def profit(price, won):
     return (p / 100.0 if p > 0 else 100.0 / abs(p)) if won else -1.0
 
 
-def load(conn, sport: str, market: str):
-    """Latest PRE-GAME quote per (game, book) plus the game's result."""
-    rows = conn.execute("""
+def iter_months(date_from: str, date_to: str):
+    """Half-open [start, end) month windows covering [date_from, date_to)."""
+    d = date.fromisoformat(date_from)
+    end = date.fromisoformat(date_to)
+    if d >= end:
+        return
+    d = d.replace(day=1)
+    while d < end:
+        nxt = date(d.year + (d.month == 12), 1 if d.month == 12 else d.month + 1, 1)
+        start = max(d, date.fromisoformat(date_from)).isoformat()
+        stop = min(nxt, end).isoformat()
+        if start < stop:
+            yield start, stop
+        d = nxt
+
+
+def load(conn, sport: str, market: str, snapshot_type: str = "open",
+         date_from: str | None = None, date_to: str | None = None):
+    """Latest OPEN quote per (game, book) plus the game's result.
+
+    `snapshot_type` lives on `odds`. `commence_time` lives on `games`.
+    Month-bounded callers pass date_from/date_to so the odds scan stays
+    inside an index-friendly window (unbounded scans time out on MCP).
+    """
+    if snapshot_type not in SNAPSHOT_TYPES:
+        raise ValueError(f"snapshot_type must be one of {SNAPSHOT_TYPES}, "
+                         f"got {snapshot_type!r}")
+    extra = []
+    params: list = [sport, market, snapshot_type]
+    if date_from:
+        extra.append("AND g.game_date >= %s")
+        params.append(date_from)
+        pad = (date.fromisoformat(date_from[:10])
+               - timedelta(days=SNAPSHOT_PAD_DAYS)).isoformat()
+        extra.append("AND o.snapshot_at >= %s")
+        params.append(pad)
+    if date_to:
+        extra.append("AND g.game_date < %s")
+        params.append(date_to)
+        extra.append("AND o.snapshot_at < %s")
+        params.append(date_to)
+    extra_sql = "\n          ".join(extra)
+    rows = conn.execute(f"""
         SELECT DISTINCT ON (o.game_id, o.bookmaker)
                o.game_id, o.bookmaker, o.home_price, o.away_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
@@ -85,16 +144,32 @@ def load(conn, sport: str, market: str):
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s AND o.market = %s
           AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
-          AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+          AND o.snapshot_type = %s
           AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
+          {extra_sql}
         ORDER BY o.game_id, o.bookmaker, o.snapshot_at DESC
-    """, (sport, market)).fetchall()
+    """, tuple(params)).fetchall()
     by_game = defaultdict(dict)
     meta = {}
     for (gid, bk, hp, ap, sh, tl, op, up, hs, as_, gd, snap) in rows:
         by_game[gid][bk] = dict(home=hp, away=ap, spread=sh, total=tl,
                                 over=op, under=up, snap=snap)
-        meta[gid] = (float(hs), float(as_), str(gd))
+        meta[gid] = (float(hs), float(as_), str(gd)[:10])
+    return by_game, meta
+
+
+def load_chunked(conn, sport: str, market: str, snapshot_type: str = "open",
+                 date_from: str | None = None, date_to: str | None = None):
+    """Month-chunked load so a full-season scan does not time out."""
+    if not date_from or not date_to:
+        return load(conn, sport, market, snapshot_type, date_from, date_to)
+    by_game: dict = defaultdict(dict)
+    meta: dict = {}
+    for start, stop in iter_months(date_from, date_to):
+        chunk_g, chunk_m = load(conn, sport, market, snapshot_type, start, stop)
+        for gid, books in chunk_g.items():
+            by_game[gid].update(books)
+        meta.update(chunk_m)
     return by_game, meta
 
 
@@ -125,8 +200,18 @@ def grade(market, side, m, line):
     return total > float(line) if side == "over" else total < float(line)
 
 
-def sweep(conn, sport: str, market: str, edges, max_gap_s: float | None = 300):
-    by_game, meta = load(conn, sport, market)
+def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
+                  vs: str = "devig", pin_lean: bool = False,
+                  soft_books=None):
+    """One candidate per game: largest Pin-vs-soft disagreement on an equal line.
+
+    vs='devig'   — Pin de-vig minus the soft book's own de-vig (nfl_prop_market).
+    vs='implied' — Pin de-vig minus the soft book's juiced implied (GROK Pin-lean).
+    pin_lean     — only the side Pinnacle's no-vig prefers (max sharp_p).
+    """
+    if vs not in VS_MODES:
+        raise ValueError(f"vs must be one of {VS_MODES}, got {vs!r}")
+    soft = tuple(soft_books) if soft_books is not None else SOFT
     picks = []
     diag = defaultdict(int)
     for gid, books in by_game.items():
@@ -152,10 +237,12 @@ def sweep(conn, sport: str, market: str, edges, max_gap_s: float | None = 300):
         if sf is None:
             diag["sharp_one_way"] += 1
             continue
+        if pin_lean:
+            sides = (max(sides, key=lambda s: (s[1] is not None, s[1] or 0.0)),)
 
         best = None
         for bk, q in books.items():
-            if bk not in SOFT:
+            if bk not in soft:
                 continue
             bline = q["spread"] if market == "spreads" else (
                 q["total"] if market == "totals" else None)
@@ -179,13 +266,23 @@ def sweep(conn, sport: str, market: str, edges, max_gap_s: float | None = 300):
             else:
                 a, b = q["home"], q["away"]
             fa, fb = devig(a, b)
-            if fa is None:
+            if vs == "devig" and fa is None:
                 diag["soft_one_way"] += 1
                 continue
             for side, sharp_p, _k in sides:
-                soft_fair = fa if side in ("home", "over") else fb
                 price = (a if side in ("home", "over") else b)
-                edge = sharp_p - soft_fair
+                if price is None or sharp_p is None:
+                    continue
+                if vs == "implied":
+                    try:
+                        soft_p = implied(price)
+                    except (TypeError, ValueError):
+                        continue
+                else:
+                    soft_p = fa if side in ("home", "over") else fb
+                    if soft_p is None:
+                        continue
+                edge = sharp_p - soft_p
                 if best is None or edge > best[0]:
                     best = (edge, side, price, bk, sline)
             diag["compared"] += 1
@@ -194,54 +291,205 @@ def sweep(conn, sport: str, market: str, edges, max_gap_s: float | None = 300):
         edge, side, price, bk, line = best
         won = grade(market, side, meta[gid], line)
         picks.append((meta[gid][2], edge, price, won, bk))
+    return picks, diag
 
+
+def _summarize(picks, edges) -> list[dict]:
+    """ROI at each edge. Thin cells still report; they are labelled, not dropped."""
     out = []
     for e in edges:
         sel = [p for p in picks if p[1] >= e and p[3] is not None]
-        if len(sel) < 40:
-            out.append((e, len(sel), None, None, None))
+        n = len(sel)
+        row = {"min_edge": float(e), "n": n, "thin": n < THIN_N,
+               "win_pct": None, "roi_pct": None, "units": None,
+               "ci90": None}
+        if n == 0:
+            out.append(row)
             continue
         prof = [profit(p[2], p[3]) for p in sel]
-        u = sum(prof)
+        u = float(sum(prof))
         w = sum(1 for x in prof if x > 0)
-        rng = np.random.default_rng(42)
-        a = np.array(prof)
-        idx = rng.integers(0, len(a), (10000, len(a)))
-        roi = 100 * a[idx].mean(axis=1)
-        out.append((e, len(sel), 100 * w / len(sel), 100 * u / len(sel),
-                    (np.percentile(roi, 5), np.percentile(roi, 95))))
-    return out, diag, picks
+        row["win_pct"] = 100.0 * w / n
+        row["roi_pct"] = 100.0 * u / n
+        row["units"] = u
+        if n >= 2:
+            rng = np.random.default_rng(42)
+            a = np.array(prof)
+            idx = rng.integers(0, len(a), (10000, len(a)))
+            roi = 100 * a[idx].mean(axis=1)
+            row["ci90"] = [float(np.percentile(roi, 5)),
+                           float(np.percentile(roi, 95))]
+        out.append(row)
+    return out
+
+
+def _split_halves(picks, edges, split_date: str = "2026-07-01"):
+    early = [p for p in picks if p[0] < split_date]
+    late = [p for p in picks if p[0] >= split_date]
+    return {
+        "split_date": split_date,
+        "early": _summarize(early, edges),
+        "late": _summarize(late, edges),
+    }
+
+
+def _by_month(picks, edges) -> dict:
+    buckets: dict[str, list] = defaultdict(list)
+    for p in picks:
+        buckets[p[0][:7]].append(p)
+    return {m: _summarize(buckets[m], edges) for m in sorted(buckets)}
+
+
+def sweep(conn, sport: str, market: str, edges,
+          max_gap_s: float | None = 300,
+          snapshot_type: str = "open",
+          date_from: str | None = None, date_to: str | None = None,
+          vs: str = "devig", pin_lean: bool = False,
+          soft_books=None, by_month: bool = False):
+    by_game, meta = load_chunked(
+        conn, sport, market, snapshot_type=snapshot_type,
+        date_from=date_from, date_to=date_to)
+    picks, diag = collect_picks(
+        by_game, meta, market, max_gap_s=max_gap_s, vs=vs,
+        pin_lean=pin_lean, soft_books=soft_books)
+    # Legacy tuple so existing callers that unpacked (e, n, w, roi, ci) still
+    # work: ROI is always filled when n>0 (thin is no longer a silent drop).
+    legacy = []
+    for row in _summarize(picks, edges):
+        ci = tuple(row["ci90"]) if row["ci90"] is not None else None
+        legacy.append((row["min_edge"], row["n"], row["win_pct"],
+                       row["roi_pct"], ci))
+    extra = {}
+    if by_month:
+        extra["by_month"] = _by_month(picks, edges)
+        extra["halves"] = _split_halves(picks, edges)
+    return legacy, diag, picks, extra
+
+
+def _print_table(res, indent="    "):
+    print(f"{indent}{'min_edge':>8} {'bets':>6} {'win%':>6} {'ROI':>8} "
+          f"{'units':>8} {'90% CI':>18}")
+    for e, n, w, roi, ci in res:
+        tag = " (thin)" if n < THIN_N else ""
+        if n == 0 or roi is None:
+            print(f"{indent}{e:>7.0%} {n:>6}{tag}")
+            continue
+        ci_s = ""
+        if ci is not None:
+            ci_s = f"({ci[0]:+.1f}, {ci[1]:+.1f})"
+        units = n * roi / 100.0
+        print(f"{indent}{e:>7.0%} {n:>6} {w:>5.1f}% {roi:>+7.2f}% "
+              f"{units:>+7.2f}u {ci_s:>18}{tag}")
+
+
+def run(sport: str = "MLB", markets=None, edges=None,
+        snapshot_type: str = "open", bettable: bool = True,
+        by_month: bool = True, vs: str = "devig", pin_lean: bool = False,
+        date_from: str | None = "2026-03-20", date_to: str | None = None,
+        soft_books=None, max_gap_s: float | None = 300) -> dict:
+    """Worker-job entry: JSON-serializable grid. Does not publish anything."""
+    markets = list(markets or ["spreads", "totals"])
+    edges = [float(e) for e in (edges or DEFAULT_EDGES)]
+    if date_to is None:
+        date_to = (date.today() + timedelta(days=1)).isoformat()
+    soft = tuple(soft_books) if soft_books else None
+    if soft is None and bettable:
+        import config as cfg
+        soft = tuple(b for b in cfg.BEST_LINE_BOOKMAKERS if b != SHARP)
+    conn = get_connection()
+    try:
+        out = {
+            "sport": sport,
+            "snapshot_type": snapshot_type,
+            "vs": vs,
+            "pin_lean": bool(pin_lean),
+            "bettable": bool(bettable),
+            "soft_books": list(soft) if soft is not None else list(SOFT),
+            "date_from": date_from,
+            "date_to": date_to,
+            "edges": edges,
+            "markets": {},
+        }
+        for market in markets:
+            res, diag, picks, extra = sweep(
+                conn, sport, market, edges, max_gap_s=max_gap_s,
+                snapshot_type=snapshot_type, date_from=date_from,
+                date_to=date_to, vs=vs, pin_lean=pin_lean,
+                soft_books=soft, by_month=by_month)
+            block = {
+                "diag": dict(diag),
+                "n_candidates": len(picks),
+                "pooled": _summarize(picks, edges),
+            }
+            if by_month:
+                block["by_month"] = extra.get("by_month") or {}
+                block["halves"] = extra.get("halves") or {}
+            out["markets"][market] = block
+            print(f"\n=== {sport} {market} — snapshot_type={snapshot_type} "
+                  f"vs={vs} pin_lean={pin_lean}  "
+                  f"sharp {SHARP}, {len(soft or SOFT)} soft books")
+            print(f"    compared {diag['compared']}, line_mismatch "
+                  f"{diag['line_mismatch']}, no_sharp {diag['no_sharp']}, "
+                  f"graded {len(picks)}")
+            _print_table(res)
+            if by_month and extra.get("by_month"):
+                for month, rows in extra["by_month"].items():
+                    print(f"    -- {month}")
+                    legacy = [(r["min_edge"], r["n"], r["win_pct"],
+                               r["roi_pct"],
+                               tuple(r["ci90"]) if r["ci90"] else None)
+                              for r in rows]
+                    _print_table(legacy, indent="      ")
+            if by_month and extra.get("halves"):
+                for label in ("early", "late"):
+                    rows = extra["halves"][label]
+                    print(f"    -- {label} (split "
+                          f"{extra['halves']['split_date']})")
+                    legacy = [(r["min_edge"], r["n"], r["win_pct"],
+                               r["roi_pct"],
+                               tuple(r["ci90"]) if r["ci90"] else None)
+                              for r in rows]
+                    _print_table(legacy, indent="      ")
+        return out
+    finally:
+        conn.close()
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sport", nargs="+", default=["MLB", "NCAAF"])
-    ap.add_argument("--market", nargs="+", default=["h2h", "spreads", "totals"])
+    ap.add_argument("--sport", nargs="+", default=["MLB"])
+    ap.add_argument("--market", nargs="+", default=["spreads", "totals"])
+    ap.add_argument("--edges", nargs="+", type=float, default=list(DEFAULT_EDGES),
+                    help="min-edge floors to report (default 0.02 0.03 0.04)")
+    ap.add_argument("--snapshot-type", default="open", choices=SNAPSHOT_TYPES,
+                    help="odds.snapshot_type; commence_time is on games")
+    ap.add_argument("--date-from", default="2026-03-20")
+    ap.add_argument("--date-to", default=None)
     ap.add_argument("--bettable", action="store_true",
                     help="restrict soft books to BEST_LINE_BOOKMAKERS "
                          "(drop pinnacle/bovada/espnbet as a price to take)")
+    ap.add_argument("--soft-books", nargs="+", default=None,
+                    help="explicit soft-book list (overrides --bettable)")
+    ap.add_argument("--vs", default="devig", choices=VS_MODES,
+                    help="devig = Pin de-vig vs soft de-vig; "
+                         "implied = Pin de-vig vs soft juiced implied")
+    ap.add_argument("--pin-lean", action="store_true",
+                    help="only the side Pinnacle's no-vig prefers")
+    ap.add_argument("--by-month", action="store_true")
+    ap.add_argument("--max-gap-s", type=float, default=300.0)
     a = ap.parse_args()
-    edges = (0.005, 0.008, 0.01, 0.012, 0.015, 0.018, 0.02, 0.025, 0.03, 0.04, 0.05, 0.07)
-    if a.bettable:
+    global SOFT
+    if a.soft_books:
+        SOFT = tuple(a.soft_books)
+    elif a.bettable:
         import config as cfg
-        global SOFT
         SOFT = tuple(b for b in cfg.BEST_LINE_BOOKMAKERS if b != SHARP)
-    conn = get_connection()
     for sport in a.sport:
-        for market in a.market:
-            res, diag, picks = sweep(conn, sport, market, edges)
-            print(f"\n=== {sport} {market} — sharp {SHARP}, {len(SOFT)} soft books")
-            print(f"    compared {diag['compared']}, line_mismatch "
-                  f"{diag['line_mismatch']}, no_sharp {diag['no_sharp']}, "
-                  f"graded props {len(picks)}")
-            print(f"    {'min_edge':>8} {'bets':>6} {'win%':>6} {'ROI':>8} {'90% CI':>18}")
-            for e, n, w, roi, ci in res:
-                if roi is None:
-                    print(f"    {e:>7.0%} {n:>6}   (thin)")
-                    continue
-                print(f"    {e:>7.0%} {n:>6} {w:>5.1f}% {roi:>+7.2f}% "
-                      f"{'('+format(ci[0],'+.1f')+', '+format(ci[1],'+.1f')+')':>18}")
-    conn.close()
+        run(sport=sport, markets=a.market, edges=a.edges,
+            snapshot_type=a.snapshot_type, bettable=a.bettable or bool(a.soft_books),
+            by_month=a.by_month, vs=a.vs, pin_lean=a.pin_lean,
+            date_from=a.date_from, date_to=a.date_to,
+            soft_books=SOFT, max_gap_s=a.max_gap_s)
 
 
 if __name__ == "__main__":

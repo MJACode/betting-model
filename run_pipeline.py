@@ -1102,19 +1102,20 @@ def step_wnba_prop_market(run_date: str, dry_run: bool = False) -> bool:
 
 
 def step_mlb_game_market(run_date: str, dry_run: bool = False) -> bool:
-    """MLB run-line market-relative card: de-vig Pinnacle, bet the soft outlier.
+    """MLB game-line market-relative cards: de-vig Pinnacle, flag the soft outlier.
 
-    Publishes insert-once picks under model_id 'mlb_spread_market'. A pass
-    with no Pinnacle quotes or no MLB slate is a clean no-op. Totals are
-    not published (the same construction is negative at every threshold).
+    Logs both spreads (`mlb_spread_market`) and totals (`mlb_total_market`)
+    every pass. INSERT is gated by MLB_SPREAD_MARKET_PUBLISH /
+    MLB_TOTAL_MARKET_PUBLISH (default 0). A pass with no Pinnacle quotes or
+    no MLB slate is a clean no-op.
     """
     try:
-        from scripts.mlb_game_market_card import run_card
-        result = run_card(run_date, do_publish=not dry_run)
-        logger.success(f"✓ MLB spread market card: {result}")
+        from scripts.mlb_game_market_card import run_both
+        result = run_both(run_date, do_publish=not dry_run)
+        logger.success(f"✓ MLB game market card: {result}")
         return True
     except Exception as exc:
-        logger.error(f"✗ MLB spread market card failed: {exc}")
+        logger.error(f"✗ MLB game market card failed: {exc}")
         return False
 
 

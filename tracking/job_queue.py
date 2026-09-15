@@ -294,6 +294,85 @@ def _job_ncaaf_prop_odds(**kw):
                                         with_alternates=kw["with_alternates"])
 
 
+def _job_game_line_market_sweep(**kw):
+    """Fill the Pin-vs-soft game-line grid. Writes nothing except the job result.
+
+    MCP execute_sql times out on unbounded odds joins; the worker has
+    DATABASE_URL and can month-chunk. Does not publish, pause, or unpause.
+    """
+    from scripts.game_line_market_sweep import run
+    return run(
+        sport=kw["sport"],
+        markets=kw["markets"],
+        edges=kw["edges"],
+        snapshot_type=kw["snapshot_type"],
+        bettable=kw["bettable"],
+        by_month=kw["by_month"],
+        vs=kw["vs"],
+        pin_lean=kw["pin_lean"],
+        date_from=kw.get("date_from"),
+        date_to=kw.get("date_to"),
+        soft_books=kw.get("soft_books"),
+        max_gap_s=kw.get("max_gap_s", 300),
+    )
+
+
+def _validate_game_line_market_sweep(args: dict) -> dict:
+    """Read-only grid. Unknown keys dropped; sport/market/snapshot_type allowlisted."""
+    from scripts.game_line_market_sweep import SNAPSHOT_TYPES, VS_MODES
+    sport = str(args.get("sport") or "MLB").upper()
+    if sport not in ("MLB", "NCAAF"):
+        raise ValueError(f"sport must be MLB|NCAAF, got {sport!r}")
+    markets = args.get("markets") or ["spreads", "totals"]
+    if not isinstance(markets, list) or not markets:
+        raise ValueError("markets must be a non-empty list")
+    allowed_m = {"h2h", "spreads", "totals"}
+    markets = [str(m) for m in markets]
+    bad = [m for m in markets if m not in allowed_m]
+    if bad:
+        raise ValueError(f"unknown markets: {bad}")
+    edges = args.get("edges") or [0.02, 0.03, 0.04]
+    if not isinstance(edges, list) or not 1 <= len(edges) <= 12:
+        raise ValueError("edges must be a list of 1-12 floats")
+    edges = [float(e) for e in edges]
+    if any(e <= 0 or e >= 1 for e in edges):
+        raise ValueError(f"edges must be in (0, 1), got {edges}")
+    snapshot_type = str(args.get("snapshot_type") or "open")
+    if snapshot_type not in SNAPSHOT_TYPES:
+        raise ValueError(f"snapshot_type must be one of {SNAPSHOT_TYPES}")
+    vs = str(args.get("vs") or "devig")
+    if vs not in VS_MODES:
+        raise ValueError(f"vs must be one of {VS_MODES}")
+    date_from = args.get("date_from") or "2026-03-20"
+    date_to = args.get("date_to")
+    datetime.strptime(str(date_from), "%Y-%m-%d")
+    if date_to:
+        datetime.strptime(str(date_to), "%Y-%m-%d")
+        date_to = str(date_to)
+    soft_books = args.get("soft_books")
+    if soft_books is not None:
+        if not isinstance(soft_books, list) or not 1 <= len(soft_books) <= 20:
+            raise ValueError("soft_books must be a list of 1-20 book keys")
+        soft_books = [str(b) for b in soft_books]
+    max_gap_s = float(args.get("max_gap_s") if args.get("max_gap_s") is not None else 300)
+    if not 0 <= max_gap_s <= 86_400:
+        raise ValueError(f"max_gap_s out of range: {max_gap_s}")
+    return {
+        "sport": sport,
+        "markets": markets,
+        "edges": edges,
+        "snapshot_type": snapshot_type,
+        "bettable": bool(args.get("bettable", True)),
+        "by_month": bool(args.get("by_month", True)),
+        "vs": vs,
+        "pin_lean": bool(args.get("pin_lean", False)),
+        "date_from": str(date_from),
+        "date_to": date_to,
+        "soft_books": soft_books,
+        "max_gap_s": max_gap_s,
+    }
+
+
 def _job_market_coverage(**kw):
     from scripts.probe_market_coverage import probe
     return probe(kw["sport"], kw["markets"])
@@ -1040,6 +1119,9 @@ JOBS = {
                               _validate_ncaaf_player_backfill),
     "ncaaf_prop_odds": (_job_ncaaf_prop_odds,  _validate_ncaaf_prop_odds),
     "market_coverage": (_job_market_coverage,  _validate_market_coverage),
+    # ONE-SHOT / on demand. Pin-vs-soft game-line grid. Result JSON only.
+    "game_line_market_sweep": (_job_game_line_market_sweep,
+                               _validate_game_line_market_sweep),
 }
 
 

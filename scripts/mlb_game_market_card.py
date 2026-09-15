@@ -1,15 +1,19 @@
-"""Live MLB run-line card: de-vig Pinnacle, bet the bettable soft outlier.
+"""Live MLB game-line cards: de-vig Pinnacle, bet the bettable soft outlier.
 
-Deployment of models/mlb_game_market (the NFL prop-market rule pointed at
-MLB spreads). This script is plumbing: load today's unstarted games, take
-the latest pre-game quotes, call find_spread_bets, print the card, publish
-insert-once picks under model_id `mlb_spread_market`.
+Deployment of models/mlb_game_market. This script is plumbing: load today's
+unstarted games, take the latest OPEN quotes, call find_spread_bets /
+find_total_bets, print the card, and INSERT only when the matching
+`MLB_*_MARKET_PUBLISH` env is 1 (default 0 — paper/shadow).
 
 Deliberate and load-bearing:
 
-  THE THRESHOLD IS 1.8pp. Measured 2026-09-15 on the 2026 season against
-  BEST_LINE_BOOKMAKERS (docs/mlb_runline_ou_edge_search.md). 2.0pp is a
-  peak that fails the early half. Do not chase it.
+  SPREADS THRESHOLD IS 1.8pp. Measured 2026-09-15 on the 2026 season against
+  BEST_LINE_BOOKMAKERS. GROK Pin-vs-DK ≥2pp was ~−5% n≈200 — do not live
+  INSERT until MLB_SPREAD_MARKET_PUBLISH=1.
+
+  TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). GROK Pin-open vs DK-open
+  Apr–Jul ~+11% n≈103 is the candidate. find_total_bets' default wall stays
+  1.0; this card passes 0.02 explicitly. MLB_TOTAL_MARKET_PUBLISH default 0.
 
   ONE BET PER GAME. The same game at three books is one opinion.
 
@@ -17,10 +21,8 @@ Deliberate and load-bearing:
   re-pricing a locked pick at the corrected number would replace a bet
   that was taken with one that never existed.
 
-  TOTALS ARE NOT PUBLISHED. The same construction is negative at every
-  threshold on 2026 MLB totals.
-
     python -m scripts.mlb_game_market_card
+    python -m scripts.mlb_game_market_card --market totals
     python -m scripts.mlb_game_market_card --date 2026-09-15 --publish
 """
 from __future__ import annotations
@@ -46,8 +48,21 @@ from models.scorer import (
 )
 from tracking.pick_integrity import pick_problems
 
-MODEL_ID = "mlb_spread_market"
-MIN_EDGE = mk.MIN_EDGE_SPREADS
+LANES = {
+    "spreads": {
+        "model_id": "mlb_spread_market",
+        "market": "spreads",
+        "min_edge": mk.MIN_EDGE_SPREADS,
+    },
+    "totals": {
+        "model_id": "mlb_total_market",
+        "market": "totals",
+        "min_edge": mk.MIN_EDGE_TOTALS_PAPER,
+    },
+}
+# Back-compat for tests that imported the spreads constants.
+MODEL_ID = LANES["spreads"]["model_id"]
+MIN_EDGE = LANES["spreads"]["min_edge"]
 SPORT = "MLB"
 MARKET = "spreads"
 
@@ -79,9 +94,10 @@ def slate(conn, game_date: str) -> dict[str, dict]:
     return out
 
 
-def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
+def pick_rows(bets, games, quotes, bankroll: float,
+              model_id: str = MODEL_ID, market: str = MARKET) -> list[dict]:
     """Card bets -> picks rows. Pure given its inputs, so it is testable."""
-    floor = config.min_odds_for(MODEL_ID)
+    floor = config.min_odds_for(model_id)
     rows = []
     for b in bets:
         if floor is not None and b.price < floor:
@@ -90,11 +106,11 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
             continue
         g = games.get(b.game_id, {})
         home, away = g.get("home", ""), g.get("away", "")
-        label = _build_pick_label(b.side, home, away, MARKET, b.line)
+        label = _build_pick_label(b.side, home, away, market, b.line)
         book_tag = _BOOK.get(b.book, b.book)
         if not label.endswith(f"({book_tag})"):
             label = f"{label} ({book_tag})"
-        problems = pick_problems(label, b.side, b.line, MODEL_ID, home, away)
+        problems = pick_problems(label, b.side, b.line, model_id, home, away)
         if problems:
             logger.error(f"refusing {b.game_id}: {'; '.join(problems)}")
             continue
@@ -110,7 +126,7 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
         else:
             link = q.get("under_link")
         rows.append({
-            "game_id": b.game_id, "model_id": MODEL_ID, "sport": SPORT,
+            "game_id": b.game_id, "model_id": model_id, "sport": SPORT,
             "game_date": g.get("game_date"),
             "game_time": g.get("commence_time"),
             "pick_side": b.side, "pick_label": label,
@@ -144,19 +160,20 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
     return rows
 
 
-def _stamp_public(conn, rows: list[dict]) -> None:
+def _stamp_public(conn, rows: list[dict], market: str) -> None:
     for r in rows:
         try:
-            r.update(_get_public_betting(conn, r["game_id"], MARKET,
+            r.update(_get_public_betting(conn, r["game_id"], market,
                                          r["pick_side"]))
         except Exception:  # noqa: BLE001 — display-only
             pass
 
 
-def _shadow_gate(conn, rows: list[dict], quotes: dict, games: dict) -> None:
+def _shadow_gate(conn, rows: list[dict], quotes: dict, games: dict,
+                 market: str, model_id: str) -> None:
     """Persist CLEAR vs PASS_* without changing signal_type.
 
-    The 1.8pp Pinnacle-soft disagreement IS the measured edge. Applying
+    The Pinnacle-soft disagreement IS the measured edge. Applying
     PASS_STEAMED / PASS_PUBLIC_STEAM live here would veto a cut that has
     not been re-measured under that overlay. Shadow so the next assessment
     can split the record. Fail-open.
@@ -172,13 +189,13 @@ def _shadow_gate(conn, rows: list[dict], quotes: dict, games: dict) -> None:
         g = games.get(r["game_id"], {})
         as_of = r.get("_quote_snapshot_at")
         opening = gmg.load_opening_odds(
-            conn, r["game_id"], MARKET, as_of,
+            conn, r["game_id"], market, as_of,
             commence=g.get("commence_time"), book=r.get("decision_book") or "draftkings",
         )
         gmg.apply_to_picks(
-            [r], market=MARKET, current_odds=q, opening_odds=opening,
+            [r], market=market, current_odds=q, opening_odds=opening,
             mode="shadow", min_no_vig_edge=None,
-            enabled_models={MODEL_ID},
+            enabled_models={model_id},
         )
     try:
         gmg.persist(conn, rows, mode="shadow")
@@ -190,15 +207,14 @@ def _shadow_gate(conn, rows: list[dict], quotes: dict, games: dict) -> None:
         r.pop("_quote_snapshot_at", None)
 
 
-def publish(conn, rows: list[dict]) -> int:
+def publish(conn, rows: list[dict], model_id: str) -> int:
     """Insert-once per game. A later tick must not replace the locked bet."""
-    written = 0
     keep = []
     for r in rows:
         got = conn.execute("""
             SELECT 1 FROM picks
             WHERE game_id = %s AND model_id = %s
-        """, (r["game_id"], MODEL_ID)).fetchone()
+        """, (r["game_id"], model_id)).fetchone()
         if got:
             continue
         keep.append(r)
@@ -206,19 +222,18 @@ def publish(conn, rows: list[dict]) -> int:
         return 0
     _insert_picks(conn, keep)
     conn.commit()
-    written = len(keep)
-    return written
+    return len(keep)
 
 
-def render(bets, diag) -> str:
-    lines = [f"MLB spread market card — {len(bets)} flag(s)  "
+def render(bets, diag, market: str) -> str:
+    lines = [f"MLB {market} market card — {len(bets)} flag(s)  "
              f"[sharp compared {diag.get('compared', 0)} · "
              f"mismatch {diag.get('line_mismatch', 0)} · "
              f"no-sharp {diag.get('no_sharp', 0)} · "
              f"gap {diag.get('not_simultaneous', 0)}]"]
     for b in sorted(bets, key=lambda x: -x.edge):
         lines.append(
-            f"  {b.game_id:28s} {b.side:4s} {b.line:+.1f}  "
+            f"  {b.game_id:28s} {b.side:5s} {b.line:+.1f}  "
             f"@{_BOOK.get(b.book, b.book):4s} {b.price:+.0f}  "
             f"fair {b.fair:.3f}  edge {b.edge * 100:+.1f}pp  "
             f"(PIN {b.sharp_price:+.0f})"
@@ -226,36 +241,65 @@ def render(bets, diag) -> str:
     return "\n".join(lines)
 
 
-def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
+def run_card(game_date: str | None = None, do_publish: bool = False,
+             market: str = "spreads") -> dict:
+    if market not in LANES:
+        raise ValueError(f"market must be spreads|totals, got {market!r}")
+    lane = LANES[market]
+    model_id = lane["model_id"]
+    min_edge = lane["min_edge"]
     game_date = game_date or config.today_et().isoformat()
     conn = get_connection()
     try:
         games = slate(conn, game_date)
         if not games:
-            logger.info(f"mlb spread market: no MLB games on {game_date}")
-            return {"flags": 0, "published": 0}
-        quotes = mk.load_latest_quotes(conn, SPORT, MARKET, list(games))
-        bets, diag = mk.find_spread_bets(quotes, min_edge=MIN_EDGE)
-        logger.info("\n" + render(bets, diag))
+            logger.info(f"mlb {market} market: no MLB games on {game_date}")
+            return {"flags": 0, "published": 0, "market": market,
+                    "publish_enabled": mk.publish_enabled(market)}
+        quotes = mk.load_latest_quotes(conn, SPORT, market, list(games))
+        if market == "spreads":
+            bets, diag = mk.find_spread_bets(quotes, min_edge=min_edge)
+        else:
+            bets, diag = mk.find_total_bets(quotes, min_edge=min_edge)
+        logger.info("\n" + render(bets, diag, market))
         published = 0
-        if do_publish and bets:
+        will_insert = bool(do_publish) and mk.publish_enabled(market)
+        if do_publish and not will_insert:
+            logger.info(
+                f"mlb {market} market: {len(bets)} flag(s) logged, INSERT "
+                f"gated off (set MLB_{'SPREAD' if market == 'spreads' else 'TOTAL'}"
+                f"_MARKET_PUBLISH=1 to write picks)")
+        if will_insert and bets:
             bankroll = _get_current_bankroll(conn)
-            rows = pick_rows(bets, games, quotes, bankroll)
-            _stamp_public(conn, rows)
-            _shadow_gate(conn, rows, quotes, games)
-            published = publish(conn, rows)
+            rows = pick_rows(bets, games, quotes, bankroll,
+                             model_id=model_id, market=market)
+            _stamp_public(conn, rows, market)
+            _shadow_gate(conn, rows, quotes, games, market, model_id)
+            published = publish(conn, rows, model_id)
             logger.info(f"published {published} new pick(s) of {len(bets)} flagged")
-        return {"flags": len(bets), "published": published}
+        return {"flags": len(bets), "published": published, "market": market,
+                "publish_enabled": mk.publish_enabled(market)}
     finally:
         conn.close()
+
+
+def run_both(game_date: str | None = None, do_publish: bool = False) -> dict:
+    """Pipeline entry: log both lanes; INSERT only where the env allows."""
+    spread = run_card(game_date, do_publish=do_publish, market="spreads")
+    total = run_card(game_date, do_publish=do_publish, market="totals")
+    return {"spreads": spread, "totals": total}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--date", default=None)
     ap.add_argument("--publish", action="store_true")
+    ap.add_argument("--market", default="both", choices=("spreads", "totals", "both"))
     a = ap.parse_args()
-    run_card(a.date, do_publish=a.publish)
+    if a.market == "both":
+        run_both(a.date, do_publish=a.publish)
+    else:
+        run_card(a.date, do_publish=a.publish, market=a.market)
 
 
 if __name__ == "__main__":
