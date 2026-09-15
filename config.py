@@ -1442,6 +1442,42 @@ DECIDE_ON_CALIBRATED_PROB: bool = (
     os.environ.get("DECIDE_ON_CALIBRATED_PROB", "1").strip() not in ("0", "false", "False")
 )
 
+# MLB GAME-MARKET GATE (mike, 2026-09-15). Decision overlay, not a retrain.
+# After `_decide` (vig-included edge vs the posted price) the scorer asks
+# models/game_market_gate.py whether the CURRENT two-way — the same quote
+# `_get_dk_odds` already bounded at first pitch — still disagrees with the
+# model, or has already steamed through it / run with ticket-heavy public.
+# `market_relative.py` is the sharp-vs-soft PROP rule and is not this.
+#
+# Live-artifact record queried 2026-09-15 (docs/mlb_game_market_gate.md):
+# mlb_moneyline 0 settled BETs since the 2026-09-03 artifact; f5 8 settled
+# 4-4 −1.22u; runline 4; over_under paused and 11-26 −16.08u. No cut clears
+# §7 (25+ on the live artifact, plateau, both halves), so MODE defaults to
+# shadow: persist `game_market_gate`, do not change signal_type. `live`
+# actually downgrades BET → NONE. Extra no-vig floor is OFF until a cut
+# clears. Do not pause/unpause from this flag.
+GAME_MARKET_GATE_ENABLED: bool = (
+    os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
+)
+GAME_MARKET_GATE_MODE: str = os.environ.get("GAME_MARKET_GATE_MODE", "shadow").strip().lower()
+GAME_MARKET_GATE_MODELS: frozenset = frozenset({
+    "mlb_moneyline", "mlb_runline", "mlb_over_under", "mlb_f5_moneyline",
+})
+# None = do not add a floor on top of `_decide`. Set a float to require
+# model_prob − no-vig-fair >= that number in addition to the model cut.
+_GAME_MARKET_MIN_EDGE_RAW = os.environ.get("GAME_MARKET_GATE_MIN_NO_VIG_EDGE", "").strip()
+GAME_MARKET_GATE_MIN_NO_VIG_EDGE = (
+    float(_GAME_MARKET_MIN_EDGE_RAW) if _GAME_MARKET_MIN_EDGE_RAW else None
+)
+GAME_MARKET_GATE_STEAM_THROUGH: bool = (
+    os.environ.get("GAME_MARKET_GATE_STEAM_THROUGH", "1").strip() not in ("0", "false", "False")
+)
+GAME_MARKET_GATE_PUBLIC_STEAM_PASS: bool = (
+    os.environ.get("GAME_MARKET_GATE_PUBLIC_STEAM_PASS", "1").strip() not in ("0", "false", "False")
+)
+GAME_MARKET_GATE_PUBLIC_HEAVY: float = float(os.environ.get("GAME_MARKET_GATE_PUBLIC_HEAVY", "55"))
+GAME_MARKET_GATE_LINE_STEAM_PTS: float = float(os.environ.get("GAME_MARKET_GATE_LINE_STEAM_PTS", "0.5"))
+
 # THE HOUSE JUICE FLOOR. Applies to every model that does not name its own.
 #
 # mike, 2026-09-03, on seeing `LAD ML F5  -290 @ FanDuel  3u to win 0.91u` on
