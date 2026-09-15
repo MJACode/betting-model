@@ -50,7 +50,6 @@ from tracking.postable import still_pre_game
 # (blocked on historical odds for their target, or a pending data subscription).
 # Update when one of these trains for real.
 KNOWN_UNTRAINED = {
-    "mlb_f5_over_under", "mlb_f5_runline",       # DK does not carry these markets
     "nhl_over_under", "nhl_puckline",            # need historical NHL lines
     "wnba_over_under", "wnba_spread",            # need historical DK WNBA lines
     "nba_over_under", "nba_spread",              # need historical DK NBA lines

@@ -63,12 +63,12 @@ to every reader above; on the two busiest recent slates that was 4
 
 Zero picks on a given day is valid — it means no high-conviction plays.
 
-**DK F5 odds coverage (confirmed 2026-05-10):**
-- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint on the 6am pipeline and every refresh pass (hourly 7am–5pm, every 10 min 6pm–11pm ET). Scorer uses real DK odds; skips (no pick) if DK odds are absent. No subscription upgrade needed.
-- `totals_1st_5_innings` (F5 O/U): DK does **not** offer this at any tier. **DISABLED** — scorer skips these games entirely (returns no picks). Not a subscription issue.
-- `spreads_1st_5_innings` (F5 RL): Same — DK does not offer. **DISABLED** — scorer skips.
+**DK / multi-book F5 odds coverage (re-measured 2026-09-15):**
+- `h2h_1st_5_innings` (F5 ML): DraftKings **does** carry this. Scorer uses real DK odds (then best-line re-check); skips if no real price.
+- `totals_1st_5_innings` (F5 O/U): DraftKings' Odds API feed still returns **zero** rows. FanDuel / BetMGM / William Hill do. Scorer takes the first bettable book in `BEST_LINE_BOOKMAKERS` order. **BET paused** until the 2026-05-08 leak-era artifacts are retrained on real F5 prices. No synthetic DK line for live BET.
+- `spreads_1st_5_innings` (F5 RL): Same as F5 O/U.
 
-F5 O/U and F5 RL will not appear in picks until real DK lines become available. The models are trained and thresholds are set — they are ready to re-enable if DK ever lists these markets.
+F5 O/U and F5 RL write NONE rows against real book quotes so a later sweep has a universe. They do not publish BET. Full-game `mlb_runline` / `mlb_over_under` stay paused independently (honest-era negative / coin-flip AUC); a human CLE −1.5 is not `mlb_runline` output.
 
 ### Claude Mobile — Full Picks Chart Prompt (paste into project instructions)
 

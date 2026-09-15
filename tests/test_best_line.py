@@ -216,9 +216,12 @@ def test_the_builders_decide_at_draftkings_and_the_stamp_requalifies():
             assert '"dk_odds":             None if line_book else dk_odds' in body, (
                 "picks.dk_odds must stay NULL when DraftKings never quoted it")
         else:
-            assert "_decision_fields(ODDS_API_BOOKMAKER" in body, (
-                f"{fn} must record DraftKings as the deciding price until the "
-                "best-price re-check says otherwise")
+            # 2026-09-15: F5 totals/spreads use the same line_book path when
+            # DraftKings' Odds API feed does not list the market.
+            assert "_decision_fields(line_book or ODDS_API_BOOKMAKER" in body, (
+                f"{fn} must record the line's book, DraftKings when it quoted it")
+            assert '"dk_odds":           None if line_book else dk_odds' in body, (
+                "picks.dk_odds must stay NULL when DraftKings never quoted it")
     for fn in ("def _stamp_best_game_prices(", "def _tag_prop("):
         start = src.index(fn)
         body = src[start:src.index("\ndef ", start + 1)]

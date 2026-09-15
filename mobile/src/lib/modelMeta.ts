@@ -65,6 +65,20 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  mlb_f5_over_under: {
+    shortLabel: 'F5 O/U',
+    longLabel: 'First 5 Total Runs',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  mlb_f5_runline: {
+    shortLabel: 'F5 RL',
+    longLabel: 'First 5 Runline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   // mlb_live_win_prob + mlb_live_runline are RETIRED (2026-08-30, see
   // thresholds.RETIRED_MODELS). Their labels stay so the picks they already made
   // still render with a name wherever history is shown.
