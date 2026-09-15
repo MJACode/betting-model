@@ -37,6 +37,11 @@ from tracking import publish_lock as pl
 from tracking import push_notifier as pn
 
 
+@pytest.fixture(autouse=True)
+def _no_prod_threshold_sync(monkeypatch):
+    monkeypatch.setattr(dn, "_sync_thresholds_before_post", lambda: None)
+
+
 class _Conn:
     """A Postgres-ish connection whose advisory lock is really exclusive."""
 

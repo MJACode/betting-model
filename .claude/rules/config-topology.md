@@ -38,12 +38,15 @@ source of truth for the variable list.
 
 **Thresholds → canonical in `config.py`, mirrored to Supabase.** The scorer reads
 `config.py` directly, so the BET decision is config-canonical wherever the code
-runs. `data.threshold_sync` (Step 0c of the daily pipeline) mirrors it into the
-`model_action_thresholds` table, which the app action filter and the track-record
-views read. **A hand edit to that table is temporary** — the next daily run
-overwrites it from `config.py` on master. To change a cut permanently, edit
-`config.py` and merge; to make it live immediately, edit the table AND merge
-before the next 6am run.
+runs. `data.threshold_sync` mirrors it into the `model_action_thresholds`
+table, which the app action filter, Discord, push, and the track-record views
+read. Sync runs on every refresh pass (after view migrations), as daily Step
+0c2 (after migrations, not before), and immediately before a Discord post.
+**A hand edit to that table is temporary** — the next sync overwrites it from
+`config.py` on master. To change a cut permanently, edit `config.py` and merge.
+The scorer pauses from `config.PAUSED_MODELS`; the publishers pause from the
+table. A 6am-only sync left those two a day apart after #727 (five MLB props
+unposted 2026-09-14).
 
 **Sportsbooks → `config.py`, env-overridable.** `LINE_SHOP_BOOKMAKERS` drives the
 Odds API `bookmakers` param (the `us2` books cost a second region — measured,

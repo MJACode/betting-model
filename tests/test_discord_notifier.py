@@ -15,6 +15,13 @@ import pytest
 from tracking import discord_notifier as dn
 
 
+@pytest.fixture(autouse=True)
+def _no_prod_threshold_sync(monkeypatch):
+    """notify_discord_signals syncs model_action_thresholds before the SELECT.
+    Tests have no right to write production, and most have no DB at all."""
+    monkeypatch.setattr(dn, "_sync_thresholds_before_post", lambda: None)
+
+
 # ── Formatting ───────────────────────────────────────────────────────────────
 
 def test_american_odds_formatting():
@@ -1637,3 +1644,76 @@ def test_live_webhook_map_reads_the_per_sport_env_vars(monkeypatch):
                   "DISCORD_WEBHOOK_LIVE_NCAAF"):
             monkeypatch.delenv(k, raising=False)
         importlib.reload(cfg)
+
+
+def test_notify_syncs_thresholds_before_the_select():
+    """The Sep 14 miss. Scorer writes BETs from config; Discord joins the
+    table. Sync used to wait until 6am, so a deploy that cleared an auto-pause
+    left t.paused=true all afternoon. The producer must refresh the table
+    before it decides there is nothing to post."""
+    import inspect
+    src = inspect.getsource(dn.notify_discord_signals)
+    assert "_sync_thresholds_before_post()" in src
+    assert src.index("_sync_thresholds_before_post()") < src.index("get_connection()")
+
+
+def test_empty_set_errors_when_a_stale_pause_flag_hides_bets(monkeypatch):
+    """'Discord: no new signals' was the silent miss. Naming the models that
+    the table has paused and config has live is the thing that makes the
+    next pass diagnosable instead of the next morning's CRIT."""
+    from loguru import logger
+
+    class _Probe:
+        def execute(self, sql, params=None):
+            class R:
+                def fetchall(self_inner):
+                    if "t.paused = TRUE" in (sql or ""):
+                        return [("mlb_prop_pitcher_k", 2),
+                                ("mlb_prop_batter_runs", 3)]
+                    return []
+            return R()
+
+    monkeypatch.setattr("config.PAUSED_MODELS", set())
+    monkeypatch.setattr("tracking.threshold_review.auto_paused",
+                        lambda conn: set())
+    lines = []
+    sink = logger.add(lines.append, level="ERROR", format="{message}")
+    try:
+        dn._log_stale_pause_hiding_bets(_Probe(), "2026-09-14")
+    finally:
+        logger.remove(sink)
+    text = "".join(str(m) for m in lines)
+    assert "mlb_prop_pitcher_k" in text
+    assert "mlb_prop_batter_runs" in text
+    assert "paused=true" in text
+
+
+def test_a_real_pause_is_not_logged_as_stale(monkeypatch):
+    """config.PAUSED_MODELS is a person saying don't post. That is quiet."""
+    from loguru import logger
+
+    class _Probe:
+        def execute(self, sql, params=None):
+            class R:
+                def fetchall(self_inner):
+                    return [("mlb_runline", 4)]
+            return R()
+
+    monkeypatch.setattr("config.PAUSED_MODELS", {"mlb_runline"})
+    monkeypatch.setattr("tracking.threshold_review.auto_paused",
+                        lambda conn: set())
+    lines = []
+    sink = logger.add(lines.append, level="ERROR", format="{message}")
+    try:
+        dn._log_stale_pause_hiding_bets(_Probe(), "2026-09-14")
+    finally:
+        logger.remove(sink)
+    text = "".join(str(m) for m in lines)
+    assert "mlb_runline" not in text
+
+
+def test_empty_post_probes_for_a_stale_pause():
+    import inspect
+    src = inspect.getsource(dn._post_new_signals)
+    assert "_log_stale_pause_hiding_bets(" in src
+

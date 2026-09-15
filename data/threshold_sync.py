@@ -14,7 +14,9 @@ refresh, with NO mobile rebuild. (The scorer reads config.py directly, so the
 server-side BET decision is always config-canonical.)
 
 Run standalone (`python -m data.threshold_sync`) or as the pipeline's
-`sync-thresholds` step (auto-runs daily so the table never drifts from config).
+`sync-thresholds` step (daily after view migrations, every refresh pass,
+and immediately before a Discord post, so the table the publishers join
+cannot lag `config.py` overnight).
 """
 
 import sys

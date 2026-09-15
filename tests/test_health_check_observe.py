@@ -102,3 +102,14 @@ def test_refresh_pass_is_not_the_daily_pipeline():
     daily_fn = sched[sched.index("def run_daily_pipeline"):sched.index("def run_refresh_pass")]
     assert "refresh_pass.sh" not in daily_fn
     assert "run_pipeline.py" in daily_fn
+
+
+def test_daily_syncs_thresholds_after_view_migrations():
+    """A migration that clears auto-pauses is a no-op if sync already wrote
+    paused=true from the old set. #727 then waited until the next morning.
+    Daily Step 0c is migrations; 0c2 is the sync that reads them."""
+    daily = _SRC[_SRC.index("def run_daily_pipeline"):_SRC.index("def setup_database")]
+    assert daily.index('results["view_migrations"]') < daily.index(
+        'results["sync_thresholds"]'), (
+        "sync_thresholds must follow view_migrations so a pause-register "
+        "migration is visible in the same daily run")

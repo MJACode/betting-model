@@ -179,3 +179,14 @@ def test_view_migrations_run_first_and_alone():
     """A schema fix must land before anything reads the schema."""
     assert _order("apply-view-migrations") < _order("odds")
     assert re.search(r"^step apply-view-migrations$", SH, re.M)
+
+
+def test_sync_thresholds_follows_migrations_and_precedes_scoring():
+    """The scorer pauses from config; Discord/app pause from the table.
+    #727's auto-pause DELETE on refresh left paused=true until the next
+    daily sync, so five MLB props never posted. Migrations first (they can
+    change the auto-pause set), then sync, then anything that publishes."""
+    assert _order("apply-view-migrations") < _order("sync-thresholds")
+    assert _order("sync-thresholds") < _order("scoring")
+    assert _order("sync-thresholds") < _order("opening-signals")
+    assert re.search(r"^step sync-thresholds$", SH, re.M)

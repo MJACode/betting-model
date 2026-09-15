@@ -45,7 +45,7 @@ pass**, not just the daily one:
 |---|---|---|
 | `refresh_pass_completion` | CRIT | no pass finished in 90 min inside the 7am–midnight ET window; or a run that started >2h ago and never finished (hang / OOM / killed worker) |
 | `refresh_pass_steps` | CRIT / WARN | a step failing in **all** of the last 3 passes = a real break (CRIT, names the step); failing in only some = flaky upstream (WARN) |
-| `signal_delivery` | CRIT | a standing BET pick that the Discord producer would post has no `discord_signal` ledger row past a 90-minute grace — reads `picks` at the same `model_action_thresholds` cut as `_new_signals` (not `opening_signals`; that is the CLV shadow track). A leftover capture row whose pick was deleted is not an outage. |
+| `signal_delivery` | CRIT | a standing BET pick that the Discord producer would post **right now** has no `discord_signal` ledger row past a 90-minute grace — reads `picks` at the same `model_action_thresholds` cut as `_new_signals` (not `opening_signals`; that is the CLV shadow track). A leftover capture row whose pick was deleted is not an outage. A finished game is no longer announcable, so a one-time miss that has already commenced is not a standing CRIT (the producer refuses started games; 2026-09-15 five MLB props). A genuine notifier outage still alarms on pre-commence picks. |
 | `pick_label_integrity` | CRIT | an open BET (last 3 days) whose label disagrees with its side or line — the publishers refuse to send it (`tracking/pick_integrity.py`), and this makes that refusal visible. Added 2026-09-12 after "BUF +1" was relayed as "Bills −1" |
 
 Backed by **`pipeline_runs`** (one row per pipeline invocation, written by

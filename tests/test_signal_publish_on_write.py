@@ -145,6 +145,8 @@ def _surfaces(monkeypatch, order, fail=()):
     monkeypatch.setitem(sys.modules, "tracking.opening_signals", osig)
     monkeypatch.setitem(sys.modules, "tracking.push_notifier", push)
     monkeypatch.setitem(sys.modules, "tracking.discord_notifier", disc)
+    monkeypatch.setattr("data.threshold_sync.sync_action_thresholds",
+                        lambda: 0, raising=False)
 
 
 def test_capture_runs_before_either_notifier(monkeypatch):
@@ -181,6 +183,17 @@ def test_publish_never_raises(monkeypatch):
     _surfaces(monkeypatch, order, fail={"capture", "push", "discord"})
     assert signal_publisher.publish_new_signals(target_date="2026-09-05") == {
         "locked": 0, "pushed": 0, "discord": 0}
+
+
+def test_publish_syncs_thresholds_before_either_notifier():
+    """Same gap as Discord: push joins model_action_thresholds too. A poller
+    tick that writes a BET must see the current pause flags, not yesterday's."""
+    src = (Path(__file__).parent.parent / "tracking"
+           / "signal_publisher.py").read_text(encoding="utf-8")
+    body = _body(src, "publish_new_signals")
+    assert "sync_action_thresholds" in body
+    assert body.index("sync_action_thresholds") < body.index("notify_signal_changes")
+    assert body.index("sync_action_thresholds") < body.index("notify_discord_signals")
 
 
 def test_the_publisher_does_not_fire_the_pass_only_surfaces():

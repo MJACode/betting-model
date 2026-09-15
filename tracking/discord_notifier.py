@@ -53,6 +53,7 @@ from tracking.publish_lock import (
 from tracking.publish_filters import live_publishable_sql
 from tracking.publish_keys import live_lock_key_sql
 from tracking.publish_keys import key_partition_sql, lock_key_sql
+from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
 from tracking.pick_integrity import refuse_mismatched
 
@@ -561,37 +562,82 @@ def _configured() -> bool:
 # ── New BET signals ──────────────────────────────────────────────────────────
 
 
-def _still_pre_game(commence, now=None) -> bool:
-    """True when this signal's game has NOT started yet.
+def _sync_thresholds_before_post() -> None:
+    """Mirror config.py into model_action_thresholds before the producer reads it.
 
-    THE DELIVERY HALF OF THE FIRST-PITCH GUARD (2026-09-03). Capture now refuses
-    to lock a pick written after its own first pitch, but a legitimately
-    pre-game pick can still reach the poster after the game has started -- the
-    2026-08-31 MIN/DET signal was created 38 seconds before first pitch and
-    captured four minutes after it. Posting that sends a member to a live game
-    at a pre-game number.
+    The scorer pauses from config.PAUSED_MODELS + model_auto_pauses. Discord
+    and the app pause from the table. threshold_sync used to run at 6am ET
+    only, so a deploy that cleared an auto-pause (or an unpause in config)
+    left the table stale until the next daily run -- the producer logged
+    "no new signals" while BETs sat unposted. Measured 2026-09-14: five MLB
+    props (Lodolo Ks, Alcantara Ks, three SD@COL batter runs) written after
+    #727 cleared model_auto_pauses, never posted, games finished, then the
+    2026-09-15 10:02Z sync flipped paused=false and signal_delivery went CRIT.
 
-    Parsed, never string-compared: these columns are TEXT in mixed shapes ('Z'
-    vs '-04:00' vs naive) and a string comparison silently keeps the wrong rows
-    (§7). Done in Python rather than SQL because these producers are executed
-    against sqlite by the tests, where a ::timestamptz cast is a syntax error.
-
-    FAILS OPEN. A missing or unparseable commence_time counts as pre-game, so a
-    feed that stops populating the column cannot silently empty the board --
-    the same direction every other guard in this repo fails.
+    Best-effort: a sync failure must not skip the post. The query still runs
+    against whatever the table currently holds.
     """
-    if not commence:
-        return True
     try:
-        raw = str(commence).strip().replace(" ", "T", 1)
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        ts = datetime.fromisoformat(raw)
-    except (ValueError, TypeError):
-        return True
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    return ts > (now or datetime.now(timezone.utc))
+        from data.threshold_sync import sync_action_thresholds
+        sync_action_thresholds()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Discord: threshold sync before post failed: {exc}")
+
+
+def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
+    """ERROR when the table's paused flag is hiding a BET config says is live.
+
+    The empty-set log ("no new signals") is the silent miss: the five Sep 14
+    MLB props matched today's cut, commence was hours away, and the only
+    reason _new_signals returned [] was t.paused = TRUE on models that were
+    not in PAUSED_MODELS. An ERROR naming the models is the thing that makes
+    that diagnosable on the next pass rather than the next morning's CRIT.
+    """
+    try:
+        from config import PAUSED_MODELS
+        from tracking.threshold_review import auto_paused
+        paused_ok = set(PAUSED_MODELS) | set(auto_paused(conn) or ())
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Discord: could not read pause registers: {exc}")
+        return
+    try:
+        rows = conn.execute(f"""
+            SELECT p.model_id, COUNT(*)
+            FROM picks p
+            JOIN model_action_thresholds t ON t.model_id = p.model_id
+            LEFT JOIN games g ON g.game_id = p.game_id
+            WHERE p.signal_type = 'BET'
+              AND (p.is_live IS NULL OR p.is_live = FALSE)
+              AND p.model_id NOT LIKE '%%_live_%%'
+              AND (g.commence_time IS NULL
+                   OR g.commence_time::timestamptz > NOW())
+              AND (g.commence_time IS NOT NULL OR p.game_date >= %s)
+              AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
+              AND t.paused = TRUE
+              AND p.model_probability >= t.min_prob
+              AND (t.prob_only = TRUE
+                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
+                   OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
+              AND NOT EXISTS (
+                  SELECT 1 FROM push_sent s
+                  WHERE s.lock_key = {lock_key_sql()} AND s.kind = 'discord_signal'
+              )
+            GROUP BY p.model_id
+            ORDER BY p.model_id
+        """, (target_date,)).fetchall()
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Discord: stale-pause probe failed: {exc}")
+        return
+    hidden = [(mid, n) for mid, n in rows if mid not in paused_ok]
+    if not hidden:
+        return
+    detail = ", ".join(f"{mid} x{n}" for mid, n in hidden)
+    logger.error(
+        f"Discord: {sum(n for _, n in hidden)} unposted BET(s) hidden by "
+        f"model_action_thresholds.paused=true on models config has live "
+        f"({detail}). Sync thresholds and retry; do not wait for 6am."
+    )
 
 
 def _new_signals(conn, target_date: str) -> list[dict]:
@@ -1340,6 +1386,11 @@ def notify_discord_signals(target_date: str | None = None, dry_run: bool = False
     if not _configured():
         return 0
 
+    # BEFORE the lock and the SELECT: the table the producer joins must match
+    # config, or a BET the scorer just wrote is invisible here. Own connection
+    # inside sync_action_thresholds; fail-open on error.
+    _sync_thresholds_before_post()
+
     conn = get_connection()
     try:
         # Serialize the read -> post -> ledger sequence across every process
@@ -1362,6 +1413,7 @@ def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
     signals = refuse_mismatched(_new_signals(conn, target_date), "Discord")
     if not signals:
         logger.info(f"Discord: no new signals for {target_date}")
+        _log_stale_pause_hiding_bets(conn, target_date)
         return 0
 
     by_sport: dict[str, list[dict]] = {}
