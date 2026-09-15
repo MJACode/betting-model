@@ -59,6 +59,17 @@ that has a promoted map. `mlb_live_total_runs` is 26-31 (-9.66u) in innings 1-3
 and 27-10 (+11.69u) from inning 4. Full workings, caveats and what the window
 cannot support: `docs/mlb_volume_efficiency.md`.
 
+## 11b2. MARKET-RELATIVE GAME GATE — `docs/mlb_game_market_gate.md`
+
+Game models still decide BET in `_decide` (model vs vig-included posted
+price). They did **not** call `market_relative.py` (that's props), did not
+consume `features/market_movement.py`, and stamped Action Network splits
+without reading them. As of 2026-09-15 a leak-bounded overlay
+(`models/game_market_gate.py`) computes no-vig fair, PASS-when-steamed, and
+optional public-steam when `public_betting` has tickets. Default **shadow**
+(no live-artifact cut cleared: moneyline 0 BETs on the 2026-09-03 artifact).
+`GAME_MARKET_GATE_MODE=live` actually downgrades. No pause/unpause, no retrain.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 

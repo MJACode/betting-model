@@ -350,6 +350,21 @@ class TestMakePick:
         assert pick["edge"] == round(0.051234567, 4)
 
 
+def test_apply_game_market_gate_fail_open_without_conn(monkeypatch):
+    """A missing opener or a down DB must not kill scoring."""
+    from models import scorer
+    picks = [{
+        "game_id": "MLB_2026-09-15_NYY_BOS", "model_id": "mlb_moneyline",
+        "pick_side": "home", "model_probability": 0.72,
+        "signal_type": "BET", "kelly_fraction": 0.03, "recommended_bet": 300,
+    }]
+    scorer._apply_game_market_gate(
+        None, picks, "h2h",
+        {"home_price": -110, "away_price": -110, "snapshot_at": "2026-09-15T16:00:00Z"},
+        "2026-09-15T23:00:00Z")
+    assert picks[0]["signal_type"] == "BET"
+
+
 # ── _feature_value (serve-time encoding) ──────────────────────────────────────
 
 class TestFeatureValue:
