@@ -12,11 +12,15 @@ one exists, and names what failed where one does not. **It does not conclude
 (`model_calibration_sweeps` 2026-09-14: `mlb_over_under` NO CUT, cur −11.6%
 n=107; `mlb_runline` NO CUT, cur −15.5% n=9).
 
-This PR wires a **paper, INSERT-gated** totals card. Defaults stay 0.
-Do **not** set `MLB_TOTAL_MARKET_PUBLISH=1` on merge. Do **not** set
-`MLB_SPREAD_MARKET_PUBLISH=1`. This is not an unpause of `mlb_over_under`
-and not live money. The env flip is a later ops step, and only after the
-worker GROK job confirms the **same** construction the card now fires.
+This PR wires a **paper, INSERT-gated** totals *logger* of the construction
+this pass measured: Pin de-vig vs bettable-soft de-vig at 2pp
+(**−11.13% / 79** May–Jun). Defaults stay 0. Do **not** set
+`MLB_TOTAL_MARKET_PUBLISH=1`. Do **not** set `MLB_SPREAD_MARKET_PUBLISH=1`.
+This is not an unpause of `mlb_over_under` and not live money.
+
+GROK Pin-lean vs DK implied (~+11% n≈103) is a **different** construction.
+It is not this card. Confirming it is **not** permission to flip
+`MLB_TOTAL_MARKET_PUBLISH` — that env would INSERT the −11% population.
 
 ---
 
@@ -24,19 +28,16 @@ worker GROK job confirms the **same** construction the card now fires.
 
 | Market | Verdict |
 |---|---|
-| Totals | **Paper publisher `mlb_total_market` at 2pp is GROK**: Pin no-vig **lean** minus **DraftKings juiced implied**, equal `total_line`, DK-only. Apr–Jul ~**+11% n≈103**. Not Pin-vs-soft-devig (−11.13% / 79 at 2pp) and not best-soft implied (unmeasured). `mlb_over_under` stays paused. INSERT off until env=1 **after** the worker GROK job confirms. |
+| Totals | **Log-only `mlb_total_market` at 2pp is Pin-vs-soft-devig** (same construction as the spread card, equal `total_line`, bettable books). Measured May–Jun 2pp **−11.13% / 79**. Not a publish candidate. GROK Pin-lean vs DK implied (~+11% n≈103) is a different construction — not this card, not a reason to flip `MLB_TOTAL_MARKET_PUBLISH`. `mlb_over_under` stays paused. |
 | Run line | **Do not live-publish pure Pin-vs-soft spreads.** GROK Pin-open vs DK-open ≥2pp: ~**−5% n≈200**. Earlier same-day bettable-soft de-vig at **1.8pp** was +4.16% / 328 through Aug (both halves +) — a different construction, and GROK’s ≥2pp result is the one that says “more work.” Code for `mlb_spread_market` at 1.8pp remains; INSERT is gated off. `mlb_runline` stays paused. |
 | Hybrid | GROK on existing `mlb_over_under` BETs: disagree with Pin lean **−17.7u / 71**; agree any **−5.1u / 53**; agree ≥1.5pp **−0.5u / 8**. Stops the hemorrhage, is **not +EV**. Steam/public overlay stays **shadow** on the market cards. Live gate stays on the four predictive MLB game models. |
 | Retrain | **Not run here** (no `DATABASE_URL`). Next only if the worker totals 2pp cell is still negative. Commands at the bottom. |
 
-Do **not** flip `MLB_TOTAL_MARKET_PUBLISH` on this merge. Flip it only
-after `mlb-game-line-market-sweep-open-dk-implied-2026-09-15` confirms
-GROK 2pp on `snapshot_type=open` (both halves +, n≥25, neighbours not a
-lone peak) — that job is the same Pin-lean vs DK-implied population the
-card INSERTs. Do **not** flip on the bettable-soft de-vig job (that is
-Construction 1, the −11% loser). Do not set `MLB_SPREAD_MARKET_PUBLISH=1`.
-Do not silently unpause `mlb_runline` / `mlb_over_under`. Live money still
-needs Updated-By after the paper record exists.
+Do **not** flip `MLB_TOTAL_MARKET_PUBLISH`. This card’s INSERT population
+is the −11% Pin-vs-soft-devig cell. GROK +11% would need a **new** card
+if a later sweep ever clears it — not this env. Do not set
+`MLB_SPREAD_MARKET_PUBLISH=1`. Do not silently unpause `mlb_runline` /
+`mlb_over_under`.
 
 ---
 
@@ -182,25 +183,26 @@ Do **not** use the close as a feature. Opener-vs-current belongs in
    enqueues them from `jobs/declared_jobs.json`:
    - `mlb-game-line-market-sweep-open-bettable-2026-09-15` — Pin de-vig vs
      bettable soft de-vig, `snapshot_type=open`, edges 0.02/0.03/0.04,
-     by month, spreads + totals. **Not** the card’s INSERT population.
+     by month, spreads + totals. **This is the card.** Totals 2pp already
+     measured −11% on MCP (May–Jun); the worker fills the rest of the grid.
      Do not flip `MLB_TOTAL_MARKET_PUBLISH` off this job.
    - `mlb-game-line-market-sweep-open-dk-implied-2026-09-15` — GROK
-     construction: Pin lean vs DK implied, same edges. **This** is the
-     card. Env flip waits on this result.
+     construction: Pin lean vs DK implied, same edges. **Not this card.**
+     A hold here is a *new* totals card, not `MLB_TOTAL_MARKET_PUBLISH=1`.
    Result JSON lands in `worker_jobs.result`. If Error Handler needs to
    fire them before merge, open a one-off worker-job PR; this branch
    already registers `job_type=game_line_market_sweep`.
-2. **If that GROK job’s totals 2pp holds** (both halves +, n≥25,
-   neighbours not a lone peak): *then* set `MLB_TOTAL_MARKET_PUBLISH=1`.
-   The card already fires that population, so the env writes the measured
-   set, not Construction 1. Keep `mlb_over_under` paused. Still paper
-   until §2’s go-live gate — env=1 is the paper record, not live money.
-3. **If it does not hold:** do not flip the env. Next knobs: best-soft
-   implied (unmeasured — a **new** card, not this one) +
-   `snapshot_type=close`-aligned quotes (CLV, not a feature) + optional
-   model-agree after the 2019–2025 retrain. Spreads: same; do not ship
-   ≥2pp Pin-vs-DK as-is.
-4. **Hybrid steam gate** stays shadow on the cards until the overlay is
+2. **Do not set `MLB_TOTAL_MARKET_PUBLISH=1` because GROK +11% “held.”**
+   That env writes Pin-vs-soft-devig. Totals 2pp on that construction is
+   −11%. Keep `mlb_over_under` paused.
+3. **If the GROK job’s totals 2pp holds** (both halves +, n≥25,
+   neighbours not a lone peak): that is a **new card** (Pin-lean vs DK
+   implied, DK-only), not a flip of this env. Until that card exists,
+   GROK is measurement only.
+4. **If GROK does not hold:** next knobs stay close-aligned quotes (CLV,
+   not a feature) + optional model-agree after the 2019–2025 retrain.
+   Spreads: do not ship ≥2pp Pin-vs-DK as-is.
+5. **Hybrid steam gate** stays shadow on the cards until the overlay is
    re-measured on the market-relative record.
 
 ---
@@ -212,7 +214,7 @@ Do **not** use the close as a feature. Opener-vs-current belongs in
 | Sweep | `scripts/game_line_market_sweep.py` — `snapshot_type=open`, 2/3/4pp, `--by-month`, `--vs devig\|implied`, `--pin-lean`, month-chunked load. Thin n still prints. |
 | Worker job | `tracking/job_queue.py` `game_line_market_sweep` + two keys in `jobs/declared_jobs.json` |
 | Spreads rule | `models/mlb_game_market.py` `MIN_EDGE_SPREADS = 0.018`; INSERT gated by `MLB_SPREAD_MARKET_PUBLISH` (default 0) |
-| Totals paper | `mlb_total_market` at 0.02; **GROK: Pin lean − DK implied, pin-lean, DK-only**; `find_total_bets` wall stays 1.0; INSERT gated by `MLB_TOTAL_MARKET_PUBLISH` (default 0) |
+| Totals log | `mlb_total_market` at 0.02; **Pin-vs-soft-devig, bettable books** (measured −11% at 2pp); `find_total_bets` wall stays 1.0; INSERT gated by `MLB_TOTAL_MARKET_PUBLISH` (default 0). Do not flip that env on GROK. |
 | Card | `scripts/mlb_game_market_card.py --market spreads\|totals\|both` |
 | Pipeline | `run_pipeline.py --step mlb-game-market` logs both lanes; INSERT only if env=1 |
 | Gate | `game_market_gate` live on the four predictive MLB game models; **shadow** on both cards |
@@ -231,17 +233,13 @@ belongs to: **money divergence** at the **same** line.
 
 **Product split (do not blend):**
 
-- **Card INSERT** = GROK totals: Pin no-vig lean vs **DK juiced implied**,
-  DK-only. That is the +11% sample. Platform §6 usually shops the best
-  bettable price at the DK line; this card does **not**, because shopping
-  would grade a different P&L than GROK measured. Flag, not a silent
-  exception to invent a hybrid.
-- **Construction 1** (Pin de-vig vs bettable-soft de-vig) is the −11%
-  loser. The worker bettable job measures it. The card must not INSERT it.
-- **Best-soft implied** (Pin lean vs the best BEST_LINE juiced implied)
-  was a generalisation of GROK. It has no measured ROI. Sweeps may pass
-  other `soft_books`; the card must not.
+- **Card log / INSERT-if-env** = Construction 1: Pin de-vig vs bettable-soft
+  de-vig. Totals 2pp **−11.13% / 79**. Env stays 0. Flipping it writes
+  that loser.
+- **GROK** (Pin no-vig lean vs DK juiced implied, DK-only, ~+11% n≈103)
+  is a different population. Worker job may remeasure it. It is **not**
+  this card and **not** a justification for `MLB_TOTAL_MARKET_PUBLISH=1`.
+  A hold would need a new card.
 
-GROK’s ≥2pp Pin-vs-DK spread sample lost. GROK’s ≥2pp Pin-vs-DK totals
-sample is the paper candidate until the worker confirms it on
-`snapshot_type=open`.
+GROK’s ≥2pp Pin-vs-DK spread sample lost. Pin-vs-soft totals 2pp lost.
+Neither is a go-live.

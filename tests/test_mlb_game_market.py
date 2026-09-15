@@ -46,8 +46,6 @@ def test_soft_books_are_exactly_the_bettable_set():
     assert not missing, missing
     assert "draftkings" in mk.SOFT_BOOKS
     assert "fanduel" in mk.SOFT_BOOKS
-    assert mk.TOTALS_SOFT_BOOKS == ("draftkings",)
-    assert mk.TOTALS_SOFT_BOOKS[0] in mk.SOFT_BOOKS
 
 
 def test_equal_lines_only():
@@ -142,14 +140,14 @@ def test_totals_paper_cut_is_two_pp_and_not_the_wall():
         quotes, min_edge=mk.MIN_EDGE_TOTALS_PAPER, soft_books=("fanduel",))
     assert len(paper) == 1
     assert paper[0].side == "over"
-    # Edge is Pin fair − FD juiced implied, not FD de-vig.
+    # Edge is Pin fair − FD de-vig, not FD juiced implied.
     pin_fair = paper[0].fair
-    fd_implied = mk.implied(-110)
-    assert paper[0].edge == pytest.approx(pin_fair - fd_implied)
+    fd_devig, _ = mk.devig(-110, -110)
+    assert paper[0].edge == pytest.approx(pin_fair - fd_devig)
 
 
-def test_totals_pin_lean_does_not_fade_pinnacle():
-    """De-vig vs de-vig would take the fade; GROK's path takes Pin's lean only."""
+def test_totals_card_takes_the_pin_vs_soft_fade():
+    """Card is Pin-vs-soft-devig (both sides). GROK pin-lean is a sweep flag."""
     quotes = {
         ("G1", "pinnacle"): {
             "total_line": 8.5, "over_price": -150, "under_price": 130,
@@ -160,24 +158,23 @@ def test_totals_pin_lean_does_not_fade_pinnacle():
             "snapshot_at": "2026-09-15T16:00:00Z",
         },
     }
-    lean, _ = mk.find_total_bets(
+    card, _ = mk.find_total_bets(
         quotes, min_edge=0.02, soft_books=("fanduel",))
-    fade, _ = mk.find_total_bets(
+    grok, _ = mk.find_total_bets(
         quotes, min_edge=0.02, soft_books=("fanduel",),
-        vs="devig", pin_lean=False)
-    assert lean == []
-    assert len(fade) == 1
-    assert fade[0].side == "under"
+        vs="implied", pin_lean=True)
+    assert len(card) == 1
+    assert card[0].side == "under"
+    assert grok == []
 
 
-def test_totals_card_is_grok_dk_only():
-    """INSERT path is GROK: Pin lean vs DK implied, not best-soft / not de-vig."""
-    assert mk.TOTALS_SOFT_BOOKS == ("draftkings",)
+def test_totals_card_is_pin_vs_soft_devig():
+    """INSERT/log path is measured Pin-vs-soft-devig, not GROK DK-only."""
     src = (Path(__file__).resolve().parents[1] / "scripts"
            / "mlb_game_market_card.py").read_text(encoding="utf-8")
-    assert '"soft_books": mk.TOTALS_SOFT_BOOKS' in src
-    assert '"vs": "implied"' in src
-    assert '"pin_lean": True' in src
+    assert '"soft_books": mk.SOFT_BOOKS' in src
+    assert '"vs": "devig"' in src
+    assert '"pin_lean": False' in src
     assert "soft_books=lane[\"soft_books\"]" in src
     quotes = {
         ("G1", "pinnacle"): {
@@ -193,14 +190,16 @@ def test_totals_card_is_grok_dk_only():
             "snapshot_at": "2026-09-15T16:00:00Z",
         },
     }
-    grok, _ = mk.find_total_bets(quotes, min_edge=0.02)
-    assert len(grok) == 1
-    assert grok[0].book == "draftkings"
-    assert grok[0].side == "over"
+    bets, _ = mk.find_total_bets(quotes, min_edge=0.02)
+    assert len(bets) == 1
+    assert bets[0].book == "fanduel"
+    assert bets[0].side == "over"
+    fd_over, _ = mk.devig(-102, -118)
+    assert bets[0].edge == pytest.approx(bets[0].fair - fd_over)
 
 
-def test_totals_sweep_can_shop_other_books_when_asked():
-    """Library still shops when a sweep passes books; the card does not."""
+def test_totals_sweep_can_still_name_grok():
+    """Library still accepts GROK flags; the card does not use them."""
     quotes = {
         ("G1", "pinnacle"): {
             "total_line": 8.5, "over_price": -150, "under_price": 130,
@@ -215,11 +214,13 @@ def test_totals_sweep_can_shop_other_books_when_asked():
             "snapshot_at": "2026-09-15T16:00:00Z",
         },
     }
-    bets, _ = mk.find_total_bets(
-        quotes, min_edge=0.02, soft_books=("draftkings", "fanduel"))
-    assert len(bets) == 1
-    assert bets[0].book == "fanduel"
-    assert bets[0].side == "over"
+    grok, _ = mk.find_total_bets(
+        quotes, min_edge=0.02, soft_books=("draftkings",),
+        vs="implied", pin_lean=True)
+    assert len(grok) == 1
+    assert grok[0].book == "draftkings"
+    dk_implied = mk.implied(-110)
+    assert grok[0].edge == pytest.approx(grok[0].fair - dk_implied)
 
 
 def test_totals_default_is_a_wall():

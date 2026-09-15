@@ -212,7 +212,8 @@ Notes:
    - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` — OPTIONAL,
      default `0`. MLB game-line cards log every pass; they INSERT picks
      only when the matching flag is `1` (redeploy after setting). Totals
-     INSERT is GROK Pin-lean vs DK implied (not Pin-vs-soft de-vig). See
+     INSERT is Pin-vs-soft-devig (measured −11% at 2pp) — do not flip
+     that env on a GROK confirmation. See
      `docs/mlb_runline_ou_edge_search.md`.
 4. Deploy. Open the **Logs** — on boot you should see
    `Betting scheduler starting … Registered jobs:` with the three jobs and their next run
