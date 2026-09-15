@@ -30,16 +30,18 @@ Aug +8.68 / Sep +11.19 (5 of 6 months positive). Both sides positive
 (away +3.25% / 175, home +7.19% / 192). Every matching line in the
 sample is the run line (±1.5).
 
-TOTALS. The paper publisher is GROK's measured construction, shopped at
-the best bettable book: Pin OPEN no-vig lean minus the soft book's
-juiced implied, equal total, ≥2pp. GROK vs DK only: Apr–Jul ~+11%
-n≈103. May–Jun Pin-de-vig vs bettable-soft-de-vig was the loser
-(2pp −11.13% / 79) and is not what the card fires. Accidental callers
-of find_total_bets still hit MIN_EDGE_TOTALS = 1.0 (a wall). INSERT
-waits on `MLB_TOTAL_MARKET_PUBLISH=1`. `mlb_over_under` stays paused.
+TOTALS. The paper publisher IS GROK's measured construction, not a
+generalisation of it: Pin OPEN no-vig lean minus DraftKings OPEN
+juiced implied, equal total, ≥2pp, DK-only. GROK Apr–Jul ~+11%
+n≈103. Shopping BEST_LINE or de-vigging the soft book is a different
+population (May–Jun Pin-de-vig vs bettable-soft-de-vig 2pp −11.13% /
+79). Accidental callers of find_total_bets still hit MIN_EDGE_TOTALS
+= 1.0 (a wall). INSERT stays off until `MLB_TOTAL_MARKET_PUBLISH=1`
+AND the worker GROK job confirms the same construction.
+`mlb_over_under` stays paused.
 
-PUBLISH. Both cards default to log-only. Spreads: GROK Pin-vs-DK ≥2pp
-~−5% n≈200 — do not live-publish without the worker remeasure.
+PUBLISH. Both cards default to log-only. This PR does not go live.
+Spreads: GROK Pin-vs-DK ≥2pp ~−5% n≈200 — do not INSERT.
 `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` (default 0).
 
 Soft books are BEST_LINE_BOOKMAKERS, not LINE_SHOP. Betting Bovada or
@@ -70,6 +72,11 @@ SOFT_BOOKS = tuple(
     b for b in config.BEST_LINE_BOOKMAKERS
     if b != SHARP_BOOK
 )
+# GROK totals construction is DraftKings only. Pin no-vig lean minus
+# DK's juiced implied. Shopping BEST_LINE here would INSERT a different
+# population than the Apr–Jul ~+11% n≈103 sample. Sweeps that want
+# other books pass soft_books explicitly.
+TOTALS_SOFT_BOOKS = ("draftkings",)
 
 
 @dataclass(frozen=True)
@@ -234,20 +241,21 @@ def find_total_bets(quotes: dict, min_edge: float = MIN_EDGE_TOTALS,
                     vs: str = "implied",
                     pin_lean: bool = True,
                     ) -> tuple[list[GameMarketBet], dict]:
-    """Totals: Pin no-vig lean vs the best soft implied, equal total_line.
+    """Totals: Pin no-vig lean vs DraftKings juiced implied, equal total.
 
     GROK_BOT 2026-09-15 measured Pin OPEN fair − DK OPEN implied ≥2pp,
-    pin-lean, Apr–Jul ~+11% n≈103. SHIP THIS: same edge, but the best
-    bettable soft price (not DK-only). Default min_edge is a wall so an
+    pin-lean, Apr–Jul ~+11% n≈103. The paper card fires that population
+    (TOTALS_SOFT_BOOKS = draftkings). Default min_edge is a wall so an
     accidental caller cannot fire; the paper card passes 0.02.
 
     vs='implied' is the measured construction. vs='devig' is the May–Jun
     loser (−11.13% / 79 at 2pp) and is kept only so a sweep can name it.
     pin_lean=True bets only the side Pinnacle's no-vig prefers.
+    Passing other soft_books is for sweeps, not for INSERT.
     """
     if vs not in ("implied", "devig"):
         raise ValueError(f"vs must be implied|devig, got {vs!r}")
-    soft = tuple(soft_books) if soft_books is not None else SOFT_BOOKS
+    soft = tuple(soft_books) if soft_books is not None else TOTALS_SOFT_BOOKS
     diag = defaultdict(int)
     by_game: dict[str, dict] = defaultdict(dict)
     for (gid, bk), q in quotes.items():
