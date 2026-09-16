@@ -167,7 +167,9 @@ python -m scripts.mlb_runline_sweep --seasons 2026
 
 python -m models.trainer --model mlb_over_under \
     --seasons 2019 2020 2021 2022 2023 2024 2025 --holdout 2026
-python -m scripts.calibrated_threshold_sweep --model mlb_over_under
+python -m scripts.mlb_over_under_sweep --seasons 2026 --artifact <just-trained pkl>
+# Worker job `mlb_over_under_retrain_sweep` (register=false) chains both.
+# calibrated_threshold_sweep replays live graded picks — wrong tool after a retrain.
 ```
 
 Do **not** use the close as a feature. Opener-vs-current belongs in

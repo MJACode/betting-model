@@ -26,9 +26,10 @@
 Shipped 2026-09-16: `features/market_handicap.py` is in both FEATURE_MAP lists
 and both train/score paths. **No live artifact, no unpause.** After this
 merges, queue `mlb_runline_retrain_sweep` with `register=false` (2019-2025 /
-holdout 2026), read `scripts/mlb_runline_sweep --artifact <pkl>`. Same for
-`mlb_over_under` if the runline holdout is worth it. Do not flip
-`PAUSED_MODELS` or `MLB_*_MARKET_PUBLISH`. Design:
+holdout 2026), read `scripts/mlb_runline_sweep --artifact <pkl>`. Worker job
+`mlb_over_under_retrain_sweep` (same honesty, declared
+`mlb-over-under-retrain-sweep-2026-09-16`) is the totals twin — still measure
+only; do not flip `PAUSED_MODELS` or `MLB_*_MARKET_PUBLISH`. Design:
 `docs/mlb_market_handicap_features.md`.
 
 ## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)

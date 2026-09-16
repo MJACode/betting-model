@@ -1260,6 +1260,83 @@ def _job_mlb_runline_retrain_sweep(**kw):
     }
 
 
+_MLB_OVER_UNDER_TRAIN_SEASONS = [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+
+
+def _validate_mlb_over_under_retrain_sweep(args: dict) -> dict:
+    """Honest path: retrain mlb_over_under on 2019-2025 / holdout 2026, then
+    sweep 2026. Twin of `_validate_mlb_runline_retrain_sweep`.
+
+    `register` defaults False — the same default as `retrain_model` and every
+    declared retrain in this file — so the live artifact stays put. The sweep
+    loads the just-trained pickle via `--artifact`, not `model_registry`.
+    """
+    requested = str(args.get("model_id") or "mlb_over_under")
+    if requested != "mlb_over_under":
+        raise ValueError(
+            f"mlb_over_under_retrain_sweep only trains mlb_over_under, got {requested!r}")
+    holdout = args.get("holdout")
+    if holdout in (None, ""):
+        holdout = 2026
+    cleaned = _validate_retrain({
+        "model_id": "mlb_over_under",
+        "seasons": args.get("seasons") or _MLB_OVER_UNDER_TRAIN_SEASONS,
+        "holdout": holdout,
+        "register": args.get("register", False),
+        "trials": args.get("trials"),
+        "statement_timeout_ms": args.get("statement_timeout_ms"),
+    })
+    sweep_seasons = args.get("sweep_seasons")
+    if sweep_seasons in (None, ""):
+        sweep_seasons = [cleaned["holdout"] if cleaned["holdout"] is not None else 2026]
+    elif not isinstance(sweep_seasons, list) or not sweep_seasons:
+        raise ValueError("sweep_seasons must be a non-empty list of ints")
+    else:
+        sweep_seasons = [int(s) for s in sweep_seasons]
+    raw_min = args.get("min_bets")
+    min_bets = 30 if raw_min in (None, "") else int(raw_min)
+    if min_bets < 1:
+        raise ValueError(f"min_bets out of range: {min_bets}")
+    return {**cleaned, "sweep_seasons": sweep_seasons, "min_bets": min_bets}
+
+
+def _job_mlb_over_under_retrain_sweep(**kw):
+    """Retrain mlb_over_under, then sweep the just-trained artifact. Measure only.
+
+    Combined so the sweep cannot run against the pre-retrain live pickle.
+    register=False leaves model_registry and the live scorer untouched. Does
+    not write a cut and does not pause or unpause.
+
+    `scripts.mlb_over_under_sweep` calls `config.assert_retrain_allowed` at
+    import. The marker `data/TEAM_STATS_ASOF_REBUILD_COMPLETE` is in tree
+    (2026-09-14); without it (or `TEAM_STATS_ASOF_REBUILD_COMPLETE=1`) the
+    job fails loud.
+    """
+    trained = _job_retrain_model(
+        model_id=kw["model_id"], seasons=kw["seasons"], holdout=kw["holdout"],
+        trials=kw["trials"], register=kw["register"],
+        statement_timeout_ms=kw["statement_timeout_ms"])
+    path = (trained or {}).get("path") if isinstance(trained, dict) else None
+    if not path:
+        raise RuntimeError(
+            "mlb_over_under retrain returned no artifact path; refusing to sweep "
+            "the live model")
+    argv = [
+        "--seasons", *[str(s) for s in kw["sweep_seasons"]],
+        "--min-bets", str(kw["min_bets"]),
+        "--artifact", str(path),
+    ]
+    stdout = _run_script_main("scripts.mlb_over_under_sweep", argv)
+    summary = stdout.strip()[-800:] if stdout.strip() else "(no sweep stdout)"
+    return {
+        "summary": summary,
+        "retrain": trained,
+        "artifact": str(path),
+        "registered": bool(kw["register"]),
+        "stdout": stdout,
+    }
+
+
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
@@ -1275,6 +1352,10 @@ JOBS = {
     # then sweep the just-trained pickle. See _job_mlb_runline_retrain_sweep.
     "mlb_runline_retrain_sweep": (_job_mlb_runline_retrain_sweep,
                                   _validate_mlb_runline_retrain_sweep),
+    # ONE-SHOT measure-only. Retrain mlb_over_under (2019-2025 / holdout 2026)
+    # then sweep the just-trained pickle. See _job_mlb_over_under_retrain_sweep.
+    "mlb_over_under_retrain_sweep": (_job_mlb_over_under_retrain_sweep,
+                                     _validate_mlb_over_under_retrain_sweep),
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),

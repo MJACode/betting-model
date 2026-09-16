@@ -821,5 +821,17 @@
       "register": false,
       "sweep_seasons": [2026]
     }
+  },
+  {
+    "key": "mlb-over-under-retrain-sweep-2026-09-16",
+    "job_type": "mlb_over_under_retrain_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only (mike via mlb Handicap / Error Handler). Twin of mlb-runline-retrain-sweep-2026-09-15: retrain mlb_over_under seasons 2019-2025 / holdout 2026, THEN sweep --seasons 2026. Combined job so the sweep cannot run against the pre-retrain live pickle. register=false matches every prior declared retrain_model job (a queued retrain must not swap the live artifact whose .pkl is not committed); the sweep loads the just-trained pickle via --artifact. Does not ship a RE-CUT, does not pause/unpause. Requires data/TEAM_STATS_ASOF_REBUILD_COMPLETE (in tree since 2026-09-14) or TEAM_STATS_ASOF_REBUILD_COMPLETE=1 — scripts.mlb_over_under_sweep asserts this at import; do not bypass by deleting the guard.",
+    "args": {
+      "seasons": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+      "holdout": 2026,
+      "register": false,
+      "sweep_seasons": [2026]
+    }
   }
 ]

@@ -123,8 +123,9 @@ python -m models.trainer --model mlb_over_under \
 ```
 
 Same freeze as every queued MLB retrain: `register=false`, `PAUSED_MODELS`
-untouched, no `PUBLISH` env. Worker job type `mlb_runline_retrain_sweep`
-already chains retrain → sweep on the just-trained pickle.
+untouched, no `PUBLISH` env. Worker job types `mlb_runline_retrain_sweep`
+and `mlb_over_under_retrain_sweep` chain retrain → sweep on the just-trained
+pickle (`scripts.mlb_over_under_sweep --artifact`).
 
 ## What this is not
 
