@@ -83,7 +83,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // mlb_over_under stays paused. docs/mlb_total_public_fade.md.
   mlb_total_public_fade: {
     shortLabel: 'O/U Fade',
-    longLabel: 'Total Runs (fade public over)',
+    longLabel: 'Total Runs (fade the public)',
     type: 'game',
     statKey: null,
     statLabel: '',
