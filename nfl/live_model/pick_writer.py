@@ -65,7 +65,21 @@ def _norm_player(name: str | None) -> str | None:
 
 def resolve_game_id(conn, home_team: str | None, away_team: str | None,
                     kickoff: datetime | None) -> str | None:
-    """The platform's NFL game_id for a book's (home, away) around `kickoff`.
+    """The platform's NFL game_id for a book's (home, away) around `kickoff`."""
+    game = resolve_game(conn, home_team, away_team, kickoff)
+    return game[0] if game else None
+
+
+def resolve_game(conn, home_team: str | None, away_team: str | None,
+                 kickoff: datetime | None) -> tuple[str, str] | None:
+    """(game_id, game_date) for a book's (home, away) around `kickoff`.
+
+    The game_date comes back WITH the id because it is the only correct date for
+    the pick row. Until 2026-09-16 the row took the decision's UTC date, so every
+    kickoff from 8pm ET -- Thursday, Sunday and Monday night -- was filed under
+    the next day: MNF's DEN @ KC bets were graded in the record on a Tuesday with
+    no game, and the app's live board, which asks for today's ET date, could not
+    see an evening pick until midnight.
 
     Returns None rather than guessing. Every caller treats None as "drop this
     decision", so a wrong answer here is strictly worse than no answer: it
@@ -89,7 +103,7 @@ def resolve_game_id(conn, home_team: str | None, away_team: str | None,
 
     day = kickoff.astimezone(timezone.utc).date()
     rows = conn.execute("""
-        SELECT game_id FROM games
+        SELECT game_id, game_date FROM games
         WHERE sport = 'NFL' AND home_team = %s AND away_team = %s
           AND game_date BETWEEN %s AND %s
         ORDER BY game_date
@@ -102,11 +116,14 @@ def resolve_game_id(conn, home_team: str | None, away_team: str | None,
         log.warning("game_id resolution found %d rows for %s @ %s around %s",
                     len(rows), away, home, day)
         return None
-    return rows[0][0]
+    return rows[0][0], str(rows[0][1])
 
 
-def build_pick(decision, game_id: str, bankroll: float) -> dict:
+def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> dict:
     """One `picks` row from one BET decision.
+
+    `game_date` is the game's own ET date from `games` (resolve_game), never a
+    date derived from the decision's clock -- see resolve_game.
 
     `edge` is model_prob - market_prob, the platform's definition everywhere.
     It is NOT the executor's EV (`model_prob * decimal - 1`), which is the
@@ -129,7 +146,7 @@ def build_pick(decision, game_id: str, bankroll: float) -> dict:
         "game_id": game_id,
         "model_id": decision.model_id,
         "sport": "NFL",
-        "game_date": decision.ts.astimezone(timezone.utc).date().isoformat(),
+        "game_date": game_date,
         "game_time": None,
         "pick_side": side,
         "pick_label": label,
@@ -238,9 +255,9 @@ def announce_live_picks(game_date: str) -> None:
     Until 2026-09-09 nothing called either notifier for this lane: the MLB and
     NCAAF loops publish at the end of a scoring pass, and this worker has no
     pass, only a tick per decision, so its BETs reached the app's Live tab and
-    nowhere else. Called with the pick's OWN game_date rather than a clock
-    date: the row stamps the decision's UTC date, and a Sunday-night bet is
-    Monday in UTC, so resolving "today" here would hunt the wrong day.
+    nowhere else. Called with the pick's OWN game_date -- the game's ET date
+    from `games` -- rather than a clock date, so a bet written after midnight
+    ET in a late game still announces under the day its game belongs to.
 
     Both notifiers dedupe on push_sent and take the publisher lock, so calling
     per BET rather than per pass costs nothing but one query each. Separate
@@ -344,10 +361,11 @@ class PicksRecorder:
         ctx = decision.context or {}
         conn = self._connect()
         try:
-            game_id = resolve_game_id(conn, ctx.get("home_team"),
-                                      ctx.get("away_team"), decision.ts)
-            if game_id is None:
+            game = resolve_game(conn, ctx.get("home_team"),
+                                ctx.get("away_team"), decision.ts)
+            if game is None:
                 return
+            game_id, game_date = game
 
             # A lane holding the bet of record is not also "avoided". Same rule
             # the MLB loop applies by excluding locked lanes from its rewrite.
@@ -368,7 +386,8 @@ class PicksRecorder:
                   AND is_live = TRUE AND result IS NULL
                   AND signal_type <> 'BET'
             """, (game_id, decision.model_id, player_key, side))
-            row = build_pick(decision, game_id, self._bankroll_value())
+            row = build_pick(decision, game_id, self._bankroll_value(),
+                             game_date=game_date)
             row["signal_type"] = "AVOID"
             row["kelly_fraction"] = 0.0
             row["recommended_bet"] = 0.0
@@ -387,10 +406,11 @@ class PicksRecorder:
         ctx = decision.context or {}
         conn = self._connect()
         try:
-            game_id = resolve_game_id(conn, ctx.get("home_team"),
-                                      ctx.get("away_team"), decision.ts)
-            if game_id is None:
+            game = resolve_game(conn, ctx.get("home_team"),
+                                ctx.get("away_team"), decision.ts)
+            if game is None:
                 return                  # refuse, never guess -- see module docstring
+            game_id, game_date = game
 
             # FIRST-SIGNAL LIVE LOCK (§1c, config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL).
             # A lane holding an unsettled live BET for this game is the bet of
@@ -403,7 +423,8 @@ class PicksRecorder:
                          decision.model_id, decision.player, game_id)
                 return
 
-            row = build_pick(decision, game_id, self._bankroll_value())
+            row = build_pick(decision, game_id, self._bankroll_value(),
+                             game_date=game_date)
             conn.execute(_INSERT_SQL, row)
             conn.commit()
             log.info("WROTE live %s %s %s @ %s", row["model_id"],
