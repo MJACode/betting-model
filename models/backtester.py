@@ -42,6 +42,7 @@ from data.db import get_connection, DBConnection
 from features.feature_engine import (
     FEATURE_MAP,
     SPARSE_OK_FEATURES,
+    HANDICAP_SPARSE_FEATURES,
     build_mlb_game_features,
     build_nhl_game_features,
     _build_bulk_mlb_lookups,
@@ -132,7 +133,12 @@ def run_backtest(model_id: str, season: int,
 
     # For MLB and NHL, bulk-load all lookup tables upfront (same path as the
     # trainer). Drops backtest from ~1 hour to seconds.
-    bulk = _build_bulk_mlb_lookups(conn, [season]) if sport == "MLB" else None
+    bulk = (
+        _build_bulk_mlb_lookups(
+            conn, [season],
+            include_handicap=any(c in HANDICAP_SPARSE_FEATURES for c in feat_cols),
+        ) if sport == "MLB" else None
+    )
     nhl_bulk = _build_bulk_nhl_lookups(conn, [season]) if sport == "NHL" else None
     # NCAAF needs its own bulk lookups. Without this the sport fell through to
     # the NHL `else` branch below and was scored with NHL features off a
