@@ -14,9 +14,11 @@ pre-game GAME model never calls it. Those models still:
 They do not look at opening vs current structure, do not pass when the
 market has already steamed through the model's number, and do not use the
 Action Network ticket/handle splits that `public_betting` already stores.
-`features/market_movement.py` computes the movement features; no GAME model
-consumes them (docs/market_movement_features.md) because adding them to a
-retrain would drop every pre-2026 row.
+`features/market_movement.py` computes the movement features. `mlb_runline`
+and `mlb_over_under` now list them on the train matrix
+(`docs/mlb_market_handicap_features.md`); this module is still the DECISION
+layer, not a substitute for that retrain. Pre-2026 SBR rows stay NaN
+(`SPARSE_OK`). A live artifact has not been retrained.
 
 This module is the DECISION layer, not a retrain. It answers three questions
 at pick time from odds already in the pipeline:

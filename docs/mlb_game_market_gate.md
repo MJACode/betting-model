@@ -12,9 +12,9 @@ Code: `models/game_market_gate.py`. Config: `GAME_MARKET_GATE_*` in `config.py`.
   no-vig-vs-open test, and it does not look at ticket splits.
 - **`models/market_relative.py`** is the sharp-vs-soft *prop* construction. MLB
   game scoring never calls it.
-- **`features/market_movement.py`** exists; **no model consumes it**
-  (`docs/market_movement_features.md`) — 17 seasons of SBR history are one
-  snapshot per game, so a retrain on movement would drop every pre-2026 row.
+- **`features/market_movement.py`** exists and is now consumed at **train**
+  time by `mlb_runline` / `mlb_over_under` (`docs/mlb_market_handicap_features.md`).
+  This gate is still the decision overlay, not a substitute for that retrain.
 - **`check_line_movement`** is a post-hoc SKIP/CAUTION log, not a BET gate.
 - **`public_betting`** (Action Network) is stamped on the pick for display
   (`public_bet_pct` / `public_money_pct`) and is not read by `_decide`.

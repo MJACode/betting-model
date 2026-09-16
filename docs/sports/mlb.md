@@ -79,6 +79,15 @@ optional public-steam when `public_betting` has tickets. Default **live**
 artifact). New BETs that steam or public-steam become NONE; fail-open; never
 upgrades. Extra no-vig floor off. No pause/unpause, no retrain.
 
+## 11b3. MARKET-HANDICAP FEATURES — `docs/mlb_market_handicap_features.md`
+
+As of 2026-09-16 the **train matrix** for `mlb_runline` and `mlb_over_under`
+includes the same signals the gate only used after `_decide`: Action Network
+tickets/money/RLM (`public_betting`) and line-move / Pinnacle-gap
+(`features/market_movement.py`). All of those columns are `SPARSE_OK` so
+pre-2026 rows are not `dropna`'d. Models stay paused; no live artifact; retrain
+is the next worker job. Moneyline and F5 lists are unchanged.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 

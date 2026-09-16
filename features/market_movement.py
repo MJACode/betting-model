@@ -88,13 +88,19 @@ def american_to_prob(price) -> float | None:
     return (-p / (-p + 100.0)) if p < 0 else (100.0 / (p + 100.0))
 
 
-def load_market_movement(conn, sport: str, decision_book: str = "draftkings") -> dict:
+def load_market_movement(conn, sport: str, decision_book: str = "draftkings",
+                         game_id: str | None = None) -> dict:
     """Bulk-load every pre-game h2h/totals/spreads snapshot for one sport.
 
     One query rather than per-game lookups: the same reason the rest of the
     engines bulk-load. Returns {game_id: {feature: value}}, ready to merge into
-    a feature row.
+    a feature row. Pass `game_id` to bound the scan to a single live game.
     """
+    extra = ""
+    params: list = [sport]
+    if game_id:
+        extra = " AND o.game_id = %s"
+        params.append(game_id)
     rows = conn.execute(f"""
         SELECT o.game_id, o.bookmaker, o.snapshot_at, o.home_price,
                o.away_price, o.total_line, o.spread_home,
@@ -110,8 +116,9 @@ def load_market_movement(conn, sport: str, decision_book: str = "draftkings") ->
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s
           AND COALESCE(o.snapshot_type, '') <> 'in_play'
+          {extra}
         ORDER BY o.game_id, o.snapshot_at
-    """, (sport,)).fetchall()
+    """, tuple(params)).fetchall()
 
     per_game: dict[str, list[dict]] = defaultdict(list)
     for (game_id, book, snap, home_price, away_price,
