@@ -12,15 +12,17 @@ one exists, and names what failed where one does not. **It does not conclude
 (`model_calibration_sweeps` 2026-09-14: `mlb_over_under` NO CUT, cur −11.6%
 n=107; `mlb_runline` NO CUT, cur −15.5% n=9).
 
-This PR wires a **paper, INSERT-gated** totals *logger* of the construction
-this pass measured: Pin de-vig vs bettable-soft de-vig at 2pp
-(**−11.13% / 79** May–Jun). Defaults stay 0. Do **not** set
+Merged #734 (`d925a24`) wires a **paper, INSERT-gated** totals card:
+Pin OPEN no-vig **lean** minus the **best bettable soft book's juiced
+implied**, equal `total_line`, ≥2pp (`BEST_LINE_BOOKMAKERS`, pin-lean
+only — never fade Pinnacle). Defaults stay 0. Do **not** set
 `MLB_TOTAL_MARKET_PUBLISH=1`. Do **not** set `MLB_SPREAD_MARKET_PUBLISH=1`.
 This is not an unpause of `mlb_over_under` and not live money.
 
-GROK Pin-lean vs DK implied (~+11% n≈103) is a **different** construction.
-It is not this card. Confirming it is **not** permission to flip
-`MLB_TOTAL_MARKET_PUBLISH` — that env would INSERT the −11% population.
+Pin-de-vig vs bettable-soft-de-vig May–Jun 2pp **−11.13% / 79** is a
+sweep flag (`vs=devig`), not this card. GROK vs DK-only (~+11% n≈103)
+is the same lean-vs-implied arithmetic at one book; the card shops
+BEST_LINE. Neither is a reason to flip the env.
 
 ---
 
@@ -226,13 +228,12 @@ belongs to: **money divergence** at the **same** line.
 
 **Product split (do not blend):**
 
-- **Card log / INSERT-if-env** = Construction 1: Pin de-vig vs bettable-soft
-  de-vig. Totals 2pp **−11.13% / 79**. Env stays 0. Flipping it writes
-  that loser.
-- **GROK** (Pin no-vig lean vs DK juiced implied, DK-only, ~+11% n≈103)
-  is a different population. Worker job may remeasure it. It is **not**
-  this card and **not** a justification for `MLB_TOTAL_MARKET_PUBLISH=1`.
-  A hold would need a new card.
+- **Card log / INSERT-if-env** = Pin no-vig lean vs BEST_LINE juiced
+  implied, pin-lean only. Env stays 0.
+- **Construction 1** (Pin de-vig vs bettable-soft de-vig) is the −11%
+  loser. Sweep flag `vs=devig`. Not this card.
+- **GROK DK-only** (Pin lean vs DK juiced implied, ~+11% n≈103) is the
+  same lean-vs-implied arithmetic at one book. The card shops BEST_LINE.
 
-GROK’s ≥2pp Pin-vs-DK spread sample lost. Pin-vs-soft totals 2pp lost.
-Neither is a go-live.
+GROK’s ≥2pp Pin-vs-DK spread sample lost. Pin-vs-soft-devig totals 2pp
+lost. Neither is a go-live, and neither is this card.
