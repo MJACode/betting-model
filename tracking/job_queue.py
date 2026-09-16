@@ -1005,6 +1005,177 @@ def _job_clv_backfill(**kw):
         conn.close()
 
 
+def _run_script_main(mod_name: str, argv: list[str]) -> str:
+    """Import `mod.main` and run it with argv, capturing stdout for the job card.
+
+    Jobs are an allowlist of types, not a shell (`test_there_is_no_shell_or_command_column`).
+    Same shape as `_job_market_coverage` importing a script function, with stdout
+    captured because these scripts print the grid a person reads. Discord's job
+    card truncates to 900 chars; the full text is in `worker_jobs.result` and
+    the worker log.
+    """
+    import importlib
+    import io
+    import sys
+    from contextlib import redirect_stdout
+
+    mod = importlib.import_module(mod_name)
+    buf = io.StringIO()
+    old = sys.argv[:]
+    try:
+        sys.argv = [mod_name] + list(argv)
+        with redirect_stdout(buf):
+            try:
+                mod.main()
+            except SystemExit as exc:
+                if exc.code not in (0, None):
+                    msg = (exc.code if isinstance(exc.code, str)
+                           else (str(exc) or f"exit {exc.code}"))
+                    raise RuntimeError(msg) from exc
+    finally:
+        sys.argv = old
+    text = buf.getvalue()
+    if text.strip():
+        logger.info(text.rstrip())
+    return text
+
+
+_GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF"})
+_GAME_LINE_MARKETS = frozenset({"h2h", "spreads", "totals"})
+
+
+def _validate_game_line_market_sweep(args: dict) -> dict:
+    """Pinnacle vs soft books, equal-line, pre-game. Measure only.
+
+    Empty args is the one-shot Mike asked for: MLB spreads + totals. Unknown
+    keys (a free-form `command`, say) are dropped, not executed.
+    """
+    sports = args.get("sport")
+    if sports in (None, ""):
+        sports = ["MLB"]
+    elif isinstance(sports, str):
+        sports = [sports]
+    elif not isinstance(sports, list) or not sports:
+        raise ValueError("sport must be a non-empty list or string")
+    else:
+        sports = [str(s) for s in sports]
+    sports = [s.upper() for s in sports]
+    bad = [s for s in sports if s not in _GAME_LINE_SPORTS]
+    if bad:
+        raise ValueError(
+            f"unknown sport {bad}; allowed {sorted(_GAME_LINE_SPORTS)}")
+
+    markets = args.get("market")
+    if markets in (None, ""):
+        markets = ["spreads", "totals"]
+    elif isinstance(markets, str):
+        markets = [markets]
+    elif not isinstance(markets, list) or not markets:
+        raise ValueError("market must be a non-empty list or string")
+    else:
+        markets = [str(m) for m in markets]
+    markets = [m.lower() for m in markets]
+    bad = [m for m in markets if m not in _GAME_LINE_MARKETS]
+    if bad:
+        raise ValueError(
+            f"unknown market {bad}; allowed {sorted(_GAME_LINE_MARKETS)}")
+    return {"sport": sports, "market": markets}
+
+
+def _job_game_line_market_sweep(**kw):
+    """Read-only ROI grid: Pinnacle vs the script's eight soft books.
+
+    Wraps `scripts.game_line_market_sweep.main`. Writes no threshold,
+    does not pause or unpause a model, does not publish.
+    """
+    argv = ["--sport", *kw["sport"], "--market", *kw["market"]]
+    stdout = _run_script_main("scripts.game_line_market_sweep", argv)
+    summary = stdout.strip()[-800:] if stdout.strip() else "(no sweep stdout)"
+    return {
+        "summary": summary,
+        "sport": kw["sport"],
+        "market": kw["market"],
+        "stdout": stdout,
+    }
+
+
+_MLB_RUNLINE_TRAIN_SEASONS = [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+
+
+def _validate_mlb_runline_retrain_sweep(args: dict) -> dict:
+    """Honest path from `.github/workflows/runline_sweep.yml`.
+
+    Retrain mlb_runline on 2019-2025 / holdout 2026, then sweep 2026.
+    `register` defaults False — the same default as `retrain_model` and every
+    declared retrain in this file — so the live artifact stays put. The sweep
+    loads the just-trained pickle via `--artifact`, not `model_registry`.
+    """
+    requested = str(args.get("model_id") or "mlb_runline")
+    if requested != "mlb_runline":
+        raise ValueError(
+            f"mlb_runline_retrain_sweep only trains mlb_runline, got {requested!r}")
+    holdout = args.get("holdout")
+    if holdout in (None, ""):
+        holdout = 2026
+    cleaned = _validate_retrain({
+        "model_id": "mlb_runline",
+        "seasons": args.get("seasons") or _MLB_RUNLINE_TRAIN_SEASONS,
+        "holdout": holdout,
+        "register": args.get("register", False),
+        "trials": args.get("trials"),
+        "statement_timeout_ms": args.get("statement_timeout_ms"),
+    })
+    sweep_seasons = args.get("sweep_seasons")
+    if sweep_seasons in (None, ""):
+        sweep_seasons = [cleaned["holdout"] if cleaned["holdout"] is not None else 2026]
+    elif not isinstance(sweep_seasons, list) or not sweep_seasons:
+        raise ValueError("sweep_seasons must be a non-empty list of ints")
+    else:
+        sweep_seasons = [int(s) for s in sweep_seasons]
+    raw_min = args.get("min_bets")
+    min_bets = 30 if raw_min in (None, "") else int(raw_min)
+    if min_bets < 1:
+        raise ValueError(f"min_bets out of range: {min_bets}")
+    return {**cleaned, "sweep_seasons": sweep_seasons, "min_bets": min_bets}
+
+
+def _job_mlb_runline_retrain_sweep(**kw):
+    """Retrain mlb_runline, then sweep the just-trained artifact. Measure only.
+
+    Combined so the sweep cannot run against the pre-retrain live pickle (the
+    2026-in-sample model the workflow comments call dishonest). register=False
+    leaves model_registry and the live scorer untouched. Does not write a
+    cut and does not pause or unpause.
+
+    `scripts.mlb_runline_sweep` calls `config.assert_retrain_allowed` at import.
+    The marker `data/TEAM_STATS_ASOF_REBUILD_COMPLETE` is in tree (2026-09-14);
+    without it (or `TEAM_STATS_ASOF_REBUILD_COMPLETE=1`) the job fails loud.
+    """
+    trained = _job_retrain_model(
+        model_id=kw["model_id"], seasons=kw["seasons"], holdout=kw["holdout"],
+        trials=kw["trials"], register=kw["register"],
+        statement_timeout_ms=kw["statement_timeout_ms"])
+    path = (trained or {}).get("path") if isinstance(trained, dict) else None
+    if not path:
+        raise RuntimeError(
+            "mlb_runline retrain returned no artifact path; refusing to sweep "
+            "the live model")
+    argv = [
+        "--seasons", *[str(s) for s in kw["sweep_seasons"]],
+        "--min-bets", str(kw["min_bets"]),
+        "--artifact", str(path),
+    ]
+    stdout = _run_script_main("scripts.mlb_runline_sweep", argv)
+    summary = stdout.strip()[-800:] if stdout.strip() else "(no sweep stdout)"
+    return {
+        "summary": summary,
+        "retrain": trained,
+        "artifact": str(path),
+        "registered": bool(kw["register"]),
+        "stdout": stdout,
+    }
+
+
 JOBS = {
     "verify_checks": (_job_verify_checks, _validate_verify_checks),
     "void_picks":      (_job_void_picks,       _validate_void_picks),
@@ -1012,6 +1183,14 @@ JOBS = {
     # ONE-SHOT. Loops the ordinary settle backfill until the raw_one_sided
     # pedigree is gone (or 40 passes). See _job_clv_backfill.
     "clv_backfill": (_job_clv_backfill, _validate_clv_backfill),
+    # ONE-SHOT measure-only. Pinnacle vs soft books on game lines. See
+    # _job_game_line_market_sweep.
+    "game_line_market_sweep": (_job_game_line_market_sweep,
+                               _validate_game_line_market_sweep),
+    # ONE-SHOT measure-only. Retrain mlb_runline (2019-2025 / holdout 2026)
+    # then sweep the just-trained pickle. See _job_mlb_runline_retrain_sweep.
+    "mlb_runline_retrain_sweep": (_job_mlb_runline_retrain_sweep,
+                                  _validate_mlb_runline_retrain_sweep),
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),

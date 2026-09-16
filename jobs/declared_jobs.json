@@ -762,5 +762,27 @@
     "requested_by": "mike",
     "note": "ONE-SHOT. #729 (9fb77ee) already live; _backfill_clv rewrites 40 dates of clv_method='raw_one_sided' per settle and there is no settle job_type. Prod had 2419 such rows across 151 dates (2026-09-14). This loops the ordinary paper_tracker._backfill_clv until a pass fills 0 (cap 40 passes) so the no-vig pedigree is complete now rather than over many scheduled settles. mike: force Railway pickup and backfill everything. No model/threshold change.",
     "args": {}
+  },
+  {
+    "key": "mlb-game-line-market-sweep-2026-09-15",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only (mike via mlb Handicap). Pinnacle vs the script's eight soft books (draftkings, fanduel, betmgm, williamhill_us, espnbet, betrivers, hardrockbet, bovada), equal-line only, pre-game, MLB spreads + totals. Writes nothing to ACTION_THRESHOLDS / PAUSED_MODELS; does not publish. Independent of the runline retrain.",
+    "args": {
+      "sport": ["MLB"],
+      "market": ["spreads", "totals"]
+    }
+  },
+  {
+    "key": "mlb-runline-retrain-sweep-2026-09-15",
+    "job_type": "mlb_runline_retrain_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only (mike via mlb Handicap). Honest path from .github/workflows/runline_sweep.yml: retrain mlb_runline seasons 2019-2025 / holdout 2026, THEN sweep --seasons 2026. Combined job so the sweep cannot run against the pre-retrain live pickle. register=false matches every prior declared retrain_model job (a queued retrain must not swap the live artifact whose .pkl is not committed); the sweep loads the just-trained pickle via --artifact. Does not ship a RE-CUT, does not pause/unpause. Requires data/TEAM_STATS_ASOF_REBUILD_COMPLETE (in tree since 2026-09-14) or TEAM_STATS_ASOF_REBUILD_COMPLETE=1 — scripts.mlb_runline_sweep asserts this at import; do not bypass by deleting the guard.",
+    "args": {
+      "seasons": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+      "holdout": 2026,
+      "register": false,
+      "sweep_seasons": [2026]
+    }
   }
 ]
