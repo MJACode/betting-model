@@ -21,6 +21,17 @@
 
 ---
 
+## [x] Earliest Pin vs earliest soft totals ≥2pp is look-ahead — 2026-09-16
+
+Mike's SQL (2025 n=40 +13.29u +33.2%; 2024 n=41 +12.40u) **replicates**
+on production (2025 exact; 2024 this pass 42 / +13.50u). Open-only is a
+no-op (100% of earliest quotes are `snapshot_type=open`). ±5min
+aligned-first ≥2pp is n=1 on 2024–25 totals (2026 H1 n=0). Spreads ±1.5
+unaligned combined +7.70%/190 is the same 10–14h tail; aligned-first
+n=9. Ship gate (open or aligned ≥2pp, ≥+5%, n≥80 2024–26) fails on
+aligned. **Did not** retarget `mlb_total_market`. **Did not** unpause
+XGBoost. `docs/mlb_edge_search_2026_09_16.md` §6.
+
 ## [needs-decision] Paper `mlb_spread_market` 1.8pp — INSERT still 0
 
 2026-09-16 search (`docs/mlb_edge_search_2026_09_16.md`). Card cut 1.8pp is

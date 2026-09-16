@@ -1052,6 +1052,7 @@ def _allowed_game_line_markets() -> frozenset:
 _GAME_LINE_RICH_KEYS = frozenset({
     "markets", "edges", "snapshot_type", "vs", "pin_lean", "bettable",
     "by_month", "date_from", "date_to", "soft_books", "max_gap_s",
+    "quote", "juice_abs_max", "min_line", "max_line",
 })
 
 
@@ -1066,7 +1067,7 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
       vs / pin_lean so the worker can fill the 2/3/4pp constructions.
     """
     if _GAME_LINE_RICH_KEYS & set(args):
-        from scripts.game_line_market_sweep import SNAPSHOT_TYPES, VS_MODES
+        from scripts.game_line_market_sweep import SNAPSHOT_TYPES, VS_MODES, QUOTE_ORDERS
         sport = str(args.get("sport") or "MLB").upper()
         if sport not in _GAME_LINE_SPORTS:
             raise ValueError(f"sport must be MLB|NCAAF, got {sport!r}")
@@ -1103,10 +1104,27 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
             if not isinstance(soft_books, list) or not 1 <= len(soft_books) <= 20:
                 raise ValueError("soft_books must be a list of 1-20 book keys")
             soft_books = [str(b) for b in soft_books]
-        max_gap_s = float(
-            args.get("max_gap_s") if args.get("max_gap_s") is not None else 300)
-        if not 0 <= max_gap_s <= 86_400:
-            raise ValueError(f"max_gap_s out of range: {max_gap_s}")
+        max_gap_raw = args.get("max_gap_s", 300)
+        if max_gap_raw is None:
+            max_gap_s = None
+        else:
+            max_gap_s = float(max_gap_raw)
+            if not 0 <= max_gap_s <= 86_400:
+                raise ValueError(f"max_gap_s out of range: {max_gap_s}")
+        quote = str(args.get("quote") or "latest")
+        if quote not in QUOTE_ORDERS:
+            raise ValueError(f"quote must be latest|earliest, got {quote!r}")
+        juice_abs_max = args.get("juice_abs_max")
+        if juice_abs_max is not None:
+            juice_abs_max = float(juice_abs_max)
+            if not 100 <= juice_abs_max <= 1000:
+                raise ValueError(f"juice_abs_max out of range: {juice_abs_max}")
+        min_line = args.get("min_line")
+        max_line = args.get("max_line")
+        if min_line is not None:
+            min_line = float(min_line)
+        if max_line is not None:
+            max_line = float(max_line)
         return {
             "sport": sport,
             "markets": markets,
@@ -1120,6 +1138,10 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
             "date_to": date_to,
             "soft_books": soft_books,
             "max_gap_s": max_gap_s,
+            "quote": quote,
+            "juice_abs_max": juice_abs_max,
+            "min_line": min_line,
+            "max_line": max_line,
         }
 
     sports = args.get("sport")
@@ -1178,6 +1200,10 @@ def _job_game_line_market_sweep(**kw):
             date_to=kw.get("date_to"),
             soft_books=kw.get("soft_books"),
             max_gap_s=kw.get("max_gap_s", 300),
+            quote=kw.get("quote", "latest"),
+            juice_abs_max=kw.get("juice_abs_max"),
+            min_line=kw.get("min_line"),
+            max_line=kw.get("max_line"),
         )
     argv = ["--sport", *kw["sport"], "--market", *kw["market"]]
     stdout = _run_script_main("scripts.game_line_market_sweep", argv)

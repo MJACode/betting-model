@@ -28,6 +28,14 @@ the HOME number.
 Live money stays off every row in this table until Mike sets
 `MLB_SPREAD_MARKET_PUBLISH=1` (rank 1 only) or asks for a new card.
 
+**Earliest Pin vs earliest soft totals ≥2pp is not in this table.** It
+replicates (2025 n=40 +13.29u +33.2%) and then fails the look-ahead test:
+open-only is a no-op (100% of earliest quotes are `snapshot_type=open`),
+and ±5min aligned-first ≥2pp is n=1 on 2024–25 (2026 H1 n=0). Ship gate
+was ≥2pp open **or** aligned, still ≥+5% ROI on n≥80 combined 2024–26.
+Aligned fails n. Treating open-only as a pass would ship the 14-hour tail.
+`mlb_total_market` is **not** retargeted. Section 6.
+
 ---
 
 ## Rank 1 — the paper strategy
@@ -186,6 +194,85 @@ Prior MCP Apr–Jun: 1.5pp +3.73%/107 (home −2.22%/69, away +14.53%/38);
 Declared `mlb-game-line-market-sweep-h2h-2026-09-16` remeasures 1.2/1.5/1.8/2.0
 on bettable books. Not paper until the plateau holds.
 
+### 6. Earliest Pin vs earliest soft (Mike's SQL, 2026-09-16)
+
+Mike: earliest pregame Pin (`snapshot_type <> in_play`) vs earliest soft at
+equal `total_line`; soft books DK / FD / BetMGM / WH / Bovada / ESPN /
+HardRock; Pin no-vig fair − soft implied ≥2pp; one bet per game (best
+edge); American |price| ≤ 200; lines 5.5–14.5. Reported 2025 n=40 +13.29u
++33.2%; 2024 n=41 +12.40u +30.2%. Caveat: the worker's time-aligned
+totals sweep was negative, so this had to be proved not look-ahead
+(earliest soft after Pin moved). Variants required: `snapshot_type=open`
+both sides, and soft `snapshot_at` within 5 min of Pin. Same construction
+on spreads ±1.5. Ship paper-publisher alignment only if ≥2pp **open or
+aligned** still ≥+5% ROI on n≥80 combined 2024–26. Do not unpause XGBoost.
+
+Replicated on production (`vvprgnrmzeekokzkrkfu`) 2026-09-16. Units, never
+dollars. Pushes excluded. `scored_line` is the HOME number on spreads.
+
+**Open-only is the unaligned cell.** Earliest pregame totals quotes
+(`snapshot_type IS DISTINCT FROM 'in_play'`, `snapshot_at <= commence_time`)
+are 100% `open`: 2024 **19,096 / 19,096**, 2025 **19,232 / 19,232**. Restricting
+both sides to `snapshot_type=open` changes nothing.
+
+**Unaligned earliest vs earliest, totals, ≥2pp** (also the open-only cell).
+Median |gap| on the 2pp bets is **~50,380s = 14.0 hours**.
+
+| Window | n | units | ROI | aligned-first n / u |
+|---|---|---|---|---|
+| 2024 | **42** | **+13.50** | **+32.14%** | 1 / −1.00 |
+| 2025 | **40** | **+13.29** | **+33.23%** | 0 / — |
+| 2026 H1 (to 06-30) | 22 | +2.57 | +11.68% | 0 / — |
+| 2026-07 | 10 | +0.15 | +1.50% | 0 / — |
+| 2026-08 | 13 | +5.64 | +43.38% | 0 / — |
+| **Combined through 2026-08** | **127** | **+35.15** | **+27.68%** | **1 / −1.00** |
+
+2025 matches Mike byte-for-byte (n=40, +13.29u, +33.2%). 2024 is one bet
+off his n=41 +12.40u +30.2% (this pass 42 / +13.50u). 2026-09 MCP timed
+out on the join; 202 settled games in that window have a Pin totals quote.
+The worker one-shots cover through 2026-09-17.
+
+≥1.5pp unaligned: 2024 **78 / +9.98u / +12.79%** (Mike n=75 +9.2%);
+2025 **74 / +17.70u / +23.92%** (Mike n=73 +25.6%); 2026 H1 41 / +9.78u /
++23.85%. Neighbour of a look-ahead cell, not a plateau to ship.
+
+**Aligned-first (filter |gap|≤300s, then best edge).** This is the worker
+construction and the honest test. Games that *have* an equal-line
+earliest-per-book pair inside 5 minutes: 2024 **2,032**, 2025 **2,054**,
+2026 H1 **1,024**. ≥2pp among those: **2024 n=1 −1.00u, 2025 n=0, 2026 H1
+n=0**. Combined n=1, not n≥80.
+
+**Any-soft in the Pin-open window, not just that book's earliest.** June
+2025: 371 games have a contemporaneous (`snapshot_type=open`, equal
+`total_line`, |snap−pin_snap|≤300s) quote from one of the seven books.
+≥2pp n=**0**. The 2pp disagreement lives in the 14-hour tail, not at the
+opener.
+
+**Spreads ±1.5, same books / juice / vs=implied / earliest.**
+`scored_line` is the HOME number.
+
+| Window | unaligned ≥2pp n / u / ROI | aligned-first ≥2pp n / u | med gap (unaligned 2pp) |
+|---|---|---|---|
+| 2024 | 78 / +9.90 / +12.69% | 5 / +2.50 | 36,041s (10.0h) |
+| 2025 | 74 / +3.99 / +5.39% | 4 / +0.26 | 50,396s (14.0h) |
+| 2026 H1 | 38 / +0.74 / +1.95% | 1 / −1.00 (best-was-aligned) | 50,409s (14.0h) |
+| Combined 2024–26 H1 | 190 / +14.63 / +7.70% | 2024-25 aligned-first **n=9** | — |
+
+Unaligned combined clears +5% n≥80 **and** is look-ahead (median 10–14h).
+2026 H1 unaligned is **+1.95%**. Aligned-first n=9 on two full seasons,
+not n≥80.
+
+**Ship gate.** ≥2pp open or aligned, ≥+5% ROI, n≥80 combined 2024–26.
+Open-only = unaligned = the 14h tail. Aligned fails n (totals n=1;
+spreads n=9). **Do not retarget `mlb_total_market` / `find_total_bets` to
+earliest-unaligned. Do not change `MIN_EDGE_SPREADS`. Do not unpause
+XGBoost. `MLB_*_MARKET_PUBLISH` stays 0.**
+
+The paper publisher stays latest OPEN, ≤300s, Pin de-vig vs bettable-soft
+de-vig, 1.8pp spreads. Worker jobs
+`mlb-game-line-market-sweep-earliest-*-2026-09-16` remeasure unaligned and
+aligned on 2024-03-20→2026-09-17.
+
 ### Predictive models (settled 2026 pregame BET, not VOID)
 
 Prior pass: `mlb_moneyline` −2.38%/101; `mlb_over_under` −17.64%/162;
@@ -202,10 +289,12 @@ publish path.
 | Worker markets | `tracking/job_queue.py` `_allowed_game_line_markets` includes the three F5 keys |
 | Public RLM grader | `scripts/mlb_public_rlm_sweep.py` — `_is_pregame_snapshot`, DK price, control always-under, hybrid Pin-lean |
 | Worker job | `mlb_public_rlm_sweep` |
-| One-shots | `jobs/declared_jobs.json` — spreads 1.5/1.8/2.0/2.5, h2h, F5 totals, public RLM+steam |
+| One-shots | `jobs/declared_jobs.json` — spreads 1.5/1.8/2.0/2.5, h2h, F5 totals, public RLM+steam, earliest totals/spreads unaligned+aligned |
+| Earliest quote + unaligned gap | `scripts/game_line_market_sweep.py` — `quote=earliest`, `max_gap_s=None`, juice / line filters |
 
 **Not done:** `PAUSED_MODELS` unchanged. `MLB_*_MARKET_PUBLISH` unchanged.
 No pickle registered. No live Discord/app publisher for a new model id.
+`mlb_total_market` is **not** retargeted to earliest-unaligned.
 
 ---
 
@@ -213,5 +302,7 @@ No pickle registered. No live Discord/app publisher for a new model id.
 
 This is not an unpause of `mlb_runline`. It is not GROK’s Pin-vs-DK implied
 totals +11%. It is not “fade the public” as a live model — the honest public
-sample is 85 games and August is gone. Rank 1 is the market-relative run-line
-rule that already has both-halves-positive evidence at n=367.
+sample is 85 games and August is gone. It is not Mike’s earliest-Pin vs
+earliest-soft totals +33% — that cell is a 14-hour look-ahead; aligned it
+does not exist at volume. Rank 1 is the market-relative run-line rule that
+already has both-halves-positive evidence at n=367.

@@ -31,12 +31,18 @@ Aug +8.68 / Sep +11.19 (5 of 6 months positive). Both sides positive
 sample is the run line (±1.5).
 
 TOTALS. The paper publisher is Pin OPEN no-vig lean minus the best
-bettable soft book's juiced implied, equal total, ≥2pp. GROK vs DK
-only: Apr–Jul ~+11% n≈103. May–Jun Pin-de-vig vs bettable-soft-de-vig
-was the loser (2pp −11.13% / 79) and is not what the card fires —
-`vs='devig'` stays a sweep flag. Accidental callers of find_total_bets
-still hit MIN_EDGE_TOTALS = 1.0 (a wall). INSERT waits on
-`MLB_TOTAL_MARKET_PUBLISH=1` (default 0). `mlb_over_under` stays paused.
+bettable soft book's juiced implied, equal total, ≥2pp, latest quote,
+≤300s. GROK vs DK only: Apr–Jul ~+11% n≈103. May–Jun Pin-de-vig vs
+bettable-soft-de-vig was the loser (2pp −11.13% / 79) and is not what
+the card fires — `vs='devig'` stays a sweep flag. Accidental callers of
+find_total_bets still hit MIN_EDGE_TOTALS = 1.0 (a wall). INSERT waits
+on `MLB_TOTAL_MARKET_PUBLISH=1` (default 0). `mlb_over_under` stays paused.
+
+Do NOT retarget this card to earliest-Pin vs earliest-soft. That
+construction replicates Mike's 2025 ≥2pp cell (n=40 +13.29u +33.2%) and
+is look-ahead: median |gap| 14 hours; open-only is a no-op (every
+earliest row is snapshot_type=open); aligned-first ≥2pp is n=1 on
+2024–25. docs/mlb_edge_search_2026_09_16.md §6.
 
 PUBLISH. Both cards default to log-only. Spreads: GROK Pin-vs-DK ≥2pp
 ~−5% n≈200 — do not live-publish without the worker remeasure.

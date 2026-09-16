@@ -61,6 +61,7 @@ SHARP = "pinnacle"
 SOFT = ("draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
         "betrivers", "hardrockbet", "bovada")
 SNAPSHOT_TYPES = ("open", "in_play", "close")
+QUOTE_ORDERS = ("latest", "earliest")
 VS_MODES = ("devig", "implied")
 DEFAULT_EDGES = (0.02, 0.03, 0.04)
 # First-five quotes grade on games.home_score_f5 / away_score_f5, never the
@@ -124,17 +125,20 @@ def base_market(market: str) -> str:
 
 
 def load(conn, sport: str, market: str, snapshot_type: str = "open",
-         date_from: str | None = None, date_to: str | None = None):
-    """Latest OPEN quote per (game, book) plus the game's result.
+         date_from: str | None = None, date_to: str | None = None,
+         quote: str = "latest"):
+    """One pre-game quote per (game, book) plus the game's result.
 
-    `snapshot_type` lives on `odds`. `commence_time` lives on `games`.
-    Month-bounded callers pass date_from/date_to so the odds scan stays
-    inside an index-friendly window (unbounded scans time out on MCP).
-    First-five markets require F5 scores and grade on those, not FG.
+    `quote='latest'` (default) is the card: last OPEN before commence.
+    `quote='earliest'` is the opener. Pairing earliest Pin with earliest
+    soft *without* a 5-minute gap is look-ahead — measured 2026-09-16,
+    the +33% totals 2pp cell is the 14-hour tail; aligned-first is n=1.
     """
     if snapshot_type not in SNAPSHOT_TYPES:
         raise ValueError(f"snapshot_type must be one of {SNAPSHOT_TYPES}, "
                          f"got {snapshot_type!r}")
+    if quote not in QUOTE_ORDERS:
+        raise ValueError(f"quote must be one of {QUOTE_ORDERS}, got {quote!r}")
     bm = base_market(market)
     if bm not in BASE_MARKETS:
         raise ValueError(f"market must be h2h/spreads/totals or an F5 key, "
@@ -160,6 +164,7 @@ def load(conn, sport: str, market: str, snapshot_type: str = "open",
     score_bound = ("AND g.home_score_f5 IS NOT NULL AND g.away_score_f5 IS NOT NULL"
                    if f5 else
                    "AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL")
+    order = "ASC" if quote == "earliest" else "DESC"
     rows = conn.execute(f"""
         SELECT DISTINCT ON (o.game_id, o.bookmaker)
                o.game_id, o.bookmaker, o.home_price, o.away_price,
@@ -172,7 +177,7 @@ def load(conn, sport: str, market: str, snapshot_type: str = "open",
           AND o.snapshot_type = %s
           AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
           {extra_sql}
-        ORDER BY o.game_id, o.bookmaker, o.snapshot_at DESC
+        ORDER BY o.game_id, o.bookmaker, o.snapshot_at {order}
     """, tuple(params)).fetchall()
     by_game = defaultdict(dict)
     meta = {}
@@ -184,14 +189,17 @@ def load(conn, sport: str, market: str, snapshot_type: str = "open",
 
 
 def load_chunked(conn, sport: str, market: str, snapshot_type: str = "open",
-                 date_from: str | None = None, date_to: str | None = None):
+                 date_from: str | None = None, date_to: str | None = None,
+                 quote: str = "latest"):
     """Month-chunked load so a full-season scan does not time out."""
     if not date_from or not date_to:
-        return load(conn, sport, market, snapshot_type, date_from, date_to)
+        return load(conn, sport, market, snapshot_type, date_from, date_to,
+                    quote=quote)
     by_game: dict = defaultdict(dict)
     meta: dict = {}
     for start, stop in iter_months(date_from, date_to):
-        chunk_g, chunk_m = load(conn, sport, market, snapshot_type, start, stop)
+        chunk_g, chunk_m = load(conn, sport, market, snapshot_type, start, stop,
+                                quote=quote)
         for gid, books in chunk_g.items():
             by_game[gid].update(books)
         meta.update(chunk_m)
@@ -227,13 +235,16 @@ def grade(market, side, m, line):
 
 def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
                   vs: str = "devig", pin_lean: bool = False,
-                  soft_books=None):
+                  soft_books=None, juice_abs_max: float | None = None,
+                  min_line: float | None = None, max_line: float | None = None):
     """One candidate per game: largest Pin-vs-soft disagreement on an equal line.
 
     vs='devig'   — Pin de-vig minus the soft book's own de-vig (nfl_prop_market).
     vs='implied' — Pin de-vig minus the soft book's juiced implied (GROK Pin-lean).
     pin_lean     — only the side Pinnacle's no-vig prefers (max sharp_p).
     `market` may be an F5 key; matching and grading use the base market.
+    juice_abs_max — drop a bet whose American |price| exceeds this (Mike's −200..200).
+    min_line / max_line — totals `total_line` floor/ceiling (Mike's 5.5–14.5).
     """
     if vs not in VS_MODES:
         raise ValueError(f"vs must be one of {VS_MODES}, got {vs!r}")
@@ -267,6 +278,14 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
         if sf is None:
             diag["sharp_one_way"] += 1
             continue
+        if bm in ("totals", "spreads") and sline is not None:
+            sl = float(sline)
+            if min_line is not None and sl < float(min_line):
+                diag["line_range"] += 1
+                continue
+            if max_line is not None and sl > float(max_line):
+                diag["line_range"] += 1
+                continue
         if pin_lean:
             sides = (max(sides, key=lambda s: (s[1] is not None, s[1] or 0.0)),)
 
@@ -302,6 +321,9 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
             for side, sharp_p, _k in sides:
                 price = (a if side in ("home", "over") else b)
                 if price is None or sharp_p is None:
+                    continue
+                if juice_abs_max is not None and abs(float(price)) > float(juice_abs_max):
+                    diag["juice"] += 1
                     continue
                 if vs == "implied":
                     try:
@@ -375,13 +397,16 @@ def sweep(conn, sport: str, market: str, edges,
           snapshot_type: str = "open",
           date_from: str | None = None, date_to: str | None = None,
           vs: str = "devig", pin_lean: bool = False,
-          soft_books=None, by_month: bool = False):
+          soft_books=None, by_month: bool = False,
+          quote: str = "latest", juice_abs_max: float | None = None,
+          min_line: float | None = None, max_line: float | None = None):
     by_game, meta = load_chunked(
         conn, sport, market, snapshot_type=snapshot_type,
-        date_from=date_from, date_to=date_to)
+        date_from=date_from, date_to=date_to, quote=quote)
     picks, diag = collect_picks(
         by_game, meta, market, max_gap_s=max_gap_s, vs=vs,
-        pin_lean=pin_lean, soft_books=soft_books)
+        pin_lean=pin_lean, soft_books=soft_books,
+        juice_abs_max=juice_abs_max, min_line=min_line, max_line=max_line)
     # Legacy tuple so existing callers that unpacked (e, n, w, roi, ci) still
     # work: ROI is always filled when n>0 (thin is no longer a silent drop).
     legacy = []
@@ -416,12 +441,16 @@ def run(sport: str = "MLB", markets=None, edges=None,
         snapshot_type: str = "open", bettable: bool = True,
         by_month: bool = True, vs: str = "devig", pin_lean: bool = False,
         date_from: str | None = "2026-03-20", date_to: str | None = None,
-        soft_books=None, max_gap_s: float | None = 300) -> dict:
+        soft_books=None, max_gap_s: float | None = 300,
+        quote: str = "latest", juice_abs_max: float | None = None,
+        min_line: float | None = None, max_line: float | None = None) -> dict:
     """Worker-job entry: JSON-serializable grid. Does not publish anything."""
     markets = list(markets or ["spreads", "totals"])
     edges = [float(e) for e in (edges or DEFAULT_EDGES)]
     if date_to is None:
         date_to = (date.today() + timedelta(days=1)).isoformat()
+    if quote not in QUOTE_ORDERS:
+        raise ValueError(f"quote must be one of {QUOTE_ORDERS}, got {quote!r}")
     soft = tuple(soft_books) if soft_books else None
     if soft is None and bettable:
         import config as cfg
@@ -431,6 +460,7 @@ def run(sport: str = "MLB", markets=None, edges=None,
         out = {
             "sport": sport,
             "snapshot_type": snapshot_type,
+            "quote": quote,
             "vs": vs,
             "pin_lean": bool(pin_lean),
             "bettable": bool(bettable),
@@ -438,6 +468,10 @@ def run(sport: str = "MLB", markets=None, edges=None,
             "date_from": date_from,
             "date_to": date_to,
             "edges": edges,
+            "max_gap_s": max_gap_s,
+            "juice_abs_max": juice_abs_max,
+            "min_line": min_line,
+            "max_line": max_line,
             "markets": {},
         }
         for market in markets:
@@ -445,7 +479,9 @@ def run(sport: str = "MLB", markets=None, edges=None,
                 conn, sport, market, edges, max_gap_s=max_gap_s,
                 snapshot_type=snapshot_type, date_from=date_from,
                 date_to=date_to, vs=vs, pin_lean=pin_lean,
-                soft_books=soft, by_month=by_month)
+                soft_books=soft, by_month=by_month, quote=quote,
+                juice_abs_max=juice_abs_max, min_line=min_line,
+                max_line=max_line)
             block = {
                 "diag": dict(diag),
                 "n_candidates": len(picks),
@@ -456,7 +492,7 @@ def run(sport: str = "MLB", markets=None, edges=None,
                 block["halves"] = extra.get("halves") or {}
             out["markets"][market] = block
             print(f"\n=== {sport} {market} — snapshot_type={snapshot_type} "
-                  f"vs={vs} pin_lean={pin_lean}  "
+                  f"quote={quote} vs={vs} pin_lean={pin_lean}  "
                   f"sharp {SHARP}, {len(soft or SOFT)} soft books")
             print(f"    compared {diag['compared']}, line_mismatch "
                   f"{diag['line_mismatch']}, no_sharp {diag['no_sharp']}, "
@@ -506,7 +542,16 @@ def main() -> None:
     ap.add_argument("--pin-lean", action="store_true",
                     help="only the side Pinnacle's no-vig prefers")
     ap.add_argument("--by-month", action="store_true")
-    ap.add_argument("--max-gap-s", type=float, default=300.0)
+    ap.add_argument("--max-gap-s", type=float, default=300.0,
+                    help="pair Pin/soft quotes only if |snap| <= this; "
+                         "negative means unaligned (look-ahead measure)")
+    ap.add_argument("--quote", default="latest", choices=list(QUOTE_ORDERS),
+                    help="latest (card) or earliest (opener). Earliest without "
+                         "a 5-minute gap is look-ahead on totals.")
+    ap.add_argument("--juice-abs-max", type=float, default=None,
+                    help="drop bets whose |American price| exceeds this")
+    ap.add_argument("--min-line", type=float, default=None)
+    ap.add_argument("--max-line", type=float, default=None)
     a = ap.parse_args()
     global SOFT
     if a.soft_books:
@@ -514,12 +559,15 @@ def main() -> None:
     elif a.bettable:
         import config as cfg
         SOFT = tuple(b for b in cfg.BEST_LINE_BOOKMAKERS if b != SHARP)
+    gap = None if a.max_gap_s is not None and a.max_gap_s < 0 else a.max_gap_s
     for sport in a.sport:
         run(sport=sport, markets=a.market, edges=a.edges,
             snapshot_type=a.snapshot_type, bettable=a.bettable or bool(a.soft_books),
             by_month=a.by_month, vs=a.vs, pin_lean=a.pin_lean,
             date_from=a.date_from, date_to=a.date_to,
-            soft_books=SOFT, max_gap_s=a.max_gap_s)
+            soft_books=SOFT, max_gap_s=gap, quote=a.quote,
+            juice_abs_max=a.juice_abs_max, min_line=a.min_line,
+            max_line=a.max_line)
 
 
 if __name__ == "__main__":

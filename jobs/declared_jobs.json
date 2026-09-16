@@ -899,5 +899,97 @@
       "steam": true,
       "by_month": true
     }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-earliest-totals-unaligned-2026-09-16",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. Mike's earliest-Pin vs earliest-soft totals, Pin no-vig minus soft implied, equal total_line 5.5-14.5, juice |p|<=200, his seven soft books, NO 5-minute gap (max_gap_s null). MCP 2025 >=2pp was n=40 +13.29u +33.2% with median gap 14h — this is the look-ahead cell, not a publisher. Does not publish, pause, or unpause. Does not set MLB_TOTAL_MARKET_PUBLISH. Do not unpause XGBoost.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["totals"],
+      "edges": [0.015, 0.02, 0.025, 0.03],
+      "snapshot_type": "open",
+      "bettable": false,
+      "by_month": true,
+      "vs": "implied",
+      "pin_lean": false,
+      "quote": "earliest",
+      "max_gap_s": null,
+      "juice_abs_max": 200,
+      "min_line": 5.5,
+      "max_line": 14.5,
+      "soft_books": ["draftkings", "fanduel", "betmgm", "williamhill_us", "bovada", "espnbet", "hardrockbet"],
+      "date_from": "2024-03-20",
+      "date_to": "2026-09-17"
+    }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-earliest-totals-aligned-2026-09-16",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. Same construction as earliest-totals-unaligned but max_gap_s=300. MCP aligned-first >=2pp was n=1 on 2024-25 (2026 H1 n=0) — the honest test. Does not publish, pause, or unpause. Does not set MLB_TOTAL_MARKET_PUBLISH.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["totals"],
+      "edges": [0.015, 0.02, 0.025, 0.03],
+      "snapshot_type": "open",
+      "bettable": false,
+      "by_month": true,
+      "vs": "implied",
+      "pin_lean": false,
+      "quote": "earliest",
+      "max_gap_s": 300,
+      "juice_abs_max": 200,
+      "min_line": 5.5,
+      "max_line": 14.5,
+      "soft_books": ["draftkings", "fanduel", "betmgm", "williamhill_us", "bovada", "espnbet", "hardrockbet"],
+      "date_from": "2024-03-20",
+      "date_to": "2026-09-17"
+    }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-earliest-spreads-unaligned-2026-09-16",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. Earliest-Pin vs earliest-soft spreads, Pin no-vig minus soft implied, juice |p|<=200, Mike's seven soft books, no 5-minute gap. MCP ±1.5 >=2pp unaligned 2024-26H1 n=190 +7.70% is the 10-14h tail; 2026 H1 +1.95%/38. Does not publish, pause, or unpause. Does not set MLB_SPREAD_MARKET_PUBLISH. Do not unpause XGBoost.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["spreads"],
+      "edges": [0.015, 0.02, 0.025, 0.03],
+      "snapshot_type": "open",
+      "bettable": false,
+      "by_month": true,
+      "vs": "implied",
+      "pin_lean": false,
+      "quote": "earliest",
+      "max_gap_s": null,
+      "juice_abs_max": 200,
+      "soft_books": ["draftkings", "fanduel", "betmgm", "williamhill_us", "bovada", "espnbet", "hardrockbet"],
+      "date_from": "2024-03-20",
+      "date_to": "2026-09-17"
+    }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-earliest-spreads-aligned-2026-09-16",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. Same as earliest-spreads-unaligned but max_gap_s=300. MCP aligned-first >=2pp 2024-25 n=9. Does not publish, pause, or unpause.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["spreads"],
+      "edges": [0.015, 0.02, 0.025, 0.03],
+      "snapshot_type": "open",
+      "bettable": false,
+      "by_month": true,
+      "vs": "implied",
+      "pin_lean": false,
+      "quote": "earliest",
+      "max_gap_s": 300,
+      "juice_abs_max": 200,
+      "soft_books": ["draftkings", "fanduel", "betmgm", "williamhill_us", "bovada", "espnbet", "hardrockbet"],
+      "date_from": "2024-03-20",
+      "date_to": "2026-09-17"
+    }
   }
 ]

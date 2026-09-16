@@ -166,3 +166,87 @@ def test_job_validator_accepts_f5_keys():
     assert got["markets"] == ["totals_1st_5_innings"]
     with pytest.raises(ValueError, match="unknown"):
         validate({"markets": ["player_points"]})
+
+
+def test_earliest_load_orders_snapshot_at_asc():
+    src = inspect.getsource(sweep.load)
+    assert 'quote == "earliest"' in src
+    assert "ASC" in src
+    assert sweep.QUOTE_ORDERS == ("latest", "earliest")
+
+
+def test_a_fourteen_hour_gap_is_look_ahead_not_a_2pp_edge():
+    """Mike's earliest-Pin vs earliest-soft totals 2pp cell.
+
+    Pin opens at 02:00, DK at 16:00, same 8.5. Unaligned (max_gap_s=None)
+    manufactures a 2pp implied disagreement. The 5-minute bound drops it.
+    Measured on production 2024-26: the +33% 2pp cell is this tail (median
+    gap 14h). Aligned-first ≥2pp on 2024-25 totals is n=1.
+    """
+    by_game = {
+        "G1": {
+            "pinnacle": dict(home=None, away=None, spread=None, total=8.5,
+                             over=-150, under=130,
+                             snap="2026-06-15T02:00:00Z"),
+            "draftkings": dict(home=None, away=None, spread=None, total=8.5,
+                               over=-110, under=-110,
+                               snap="2026-06-15T16:00:00Z"),
+        }
+    }
+    meta = {"G1": (5.0, 3.0, "2026-06-15")}
+    unaligned, _ = sweep.collect_picks(
+        by_game, meta, "totals", max_gap_s=None, vs="implied",
+        pin_lean=False, soft_books=("draftkings",),
+        juice_abs_max=200, min_line=5.5, max_line=14.5)
+    aligned, diag = sweep.collect_picks(
+        by_game, meta, "totals", max_gap_s=300, vs="implied",
+        pin_lean=False, soft_books=("draftkings",),
+        juice_abs_max=200, min_line=5.5, max_line=14.5)
+    assert len(unaligned) == 1
+    assert unaligned[0][1] >= 0.02
+    assert aligned == []
+    assert diag["not_simultaneous"] >= 1
+
+
+def test_juice_abs_max_drops_a_minus_250():
+    by_game = {
+        "G1": {
+            "pinnacle": dict(home=None, away=None, spread=None, total=8.5,
+                             over=-150, under=130,
+                             snap="2026-06-15T16:00:00Z"),
+            "draftkings": dict(home=None, away=None, spread=None, total=8.5,
+                               over=-250, under=210,
+                               snap="2026-06-15T16:00:00Z"),
+        }
+    }
+    meta = {"G1": (5.0, 3.0, "2026-06-15")}
+    kept, _ = sweep.collect_picks(
+        by_game, meta, "totals", vs="implied", soft_books=("draftkings",))
+    dropped, diag = sweep.collect_picks(
+        by_game, meta, "totals", vs="implied", soft_books=("draftkings",),
+        juice_abs_max=200)
+    assert len(kept) == 1
+    assert dropped == []
+    assert diag["juice"] >= 1
+
+
+def test_validator_accepts_earliest_unaligned_and_juice():
+    _, validate = jq.JOBS["game_line_market_sweep"]
+    got = validate({
+        "markets": ["totals"],
+        "quote": "earliest",
+        "max_gap_s": None,
+        "vs": "implied",
+        "juice_abs_max": 200,
+        "min_line": 5.5,
+        "max_line": 14.5,
+        "soft_books": ["draftkings", "fanduel"],
+        "bettable": False,
+    })
+    assert got["quote"] == "earliest"
+    assert got["max_gap_s"] is None
+    assert got["juice_abs_max"] == 200.0
+    assert got["min_line"] == 5.5
+    assert got["max_line"] == 14.5
+    with pytest.raises(ValueError, match="quote"):
+        validate({"markets": ["totals"], "quote": "close"})

@@ -2,7 +2,10 @@
 
 **2026-09-16 follow-up:** `docs/mlb_edge_search_2026_09_16.md` — worker 2pp
 spreads +6.82%/234 early flat; **1.8pp remains the paper cut**; public RLM /
-GROK implied / F5 Pin did not replace it. INSERT still 0.
+GROK implied / F5 Pin did not replace it. Same-day: Mike’s earliest-Pin vs
+earliest-soft totals ≥2pp **replicates** (2025 n=40 +13.29u +33.2%) and is
+**look-ahead** (median gap 14h; aligned-first n=1 on 2024–25). Do not
+retarget `mlb_total_market` to earliest-unaligned. INSERT still 0.
 
 Mike rejected “keep `mlb_runline` and `mlb_over_under` paused until someday.”
 Standing rule (CLAUDE.md §1b): a losing model is an **assessment to run**, not

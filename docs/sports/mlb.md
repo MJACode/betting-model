@@ -43,7 +43,9 @@ converging on the same place from the other side.
   equal total, `BEST_LINE_BOOKMAKERS`, pin-lean only. INSERT off
   (`MLB_TOTAL_MARKET_PUBLISH` default 0). Pin-de-vig vs soft-de-vig May–Jun
   2pp −11.13% / 79 is a sweep flag. Do not resurrect 0.50/0.06.
-  `docs/mlb_runline_ou_edge_search.md`.
+  2026-09-16: earliest-Pin vs earliest-soft ≥2pp **replicates** (2025 n=40
+  +13.29u +33.2%) and is **look-ahead** (median gap 14h; aligned-first n=1).
+  Do not retarget the card. `docs/mlb_edge_search_2026_09_16.md` §6.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
   base rate moving 0.364 → 0.495, so the target mix is itself changing. The
   folds do not agree and the mean is not actionable. 2026-09-15: `mlb_spread_market`
