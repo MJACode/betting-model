@@ -348,6 +348,10 @@ class TestFeatureMap:
     def test_spreads_models_include_spread_feature(self):
         assert "spread_home" in FEATURE_MAP["mlb_runline"]
         assert "spread_home" in FEATURE_MAP["nhl_puckline"]
+        assert "pub_fav_rlm" in FEATURE_MAP["mlb_runline"]
+        assert "mkt_spread_move" in FEATURE_MAP["mlb_runline"]
+        assert "pub_over_rlm" in FEATURE_MAP["mlb_over_under"]
+        assert "mkt_total_move" in FEATURE_MAP["mlb_over_under"]
 
 
 # ── Pre-tipoff odds guard (look-ahead protection for bulk loaders) ─────────────

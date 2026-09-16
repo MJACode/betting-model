@@ -395,15 +395,18 @@ def test_hfa_defaults_to_the_league_prior_when_unknown():
 # matrix (321 of ~7,300 rows survived on 2026-08-23). Geography columns pass
 # through as NaN for XGBoost; core team-strength columns stay strict.
 
-def test_sparse_ok_covers_exactly_the_geography_columns():
+def test_sparse_ok_covers_geography_and_market_handicap():
     from features.feature_engine import (
-        SPARSE_OK_FEATURES, NCAAF_H2H_FEATURES, NCAAF_TOTALS_FEATURES)
+        SPARSE_OK_FEATURES, NCAAF_H2H_FEATURES, NCAAF_TOTALS_FEATURES,
+        MLB_SPREADS_FEATURES, MLB_TOTALS_FEATURES)
+    ncaaf = set(NCAAF_H2H_FEATURES) | set(NCAAF_TOTALS_FEATURES)
+    mlb = set(MLB_SPREADS_FEATURES) | set(MLB_TOTALS_FEATURES)
     # Every sparse-ok column is a real feature somewhere…
     for c in SPARSE_OK_FEATURES:
-        assert c in NCAAF_H2H_FEATURES or c in NCAAF_TOTALS_FEATURES
+        assert c in ncaaf or c in mlb, c
     # …and no CORE strength/efficiency/market column is exempt.
     for c in ("d_sp_overall", "d_epa_per_play_off", "d_points_per_game",
-              "spread_home", "total_line", "week"):
+              "spread_home", "total_line", "week", "d_starter_era"):
         assert c not in SPARSE_OK_FEATURES
 
 

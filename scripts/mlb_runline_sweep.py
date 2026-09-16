@@ -79,6 +79,7 @@ config.assert_retrain_allowed("MLB", what="threshold sweep")
 from data.db import get_connection
 from features.feature_engine import (
     FEATURE_MAP,
+    HANDICAP_SPARSE_FEATURES,
     _build_bulk_mlb_lookups,
     _build_mlb_features_from_bulk,
     _is_pregame_snapshot,
@@ -222,7 +223,8 @@ def build_side_table(seasons: list[int],
     """Score every completed game and return one row per bettable side."""
     artifact = _load_artifact(artifact_path)
     clf = artifact["model"]
-    feature_cols = FEATURE_MAP[MODEL_ID]
+    # Artifact list wins: FEATURE_MAP growing must not reshape an old pickle.
+    feature_cols = list(artifact.get("feature_cols") or FEATURE_MAP[MODEL_ID])
 
     conn = get_connection()
     try:
@@ -232,7 +234,10 @@ def build_side_table(seasons: list[int],
         odds_by_game = _pregame_odds(conn)
         logger.info(f"{len(games)} completed games; "
                     f"{len(odds_by_game)} have a pre-game DK run line")
-        bulk = _build_bulk_mlb_lookups(conn, seasons)
+        bulk = _build_bulk_mlb_lookups(
+            conn, seasons,
+            include_handicap=any(c in HANDICAP_SPARSE_FEATURES for c in feature_cols),
+        )
     finally:
         conn.close()
 

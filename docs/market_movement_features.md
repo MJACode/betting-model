@@ -1,8 +1,20 @@
 # Market movement as a feature
 
+**Status 2026-09-16.** The computation is live in `features/market_movement.py`.
+`mlb_runline` and `mlb_over_under` now **list** the columns (plus public
+ticket/money/RLM) via `features/market_handicap.py`. They are `SPARSE_OK` so
+`dropna` does not delete pre-DK-era rows. **No live artifact has been
+retrained.** Next step is a `register=false` retrain, not an unpause.
+Design, leakage, and coverage: `docs/mlb_market_handicap_features.md`.
+
+The 2026-08-31 note below (“activation is a new 2026-only model”) was the
+right answer when adding these columns would `dropna` the matrix. That trap is
+closed. Pinnacle/DK coverage is also wider than the table below (re-queried
+2026-09-16: Pinnacle 11,913 MLB games from 2021-04-09). SBR is still one
+snapshot per game.
+
 Built 2026-08-31 (mike: "yes build the market movement features"). The
-computation is live in `features/market_movement.py` and tested; **no model
-consumes it yet**, for a reason the coverage numbers make unavoidable.
+computation is live in `features/market_movement.py` and tested.
 
 ## Why
 

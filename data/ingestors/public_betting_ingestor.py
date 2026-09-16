@@ -271,6 +271,8 @@ def run_public_betting_ingestor(target_date: str = None) -> dict:
     conn = get_connection()
     total_rows = 0
     games_with_splits = 0
+    skipped_started = 0
+    from features.feature_engine import _is_pregame_snapshot
     try:
         for game in games:
             try:
@@ -282,10 +284,24 @@ def run_public_betting_ingestor(target_date: str = None) -> dict:
                 # Only persist rows whose game we actually track (FK to games).
                 game_id = rows[0]["game_id"]
                 exists = conn.execute(
-                    "SELECT 1 FROM games WHERE game_id = %s", (game_id,)
+                    "SELECT commence_time, first_pitch_at "
+                    "FROM games WHERE game_id = %s",
+                    (game_id,),
                 ).fetchone()
                 if not exists:
                     logger.debug(f"  {game_id} not in games table — skipping")
+                    continue
+                commence_time, first_pitch_at = exists[0], exists[1]
+                # UNIQUE(game_id, market, side, book) last-write-wins. A post-
+                # start upsert would overwrite the last pre-game split with a
+                # fetch-time stamp after first pitch, and the feature loader
+                # would then drop it as leaked. Refuse the write; keep the
+                # last pre-game row.
+                if not _is_pregame_snapshot(
+                        snapshot_at, commence_time, first_pitch_at):
+                    skipped_started += 1
+                    logger.debug(
+                        f"  {game_id} already started — keeping last pre-game split")
                     continue
                 total_rows += _upsert_public_betting(conn, rows)
                 games_with_splits += 1
@@ -301,13 +317,14 @@ def run_public_betting_ingestor(target_date: str = None) -> dict:
     duration = (datetime.now() - start).total_seconds()
     logger.success(
         f"Public betting: {games_with_splits}/{len(games)} games with splits, "
-        f"{total_rows} rows — {duration:.1f}s"
+        f"{total_rows} rows, {skipped_started} already started — {duration:.1f}s"
     )
     return {
         "target_date": target_date,
         "games":       len(games),
         "with_splits": games_with_splits,
         "rows":        total_rows,
+        "skipped_started": skipped_started,
         "duration_s":  duration,
     }
 

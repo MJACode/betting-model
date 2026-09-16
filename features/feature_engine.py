@@ -27,6 +27,11 @@ from data.first_pitch import trusted_first_pitch
 # derives matchup diffs from them). Safe top-level import: golf_feature_engine
 # imports feature_engine only lazily inside functions, so there is no cycle.
 from features.golf_feature_engine import GOLF_PLAYER_FEATURES, GOLF_MATCHUP_FEATURES
+from features.market_handicap import (
+    HANDICAP_SPARSE_FEATURES,
+    MLB_HANDICAP_SPREAD_FEATURES,
+    MLB_HANDICAP_TOTAL_FEATURES,
+)
 
 
 # ── Feature Column Groups ─────────────────────────────────────────────────────
@@ -73,11 +78,16 @@ MLB_TOTALS_FEATURES = [
     # Weather (primary signal for totals — wind blowing out raises run totals)
     "wind_out_component", "temp_f", "is_dome_game",
     "is_early_season",
-]
+] + MLB_HANDICAP_TOTAL_FEATURES
 
-# Spreads uses same features as H2H plus market line and wind/dome
+# Spreads uses same features as H2H plus market line, wind/dome, and the
+# market-handicap block (public splits / RLM / line-move / sharp gap).
 # (wind has moderate effect on run-scoring margin; temp omitted for runline)
-MLB_SPREADS_FEATURES = MLB_H2H_FEATURES + ["spread_home", "wind_out_component", "is_dome_game"]
+MLB_SPREADS_FEATURES = (
+    MLB_H2H_FEATURES
+    + ["spread_home", "wind_out_component", "is_dome_game"]
+    + MLB_HANDICAP_SPREAD_FEATURES
+)
 
 # ── F5 (First 5 Innings) Feature Groups ──────────────────────────────────────
 # F5 models are starter-dominant: no bullpen features, heavier starter weight.
@@ -279,6 +289,10 @@ SPARSE_OK_FEATURES = {
     "venue_elevation_ft", "is_dome_game", "is_grass",
     # Weather — backfill coverage is partial; XGBoost handles missing natively.
     "wx_temp_f", "wx_wind_mph", "wx_precip_mm",
+    # MLB market-handicap block — Action Network splits start 2026-05-31;
+    # DK/Pinnacle movement is sparse before 2021 and SBR is one snapshot per
+    # game. Missing is NaN, not a row drop. See features/market_handicap.py.
+    *HANDICAP_SPARSE_FEATURES,
 }
 
 # ── UFC Feature Groups ────────────────────────────────────────────────────────
@@ -918,6 +932,23 @@ def build_mlb_game_features(conn: DBConnection,
     # The pre-game total, from the TOTALS market regardless of what odds_row is.
     features["pregame_total_line"] = (totals_row or {}).get("total_line")
 
+    # Market-handicap block (public splits / RLM / line-move / sharp gap).
+    # Live scoring builds this row from the h2h odds snapshot, so spread_home
+    # is often still None here — look up the pre-game runline for fav framing.
+    from features.market_handicap import (
+        attach_market_handicap,
+        load_market_movement_for_game,
+        load_public_splits,
+        lookup_pregame_spread_home,
+    )
+    spread_home = features.get("spread_home")
+    if spread_home is None:
+        spread_home = lookup_pregame_spread_home(conn, game_id)
+    movement = load_market_movement_for_game(conn, game_id)
+    splits = load_public_splits(conn, sport="MLB", game_id=game_id).get(game_id)
+    features = attach_market_handicap(
+        features, movement=movement, splits=splits, spread_home=spread_home)
+
     return coerce_feature_row(features)
 
 
@@ -1452,10 +1483,16 @@ def build_features_for_game(conn: DBConnection,
 # with 8 bulk queries + fast in-memory dict/bisect lookups.
 # The live scoring path (build_mlb_game_features) is unchanged.
 
-def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
+def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int],
+                            include_handicap: bool = False) -> dict:
     """
     Bulk-load all tables needed for MLB training features in ~8 queries.
     Returns a dict of lookup structures keyed for fast ASOF / exact access.
+
+    `include_handicap` loads market-movement + public-betting lookups. Off by
+    default so moneyline / F5 / live-game trains do not scan the whole odds
+    table for columns they do not use. `mlb_runline` / `mlb_over_under` turn
+    it on because those FEATURE_MAP lists carry the handicap block.
     """
     all_seasons = sorted(set(seasons))
     load_seasons = list(range(min(all_seasons) - 1, max(all_seasons) + 2))
@@ -1596,10 +1633,23 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         f"{len(w_rows)} weather rows, {len(inj_rows)} injury rows, {len(o_rows)} odds rows"
     )
 
-    return dict(team_stats=team_stats, pitcher=pitcher, bullpen=bullpen,
-                runs=runs, home_runs=home_runs, away_runs=away_runs,
-                weather=weather, injuries=injuries, inj_dates=inj_dates,
-                odds=odds_lookup)
+    out = dict(team_stats=team_stats, pitcher=pitcher, bullpen=bullpen,
+               runs=runs, home_runs=home_runs, away_runs=away_runs,
+               weather=weather, injuries=injuries, inj_dates=inj_dates,
+               odds=odds_lookup)
+    if include_handicap:
+        from features.market_handicap import load_public_splits
+        from features.market_movement import load_market_movement
+        out["movement"] = load_market_movement(conn, "MLB")
+        out["public"] = load_public_splits(conn, sport="MLB")
+        logger.debug(
+            f"Handicap loads: {len(out['movement'])} movement games, "
+            f"{len(out['public'])} public-split games"
+        )
+    else:
+        out["movement"] = {}
+        out["public"] = {}
+    return out
 
 
 def _blk_team_stats(bulk: dict, team: str, season: int, game_date: str) -> dict:
@@ -1801,6 +1851,13 @@ def _build_mlb_features_from_bulk(bulk: dict,
         # Always the TOTALS market — see build_mlb_game_features' docstring.
         "pregame_total_line": (totals_row or {}).get("total_line"),
     }
+    from features.market_handicap import attach_market_handicap
+    row = attach_market_handicap(
+        row,
+        movement=bulk.get("movement", {}).get(game_id),
+        splits=bulk.get("public", {}).get(game_id),
+        spread_home=row.get("spread_home"),
+    )
     return coerce_feature_row(row)
 
 
@@ -1865,7 +1922,9 @@ def build_training_dataset(model_id: str,
     nhl_bulk = None
     ncaaf_bulk = None
     if sport == "MLB":
-        bulk = _build_bulk_mlb_lookups(conn, seasons)
+        want_handicap = any(c in HANDICAP_SPARSE_FEATURES for c in feature_cols)
+        bulk = _build_bulk_mlb_lookups(
+            conn, seasons, include_handicap=want_handicap)
     elif sport == "NHL":
         nhl_bulk = _build_bulk_nhl_lookups(conn, seasons)
     elif sport == "WNBA":
