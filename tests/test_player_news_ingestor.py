@@ -276,6 +276,77 @@ def test_an_empty_table_is_never_treated_as_fresh():
     assert pni._minutes_since_last_ingest(FakeConn()) is None
 
 
+# ── A dead feed is not a quiet news day ───────────────────────────────────────
+
+def test_a_feed_that_fails_every_call_is_reported_not_swallowed(monkeypatch):
+    """THE BUG THIS PINS. This ingestor wrote ZERO rows from the day it shipped
+    while pipeline_log recorded `success` on every one of its ~90 runs a day.
+    Measured 2026-09-16 in api_call_log: site.api.espn.com answered the worker
+    HTTP 403 6,084 times and 200 never, across 30 days. Every fetch is a quiet
+    zero by design (a news outage must not fail the pass), so the step above saw
+    an empty list and could not tell a blocked host from a slate with no news.
+
+    One of those is a fault and one is Tuesday. The difference is whether the
+    calls FAILED, not whether the result was empty."""
+    monkeypatch.setattr(config, "PLAYER_NEWS_PROVIDER", "espn")
+    monkeypatch.setattr(config, "PLAYER_NEWS_SPORTS", ["MLB"])
+
+    def fake_fetch(url, params=None, headers=None, timeout=None):
+        return FakeResponse({}, status_code=403)
+
+    result = pni.ingest_player_news(conn=FakeConn(), fetch=fake_fetch)
+
+    assert result.get("feed_dead"), "every call 403'd — that is a fault, not an empty slate"
+    assert "403" in result["feed_dead"], "the reason must survive to the caller"
+
+
+def test_a_quiet_news_day_is_not_a_dead_feed(monkeypatch):
+    """ESPN answering 200 with nothing to say is normal. If that read as a fault
+    the fix would fire on every slow day, and an alarm that never stops is
+    silence by another route."""
+    monkeypatch.setattr(config, "PLAYER_NEWS_PROVIDER", "espn")
+    monkeypatch.setattr(config, "PLAYER_NEWS_SPORTS", ["MLB"])
+
+    def fake_fetch(url, params=None, headers=None, timeout=None):
+        return FakeResponse({"articles": []})
+
+    assert not pni.ingest_player_news(conn=FakeConn(), fetch=fake_fetch).get("feed_dead")
+
+
+def test_one_working_sport_means_the_feed_is_not_dead(monkeypatch):
+    """Dead means EVERY call failed. One sport 403ing while another answers is a
+    coverage gap, not an outage, and must not fail the pass."""
+    monkeypatch.setattr(config, "PLAYER_NEWS_PROVIDER", "espn")
+    monkeypatch.setattr(config, "PLAYER_NEWS_SPORTS", ["MLB", "NFL"])
+
+    def fake_fetch(url, params=None, headers=None, timeout=None):
+        if "baseball" in url:
+            return FakeResponse({}, status_code=403)
+        return FakeResponse({"articles": [_article()]})
+
+    assert not pni.ingest_player_news(conn=FakeConn(), fetch=fake_fetch).get("feed_dead")
+
+
+def test_the_pipeline_step_fails_when_the_feed_is_dead(monkeypatch):
+    """The step is what pipeline_log records. It returned True on a 100% dead
+    feed, which is the whole reason this was invisible for days."""
+    import run_pipeline
+
+    monkeypatch.setattr(pni, "ingest_player_news",
+                        lambda **kw: {"feed_dead": "HTTP 403 x17"})
+    assert run_pipeline.step_player_news("2026-09-16") is False
+
+
+def test_the_pipeline_step_still_succeeds_on_a_quiet_day(monkeypatch):
+    """The other half: a real zero must stay a success, or a slow news day
+    starts failing the pass."""
+    import run_pipeline
+
+    monkeypatch.setattr(pni, "ingest_player_news",
+                        lambda **kw: {"MLB": {"items": 0, "rows": 0, "resolved": 0}})
+    assert run_pipeline.step_player_news("2026-09-16") is True
+
+
 # ── The app's copy of the fold ────────────────────────────────────────────────
 
 def test_the_app_mirrors_the_python_name_fold():

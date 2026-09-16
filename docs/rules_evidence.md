@@ -378,6 +378,25 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 
 ### Operations
 
+- **A STEP THAT ONLY FAILS ON AN EXCEPTION REPORTS SUCCESS FOR A FEED THAT IS
+  100% DEAD.** (2026-09-16, found by the scheduled staleness sweep, not by a
+  person.) `player_news` shipped ~2026-09-12 and held **zero rows** ever, while
+  `pipeline_log` recorded `dispatch:player-news-refresh` = `success` on all ~90
+  runs a day. Every fetch is a deliberate quiet zero (a news outage must not
+  fail the pass), so the step saw `[]` and could not tell a blocked host from a
+  slate with no news — **an empty list from a 403 and an empty list from a quiet
+  Tuesday are the same value**. `api_call_log`, 30 days: `site.api.espn.com`
+  answered the worker **403 × 6,084 and 200 × 0**, while `sports.core.api.espn.com`
+  served **974,931 × 200**. The news ingestor was built on the host that has
+  403'd this worker since 2026-08-05 — a month *after* injuries, WNBA results
+  and NFL live state were all ported off it for exactly that reason. The fix is
+  not "log louder": the ingest tallies transport outcomes and returns
+  `feed_dead` when EVERY call failed, and the step fails on it, so the existing
+  `refresh_pass_steps` CRIT and the ops alerter do the telling. A partial
+  failure stays quiet — an alarm that never stops is silence by another route.
+  **The general form: when a producer writes nothing, the question is never
+  "was there an exception", it is "did the source answer".** Detail and the open
+  source decision: `docs/player_news.md`.
 - **A LIVE cutoff decays, so re-derive it rather than setting it once.** A
   pre-game model is scored daily against a line that barely moves; a live model
   locks at the first crossing of a market that moves every few seconds. On

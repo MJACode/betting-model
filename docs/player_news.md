@@ -15,6 +15,63 @@ click on recent news for that player."*
 
 ---
 
+## STATUS 2026-09-16: the sheet has been EMPTY since it shipped
+
+**`player_news` holds zero rows and always has.** The ingest step ran ~90 times
+a day from the day it shipped and `pipeline_log` recorded `success` on every
+single one. The sheet's icon hides itself when a player has no news, so this
+reads in the app as "nobody has any news, ever" rather than as a fault.
+
+**Cause: the feed is on the one ESPN host that 403s this worker.** Measured in
+`api_call_log`, 30 days to 2026-09-16:
+
+| host | calls | status |
+|---|---|---|
+| `site.api.espn.com` (source `pipeline`) | **6,084** | **403, every one — never a 200** |
+| `sports.core.api.espn.com` | 974,931 | 200 |
+
+The 403s are our news calls specifically — `/apis/site/v2/sports/*/news?limit=50`,
+89 per league feed in the last two days, most recent 10:15 UTC on 2026-09-16.
+The only 200s on `site.api` in that window are 25 `ncaaf-live` calls on
+2026-09-12, from the loop documented as running on Matt's **residential**
+machine, which is consistent with the block being on the worker's IP.
+
+This is not new information to the project — `ncaaf_live/feeds/cfbd_scoreboard.py`
+and `nfl/live_model/feeds/espn_core.py` both exist *because* `site.api` has 403'd
+the worker since 2026-08-05, and injuries, WNBA results and NFL live state were
+all ported to `sports.core`. **This ingestor was built on the dead host a month
+after the block, and nothing caught it because it reported success.**
+
+### Why it stayed invisible, and what changed
+
+Every fetch is a deliberate quiet zero — a news outage must not fail the pass it
+runs in — so by the time the step saw an empty list, the 403 was gone. An empty
+list from a blocked host and an empty list from a quiet Tuesday were the same
+value. **Fixed 2026-09-16:** the ingest now tallies transport outcomes and, when
+*every* call failed, returns `feed_dead` with the reason and the step FAILS.
+`refresh_pass_steps` CRITs on a step failing in all three recent passes and the
+ops alerter posts it once, throttled, with a recovery message. A partial failure
+is a coverage gap, not an outage, and deliberately does not trip it.
+
+### OPEN — needs Matt: where the news actually comes from
+
+The fix makes the outage loud; it does **not** restore the feature, and the next
+pass will now report `player-news-refresh` as failed until the source changes.
+Picking the replacement is a call to make, not a guess to ship:
+
+1. **Port to `sports.core.api.espn.com`** — the host that already serves this
+   worker a million calls a week. Whether core exposes an equivalent *news*
+   resource, and in what shape, **could not be verified from the dev sandbox**:
+   ESPN is blocked there too (proxy 403, WebFetch `EGRESS_BLOCKED`), there is no
+   Railway MCP in that session and no `DATABASE_URL` to queue a worker probe.
+   Probing ESPN from fresh IPs is what got this project blocked before, so this
+   wants one deliberate probe from the worker, not a speculative parser.
+2. **A licensed feed** (RotoWire / RotoBaller / SportsDataIO) — the providers
+   table below. `PLAYER_NEWS_PROVIDER` and the `analysis` column exist so one
+   drops in behind the same table and the same sheet.
+3. **Drop the feature** and remove the icon, rather than ship a sheet that is
+   empty by construction.
+
 ## The provider question
 
 The screenshot's sheet is **RotoWire**, which is licensed content — that is what

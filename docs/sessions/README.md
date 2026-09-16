@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, staleness sweep: all sources current. `player_news` zero rows since it shipped while logging `success` — `site.api.espn.com` 403 ×6,084 / 200 ×0 to the worker. Dead feed now fails the step; replacement source needs Matt |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, #734 rebase onto master after #732/#733. Totals card: Pin fair − soft implied, BEST_LINE, pin-lean. INSERT envs default 0. RL/OU stay paused |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, #734: `mlb_total_market` paper publisher is Pin fair − soft implied, equal total, BEST_LINE books, pin-lean only; INSERT off (`MLB_TOTAL_MARKET_PUBLISH` default 0) |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, MLB RL/OU follow-up: `mlb_total_market` paper 2pp (GROK +11% n≈103 Pin-vs-DK, unreproduced on bettable-soft); spreads INSERT gated (GROK ≥2pp −5%); worker `game_line_market_sweep` 2/3/4pp; RL/OU stay paused |

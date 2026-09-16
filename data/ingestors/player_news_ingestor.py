@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -89,6 +90,28 @@ ESPN_TEAM_IDS: dict[str, dict] = {
 }
 
 REQUEST_TIMEOUT = 15
+
+# Run-scoped transport tally. Every fetch below is a deliberate quiet zero -- a
+# news outage must never fail the pass it runs in -- so by the time the entry
+# point sees an empty list, WHY it is empty has been thrown away. That is how a
+# host answering 403 to every single call looked exactly like a slate with no
+# news for this ingestor's entire life: zero rows written since it shipped,
+# `success` in pipeline_log on all ~90 runs a day (measured 2026-09-16,
+# api_call_log: site.api.espn.com 403 x6,084, 200 x0 over 30 days).
+#
+# Module-level because the provider contract is "returns NewsItems" and a
+# transport outcome has nowhere else to ride back up. Reset per run; the ingest
+# is one step within a pass.
+_FETCH_ATTEMPTS = 0
+_FETCH_FAILURES: list[str] = []
+
+
+def _record_fetch(failure: str | None) -> None:
+    """One completed fetch attempt, and why it failed if it did."""
+    global _FETCH_ATTEMPTS
+    _FETCH_ATTEMPTS += 1
+    if failure:
+        _FETCH_FAILURES.append(failure)
 
 
 # ── The provider contract ─────────────────────────────────────────────────────
@@ -205,11 +228,14 @@ def _fetch_espn(url: str, params: dict, fetch=None) -> list[dict]:
         resp = getter(url, params=params, headers=ESPN_HEADERS, timeout=REQUEST_TIMEOUT)
         if getattr(resp, "status_code", 200) != 200:
             logger.warning(f"ESPN news {params} → HTTP {resp.status_code}")
+            _record_fetch(f"HTTP {resp.status_code}")
             return []
         payload = resp.json()
     except Exception as exc:
         logger.warning(f"ESPN news {params} failed: {exc}")
+        _record_fetch(type(exc).__name__)
         return []
+    _record_fetch(None)
     articles = payload.get("articles") if isinstance(payload, dict) else None
     return [a for a in (articles or []) if isinstance(a, dict)]
 
@@ -457,6 +483,10 @@ def ingest_player_news(
                 logger.info(f"Player news is {age:.0f} min old (< {max_age_min}) — skipping")
                 return {"skipped": "fresh", "age_min": round(age, 1)}
 
+        global _FETCH_ATTEMPTS
+        _FETCH_ATTEMPTS = 0
+        _FETCH_FAILURES.clear()
+
         for sport in targets:
             teams = teams_with_props_today(conn, sport, run_date)
             items = provider(sport, teams, fetch) if fetch else provider(sport, teams)
@@ -473,6 +503,22 @@ def ingest_player_news(
             logger.info(
                 f"{sport}: {len(items)} news items → {written} player rows "
                 f"({resolved} matched to a player id)"
+            )
+
+        # EVERY call failed = the source is unreachable, not the slate quiet.
+        # Reported rather than swallowed so the step above can fail, which is
+        # what puts it in front of a person: refresh_pass_steps CRITs on a step
+        # failing in all three recent passes and the ops alerter posts it once,
+        # throttled, with a recovery message. A partial failure is a coverage
+        # gap, not an outage, and deliberately does not trip this.
+        if _FETCH_ATTEMPTS and len(_FETCH_FAILURES) == _FETCH_ATTEMPTS:
+            detail = ", ".join(
+                f"{reason} x{n}" for reason, n in Counter(_FETCH_FAILURES).most_common()
+            )
+            summary["feed_dead"] = detail
+            logger.error(
+                f"Player news: all {_FETCH_ATTEMPTS} {provider_name} call(s) failed "
+                f"({detail}) — nothing was ingested"
             )
 
         pruned = prune_old(conn)

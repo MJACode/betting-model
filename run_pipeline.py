@@ -338,6 +338,14 @@ def step_player_news(run_date: str, max_age_min: int | None = None) -> bool:
     try:
         from data.ingestors.player_news_ingestor import run_player_news_ingestor
         result = run_player_news_ingestor(run_date=run_date)
+        if isinstance(result, dict) and result.get("feed_dead"):
+            # Zero rows because the source answered nothing at all, on every
+            # call. Until 2026-09-16 this returned True and pipeline_log said
+            # `success` — so the sheet stayed empty from the day it shipped and
+            # the pipeline looked green throughout. A dead source is a failed
+            # step; a quiet news day is still a success.
+            logger.error(f"✗ Player news: feed dead ({result['feed_dead']})")
+            return False
         logger.success(f"✓ Player news: {result}")
         return True
     except Exception as exc:
