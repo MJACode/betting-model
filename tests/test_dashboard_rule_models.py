@@ -31,7 +31,7 @@ HTML = io.open(DASH, encoding="utf-8").read()
 KNOWN_RULES = {
     "nfl_wind_totals", "nfl_opener_spread", "nfl_prop_market",
     "nfl_live_prop", "wnba_prop_market", "mlb_spread_market",
-    "mlb_total_market",
+    "mlb_total_market", "mlb_total_public_fade",
 }
 
 

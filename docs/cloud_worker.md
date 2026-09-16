@@ -209,12 +209,14 @@ Notes:
      the NFL card on a dedicated key/quota.
    - `DISCORD_WEBHOOK_*` — OPTIONAL, see [Discord](#discord-picks-to-your-server)
      below. Omit them all and nothing Discord-related runs.
-   - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` — OPTIONAL,
-     default `0`. MLB game-line cards log every pass; they INSERT picks
-     only when the matching flag is `1` (redeploy after setting). Totals
-     INSERT is Pin fair − soft implied, BEST_LINE, pin-lean — default
-     stays 0. See
-     `docs/mlb_runline_ou_edge_search.md`.
+   - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` /
+     `MLB_TOTAL_PUBLIC_FADE_PUBLISH` — OPTIONAL, default `0`. MLB game-line
+     cards log every pass; they INSERT picks only when the matching flag is
+     `1` (redeploy after setting). Totals Pin-vs-soft INSERT is Pin fair −
+     soft implied, BEST_LINE, pin-lean. Public-OVER fade INSERT is
+     `mlb_total_public_fade` (ticket cut `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`,
+     default 70). See `docs/mlb_runline_ou_edge_search.md` and
+     `docs/mlb_total_public_fade.md`.
 4. Deploy. Open the **Logs** — on boot you should see
    `Betting scheduler starting … Registered jobs:` with the three jobs and their next run
    times in ET.

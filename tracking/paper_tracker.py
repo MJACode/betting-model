@@ -1842,6 +1842,7 @@ _RULE_MODEL_MARKETS = {
     # MLB run-line sharp-vs-soft. scored_line is the HOME number (§4).
     "mlb_spread_market": "spreads",
     "mlb_total_market": "totals",
+    "mlb_total_public_fade": "totals",
 }
 # 2026 paper-track for these two: python -m scripts.nfl_rule_2026_track
 # (no unit bump; opener retire-if-flat-2026; wind MAX_FIRE_LEAD stays 4).

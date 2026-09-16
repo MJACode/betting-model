@@ -240,6 +240,8 @@ still be 100% NaN in 2019–2025 train; the O/U fit can use SBR open→close
 - Not a live-artifact register.
 - Not `mlb_spread_market` / `mlb_total_market` (those are Pin-vs-soft cards;
   INSERT still gated).
+- Not `mlb_total_public_fade` (that is a paper ticket-fade rule, INSERT
+  gated; `docs/mlb_total_public_fade.md`).
 - Not PCG. `PublicSplits.source` on the gate stays the hook; this block reads
   `public_betting` only.
 - Not a cut change.

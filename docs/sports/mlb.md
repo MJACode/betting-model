@@ -43,6 +43,10 @@ converging on the same place from the other side.
   equal total, `BEST_LINE_BOOKMAKERS`, pin-lean only. INSERT off
   (`MLB_TOTAL_MARKET_PUBLISH` default 0). Pin-de-vig vs soft-de-vig May–Jun
   2pp −11.13% / 79 is a sweep flag. Do not resurrect 0.50/0.06.
+  A **separate** paper lane, `mlb_total_public_fade`, fades consensus OVER
+  tickets ≥70 (env; 80 supported) and bets UNDER. INSERT off
+  (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). Not an unpause.
+  `docs/mlb_total_public_fade.md`.
   `docs/mlb_runline_ou_edge_search.md`.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
   base rate moving 0.364 → 0.495, so the target mix is itself changing. The
@@ -87,6 +91,14 @@ tickets/money/RLM (`public_betting`) and line-move / Pinnacle-gap
 (`features/market_movement.py`). All of those columns are `SPARSE_OK` so
 pre-2026 rows are not `dropna`'d. Models stay paused; no live artifact; retrain
 is the next worker job. Moneyline and F5 lists are unchanged.
+
+## 11b4. PUBLIC-OVER FADE TOTALS — `docs/mlb_total_public_fade.md`
+
+As of 2026-09-16 a **paper** rule `mlb_total_public_fade` fades Action
+Network consensus OVER tickets ≥70 (env; 80 supported) and bets UNDER at
+the best DK/FD/MGM/WH open (fallback DK). INSERT gated
+(`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). `mlb_over_under` stays paused.
+Coverage caveat: only ~99 pre-commence public totals-over games in the DB.
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)

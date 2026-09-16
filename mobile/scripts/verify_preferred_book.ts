@@ -401,6 +401,7 @@ check(
 // it fell through to h2h and its totals price could never resolve at any book.
 check('live totals resolve to the totals market', gameMarketForModel('mlb_live_total_runs') === 'totals');
 check('mlb_total_market resolves to totals (id has no over_under)', gameMarketForModel('mlb_total_market') === 'totals');
+check('mlb_total_public_fade resolves to totals (id has no over_under)', gameMarketForModel('mlb_total_public_fade') === 'totals');
 check('mlb_spread_market resolves to spreads', gameMarketForModel('mlb_spread_market') === 'spreads');
 check('live runline resolves to spreads', gameMarketForModel('mlb_live_runline') === 'spreads');
 check('live win prob resolves to h2h', gameMarketForModel('mlb_live_win_prob') === 'h2h');

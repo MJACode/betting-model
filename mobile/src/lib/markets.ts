@@ -39,8 +39,9 @@ export function gameMarketForModel(modelId: string): string | null {
   // so without this it fell through to 'h2h' and its totals price could never
   // resolve. Live rows come from v_latest_inplay_odds_all_books, not the
   // pre-game views (which exclude snapshot_type='in_play' by design).
-  // Same trap: `mlb_total_market` has neither 'over_under' nor 'spread'.
-  if (modelId === 'mlb_total_market') return 'totals';
+  // Same trap: `mlb_total_market` / `mlb_total_public_fade` have neither
+  // 'over_under' nor 'spread'. Without this they fall through to 'h2h'.
+  if (modelId === 'mlb_total_market' || modelId === 'mlb_total_public_fade') return 'totals';
   if (modelId === 'mlb_live_total_runs') return 'totals';
   if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';

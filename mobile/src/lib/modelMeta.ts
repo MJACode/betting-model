@@ -78,6 +78,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Paper public-OVER fade: tickets ≥70 (env; 80 supported), bet UNDER.
+  // INSERT gated by MLB_TOTAL_PUBLIC_FADE_PUBLISH default 0.
+  // mlb_over_under stays paused. docs/mlb_total_public_fade.md.
+  mlb_total_public_fade: {
+    shortLabel: 'O/U Fade',
+    longLabel: 'Total Runs (fade public over)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   mlb_f5_moneyline: {
     shortLabel: 'F5 ML',
     longLabel: 'First 5 Moneyline',

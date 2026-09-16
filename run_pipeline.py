@@ -1105,18 +1105,34 @@ def step_mlb_game_market(run_date: str, dry_run: bool = False) -> bool:
     """MLB game-line market-relative cards: de-vig Pinnacle, flag the soft outlier.
 
     Logs both spreads (`mlb_spread_market`) and totals (`mlb_total_market`)
-    every pass. Totals construction is Pin fair − soft implied, BEST_LINE
-    books, pin-lean only. INSERT is gated by MLB_SPREAD_MARKET_PUBLISH /
-    MLB_TOTAL_MARKET_PUBLISH (default 0). A pass with no Pinnacle quotes or
-    no MLB slate is a clean no-op.
+    every pass, then the public-OVER fade (`mlb_total_public_fade`). Totals
+    Pin-vs-soft construction is Pin fair − soft implied, BEST_LINE books,
+    pin-lean only. INSERT is gated by MLB_SPREAD_MARKET_PUBLISH /
+    MLB_TOTAL_MARKET_PUBLISH / MLB_TOTAL_PUBLIC_FADE_PUBLISH (all default 0).
+    A pass with no Pinnacle quotes or no MLB slate is a clean no-op.
     """
     try:
         from scripts.mlb_game_market_card import run_both
+        from scripts.mlb_total_public_fade_card import run_card as run_fade
         result = run_both(run_date, do_publish=not dry_run)
+        fade = run_fade(run_date, do_publish=not dry_run)
         logger.success(f"✓ MLB game market card: {result}")
+        logger.success(f"✓ MLB totals public-fade card: {fade}")
         return True
     except Exception as exc:
         logger.error(f"✗ MLB game market card failed: {exc}")
+        return False
+
+
+def step_mlb_total_public_fade(run_date: str, dry_run: bool = False) -> bool:
+    """Paper MLB totals public-fade card only. INSERT gated (default 0)."""
+    try:
+        from scripts.mlb_total_public_fade_card import run_card
+        result = run_card(run_date, do_publish=not dry_run)
+        logger.success(f"✓ MLB totals public-fade card: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ MLB totals public-fade card failed: {exc}")
         return False
 
 
@@ -1940,7 +1956,7 @@ Examples:
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
-                                 "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "nba-prop-scoring",
+                                 "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
@@ -2013,6 +2029,7 @@ Examples:
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-market": lambda: step_wnba_prop_market(run_date, dry_run=args.dry_run),
             "mlb-game-market": lambda: step_mlb_game_market(run_date, dry_run=args.dry_run),
+            "mlb-total-public-fade": lambda: step_mlb_total_public_fade(run_date, dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
