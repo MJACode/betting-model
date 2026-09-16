@@ -92,6 +92,7 @@ from features.feature_engine import (
     FEATURE_MAP,
     build_mlb_game_features,
     build_nhl_game_features,
+    numeric_feature_value,
 )
 from features.prop_feature_engine import (
     PROP_FEATURE_MAP,
@@ -239,7 +240,8 @@ def _feature_value(v):
     float (so a legitimate 0 like is_dome_game=0 / wind=0 is preserved). Never
     0-fill a missing value — an impossible 0.00 rate stat (ERA/WHIP/K9) is
     out-of-distribution and skews XGBoost, which handles NaN natively."""
-    return np.nan if v is None else float(v)
+    x = numeric_feature_value(v)
+    return np.nan if x is None else x
 
 
 def score_game(conn: DBConnection,

@@ -431,6 +431,9 @@ class TestFeatureValue:
     def test_int_coerced_to_float(self):
         assert _feature_value(4) == 4.0
 
+    def test_empty_string_is_nan_not_a_crash(self):
+        assert math.isnan(_feature_value(""))
+
 
 # ── missing-starter gate (the spurious-morning-BET fix) ───────────────────────
 

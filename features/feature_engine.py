@@ -363,6 +363,84 @@ FEATURE_MAP = {
 }
 
 
+# ── Numeric feature matrix ────────────────────────────────────────────────────
+# Postgres NUMERIC arrives as Decimal; empty strings and mixed missing markers
+# stay `object`. XGBoost's pandas path then refuses the frame:
+#   ValueError: DataFrame.dtypes for data must be int, float, bool or category.
+#   Invalid columns:d_starter_era_last3: object, d_starter_k9_last3: object
+# That is what killed worker job 114289 (`mlb_runline_retrain_sweep`) after the
+# train set was built. Empty/missing → None here, NaN on the matrix; never
+# leave object dtype. Shared by train (`build_training_dataset`) and score
+# (`feature_matrix` / live `_feature_value`).
+
+_FEATURE_ROW_META = frozenset({
+    "game_id", "game_date", "sport", "season", "home_team", "away_team",
+})
+
+
+def numeric_feature_value(value):
+    """Coerce one feature to float, or None if missing/unparseable.
+
+    Empty string, None, and junk become None so the matrix assembler can turn
+    them into NaN. Decimal (psycopg2 NUMERIC) becomes float. Legitimate zeros
+    (is_dome_game=0, wind=0) stay 0.0.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        f = float(value)
+        return None if np.isnan(f) else f
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if np.isnan(f) else f
+
+
+def coerce_numeric_features(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Coerce named columns to numeric dtype. Empty/missing → NaN.
+
+    Never leaves object dtype on a requested column that exists in `df`.
+    Callers pass the model's feature list, not metadata / target.
+    """
+    if df.empty:
+        return df
+    out = df.copy()
+    for col in columns:
+        if col not in out.columns:
+            continue
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
+
+
+def feature_matrix(feats: dict, feature_cols: list[str]) -> pd.DataFrame:
+    """One-row numeric matrix for fit/predict from a feature dict.
+
+    The sweep/backtest path used to build `pd.DataFrame([{c: feats.get(c)}])`
+    and hand it to XGBoost. A single None (or Decimal) makes that column
+    `object`, which `_transform_pandas_df` rejects. Coerce first.
+    """
+    row = {c: numeric_feature_value(feats.get(c)) for c in feature_cols}
+    return coerce_numeric_features(
+        pd.DataFrame([row], columns=feature_cols), feature_cols)
+
+
+def coerce_feature_row(feat: dict) -> dict:
+    """Float-or-None every non-meta value on a feature dict."""
+    if not feat:
+        return feat
+    out = dict(feat)
+    for key, value in feat.items():
+        if key in _FEATURE_ROW_META:
+            continue
+        out[key] = numeric_feature_value(value)
+    return out
+
+
 # ── Odds Snapshot Timing Helpers ──────────────────────────────────────────────
 # Look-ahead guard for the bulk (training / backtest) odds lookups.
 #
@@ -690,15 +768,15 @@ def build_mlb_game_features(conn: DBConnection,
                    _gp(away_stats) < MIN_GAMES_BASELINE)
 
     def diff(key: str):
-        h = home_stats.get(key)
-        a = away_stats.get(key)
+        h = numeric_feature_value(home_stats.get(key))
+        a = numeric_feature_value(away_stats.get(key))
         if h is None or a is None:
             return None
         return round(h - a, 4)
 
     def pitcher_diff(key: str):
-        h = home_pitcher.get(key)
-        a = away_pitcher.get(key)
+        h = numeric_feature_value(home_pitcher.get(key))
+        a = numeric_feature_value(away_pitcher.get(key))
         if h is None or a is None:
             return None
         # For ERA/FIP: lower = better, so away's advantage if away_era < home_era
@@ -840,7 +918,7 @@ def build_mlb_game_features(conn: DBConnection,
     # The pre-game total, from the TOTALS market regardless of what odds_row is.
     features["pregame_total_line"] = (totals_row or {}).get("total_line")
 
-    return features
+    return coerce_feature_row(features)
 
 
 # ── NHL Feature Builder ───────────────────────────────────────────────────────
@@ -1618,11 +1696,13 @@ def _build_mlb_features_from_bulk(bulk: dict,
     is_early = int(_gp(home_stats) < MIN_GAMES_BASELINE or _gp(away_stats) < MIN_GAMES_BASELINE)
 
     def diff(key):
-        h, a = home_stats.get(key), away_stats.get(key)
+        h = numeric_feature_value(home_stats.get(key))
+        a = numeric_feature_value(away_stats.get(key))
         return round(h - a, 4) if h is not None and a is not None else None
 
     def pitcher_diff(key):
-        h, a = home_pitcher.get(key), away_pitcher.get(key)
+        h = numeric_feature_value(home_pitcher.get(key))
+        a = numeric_feature_value(away_pitcher.get(key))
         if h is None or a is None:
             return None
         return round(a - h, 4) if key in ("era", "xfip", "bb9", "era_last3", "xfip_last3") else round(h - a, 4)
@@ -1637,7 +1717,7 @@ def _build_mlb_features_from_bulk(bulk: dict,
     away_rl5  = _blk_rolling_runs(bulk, away_team, game_date, 5)
     away_rl10 = _blk_rolling_runs(bulk, away_team, game_date, 10)
 
-    return {
+    row = {
         "game_id":   game_id,
         "game_date": game_date,
         "sport":     "MLB",
@@ -1721,6 +1801,7 @@ def _build_mlb_features_from_bulk(bulk: dict,
         # Always the TOTALS market — see build_mlb_game_features' docstring.
         "pregame_total_line": (totals_row or {}).get("total_line"),
     }
+    return coerce_feature_row(row)
 
 
 # ── Training Dataset Builder ──────────────────────────────────────────────────
@@ -1900,6 +1981,12 @@ def build_training_dataset(model_id: str,
     meta_cols = ["game_id", "game_date", "sport", "season", "home_team", "away_team"]
     keep_cols = meta_cols + [c for c in feature_cols if c in df.columns] + ["target"]
     df = df[[c for c in keep_cols if c in df.columns]]
+
+    # Decimal (Postgres NUMERIC) and empty strings stay object. XGBoost then
+    # refuses the frame, and dropna does not treat "" as missing — so coerce
+    # BEFORE the null drop. Empty/missing → NaN, never leave object dtype.
+    present_features = [c for c in feature_cols if c in df.columns]
+    df = coerce_numeric_features(df, present_features)
 
     # Drop rows with any null CORE feature value. We do not impute — a missing
     # core feature means we didn't have the data for that game, and training on

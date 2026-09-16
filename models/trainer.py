@@ -42,7 +42,7 @@ from config import (LIVE_MODELS, MODEL_PROB_THRESHOLDS, MODELS, MODELS_DIR,
                     PROP_MODELS, SPORTS, calibration_method)
 from data.anon_readable import lock_down
 from data.db import get_connection
-from features.feature_engine import FEATURE_MAP, build_training_dataset
+from features.feature_engine import FEATURE_MAP, build_training_dataset, coerce_numeric_features
 from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_dataset
 
 # ── Training Config ────────────────────────────────────────────────────────────
@@ -263,10 +263,16 @@ def train_model(model_id: str,
     if "game_date" in df_train.columns:
         df_train = df_train.sort_values("game_date", kind="mergesort")
 
+    # Shared with scoring: Decimal / empty last3 (and any similar column) must
+    # be float64 before XGBoost sees the frame. build_training_dataset already
+    # coerces; this is the fit-path backstop so a bypass still cannot leave
+    # object dtype on d_starter_era_last3 / d_starter_k9_last3.
+    df_train = coerce_numeric_features(df_train, feature_cols)
     X_train = df_train[feature_cols].values.astype(float)
     y_train = df_train["target"].values.astype(int)
 
     if not df_hold.empty:
+        df_hold = coerce_numeric_features(df_hold, feature_cols)
         X_hold  = df_hold[feature_cols].values.astype(float)
         y_hold  = df_hold["target"].values.astype(int)
     else:

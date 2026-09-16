@@ -65,6 +65,7 @@ from features.feature_engine import (
     _build_bulk_mlb_lookups,
     _build_mlb_features_from_bulk,
     _is_pregame_snapshot,
+    feature_matrix,
 )
 from models.scorer import american_to_decimal, american_to_implied_prob
 from models.trainer import load_model
@@ -232,13 +233,12 @@ def build_side_table(seasons: list[int]) -> pd.DataFrame:
             skipped_no_features += 1
             continue
 
-        X = pd.DataFrame([{c: feats.get(c) for c in feature_cols}])[feature_cols]
+        X = feature_matrix(feats, feature_cols)
         # Mirror training's `dropna(subset=strict_cols)`. ALL 25 f5 features are
         # strict -- none is in SPARSE_OK_FEATURES -- so a row with any null was
         # never in the training population and must not be scored here either.
-        # (It also keeps the frame numeric: one None makes the column `object`
-        # and XGBoost refuses it outright.)
-        X = X.apply(pd.to_numeric, errors="coerce")
+        # (feature_matrix also keeps the frame numeric: one None used to make
+        # the column `object` and XGBoost refused it outright.)
         if X.isnull().any(axis=1).iloc[0]:
             skipped_no_features += 1
             continue
