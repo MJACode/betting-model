@@ -327,7 +327,8 @@ sweeps until the as-of rebuild is marked complete:
 
 Wired from `models.trainer` and the MLB sweep scripts:
 
-* gated: `calibrated_threshold_sweep`, `mlb_runline_sweep`, `mlb_f5_sweep`,
+* gated: `calibrated_threshold_sweep`, `mlb_runline_sweep`,
+  `mlb_over_under_sweep`, `mlb_f5_sweep`,
   `best_line_threshold_sweep` (per `mlb_*` id), `live_cut_sweep`,
   `live_calibration_sweep`
 * exempt: `mlb_prop_market_sweep` — market-relative rule on

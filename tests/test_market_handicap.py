@@ -347,6 +347,15 @@ def test_runline_sweep_scores_the_artifact_feature_cols():
     assert "include_handicap" in sweep
 
 
+def test_over_under_sweep_scores_the_artifact_feature_cols():
+    """Same honesty as runline: artifact list wins, handicap lookup follows it."""
+    sweep = (ROOT / "scripts" / "mlb_over_under_sweep.py").read_text(
+        encoding="utf-8")
+    assert 'artifact.get("feature_cols")' in sweep
+    assert "include_handicap" in sweep
+    assert "feature_matrix" in sweep
+
+
 def test_ingestor_refuses_post_start_upserts():
     src = (ROOT / "data" / "ingestors" / "public_betting_ingestor.py").read_text(
         encoding="utf-8")

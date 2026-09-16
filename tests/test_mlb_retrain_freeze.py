@@ -54,6 +54,7 @@ def test_frozen_sports_set_is_mlb_only():
 _GATED_SWEEPS = (
     "scripts/calibrated_threshold_sweep.py",
     "scripts/mlb_runline_sweep.py",
+    "scripts/mlb_over_under_sweep.py",
     "scripts/mlb_f5_sweep.py",
     "scripts/best_line_threshold_sweep.py",
     "scripts/live_cut_sweep.py",
