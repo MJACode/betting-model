@@ -1044,12 +1044,78 @@ _GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF"})
 _GAME_LINE_MARKETS = frozenset({"h2h", "spreads", "totals"})
 
 
+_GAME_LINE_RICH_KEYS = frozenset({
+    "markets", "edges", "snapshot_type", "vs", "pin_lean", "bettable",
+    "by_month", "date_from", "date_to", "soft_books", "max_gap_s",
+})
+
+
 def _validate_game_line_market_sweep(args: dict) -> dict:
     """Pinnacle vs soft books, equal-line, pre-game. Measure only.
 
-    Empty args is the one-shot Mike asked for: MLB spreads + totals. Unknown
-    keys (a free-form `command`, say) are dropped, not executed.
+    Two arg shapes, both valid:
+
+    * Measure-jobs (#735): `sport`/`market` as list-or-string. Empty args
+      is MLB spreads + totals. Unknown keys (a free-form `command`) drop.
+    * Paper-grid (#734): `markets` plus optional edges / snapshot_type /
+      vs / pin_lean so the worker can fill the 2/3/4pp constructions.
     """
+    if _GAME_LINE_RICH_KEYS & set(args):
+        from scripts.game_line_market_sweep import SNAPSHOT_TYPES, VS_MODES
+        sport = str(args.get("sport") or "MLB").upper()
+        if sport not in _GAME_LINE_SPORTS:
+            raise ValueError(f"sport must be MLB|NCAAF, got {sport!r}")
+        markets = args.get("markets") or args.get("market") or ["spreads", "totals"]
+        if isinstance(markets, str):
+            markets = [markets]
+        if not isinstance(markets, list) or not markets:
+            raise ValueError("markets must be a non-empty list")
+        markets = [str(m).lower() for m in markets]
+        bad = [m for m in markets if m not in _GAME_LINE_MARKETS]
+        if bad:
+            raise ValueError(f"unknown markets: {bad}")
+        edges = args.get("edges") or [0.02, 0.03, 0.04]
+        if not isinstance(edges, list) or not 1 <= len(edges) <= 12:
+            raise ValueError("edges must be a list of 1-12 floats")
+        edges = [float(e) for e in edges]
+        if any(e <= 0 or e >= 1 for e in edges):
+            raise ValueError(f"edges must be in (0, 1), got {edges}")
+        snapshot_type = str(args.get("snapshot_type") or "open")
+        if snapshot_type not in SNAPSHOT_TYPES:
+            raise ValueError(f"snapshot_type must be one of {SNAPSHOT_TYPES}")
+        vs = str(args.get("vs") or "devig")
+        if vs not in VS_MODES:
+            raise ValueError(f"vs must be one of {VS_MODES}")
+        date_from = args.get("date_from") or "2026-03-20"
+        date_to = args.get("date_to")
+        datetime.strptime(str(date_from), "%Y-%m-%d")
+        if date_to:
+            datetime.strptime(str(date_to), "%Y-%m-%d")
+            date_to = str(date_to)
+        soft_books = args.get("soft_books")
+        if soft_books is not None:
+            if not isinstance(soft_books, list) or not 1 <= len(soft_books) <= 20:
+                raise ValueError("soft_books must be a list of 1-20 book keys")
+            soft_books = [str(b) for b in soft_books]
+        max_gap_s = float(
+            args.get("max_gap_s") if args.get("max_gap_s") is not None else 300)
+        if not 0 <= max_gap_s <= 86_400:
+            raise ValueError(f"max_gap_s out of range: {max_gap_s}")
+        return {
+            "sport": sport,
+            "markets": markets,
+            "edges": edges,
+            "snapshot_type": snapshot_type,
+            "bettable": bool(args.get("bettable", True)),
+            "by_month": bool(args.get("by_month", True)),
+            "vs": vs,
+            "pin_lean": bool(args.get("pin_lean", False)),
+            "date_from": str(date_from),
+            "date_to": date_to,
+            "soft_books": soft_books,
+            "max_gap_s": max_gap_s,
+        }
+
     sports = args.get("sport")
     if sports in (None, ""):
         sports = ["MLB"]
@@ -1083,11 +1149,29 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
 
 
 def _job_game_line_market_sweep(**kw):
-    """Read-only ROI grid: Pinnacle vs the script's eight soft books.
+    """Read-only ROI grid. Writes no threshold, does not pause or publish.
 
-    Wraps `scripts.game_line_market_sweep.main`. Writes no threshold,
-    does not pause or unpause a model, does not publish.
+    Rich args (`markets` / `vs` / `snapshot_type`) call `run()` so the
+    worker can fill the 2/3/4pp Pin-vs-soft constructions. The #735
+    one-shot (`sport`/`market` lists) still wraps `main` via
+    `_run_script_main`.
     """
+    if "markets" in kw or "vs" in kw or "snapshot_type" in kw:
+        from scripts.game_line_market_sweep import run
+        return run(
+            sport=kw["sport"],
+            markets=kw["markets"],
+            edges=kw.get("edges"),
+            snapshot_type=kw.get("snapshot_type", "open"),
+            bettable=kw.get("bettable", True),
+            by_month=kw.get("by_month", True),
+            vs=kw.get("vs", "devig"),
+            pin_lean=kw.get("pin_lean", False),
+            date_from=kw.get("date_from"),
+            date_to=kw.get("date_to"),
+            soft_books=kw.get("soft_books"),
+            max_gap_s=kw.get("max_gap_s", 300),
+        )
     argv = ["--sport", *kw["sport"], "--market", *kw["market"]]
     stdout = _run_script_main("scripts.game_line_market_sweep", argv)
     summary = stdout.strip()[-800:] if stdout.strip() else "(no sweep stdout)"

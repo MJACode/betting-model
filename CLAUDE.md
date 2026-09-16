@@ -607,6 +607,7 @@ to be known BEFORE deciding which file to open.
 | **The stat models: what is exhausted, what the outside world does, the one method left (market-anchored shape simulation)** | `docs/nfl_prop_method_search.md` |
 | **NFL prop lines lean over — the measured bias, and the per-side cut it bought** | `docs/nfl_prop_over_lean.md` |
 | **nfl_prop_market 2026 remeasure — no cut change, no 24h-ceiling change** | `docs/nfl_prop_market_2026.md` |
+| **MLB runline / O/U edge search (paper totals 2pp, spreads gated)** | `docs/mlb_runline_ou_edge_search.md` |
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |
 
