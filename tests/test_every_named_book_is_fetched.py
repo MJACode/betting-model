@@ -36,6 +36,7 @@ def _param_books(param: str) -> set[str]:
 def _cases():
     import models.mlb_game_market as mlb_game
     import models.mlb_prop_market as mlb
+    import models.mlb_total_public_fade as fade
     import models.nfl_prop_market as nfl
     import models.wnba_prop_market as wnba
     from data.ingestors.nfl_prop_odds_ingestor import MARKET_BOOKS as NFL_BOOKS
@@ -51,6 +52,7 @@ def _cases():
         ("mlb sharp", (mlb.SHARP_BOOK,), general),
         ("mlb game-line soft", mlb_game.SOFT_BOOKS, general),
         ("mlb game-line sharp", (mlb_game.SHARP_BOOK,), general),
+        ("mlb public-fade soft", fade.SOFT_BOOKS, general),
     ]
     return out
 

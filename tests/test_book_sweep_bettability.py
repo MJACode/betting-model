@@ -44,10 +44,12 @@ def test_every_incumbent_soft_book_is_bettable():
     """If this ever fails, the shipped strategy is naming bets that cannot be
     placed — which is the failure the clause exists to prevent, already live."""
     import models.mlb_game_market as mlb_game
+    import models.mlb_total_public_fade as fade
     import models.nfl_prop_market as mk
 
     for label, books in (("nfl", mk.SOFT_BOOKS),
-                         ("mlb_game", mlb_game.SOFT_BOOKS)):
+                         ("mlb_game", mlb_game.SOFT_BOOKS),
+                         ("mlb_public_fade", fade.SOFT_BOOKS)):
         unbettable = [b for b in books if b not in config.BEST_LINE_BOOKMAKERS]
         assert not unbettable, (
             f"{label}: {unbettable} are in SOFT_BOOKS but not BEST_LINE_BOOKMAKERS, "

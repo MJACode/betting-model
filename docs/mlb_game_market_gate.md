@@ -72,6 +72,10 @@ cut that has not been re-measured under the overlay is not silently vetoed.
 INSERT is gated by `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH`
 (default 0). `docs/mlb_runline_ou_edge_search.md`.
 
+`mlb_total_public_fade` is also **not** in `GAME_MARKET_GATE_MODELS`. A
+public-steam overlay would veto the fade. INSERT gated by
+`MLB_TOTAL_PUBLIC_FADE_PUBLISH` (default 0). `docs/mlb_total_public_fade.md`.
+
 
 ## How to evaluate the next week
 

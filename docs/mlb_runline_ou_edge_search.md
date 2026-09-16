@@ -37,6 +37,10 @@ Do **not** flip `MLB_TOTAL_MARKET_PUBLISH` or `MLB_SPREAD_MARKET_PUBLISH`
 until the worker grid confirms. Do not silently unpause `mlb_runline` /
 `mlb_over_under`.
 
+A **separate** paper lane, `mlb_total_public_fade`, fades public OVER
+tickets. It is not this card and not an unpause.
+`docs/mlb_total_public_fade.md`. `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0.
+
 ---
 
 ## Production facts (Error Handler, 2026-09-15 — do not re-litigate calibration cuts)

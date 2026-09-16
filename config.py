@@ -602,6 +602,14 @@ ACTION_THRESHOLDS: dict = {
     # mlb_over_under stays paused. find_total_bets wall stays 1.0;
     # the card passes 0.02 explicitly. vs=devig is a sweep flag.
     "mlb_total_market":           {"min_prob": 0.0, "min_edge": 0.02},
+    # MLB totals public-fade paper rule. Fade consensus OVER tickets ≥
+    # MLB_TOTAL_PUBLIC_FADE_TICKET_PCT (default 70; 80 supported), bet
+    # UNDER at best DK/FD/MGM/WH open (fallback DK). Ticket% is the cut
+    # — min_edge 0 so the action filter does not invent a second one.
+    # INSERT off until MLB_TOTAL_PUBLIC_FADE_PUBLISH=1.
+    # mlb_over_under stays paused. Not mlb_total_market (Pin-vs-soft).
+    # docs/mlb_total_public_fade.md.
+    "mlb_total_public_fade":      {"min_prob": 0.0, "min_edge": 0.0},
     # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
     # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
     # paper trading and delay this being an available feature") -- taken with
@@ -927,7 +935,10 @@ PAUSED_MODELS: set = {
     # how many coin flips get bet. The 2026-09-02 RE-CUT 0.50/0.06 (+15.7%)
     # did NOT survive later sweeps — do not resurrect it. Publish path is
     # mlb_total_market at 2pp (Pin fair − soft implied, BEST_LINE,
-    # pin-lean), paper until MLB_TOTAL_MARKET_PUBLISH=1.
+    # pin-lean), paper until MLB_TOTAL_MARKET_PUBLISH=1. A separate
+    # paper lane, mlb_total_public_fade, fades public OVER tickets;
+    # INSERT gated by MLB_TOTAL_PUBLIC_FADE_PUBLISH (default 0).
+    # Neither is an unpause of this id.
     "mlb_over_under",
     # 2026-09-15 (mike): scoring path ENABLED (the "DK does not carry
     # totals/spreads_1st_5_innings" disable was false — other books do, and
@@ -1371,6 +1382,7 @@ PAUSED_MODELS: set = {
     #     — rule / market / live lanes, not these distributional PROP_MODELS
     #   mlb_spread_market — MLB run-line sharp-vs-soft rule (not mlb_runline)
     #   mlb_total_market  — MLB totals Pin-lean vs soft implied (not mlb_over_under)
+    #   mlb_total_public_fade — MLB totals fade public OVER (not mlb_over_under)
     # nfl_prop_sacks joined the pause 2026-09-14 (mike, design-review follow-up
     # to #710): thin / paper-only, never a live BET lane.
     #
@@ -1521,6 +1533,15 @@ MLB_SPREAD_MARKET_PUBLISH: bool = (
 )
 MLB_TOTAL_MARKET_PUBLISH: bool = (
     os.environ.get("MLB_TOTAL_MARKET_PUBLISH", "0").strip() not in ("0", "false", "False")
+)
+# Public-OVER fade totals paper card (models/mlb_total_public_fade).
+# INSERT default 0. Ticket cut default 70; set 80 to tighten.
+# Not an unpause of mlb_over_under. docs/mlb_total_public_fade.md.
+MLB_TOTAL_PUBLIC_FADE_PUBLISH: bool = (
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_PUBLISH", "0").strip() not in ("0", "false", "False")
+)
+MLB_TOTAL_PUBLIC_FADE_TICKET_PCT: float = float(
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_TICKET_PCT", "70")
 )
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
@@ -1674,6 +1695,7 @@ SCORING_METHODS: dict = {
     "wnba_prop_market":    "rule",    # models/wnba_prop_market.py — the same rule, pointed at WNBA
     "mlb_spread_market":   "rule",    # models/mlb_game_market.py — the same rule, pointed at MLB run lines
     "mlb_total_market":    "rule",    # models/mlb_game_market.py — Pin-lean vs soft implied 2pp, INSERT gated
+    "mlb_total_public_fade": "rule",  # models/mlb_total_public_fade.py — fade public OVER, bet UNDER, INSERT gated
     # Trained, off-registry.
     "ncaaf_live_win_prob": "engine",  # two-stage LightGBM, ncaaf_live/engine/remaining.py
     "ncaaf_live_total":    "engine",
@@ -1775,6 +1797,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "mlb_spread_market":           0.018,  # see ACTION_THRESHOLDS
     "mlb_total_market":            0.02,   # see ACTION_THRESHOLDS
+    "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":           0.15,
     "nfl_prop_pass_attempts":        0.19,
     "nfl_prop_pass_completions":     0.16,
@@ -1872,6 +1895,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_spread_market":           0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "mlb_total_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
+    "mlb_total_public_fade":       0.0,    # ticket cut is the signal; see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":           0.68,
     "nfl_prop_pass_attempts":        0.73,
     "nfl_prop_pass_completions":     0.68,
