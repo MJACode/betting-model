@@ -48,6 +48,8 @@ converging on the same place from the other side.
   base rate moving 0.364 → 0.495, so the target mix is itself changing. The
   folds do not agree and the mean is not actionable. 2026-09-15: `mlb_spread_market`
   at 1.8pp exists but INSERT is gated (`MLB_SPREAD_MARKET_PUBLISH` default 0).
+  2026-09-16 search (`docs/mlb_edge_search_2026_09_16.md`): worker 2pp
+  +6.82%/234 early flat; 1.8pp remains the both-halves+ cell (367 +4.80%).
   GROK Pin-vs-DK ≥2pp spreads ~−5% n≈200 — do not live-publish that construction.
   Not an unpause of this id. `docs/mlb_runline_ou_edge_search.md`.
 * **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last

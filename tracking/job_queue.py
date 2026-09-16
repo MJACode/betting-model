@@ -1041,7 +1041,12 @@ def _run_script_main(mod_name: str, argv: list[str]) -> str:
 
 
 _GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF"})
-_GAME_LINE_MARKETS = frozenset({"h2h", "spreads", "totals"})
+
+
+def _allowed_game_line_markets() -> frozenset:
+    """Full-game keys plus F5. F5 grades on home_score_f5 / away_score_f5."""
+    from scripts.game_line_market_sweep import BASE_MARKETS, F5_MARKETS
+    return frozenset(BASE_MARKETS) | frozenset(F5_MARKETS)
 
 
 _GAME_LINE_RICH_KEYS = frozenset({
@@ -1071,7 +1076,8 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
         if not isinstance(markets, list) or not markets:
             raise ValueError("markets must be a non-empty list")
         markets = [str(m).lower() for m in markets]
-        bad = [m for m in markets if m not in _GAME_LINE_MARKETS]
+        allowed = _allowed_game_line_markets()
+        bad = [m for m in markets if m not in allowed]
         if bad:
             raise ValueError(f"unknown markets: {bad}")
         edges = args.get("edges") or [0.02, 0.03, 0.04]
@@ -1141,10 +1147,11 @@ def _validate_game_line_market_sweep(args: dict) -> dict:
     else:
         markets = [str(m) for m in markets]
     markets = [m.lower() for m in markets]
-    bad = [m for m in markets if m not in _GAME_LINE_MARKETS]
+    allowed = _allowed_game_line_markets()
+    bad = [m for m in markets if m not in allowed]
     if bad:
         raise ValueError(
-            f"unknown market {bad}; allowed {sorted(_GAME_LINE_MARKETS)}")
+            f"unknown market {bad}; allowed {sorted(allowed)}")
     return {"sport": sports, "market": markets}
 
 
@@ -1181,6 +1188,33 @@ def _job_game_line_market_sweep(**kw):
         "market": kw["market"],
         "stdout": stdout,
     }
+
+
+def _validate_mlb_public_rlm_sweep(args: dict) -> dict:
+    """Leak-bounded public RLM / steam grader. Measure only. MLB 2026."""
+    date_from = str(args.get("date_from") or "2026-05-31")
+    date_to = args.get("date_to")
+    datetime.strptime(date_from, "%Y-%m-%d")
+    if date_to:
+        datetime.strptime(str(date_to), "%Y-%m-%d")
+        date_to = str(date_to)
+    return {
+        "date_from": date_from,
+        "date_to": date_to,
+        "steam": bool(args.get("steam", False)),
+        "by_month": bool(args.get("by_month", True)),
+    }
+
+
+def _job_mlb_public_rlm_sweep(**kw):
+    """Read-only public-ticket/money + optional steam grid. Writes no picks."""
+    from scripts.mlb_public_rlm_sweep import run
+    return run(
+        date_from=kw.get("date_from"),
+        date_to=kw.get("date_to"),
+        steam=kw.get("steam", False),
+        by_month=kw.get("by_month", True),
+    )
 
 
 _MLB_RUNLINE_TRAIN_SEASONS = [2019, 2020, 2021, 2022, 2023, 2024, 2025]
@@ -1348,6 +1382,9 @@ JOBS = {
     # _job_game_line_market_sweep.
     "game_line_market_sweep": (_job_game_line_market_sweep,
                                _validate_game_line_market_sweep),
+    # ONE-SHOT measure-only. 2026 public RLM / steam on leak-bounded snapshots.
+    "mlb_public_rlm_sweep": (_job_mlb_public_rlm_sweep,
+                             _validate_mlb_public_rlm_sweep),
     # ONE-SHOT measure-only. Retrain mlb_runline (2019-2025 / holdout 2026)
     # then sweep the just-trained pickle. See _job_mlb_runline_retrain_sweep.
     "mlb_runline_retrain_sweep": (_job_mlb_runline_retrain_sweep,

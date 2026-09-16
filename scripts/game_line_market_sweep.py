@@ -63,6 +63,15 @@ SOFT = ("draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
 SNAPSHOT_TYPES = ("open", "in_play", "close")
 VS_MODES = ("devig", "implied")
 DEFAULT_EDGES = (0.02, 0.03, 0.04)
+# First-five quotes grade on games.home_score_f5 / away_score_f5, never the
+# full-game score. Mixing those manufactured a spread-move feature in the
+# handicap block; it would also invent a fake F5 result here.
+F5_MARKETS = {
+    "h2h_1st_5_innings": "h2h",
+    "spreads_1st_5_innings": "spreads",
+    "totals_1st_5_innings": "totals",
+}
+BASE_MARKETS = ("h2h", "spreads", "totals")
 # Unbounded odds scans time out on MCP. Month windows keep each SELECT inside
 # an index-friendly range. Pad snapshot_at 14 days before the game_date window
 # so an opener posted in March for an April game is not dropped.
@@ -109,6 +118,11 @@ def iter_months(date_from: str, date_to: str):
         d = nxt
 
 
+def base_market(market: str) -> str:
+    """Map an odds.market key onto h2h / spreads / totals for matching + grading."""
+    return F5_MARKETS.get(market, market)
+
+
 def load(conn, sport: str, market: str, snapshot_type: str = "open",
          date_from: str | None = None, date_to: str | None = None):
     """Latest OPEN quote per (game, book) plus the game's result.
@@ -116,10 +130,15 @@ def load(conn, sport: str, market: str, snapshot_type: str = "open",
     `snapshot_type` lives on `odds`. `commence_time` lives on `games`.
     Month-bounded callers pass date_from/date_to so the odds scan stays
     inside an index-friendly window (unbounded scans time out on MCP).
+    First-five markets require F5 scores and grade on those, not FG.
     """
     if snapshot_type not in SNAPSHOT_TYPES:
         raise ValueError(f"snapshot_type must be one of {SNAPSHOT_TYPES}, "
                          f"got {snapshot_type!r}")
+    bm = base_market(market)
+    if bm not in BASE_MARKETS:
+        raise ValueError(f"market must be h2h/spreads/totals or an F5 key, "
+                         f"got {market!r}")
     extra = []
     params: list = [sport, market, snapshot_type]
     if date_from:
@@ -135,15 +154,21 @@ def load(conn, sport: str, market: str, snapshot_type: str = "open",
         extra.append("AND o.snapshot_at < %s")
         params.append(date_to)
     extra_sql = "\n          ".join(extra)
+    f5 = market in F5_MARKETS
+    score_sql = ("g.home_score_f5, g.away_score_f5" if f5
+                 else "g.home_score, g.away_score")
+    score_bound = ("AND g.home_score_f5 IS NOT NULL AND g.away_score_f5 IS NOT NULL"
+                   if f5 else
+                   "AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL")
     rows = conn.execute(f"""
         SELECT DISTINCT ON (o.game_id, o.bookmaker)
                o.game_id, o.bookmaker, o.home_price, o.away_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
-               g.home_score, g.away_score, g.game_date, o.snapshot_at
+               {score_sql}, g.game_date, o.snapshot_at
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s AND o.market = %s
-          AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
+          {score_bound}
           AND o.snapshot_type = %s
           AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
           {extra_sql}
@@ -208,9 +233,14 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
     vs='devig'   — Pin de-vig minus the soft book's own de-vig (nfl_prop_market).
     vs='implied' — Pin de-vig minus the soft book's juiced implied (GROK Pin-lean).
     pin_lean     — only the side Pinnacle's no-vig prefers (max sharp_p).
+    `market` may be an F5 key; matching and grading use the base market.
     """
     if vs not in VS_MODES:
         raise ValueError(f"vs must be one of {VS_MODES}, got {vs!r}")
+    bm = base_market(market)
+    if bm not in BASE_MARKETS:
+        raise ValueError(f"market must be h2h/spreads/totals or an F5 key, "
+                         f"got {market!r}")
     soft = tuple(soft_books) if soft_books is not None else SOFT
     picks = []
     diag = defaultdict(int)
@@ -219,12 +249,12 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
         if not sharp:
             diag["no_sharp"] += 1
             continue
-        if market == "h2h":
+        if bm == "h2h":
             sf, _ = devig(sharp["home"], sharp["away"])
             su = 1 - sf if sf is not None else None
             sline = None
             sides = (("home", sf, "home"), ("away", su, "away"))
-        elif market == "spreads":
+        elif bm == "spreads":
             sline = sharp["spread"]
             sf, _ = devig(sharp["home"], sharp["away"])
             su = 1 - sf if sf is not None else None
@@ -244,8 +274,8 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
         for bk, q in books.items():
             if bk not in soft:
                 continue
-            bline = q["spread"] if market == "spreads" else (
-                q["total"] if market == "totals" else None)
+            bline = q["spread"] if bm == "spreads" else (
+                q["total"] if bm == "totals" else None)
             if sline is not None and (bline is None or float(bline) != float(sline)):
                 diag["line_mismatch"] += 1
                 continue
@@ -261,7 +291,7 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
                 if gap is None or gap > max_gap_s:
                     diag["not_simultaneous"] += 1
                     continue
-            if market == "totals":
+            if bm == "totals":
                 a, b = q["over"], q["under"]
             else:
                 a, b = q["home"], q["away"]
@@ -289,7 +319,7 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
         if best is None:
             continue
         edge, side, price, bk, line = best
-        won = grade(market, side, meta[gid], line)
+        won = grade(bm, side, meta[gid], line)
         picks.append((meta[gid][2], edge, price, won, bk))
     return picks, diag
 

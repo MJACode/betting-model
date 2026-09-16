@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, MLB game-line edge search: `mlb_spread_market` 1.8pp is the paper strategy (367 +4.80%, both halves +). F5 sweep keys, public RLM grader, worker one-shots. No unpause, PUBLISH stays 0 |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, mlb handicap coverage: pub_* 0/16000 in 2019–2025 train, 101/2059 in 2026 holdout; richer gated features; SBR open→close sort. No unpause |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, mlb_over_under_retrain_sweep one-shot: retrain 2019-2025 / holdout 2026 register=false, sweep just-trained pickle. No unpause, no recut |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, in-play NFL prop picks took the UTC date: night games filed a day late. Now the game's own date; 8 rows re-dated |

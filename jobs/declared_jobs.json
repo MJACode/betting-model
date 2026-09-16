@@ -833,5 +833,71 @@
       "register": false,
       "sweep_seasons": [2026]
     }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-spreads-plateau-2026-09-16",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. Remeasure the mlb_spread_market neighbourhood (1.5/1.8/2.0/2.5pp) Pin de-vig vs bettable-soft de-vig, equal ±1.5, snapshot_type=open, 300s, by month through 2026-09-17. Worker 2pp on 2026-09-16 was +6.82%/234 with early half flat (−0.05%/139) — 1.8pp is the documented both-halves+ cell and was not in that job's edge list. Does not publish, pause, or unpause. Does not set MLB_SPREAD_MARKET_PUBLISH.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["spreads"],
+      "edges": [0.015, 0.018, 0.02, 0.025],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2026-03-20",
+      "date_to": "2026-09-17"
+    }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-h2h-2026-09-16",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. MLB h2h Pin de-vig vs bettable-soft de-vig, equal (no line), 300s, 1.2/1.5/1.8/2.0pp. MCP 1.5pp was a peak (1.2 early negative). Does not publish, pause, or unpause.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["h2h"],
+      "edges": [0.012, 0.015, 0.018, 0.02],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2026-03-20",
+      "date_to": "2026-09-17"
+    }
+  },
+  {
+    "key": "mlb-game-line-market-sweep-f5-totals-2026-09-16",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. F5 totals Pin de-vig vs bettable-soft de-vig, equal total_line, 300s, grades home_score_f5/away_score_f5. Pinnacle F5 totals exist 2026-09-02..09-16 only (175 games). MCP 2pp was +12.41%/28 one fortnight — thin, not a plateau. Does not publish, pause, or unpause. Leak-era mlb_f5_* stay paused.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["totals_1st_5_innings"],
+      "edges": [0.015, 0.02, 0.025, 0.03],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2026-09-01",
+      "date_to": "2026-09-17"
+    }
+  },
+  {
+    "key": "mlb-public-rlm-sweep-2026-09-16",
+    "job_type": "mlb_public_rlm_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. Leak-bounded public RLM grid (snapshot_at <= trusted first pitch) plus DK totals steam first-vs-last OPEN. Public last-upsert destroyed most pregame history; honest sample is ~85 games Jun/Jul. Does not publish, pause, or unpause.",
+    "args": {
+      "date_from": "2026-05-31",
+      "date_to": "2026-09-17",
+      "steam": true,
+      "by_month": true
+    }
   }
 ]

@@ -21,6 +21,17 @@
 
 ---
 
+## [needs-decision] Paper `mlb_spread_market` 1.8pp — INSERT still 0
+
+2026-09-16 search (`docs/mlb_edge_search_2026_09_16.md`). Card cut 1.8pp is
+**367 bets +4.80%**, both halves +, 5/6 months +, both sides +. Worker 2pp
+(the neighbour) is +6.82%/234 with early **−0.05%/139** — that is why 1.8
+is the cut. Public RLM / GROK implied / F5 Pin / h2h 1.5pp did not clear.
+**Mike decides** whether to set `MLB_SPREAD_MARKET_PUBLISH=1`. Do not unpause
+`mlb_runline`. Worker one-shot
+`mlb-game-line-market-sweep-spreads-plateau-2026-09-16` remeasures
+1.5/1.8/2.0/2.5 after this merges.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`

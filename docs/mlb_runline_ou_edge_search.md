@@ -1,5 +1,9 @@
 # MLB runline / over-under: the edge search (2026-09-15)
 
+**2026-09-16 follow-up:** `docs/mlb_edge_search_2026_09_16.md` — worker 2pp
+spreads +6.82%/234 early flat; **1.8pp remains the paper cut**; public RLM /
+GROK implied / F5 Pin did not replace it. INSERT still 0.
+
 Mike rejected “keep `mlb_runline` and `mlb_over_under` paused until someday.”
 Standing rule (CLAUDE.md §1b): a losing model is an **assessment to run**, not
 a model to pause. This file is the assessment. It names a shippable cut where

@@ -87,3 +87,82 @@ def test_job_type_is_registered_and_validates():
 def test_load_does_not_reference_odds_commence_time_anywhere_in_module():
     src = inspect.getsource(sweep)
     assert "o.commence_time" not in src
+
+
+def test_f5_market_maps_to_base_and_load_selects_f5_scores():
+    assert sweep.base_market("totals_1st_5_innings") == "totals"
+    assert sweep.base_market("spreads_1st_5_innings") == "spreads"
+    assert sweep.base_market("h2h_1st_5_innings") == "h2h"
+    assert sweep.base_market("spreads") == "spreads"
+    src = inspect.getsource(sweep.load)
+    assert "home_score_f5" in src
+    assert "away_score_f5" in src
+    assert "market in F5_MARKETS" in src or "F5_MARKETS" in src
+
+
+def test_f5_h2h_grades_first_five_not_full_game():
+    """Full game 8-1 home; F5 2-3 away. Grading the FG score would flip the bet."""
+    by_game = {
+        "G1": {
+            "pinnacle": dict(home=120, away=-140, spread=None, total=None,
+                             over=None, under=None, snap="2026-09-15T16:00:00Z"),
+            "draftkings": dict(home=-110, away=-110, spread=None, total=None,
+                               over=None, under=None, snap="2026-09-15T16:00:00Z"),
+        }
+    }
+    # F5 scores: away winning. FG would be (8, 1) and home would cover ML.
+    meta = {"G1": (2.0, 3.0, "2026-09-15")}
+    picks, _ = sweep.collect_picks(
+        by_game, meta, "h2h_1st_5_innings", vs="devig", pin_lean=True,
+        soft_books=("draftkings",))
+    assert len(picks) == 1
+    assert picks[0][3] is True  # Pin away-lean won the F5
+    fg_would_lose = sweep.grade("h2h", "away", (8.0, 1.0, "2026-09-15"), None)
+    assert fg_would_lose is False
+
+
+def test_f5_totals_do_not_use_the_full_game_run_total():
+    """F5 2+2=4 under 4.5; FG 8+8=16 over. Under must win on the F5 key."""
+    by_game = {
+        "G1": {
+            "pinnacle": dict(home=None, away=None, spread=None, total=4.5,
+                             over=100, under=-120, snap="2026-09-15T16:00:00Z"),
+            "draftkings": dict(home=None, away=None, spread=None, total=4.5,
+                               over=-110, under=-110, snap="2026-09-15T16:00:00Z"),
+        }
+    }
+    meta = {"G1": (2.0, 2.0, "2026-09-15")}
+    picks, _ = sweep.collect_picks(
+        by_game, meta, "totals_1st_5_innings", vs="devig", pin_lean=True,
+        soft_books=("draftkings",))
+    assert len(picks) == 1
+    assert picks[0][3] is True  # Pin under-lean, F5 total 4
+    fg_would_lose = sweep.grade("totals", "under", (8.0, 8.0, "2026-09-15"), 4.5)
+    assert fg_would_lose is False
+
+
+def test_f5_spreads_match_the_run_line_not_a_total():
+    by_game = {
+        "G1": {
+            "pinnacle": dict(home=-150, away=130, spread=-0.5, total=None,
+                             over=None, under=None, snap="2026-09-15T16:00:00Z"),
+            "draftkings": dict(home=-110, away=-110, spread=-0.5, total=None,
+                               over=None, under=None, snap="2026-09-15T16:00:00Z"),
+        }
+    }
+    # F5 3-2, home covers -0.5. A totals fallback would see total=None and skip.
+    meta = {"G1": (3.0, 2.0, "2026-09-15")}
+    picks, diag = sweep.collect_picks(
+        by_game, meta, "spreads_1st_5_innings", vs="devig", pin_lean=False,
+        soft_books=("draftkings",))
+    assert len(picks) == 1
+    assert picks[0][3] is True
+    assert diag.get("line_mismatch", 0) == 0
+
+
+def test_job_validator_accepts_f5_keys():
+    _, validate = jq.JOBS["game_line_market_sweep"]
+    got = validate({"markets": ["totals_1st_5_innings"], "edges": [0.02]})
+    assert got["markets"] == ["totals_1st_5_innings"]
+    with pytest.raises(ValueError, match="unknown"):
+        validate({"markets": ["player_points"]})
