@@ -25,9 +25,13 @@ from features.feature_engine import (
 )
 from features.market_handicap import (
     HANDICAP_SPARSE_FEATURES,
+    MLB_HANDICAP_GATES_SPREAD,
+    MLB_HANDICAP_GATES_TOTAL,
     MLB_HANDICAP_MOVE_SHARED,
     MLB_HANDICAP_SPREAD_FEATURES,
     MLB_HANDICAP_TOTAL_FEATURES,
+    PUBLIC_FADE_TICKET_PCT,
+    PUBLIC_HEAVY_TICKET_PCT,
     attach_market_handicap,
     build_public_features,
     empty_handicap,
@@ -324,12 +328,24 @@ def test_attach_overlays_movement_and_public_without_clobbering_fundamentals():
     assert out["mkt_move_home_pp"] is not None
     assert out["mkt_spread_move"] == 0.0
     assert out["pub_over_rlm"] is None
+    assert out["pub_dog_ticket_pct"] == 10.0
+    assert out["pub_dog_rlm"] == 70.0
+    assert out["pub_home_present"] == 1.0
+    assert out["mkt_move_present"] == 1.0
+    assert out["pub_fade_public_fav"] == 1.0
+    assert out["pub_home_public_steam"] == 1.0
+    assert out["pub_home_rlm_flag"] == 0.0
 
 
 def test_attach_with_nothing_fills_none_not_zero():
     out = attach_market_handicap({"spread_home": -1.5})
+    present = {"pub_home_present", "mkt_move_present",
+               "pub_over_present", "mkt_total_move_present"}
     for col in MLB_HANDICAP_SPREAD_FEATURES:
-        assert out[col] is None, col
+        if col in present:
+            assert out[col] == 0.0, col
+        else:
+            assert out[col] is None, col
 
 
 def test_train_and_score_builders_call_attach():
@@ -363,3 +379,124 @@ def test_ingestor_refuses_post_start_upserts():
     assert "first_pitch_at" in src
     assert "keeping last pre-game split" in src
     assert "skipped_started" in src
+
+
+# ── offset-aware bound (the #740 585 vs 101 gap) ─────────────────────────────
+
+def test_offset_aware_public_snapshot_after_utc_commence_is_dropped():
+    """16:00-04:00 is 20:00Z. commence 17:36Z. Text compare would keep it."""
+    rows = [
+        _split("g1", "spreads", "home", 90, 20,
+               snap="2026-05-31T16:00:00-04:00",
+               commence="2026-05-31T17:36:00+00:00"),
+    ]
+    assert select_latest_pregame_splits(rows) == {}
+
+
+def test_offset_aware_public_snapshot_before_utc_commence_is_kept():
+    rows = [
+        _split("g1", "spreads", "home", 90, 20,
+               snap="2026-05-31T12:00:00-04:00",
+               commence="2026-05-31T17:36:00+00:00"),
+    ]
+    got = select_latest_pregame_splits(rows)
+    assert got["g1"]["spreads"]["home"]["ticket"] == 90.0
+
+
+# ── richer gated / interaction columns ───────────────────────────────────────
+
+def test_rich_features_are_on_the_runline_and_ou_lists():
+    for col in MLB_HANDICAP_GATES_SPREAD:
+        assert col in FEATURE_MAP["mlb_runline"], col
+        assert col in SPARSE_OK_FEATURES, col
+    for col in MLB_HANDICAP_GATES_TOTAL:
+        assert col in FEATURE_MAP["mlb_over_under"], col
+        assert col in SPARSE_OK_FEATURES, col
+    assert "pub_dog_ticket_pct" in FEATURE_MAP["mlb_runline"]
+    assert "pub_dog_ticket_pct" not in FEATURE_MAP["mlb_over_under"]
+    assert "pub_over_rlm_x_move" not in FEATURE_MAP["mlb_runline"]
+    assert "pub_home_rlm_x_move" not in FEATURE_MAP["mlb_moneyline"]
+
+
+def test_public_steam_and_rlm_flags_gate_on_both_inputs():
+    """Tickets without a move is not 0-steam — it is unknown."""
+    splits = {"spreads": {"home": {"ticket": 90.0, "money": 20.0}}}
+    no_move = attach_market_handicap(
+        {"spread_home": -1.5}, splits=splits, spread_home=-1.5)
+    assert no_move["pub_home_ticket_pct"] == 90.0
+    assert no_move["pub_home_present"] == 1.0
+    assert no_move["mkt_move_present"] == 0.0
+    assert no_move["pub_home_public_steam"] is None
+    assert no_move["pub_home_rlm_flag"] is None
+    assert no_move["pub_home_rlm_x_move"] is None
+    assert no_move["pub_fade_public_fav"] == 1.0
+    assert PUBLIC_FADE_TICKET_PCT == 65.0
+    assert PUBLIC_HEAVY_TICKET_PCT == 55.0
+
+
+def test_rlm_x_move_and_steam_when_line_fades_the_public():
+    """90% tickets on home, line moves AWAY from home → RLM flag, not steam."""
+    movement = build_market_features([
+        {"book": "draftkings", "snap": "2026-09-16T12:00:00Z",
+         "home_price": -140, "away_price": 120,
+         "total_line": 8.5, "spread_home": -1.5},
+        {"book": "draftkings", "snap": "2026-09-16T18:00:00Z",
+         "home_price": -110, "away_price": -110,
+         "total_line": 8.0, "spread_home": -1.5},
+    ])
+    splits = {
+        "spreads": {"home": {"ticket": 90.0, "money": 20.0}},
+        "totals": {"over": {"ticket": 70.0, "money": 40.0}},
+    }
+    out = attach_market_handicap(
+        {"spread_home": -1.5}, movement=movement, splits=splits,
+        spread_home=-1.5)
+    assert out["mkt_move_home_pp"] < 0
+    assert out["pub_home_public_steam"] == 0.0
+    assert out["pub_home_rlm_flag"] == 1.0
+    assert out["pub_fav_rlm_flag"] == 1.0
+    assert out["pub_home_rlm_x_move"] == pytest.approx(
+        (-70.0) * out["mkt_move_home_pp"], rel=1e-4)
+    assert out["mkt_total_move"] == -0.5
+    assert out["pub_over_public_steam"] == 0.0
+    assert out["pub_over_rlm_flag"] == 1.0
+    assert out["pub_over_rlm_x_move"] == pytest.approx((-30.0) * -0.5)
+    assert out["mkt_total_steamed"] == 1.0
+    assert out["mkt_steam_home"] == 0.0
+
+
+def test_favorite_signed_move_flips_when_home_is_the_dog():
+    movement = build_market_features([
+        {"book": "draftkings", "snap": "2026-09-16T12:00:00Z",
+         "home_price": -110, "away_price": -110,
+         "total_line": 8.5, "spread_home": 1.5},
+        {"book": "draftkings", "snap": "2026-09-16T18:00:00Z",
+         "home_price": -140, "away_price": 120,
+         "total_line": 8.5, "spread_home": 1.5},
+    ])
+    splits = {
+        "spreads": {
+            "home": {"ticket": 25.0, "money": 40.0},
+            "away": {"ticket": 75.0, "money": 15.0},
+        }
+    }
+    out = attach_market_handicap(
+        {"spread_home": 1.5}, movement=movement, splits=splits,
+        spread_home=1.5)
+    assert out["mkt_move_home_pp"] > 0
+    # Away is the fav; home steamed, so fav-signed move is negative.
+    assert out["pub_fav_public_steam"] == 0.0
+    assert out["pub_fav_rlm_flag"] == 1.0
+    assert out["pub_dog_ticket_pct"] == 25.0
+    assert out["pub_home_public_steam"] == 0.0  # 25% tickets, not heavy
+
+
+def test_rich_columns_coerce_numeric_like_738():
+    cols = FEATURE_MAP["mlb_runline"]
+    row = {c: 1.0 for c in cols}
+    row["pub_home_rlm_x_move"] = Decimal("-12.5")
+    row["pub_home_public_steam"] = ""
+    X = feature_matrix(row, cols)
+    assert pd.api.types.is_numeric_dtype(X["pub_home_rlm_x_move"])
+    assert float(X["pub_home_rlm_x_move"].iloc[0]) == pytest.approx(-12.5)
+    assert pd.isna(X["pub_home_public_steam"].iloc[0])

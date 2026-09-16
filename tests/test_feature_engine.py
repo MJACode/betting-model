@@ -352,6 +352,8 @@ class TestFeatureMap:
         assert "mkt_spread_move" in FEATURE_MAP["mlb_runline"]
         assert "pub_over_rlm" in FEATURE_MAP["mlb_over_under"]
         assert "mkt_total_move" in FEATURE_MAP["mlb_over_under"]
+        assert "pub_home_public_steam" in FEATURE_MAP["mlb_runline"]
+        assert "pub_over_rlm_x_move" in FEATURE_MAP["mlb_over_under"]
 
 
 # ── Pre-tipoff odds guard (look-ahead protection for bulk loaders) ─────────────

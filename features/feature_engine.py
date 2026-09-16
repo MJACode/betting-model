@@ -289,9 +289,10 @@ SPARSE_OK_FEATURES = {
     "venue_elevation_ft", "is_dome_game", "is_grass",
     # Weather — backfill coverage is partial; XGBoost handles missing natively.
     "wx_temp_f", "wx_wind_mph", "wx_precip_mm",
-    # MLB market-handicap block — Action Network splits start 2026-05-31;
-    # DK/Pinnacle movement is sparse before 2021 and SBR is one snapshot per
-    # game. Missing is NaN, not a row drop. See features/market_handicap.py.
+    # MLB market-handicap block — Action Network splits start 2026-05-31
+    # and are ~5% of 2026 games after the as-of bound (0% of 2019–2025).
+    # DK/Pinnacle movement is sparse before 2021; SBR open+close share a
+    # date. Missing is NaN, not a row drop. See features/market_handicap.py.
     *HANDICAP_SPARSE_FEATURES,
 }
 

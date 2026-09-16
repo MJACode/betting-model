@@ -21,16 +21,19 @@
 
 ---
 
-## [ ] Retrain `mlb_runline` (then `mlb_over_under`) on the market-handicap block
+## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
-Shipped 2026-09-16: `features/market_handicap.py` is in both FEATURE_MAP lists
-and both train/score paths. **No live artifact, no unpause.** After this
-merges, queue `mlb_runline_retrain_sweep` with `register=false` (2019-2025 /
-holdout 2026), read `scripts/mlb_runline_sweep --artifact <pkl>`. Worker job
-`mlb_over_under_retrain_sweep` (same honesty, declared
-`mlb-over-under-retrain-sweep-2026-09-16`) is the totals twin — still measure
-only; do not flip `PAUSED_MODELS` or `MLB_*_MARKET_PUBLISH`. Design:
-`docs/mlb_market_handicap_features.md`.
+Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
+cut (holdout AUC 0.6056, best volume cell −0.32% / 314). Coverage dig:
+`pub_*` is **0 / 16,000** in 2019–2025 train and **101 / 2,059** in 2026
+holdout (Python offset-aware bound; #740’s 585 was text compare).
+Stronger gated/interaction columns + SBR open→close sort shipped
+`docs/mlb_market_handicap_features.md`. **No live artifact, no unpause.**
+After this merges: `mlb_runline_retrain_sweep` register=false. Worker job
+`mlb_over_under_retrain_sweep` (declared
+`mlb-over-under-retrain-sweep-2026-09-16`, #741) is the totals twin and
+consumes the same `FEATURE_MAP`. Do not flip `PAUSED_MODELS` or
+`MLB_*_MARKET_PUBLISH`.
 
 ## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)
 

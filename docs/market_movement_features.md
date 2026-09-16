@@ -2,10 +2,12 @@
 
 **Status 2026-09-16.** The computation is live in `features/market_movement.py`.
 `mlb_runline` and `mlb_over_under` now **list** the columns (plus public
-ticket/money/RLM) via `features/market_handicap.py`. They are `SPARSE_OK` so
-`dropna` does not delete pre-DK-era rows. **No live artifact has been
-retrained.** Next step is a `register=false` retrain, not an unpause.
-Design, leakage, and coverage: `docs/mlb_market_handicap_features.md`.
+ticket/money/RLM and gated public×move flags) via `features/market_handicap.py`.
+They are `SPARSE_OK` so `dropna` does not delete pre-DK-era rows. **No live
+artifact has been retrained.** Job 121848 (first block) did not ship a cut.
+SBR 2019–2020 open+close share a date — sort is open→close, not timestamp
+alone. F5 markets are excluded from the FG move. Coverage:
+`docs/mlb_market_handicap_features.md`.
 
 The 2026-08-31 note below (“activation is a new 2026-only model”) was the
 right answer when adding these columns would `dropna` the matrix. That trap is

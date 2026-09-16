@@ -8,6 +8,8 @@ snapshot makes a model look brilliant in backtest, and a 0.0 standing in for
 
 from __future__ import annotations
 
+import pytest
+
 import config
 from features.market_movement import (MARKET_MOVEMENT_FEATURES,
                                       american_to_prob, build_market_features)
@@ -165,6 +167,52 @@ def test_the_loader_excludes_in_play_and_post_start_rows():
     src = inspect.getsource(market_movement.load_market_movement)
     assert "in_play" in src
     assert "_is_pregame_snapshot" in src
+    assert "IN ('h2h', 'spreads', 'totals')" in src
+
+
+def test_sbr_open_and_close_on_the_same_date_move_open_to_close():
+    """2019 SBR stores open+close on one calendar date. Close-first input
+    must not flip the sign."""
+    close_first = [
+        {"book": "sbr_consensus", "snap": "2019-02-21",
+         "snapshot_type": "close", "home_price": -137, "away_price": 117,
+         "market": "h2h"},
+        {"book": "sbr_consensus", "snap": "2019-02-21",
+         "snapshot_type": "open", "home_price": -135, "away_price": 115,
+         "market": "h2h"},
+    ]
+    out = build_market_features(close_first)
+    open_first = list(reversed(close_first))
+    flipped = build_market_features(open_first)
+    assert out["mkt_move_home_pp"] == flipped["mkt_move_home_pp"]
+    # -135 → 0.5745, -137 → 0.5781, move +0.36pp (home slightly more favored)
+    assert out["mkt_move_home_pp"] == pytest.approx(0.36, abs=0.02)
+    assert out["mkt_snapshots"] == 2
+
+
+def test_f5_spread_does_not_invent_a_full_game_spread_move():
+    out = build_market_features([
+        {"book": "draftkings", "snap": "2026-08-30T10:00:00Z",
+         "home_price": -110, "away_price": -110,
+         "spread_home": -1.5, "total_line": 8.5, "market": "spreads"},
+        {"book": "draftkings", "snap": "2026-08-30T18:00:00Z",
+         "home_price": -110, "away_price": -110,
+         "spread_home": -0.5, "total_line": 4.5,
+         "market": "spreads_1st_5_innings"},
+    ])
+    assert out["mkt_spread_move"] is None
+    assert out["mkt_total_move"] is None
+
+
+def test_same_timestamp_duplicate_does_not_invent_a_move():
+    out = build_market_features([
+        {"book": "draftkings", "snap": "2026-08-30T10:00:00Z",
+         "snapshot_type": "open", "home_price": -110, "away_price": -110},
+        {"book": "draftkings", "snap": "2026-08-30T10:00:00Z",
+         "snapshot_type": "open", "home_price": -150, "away_price": 130},
+    ])
+    assert out["mkt_move_home_pp"] is None
+    assert out["mkt_snapshots"] == 1
 
 
 def test_the_pregame_guard_fails_open_on_a_missing_timestamp():
