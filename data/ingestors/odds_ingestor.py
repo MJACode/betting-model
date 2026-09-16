@@ -523,7 +523,9 @@ def _get_event_odds(sport_key: str, event_id: str, markets: list[str],
 
     Net: ~+2 credits per MLB event per F5 fetch (~15 events, daily pipeline
     only) = roughly +30/day against 4,900,852 remaining. The extra spend buys
-    F5 spreads and F5 totals, which this repo has never held.
+    F5 spreads and F5 totals, which the scorer now prices off the first
+    bettable book that quotes them (DraftKings' Odds API feed still returns
+    none — measured 2026-09-15).
     """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
