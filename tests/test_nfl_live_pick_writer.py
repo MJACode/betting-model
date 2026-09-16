@@ -53,7 +53,7 @@ class _Decision:
 
 class _Conn:
     def __init__(self, rows=None):
-        self.rows = rows if rows is not None else [("NFL_2026_01_BUF_HOU",)]
+        self.rows = rows if rows is not None else [("NFL_2026_01_BUF_HOU", "2026-09-13")]
         self.executed = []
         self.commits = 0
 
@@ -84,7 +84,7 @@ def test_every_row_key_is_actually_bound_by_the_insert():
 
     Asserted both ways: no key goes unbound, and no placeholder goes unfilled.
     """
-    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0)
+    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0, game_date="2026-09-13")
     bound = {p.split(")s")[0] for p in _INSERT_SQL.split("%(")[1:]}
     assert set(row) == bound, (
         f"row-only keys {sorted(set(row) - bound)}; "
@@ -94,7 +94,7 @@ def test_every_row_key_is_actually_bound_by_the_insert():
 def test_the_settlement_columns_are_populated():
     """`prop_market` + `player_key` are what tracking/paper_tracker resolves a
     market-spanning model id against. Empty here means graded never."""
-    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0)
+    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0, game_date="2026-09-13")
     assert row["prop_market"] == LANE_MARKET == "player_pass_attempts"
     assert row["player_key"] == "CJ STROUD"
     assert row["is_live"] is True
@@ -107,13 +107,14 @@ def test_edge_is_the_platform_edge_not_the_lanes_ev():
     column would put this lane on a different scale from the whole table and
     corrupt any cross-model threshold sweep that reads it."""
     d = _Decision(model_prob=0.58, market_prob=0.5349, ev=0.0787)
-    row = build_pick(d, "NFL_2026_01_BUF_HOU", 1000.0)
+    row = build_pick(d, "NFL_2026_01_BUF_HOU", 1000.0, game_date="2026-09-13")
     assert row["edge"] == pytest.approx(0.58 - 0.5349)
     assert row["edge"] != pytest.approx(d.ev)
 
 
 def test_the_stake_carries_through_to_a_dollar_figure():
-    row = build_pick(_Decision(stake_fraction=0.011), "NFL_2026_01_BUF_HOU", 1000.0)
+    row = build_pick(_Decision(stake_fraction=0.011), "NFL_2026_01_BUF_HOU", 1000.0,
+                     game_date="2026-09-13")
     assert row["kelly_fraction"] == pytest.approx(0.011)
     assert row["recommended_bet"] == pytest.approx(11.0)
 
@@ -125,7 +126,7 @@ def test_game_id_resolves_from_the_book_s_team_names():
     keyed NFL_{season}_{week}_{away}_{home}, and the book's event id is a third
     unrelated string. Team names are the only bridge -- which is what Quote's
     own docstring says they exist for."""
-    conn = _Conn([("NFL_2026_01_BUF_HOU",)])
+    conn = _Conn([("NFL_2026_01_BUF_HOU", "2026-09-13")])
     got = resolve_game_id(conn, "Houston Texans", "Buffalo Bills",
                           datetime(2026, 9, 13, 17, 0, tzinfo=timezone.utc))
     assert got == "NFL_2026_01_BUF_HOU"
@@ -286,7 +287,7 @@ def test_two_players_in_one_game_can_both_get_a_bet():
         def fetchall(self):
             last = self.executed[-1][0]
             if "FROM games" in last:
-                return [("NFL_2026_01_BUF_HOU",)]
+                return [("NFL_2026_01_BUF_HOU", "2026-09-13")]
             if "SELECT 1 FROM picks" in last:
                 return [(1,)] if self._last_lock else []
             return []
@@ -305,7 +306,7 @@ def test_a_locked_lane_writes_nothing_further():
     class _LockedConn(_Conn):
         def fetchall(self):
             # game_id resolution, then the lock query
-            return [("NFL_2026_01_BUF_HOU",)] if len(self.executed) == 1 \
+            return [("NFL_2026_01_BUF_HOU", "2026-09-13")] if len(self.executed) == 1 \
                 else [(MODEL_ID,)]
 
     conn = _LockedConn()
@@ -319,7 +320,7 @@ def test_an_unlocked_lane_does_write():
     would pass every lock test and silently write nothing, ever."""
     class _OpenConn(_Conn):
         def fetchall(self):
-            return [("NFL_2026_01_BUF_HOU",)] if len(self.executed) == 1 else []
+            return [("NFL_2026_01_BUF_HOU", "2026-09-13")] if len(self.executed) == 1 else []
 
     conn = _OpenConn()
     PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn)(_Decision())
@@ -474,7 +475,7 @@ class _AvoidConn(_Conn):
 
     def fetchall(self):
         last = self.executed[-1][0]
-        return [("NFL_2026_01_BUF_HOU",)] if "FROM games" in last else []
+        return [("NFL_2026_01_BUF_HOU", "2026-09-13")] if "FROM games" in last else []
 
 
 def _mk_decline(reason, **over):
@@ -576,20 +577,51 @@ def test_recording_a_decline_can_never_break_a_bet():
 
 class _OpenConn(_Conn):
     def fetchall(self):
-        return [("NFL_2026_01_BUF_HOU",)] if len(self.executed) == 1 else []
+        return [("NFL_2026_01_BUF_HOU", "2026-09-13")] if len(self.executed) == 1 else []
 
 
 def test_a_written_bet_is_announced_with_its_own_game_date():
-    """The pick's game_date is the decision's UTC date (a Sunday-night bet is
-    Monday in UTC), so the announcer must be handed the row's date, never a
-    clock's."""
+    """The announcer is handed the row's date, never a clock's -- and the row's
+    date is the GAME's (see the next test)."""
     announced = []
     conn = _OpenConn()
     PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn,
                   announce=announced.append)(_Decision(
                       ts=datetime(2026, 9, 14, 0, 30, tzinfo=timezone.utc)))
     assert conn.commits == 1
-    assert announced == ["2026-09-14"]
+    assert announced == ["2026-09-13"]
+
+
+@pytest.mark.parametrize("game_id, game_date, pick_ts_utc", [
+    # Thursday night, 2026-09-10 8:35pm ET kickoff: the pick is Friday in UTC.
+    ("NFL_2026_01_SF_LA", "2026-09-10", datetime(2026, 9, 11, 0, 40, tzinfo=timezone.utc)),
+    # Sunday night, DAL @ NYG: written as 2026-09-14 until this fix.
+    ("NFL_2026_01_DAL_NYG", "2026-09-13", datetime(2026, 9, 14, 0, 30, tzinfo=timezone.utc)),
+    # Monday night, DEN @ KC: written as 2026-09-15 -- a Tuesday with no game.
+    ("NFL_2026_01_DEN_KC", "2026-09-14", datetime(2026, 9, 15, 0, 20, tzinfo=timezone.utc)),
+])
+@pytest.mark.parametrize("bet", [True, False], ids=["BET", "AVOID"])
+def test_a_night_game_pick_carries_the_game_s_date_not_the_utc_clock(
+        game_id, game_date, pick_ts_utc, bet):
+    """mike, 2026-09-16: "Why were nfl picks graded yesterday in the record when
+    there was no game?" The row took its date from the decision's UTC clock, so
+    every kickoff from 8pm ET -- Thursday, Sunday and Monday night -- landed on
+    the NEXT day: the record split one game across two days, and the app's live
+    board (which asks for today's ET date) could not see the pick until midnight.
+    The date is the game's own, read from `games` alongside the id."""
+    class _GameConn(_AvoidConn):
+        def fetchall(self):
+            last = self.executed[-1][0]
+            return [(game_id, game_date)] if "FROM games" in last else []
+
+    conn = _GameConn()
+    d = (_Decision(ts=pick_ts_utc) if bet
+         else _mk_decline("below_threshold:0.02<0.06", ts=pick_ts_utc))
+    PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn,
+                  announce=lambda _d: None)(d)
+    assert len(conn.inserts) == 1
+    assert conn.inserts[0]["game_date"] == game_date, (
+        f"dated {conn.inserts[0]['game_date']}, the game is {game_date}")
 
 
 def test_the_announce_runs_after_the_commit_and_after_the_connection_closes():
@@ -613,7 +645,7 @@ def test_the_announce_runs_after_the_commit_and_after_the_connection_closes():
 @pytest.mark.parametrize("why, conn", [
     ("no game id", lambda: _Conn(rows=[])),
     ("locked lane", lambda: type("L", (_Conn,), {
-        "fetchall": lambda self: [("NFL_2026_01_BUF_HOU",)]
+        "fetchall": lambda self: [("NFL_2026_01_BUF_HOU", "2026-09-13")]
         if len(self.executed) == 1 else [(MODEL_ID,)]})()),
 ])
 def test_nothing_written_means_nothing_announced(why, conn):

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, in-play NFL prop picks took the UTC date: night games filed a day late. Now the game's own date; 8 rows re-dated |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, mlb_runline retrain/sweep: coerce d_starter_era_last3 / d_starter_k9_last3 (and similar) off object dtype. register=false path only; RL stays paused |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, #734 rebase onto master after #732/#733. Totals card: Pin fair − soft implied, BEST_LINE, pin-lean. INSERT envs default 0. RL/OU stay paused |
 | 2026-09-15 | [2026-09](./2026-09.md) | 2026-09-15, #734: `mlb_total_market` paper publisher is Pin fair − soft implied, equal total, BEST_LINE books, pin-lean only; INSERT off (`MLB_TOTAL_MARKET_PUBLISH` default 0) |
