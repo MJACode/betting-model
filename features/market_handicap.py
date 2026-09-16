@@ -23,13 +23,22 @@ Public (Action Network, `public_betting` table):
     on the FAVORITE (home if `spread_home < 0`). Classic board: favorite −1.5
     at 90% tickets / 20% money → `pub_fav_rlm = -70` → lean the dog +1.5.
   * `pub_over_ticket_pct` / `pub_over_money_pct` / `pub_over_rlm` — totals.
+  * `pub_dog_ticket_pct` / `pub_dog_rlm` — complement of the favorite.
+  * Gated: `pub_*_present`, RLM × move, public-steam / RLM flags, fade-public-fav,
+    `pub_home_vs_sharp`, `mkt_steam_home` / `mkt_total_steamed`. None unless
+    the raw inputs exist (presence flags are 0/1 after attach).
 
 Movement / sharp (reused from `MARKET_MOVEMENT_FEATURES`, no new odds joins):
 
   * open implied, signed/abs home-prob move, book disagreement, snapshot count,
     Pinnacle no-vig home, DK vs sharp, plus `mkt_spread_move` / `mkt_total_move`.
 
-MISSING IS None, NEVER 0.0. A game with no splits is not "0% public on home".
+MISSING IS None, NEVER 0.0 — for the *raw* percentages, RLM, and line-move.
+A game with no splits is not "0% public on home". Presence / steam *flags*
+are the exception: they are 1/0 when the inputs exist so the model can
+learn "we have splits" vs NaN, and stay None when the inputs to evaluate
+them are missing (do not invent a 0-steam from a missing move).
+
 XGBoost routes NaN; `SPARSE_OK_FEATURES` keeps those rows in train so a
 pre-2026 SBR game is not deleted because Action Network did not exist.
 
@@ -43,10 +52,11 @@ a missing timestamp).
 
 `public_betting` is UNIQUE(game_id, market, side, book) — one row, last upsert
 wins. Measured 2026-09-16: 4,704 of 8,214 stored snapshots sit after
-`commence_time` because hourly refresh kept writing. Those rows are DROPPED
-here, not used. Covering ~585 spread games still have a last fetch that landed
-before start; the rest stay NaN. The ingestor now refuses post-start upserts
-so future last-rows stay the last pre-game split.
+`commence_time` on a *text* compare; offset-aware parse + first-pitch leaves
+**101 / 2,059** completed 2026 games with a pre-game home-runline split, and
+**0 / 16,000** in 2019–2025 train. Those post-start rows are DROPPED here, not
+used. The ingestor now refuses post-start upserts so future last-rows stay the
+last pre-game split. Historical overwrites stay NaN.
 """
 
 from __future__ import annotations
@@ -85,16 +95,53 @@ MLB_HANDICAP_PUBLIC_OVER = [
     "pub_over_rlm",
 ]
 
+# Gated / interaction columns. None unless the raw inputs exist, except the
+# `*_present` flags which are 1.0 / 0.0 after attach so XGBoost can split
+# "have splits" vs "do not". Same 55% heavy as models.game_market_gate.
+PUBLIC_HEAVY_TICKET_PCT = 55.0
+PUBLIC_FADE_TICKET_PCT = 65.0
+STEAM_HOME_PP = 3.0          # market_movement.md >3pp steam bucket
+TOTAL_STEAM_PTS = 0.5        # game_market_gate line_steam_pts
+
+MLB_HANDICAP_PUBLIC_DOG = [
+    "pub_dog_ticket_pct",
+    "pub_dog_rlm",
+]
+MLB_HANDICAP_GATES_SPREAD = [
+    "pub_home_present",
+    "mkt_move_present",
+    "pub_home_rlm_x_move",
+    "pub_fav_rlm_x_move",
+    "pub_home_public_steam",
+    "pub_home_rlm_flag",
+    "pub_fav_public_steam",
+    "pub_fav_rlm_flag",
+    "pub_fade_public_fav",
+    "pub_home_vs_sharp",
+    "mkt_steam_home",
+]
+MLB_HANDICAP_GATES_TOTAL = [
+    "pub_over_present",
+    "mkt_total_move_present",
+    "pub_over_rlm_x_move",
+    "pub_over_public_steam",
+    "pub_over_rlm_flag",
+    "mkt_total_steamed",
+]
+
 MLB_HANDICAP_SPREAD_FEATURES = (
     MLB_HANDICAP_MOVE_SHARED
     + MLB_HANDICAP_MOVE_SPREAD
     + MLB_HANDICAP_PUBLIC_HOME
     + MLB_HANDICAP_PUBLIC_FAV
+    + MLB_HANDICAP_PUBLIC_DOG
+    + MLB_HANDICAP_GATES_SPREAD
 )
 MLB_HANDICAP_TOTAL_FEATURES = (
     MLB_HANDICAP_MOVE_SHARED
     + MLB_HANDICAP_MOVE_TOTAL
     + MLB_HANDICAP_PUBLIC_OVER
+    + MLB_HANDICAP_GATES_TOTAL
 )
 
 HANDICAP_SPARSE_FEATURES = frozenset(
@@ -149,6 +196,123 @@ def _rlm(ticket, money):
     if ticket is None or money is None:
         return None
     return round(float(money) - float(ticket), 1)
+
+
+def _mul(a, b):
+    if a is None or b is None:
+        return None
+    return round(float(a) * float(b), 4)
+
+
+def _gated_flag(*, have_inputs: bool, condition: bool) -> float | None:
+    """None when we cannot evaluate; 1.0/0.0 when we can."""
+    if not have_inputs:
+        return None
+    return 1.0 if condition else 0.0
+
+
+def _fav_signed_home_move(move, spread_home):
+    """Home-prob move from the favorite's point of view. None if either missing."""
+    if move is None:
+        return None
+    fav = favorite_side(spread_home)
+    if fav is None:
+        return None
+    m = float(move)
+    return m if fav == "home" else -m
+
+
+def build_rich_handicap(feat: dict, spread_home=None) -> dict:
+    """Gated indicators + public×move interactions. Missing inputs stay None.
+
+    Presence flags are 1.0/0.0 (never None) once attach has run: "we looked
+    and there are no splits" is a real 0, not a missing percentage.
+    """
+    from features.feature_engine import numeric_feature_value
+
+    out = dict(feat)
+    if spread_home is None:
+        spread_home = out.get("spread_home")
+
+    home_t = numeric_feature_value(out.get("pub_home_ticket_pct"))
+    home_rlm = numeric_feature_value(out.get("pub_home_rlm"))
+    fav_t = numeric_feature_value(out.get("pub_fav_ticket_pct"))
+    fav_rlm = numeric_feature_value(out.get("pub_fav_rlm"))
+    over_t = numeric_feature_value(out.get("pub_over_ticket_pct"))
+    over_rlm = numeric_feature_value(out.get("pub_over_rlm"))
+    move = numeric_feature_value(out.get("mkt_move_home_pp"))
+    total_move = numeric_feature_value(out.get("mkt_total_move"))
+    sharp = numeric_feature_value(out.get("mkt_sharp_devig_home"))
+    fav_move = _fav_signed_home_move(move, spread_home)
+
+    if fav_t is not None:
+        out["pub_dog_ticket_pct"] = round(100.0 - float(fav_t), 1)
+    else:
+        out["pub_dog_ticket_pct"] = None
+    if fav_rlm is not None:
+        out["pub_dog_rlm"] = round(-float(fav_rlm), 1)
+    else:
+        out["pub_dog_rlm"] = None
+
+    out["pub_home_present"] = 1.0 if home_t is not None else 0.0
+    out["mkt_move_present"] = 1.0 if move is not None else 0.0
+    out["pub_over_present"] = 1.0 if over_t is not None else 0.0
+    out["mkt_total_move_present"] = 1.0 if total_move is not None else 0.0
+
+    out["pub_home_rlm_x_move"] = _mul(home_rlm, move)
+    out["pub_fav_rlm_x_move"] = _mul(fav_rlm, fav_move)
+    out["pub_over_rlm_x_move"] = _mul(over_rlm, total_move)
+
+    out["pub_home_public_steam"] = _gated_flag(
+        have_inputs=home_t is not None and move is not None,
+        condition=home_t is not None and home_t >= PUBLIC_HEAVY_TICKET_PCT
+        and move is not None and move > 0,
+    )
+    out["pub_home_rlm_flag"] = _gated_flag(
+        have_inputs=home_t is not None and move is not None,
+        condition=home_t is not None and home_t >= PUBLIC_HEAVY_TICKET_PCT
+        and move is not None and move < 0,
+    )
+    out["pub_fav_public_steam"] = _gated_flag(
+        have_inputs=fav_t is not None and fav_move is not None,
+        condition=fav_t is not None and fav_t >= PUBLIC_HEAVY_TICKET_PCT
+        and fav_move is not None and fav_move > 0,
+    )
+    out["pub_fav_rlm_flag"] = _gated_flag(
+        have_inputs=fav_t is not None and fav_move is not None,
+        condition=fav_t is not None and fav_t >= PUBLIC_HEAVY_TICKET_PCT
+        and fav_move is not None and fav_move < 0,
+    )
+    out["pub_fade_public_fav"] = _gated_flag(
+        have_inputs=fav_t is not None and fav_rlm is not None,
+        condition=fav_t is not None and fav_t >= PUBLIC_FADE_TICKET_PCT
+        and fav_rlm is not None and fav_rlm < 0,
+    )
+    out["pub_over_public_steam"] = _gated_flag(
+        have_inputs=over_t is not None and total_move is not None,
+        condition=over_t is not None and over_t >= PUBLIC_HEAVY_TICKET_PCT
+        and total_move is not None and total_move > 0,
+    )
+    out["pub_over_rlm_flag"] = _gated_flag(
+        have_inputs=over_t is not None and total_move is not None,
+        condition=over_t is not None and over_t >= PUBLIC_HEAVY_TICKET_PCT
+        and total_move is not None and total_move < 0,
+    )
+
+    if home_t is not None and sharp is not None:
+        out["pub_home_vs_sharp"] = round(float(home_t) / 100.0 - float(sharp), 4)
+    else:
+        out["pub_home_vs_sharp"] = None
+
+    out["mkt_steam_home"] = _gated_flag(
+        have_inputs=move is not None,
+        condition=move is not None and move >= STEAM_HOME_PP,
+    )
+    out["mkt_total_steamed"] = _gated_flag(
+        have_inputs=total_move is not None,
+        condition=total_move is not None and abs(total_move) >= TOTAL_STEAM_PTS,
+    )
+    return out
 
 
 def build_public_features(splits: dict | None, spread_home=None) -> dict:
@@ -206,6 +370,7 @@ def attach_market_handicap(feat: dict, *, movement: dict | None = None,
             if key in HANDICAP_SPARSE_FEATURES and key in movement:
                 out[key] = movement[key]
     out.update(build_public_features(splits, spread_home=spread_home))
+    out = build_rich_handicap(out, spread_home=spread_home)
     return out
 
 

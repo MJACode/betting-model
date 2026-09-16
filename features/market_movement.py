@@ -104,6 +104,7 @@ def load_market_movement(conn, sport: str, decision_book: str = "draftkings",
     rows = conn.execute(f"""
         SELECT o.game_id, o.bookmaker, o.snapshot_at, o.home_price,
                o.away_price, o.total_line, o.spread_home,
+               o.market, o.snapshot_type,
                -- ACTUAL first pitch where we know it AND believe it, scheduled
                -- start otherwise. commence_time runs ~16 minutes late against
                -- reality, so bounding on it alone admits rows from the first
@@ -116,22 +117,66 @@ def load_market_movement(conn, sport: str, decision_book: str = "draftkings",
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s
           AND COALESCE(o.snapshot_type, '') <> 'in_play'
+          AND o.market IN ('h2h', 'spreads', 'totals')
           {extra}
         ORDER BY o.game_id, o.snapshot_at
     """, tuple(params)).fetchall()
 
     per_game: dict[str, list[dict]] = defaultdict(list)
     for (game_id, book, snap, home_price, away_price,
-         total_line, spread_home, commence) in rows:
+         total_line, spread_home, market, snapshot_type, commence) in rows:
         if not _is_pregame_snapshot(snap, commence):
             continue
         per_game[game_id].append({
             "book": book, "snap": snap,
             "home_price": home_price, "away_price": away_price,
             "total_line": total_line, "spread_home": spread_home,
+            "market": market, "snapshot_type": snapshot_type,
         })
     return {gid: build_market_features(snaps, decision_book)
             for gid, snaps in per_game.items()}
+
+
+# Full-game markets only. F5 ±0.5 mixed into FG ±1.5 invented a spread "move".
+_FULL_GAME_MARKETS = frozenset({"h2h", "spreads", "totals"})
+
+
+def _is_full_game_snap(row: dict) -> bool:
+    """Keep untagged snaps (tests / live callers) and drop 1st-5 markets."""
+    market = row.get("market")
+    if not market:
+        return True
+    return str(market) in _FULL_GAME_MARKETS
+
+
+def _snapshot_type_rank(row: dict) -> int:
+    """open before close when snapshot_at is only a date (SBR 2019–2020).
+
+    Measured 2026-09-16: 2,655 of 2,758 2019 SBR h2h games store open and
+    close on the SAME `snapshot_at` (a calendar date) with different prices.
+    Sorting by timestamp alone is unstable — half the time the close is
+    treated as the open and the signed move flips. Open-then-close is the
+    actual pre-game window.
+    """
+    stype = str(row.get("snapshot_type") or "").lower()
+    if stype in ("", "open"):
+        return 0
+    if stype == "close":
+        return 1
+    return 2
+
+
+def _snap_sort_key(row: dict):
+    ts = _parse_iso_ts(row.get("snap"))
+    return (ts is None, ts or 0, _snapshot_type_rank(row), str(row.get("snap") or ""))
+
+
+def _unique_ordered(rows: list[dict]) -> list[dict]:
+    """One row per (snap, snapshot_type); last write wins, then open→close order."""
+    by_key: dict[tuple, dict] = {}
+    for row in rows:
+        by_key[(row.get("snap"), row.get("snapshot_type"))] = row
+    return sorted(by_key.values(), key=_snap_sort_key)
 
 
 def build_market_features(snaps: list[dict], decision_book: str = "draftkings") -> dict:
@@ -143,13 +188,24 @@ def build_market_features(snaps: list[dict], decision_book: str = "draftkings") 
     if not snaps:
         return dict(_EMPTY)
 
-    ordered = sorted(snaps, key=lambda r: (_parse_iso_ts(r["snap"]) is None,
-                                           _parse_iso_ts(r["snap"]) or 0,
-                                           str(r["snap"])))
+    fg = [r for r in snaps if _is_full_game_snap(r)]
+    if not fg:
+        return dict(_EMPTY)
+    # Unique per book so two books on the same timestamp still disagree.
+    # Unique per (snap, snapshot_type) so SBR open+close on one date survive
+    # as two ticks, while duplicate rows at the same type do not invent a move.
+    by_book: dict[str, list[dict]] = defaultdict(list)
+    for row in fg:
+        by_book[row.get("book")].append(row)
+    per_book = {book: _unique_ordered(rows) for book, rows in by_book.items()}
+    ordered = sorted(
+        (row for rows in per_book.values() for row in rows),
+        key=_snap_sort_key,
+    )
     # The decision book leads, because every threshold in this repo was swept on
     # DK-implied edge (CLAUDE.md §6). Falling back to all books keeps a game
     # with no DK coverage from silently losing the feature entirely.
-    book_rows = [r for r in ordered if r["book"] == decision_book] or ordered
+    book_rows = per_book.get(decision_book) or ordered
 
     out = dict(_EMPTY)
     out["mkt_snapshots"] = len(book_rows)
@@ -166,11 +222,11 @@ def build_market_features(snaps: list[dict], decision_book: str = "draftkings") 
             out["mkt_move_home_pp"] = round(move, 2)
             out["mkt_move_abs_pp"] = round(abs(move), 2)
 
-    totals = [r for r in book_rows if r["total_line"] is not None]
+    totals = [r for r in book_rows if r.get("total_line") is not None]
     if len(totals) >= 2:
         out["mkt_total_move"] = round(float(totals[-1]["total_line"])
                                       - float(totals[0]["total_line"]), 2)
-    spreads = [r for r in book_rows if r["spread_home"] is not None]
+    spreads = [r for r in book_rows if r.get("spread_home") is not None]
     if len(spreads) >= 2:
         out["mkt_spread_move"] = round(float(spreads[-1]["spread_home"])
                                        - float(spreads[0]["spread_home"]), 2)

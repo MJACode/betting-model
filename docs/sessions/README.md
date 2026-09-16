@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, mlb handicap coverage: pub_* 0/16000 in 2019–2025 train, 101/2059 in 2026 holdout; richer gated features; SBR open→close sort. No unpause |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, mlb_over_under_retrain_sweep one-shot: retrain 2019-2025 / holdout 2026 register=false, sweep just-trained pickle. No unpause, no recut |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, in-play NFL prop picks took the UTC date: night games filed a day late. Now the game's own date; 8 rows re-dated |
 | 2026-09-16 | [2026-09](./2026-09.md) | 2026-09-16, mlb_runline retrain/sweep: coerce d_starter_era_last3 / d_starter_k9_last3 (and similar) off object dtype. register=false path only; RL stays paused |
