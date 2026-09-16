@@ -1105,8 +1105,8 @@ def step_mlb_game_market(run_date: str, dry_run: bool = False) -> bool:
     """MLB game-line market-relative cards: de-vig Pinnacle, flag the soft outlier.
 
     Logs both spreads (`mlb_spread_market`) and totals (`mlb_total_market`)
-    every pass. Totals construction is Pin-vs-soft-devig (measured −11%
-    at 2pp). INSERT is gated by MLB_SPREAD_MARKET_PUBLISH /
+    every pass. Totals construction is Pin fair − soft implied, BEST_LINE
+    books, pin-lean only. INSERT is gated by MLB_SPREAD_MARKET_PUBLISH /
     MLB_TOTAL_MARKET_PUBLISH (default 0). A pass with no Pinnacle quotes or
     no MLB slate is a clean no-op.
     """

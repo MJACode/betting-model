@@ -140,14 +140,14 @@ def test_totals_paper_cut_is_two_pp_and_not_the_wall():
         quotes, min_edge=mk.MIN_EDGE_TOTALS_PAPER, soft_books=("fanduel",))
     assert len(paper) == 1
     assert paper[0].side == "over"
-    # Edge is Pin fair − FD de-vig, not FD juiced implied.
+    # Edge is Pin fair − FD juiced implied, not FD de-vig.
     pin_fair = paper[0].fair
-    fd_devig, _ = mk.devig(-110, -110)
-    assert paper[0].edge == pytest.approx(pin_fair - fd_devig)
+    fd_implied = mk.implied(-110)
+    assert paper[0].edge == pytest.approx(pin_fair - fd_implied)
 
 
-def test_totals_card_takes_the_pin_vs_soft_fade():
-    """Card is Pin-vs-soft-devig (both sides). GROK pin-lean is a sweep flag."""
+def test_totals_pin_lean_does_not_fade_pinnacle():
+    """De-vig vs de-vig would take the fade; the card takes Pin's lean only."""
     quotes = {
         ("G1", "pinnacle"): {
             "total_line": 8.5, "over_price": -150, "under_price": 130,
@@ -158,24 +158,22 @@ def test_totals_card_takes_the_pin_vs_soft_fade():
             "snapshot_at": "2026-09-15T16:00:00Z",
         },
     }
-    card, _ = mk.find_total_bets(
+    lean, _ = mk.find_total_bets(
         quotes, min_edge=0.02, soft_books=("fanduel",))
-    grok, _ = mk.find_total_bets(
+    fade, _ = mk.find_total_bets(
         quotes, min_edge=0.02, soft_books=("fanduel",),
-        vs="implied", pin_lean=True)
-    assert len(card) == 1
-    assert card[0].side == "under"
-    assert grok == []
+        vs="devig", pin_lean=False)
+    assert lean == []
+    assert len(fade) == 1
+    assert fade[0].side == "under"
 
 
-def test_totals_card_is_pin_vs_soft_devig():
-    """INSERT/log path is measured Pin-vs-soft-devig, not GROK DK-only."""
+def test_totals_shops_the_best_soft_book_not_dk_only():
     src = (Path(__file__).resolve().parents[1] / "scripts"
            / "mlb_game_market_card.py").read_text(encoding="utf-8")
     assert '"soft_books": mk.SOFT_BOOKS' in src
-    assert '"vs": "devig"' in src
-    assert '"pin_lean": False' in src
-    assert "soft_books=lane[\"soft_books\"]" in src
+    assert '"vs": "implied"' in src
+    assert '"pin_lean": True' in src
     quotes = {
         ("G1", "pinnacle"): {
             "total_line": 8.5, "over_price": -150, "under_price": 130,
@@ -190,37 +188,13 @@ def test_totals_card_is_pin_vs_soft_devig():
             "snapshot_at": "2026-09-15T16:00:00Z",
         },
     }
-    bets, _ = mk.find_total_bets(quotes, min_edge=0.02)
+    bets, _ = mk.find_total_bets(
+        quotes, min_edge=0.02, soft_books=("draftkings", "fanduel"))
     assert len(bets) == 1
     assert bets[0].book == "fanduel"
     assert bets[0].side == "over"
-    fd_over, _ = mk.devig(-102, -118)
-    assert bets[0].edge == pytest.approx(bets[0].fair - fd_over)
-
-
-def test_totals_sweep_can_still_name_grok():
-    """Library still accepts GROK flags; the card does not use them."""
-    quotes = {
-        ("G1", "pinnacle"): {
-            "total_line": 8.5, "over_price": -150, "under_price": 130,
-            "snapshot_at": "2026-09-15T16:00:00Z",
-        },
-        ("G1", "draftkings"): {
-            "total_line": 8.5, "over_price": -110, "under_price": -110,
-            "snapshot_at": "2026-09-15T16:00:00Z",
-        },
-        ("G1", "fanduel"): {
-            "total_line": 8.5, "over_price": -102, "under_price": -118,
-            "snapshot_at": "2026-09-15T16:00:00Z",
-        },
-    }
-    grok, _ = mk.find_total_bets(
-        quotes, min_edge=0.02, soft_books=("draftkings",),
-        vs="implied", pin_lean=True)
-    assert len(grok) == 1
-    assert grok[0].book == "draftkings"
-    dk_implied = mk.implied(-110)
-    assert grok[0].edge == pytest.approx(grok[0].fair - dk_implied)
+    fd_implied = mk.implied(-102)
+    assert bets[0].edge == pytest.approx(bets[0].fair - fd_implied)
 
 
 def test_totals_default_is_a_wall():

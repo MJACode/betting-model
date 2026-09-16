@@ -1,4 +1,4 @@
-"""MLB game-line cards: Pin-vs-soft-devig (spreads 1.8pp, totals 2pp log).
+"""MLB game-line cards: spreads Pin-vs-soft-devig 1.8pp; totals Pin-lean implied 2pp.
 
 Deployment of models/mlb_game_market. This script is plumbing: load today's
 unstarted games, take the latest OPEN quotes, call find_spread_bets /
@@ -11,12 +11,10 @@ Deliberate and load-bearing:
   BEST_LINE_BOOKMAKERS. GROK Pin-vs-DK ≥2pp was ~−5% n≈200 — do not live
   INSERT until MLB_SPREAD_MARKET_PUBLISH=1.
 
-  TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). Same Pin-vs-soft-devig
-  construction as spreads, equal total, bettable books. Measured May–Jun
-  2pp −11.13% / 79 — log only. GROK Pin-lean vs DK implied (~+11%) is a
-  different construction; it is not this card and is not a reason to set
-  MLB_TOTAL_MARKET_PUBLISH=1. find_total_bets' default wall stays 1.0;
-  this card passes 0.02 explicitly. MLB_TOTAL_MARKET_PUBLISH default 0.
+  TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). Pin no-vig lean minus
+  the best bettable soft implied, equal total. Never fade Pinnacle.
+  find_total_bets' default wall stays 1.0; this card passes 0.02
+  explicitly. MLB_TOTAL_MARKET_PUBLISH default 0.
 
   ONE BET PER GAME. The same game at three books is one opinion.
 
@@ -61,10 +59,10 @@ LANES = {
         "model_id": "mlb_total_market",
         "market": "totals",
         "min_edge": mk.MIN_EDGE_TOTALS_PAPER,
-        # Measured Pin-vs-soft-devig (−11% at 2pp). Not GROK.
+        # Pin fair − soft implied, BEST_LINE, pin-lean only.
         "soft_books": mk.SOFT_BOOKS,
-        "vs": "devig",
-        "pin_lean": False,
+        "vs": "implied",
+        "pin_lean": True,
     },
 }
 # Back-compat for tests that imported the spreads constants.
