@@ -36,6 +36,7 @@ import sys
 
 import requests
 from loguru import logger
+from psycopg2 import IntegrityError
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import (
@@ -565,6 +566,15 @@ def _backfill_one_date(conn: DBConnection, d: str, hours_before: int,
         home = _normalize_team(ev.get("home_team", ""), "MLB")
         away = _normalize_team(ev.get("away_team", ""), "MLB")
         game_id = _build_game_id("MLB", game_date, away, home)
+        if game_id not in _existing_game_ids(conn, [game_id]):
+            # Same FK as the live pass: one unknown id aborts the date.
+            _warn_unknown_prop_game(
+                game_id, away, home, game_date,
+                away_name=ev.get("away_team", ""),
+                home_name=ev.get("home_team", ""),
+            )
+            total["skipped"] += 1
+            continue
 
         books_data, served, credits = _historical_event_props(
             ev["id"], snap, markets, books)
@@ -584,7 +594,25 @@ def _backfill_one_date(conn: DBConnection, d: str, hours_before: int,
                 snapshot_type, stamp,
                 allowed_markets=set(markets), bookmaker=bk.get("key", ""))
         if rows:
-            date_rows += _insert_prop_odds(conn, rows)
+            try:
+                conn.execute("SAVEPOINT prop_odds_event")
+                date_rows += _insert_prop_odds(conn, rows)
+                conn.execute("RELEASE SAVEPOINT prop_odds_event")
+            except IntegrityError as exc:
+                if not _is_missing_game_fk(exc):
+                    raise
+                try:
+                    conn.execute("ROLLBACK TO SAVEPOINT prop_odds_event")
+                except Exception:
+                    conn.rollback()
+                    raise
+                _warn_unknown_prop_game(
+                    game_id, away, home, game_date,
+                    away_name=ev.get("away_team", ""),
+                    home_name=ev.get("home_team", ""),
+                )
+                total["skipped"] += 1
+                continue
         total["events"] += 1
 
     logger.info(f"  {d}: {len(evs)} events, {date_rows} rows "
@@ -664,6 +692,41 @@ def backfill_mlb_prop_odds(dates: list[str], hours_before: int = 3,
             persist_quota(conn)
         finally:
             conn.close()
+
+def _existing_game_ids(conn: DBConnection, game_ids: list[str]) -> set[str]:
+    """Which of `game_ids` already have a `games` row.
+
+    `player_prop_odds.game_id` FKs to `games.game_id`. One unknown id aborts
+    the whole transaction — hourly 2026-09-18 07:17Z, MLB_2026-09-18_SEA_COL
+    rolled back every MLB prop row from that pass. Same shape 2026-09-08
+    TEX_SEA, 2026-09-09 TOR_OAK, 2026-09-13 CWS_STL.
+    """
+    ids = [g for g in dict.fromkeys(game_ids) if g]
+    if not ids:
+        return set()
+    rows = conn.execute(
+        "SELECT game_id FROM games WHERE game_id = ANY(%s)",
+        (ids,),
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def _is_missing_game_fk(exc: BaseException) -> bool:
+    """True when Postgres refused a player_prop_odds insert for a missing games row."""
+    msg = str(exc).lower()
+    return "player_prop_odds_game_id_fkey" in msg or (
+        "foreign key constraint" in msg and "game_id" in msg
+    )
+
+
+def _warn_unknown_prop_game(game_id: str, away: str, home: str, game_date: str,
+                            *, away_name: str = "", home_name: str = "") -> None:
+    teams = f"{away_name or away} @ {home_name or home}"
+    logger.warning(
+        f"Prop odds: no games row for {game_id} ({teams}, {game_date}); "
+        f"skipping rather than failing the sport pass"
+    )
+
 
 def _insert_prop_odds(conn: DBConnection, rows: list[dict]) -> int:
     """Insert prop odds rows. No dedup — always append snapshots."""
@@ -755,12 +818,30 @@ def run_prop_odds_ingestor(target_date: str = None,
             conn.commit()
             return {"target_date": target_date, "sport": sport, "events": 0, "prop_rows": 0}
 
+        # Resolve every event's game_id first, then ask `games` once. An event
+        # whose id is missing is skipped BEFORE the paid per-event call — the
+        # row cannot be stored (FK) and spending the credit would buy nothing.
+        identities: list[tuple] = []
         for event in events:
             home_name = event["home_team"]
             away_name = event["away_team"]
             home_team = _normalize_team(home_name, sport)
             away_team = _normalize_team(away_name, sport)
-            game_id   = _build_game_id(sport, event["game_date"], away_team, home_team)
+            game_id = _build_game_id(sport, event["game_date"], away_team, home_team)
+            identities.append(
+                (event, game_id, away_team, home_team, away_name, home_name)
+            )
+        known = _existing_game_ids(conn, [gid for _ev, gid, *_ in identities])
+        skipped_unknown = 0
+
+        for event, game_id, away_team, home_team, away_name, home_name in identities:
+            if game_id not in known:
+                _warn_unknown_prop_game(
+                    game_id, away_team, home_team, event["game_date"],
+                    away_name=away_name, home_name=home_name,
+                )
+                skipped_unknown += 1
+                continue
 
             logger.debug(f"Fetching props for {away_team} @ {home_team} ({game_id})")
 
@@ -787,7 +868,21 @@ def run_prop_odds_ingestor(target_date: str = None,
                 ))
 
             if rows:
-                n = _insert_prop_odds(conn, rows)
+                try:
+                    n = _insert_prop_odds(conn, rows)
+                    # Commit per event so one later FK cannot unwrite the
+                    # rows that already landed (the 07:17Z failure mode).
+                    conn.commit()
+                except IntegrityError as exc:
+                    if not _is_missing_game_fk(exc):
+                        raise
+                    conn.rollback()
+                    _warn_unknown_prop_game(
+                        game_id, away_team, home_team, event["game_date"],
+                        away_name=away_name, home_name=home_name,
+                    )
+                    skipped_unknown += 1
+                    continue
                 total_rows   += n
                 total_events += 1
                 logger.info(f"  {away_team} @ {home_team}: {n} prop rows "
@@ -796,6 +891,12 @@ def run_prop_odds_ingestor(target_date: str = None,
                             f"{len(set(r['bookmaker'] for r in rows))} books)")
             else:
                 logger.debug(f"  {game_id}: no parseable prop rows")
+
+        if skipped_unknown:
+            logger.warning(
+                f"Prop odds: skipped {skipped_unknown}/{len(events)} "
+                f"{sport} event(s) with no games row"
+            )
 
         duration = (datetime.now() - start).total_seconds()
         _log_pipeline(conn, target_date, "success",
