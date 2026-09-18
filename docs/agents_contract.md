@@ -113,6 +113,26 @@ not double the spend), and best-effort per job (a catch-up that raised would sto
 the scheduler starting at all, and one weekly job failing must not cancel the
 rest).
 
+**The daily pipeline has the same hole on a shorter clock.** A weekly miss waits
+a week; a daily miss waits until tomorrow. 2026-09-18: the 6:00am ET daily
+(`pipeline_runs` run_id `b65a709cdf734a15bdf7a5d3c8cf7983`) was still running
+when PR #699 merged at ~6:07am ET, Railway replaced the worker, and APScheduler
+registered `daily_pipeline` next for *tomorrow* 6:00am — a CronTrigger whose
+fire has passed does not misfire on a fresh scheduler. `pipeline_watch` at
+7:15am reported `failed_steps=aborted` and did not re-queue.
+`mlb_bullpen_workload` and `mlb_team_stats` are written ONLY by that once-daily
+run (Steps 0d/3/3b/5c); hourlies never touch them, so live MLB models scored on
+stale features until the next calendar day.
+
+`scheduler.py::catch_up_daily_pipeline()` closes that. It runs on boot and
+again from `run_pipeline_watch` (after the report, so a 20-minute retry does
+not delay the morning post). Decision: `tracking/daily_retry.py`. Guards: a
+successful daily today is left alone; an in-process daily is not started
+twice; at most one automatic retry per ET calendar day (two ledgered starts
+total); a daily that finished with only later-step failures (typically
+`health_check`) is treated as complete for MLB freshness. Kill switch:
+`RUN_DAILY_RETRY=0`. No model, threshold, pause or calibration change.
+
 ---
 
 # Agents — Sentinel and Janitor
@@ -194,8 +214,12 @@ testable without a database):
 6. A weekly job stale past 8 days: `model_calibration_sweeps` and
    `player_savant_stats`. A missing table reads as never-completed.
 
-It changes nothing — no threshold, no pause, no registry swap. Those are model
-updates needing a person and an `Updated-By` trailer (CLAUDE.md §1b).
+It changes nothing about models — no threshold, no pause, no registry swap.
+Those are model updates needing a person and an `Updated-By` trailer
+(CLAUDE.md §1b). After it reports, `run_pipeline_watch` also calls
+`catch_up_daily_pipeline` so an aborted/missing 6am daily is re-run the same
+ET day rather than waiting until tomorrow (2026-09-18: mid-run redeploy,
+`failed_steps=aborted`, bullpen/team_stats STALE until the next 6am).
 
 ## JANITOR — the backlog runner (daily, 8:00am ET)
 

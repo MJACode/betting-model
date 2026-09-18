@@ -120,8 +120,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _abort_orphans(conn) -> int:
-    """Close out runs that started but never finished, before recording a new one.
+def _abort_orphans(conn, run_kind: str) -> int:
+    """Close out SAME-KIND runs that started but never finished.
 
     A row with finished_at NULL means the process that owned it never called
     finish_run. Until now that row stayed open forever, and every deploy creates
@@ -131,17 +131,22 @@ def _abort_orphans(conn) -> int:
     added a false hang to a CRIT check -- observed live after two deploys on
     2026-08-27.
 
-    Closing them HERE is safe and precise, because a new pass starting proves
-    the previous one's process is gone: the scheduler runs refresh passes with
-    max_instances=1, so it never launches an overlapping pass. Anything still
-    open at this moment is dead, not running.
+    Closing them HERE is safe and precise ONLY for the same run_kind: the
+    scheduler runs each kind with max_instances=1, so a new hourly starting
+    proves the previous HOURLY is gone. It does not prove the DAILY is gone.
+    Until 2026-09-18 this UPDATE had no kind filter, so the 7:17am hourly
+    aborted that morning's still-open daily (run_id b65a709cdf734a15bdf7a5d3c8cf7983)
+    — which is the correct label when the daily process is already dead, and
+    the WRONG label when a same-day daily retry is still running. Kind-scoping
+    keeps hang detection for refresh passes and stops hourly from assassinating
+    a daily retry.
 
     Hang detection is preserved rather than masked. These are recorded as
     ok = FALSE with failed_steps = 'aborted', so a worker dying mid-pass stays
     visible and countable -- it is simply no longer indistinguishable from a
     pass that is hanging right now. The stuck check keeps its meaning too: after
     this, an unfinished row older than 2h can only be the CURRENTLY running
-    pass, which is exactly the case that check exists to catch.
+    pass of that kind, which is exactly the case that check exists to catch.
     """
     try:
         cur = conn.execute(
@@ -151,14 +156,15 @@ def _abort_orphans(conn) -> int:
                    ok           = FALSE,
                    failed_steps = 'aborted'
              WHERE finished_at IS NULL
+               AND run_kind = ?
             """,
-            (_now(),),
+            (_now(), run_kind),
         )
         n = getattr(cur, "rowcount", 0) or 0
         if n:
             logger.warning(
-                f"run_ledger: closed {n} orphaned run(s) as aborted — the worker "
-                f"was replaced or killed mid-pass (usually a deploy)"
+                f"run_ledger: closed {n} orphaned {run_kind} run(s) as aborted — "
+                f"the worker was replaced or killed mid-pass (usually a deploy)"
             )
         return n
     except Exception as exc:
@@ -179,7 +185,7 @@ def start_run(run_kind: str) -> str:
         conn = get_connection()
         try:
             _ensure_table(conn)
-            _abort_orphans(conn)
+            _abort_orphans(conn, run_kind)
             conn.execute(
                 """
                 INSERT INTO pipeline_runs (run_id, run_kind, started_at)

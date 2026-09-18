@@ -122,3 +122,20 @@ def test_cleanup_failure_cannot_break_the_pass(db, monkeypatch):
     assert run_id
     assert db.execute("SELECT COUNT(*) FROM pipeline_runs WHERE run_id=?",
                       (run_id,)).fetchone()[0] == 1
+
+
+def test_hourly_start_does_not_abort_an_open_daily(db, monkeypatch):
+    """Kind-scoped orphans. 2026-09-18: the 7:17 hourly closed the still-open
+    daily as aborted. That is the right label when the daily process is
+    already dead, and the wrong one when a same-day daily retry is still
+    running — max_instances=1 is per job, not across daily and hourly."""
+    db.execute(
+        "INSERT INTO pipeline_runs (run_id, run_kind, started_at) "
+        "VALUES ('daily-open','daily','2026-09-18T10:00:00+00:00')")
+    db.commit()
+    _ledger(monkeypatch, _Conn(db)).start_run("hourly")
+    fin, failed = db.execute(
+        "SELECT finished_at, failed_steps FROM pipeline_runs "
+        "WHERE run_id='daily-open'").fetchone()
+    assert fin is None, "hourly must not abort a still-open daily"
+    assert failed is None
