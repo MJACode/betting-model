@@ -33,6 +33,23 @@ Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
 instead of double-fetching.
 
+### Same-day daily retry (2026-09-18)
+
+The 6:00am ET daily is the only writer of `mlb_bullpen_workload` / `mlb_team_stats`
+(Steps 0d/3/3b/5c). Hourlies never touch them. A CronTrigger whose 6:00am fire has
+already passed does **not** misfire when the scheduler starts — so a worker restart
+mid-daily (a Railway redeploy after a merge) left the run `failed_steps=aborted` and
+aimed the next daily at *tomorrow* 6:00am. `pipeline_watch` reported the abort and
+did not re-queue.
+
+`scheduler.py::catch_up_daily_pipeline` runs on boot and again after the 7:15am ET
+pipeline watch. If today's daily is missing, unfinished, aborted, or failed before
+the MLB freshness steps, it invokes `python run_pipeline.py` once the same
+America/New_York calendar day, posts an ops Discord note, and caps at one automatic
+retry (two ledgered `run_kind='daily'` starts). In-process lock plus a successful
+daily already today both no-op. Kill switch: `RUN_DAILY_RETRY=0`. See
+`tracking/daily_retry.py`.
+
 ### NFL polling (changed 2026-08-22)
 
 The four fixed wind-card slots and the daily opener card were replaced by one poll
