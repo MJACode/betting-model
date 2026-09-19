@@ -1134,6 +1134,35 @@ path is unchanged. The 25 Kalshi-origin picks standing at the time: 2480901,
 2480915, 2480917, 2480918, 2480920, 2480921, 2480922, 2480925, 2480926,
 2480927, 2480928, 2480929, 2480930, 2480931, 2480936, 2480938, 2480939.
 
+## The standing board was written before the floor, and the floor is a bar on the board (2026-09-19, evening)
+
+mike, after the global EV floor merged: *"Are all the nfl picks that should have
+been voided are they voided? I still see 30 FUCKING nfl picks in the signal
+base app."* The 25 Kalshi-origin picks WERE voided (above). What he was seeing
+was the other 23 `nfl_prop_market` picks from the same passes, 4
+`nfl_prop_tackles_assists` and 4 `nfl_wind_totals` -- 31 rows, every one
+written before the 0.30 floor landed at 21:44Z, and every one under it on the
+honest probability (EV −0.10 to +0.28).
+
+The floor is enforced at WRITE time so every surface stays identical; that
+also means a pick already on the board is untouched by it. The board he had
+asked for -- only the best of the best -- and the board he had were different
+things until the standing rows were held to the same bar. Measured across
+every sport: **51 standing BETs on games not yet started, 51 under the floor,
+0 clearing it** (NFL 31, NCAAF 13 `ncaaf_over_under`, MLB 6, UFC 1). All 51
+voided (`scripts/void_picks.void`, result NO_ACTION, condition_status VOID,
+reason recorded), none graded, rows kept. Ids: 2485756, 2490755, 2415404,
+2415403, 2419408, 2433727, 1769812, 1769753, 1769626, 1992830, 2109187,
+2109205, 2109285, 2118752, 2118792, 2126249, 2167581, 2222900, 2399357,
+2480919, 2480905, 2480908, 2480909, 2480910, 2480912, 2480916, 2480923,
+2480924, 2480932, 2480933, 2480934, 2480935, 2480937, 2481955, 2481953,
+2481954, 2484540, 2484537, 2487559, 2487560, 2487557, 2487558, 2482065,
+2488341, 2488358, 2492153, 2293338, 2293337, 2316660, 2340309, 2482412.
+
+The lesson for the next bar change: **a write-time gate changes tomorrow's
+board; the standing board has to be held to it by hand the same hour, or the
+person sees yesterday's rule for a day.**
+
 ## Our state was behind the book, and every guard passed (2026-09-19)
 
 The rule this is the evidence for: **a live quote the book has moved past a
