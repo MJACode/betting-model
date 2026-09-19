@@ -91,6 +91,11 @@ Anon/authenticated hold SELECT. The pipeline writes as the table owner.
 - A replacement for `system_health_checks`. Freshness stays there.
 - A replacement for the Monday calibration sweep
   (`docs/probability_calibration.md`) or the 250-bet threshold review.
+- A replacement for the **insert-time** slate guard
+  (`models/slate_concentration.py`, #747). That helper **suppresses** a
+  concentrated `mlb_total_public_fade` card before INSERT/notify. This
+  monitor **reports** any model (any sport) that already booked a
+  one-sided or faded slate, plus CLV/ROI/volume. Both stay.
 
 Related: [`health_checks.md`](health_checks.md), [`clv.md`](clv.md),
 [`mlb_total_public_fade.md`](mlb_total_public_fade.md),
