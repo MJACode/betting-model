@@ -84,6 +84,10 @@ Consequences worth knowing before touching either producer:
   from it.
 - **The started-game guard stays** — on both surfaces. It is the one bound that
   should exist.
+- **The pre-publish sanity gate** (`tracking.publish_sanity.filter_for_publish`)
+  runs on Discord and push, pre-game and live, immediately before send. Live
+  must not bypass it via `publish_new_signals`. Kill switch:
+  `RUN_PUBLISH_SANITY=0`. Checks: `docs/publish_sanity.md`.
 
 ### One board, on the LIVE channel too (2026-09-12)
 

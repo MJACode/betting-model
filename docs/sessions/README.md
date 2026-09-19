@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, pre-publish sanity gate on Discord+push pregame+live (`tracking/publish_sanity.py`). Integrity first. `RUN_PUBLISH_SANITY=0`. No auto-pause/unit bump |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, slate concentration guard: suppress mlb_total_public_fade when one side is ≥70% of n_bet ≥ 4 (12/12 under card). PUBLISH stays 0. RL/OU stay paused |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, daily model-quality monitor (all sports): one-sided slates, fade risk, CLV/ROI, volume → `model_quality_checks`. Job + `--step` + 11am ET cron. Report only |
 | 2026-09-18 | [2026-09](./2026-09.md) | 2026-09-18, same-day daily retry after mid-run Railway redeploy: boot + pipeline_watch re-run today's daily once if aborted/incomplete. Kind-scoped orphan abort. No model/threshold change |

@@ -34,6 +34,7 @@ from tracking.publish_filters import live_publishable_sql
 from tracking.publish_keys import key_partition_sql, live_lock_key_sql, lock_key_sql
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
 from tracking.pick_integrity import refuse_mismatched
+from tracking.publish_sanity import filter_for_publish
 
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _MAX_LABELS = 3          # labels listed in a summary body before "+N more"
@@ -392,7 +393,8 @@ def notify_signal_changes(target_date: str | None = None, dry_run: bool = False)
 def _send_signal_changes(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_signal_changes, under the publisher lock."""
     # Refused picks are neither pushed nor ledgered (tracking/pick_integrity).
-    new_bets = refuse_mismatched(_new_bet_signals(conn, target_date), "Push")
+    new_bets = filter_for_publish(_new_bet_signals(conn, target_date), "Push",
+                                  live=False)
     dropped = refuse_mismatched(_dropped_signals(conn, target_date), "Push(dropped)")
     if not new_bets and not dropped:
         logger.info(f"Push: no new/dropped signals for {target_date}")
@@ -613,7 +615,8 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
 
     conn = get_connection()
     try:
-        new = refuse_mismatched(_new_live_signals(conn, target_date), "Push(live)")
+        new = filter_for_publish(_new_live_signals(conn, target_date),
+                                 "Push(live)", live=True)
         if not new:
             return 0
 

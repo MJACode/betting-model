@@ -131,6 +131,12 @@ A surface with an extra GATE can only lose rows, and does it silently —
   producer passes its rows through `tracking/pick_integrity.refuse_mismatched`
   and supplies `side` and `line`, or the pick is refused. A new surface adds
   itself to `tests/test_pick_integrity.py`.
+- **A pick that fails the pre-publish sanity gate is not sent.** Discord and
+  push (pre-game and live) run `tracking.publish_sanity.filter_for_publish`
+  on the signal list immediately before send. Integrity is the first check.
+  Refused rows are not ledgered. `RUN_PUBLISH_SANITY=0` disables the new
+  checks only. Checks and fail-open/closed: `docs/publish_sanity.md`. Same
+  shape as pick_integrity — it does not mutate `picks`.
 - **A new surface is a line in the parity tests**, not a copied query:
   `tests/test_{nfl_lookahead_signals,publish_key_identity,publisher_lock}.py`.
 - **LIVE PICKS POST TO THEIR SPORT'S LIVE CHANNEL.** (mike, 2026-09-09:
