@@ -106,6 +106,16 @@ slate guard. Optional under-juice **band**
 `mlb_over_under` stays paused. Coverage caveat: only
 ~99–136 pre-commence public totals-over games in the DB.
 
+## 11b5. TOTALS EDGE HUNT — `docs/mlb_over_under_edge_hunt.md`
+
+2026-09-19 measure-only hunt (public / Pin / RLM / steam / overlay) on
+the 123-game leak-bounded public board. **Deliverable B:** no cell
+cleared n≥40 / every-month-green / max/day≤4 **and** survived the
+full-book veto. Closest miss is public-board steam follow (top-2/3/4
+CLEAR) refused because full-July DK follow ≥1pp is −118.50u / 197.
+I24 / `mlb_total_public_fade` guards not recut. No `PUBLISH` flip.
+`mlb_over_under` stays paused.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 
