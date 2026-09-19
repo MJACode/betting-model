@@ -271,6 +271,15 @@ LIVE_SCORE_LAG_TOLERANCE_SEC = float(
 # re-measured on the real quantity after one slate. Move them on that, never
 # to unblock a pick.
 #
+# FIRST MEASUREMENT OF THE REAL QUANTITY (2026-09-19, 18:05Z, the first 262
+# state changes on 14 games): DraftKings' largest move from the first quote
+# after a state change to any later quote in the SAME state -- moneyline
+# p50 0.0175, p90 0.084, p95 0.101, p99 0.134 implied (20 of 101 intervals
+# over the 0.05 cap); totals p50 1.0, p90 3.0, p95 4.0, p99 7.0 points (15
+# of 174 over 3.0). So the caps decline roughly one interval in five, and
+# those are the intervals in which the book learned something the feed had
+# not reported -- the intended effect, not a calibration target.
+#
 # 0.08 -> 0.05 (2026-09-19, same day, mike: "There is no way these are +ev
 # picks"). North Carolina at Clemson, 16:12Z, before the guard deployed:
 # DraftKings -143 -> -116 -> -105 in two and a half minutes on a 0-0 state,
