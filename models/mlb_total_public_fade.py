@@ -16,10 +16,11 @@ Source: `public_betting` consensus totals, last snapshot with
 tickets ≥ 75 AND over money ≥ over tickets (public steam on the over),
 then UNDER, hard-capped at 2 per slate ranked by over_tix then juice.
 `blunt` restores the old ticket-cut-only finder (70 default; 80 is a
-supported env). A −115 juice floor is an opt-in env — it failed month
-holdout on the 2026 public window. Price: best open under among
-DK/FD/MGM/WH at DK's open total (fallback DK), main total 5.5–14.5,
-under American in [-200, 200]. Always UNDER.
+supported env). `top1` is the searched alternate: t70 pool, keep the
+highest-tix (then juice) under only. A −115 juice floor is an opt-in
+env — it failed month holdout on the 2026 public window. Price: best
+open under among DK/FD/MGM/WH at DK's open total (fallback DK), main
+total 5.5–14.5, under American in [-200, 200]. Always UNDER.
 
 INSERT is gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` (default 0). This is
 not an unpause of `mlb_over_under` and not `mlb_total_market`. A slate
@@ -63,8 +64,11 @@ PRICE_MAX = 200.0
 DEFAULT_OVER_TICKETS = 70.0
 DEFAULT_STEAM_TICKETS = 75.0
 DEFAULT_MAX_PER_SLATE = 2
+DEFAULT_MAX_PER_SLATE_TOP1 = 1
 RULE_BLUNT = "blunt"
 RULE_STEAM = "steam"
+RULE_TOP1 = "top1"
+KNOWN_RULES = (RULE_BLUNT, RULE_STEAM, RULE_TOP1)
 _UNSET = object()
 
 
@@ -87,9 +91,9 @@ def ticket_threshold() -> float:
 
 
 def fade_rule() -> str:
-    """`steam` (default) or `blunt`. Unknown values coerce to steam."""
+    """`steam` (default), `blunt`, or `top1`. Unknown values coerce to steam."""
     raw = str(getattr(config, "MLB_TOTAL_PUBLIC_FADE_RULE", RULE_STEAM)).strip().lower()
-    return raw if raw in (RULE_BLUNT, RULE_STEAM) else RULE_STEAM
+    return raw if raw in KNOWN_RULES else RULE_STEAM
 
 
 def steam_ticket_threshold() -> float:
@@ -363,9 +367,11 @@ def select_fade_bets(splits: dict[str, dict], quotes: dict,
     then hard-cap max 2 per slate ranked by over_tix then juice.
     Blunt: ticket cut only (70 default). Cap is steam-only so blunt
     still relies on the concentration suppress for all-under slates.
+    Top1: t70 pool, keep the single highest-tix (then juice) under.
+    Alternate flag only — holdout did not clear it as the default.
     """
     chosen = (rule or fade_rule()).strip().lower()
-    if chosen not in (RULE_BLUNT, RULE_STEAM):
+    if chosen not in KNOWN_RULES:
         chosen = RULE_STEAM
     if chosen == RULE_STEAM:
         cut = (steam_ticket_threshold() if min_over_tickets is None
@@ -406,7 +412,12 @@ def select_fade_bets(splits: dict[str, dict], quotes: dict,
         diag["juice_floor"] = dropped
 
     if max_per_slate is _UNSET:
-        cap = max_bets_per_slate() if chosen == RULE_STEAM else None
+        if chosen == RULE_STEAM:
+            cap = max_bets_per_slate()
+        elif chosen == RULE_TOP1:
+            cap = DEFAULT_MAX_PER_SLATE_TOP1
+        else:
+            cap = None
     else:
         cap = max_per_slate
     if cap:

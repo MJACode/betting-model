@@ -233,7 +233,8 @@ Notes:
      soft implied, BEST_LINE, pin-lean. Public-OVER fade INSERT is
      `mlb_total_public_fade` (`RULE` default `steam`: over tix ≥75 and
      money ≥ tix, max 2 / slate; `blunt` uses
-     `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`, default 70). See
+     `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`, default 70; `top1` is the
+     searched t70-keep-one alternate). See
      `docs/mlb_runline_ou_edge_search.md` and
      `docs/mlb_total_public_fade.md`.
 4. Deploy. Open the **Logs** — on boot you should see

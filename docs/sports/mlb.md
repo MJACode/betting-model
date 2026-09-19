@@ -45,7 +45,8 @@ converging on the same place from the other side.
   2pp −11.13% / 79 is a sweep flag. Do not resurrect 0.50/0.06.
   A **separate** paper lane, `mlb_total_public_fade`, fades a consensus
   OVER steam (tix ≥75 and money ≥ tix), bets UNDER, max 2 per slate.
-  `RULE=blunt` is the old ≥70 ticket-cut. INSERT off
+  `RULE=blunt` is the old ≥70 ticket-cut; `RULE=top1` is the searched
+  t70-keep-one alternate. INSERT off
   (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). Not an unpause.
   `docs/mlb_total_public_fade.md`.
   `docs/mlb_runline_ou_edge_search.md`.

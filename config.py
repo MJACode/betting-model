@@ -1537,9 +1537,10 @@ MLB_TOTAL_MARKET_PUBLISH: bool = (
 # Public-OVER fade totals paper card (models/mlb_total_public_fade).
 # INSERT default 0. Rule default `steam` (over tix ≥75 and over money ≥
 # tix, max 2 per slate). `blunt` restores the old ticket-cut-only finder
-# (TICKET_PCT default 70). MIN_UNDER_PRICE default unset: the −115 juice
-# floor failed month holdout (docs/mlb_total_public_fade.md). Not an
-# unpause of mlb_over_under.
+# (TICKET_PCT default 70). `top1` is the searched alternate (t70, keep
+# one). MIN_UNDER_PRICE default unset: the −115 juice floor failed
+# month holdout (docs/mlb_total_public_fade.md). Not an unpause of
+# mlb_over_under.
 MLB_TOTAL_PUBLIC_FADE_PUBLISH: bool = (
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_PUBLISH", "0").strip() not in ("0", "false", "False")
 )

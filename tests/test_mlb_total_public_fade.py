@@ -514,10 +514,49 @@ def test_grade_under_matches_paper_tracker_units():
     assert fade.grade_under(7, 8.5, 120) == ("WIN", pytest.approx(1.20))
 
 
+def test_top1_keeps_highest_tix_only():
+    """RULE=top1 is the searched alternate: t70 pool, cap 1, no steam filter."""
+    splits = {
+        "G1": _steam_split("G1", 90, 70),  # tix high, money below tix
+        "G2": _steam_split("G2", 80, 90),
+        "G3": _steam_split("G3", 71, 80),
+        "G4": _steam_split("G4", 69, 90),  # below t70
+    }
+    quotes = {}
+    for gid, under in (("G1", -110), ("G2", -105), ("G3", -102), ("G4", -100)):
+        key, row = _quote(gid, "draftkings", under=under)
+        quotes[key] = row
+    bets, diag = fade.select_fade_bets(splits, quotes, rule=fade.RULE_TOP1)
+    assert [b.game_id for b in bets] == ["G1"]
+    assert diag["rule"] == fade.RULE_TOP1
+    assert diag["capped"] == 2  # G2 and G3 dropped by cap; G4 never entered
+    # Same tix: better juice wins.
+    tied = {
+        "A": _steam_split("A", 80, 80),
+        "B": _steam_split("B", 80, 80),
+    }
+    tq = {}
+    for gid, under in (("A", -120), ("B", -105)):
+        key, row = _quote(gid, "draftkings", under=under)
+        tq[key] = row
+    picks, _ = fade.select_fade_bets(tied, tq, rule=fade.RULE_TOP1)
+    assert [b.game_id for b in picks] == ["B"]
+
+
+def test_unknown_rule_coerces_to_steam():
+    assert fade.fade_rule() == fade.RULE_STEAM
+    quotes = _dk_board()
+    bets, diag = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 80, 81)}, quotes, rule="not-a-rule")
+    assert diag["rule"] == fade.RULE_STEAM
+    assert len(bets) == 1
+
+
 def test_card_still_does_not_publish_on_steam():
     assert config.MLB_TOTAL_PUBLIC_FADE_PUBLISH is False
     assert fade.publish_enabled() is False
     assert fade.fade_rule() == fade.RULE_STEAM
+    assert fade.RULE_TOP1 in fade.KNOWN_RULES
 
 
 def test_bootstrap_and_holdout_helpers_are_deterministic():

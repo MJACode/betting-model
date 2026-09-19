@@ -224,12 +224,28 @@ def run(date_from: str, date_to: str) -> dict:
                         [r for r in grade_bets(juice_bets, scores)
                          if r.get("settled")]))
 
+    top1_bets, _ = fade.select_fade_bets(
+        splits, quotes, rule=fade.RULE_TOP1, min_under_price=None)
+    cells.append(report("top1 among t70 (finder)",
+                        [r for r in grade_bets(top1_bets, scores)
+                         if r.get("settled")]))
+    top1_j_bets, _ = fade.select_fade_bets(
+        splits, quotes, rule=fade.RULE_TOP1, min_under_price=-115)
+    cells.append(report("top1 among t70 + juice>=-115",
+                        [r for r in grade_bets(top1_j_bets, scores)
+                         if r.get("settled")]))
+
     logger.info("month holdout — steam75 (no juice, no cap)")
     for h in month_holdout(steam):
         logger.info(f"  hold {h['hold']}: train {_fmt(h['train'])}  "
                     f"test {_fmt(h['test'])}")
     logger.info("month holdout — steam75 cap2")
     for h in month_holdout([r for r in steam_capped if r.get("settled")]):
+        logger.info(f"  hold {h['hold']}: train {_fmt(h['train'])}  "
+                    f"test {_fmt(h['test'])}")
+    logger.info("month holdout — top1 among t70")
+    for h in month_holdout([r for r in grade_bets(top1_bets, scores)
+                            if r.get("settled")]):
         logger.info(f"  hold {h['hold']}: train {_fmt(h['train'])}  "
                     f"test {_fmt(h['test'])}")
 

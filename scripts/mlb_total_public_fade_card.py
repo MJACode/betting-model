@@ -10,10 +10,10 @@ Deliberate and load-bearing:
 
   RULE IS ENV. MLB_TOTAL_PUBLIC_FADE_RULE default steam (over tix ≥75
   and over money ≥ tix, max 2 per slate). blunt restores the old
-  ticket-cut-only finder (TICKET_PCT default 70). Juice floor
-  MIN_UNDER_PRICE is opt-in (empty): −115 failed holdout.
-  ACTION_THRESHOLDS min_edge is 0 so the action filter does not invent
-  a second cut.
+  ticket-cut-only finder (TICKET_PCT default 70). top1 is the searched
+  alternate (t70 pool, keep one). Juice floor MIN_UNDER_PRICE is
+  opt-in (empty): −115 failed holdout. ACTION_THRESHOLDS min_edge is
+  0 so the action filter does not invent a second cut.
 
   INSERT-ONCE (§1c). Re-pricing a locked under after the ticket pile
   moves would replace a bet that was taken with one that never existed.

@@ -121,8 +121,11 @@ concentration suppress it is what the card fires.
 days). That is why it is no longer the default.
 
 **top-1-by-tix** and **ticket−money gap ≥ 10** were searched after the
-juice floor failed. Top-1 is −/flat. Gap≥10 is n=7 — too thin to ship
-as the rule.
+juice floor failed. Top-1 among t70 is +3.2% pooled (n=26); among
+steam+juice it is −21.6%. Gap≥10 is n=7 — too thin to ship as the
+rule. `RULE=top1` is coded as the alternate flag (t70 pool, cap 1)
+so it can be re-measured without a code change. It is **not** the
+default.
 
 ## Why steam, not blunt
 
@@ -160,7 +163,7 @@ can be re-measured; it is **not** on.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` | `0` | `1` writes BET rows |
-| `MLB_TOTAL_PUBLIC_FADE_RULE` | `steam` | `steam` or `blunt` |
+| `MLB_TOTAL_PUBLIC_FADE_RULE` | `steam` | `steam`, `blunt`, or `top1` (t70, keep one; not the default) |
 | `MLB_TOTAL_PUBLIC_FADE_STEAM_TICKETS` | `75` | Steam over-ticket floor |
 | `MLB_TOTAL_PUBLIC_FADE_REQUIRE_MONEY_STEAM` | `1` | Steam requires money ≥ tickets |
 | `MLB_TOTAL_PUBLIC_FADE_MIN_UNDER_PRICE` | unset | Optional American juice floor. `−115` failed holdout |
