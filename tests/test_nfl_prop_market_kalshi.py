@@ -132,3 +132,36 @@ def test_fetch_helper_swallows_errors(monkeypatch):
     monkeypatch.setattr(kpi, "ladders",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
     assert kpi.ladders_or_empty() == {}
+
+
+# ── Off until graded (2026-09-19) ────────────────────────────────────────────
+
+def test_the_card_does_not_price_off_kalshi_until_it_is_graded(monkeypatch):
+    """2026-09-19, 17:27Z: 39 BETs in one pass, 37 unders, 25 of the hour's
+    42 at a line no sharp book quoted -- every one priced off a Kalshi ladder
+    with no graded record (config.NFL_PROP_MARKET_KALSHI_REFERENCE has the
+    numbers). Off means not even fetched."""
+    import config
+    import scripts.nfl_prop_market_card as card
+
+    def boom():
+        raise AssertionError("the ladder was fetched while the reference is off")
+
+    monkeypatch.setattr(card, "_kalshi_ladders_or_empty", boom)
+    monkeypatch.setattr(config, "NFL_PROP_MARKET_KALSHI_REFERENCE", False)
+    assert card.reference_ladders(replay=False) == {}
+    assert card.reference_ladders(replay=True) == {}
+
+
+def test_a_replay_never_prices_off_todays_ladder_even_when_on(monkeypatch):
+    import config
+    import scripts.nfl_prop_market_card as card
+    monkeypatch.setattr(config, "NFL_PROP_MARKET_KALSHI_REFERENCE", True)
+    monkeypatch.setattr(card, "_kalshi_ladders_or_empty", lambda: {"x": 1})
+    assert card.reference_ladders(replay=True) == {}
+    assert card.reference_ladders(replay=False) == {"x": 1}
+
+
+def test_the_reference_is_off_by_default():
+    import config
+    assert config.NFL_PROP_MARKET_KALSHI_REFERENCE is False
