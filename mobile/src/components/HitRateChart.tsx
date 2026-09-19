@@ -15,6 +15,13 @@ interface Props {
    *  colours now follow the bet instead of always drawing an over. Leaving
    *  this out on an under card would paint every losing game green. */
   side?: HitDirection;
+  /** What to print on the threshold tick, in the CALLER'S idiom. The line is
+   *  drawn at the book's half-point number, but a card headed "2+ Hits" with a
+   *  stepper reading "2" and a legend reading "Hit (2+)" would then carry a
+   *  lone "1.5" — the only number on screen speaking the other vocabulary
+   *  (lib/hitMode.modeLineLabel exists for exactly this). Defaults to the raw
+   *  number for callers with no mode behind them. */
+  lineLabel?: string;
   avg: number | null;
   median: number | null;
   height?: number;
@@ -39,7 +46,15 @@ const BOTTOM_PAD = 18; // room for the game-index label under each bar
  * a game's value without a tie: no game ever lands on 0.5, so every bar is a
  * hit or a miss and none sits ambiguously ON the dashed line.
  */
-export function HitRateChart({ values, line, side = 'over', avg, median, height = 200 }: Props) {
+export function HitRateChart({
+  values,
+  line,
+  side = 'over',
+  lineLabel,
+  avg,
+  median,
+  height = 200,
+}: Props) {
   const scrollRef = useRef<ScrollView>(null);
 
   if (values.length === 0) {
@@ -109,7 +124,7 @@ export function HitRateChart({ values, line, side = 'over', avg, median, height 
         fontSize={10}
         fontWeight="700"
       >
-        {fmtTick(line)}
+        {lineLabel ?? fmtTick(line)}
       </SvgText>
 
       {bars.map((b, i) => (

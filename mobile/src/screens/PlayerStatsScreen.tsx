@@ -59,7 +59,7 @@ import { todayET } from '@/lib/format';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
-import { bookName, storedQuoteBook } from '@/lib/markets';
+import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
@@ -316,6 +316,15 @@ export function PlayerStatsScreen() {
               <Pressable
                 key={`${c.group}:${String(c.key)}`}
                 onPress={() => setStat(c)}
+                // Pre-existing (ux_scan a11y-pressable, byte-identical to
+                // master): a chip whose only child is a Text announces as
+                // "button" and nothing else, and neither row said which chip
+                // was ACTIVE. Cleared here because this change made the stat
+                // row the bet-type selector and brought the file into the
+                // reviewed set — the same courtesy the stepper was paid.
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${c.label} bets`}
                 style={[styles.windowChip, active && styles.windowChipActive]}
               >
                 <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
@@ -338,6 +347,11 @@ export function PlayerStatsScreen() {
               <Pressable
                 key={String(w.value)}
                 onPress={() => setGameWindow(w.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={
+                  w.value === 'all' ? 'All games' : `Last ${w.value} games`
+                }
                 style={[styles.windowChip, active && styles.windowChipActive]}
               >
                 <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
@@ -429,10 +443,36 @@ export function PlayerStatsScreen() {
                 </View>
               </View>
 
+              {/* The bet, between the control that sets it and the evidence
+                  for it. Above the chart because the stepper directly above
+                  changes which bet this is and the price is that change's
+                  result — and because below a 200pt chart it fell entirely
+                  under the fold on a 4.7" phone, which is a poor home for the
+                  one thing this screen gained (UX review). NOT pinned:
+                  BetslipBar is mounted at the app root and owns the bottom of
+                  this screen the moment the slip has a leg. */}
+              <PlayerBetBar
+                quote={propQuote.quote}
+                game={propQuote.game}
+                headline={headline}
+                mode={mode}
+                side={selection.side}
+                books={books}
+                statLabel={statLabel}
+                marketPriced={market != null}
+                hasGame={propQuote.hasGame}
+                sidePosted={propQuote.sidePosted}
+                loading={propQuote.loading}
+                error={propQuote.error}
+                onRetry={propQuote.reload}
+                onCompare={openCompare}
+              />
+
               <HitRateChart
                 values={windowed}
                 line={selection.line}
                 side={selection.side}
+                lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}
                 avg={avg}
                 median={median}
               />
@@ -455,23 +495,6 @@ export function PlayerStatsScreen() {
               </View>
             </View>
 
-            {/* The bet. Directly under the chart it prices, which is where the
-                eye already is — and NOT pinned to the bottom, because
-                BetslipBar is mounted at the app root and covers this screen
-                the moment the slip has a leg in it. Two bars stacked over one
-                tab bar is the collision that would cause. */}
-            <PlayerBetBar
-              quote={propQuote.quote}
-              headline={headline}
-              mode={mode}
-              books={books}
-              statLabel={statLabel}
-              marketPriced={market != null}
-              hasGame={propQuote.hasGame}
-              sidePosted={propQuote.sidePosted}
-              loading={propQuote.loading}
-              onCompare={openCompare}
-            />
 
             {/* The betslip leg. The Stats board's line pills go straight to the
                 sportsbook now, so this is the one place a leg joins OUR slip —
@@ -550,6 +573,17 @@ export function PlayerStatsScreen() {
         overAvailable={propQuote.coverage.size === 0 || anyBookPostsSide(propQuote.coverage, 'over')}
         underAvailable={
           propQuote.coverage.size === 0 || anyBookPostsSide(propQuote.coverage, 'under')
+        }
+        // WHY the row is greyed. A disabled option with no reason is the "why
+        // is FanDuel blank" question in a smaller box — the same sentence the
+        // bet bar composes, from the one helper, so the sheet and the card can
+        // never explain the same absence two ways.
+        unavailableNote={
+          propQuote.coverage.size > 0 && !anyBookPostsSide(propQuote.coverage, 'under')
+            ? sideNotPostedNote(books, 'under', statLabel)
+            : propQuote.coverage.size > 0 && !anyBookPostsSide(propQuote.coverage, 'over')
+              ? sideNotPostedNote(books, 'over', statLabel)
+              : undefined
         }
         onClose={() => setModeOpen(false)}
       />
@@ -657,7 +691,12 @@ const styles = StyleSheet.create({
   },
   slipBtnTextIn: { color: colors.bet },
   container: { flex: 1, backgroundColor: colors.bg },
-  list: { paddingBottom: spacing.xl },
+  // Clears BetslipBar, which is mounted at the app ROOT and sits over the
+  // bottom of this screen whenever the slip has a leg — at 24pt the tail of
+  // the game log was underneath it. Pre-existing; this change gave the screen
+  // a second way to put a leg in the slip without leaving it, so it now
+  // happens to anyone who uses the card as intended.
+  list: { paddingBottom: spacing.xxl * 2 },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',

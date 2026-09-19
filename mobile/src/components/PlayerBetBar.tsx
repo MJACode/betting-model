@@ -34,29 +34,41 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { formatAmerican } from '@/lib/format';
+import { formatAmerican, formatDayTimeET } from '@/lib/format';
 import { modeLineLabel, type HitMode } from '@/lib/hitMode';
-import { bookName, booksNoneName } from '@/lib/markets';
+import type { HitDirection } from '@/lib/hitRate';
+import { bookName, booksNoneName, sideNotPostedNote } from '@/lib/markets';
+import { matchupForLeg } from '@/lib/parlay';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { StatsOddsQuote } from '@/lib/statsOdds';
+import type { GameRow } from '@/types';
 
 export function PlayerBetBar({
   quote,
+  game,
   headline,
   mode,
+  side,
   books,
   statLabel,
   marketPriced,
   hasGame,
   sidePosted,
   loading,
+  error,
+  onRetry,
   onCompare,
 }: {
   quote: StatsOddsQuote | null;
+  /** The game the price is for — named under the proposition, because a player
+   *  reached from search carries no matchup line in the header. */
+  game: GameRow | null;
   /** The bet in the active idiom — "2+ Total Bases", "Over 1.5 Total Bases". */
   headline: string;
   mode: HitMode;
+  /** Which way the card's bet runs, for the not-posted sentence. */
+  side: HitDirection;
   /** The member's sportsbooks, for the "none of them posts this" copy. */
   books: readonly string[];
   statLabel: string;
@@ -66,6 +78,8 @@ export function PlayerBetBar({
   hasGame: boolean;
   sidePosted: boolean;
   loading: boolean;
+  error: string | null;
+  onRetry: () => void;
   onCompare: () => void;
 }) {
   if (loading && !quote) {
@@ -76,24 +90,42 @@ export function PlayerBetBar({
     );
   }
 
+  // BEFORE the empty branch, and never folded into it. A failed read has no
+  // idea what the member's books post, so falling through would answer a
+  // network error with "Neither DraftKings nor FanDuel has posted this line
+  // yet" — a confident, false claim about their sportsbooks (UX review).
+  if (error) {
+    return (
+      <View style={[styles.card, styles.cardQuiet]}>
+        <Text style={styles.emptyText}>{error}</Text>
+        <Pressable
+          onPress={onRetry}
+          accessibilityRole="button"
+          accessibilityLabel="Try loading the odds again"
+          style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+        >
+          <Text style={styles.retryText}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   if (!quote) {
     // Each of these is a DIFFERENT fact, and collapsing them into one "no line
     // available" is what makes a screen feel broken: nobody prices this stat,
     // the player isn't playing, their books don't sell this side, and their
     // books simply haven't posted this player are four separate answers.
+    // NOT GATED ON `mode === 'under'`. A market the member's books sell only
+    // one way can be missing EITHER side — FanDuel's and Caesars' milestone
+    // markets carry an over and no under, and the mirror exists — so the
+    // sentence takes the card's own side rather than assuming which one is
+    // ever absent (UX review).
     const note = !marketPriced
       ? `No sportsbook posts ${statLabel} lines.`
       : !hasGame
         ? 'No upcoming game to price.'
-        : !sidePosted && mode === 'under'
-          ? // `booksNoneName` carries its OWN negation only from two books up
-            // ("Neither X nor Y", "None of your 3 sportsbooks"); at one book it
-            // is the bare name, so the verb has to supply it or the sentence
-            // says the exact opposite of what it means. Both plural forms take
-            // a SINGULAR verb — "Neither X nor Y posts", not "post".
-            books.length === 1
-            ? `${bookName(books[0])} doesn’t post the under on ${statLabel}.`
-            : `${booksNoneName(books)} posts the under on ${statLabel}.`
+        : !sidePosted
+          ? sideNotPostedNote(books, side, statLabel)
           : `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted this line yet.`;
     return (
       <View style={[styles.card, styles.cardQuiet]}>
@@ -103,6 +135,11 @@ export function PlayerBetBar({
   }
 
   const { bg, fg } = bookButtonColors(quote.book);
+  // "PHI @ NYM · Fri 7:05 PM ET" — the same matchup string the betslip's leg
+  // cards and AddLineSheet use, so one bet reads the same wherever it appears.
+  const fixture = matchupForLeg(game);
+  const when = formatDayTimeET(game?.commence_time ?? null);
+  const matchup = fixture ? (when ? `${fixture} · ${when}` : fixture) : null;
   // An off-line quote is a DIFFERENT BET from the one the ruler names
   // (docs/best_line.md §5), so the button says the book's own number instead
   // of the headline — never the headline at someone else's line.
@@ -122,6 +159,15 @@ export function PlayerBetBar({
               {bookName(quote.book)} posts this line, not {headline}.
             </Text>
           ) : null}
+          {/* WHICH GAME the price is for. The header's matchup line only
+              exists when the Stats board handed it over, so a player opened
+              from search would otherwise read a bettable price for an unnamed
+              event (UX review). */}
+          {matchup ? (
+            <Text style={styles.matchup} numberOfLines={1}>
+              {matchup}
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -133,7 +179,13 @@ export function PlayerBetBar({
           style={({ pressed }) => [styles.compare, pressed && styles.pressed]}
         >
           <Ionicons name="git-compare-outline" size={16} color={colors.textPrimary} />
-          <Text style={styles.compareText}>Compare odds</Text>
+          {/* "Compare", not "Compare odds": the secondary is what gives way
+              when the primary needs room, and the short form buys ~38pt — the
+              difference between "Bet +1200 at Hard Rock Bet" fitting and the
+              one word that names WHO takes the bet being truncated. */}
+          <Text style={styles.compareText} numberOfLines={1}>
+            Compare
+          </Text>
         </Pressable>
 
         <Pressable
@@ -144,16 +196,21 @@ export function PlayerBetBar({
           // Spelled out: VoiceOver reads "+129" as "plus one hundred twenty
           // nine" either way, but "Bet" and the book's full name are what say
           // this LEAVES the app.
-          accessibilityLabel={`Bet ${proposition} at ${bookName(quote.book)}, ${formatAmerican(
-            quote.price,
-          )}. Opens ${bookName(quote.book)}`}
+          accessibilityLabel={`Bet ${proposition}${matchup ? `, ${matchup}` : ''} at ${bookName(
+            quote.book,
+          )}, ${formatAmerican(quote.price)}. Opens ${bookName(quote.book)}`}
           style={({ pressed }) => [styles.place, { backgroundColor: bg }, pressed && styles.pressed]}
         >
+          {/* A VERB, and an icon at the same weight as the compare button's.
+              "+129 at DraftKings" under a 13pt glyph reads as a price tag, so
+              the sighted member never learned the tap LEAVES the app while
+              the VoiceOver label said so plainly (UX review). */}
+          <Text style={[styles.placeVerb, { color: fg }]}>Bet</Text>
           <Text style={[styles.placePrice, { color: fg }]}>{formatAmerican(quote.price)}</Text>
           <Text style={[styles.placeBook, { color: fg }]} numberOfLines={1}>
             at {bookName(quote.book)}
           </Text>
-          <Ionicons name="open-outline" size={13} color={fg} />
+          <Ionicons name="open-outline" size={16} color={fg} />
         </Pressable>
       </View>
     </View>
@@ -189,6 +246,22 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  matchup: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  retry: {
+    marginTop: spacing.sm,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  retryText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
   actions: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -205,6 +278,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgGrouped,
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
+    // The SECONDARY is what gives way under pressure — at an accessibility
+    // text size its intrinsic width would otherwise grow past half the row and
+    // squeeze the button that names the book taking the bet.
+    flexShrink: 1,
   },
   compareText: {
     fontSize: font.size.footnote,
@@ -221,13 +298,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radii.pill,
   },
+  placeVerb: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+  },
   placePrice: {
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     fontVariant: ['tabular-nums'],
   },
+  // No flexShrink: the book's name is the one thing on this button that must
+  // not truncate, so the compare button shrinks instead.
   placeBook: {
-    flexShrink: 1,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
   },

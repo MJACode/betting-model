@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchPropLinesForGames, fetchSlateGames } from '@/lib/queries';
+import { errorText } from '@/lib/errors';
 import { addDays, todayET } from '@/lib/format';
 import { normalizePlayerName } from '@/lib/playerNews';
 import {
@@ -69,8 +70,11 @@ export interface PlayerPropQuote {
   /** True once a market exists for the stat AND the player has a game we can
    *  price — so "no line" can be told apart from "nothing to price yet". */
   hasGame: boolean;
+  /** True while EITHER read is in flight — see `gamesLoading` below. */
   loading: boolean;
   error: string | null;
+  /** Re-run both reads. The card's error state offers it as "Try again". */
+  reload: () => void;
 }
 
 export function usePlayerPropQuote(opts: {
@@ -98,7 +102,15 @@ export function usePlayerPropQuote(opts: {
     rows: [],
   });
   const [loading, setLoading] = useState(false);
+  // Two reads, ONE loading flag to the caller. The schedule read runs first and
+  // the odds read cannot start until it lands, so a flag covering only the
+  // second leaves a window where nothing is loading, no games are known and the
+  // card confidently says "No upcoming game to price." about a player who is in
+  // tonight's lineup — a wrong fact shown before the right one (UX review).
+  const [gamesLoading, setGamesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by `reload`, so the error state's retry re-runs both reads.
+  const [nonce, setNonce] = useState(0);
 
   // The player's next games, by team. `fetchSlateGames` is already the
   // sport-wide forward read the Stats board uses, so this rides a query the
@@ -106,22 +118,31 @@ export function usePlayerPropQuote(opts: {
   useEffect(() => {
     if (!team || !market) {
       setGames([]);
+      setGamesLoading(false);
       return;
     }
     let cancelled = false;
     const from = todayET();
+    setGamesLoading(true);
     fetchSlateGames(sport, from, addDays(from, FORWARD_DAYS))
       .then((all) => {
         if (cancelled) return;
         setGames(all.filter((g) => g.home_team === team || g.away_team === team));
+        // CLEARED ON SUCCESS. Setting an error and never unsetting it latches
+        // one transient failure for the life of the screen, so a later good
+        // read renders under a stale error (UX review).
+        setError(null);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errorText(e));
+      })
+      .finally(() => {
+        if (!cancelled) setGamesLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [sport, team, market]);
+  }, [sport, team, market, nonce]);
 
   // The next UNSTARTED game, and the ones after it. Ranked so a player with a
   // Thursday and a Sunday game is quoted from Thursday (nextGameRows does the
@@ -179,15 +200,15 @@ export function usePlayerPropQuote(opts: {
     latest.current = readKey;
     let cancelled = false;
     setLoading(true);
-    setError(null);
     fetchPropLinesForGames(readIds, market)
       .then((r) => {
         if (cancelled || latest.current !== readKey) return;
         setRows({ market, rows: r });
+        setError(null);
       })
       .catch((e: unknown) => {
         if (cancelled || latest.current !== readKey) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
         setRows({ market: '', rows: [] });
       })
       .finally(() => {
@@ -196,7 +217,7 @@ export function usePlayerPropQuote(opts: {
     return () => {
       cancelled = true;
     };
-  }, [readKey, market, readIds]);
+  }, [readKey, market, readIds, nonce]);
 
   const fresh = market != null && rows.market === market;
   const gameIdSet = useMemo(() => new Set(readIds), [readIds]);
@@ -233,7 +254,8 @@ export function usePlayerPropQuote(opts: {
     coverage,
     sidePosted: anyBookPostsSide(coverage, side),
     hasGame: market != null && readIds.length > 0,
-    loading,
+    loading: gamesLoading || loading,
     error,
+    reload: () => setNonce((n) => n + 1),
   };
 }

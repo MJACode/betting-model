@@ -1713,3 +1713,36 @@ game's context columns, so the leak is real but small.
 model's OOF dispersion under shuffled vs group/time-ordered folds. If the
 dispersion is materially larger under honest folds, every prop model's tail is
 too tight and the fix is a retrain across all of them — not a one-line change.
+
+---
+
+## Player card bet bar — the price carries no age (2026-09-19)
+
+`usePlayerPropQuote` keys its read on `(market, next two game ids)`, so the
+quote is fetched ONCE and only re-fetched when a game starts or the member
+changes stat, line or mode. A card left open sits on a price that can be an
+hour stale, and the member taps "Bet +129 at DraftKings" and lands on a
+different number at the book.
+
+Two fixes, neither done:
+
+- **A `RefreshControl` on the ScrollView** that bumps the hook's `reload`.
+  Cheapest, and it is the gesture people already try.
+- **An "as of 6:42 PM" caption** from the winning row's `snapshot_at`. The
+  column IS on `v_latest_prop_odds_all_books` and the row is already in hand,
+  but `StatsOddsQuote` does not carry it — `buildQuoteIndex` would have to
+  thread it through, which touches the Stats board too.
+
+**The Stats board has the same gap**, so fix it in `buildQuoteIndex` and both
+surfaces get it. Not urgent: the hand-off opens the book's own slip, which
+shows the live price before anyone confirms — the cost is a surprise, not a
+wrong bet.
+
+## Player card: is a live price entitlement-gated? (2026-09-19)
+
+The bet bar puts a live sportsbook price and a one-tap hand-off on a screen
+that calls neither `useEntitlement()` nor `useSubscription()`. Neither does the
+Stats board's LINE column, so this is CONSISTENT with what shipped — but nobody
+has stated the intent. Matt's call; if the answer is "gate it", both surfaces
+move together or they will disagree silently, which is the shape every
+publishing bug in `docs/discord.md` has.
