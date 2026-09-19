@@ -610,6 +610,7 @@ to be known BEFORE deciding which file to open.
 | **nfl_prop_market 2026 remeasure — no cut change, no 24h-ceiling change** | `docs/nfl_prop_market_2026.md` |
 | **MLB runline / O/U edge search (paper totals 2pp, spreads gated)** | `docs/mlb_runline_ou_edge_search.md` |
 | **MLB totals public-OVER fade (paper UNDER, INSERT default 0)** | `docs/mlb_total_public_fade.md` |
+| **MLB pitcher props: production remesure empty (2026-09-19)** | `docs/mlb_prop_pitcher_edge_search.md` |
 | **MLB market-handicap features (public/RLM/steam; RL+OU matrix; retrain next)** | `docs/mlb_market_handicap_features.md` |
 | **NFL prop Out/Doubtful veto (ESPN status_ts vs quote)** | `docs/nfl_prop_injury_veto.md` |
 | **CLV: no-vig two-way close, sharp book when present** | `docs/clv.md` |

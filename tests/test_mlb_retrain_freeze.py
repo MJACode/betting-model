@@ -86,6 +86,11 @@ def test_mlb_prop_market_sweep_is_documented_exempt():
     src = (root / _EXEMPT_SWEEPS[0]).read_text(encoding="utf-8")
     assert "PHASE 0 EXEMPT" in src
     assert "assert_retrain_allowed" not in src
+    # 2026-09-19 pitcher remesure: --markets must stay so a worker can
+    # re-run outs/K/hits without scanning batter_total_bases.
+    assert "--markets" in src
+    assert "pitcher_outs" in src
+    assert "unknown market" in src
 
 
 def test_repo_marker_file_is_present():

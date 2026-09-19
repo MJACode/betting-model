@@ -25,6 +25,11 @@ everywhere rather than shipping the least-bad cell.
 
     python -m scripts.mlb_prop_market_sweep
     python -m scripts.mlb_prop_market_sweep --start 2026-08-27 --end 2026-09-05
+    python -m scripts.mlb_prop_market_sweep --start 2026-08-01 --end 2026-09-19 \
+      --markets pitcher_outs pitcher_strikeouts pitcher_hits_allowed
+
+2026-09-19: pitcher-only remesure is in docs/mlb_prop_pitcher_edge_search.md.
+`--markets` restricts SHARP_MARKETS so that remesure is one command.
 """
 from __future__ import annotations
 
@@ -98,7 +103,8 @@ def profit(price: float, won: bool) -> float:
     return price / 100.0 if price > 0 else 100.0 / abs(price)
 
 
-def grade_day(conn, game_date: str, min_edge: float = 0.02):
+def grade_day(conn, game_date: str, min_edge: float = 0.02,
+              markets=None):
     """-> (list of (market, side, price, edge, profit), diagnostic)
 
     ONE PASS PER DATE, at the LOOSEST threshold, and the grid is built by
@@ -109,7 +115,8 @@ def grade_day(conn, game_date: str, min_edge: float = 0.02):
     card once per (date, threshold) -- ~1,700 round trips over a season, which
     timed out at ten minutes.
     """
-    bets, diag = mk.card(conn, game_date, min_edge=min_edge)
+    bets, diag = mk.card(conn, game_date, min_edge=min_edge,
+                         markets=markets or mk.SHARP_MARKETS)
     act = actuals(conn, game_date)
     graded, unmatched = [], 0
     for b in bets:
@@ -144,8 +151,16 @@ def _report(rows, label):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2026-04-01")
-    ap.add_argument("--end",   default="2026-09-05")
+    ap.add_argument("--end",   default="2026-09-19")
+    ap.add_argument("--markets", nargs="+", default=None,
+                    help="Restrict to these Odds API keys (default: SHARP_MARKETS). "
+                         "Pitcher remesure: pitcher_outs pitcher_strikeouts "
+                         "pitcher_hits_allowed")
     a = ap.parse_args()
+    markets = tuple(a.markets) if a.markets else mk.SHARP_MARKETS
+    unknown = [m for m in markets if m not in mk.SHARP_COVERAGE]
+    if unknown:
+        ap.error(f"unknown market(s) {unknown}; known: {sorted(mk.SHARP_COVERAGE)}")
 
     conn = get_connection()
     days = []
@@ -156,11 +171,11 @@ def main() -> None:
 
     print(f"\nMLB market-relative sweep — sharp {mk.SHARP_BOOK}, "
           f"soft {list(mk.SOFT_BOOKS)}, {len(days)} dates {a.start}..{a.end}")
-    print(f"markets: {', '.join(mk.SHARP_MARKETS)}\n")
+    print(f"markets: {', '.join(markets)}\n")
 
     per_day, unmatched = {}, 0
     for gd in days:
-        g, diag = grade_day(conn, gd)
+        g, diag = grade_day(conn, gd, markets=markets)
         per_day[gd] = g
         unmatched += diag.get("unmatched", 0)
     allg = [x for g in per_day.values() for x in g]

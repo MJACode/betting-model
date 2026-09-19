@@ -111,6 +111,11 @@ a per-market opportunity: it is four markets sliced after the fact from a
 negative pool, which is exactly how §5b's tackles result was manufactured. If
 anyone wants to pursue `pitcher_outs`, it needs its own pre-registered test.
 
+**That test ran 2026-09-19** (`docs/mlb_prop_pitcher_edge_search.md`).
+Pitcher-outs only, Pin de-vig vs DK de-vig, equal line, leak-bounded
+open, 3pp: **Aug +2.0% / 52, Sep −9.7% / 28**. The flat month does not
+survive the next one. Still not a card. `mlb_prop_market` stays unwired.
+
 ---
 
 ## 4. What was NOT done, deliberately
@@ -129,7 +134,9 @@ anyone wants to pursue `pitcher_outs`, it needs its own pre-registered test.
 The measurement is reproducible in one command:
 
 ```bash
-python -m scripts.mlb_prop_market_sweep --start 2026-04-01 --end 2026-09-05
+python -m scripts.mlb_prop_market_sweep --start 2026-04-01 --end 2026-09-19
+python -m scripts.mlb_prop_market_sweep --start 2026-08-01 --end 2026-09-19 \
+  --markets pitcher_outs pitcher_strikeouts pitcher_hits_allowed
 ```
 
 The history is in `player_prop_odds` and stays there — it is paid data and

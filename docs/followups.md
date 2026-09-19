@@ -21,6 +21,19 @@
 
 ---
 
+## [ ] Remesure MLB pitcher props after dated-review n≥75 / a 2nd Pin month
+
+2026-09-19 hunt empty (`docs/mlb_prop_pitcher_edge_search.md`). Live
+`mlb_prop_pitcher_k` / `_outs` current-artifact: K −10.73u / 56, outs
+−3.47u / 36 — both below breakeven, both short of the n≥75 pause clock.
+Pin-vs-DK pitcher_outs 3pp Aug +2.0% / 52 then Sep −9.7% / 28. Public is
+FG-only; August pre-commence is 0. Do not wire `mlb_prop_market`. Do not
+unpause XGBoost / ER / walks. Do not set any `PUBLISH=1`. Re-run
+`python -m scripts.mlb_prop_market_sweep --start 2026-08-01 --end <today>
+--markets pitcher_outs pitcher_strikeouts pitcher_hits_allowed` after a
+second Pin month, and the dated-review query in `docs/thresholds.md`
+when K or outs hits 75 settled BETs on the current artifact.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
