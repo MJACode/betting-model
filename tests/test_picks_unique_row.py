@@ -159,4 +159,4 @@ def test_the_card_insert_tolerates_the_unique_index():
     DAL@NYG failure. Dropping the copy is the safe direction."""
     src = (ROOT / "scripts" / "nfl_prop_market_card.py").read_text(encoding="utf-8")
     i = src.index("INSERT INTO picks (")
-    assert "ON CONFLICT DO NOTHING" in src[i:i + 800]
+    assert "ON CONFLICT DO NOTHING" in src[i:i + 1000]   # widened 2026-09-19: +model_probability_cal

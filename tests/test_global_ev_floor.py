@@ -130,8 +130,9 @@ def test_live_signal_is_refused_under_the_global_floor(floor_030, identity_maps,
 
 # ── the NCAAF live loop ──────────────────────────────────────────────────────
 
-def test_ncaaf_live_floors_are_the_platform_accessor():
+def test_ncaaf_live_floors_are_the_platform_accessor(floor_030):
     from ncaaf_live import serve
+    # serve reads the accessor at import, under the default GLOBAL_MIN_EV (0.30).
     assert serve.TOTAL_MIN_EV == config.min_ev_for("ncaaf_live_total")
     assert serve.ML_MIN_EV == config.min_ev_for("ncaaf_live_win_prob")
 

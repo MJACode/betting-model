@@ -14,7 +14,8 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _platform_gates_off(monkeypatch):
-    import config
-    import models.scorer as sc
-    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.0)
+    import importlib
+    config = importlib.import_module("config")
+    sc = importlib.import_module("models.scorer")   # the platform's, on purpose
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", -1.0)   # cannot bind
     monkeypatch.setattr(sc, "_CAL_CACHE", {})

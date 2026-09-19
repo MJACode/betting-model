@@ -132,8 +132,12 @@ def honest_probability(model_id: str, model_prob: float) -> float:
     every model decides on its honest number). Identity when the platform
     models are not importable (this package also runs standalone) or the
     lookup fails -- models.scorer._calibrated never raises."""
+    # importlib, not a bare `models` import: under nfl/ that name resolves
+    # to the platform's package on every scheduled run
+    # (tests/test_nfl_model_imports.py) -- which here is the one we want,
+    # and the loader form keeps the tripwire honest.
     try:
-        from models.honest_ev import honest_probability as _hp
+        _hp = importlib.import_module("models.honest_ev").honest_probability
         return _hp(model_id, model_prob)
     except Exception:  # noqa: BLE001 - standalone use
         return model_prob

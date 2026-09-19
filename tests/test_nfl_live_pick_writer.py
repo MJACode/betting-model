@@ -452,7 +452,7 @@ def test_the_ceiling_is_a_refusal_not_a_filter():
     assert "_mk(False" in src[i:i + 200], (
         "the ceiling must return a recorded PASS, not silently skip")
     # Before the EV test: eligibility, not an edge question.
-    assert i < src.index("threshold = EV_THRESHOLDS[model_id]")
+    assert i < src.index("threshold = ev_floor(model_id)")
 
 
 # ── declines are recorded, like every other live lane ────────────────────────

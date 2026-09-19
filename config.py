@@ -1738,7 +1738,7 @@ def min_ev_for(model_id: str) -> float:
     reason min_odds_for is one: the scorer's gate, every card, both live
     loops and the Discord "good to" bound have to agree on the number."""
     own = MODEL_MIN_EV.get(model_id)
-    return max(GLOBAL_MIN_EV, float(own) if own is not None else 0.0)
+    return GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
 
 
 def expected_value(prob, american) -> float | None:

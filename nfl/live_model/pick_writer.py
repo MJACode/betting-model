@@ -151,8 +151,9 @@ def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> di
         "pick_side": side,
         "pick_label": label,
         "model_probability": float(decision.model_prob),
-        "model_probability_cal": (None if decision.model_prob_cal is None
-                                  else float(decision.model_prob_cal)),
+        "model_probability_cal": (
+            None if getattr(decision, "model_prob_cal", None) is None
+            else float(decision.model_prob_cal)),
         "dk_implied_prob": float(decision.market_prob),
         "edge": float(decision.model_prob) - float(decision.market_prob),
         "dk_odds": float(decision.price),

@@ -314,6 +314,14 @@ def expected_value(model_prob: float, dk_odds) -> Optional[float]:
     return model_prob * decimal - 1.0
 
 
+def _ev_floor(model_id: str) -> float:
+    """config.min_ev_for, read through THIS module's MODEL_MIN_EV so a test
+    that stubs the per-model dict here still governs the per-model half."""
+    import config as _config
+    own = MODEL_MIN_EV.get(model_id)
+    return _config.GLOBAL_MIN_EV if own is None else max(_config.GLOBAL_MIN_EV, float(own))
+
+
 def classify_live_signal(model_id: str, model_prob: float,
                          edge: float, dk_odds=None, *,
                          cap_edge: Optional[float] = None) -> Optional[str]:
@@ -381,8 +389,7 @@ def classify_live_signal(model_id: str, model_prob: float,
         # thresholds alone. The floor is the platform's global one or the
         # model's own MODEL_MIN_EV, whichever is higher (config.min_ev_for,
         # 2026-09-19); MODEL_MIN_EV alone left a model with no entry unfloored.
-        import config as _config
-        floor = _config.min_ev_for(model_id)
+        floor = _ev_floor(model_id)
         ev = expected_value(decision_prob, dk_odds)
         if ev is not None and ev < floor:
             return "NONE"
