@@ -155,3 +155,107 @@ class _Unset:
 
 
 _UNSET = _Unset()
+
+
+def american_to_implied(price) -> float | None:
+    """American price -> implied probability, or None when there is no price.
+    Local rather than imported: this module stays stdlib-only so the NFL
+    worker can reach it from cwd=nfl/ (see the module docstring)."""
+    try:
+        a = float(price)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return None
+    return (-a) / ((-a) + 100.0) if a < 0 else 100.0 / (a + 100.0)
+
+
+class BookMoveClock:
+    """How far has the book's number moved since OUR state last changed?
+
+    THE FAILURE THIS EXISTS FOR, measured end to end on 2026-09-19.
+    Coastal Carolina at Delaware, `ncaaf_live_win_prob`:
+
+        15:41:51Z  DraftKings live: Delaware -174, spread Delaware -3.5
+        15:43:32Z  FanDuel flips to Delaware +102 / Coastal -130
+        15:44:21Z  DraftKings re-hangs: Delaware +100, spread Delaware +2.5
+        15:44:29   the loop WRITES BET Delaware ML +100 (model 0.659) on a
+                   state that still says 0-0 in the first quarter
+        15:44:44   the CFBD score feed reports the touchdown -- 15s after the
+                   bet, 23s after DraftKings, 72s after FanDuel
+        15:44:44+  `quote_predates_score` now declines the exact quote that
+                   was just bet, because a score has finally been seen
+
+    Every guard above passed and none was wrong to: 8s old against a 90s
+    cap, edge 0.159 against a 0.18 cap, and `quote_predates_score` can only
+    fire once WE have seen a score. All three protect against the book being
+    behind us. This one protects against us being behind the book, which is
+    the common case: the book prices the play from a courtside feed and we
+    read a scoreboard endpoint every few seconds. The model's 0.659 was the
+    pregame prior carried into a tied first quarter; the "edge" was a
+    touchdown our feed had not reported.
+
+    THE RULE. Per key (game and market), anchor the book's number -- an
+    implied probability for a moneyline, the line for a total, spread or prop
+    -- at the moment OUR state last changed. While the state stays the same,
+    report how far the book has moved from that anchor; the caller declines
+    past a cap. A book that reprices with no change in what we can see has
+    information we do not have, and that is true whether the move is a
+    touchdown, a turnover or an injury.
+
+    SELF-CLEARING, IN THE RIGHT ORDER. When the state changes the anchor is
+    dropped and the next quote that POSTDATES the change becomes the new
+    one. A quote stamped before the change is not a baseline (it is the
+    pre-score number `quote_predates_score` is already declining), so a
+    re-hang landing after a late score report is not read as a move.
+
+    FIRST SIGHT RECORDS AND REPORTS NOTHING, the same rule as ScoreClock: a
+    game seen for the first time -- or every game after a restart -- has no
+    anchor to move from. The age bound applies throughout, so this is a
+    floor, not a hole; production was in exactly that state after its
+    restart and it is why the control test in
+    tests/test_live_book_move_guard.py still bets the Delaware number.
+
+    `state` is any equatable snapshot of what the MODEL consumes and that
+    changes on an event rather than every tick -- the NCAAF loop passes
+    (home_score, away_score, period, possession); clock, down and distance
+    would reset the anchor every play and make the guard dead code.
+    """
+
+    __slots__ = ("_state", "_anchor", "_changed_at")
+
+    def __init__(self) -> None:
+        self._state: dict = {}
+        self._anchor: dict = {}
+        self._changed_at: dict = {}
+
+    def observe(self, key, state, number, quote_ts=None,
+                now: datetime | None = None,
+                tolerance_sec: float = 0.0) -> float | None:
+        """Record the book's `number` for `key` under `state`; return how far
+        it has moved since the anchor, or None when there is nothing to
+        compare against (first sight, a state change awaiting a post-change
+        quote, or a missing state or number)."""
+        if state is None or number is None:
+            return None
+        if isinstance(state, tuple) and None in state and key not in self._state:
+            # A half-parsed first payload is not a baseline worth keeping.
+            return None
+        now = now or datetime.now(timezone.utc)
+        prev = self._state.get(key, _UNSET)
+        if prev is _UNSET:
+            self._state[key] = state
+            self._anchor[key] = (state, float(number))
+            return None
+        if prev != state:
+            self._state[key] = state
+            self._changed_at[key] = now
+            self._anchor.pop(key, None)
+        anchor = self._anchor.get(key)
+        if anchor is None:
+            if quote_predates_score(quote_ts, self._changed_at.get(key),
+                                    tolerance_sec):
+                return None
+            self._anchor[key] = (state, float(number))
+            return None
+        return abs(float(number) - anchor[1])

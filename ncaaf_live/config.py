@@ -247,6 +247,33 @@ LIVE_QUOTE_MAX_AGE_SEC = int(
 # window by the same amount, so the two knobs must be read together.
 LIVE_SCORE_LAG_TOLERANCE_SEC = float(
     os.environ.get("NCAAF_LIVE_SCORE_LAG_TOLERANCE_SEC", "0"))
+
+# How far DraftKings' own number may move, with NO change in the state we can
+# see, before that state is treated as stale and the market declined. The
+# mirror of the tolerance above: that one declines a quote stamped before a
+# score we HAVE seen; this one declines a quote that has priced a score (or a
+# turnover, or an injury) we have NOT seen yet.
+#
+# 2026-09-19, Coastal Carolina at Delaware. DraftKings went -174 -> +100 on the
+# moneyline (13.5 implied points) and -3.5 -> +2.5 on the spread inside two
+# and a half minutes while the CFBD scoreboard still said 0-0; the loop bet
+# Delaware +100 fifteen seconds before the feed reported the touchdown. The
+# same shape sat behind 15 of the 20 live moneyline bets since the 09-12
+# unpause. Full timeline: data/live_quote_guard.py, BookMoveClock.
+#
+# THE CAPS ARE A FIRST CUT FROM THE ONE DISTRIBUTION THAT IS STORED. On the
+# 09-12 slate (79 games, DraftKings in-play republishes in `odds`) a single
+# moneyline republish moved 0.4 implied points at the median, 6.6 at p95 and
+# 15.1 at p99; a totals republish moved 3.0 at p95 and 6.0 at p99. What is
+# NOT stored yet is the state at each republish, so these are single-step
+# numbers, not the cumulative move since a state change they actually bound.
+# `ncaaf_live_states` now records every state change, so the caps can be
+# re-measured on the real quantity after one slate. Move them on that, never
+# to unblock a pick.
+LIVE_BOOK_MOVE_MAX_ML = float(
+    os.environ.get("NCAAF_LIVE_BOOK_MOVE_MAX_ML", "0.08"))       # implied prob
+LIVE_BOOK_MOVE_MAX_TOTAL = float(
+    os.environ.get("NCAAF_LIVE_BOOK_MOVE_MAX_TOTAL", "3.0"))     # points
 # Measured 2026-08-28 against the live API (not the documented formula): one
 # historical NCAAF odds snapshot, one market, one bookmaker = 10 credits.
 MEASURED_CREDITS_PER_SNAPSHOT = 10

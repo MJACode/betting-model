@@ -31,6 +31,7 @@ lookahead - safe to start early and forget.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -349,6 +350,74 @@ def scores_moved(prev: dict, cur: dict) -> bool:
     return any(k in prev and prev[k] != v for k, v in cur.items())
 
 
+# ── the state we priced on, kept (2026-09-19) ────────────────────────────────
+# The loop read the scoreboard, priced it and threw it away. When the Delaware
+# bet was traced, the ONE pick whose state could be shown was the one whose
+# minute the poller's log happened to hold; the other 14 moneyline bets that
+# followed the same book move could not be checked. `odds` has carried the
+# in-play QUOTES since 2026-09-08; `ncaaf_live_states` now carries the STATE
+# beside them, one row per change in what the engine's book-move guard keys
+# on (score, period, possession) -- the same key, so the two agree on what a
+# "change" is. Per-pass rows would be ~30k an hour of identical clock ticks.
+
+_STATE_KEY_FIELDS = ("home_score", "away_score", "period", "possession")
+_STATE_COLS = ("game_id", "seen_at", "period", "clock_seconds", "home_score",
+               "away_score", "possession", "down", "distance", "yardline_100",
+               "source", "raw_state")
+
+
+def state_key(state: dict) -> tuple:
+    """What the engine's book-move guard treats as an event: the score, the
+    period and who has the ball. Clock, down and distance tick every play."""
+    return tuple(state.get(f) for f in _STATE_KEY_FIELDS)
+
+
+def state_change_row(seen: dict, game_id: str, state: dict, seen_at: str,
+                     source: str) -> dict | None:
+    """One `ncaaf_live_states` row when `game_id`'s event-level state differs
+    from the last one in `seen` (first sight included); None when it is the
+    same state on a later clock. Updates `seen` in place."""
+    key = state_key(state)
+    if seen.get(game_id) == key:
+        return None
+    seen[game_id] = key
+    return {
+        "game_id": game_id, "seen_at": seen_at,
+        "period": state.get("period"),
+        "clock_seconds": (None if state.get("clock_seconds") is None
+                          else int(state["clock_seconds"])),
+        "home_score": state.get("home_score"),
+        "away_score": state.get("away_score"),
+        "possession": state.get("possession"),
+        "down": state.get("down"), "distance": state.get("distance"),
+        "yardline_100": state.get("yardline_100"),
+        "source": source,
+        "raw_state": json.dumps(state, default=str, separators=(",", ":")),
+    }
+
+
+def record_live_states(conn, rows: list[dict]) -> int:
+    """Append state-change rows. Non-fatal, like record_live_prices: a failed
+    audit write must never cost a pass. Returns how many were written."""
+    if not rows:
+        return 0
+    sql = (f"INSERT INTO ncaaf_live_states ({', '.join(_STATE_COLS)}) "
+           f"VALUES ({', '.join(['%s'] * len(_STATE_COLS))}) "
+           f"ON CONFLICT (game_id, seen_at) DO NOTHING")
+    try:
+        for r in rows:
+            conn.execute(sql, tuple(r.get(c) for c in _STATE_COLS))
+        conn.commit()
+        return len(rows)
+    except Exception as exc:                         # noqa: BLE001
+        log.warning("live state log failed (non-fatal): %s", exc)
+        try:
+            conn.rollback()
+        except Exception:                            # noqa: BLE001
+            pass
+        return 0
+
+
 def write_picks(picks: list[dict], game_id: str, dry_run: bool,
                 conn=None) -> str | None:
     """Write one game's live picks under the first-signal lock
@@ -555,6 +624,8 @@ def main() -> int:
     # further down -- so a guard hung on it would be blind on the fallback.
     # This is keyed by game_id and fed from the same `state` the engine prices.
     score_clock = ScoreClock()
+    # The last event-level state written for each game (state_change_row).
+    state_seen: dict = {}
 
     while True:
         started = time.monotonic()
@@ -637,6 +708,7 @@ def main() -> int:
         conn = None
         notify_date = None
         priced_this_pass: list[dict] = []
+        states_this_pass: list[dict] = []
         try:
             for ev, key, ctx, state in resolve_live_states(
                     live, ctx_map, use_cfbd, cfbd_states):
@@ -660,6 +732,12 @@ def main() -> int:
                 score_seen_at = score_clock.observe(
                     ctx.game_id,
                     (state.get("home_score"), state.get("away_score")), now)
+                # KEEP THE STATE WE ARE ABOUT TO PRICE ON, when it changed.
+                changed = state_change_row(
+                    state_seen, ctx.game_id, state, priced_at,
+                    "cfbd" if use_cfbd else "espn")
+                if changed:
+                    states_this_pass.append(changed)
                 quote = odds_map.get(key)
                 # AUDIT THE PRICE WE PRICED ON. This loop read DraftKings'
                 # in-play feed, decided on it, and threw it away -- so a
@@ -694,6 +772,13 @@ def main() -> int:
                 record_live_prices(
                     conn, priced_this_pass,
                     known_game_ids={r["game_id"] for r in priced_this_pass})
+            # The state beside the price. Opens the connection itself when
+            # this pass wrote no pick: a state change with no decision is
+            # exactly the row the next post-mortem needs.
+            if states_this_pass and not a.dry_run:
+                if conn is None:
+                    conn = get_connection()
+                record_live_states(conn, states_this_pass)
         finally:
             if conn is not None:
                 conn.close()
