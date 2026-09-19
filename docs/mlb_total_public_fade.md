@@ -17,6 +17,7 @@ Runs on the same pipeline step as the other MLB game-line cards
 | Price | Best open under among DK / FD / MGM / WH (`williamhill_us`) at **DK’s open total**; fallback DK |
 | Line | Main total **5.5–14.5** |
 | Price window | Under American in **[-200, 200]** |
+| Juice band | Optional. `MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN` / `_MAX` default **unset = no band**. I24 is **[-110, -100]** inclusive on the shopped under. Finder applies it **before** top-K. |
 | INSERT | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default **0** |
 | Top-K | Optional. `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` default **0** = all-pass. Set **2** + `RANK=ticket` to keep the two heaviest OVER piles per day. Runs **before** the slate guard. |
 | Slate guard | After ranking: if one `pick_side` is **≥70%** of that model's BET count **and** n_bet **≥ 4**, **suppress all**. Shared helper: `models/slate_concentration.py`. |
@@ -135,6 +136,43 @@ model. Do not set RANK to gap / juice / composite / ev — those
 cells are in the fail table above. Sweep:
 `python -m scripts.mlb_total_public_fade_topk`.
 
+## I24 juice band (2026-09-19)
+
+#751 measured **one-sided juice floors** (under ≥ −115 / −110 / −105 /
+plus-money). Every floor was worse than `any`. That is a **floor**,
+not a band: it keeps plus-money and only drops heavy juice.
+
+**I24 is a narrow band**, different: over tickets ≥ **80** (existing
+`TICKET_PCT`) and the shopped under American in **[−110, −100]**
+inclusive. Top-K (`MAX_PER_SLATE` / `RANK=ticket`) and the
+concentration guard stay as on master. Unset env is no band so merge
+does not recut the card.
+
+| Construction | n | Units | ROI | Months |
+|---|---|---|---|---|
+| **I24: t80 + under ∈ [−110, −100]** | **38** | **+9.51u** | **+25%** | Jun / Jul / Sep all + |
+
+A posted **+100** is even money (`implied(+100) == implied(−100)`) and
+sits on the cap; **+105** is plus-money past the cap and is out.
+
+**Not steam_cap2.** That construction is tickets ≥75 AND
+money ≥ tickets, juice **floor** ≥ −115, cap 2. Regrade of the first
+honest Sep pregame public (2026-09-16→18): **5 settled, 2-3, −1.18u,
+−23.6%** (Jun +12.0%/12, Jul +12.5%/7). September failed; I24 is the
+band that stayed positive across Jun/Jul/Sep. Do not ship steam_cap2
+from this file.
+
+**Recommended I24 flags (PUBLISH stays 0):**
+
+```
+MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=80
+MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN=-110
+MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX=-100
+MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE=2
+MLB_TOTAL_PUBLIC_FADE_RANK=ticket
+MLB_TOTAL_PUBLIC_FADE_PUBLISH=0
+```
+
 ## Caveats (load-bearing)
 
 1. **~85–99 pre-commence public games in the DB**, not a season. Action
@@ -144,7 +182,8 @@ cells are in the fail table above. Sweep:
    post-start fetch (August honest coverage: 2 games). The ingestor now
    refuses post-start upserts; **already-overwritten history stays unusable**.
 3. n is small. The 2026-09-16 t70 cell was 64; the 2026-09-19 remasure
-   is 101 all-pass / 48 ticket-top-2. t80 is an env, not a second model.
+   is 101 all-pass / 48 ticket-top-2. I24 (t80 + [−110, −100]) is 38.
+   t80 is an env, not a second model.
 4. Do **not** set `MLB_TOTAL_PUBLIC_FADE_PUBLISH=1` without mike. Default 0
    means the worker logs flags and writes nothing. Railway is 0 after the
    2026-09-19 all-under card; **leave default 0** until mike says
@@ -162,3 +201,5 @@ cells are in the fail table above. Sweep:
 | `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `0` | `0` = all-pass. Set `2` to keep top-K per day (recommended with `RANK=ticket`) |
 | `MLB_TOTAL_PUBLIC_FADE_RANK` | `ticket` | `ticket` \| `gap` \| `juice` \| `composite` \| `ev`. Only `ticket` cleared the holdout. `ev` without a bucket table ranks as ticket |
 | `MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR` | `0` | LOMO estimated-edge floor. Sweep-only (card has no bucket table). Every floor tried (≥2/3/5pp) lost |
+| `MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN` | unset | Inclusive American band lower bound (most juice). I24 = `-110`. Unset = no band |
+| `MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX` | unset | Inclusive American band upper bound (least juice). I24 = `-100`. Unset = no band |
