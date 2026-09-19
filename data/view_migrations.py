@@ -166,6 +166,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-15 (mike): MLB game-market gate log. Live default (despite
     # no §7 cut) — does not ALTER picks; the scorer writes NONE itself.
     "add_game_market_gate_2026_09_15.sql",
+    # 2026-09-19: daily model-quality findings (one-sided slates, fade
+    # concentration, CLV/ROI, volume). Report only; never pauses.
+    "add_model_quality_checks_2026_09_19.sql",
 ]
 
 

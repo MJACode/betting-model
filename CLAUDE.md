@@ -577,6 +577,7 @@ to be known BEFORE deciding which file to open.
 | Live monitor dashboard | `docs/monitoring.md` |
 | Calibration — claimed vs realised, the sweep, the weekly pass | `docs/probability_calibration.md` |
 | Health checks + retrain workflow | `docs/health_checks.md` |
+| Model-quality monitor (one-sided slates, fade risk, CLV/ROI, volume) | `docs/model_quality.md` |
 | Opening-signal shadow track | `docs/opening_signals.md` |
 | Signal-timing analysis + the full evaluation rule | `docs/signal_timing.md` |
 | Config topology in full (retention, best line) | `docs/config_topology.md` |

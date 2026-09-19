@@ -461,6 +461,33 @@ def step_health_check(run_date: str, *, fail_on_crit: bool = True) -> bool:
         return True
 
 
+def step_model_quality(run_date: str) -> bool:
+    """
+    Betting-quality monitor — one-sided slates, public-fade concentration,
+    CLV/ROI collapse, volume spikes. Writes model_quality_checks.
+
+    ALWAYS observe-only. A CRIT finding is the thing we wanted to see; it
+    must not fail the betting pipeline. The dedicated CLI / worker job still
+    surface CRIT (exit 1 / result.ok=false). Report only; no pause.
+    """
+    try:
+        from tracking.model_quality import run_model_quality
+        result = run_model_quality(run_date)
+        if result["ok"]:
+            logger.success(
+                f"✓ Model quality: {result['warn']} warning(s), 0 critical")
+        else:
+            logger.error(
+                f"✗ Model quality: {result['crit']} CRITICAL finding(s), "
+                f"{result['warn']} warning(s) — see model_quality_checks "
+                f"(observing only, not failing this pass)")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Model quality check failed to run: {exc}")
+        logger.warning("model-quality: observing only — not failing this pass")
+        return True
+
+
 def step_bullpen(run_date: str) -> bool:
     """
     Ingest reliever appearances (bullpen workload) up through yesterday.
@@ -1750,6 +1777,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 12: Running system health check (all API + data feeds)...")
     results["health_check"] = step_health_check(run_date)
 
+    # ── Step 13: Model quality (betting-quality — after scoring + health) ────
+    # Observe-only: a CRIT finding must not fail the daily. Results land in
+    # model_quality_checks. The 11:00am ET scheduler job re-runs once the
+    # slate is more complete.
+    logger.info("Step 13: Running model quality monitor (all sports / models)...")
+    results["model_quality"] = step_model_quality(run_date)
+
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
     n_success = sum(1 for v in results.values() if v)
@@ -1964,7 +1998,8 @@ Examples:
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "restore-first-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
-                                 "check-lines", "settle", "health-check"],
+                                 "check-lines", "settle", "health-check",
+                                 "model-quality"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -2058,6 +2093,9 @@ Examples:
             # must not fail the pass. Daily calls step_health_check(run_date)
             # directly, default fail_on_crit=True.
             "health-check": lambda: step_health_check(run_date, fail_on_crit=False),
+            # Observe-only: CRIT writes model_quality_checks and never fails
+            # the pass. Same rule as health-check on this path.
+            "model-quality": lambda: step_model_quality(run_date),
             # TODAY, not yesterday. settle_picks walks a 14-day trailing window
             # for both game and prop picks, so "today" is a strict superset of
             # "yesterday" — passing yesterday only ever excluded games that had

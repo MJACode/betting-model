@@ -126,6 +126,11 @@ RUN_NFL_WIND_CARD = os.environ.get("RUN_NFL_WIND_CARD", "1") != "0"
 # de-vig-Pinnacle-bet-the-outlier rule. RUN_NFL_PROP_CARD=0 disables it.
 RUN_NFL_PROP_CARD = os.environ.get("RUN_NFL_PROP_CARD", "1") != "0"
 
+# Daily model-quality monitor (tracking/model_quality.py). Report only —
+# never pauses. RUN_MODEL_QUALITY=0 disables the 11:00am ET cron; the
+# daily pipeline step and the worker job still run.
+RUN_MODEL_QUALITY = os.environ.get("RUN_MODEL_QUALITY", "1") != "0"
+
 # NCAAF player props (data/ingestors/ncaaf_prop_odds_ingestor.py). Matt turned
 # these on 2026-09-05 after the probe measured them: ~8.7 credits per event
 # against 68 events the feed lists, so ONE FULL PASS IS ~590 CREDITS and the
@@ -396,6 +401,24 @@ def run_job_queue() -> None:
         log.exception("ERROR job-queue crashed")
 
 
+def run_model_quality_job() -> None:
+    """Betting-quality monitor, in-process like the threshold review.
+
+    11:00am ET so the morning refresh passes have booked more of today's
+    slate than the 6am daily. Writes model_quality_checks. Never pauses.
+    """
+    if not RUN_MODEL_QUALITY:
+        log.info("model-quality skipped (RUN_MODEL_QUALITY=0)")
+        return
+    try:
+        from tracking.model_quality import run_model_quality
+        result = run_model_quality()
+        log.info("model quality: ok=%s crit=%s warn=%s",
+                 result.get("ok"), result.get("crit"), result.get("warn"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR model-quality crashed")
+
+
 def run_threshold_review() -> None:
     # In-process for the same reason as the watchdog: its output is a Discord
     # post and a pause, not an exit code, so an exception here must surface as
@@ -503,6 +526,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "model_calibration", "job_queue", "pipeline_watch",
                   "failure_alerter",
                   "calibration_watch",
+                  "model_quality",
                   "kalshi_ladders", "kalshi_game_markets"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
@@ -1354,6 +1378,17 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=7, minute=45, timezone=TIMEZONE),
         id="threshold_review",
         name="Threshold review (daily 7:45am ET, acts every 250 settled bets)",
+    )
+
+    # Model quality — daily 11:00am ET, after morning scoring + a few
+    # refresh passes. The 6am daily also runs it (observe-only). Report
+    # only; a CRIT finding writes model_quality_checks and does not pause.
+    sched.add_job(
+        run_model_quality_job,
+        CronTrigger(hour=11, minute=0, timezone=TIMEZONE),
+        id="model_quality",
+        name="Model quality monitor (daily 11:00am ET, report only)",
+        max_instances=1, coalesce=True, misfire_grace_time=300,
     )
 
     # Baseball Savant refresh — Mondays 5:30am ET, before the 6am pipeline.

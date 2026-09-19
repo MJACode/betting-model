@@ -2386,6 +2386,30 @@ ALTER TABLE system_health_checks ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "anon read system_health_checks" ON system_health_checks
     FOR SELECT TO anon, authenticated USING (true);
 
+-- Applied via migration add_model_quality_checks_2026_09_19. Daily
+-- betting-quality findings from tracking/model_quality.py. One row per
+-- (run_date, check_name, model_key); re-runs upsert. Report only — nothing
+-- here pauses a model. Anon SELECT so any operator can read today's
+-- findings the same way they read system_health_checks.
+CREATE TABLE IF NOT EXISTS model_quality_checks (
+    id          BIGSERIAL PRIMARY KEY,
+    run_date    TEXT NOT NULL,
+    check_name  TEXT NOT NULL,
+    model_key   TEXT NOT NULL,
+    sport       TEXT,
+    status      TEXT NOT NULL,          -- OK | FLAGGED | SKIPPED | ERROR
+    severity    TEXT NOT NULL,          -- CRIT | WARN
+    detail      TEXT,
+    metrics     JSONB,
+    created_at  TEXT NOT NULL,
+    UNIQUE(run_date, check_name, model_key)
+);
+CREATE INDEX IF NOT EXISTS idx_model_quality_run_date ON model_quality_checks(run_date);
+ALTER TABLE model_quality_checks ENABLE ROW LEVEL SECURITY;
+GRANT SELECT ON model_quality_checks TO anon, authenticated;
+CREATE POLICY "anon read model_quality_checks" ON model_quality_checks
+    FOR SELECT TO anon, authenticated USING (true);
+
 -- Applied via migration add_odds_api_quota (2026-08-18). Latest Odds API
 -- x-requests-used/-remaining observation per UTC day (last write wins) —
 -- written by data/ingestors/odds_quota.py from both odds ingestors, read by

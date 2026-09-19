@@ -1183,7 +1183,7 @@ def run_system_health(run_date: str | None = None) -> dict:
             # writes into failed_steps when it closes a run whose worker was
             # replaced mid-pass. Both live in the same column, so both must be
             # excluded or a deploy reports itself as a failing pipeline step.
-            _META_STEPS = {"health-check", "aborted"}
+            _META_STEPS = {"health-check", "model-quality", "aborted"}
             per_pass = [set((row[0] or "").split(",")) - {""} - _META_STEPS
                         for row in recent]
             persistent = sorted(set.intersection(*per_pass))

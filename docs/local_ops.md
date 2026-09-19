@@ -34,6 +34,14 @@ python run_pipeline.py --step scoring     # or any single step
 
 `python run_pipeline.py --help` lists every step name.
 
+Model-quality monitor (one-sided slates / fade risk / CLV / ROI / volume) —
+report only, writes `model_quality_checks`. See [`model_quality.md`](model_quality.md):
+
+```bash
+python -m tracking.model_quality
+python run_pipeline.py --step model-quality
+```
+
 ---
 
 ## NFL 2026 paper-track (opener + wind)

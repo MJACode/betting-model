@@ -67,6 +67,10 @@ EXPECTED_TABLES = {
     "feedback_threads", "feedback_messages",
     # Daily feed-freshness results (tracking/system_health.py)
     "system_health_checks",
+    # Daily betting-quality findings (tracking/model_quality.py)
+    "model_quality_checks",
+    # MLB game-market gate verdict log (models/game_market_gate.py)
+    "game_market_gate",
     "odds_api_quota",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
