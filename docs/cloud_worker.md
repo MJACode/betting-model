@@ -231,8 +231,10 @@ Notes:
      cards log every pass; they INSERT picks only when the matching flag is
      `1` (redeploy after setting). Totals Pin-vs-soft INSERT is Pin fair −
      soft implied, BEST_LINE, pin-lean. Public-OVER fade INSERT is
-     `mlb_total_public_fade` (ticket cut `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`,
-     default 70). See `docs/mlb_runline_ou_edge_search.md` and
+     `mlb_total_public_fade` (`RULE` default `steam`: over tix ≥75 and
+     money ≥ tix, max 2 / slate; `blunt` uses
+     `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`, default 70). See
+     `docs/mlb_runline_ou_edge_search.md` and
      `docs/mlb_total_public_fade.md`.
 4. Deploy. Open the **Logs** — on boot you should see
    `Betting scheduler starting … Registered jobs:` with the three jobs and their next run

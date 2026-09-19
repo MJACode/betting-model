@@ -99,6 +99,14 @@ def test_default_cut_is_seventy_and_env_default_is_seventy():
     assert fade.DEFAULT_OVER_TICKETS == 70.0
     assert config.MLB_TOTAL_PUBLIC_FADE_TICKET_PCT == 70.0
     assert fade.ticket_threshold() == 70.0
+    assert fade.fade_rule() == fade.RULE_STEAM
+    assert fade.DEFAULT_STEAM_TICKETS == 75.0
+    assert config.MLB_TOTAL_PUBLIC_FADE_STEAM_TICKETS == 75.0
+    assert fade.steam_ticket_threshold() == 75.0
+    assert fade.require_money_steam() is True
+    assert fade.min_under_price_floor() is None
+    assert fade.max_bets_per_slate() == 2
+    assert config.MLB_TOTAL_PUBLIC_FADE_PUBLISH is False
 
 
 def test_seventy_fires_and_just_under_does_not():
@@ -374,3 +382,160 @@ def test_publish_stays_off_and_xgboost_stays_paused_after_the_guard():
     assert fade.publish_enabled() is False
     assert "mlb_over_under" in config.PAUSED_MODELS
     assert "mlb_runline" in config.PAUSED_MODELS
+
+
+# ── steam selector (2026-09-19) ──────────────────────────────────────────────
+
+
+def _steam_split(gid, ticket, money, **extra):
+    return _split(gid=gid, ticket=ticket, public_money_pct=money,
+                  over_money_pct=money, game_date="2026-06-15", **extra)
+
+
+def test_steam_requires_money_at_or_above_tickets():
+    quotes = _dk_board()
+    steam, diag = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 80, 81)}, quotes, rule=fade.RULE_STEAM)
+    assert len(steam) == 1
+    assert steam[0].over_money_pct == 81.0
+    faded, diag2 = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 80, 79)}, quotes, rule=fade.RULE_STEAM)
+    assert faded == []
+    assert diag2["not_steam"] == 1
+
+
+def test_steam_missing_money_fails_closed():
+    quotes = _dk_board()
+    bets, diag = fade.select_fade_bets(
+        {"G1": _split(ticket=90)}, quotes, rule=fade.RULE_STEAM)
+    assert bets == []
+    assert diag["not_steam"] == 1
+    assert fade.is_public_steam(90, None) is False
+
+
+def test_steam_ticket_cut_is_seventy_five_not_seventy():
+    quotes = _dk_board()
+    low, diag = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 74.9, 80)}, quotes, rule=fade.RULE_STEAM)
+    assert low == []
+    assert diag["below_cut"] == 1
+    ok, _ = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 75.0, 75.0)}, quotes, rule=fade.RULE_STEAM)
+    assert len(ok) == 1
+
+
+def test_juice_floor_is_opt_in_and_drops_minus_120():
+    quotes = _dk_board(under=-120)
+    no_floor, _ = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 80, 85)}, quotes,
+        rule=fade.RULE_STEAM, min_under_price=None)
+    assert len(no_floor) == 1
+    floored, diag = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 80, 85)}, quotes,
+        rule=fade.RULE_STEAM, min_under_price=-115)
+    assert floored == []
+    assert diag["juice_floor"] == 1
+    keep, _ = fade.select_fade_bets(
+        {"G1": _steam_split("G1", 80, 85)},
+        _dk_board(under=-110),
+        rule=fade.RULE_STEAM, min_under_price=-115)
+    assert len(keep) == 1
+
+
+def test_steam_slate_caps_at_two_ranked_by_tix_then_juice():
+    """Highest over_tix first; juice (lower implied) breaks ties."""
+    splits = {
+        "G1": _steam_split("G1", 90, 92),
+        "G2": _steam_split("G2", 88, 90),
+        "G3": _steam_split("G3", 80, 81),
+        "G4": _steam_split("G4", 95, 96),
+    }
+    quotes = {}
+    # G4 95 tix @-110, G1 90 @-105 (better juice), G2 88, G3 80.
+    for gid, under in (("G1", -105), ("G2", -110), ("G3", -102), ("G4", -110)):
+        key, row = _quote(gid, "draftkings", under=under)
+        quotes[key] = row
+    bets, diag = fade.select_fade_bets(
+        splits, quotes, rule=fade.RULE_STEAM, max_per_slate=2)
+    assert {b.game_id for b in bets} == {"G4", "G1"}
+    assert diag["capped"] == 2
+    # Same tix: better juice wins.
+    tied = {
+        "A": _steam_split("A", 80, 80),
+        "B": _steam_split("B", 80, 80),
+    }
+    tied["A"]["game_date"] = "2026-06-16"
+    tied["B"]["game_date"] = "2026-06-16"
+    tq = {}
+    for gid, under in (("A", -120), ("B", -105)):
+        key, row = _quote(gid, "draftkings", under=under)
+        tq[key] = row
+    picks, _ = fade.select_fade_bets(
+        tied, tq, rule=fade.RULE_STEAM, max_per_slate=1)
+    assert [b.game_id for b in picks] == ["B"]
+
+
+def test_steam_ten_game_slate_inserts_two_not_twelve():
+    """Anti-spam: steam + cap 2. Suppress-all does not fire (n=2 < 4)."""
+    from scripts.mlb_total_public_fade_card import rows_for_insert
+
+    tickets = [75.0, 80.0, 82.0, 90.0, 88.0, 77.0, 95.0, 76.0, 78.0, 85.0]
+    splits, quotes, games = _slate(tickets)
+    for gid, tix in zip(splits, tickets):
+        splits[gid]["public_money_pct"] = tix + 1
+        splits[gid]["over_money_pct"] = tix + 1
+        splits[gid]["game_date"] = "2026-06-15"
+    bets, diag = fade.select_fade_bets(
+        splits, quotes, rule=fade.RULE_STEAM)
+    assert len(bets) == 2, diag
+    assert {b.game_id for b in bets} == {"G7", "G4"}  # 95, 90
+    rows = rows_for_insert(bets, games, quotes, bankroll=10_000)
+    assert len(rows) == 2
+    assert all(r["pick_side"] == "under" and r["signal_type"] == "BET"
+               for r in rows)
+
+
+def test_blunt_ten_game_slate_still_suppresses_all():
+    """RULE=blunt keeps the 2026-09-19 guard: 10 unders → INSERT []."""
+    from scripts.mlb_total_public_fade_card import rows_for_insert
+
+    tickets = [75.0, 80.0, 82.0, 90.0, 88.0, 77.0, 95.0, 71.0, 73.0, 85.0]
+    splits, quotes, games = _slate(tickets)
+    bets, diag = fade.select_fade_bets(
+        splits, quotes, rule=fade.RULE_BLUNT, max_per_slate=None)
+    assert len(bets) == 10, diag
+    assert rows_for_insert(bets, games, quotes, bankroll=10_000) == []
+
+
+def test_grade_under_matches_paper_tracker_units():
+    assert fade.grade_under(7, 8.5, -110) == ("WIN", pytest.approx(100 / 110))
+    assert fade.grade_under(9, 8.5, -110) == ("LOSS", -1.0)
+    assert fade.grade_under(8.5, 8.5, -110) == ("PUSH", 0.0)
+    assert fade.grade_under(7, 8.5, 120) == ("WIN", pytest.approx(1.20))
+
+
+def test_card_still_does_not_publish_on_steam():
+    assert config.MLB_TOTAL_PUBLIC_FADE_PUBLISH is False
+    assert fade.publish_enabled() is False
+    assert fade.fade_rule() == fade.RULE_STEAM
+
+
+def test_bootstrap_and_holdout_helpers_are_deterministic():
+    from scripts.mlb_total_public_fade_select import bootstrap_roi, month_holdout
+
+    units = [0.91, -1.0, 0.91, -1.0, 0.87]
+    a = bootstrap_roi(units, n=200, seed=19)
+    b = bootstrap_roi(units, n=200, seed=19)
+    assert a == b
+    mean, lo, hi, ppos = a
+    assert lo <= mean <= hi
+    assert 0.0 <= ppos <= 1.0
+    rows = [
+        {"month": "2026-06", "result": "WIN", "units": 0.9},
+        {"month": "2026-06", "result": "LOSS", "units": -1.0},
+        {"month": "2026-07", "result": "WIN", "units": 0.9},
+    ]
+    holds = month_holdout(rows)
+    assert [h["hold"] for h in holds] == ["2026-06", "2026-07"]
+    assert holds[0]["test"]["n"] == 2
+    assert holds[1]["train"]["n"] == 2

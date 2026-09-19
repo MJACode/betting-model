@@ -43,8 +43,9 @@ converging on the same place from the other side.
   equal total, `BEST_LINE_BOOKMAKERS`, pin-lean only. INSERT off
   (`MLB_TOTAL_MARKET_PUBLISH` default 0). Pin-de-vig vs soft-de-vig May–Jun
   2pp −11.13% / 79 is a sweep flag. Do not resurrect 0.50/0.06.
-  A **separate** paper lane, `mlb_total_public_fade`, fades consensus OVER
-  tickets ≥70 (env; 80 supported) and bets UNDER. INSERT off
+  A **separate** paper lane, `mlb_total_public_fade`, fades a consensus
+  OVER steam (tix ≥75 and money ≥ tix), bets UNDER, max 2 per slate.
+  `RULE=blunt` is the old ≥70 ticket-cut. INSERT off
   (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). Not an unpause.
   `docs/mlb_total_public_fade.md`.
   `docs/mlb_runline_ou_edge_search.md`.
@@ -94,11 +95,13 @@ is the next worker job. Moneyline and F5 lists are unchanged.
 
 ## 11b4. PUBLIC-OVER FADE TOTALS — `docs/mlb_total_public_fade.md`
 
-As of 2026-09-16 a **paper** rule `mlb_total_public_fade` fades Action
-Network consensus OVER tickets ≥70 (env; 80 supported) and bets UNDER at
-the best DK/FD/MGM/WH open (fallback DK). INSERT gated
+As of 2026-09-19 the **paper** rule `mlb_total_public_fade` fades an
+Action Network consensus OVER steam (tickets ≥75 and money ≥ tickets)
+and bets UNDER at the best DK/FD/MGM/WH open (fallback DK), hard-capped
+at 2 per slate. `RULE=blunt` restores the 2026-09-16 ≥70 ticket-cut
+(that cut is ~86% of the honest public universe). INSERT gated
 (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). `mlb_over_under` stays paused.
-Coverage caveat: only ~99 pre-commence public totals-over games in the DB.
+Coverage caveat: ~118 priced pre-commence public totals-over games.
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)

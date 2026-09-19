@@ -602,13 +602,13 @@ ACTION_THRESHOLDS: dict = {
     # mlb_over_under stays paused. find_total_bets wall stays 1.0;
     # the card passes 0.02 explicitly. vs=devig is a sweep flag.
     "mlb_total_market":           {"min_prob": 0.0, "min_edge": 0.02},
-    # MLB totals public-fade paper rule. Fade consensus OVER tickets ≥
-    # MLB_TOTAL_PUBLIC_FADE_TICKET_PCT (default 70; 80 supported), bet
-    # UNDER at best DK/FD/MGM/WH open (fallback DK). Ticket% is the cut
-    # — min_edge 0 so the action filter does not invent a second one.
-    # INSERT off until MLB_TOTAL_PUBLIC_FADE_PUBLISH=1.
-    # mlb_over_under stays paused. Not mlb_total_market (Pin-vs-soft).
-    # docs/mlb_total_public_fade.md.
+    # MLB totals public-fade paper rule. Default RULE=steam: fade a
+    # public-OVER steam (tix ≥75 and money ≥ tix), bet UNDER, max 2 per
+    # slate. blunt = old ticket-cut-only (TICKET_PCT default 70).
+    # Ticket%/steam is the cut — min_edge 0 so the action filter does
+    # not invent a second one. INSERT off until
+    # MLB_TOTAL_PUBLIC_FADE_PUBLISH=1. mlb_over_under stays paused.
+    # Not mlb_total_market (Pin-vs-soft). docs/mlb_total_public_fade.md.
     "mlb_total_public_fade":      {"min_prob": 0.0, "min_edge": 0.0},
     # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
     # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
@@ -1535,13 +1535,34 @@ MLB_TOTAL_MARKET_PUBLISH: bool = (
     os.environ.get("MLB_TOTAL_MARKET_PUBLISH", "0").strip() not in ("0", "false", "False")
 )
 # Public-OVER fade totals paper card (models/mlb_total_public_fade).
-# INSERT default 0. Ticket cut default 70; set 80 to tighten.
-# Not an unpause of mlb_over_under. docs/mlb_total_public_fade.md.
+# INSERT default 0. Rule default `steam` (over tix ≥75 and over money ≥
+# tix, max 2 per slate). `blunt` restores the old ticket-cut-only finder
+# (TICKET_PCT default 70). MIN_UNDER_PRICE default unset: the −115 juice
+# floor failed month holdout (docs/mlb_total_public_fade.md). Not an
+# unpause of mlb_over_under.
 MLB_TOTAL_PUBLIC_FADE_PUBLISH: bool = (
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_PUBLISH", "0").strip() not in ("0", "false", "False")
 )
 MLB_TOTAL_PUBLIC_FADE_TICKET_PCT: float = float(
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_TICKET_PCT", "70")
+)
+MLB_TOTAL_PUBLIC_FADE_RULE: str = os.environ.get(
+    "MLB_TOTAL_PUBLIC_FADE_RULE", "steam"
+).strip().lower()
+MLB_TOTAL_PUBLIC_FADE_STEAM_TICKETS: float = float(
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_STEAM_TICKETS", "75")
+)
+MLB_TOTAL_PUBLIC_FADE_REQUIRE_MONEY_STEAM: bool = (
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_REQUIRE_MONEY_STEAM", "1").strip()
+    not in ("0", "false", "False")
+)
+_FADE_MIN_UNDER_RAW = os.environ.get("MLB_TOTAL_PUBLIC_FADE_MIN_UNDER_PRICE", "").strip()
+MLB_TOTAL_PUBLIC_FADE_MIN_UNDER_PRICE = (
+    None if _FADE_MIN_UNDER_RAW == "" or _FADE_MIN_UNDER_RAW.lower() in ("none", "off")
+    else float(_FADE_MIN_UNDER_RAW)
+)
+MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE: int = int(
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", "2")
 )
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")

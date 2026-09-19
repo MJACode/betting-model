@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, `mlb_total_public_fade` steam selector: tix≥75 and money≥tix, max 2/slate. Juice −115 failed holdout (env off). PUBLISH stays 0. RL/OU stay paused |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, slate concentration guard: suppress mlb_total_public_fade when one side is ≥70% of n_bet ≥ 4 (12/12 under card). PUBLISH stays 0. RL/OU stay paused |
 | 2026-09-18 | [2026-09](./2026-09.md) | 2026-09-18, same-day daily retry after mid-run Railway redeploy: boot + pipeline_watch re-run today's daily once if aborted/incomplete. Kind-scoped orphan abort. No model/threshold change |
 | 2026-09-18 | [2026-09](./2026-09.md) | 2026-09-18, prop-odds missing-games FK: skip + warn + per-event commit so one unknown game_id cannot roll back the sport. Production key MLB_2026-09-18_SEA_COL |

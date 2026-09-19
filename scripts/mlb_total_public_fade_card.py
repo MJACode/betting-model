@@ -8,9 +8,12 @@ Deliberate and load-bearing:
   NOT mlb_over_under and NOT mlb_total_market. Those ids stay paused /
   Pin-vs-soft respectively. This lane fades a public OVER pile.
 
-  TICKET CUT IS ENV. MLB_TOTAL_PUBLIC_FADE_TICKET_PCT default 70; 80 is
-  supported. The finder applies it. ACTION_THRESHOLDS min_edge is 0 so the
-  action filter does not invent a second cut.
+  RULE IS ENV. MLB_TOTAL_PUBLIC_FADE_RULE default steam (over tix ≥75
+  and over money ≥ tix, max 2 per slate). blunt restores the old
+  ticket-cut-only finder (TICKET_PCT default 70). Juice floor
+  MIN_UNDER_PRICE is opt-in (empty): −115 failed holdout.
+  ACTION_THRESHOLDS min_edge is 0 so the action filter does not invent
+  a second cut.
 
   INSERT-ONCE (§1c). Re-pricing a locked under after the ticket pile
   moves would replace a bet that was taken with one that never existed.
@@ -114,7 +117,10 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
             "dk_bet_link": link if b.book == "draftkings" else None,
             "best_bet_link": link,
             "public_bet_pct": round(100.0 - b.over_ticket_pct, 1),
-            "public_money_pct": None,
+            "public_money_pct": (
+                None if b.over_money_pct is None
+                else round(100.0 - b.over_money_pct, 1)
+            ),
         })
     return rows
 
@@ -149,17 +155,25 @@ def publish(conn, rows: list[dict]) -> int:
 
 
 def render(bets, diag) -> str:
+    rule = diag.get("rule", fade.fade_rule())
+    cut = (fade.steam_ticket_threshold() if rule == fade.RULE_STEAM
+           else fade.ticket_threshold())
     lines = [f"MLB totals public-fade card — {len(bets)} flag(s)  "
-             f"[cut {fade.ticket_threshold():.0f}tix · "
+             f"[rule {rule} · cut {cut:.0f}tix · "
              f"below {diag.get('below_cut', 0)} · "
+             f"not-steam {diag.get('not_steam', 0)} · "
+             f"juice {diag.get('juice_floor', 0)} · "
+             f"capped {diag.get('capped', 0)} · "
              f"no-DK {diag.get('no_dk', 0)} · "
              f"line-out {diag.get('line_out', 0)} · "
              f"no-price {diag.get('no_price', 0)}]"]
     for b in sorted(bets, key=lambda x: -x.over_ticket_pct):
+        money = ("—" if b.over_money_pct is None
+                 else f"{b.over_money_pct:.0f}")
         lines.append(
             f"  {b.game_id:28s} under {b.line:.1f}  "
             f"@{_BOOK.get(b.book, b.book):4s} {b.price:+.0f}  "
-            f"over tix {b.over_ticket_pct:.1f}"
+            f"over tix {b.over_ticket_pct:.1f}  money {money}"
         )
     return "\n".join(lines)
 
@@ -178,8 +192,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
         gids = list(games)
         quotes = mk.load_latest_quotes(conn, SPORT, MARKET, gids)
         splits = fade.load_public_over_splits(conn, gids)
-        bets, diag = fade.find_fade_bets(
-            splits, quotes, min_over_tickets=fade.ticket_threshold())
+        bets, diag = fade.select_fade_bets(splits, quotes)
         logger.info("\n" + render(bets, diag))
         published = 0
         will_insert = bool(do_publish) and fade.publish_enabled()
