@@ -441,6 +441,8 @@ CalError is measured vs. synthetic lines. Those AUCs were also fit on leaked `ml
 
 **BET stays paused.** Artifacts are 2026-05-08, leak-mismatched, trained on synthetic lines, never swept on real F5 prices. Unpause path is a retrain on the as-of tables + real F5 quotes, then a §7 sweep. Scoring writes NONE rows so that sweep has a universe.
 
+**2026-09-19 F5 market hunt (empty).** Pin F5 totals/spreads exist only from 2026-09-02; Pin has no `h2h_1st_5_innings`; public is full-game only and August pre-commence is empty. Closest miss: Pin-de-vig vs bettable-soft de-vig on F5 totals 1.5pp **+7.37% / 69** (both Sep week halves +) — not month-stable, max 9/day, FG analog −11%. No new card, no unpause, no `PUBLISH=1`. `docs/mlb_f5_edge_search.md`.
+
 **Full-game `mlb_runline` / `mlb_over_under` stay paused independently.** Honest-era runline −6.93% both sides negative, 0.68 floor unreachable, no live-artifact §7 cut (3 settled at the pooled 0.70/0.08 cell). Over/under honest-era AUC 0.486, zero of six folds clearing 0.55. A human CLE −1.5 is a market/PCG handicap, not `mlb_runline` output.
 
 **v1 F5 O/U backtest:**

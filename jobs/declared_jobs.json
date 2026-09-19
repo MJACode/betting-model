@@ -849,5 +849,23 @@
     "args": {
       "sports": ["MLB"]
     }
+  },
+  {
+    "key": "mlb-f5-totals-market-sweep-2026-09-19",
+    "job_type": "game_line_market_sweep",
+    "requested_by": "mike",
+    "note": "ONE-SHOT measure-only. Perpetual MLB hunt 2026-09-19: Pin de-vig vs bettable-soft de-vig on totals_1st_5_innings (F5 scores). MCP cell at 1.5pp was +7.37%/69 Sep 2-18, both week halves +, max 9/day — NOT month-stable, not shipped, FG analog is the -11% totals 2pp loser. Worker remeasures the same grid (1.5/2/2.5pp) so October does not re-derive SQL. Does not publish, pause, or unpause. docs/mlb_f5_edge_search.md.",
+    "args": {
+      "sport": "MLB",
+      "markets": ["totals_1st_5_innings"],
+      "edges": [0.015, 0.02, 0.025],
+      "snapshot_type": "open",
+      "bettable": true,
+      "by_month": true,
+      "vs": "devig",
+      "pin_lean": false,
+      "date_from": "2026-09-02",
+      "date_to": "2026-09-20"
+    }
   }
 ]
