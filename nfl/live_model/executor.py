@@ -31,7 +31,7 @@ from .config import (
     BOOK_MOVE_MAX, DERIV_LAG_RATIO, EV_THRESHOLDS, KELLY_FRACTION,
     KELLY_HAIRCUT, MAX_DAILY_EXPOSURE_FRACTION, MAX_QUOTE_AGE_SEC,
     MAX_STAKE_FRACTION, MAX_STATE_AGE_SEC, MIN_PRICE, MIN_SECONDS_FOR_PRICING,
-    SCRIPT_LEAD_TRIGGER,
+    SCRIPT_LEAD_TRIGGER, SETTLED_SEC, SETTLED_TOL,
 )
 from .engine.pricing import american_to_decimal, american_to_prob
 from .state import GameState
@@ -329,9 +329,19 @@ class Executor:
                  getattr(quote, "player", None)),
                 (state.home_score, state.away_score, state.period,
                  state.possession),
-                number, getattr(quote, "ts", None), now)
+                number, getattr(quote, "ts", None), now,
+                move_tol=SETTLED_TOL.get(quote.market, 0.0))
             if move is not None and move > cap:
                 return _mk(False, f"book_moved:{move:.2f}>{cap:g}")
+            # THE SETTLED-STATE RULE (2026-09-19): no bet until the book's
+            # number and our state have both been still for SETTLED_SEC --
+            # the quiet version of the defect above, caught by time rather
+            # than by size. See ncaaf_live/config.LIVE_SETTLED_SEC.
+            quiet = self._book_moves.quiet_seconds(
+                (state.game_id, quote.market, quote.side,
+                 getattr(quote, "player", None)), now)
+            if quiet is None or quiet < SETTLED_SEC:
+                return _mk(False, f"not_settled:{(quiet or 0):.0f}s<{SETTLED_SEC}")
         if model_id not in EV_THRESHOLDS:
             return _mk(False, f"unknown_model:{model_id}")
         if not (0.0 < model_prob < 1.0):

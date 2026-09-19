@@ -242,41 +242,80 @@ class BookMoveClock:
     would reset the anchor every play and make the guard dead code.
     """
 
-    __slots__ = ("_state", "_anchor", "_changed_at")
+    __slots__ = ("_state", "_anchor", "_changed_at", "_quiet_since",
+                 "_last_number")
 
     def __init__(self) -> None:
         self._state: dict = {}
         self._anchor: dict = {}
         self._changed_at: dict = {}
+        # THE SETTLED-STATE CLOCK (2026-09-19, the second fix of the day, mike:
+        # "I said to fix it not pause it"). The cap above catches a LOUD move.
+        # It cannot catch the quiet version of the same defect: a book that
+        # has re-hung for an event 30 seconds ago, on a state feed 20-70s
+        # behind it, is a book whose number is "stable" by the time we see it
+        # and whose move was already inside the anchor. The only thing that
+        # separates a lag from a disagreement is TIME: if the book's number
+        # and our state have BOTH been unchanged for longer than the worst
+        # feed lag, whatever the book knew has reached us too, and an edge
+        # that survives that is a real disagreement on the same facts.
+        # `_quiet_since[key]` is the later of the last state change and the
+        # last book move larger than the tolerance; `quiet_seconds` is how
+        # long ago that was. First sight starts the clock, so a restart
+        # waits a window rather than betting blind.
+        self._quiet_since: dict = {}
+        self._last_number: dict = {}
 
     def observe(self, key, state, number, quote_ts=None,
                 now: datetime | None = None,
-                tolerance_sec: float = 0.0) -> float | None:
+                tolerance_sec: float = 0.0,
+                move_tol: float = 0.0) -> float | None:
         """Record the book's `number` for `key` under `state`; return how far
         it has moved since the anchor, or None when there is nothing to
         compare against (first sight, a state change awaiting a post-change
-        quote, or a missing state or number)."""
+        quote, or a missing state or number).
+
+        `move_tol`: a change in `number` no larger than this is juice drift,
+        not a move, for the settled-state clock (DraftKings republishes a
+        moneyline every ~50s with a median 0.4-point wobble; a clock reset by
+        that would never read settled)."""
         if state is None or number is None:
             return None
         now = now or datetime.now(timezone.utc)
+        number = float(number)
         prev = self._state.get(key, _UNSET)
         if (prev is not _UNSET and isinstance(state, tuple)
                 and isinstance(prev, tuple) and len(prev) == len(state)
                 and None in state):
             state = tuple(p if s is None else s for s, p in zip(state, prev))
+        last = self._last_number.get(key)
+        if last is None or abs(number - last) > move_tol:
+            self._quiet_since[key] = now
+            self._last_number[key] = number
         if prev is _UNSET:
             self._state[key] = state
-            self._anchor[key] = (state, float(number))
+            self._anchor[key] = (state, number)
+            self._quiet_since[key] = now
             return None
         if prev != state:
             self._state[key] = state
             self._changed_at[key] = now
+            self._quiet_since[key] = now
             self._anchor.pop(key, None)
         anchor = self._anchor.get(key)
         if anchor is None:
             if quote_predates_score(quote_ts, self._changed_at.get(key),
                                     tolerance_sec):
                 return None
-            self._anchor[key] = (state, float(number))
+            self._anchor[key] = (state, number)
             return None
-        return abs(float(number) - anchor[1])
+        return abs(number - anchor[1])
+
+    def quiet_seconds(self, key, now: datetime | None = None) -> float | None:
+        """Seconds since the later of: first sight, the last state change,
+        and the last book move past `move_tol`. None for an unseen key."""
+        since = self._quiet_since.get(key)
+        if since is None:
+            return None
+        now = now or datetime.now(timezone.utc)
+        return (now - since).total_seconds()

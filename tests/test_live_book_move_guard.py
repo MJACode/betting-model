@@ -251,18 +251,48 @@ def test_the_ncaaf_loop_no_longer_bets_the_delaware_re_hang():
     assert [p for p in picks if p["signal_type"] == "BET"] == []
 
 
-def test_the_control_a_fresh_loop_would_still_have_bet_it():
-    """If this stops betting, the test above proves nothing. A loop that sees
-    +100 at first sight has no anchor, so only the cuts decide -- and they
-    clear, as they did in production. (Production was NOT at first sight: it
-    had watched the game since 15:34 and every DraftKings publish before the
-    re-hang sat at -167..-217, so the guard fires on the real timeline
-    whichever of them was the anchor.)"""
+def test_the_control_a_settled_board_still_bets_the_number():
+    """If this stops betting, the test above proves nothing. The same +100
+    and the same 0-0 state, but held still for longer than the settled
+    window: no anchor move, nothing recent, so only the cuts decide -- and
+    they clear, as they did in production. (Production was NOT at first
+    sight: it had watched the game since 15:34 and every DraftKings publish
+    before the re-hang sat at -167..-217, so the cap fires on the real
+    timeline whichever of them was the anchor.)"""
+    from ncaaf_live.config import LIVE_SETTLED_SEC
     engine = _ncaaf_engine()
-    picks = engine.price(_tied_q1(), _delaware_ctx(), _dk(100, -133, 150),
-                         now=_at(158))
+    ctx, state = _delaware_ctx(), _tied_q1()
+    engine.price(state, ctx, _dk(100, -133, 0), now=_at(1))
+    # Republished (so the 90s age bound passes) at the SAME number.
+    picks = engine.price(state, ctx, _dk(100, -133, LIVE_SETTLED_SEC),
+                         now=_at(LIVE_SETTLED_SEC + 5))
     assert any(p["model_id"] == "ncaaf_live_win_prob"
                and p["signal_type"] == "BET" for p in picks)
+
+
+def test_first_sight_is_not_settled():
+    """A restart waits a window rather than betting blind."""
+    engine = _ncaaf_engine()
+    picks = engine.price(_tied_q1(), _delaware_ctx(), _dk(100, -133, 0),
+                         now=_at(1))
+    assert [p for p in picks if p["signal_type"] == "BET"] == []
+
+
+def test_the_settled_clock_resets_on_a_book_move_and_a_state_change():
+    """Delaware, Clemson and Texas State all fail this one test even with
+    no cap at all: in each, the book's number had moved inside the last
+    two minutes. A wobble inside the tolerance does not reset it."""
+    clock = BookMoveClock()
+    clock.observe("g", TIED, american_to_implied(-174), _iso(0), _at(0), move_tol=0.02)
+    assert clock.quiet_seconds("g", _at(100)) == pytest.approx(100)
+    clock.observe("g", TIED, american_to_implied(-167), _iso(49), _at(52), move_tol=0.02)  # 0.0097 wobble
+    assert clock.quiet_seconds("g", _at(100)) == pytest.approx(100)
+    clock.observe("g", TIED, american_to_implied(100), _iso(150), _at(158), move_tol=0.02)
+    assert clock.quiet_seconds("g", _at(158)) == pytest.approx(0)
+    assert clock.quiet_seconds("g", _at(200)) == pytest.approx(42)
+    clock.observe("g", COASTAL_UP, american_to_implied(100), _iso(198), _at(300), move_tol=0.02)
+    assert clock.quiet_seconds("g", _at(330)) == pytest.approx(30)
+    assert clock.quiet_seconds("unseen") is None
 
 
 def test_the_ncaaf_guard_clears_once_the_state_feed_catches_up():

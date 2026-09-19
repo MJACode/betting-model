@@ -208,6 +208,12 @@ def extract_live_states_cfbd(payload: list, id_to_school: dict[int, str],
             "down": down,
             "distance": distance,
             "yardline_100": None,          # not in the scoreboard - NaN degrade
+            # The raw situation string, KEPT (2026-09-19): it carries the
+            # yard line ("3rd & 7 at TCU 25") that the model was trained on
+            # and is fed as NaN here, but its exact live shape has never been
+            # stored, so the parse cannot be written honestly yet. It rides
+            # in `ncaaf_live_states.raw_state` from this slate on.
+            "situation": g.get("situation"),
             "home_timeouts": None,
             "away_timeouts": None,
             "plays_run": None,
