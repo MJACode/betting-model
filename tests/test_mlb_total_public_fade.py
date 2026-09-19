@@ -282,3 +282,95 @@ def test_house_juice_floor_drops_a_minus_250_even_if_finder_slipped():
     games = {"G1": {"home": "NYY", "away": "BOS", "game_date": "2026-06-15",
                     "commence_time": "t"}}
     assert pick_rows([bet], games, {}, bankroll=10_000) == []
+
+
+# ── slate concentration (2026-09-19: 12/12 under) ────────────────────────────
+
+
+def _slate(tickets: list[float]):
+    """N games, each with a DK open and the given over-ticket pct."""
+    splits = {}
+    quotes = {}
+    games = {}
+    for i, tix in enumerate(tickets, start=1):
+        gid = f"G{i}"
+        splits[gid] = _split(gid=gid, ticket=tix)
+        key, row = _quote(gid, "draftkings")
+        quotes[key] = row
+        games[gid] = {
+            "home": "NYY", "away": "BOS",
+            "game_date": "2026-06-15",
+            "commence_time": COMMENCE,
+        }
+    return splits, quotes, games
+
+
+class _EmptyConn:
+    """No existing picks. Records what _insert_picks would have been given."""
+
+    def __init__(self):
+        self.inserted = []
+
+    def execute(self, _sql, _params=None):
+        return type("R", (), {"fetchone": staticmethod(lambda: None)})()
+
+    def commit(self):
+        return None
+
+
+def test_ten_game_all_under_slate_inserts_zero_bets(monkeypatch):
+    """The 2026-09-19 shape: every game ≥70% public over → every under.
+
+    Finder still flags them. The guard must make INSERT a no-op.
+    """
+    from scripts.mlb_total_public_fade_card import pick_rows, publish, rows_for_insert
+
+    tickets = [75.0, 80.0, 82.0, 90.0, 88.0, 77.0, 95.0, 71.0, 73.0, 85.0]
+    splits, quotes, games = _slate(tickets)
+    bets, diag = fade.find_fade_bets(splits, quotes, min_over_tickets=70)
+    assert len(bets) == 10, diag
+    assert all(b.over_ticket_pct >= 70 for b in bets)
+
+    # Without the guard this slate is 10 BET rows — the 2026-09-19 card.
+    unguarded = pick_rows(bets, games, quotes, bankroll=10_000)
+    assert len(unguarded) == 10
+    assert all(r["signal_type"] == "BET" and r["pick_side"] == "under"
+               for r in unguarded)
+
+    rows = rows_for_insert(bets, games, quotes, bankroll=10_000)
+    assert rows == []
+    assert not any(r.get("signal_type") == "BET" for r in rows)
+
+    recorded = []
+    monkeypatch.setattr(
+        "scripts.mlb_total_public_fade_card._insert_picks",
+        lambda _conn, keep: recorded.extend(keep),
+    )
+    n = publish(_EmptyConn(), rows)
+    assert n == 0
+    assert recorded == []
+
+
+def test_mixed_slate_three_unders_of_eight_still_allows_qualifying_unders():
+    """8 games, only 3 clear the ticket cut. n_bet=3 < 4 → guard is silent."""
+    from scripts.mlb_total_public_fade_card import rows_for_insert
+
+    tickets = [80.0, 75.0, 90.0, 55.0, 40.0, 60.0, 50.0, 65.0]
+    splits, quotes, games = _slate(tickets)
+    bets, diag = fade.find_fade_bets(splits, quotes, min_over_tickets=70)
+    assert len(bets) == 3, diag
+    assert {b.game_id for b in bets} == {"G1", "G2", "G3"}
+
+    rows = rows_for_insert(bets, games, quotes, bankroll=10_000)
+    assert len(rows) == 3
+    assert {r["game_id"] for r in rows} == {"G1", "G2", "G3"}
+    assert all(r["pick_side"] == "under" for r in rows)
+    assert all(r["signal_type"] == "BET" for r in rows)
+    assert all("Under" in r["pick_label"] for r in rows)
+
+
+def test_publish_stays_off_and_xgboost_stays_paused_after_the_guard():
+    assert config.MLB_TOTAL_PUBLIC_FADE_PUBLISH is False
+    assert fade.publish_enabled() is False
+    assert "mlb_over_under" in config.PAUSED_MODELS
+    assert "mlb_runline" in config.PAUSED_MODELS

@@ -18,6 +18,7 @@ Runs on the same pipeline step as the other MLB game-line cards
 | Line | Main total **5.5–14.5** |
 | Price window | Under American in **[-200, 200]** |
 | INSERT | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default **0** |
+| Slate guard | After candidate BETs: if one `pick_side` is **≥70%** of that model's BET count **and** n_bet **≥ 4**, **suppress all** (skip INSERT / notify). Shared helper: `models/slate_concentration.py`. |
 
 As-of is offset-aware (`_parse_iso_ts`). A lexicographic compare on
 `public_betting.snapshot_at` (`-04:00`) vs `games.commence_time` (`+00:00`)
@@ -26,6 +27,19 @@ A snapshot stamped **at** commence is refused (`<`, not `<=`).
 
 Lock is insert-once per `(game_id, model_id)` (§1c). A later tick must not
 replace the under that was taken.
+
+**Slate concentration / sanity guard** (2026-09-19). This card only ever
+bets UNDER. On 2026-09-19 it wrote `signal_type=BET` under on **12/12**
+games (public over tickets 75–95% everywhere) and notified the board.
+`models/slate_concentration.py` runs after candidate BETs are built and
+before INSERT/notify. Trigger: one `pick_side` ≥ **70%** of that model's
+BET count on the slate **and** n_bet ≥ **4**. Policy for this fade:
+**suppress all** (safer than top-K). A mixed slate that is not
+concentrated is untouched — 3 unders of 8 still publish the 3 that
+cleared the ticket cut. The helper is reusable by other game-market
+cards; they may choose `top_k` (K=2) instead. A WARN logs
+`n_bet`, `n_under`, `n_over`, `threshold`. The guard does not delete or
+rewrite a pick that already exists.
 
 `mlb_over_under` and `mlb_runline` stay in `PAUSED_MODELS`. This id is **not**
 in `GAME_MARKET_GATE_MODELS` — a public-steam overlay would veto the fade.
@@ -62,8 +76,12 @@ coverage caveat, not a re-grade of the table above.
    refuses post-start upserts; **already-overwritten history stays unusable**.
 3. n=64 is small. The t70 cell is the card; t80 is an env, not a second model.
 4. Do **not** set `MLB_TOTAL_PUBLIC_FADE_PUBLISH=1` without mike. Default 0
-   means the worker logs flags and writes nothing.
+   means the worker logs flags and writes nothing. Railway is 0 after the
+   2026-09-19 all-under card; **leave default 0** until mike says
+   otherwise. The slate guard is not a substitute for that gate.
 5. Do **not** unpause `mlb_over_under` / `mlb_runline` from this file.
+6. An all-under (or ≥70% one-side) slate of 4+ BETs is suppressed in full.
+   That is a sanity bound, not a new ticket cut.
 
 ## Env (Railway; redeploy after setting)
 

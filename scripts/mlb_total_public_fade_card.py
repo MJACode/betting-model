@@ -16,7 +16,13 @@ Deliberate and load-bearing:
   moves would replace a bet that was taken with one that never existed.
 
   MLB_TOTAL_PUBLIC_FADE_PUBLISH default 0. A pass with --publish still
-  logs; it writes picks only when the env is 1.
+  logs; it writes picks only when the env is 1. Do not flip that env
+  without mike.
+
+  SLATE CONCENTRATION. After candidate BETs are built, if one pick_side
+  is ≥70% of that model's BET count and n_bet ≥ 4, suppress every BET
+  (skip insert / notify). The 2026-09-19 card was 12/12 under. The
+  helper lives in models/slate_concentration.py.
 
     python -m scripts.mlb_total_public_fade_card
     python -m scripts.mlb_total_public_fade_card --date 2026-09-16 --publish
@@ -113,6 +119,17 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
     return rows
 
 
+def rows_for_insert(bets, games, quotes, bankroll: float) -> list[dict]:
+    """BET rows that may be INSERTed. Slate concentration is applied here.
+
+    A concentrated slate (one side ≥70% of n_bet ≥ 4) returns []. The
+    finder still reports the raw flags; this is the INSERT/notify bound.
+    """
+    rows = pick_rows(bets, games, quotes, bankroll)
+    kept, _ = fade.apply_slate_guard(rows, model_id=MODEL_ID)
+    return kept
+
+
 def publish(conn, rows: list[dict]) -> int:
     """Insert-once per game. A later tick must not replace the locked bet."""
     keep = []
@@ -166,17 +183,26 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
         logger.info("\n" + render(bets, diag))
         published = 0
         will_insert = bool(do_publish) and fade.publish_enabled()
+        # Guard runs even when INSERT is gated off so a concentrated slate
+        # is WARNed on the same pass that would have notified.
+        bankroll = _get_current_bankroll(conn) if (bets and will_insert) else 0.0
+        insert_rows = rows_for_insert(bets, games, quotes, bankroll)
         if do_publish and not will_insert:
             logger.info(
                 f"mlb total public fade: {len(bets)} flag(s) logged, INSERT "
                 f"gated off (set MLB_TOTAL_PUBLIC_FADE_PUBLISH=1 to write picks)")
-        if will_insert and bets:
-            bankroll = _get_current_bankroll(conn)
-            rows = pick_rows(bets, games, quotes, bankroll)
-            published = publish(conn, rows)
-            logger.info(f"published {published} new pick(s) of {len(bets)} flagged")
+        if will_insert and insert_rows:
+            published = publish(conn, insert_rows)
+            logger.info(
+                f"published {published} new pick(s) of {len(bets)} flagged "
+                f"({len(insert_rows)} after slate guard)")
+        elif bets and not insert_rows:
+            logger.info(
+                f"mlb total public fade: slate guard held {len(bets)} "
+                f"flag(s); nothing to insert")
         return {"flags": len(bets), "published": published,
-                "publish_enabled": fade.publish_enabled()}
+                "publish_enabled": fade.publish_enabled(),
+                "after_guard": len(insert_rows)}
     finally:
         conn.close()
 
