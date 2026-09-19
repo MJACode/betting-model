@@ -15,7 +15,13 @@
  * moment config.py moved.
  */
 
-import { MODEL_META, BET_TYPE_GROUPS, betTypeGroups } from '../src/lib/modelMeta';
+import {
+  MODEL_META,
+  BET_TYPE_GROUPS,
+  betTypeGroups,
+  betTypeStatusSuffix,
+  withdrawnRulesEmpty,
+} from '../src/lib/modelMeta';
 import {
   PAUSED_MODELS,
   isModelPaused,
@@ -90,6 +96,16 @@ check('a model the server leaves live still appears',
 setServerThresholds(null);
 check('clearing the server store restores the bundled pause set',
   !isModelPaused('mlb_moneyline') && isModelPaused('mlb_prop_batter_hits'));
+
+check('a paused rule chip is labelled (paused), not (retired)',
+  betTypeStatusSuffix('mlb_prop_batter_hits') === ' (paused)');
+check('a live rule chip has no status suffix',
+  betTypeStatusSuffix('mlb_moneyline') === '');
+check('an all-paused custom model gets the paused empty, not the quiet-slate one',
+  withdrawnRulesEmpty([{ model_id: 'mlb_over_under' }, { model_id: 'mlb_runline' }])
+    === 'Every bet type in this model has been paused — it is not producing new picks.');
+check('a mixed live+paused custom model is a quiet slate, not withdrawn',
+  withdrawnRulesEmpty([{ model_id: 'mlb_moneyline' }, { model_id: 'mlb_over_under' }]) === null);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

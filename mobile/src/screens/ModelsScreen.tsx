@@ -18,7 +18,7 @@ import {
 } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
-import { betTypeLabel, MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
+import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -146,9 +146,10 @@ export function ModelsScreen() {
         <FlatList
           data={builtInWithStats}
           keyExtractor={(item) => item.modelId}
-          // Every unpaused model is listed whether or not it has settled a bet,
-          // so the list is never empty and ListEmptyComponent never fires. A
-          // wall of "0 picks · — · —" is indistinguishable from a failed fetch
+          // Every active model is listed whether or not it has settled a bet.
+          // ListEmptyComponent fires when the sport has no catalog models
+          // (all paused or retired, or never covered). A wall of
+          // "0 picks · — · —" is indistinguishable from a failed fetch
           // (UX_REVIEW §3), and it has two different causes — say which.
           //
           // While the first fetch is in flight the rows are real but every stat
@@ -185,7 +186,13 @@ export function ModelsScreen() {
             ) : (
               <EmptyState
                 title={`No models listed for ${sport}`}
-                subtitle="No built-in models cover this sport yet."
+                subtitle={
+                  BUILTIN_MODEL_IDS.some(
+                    (id) => sportOf(id) === sport && !isModelRetired(id),
+                  )
+                    ? 'Paused models are hidden here. Their settled record stays on Track Record.'
+                    : 'No built-in models cover this sport yet.'
+                }
               />
             )
           }
@@ -365,7 +372,7 @@ function CustomModelRow({
   const decided = wins + losses;
   const roiColor = roiFlat > 0 ? colors.bet : roiFlat < 0 ? colors.avoid : colors.textSecondary;
   const shown = live.slice(0, CARD_BET_LIMIT);
-  const allRetired = model.rules.length > 0 && model.rules.every((r) => isModelRetired(r.model_id));
+  const withdrawnEmpty = withdrawnRulesEmpty(model.rules);
   return (
     <Pressable
       onPress={onPress}
@@ -378,7 +385,7 @@ function CustomModelRow({
           <Text style={styles.modelName}>{model.name}</Text>
           <Text style={styles.ruleCount} numberOfLines={2}>
             {model.rules
-              .map((r) => betTypeLabel(r.model_id) + (isModelRetired(r.model_id) ? ' (retired)' : ''))
+              .map((r) => betTypeLabel(r.model_id) + betTypeStatusSuffix(r.model_id))
               .join(' · ')}
           </Text>
         </View>
@@ -399,8 +406,8 @@ function CustomModelRow({
         </Text>
         {live.length === 0 ? (
           <Text style={styles.betsEmpty}>
-            {allRetired
-              ? 'Every bet type in this model has been retired — it is no longer scored.'
+            {withdrawnEmpty
+              ? withdrawnEmpty
               : liveLoading
                 ? 'Checking today’s board…'
                 : 'Nothing on the board qualifies right now.'}

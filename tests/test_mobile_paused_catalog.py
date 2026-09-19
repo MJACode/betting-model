@@ -47,6 +47,9 @@ def test_the_models_list_filters_paused_models():
     # is the thing this hide replaces. A sort that still keys on paused means
     # the list still contains them.
     assert "Number(isModelPaused" not in src
+    # Empty copy names the pause, not "this sport was never built" (UX review).
+    assert "Paused models are hidden here" in src
+    assert "withdrawnRulesEmpty" in src
 
 
 def test_the_bet_type_picker_filters_paused_models():

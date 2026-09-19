@@ -760,6 +760,34 @@ export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOptio
  *  so they cannot drift into three phrasings of the same state. */
 export const RETIRED_RULE_CAPTION = 'Retired — no longer scored or counted';
 
+/** Same role as RETIRED_RULE_CAPTION for a paused bet type. A pause does not
+ *  unsay the settled record, so this is about the FUTURE (no new picks), not
+ *  about the backtest. */
+export const PAUSED_RULE_CAPTION = 'Paused — not producing new picks';
+
+/** Suffix on a custom-model rule chip: retired first (stronger), then paused. */
+export function betTypeStatusSuffix(modelId: string): string {
+  if (isModelRetired(modelId)) return ' (retired)';
+  if (isModelPaused(modelId)) return ' (paused)';
+  return '';
+}
+
+/** Empty-board sentence when every rule on a custom model is withdrawn.
+ *  Retired (no longer scored) wins over paused (not producing new picks).
+ *  Null when at least one rule is still live — that empty is a quiet slate. */
+export function withdrawnRulesEmpty(
+  rules: ReadonlyArray<{ model_id: string }>,
+): string | null {
+  if (rules.length === 0) return null;
+  if (rules.every((r) => isModelRetired(r.model_id))) {
+    return 'Every bet type in this model has been retired — it is no longer scored.';
+  }
+  if (rules.every((r) => isModelRetired(r.model_id) || isModelPaused(r.model_id))) {
+    return 'Every bet type in this model has been paused — it is not producing new picks.';
+  }
+  return null;
+}
+
 export function betTypeLabel(modelId: string): string {
   return `${sportOfModel(modelId)} · ${modelLong(modelId)}`;
 }

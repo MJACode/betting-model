@@ -20,8 +20,8 @@ import {
   formatPctSigned,
   gameDayLabelET,
 } from '@/lib/format';
-import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
-import { isModelRetired } from '@/lib/thresholds';
+import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
+import { isModelRetired, isModelPaused } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
@@ -51,8 +51,9 @@ export function ModelDetailScreen() {
   const { modelId } = route.params;
   const { get } = useCustomModels();
   const model = get(modelId);
-  // Every rule on a retired bet type: the empties below say so, in the same
-  // words as the Models card that opened this screen.
+  // Live-board empty: retired or paused. Graded-picks empty: retired only —
+  // a pause does not unsay the backtest.
+  const withdrawnEmpty = withdrawnRulesEmpty(model?.rules ?? []);
   const allRetired =
     (model?.rules.length ?? 0) > 0 && (model?.rules ?? []).every((r) => isModelRetired(r.model_id));
   // Backtests run against every scored pick (BET + AVOID + dead-zone), graded
@@ -111,7 +112,11 @@ export function ModelDetailScreen() {
                 <View key={i} style={styles.ruleRow}>
                   <Text style={styles.ruleName}>{betTypeLabel(r.model_id)}</Text>
                   <Text style={styles.ruleParams}>
-                    {isModelRetired(r.model_id) ? RETIRED_RULE_CAPTION : describeRule(r)}
+                    {isModelRetired(r.model_id)
+                      ? RETIRED_RULE_CAPTION
+                      : isModelPaused(r.model_id)
+                        ? PAUSED_RULE_CAPTION
+                        : describeRule(r)}
                   </Text>
                 </View>
               ))}
@@ -165,8 +170,8 @@ export function ModelDetailScreen() {
               <ActivityIndicator style={styles.upcomingLoading} />
             ) : upcoming.length === 0 ? (
               <Text style={styles.upcomingEmpty}>
-                {allRetired
-                  ? 'Every bet type in this model has been retired — it is no longer scored.'
+                {withdrawnEmpty
+                  ? withdrawnEmpty
                   : "Nothing on the board matches right now. Picks appear here as they're scored."}
               </Text>
             ) : (
