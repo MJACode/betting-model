@@ -34,7 +34,7 @@ import {
   toggleChip,
 } from '@/lib/customModelFilters';
 import { formatPctSigned } from '@/lib/format';
-import { BET_TYPE_GROUPS, betTypeLabel, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
+import { betTypeGroups, betTypeLabel, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
 import { isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
@@ -861,7 +861,7 @@ function ModelPickerModal({
           <View style={{ width: 50 }} />
         </View>
         <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          {BET_TYPE_GROUPS.map((group) => (
+          {betTypeGroups().map((group) => (
             <View key={group.sport} style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>{group.sport}</Text>
               {group.options.map((m) => {

@@ -6,7 +6,7 @@ import {
   fetchUpcomingNcaafPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
-import { isModelRetired } from '@/lib/thresholds';
+import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
 
@@ -82,14 +82,15 @@ export function useTodayPicks(date?: string) {
         fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
-      // linger on the board for the rest of the day. A retired model's picks
-      // are dropped here too (Matt, 2026-09-02: "absent from display and not
-      // counted toward anything"). This hook feeds the Today/Signals
-      // board, the sport-toggle counts, the Models cards' live lists and the
-      // Stats odds pills, so one filter at the source keeps all of them in
-      // agreement — before this, the board drew a retired BET as a green,
-      // stakeable card while the header count excluded it. The rows stay in
-      // the DB as the record of what was published (§1c).
+      // linger on the board for the rest of the day. A retired or paused
+      // model's picks are dropped here too (Matt, 2026-09-02 / 2026-09-19:
+      // catalog and today's board show only active models). This hook feeds
+      // the Today/Signals board, the sport-toggle counts, the Models cards'
+      // live lists, the filter Market chips and the Stats odds pills, so one
+      // filter at the source keeps all of them in agreement — before this, the
+      // board drew a retired BET as a green, stakeable card while the header
+      // count excluded it. The rows stay in the DB as the record of what was
+      // published (§1c).
       //
       // A VOIDED pick is dropped here for exactly the same reason, and it has
       // to be HERE rather than only in passesActionFilter (2026-09-09). Five
@@ -103,6 +104,7 @@ export function useTodayPicks(date?: string) {
       const all = [...rows, ...ufcRows, ...nflRows, ...ncaafRows].filter(
         (d) => !isGameOver(d.game, d.pick.sport)
           && !isModelRetired(d.pick.model_id)
+          && !isModelPaused(d.pick.model_id)
           && d.pick.condition_status !== 'VOID',
       );
       setData(all);

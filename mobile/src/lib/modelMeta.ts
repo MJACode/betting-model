@@ -3,7 +3,7 @@
  * Mirrors the models registry in docs/history/build_state.md.
  */
 
-import { isModelRetired } from './thresholds';
+import { isModelPaused, isModelRetired } from './thresholds';
 
 /**
  * The market a model trades. `pitcher_prop` / `batter_prop` are MLB-only cuts;
@@ -731,14 +731,28 @@ const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
  * the model_id is only the plumbing underneath. Live (in-play) markets are
  * excluded: live picks are delete-and-rescored every pass and never graded
  * into the backtest universe, so a rule on them could match nothing.
+ * Paused and retired models are excluded too — same `isModelPaused` /
+ * `isModelRetired` the Models list and Stats add-pick use — so the picker
+ * cannot offer a market the catalog has withdrawn. Labels stay on MODEL_META
+ * so a pick those models already made still has a name.
  */
-export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOption[] }> =
-  BET_TYPE_SPORT_ORDER.map((sport) => ({
+export function betTypeGroups(): Array<{ sport: BetTypeSport; options: BetTypeOption[] }> {
+  return BET_TYPE_SPORT_ORDER.map((sport) => ({
     sport,
     options: Object.entries(MODEL_META)
-      .filter(([id]) => !id.includes('_live_') && !isModelRetired(id) && sportOfModel(id) === sport)
+      .filter(([id]) =>
+        !id.includes('_live_') &&
+        !isModelRetired(id) &&
+        !isModelPaused(id) &&
+        sportOfModel(id) === sport)
       .map(([id, meta]) => ({ id, label: meta.longLabel, sport, type: meta.type })),
   })).filter((g) => g.options.length > 0);
+}
+
+/** Module-load snapshot of `betTypeGroups()` (bundled pause set). Prefer the
+ *  function at a render site so a server-flag pause lands without a rebuild. */
+export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOption[] }> =
+  betTypeGroups();
 
 /** "MLB · Moneyline" — how a bet-type rule is titled everywhere it renders. */
 /** The one sentence every surface uses for a rule on a retired bet type — the

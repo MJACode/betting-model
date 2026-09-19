@@ -249,14 +249,15 @@ check('retired live models are still live models',
 
   const hrStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'home_runs') ?? null;
   const rbiStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'rbi') ?? null;
-  const hitsStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'hits') ?? null;
+  const runsStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'runs') ?? null;
   check('the home-runs stat is still on the leaderboard', hrStat != null);
   check('propModelForStat offers no model for home runs (retired)',
     propModelForStat(hrStat) === null);
   check('propModelForStat offers no model for RBIs (retired)',
     propModelForStat(rbiStat) === null);
+  // hits is paused (catalog hide, 2026-09-19); runs is the live batter prop.
   check('propModelForStat still resolves a live batter prop',
-    propModelForStat(hitsStat) === 'mlb_prop_batter_hits');
+    propModelForStat(runsStat) === 'mlb_prop_batter_runs');
   check('a pick a retired model already made still opens its player\'s stat page',
     statForPropModel('mlb_prop_batter_hr')?.key === 'home_runs');
 
