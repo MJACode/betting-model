@@ -108,10 +108,10 @@ Two layers — both defined in `config.py`:
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | **PAUSED** — scoring path on (real FanDuel/BetMGM F5 totals; DK Odds API still 0 rows). Artifact 2026-05-08 leak-era + synthetic-line trained. Retrain before BET. |
 | `mlb_f5_runline` | 65% | 15% | **PAUSED** — same as F5 O/U, for F5 spreads. A human CLE −1.5 is not `mlb_runline` and is not an unpause. |
-| `mlb_prop_pitcher_k`     | 71% | 6% | **+ DK ≥ -140 price floor (2026-07-11)** — full-outcome: capped slice 25 bets 17-8 +20.3% vs +8.9% uncapped; the juice-heavy tail bled. See config.MODEL_MIN_ODDS |
-| `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): 14 bets -33.5%, still red (retrain) |
+| `mlb_prop_pitcher_k`     | 58% | 8% | **PAUSED 2026-09-19 (mlb Handicap)** — current-artifact remesure (`game_date >= 2026-09-04`): K over 16 / −11.88u / −74.3%; K under +2.9%/40 Sep-only, no side gate. Cut kept. |
+| `mlb_prop_pitcher_hits`  | 54% | 8% | **PAUSED 2026-09-19 (mlb Handicap)** — current-artifact remesure: hits over 27 / −5.90u / −21.8%. Cut kept. |
 | `mlb_prop_pitcher_er`    | 62% | 8% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
-| `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: 15 bets +3.7% — only profitable pitcher prop |
+| `mlb_prop_pitcher_outs`  | 50% | 12% | **PAUSED 2026-09-19 (mlb Handicap)** — current-artifact remesure: outs under 33 / −4.46u / −13.5%. Cut kept. |
 | `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
@@ -134,10 +134,10 @@ Two layers — both defined in `config.py`:
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_f5_over_under` | 65% | 15% | **PAUSED** — scoring on real multi-book F5 totals; BET waits leak-era retrain. |
 | `mlb_f5_runline` | 65% | 15% | **PAUSED** — same, F5 spreads. |
-| `mlb_prop_pitcher_k`     | 71% | 6% | + DK ≥ -140 price floor (2026-07-11): capped +20.3%/25 |
-| `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
+| `mlb_prop_pitcher_k`     | 58% | 8% | **PAUSED 2026-09-19 (mlb Handicap)** — remesure K over −74.3%/16; K under +2.9%/40. Cut kept. |
+| `mlb_prop_pitcher_hits`  | 54% | 8% | **PAUSED 2026-09-19 (mlb Handicap)** — remesure hits over −21.8%/27. Cut kept. |
 | `mlb_prop_pitcher_er`    | 62% | 8% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration |
-| `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: +3.7% — only profitable pitcher prop |
+| `mlb_prop_pitcher_outs`  | 50% | 12% | **PAUSED 2026-09-19 (mlb Handicap)** — remesure outs under −13.5%/33. Cut kept. |
 | `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
@@ -354,24 +354,24 @@ even money and a fixed number would mis-call every one of them.
 
 | Model | Since | Trigger | Count at 2026-09-08 | Then |
 |---|---|---|---|---|
-| `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | 35 (16W, bx .530, −4.81u, z −0.86) | pause if still below breakeven |
-| `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | 15 (6W, bx .503, −3.92u, z −0.80) | pause if still below breakeven |
+| `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | **PAUSED 2026-09-19 (mlb Handicap)** before n=75. Current-artifact remesure: K over 16 / −11.88u / −74.3%; K under +2.9%/40 | paused; cut kept |
+| `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | **PAUSED 2026-09-19 (mlb Handicap)** before n=75. Current-artifact remesure: outs under 33 / −4.46u / −13.5% | paused; cut kept |
 | `mlb_live_total_runs` | ~~2026-08-31~~ **2026-09-09** | ~~n ≥ 150~~ **n ≥ 75** | 0 on the current artifact (the 70 above were the June model, retired 09-09) | re-sweep the cut on the honest replay — see "mlb_live_total_runs cut, 2026-09-09" |
 | `ncaaf_live_total` | 2026-08-30 | 2026-09-13 | **LIVE, 0.73 × EV 0.24, FBS-vs-FBS only (mike, 2026-09-13)**. Unpaused 09-12 at 0.72 × 0.22; tightened after 43 BETs in one week, 24 of them FBS-vs-FCS. Replay FBS-vs-FBS 17 bets +21.3%, only 3 in the second half — not proven better. `docs/sports/ncaaf.md` | re-sweep on production once ~50 BETs settle under these rules |
 | `ncaaf_live_win_prob` | 2026-08-30 | 2026-09-12 | **LIVE, 0.65 × EV 0.26 on the pregame-corrected scale, FBS-vs-FBS only from 2026-09-13**. Qualifies at DK, bets at the best book (#694) | same |
 
-**Why `k` is not paused today**, given it is the largest single loss in the
-30-day table at −18.30u/72: **that record spans two artifacts.** Split at the
-09-04 retrain, the pre-retrain version is 13/37 (35.1%) at z = −2.36 and the
-current one is 16/35 (45.7%) at z = −0.86. The significant loss belongs to a
-model that no longer exists. Across ~12 models tested you expect ~0.6 hits at
-p<0.05 by chance, so one pre-retrain z of −2.36 is roughly one lucky draw.
+**Why `k` / `outs` / `hits` are paused (2026-09-19, mlb Handicap).** The dated-review
+n≥75 clock was not met. A later current-artifact remesure (`game_date >= 2026-09-04`,
+pregame BET, priced, WIN/LOSS, not VOID) is red on the sides that actually fire:
+K over 16 / −11.88u / −74.3%; outs under 33 / −4.46u / −13.5%; hits over 27 /
+−5.90u / −21.8%. K under is +2.9%/40 and Sep-only; there is no per-side gate, so
+the whole writer is paused. Cuts stay in `ACTION_THRESHOLDS`. The older 30-day
+−18.30u/72 figure still spans two artifacts and is not the pause evidence.
 
-**Why `outs` is on the list at all**, having been treated as the healthy one:
+**Why `outs` was on the list at all**, having been treated as the healthy one:
 the top-2 cap shipped in #572 was swept on the pooled 08-24 → 09-06 window,
-where `outs` graded +3.69u uncapped. On its **current artifact** it is −3.92u
-over 15. That does not invalidate the cap — different, smaller population — but
-it earns the same checkpoint.
+where `outs` graded +3.69u uncapped. On its **current artifact** it was −3.92u
+over 15 at the 2026-09-08 checkpoint, then −4.46u / 33 unders by 2026-09-19.
 
 **Live carries an addendum.** It has no fast feedback measure at all (there is no
 live CLV — `docs/live_betting.md` has the measurement), so the settled count is

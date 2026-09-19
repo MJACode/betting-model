@@ -375,10 +375,10 @@ ACTION_THRESHOLDS: dict = {
     "mlb_prop_batter_hits":   {"min_prob": 0.78, "min_edge": 0.17},  # 2026-06-28 full-outcome re-sweep: 0.78/0.17 = 77 bets 56-21 +8.3% (genuine combo found — UNPAUSED from the 2026-06-21 pause)
     "mlb_prop_batter_tb":     {"min_prob": 0.83, "min_edge": 0.17},  # 2026-06-21 RE-SWEEP: NO winning cut (best -4.2%) — least-bad, RETRAIN candidate
     "mlb_prop_batter_walks":  {"min_prob": 0.45, "min_edge": 0.14},  # 2026-06-21 full-outcome RE-SWEEP: 0.45/0.14 = 65 bets +5.3% (only positive pocket; high-edge/low-prob)
-    "mlb_prop_pitcher_outs":  {"min_prob": 0.5, "min_edge": 0.12},  # 2026-08-31 (mike) UNPAUSED at its EXISTING cut -- the floor correction is what changed, not the numbers. On the uncorrected sweep this failed the time split; with the -140 floor applied (26.1% of its rows) the same cell grades 79 bets 46-33 +20.7%, ~25.1/wk, the largest volume on the board. The halves are +0.7% then +40.2%: positive throughout, so it survives, but the first half is break-even and the verdict rests on the second. FIRST TO RE-CHECK.
-    "mlb_prop_pitcher_k":     {"min_prob": 0.58, "min_edge": 0.08},  # 2026-08-31 (mike): 0.71/0.06 -> 0.58/0.08 on the floor-corrected calibrated sweep = 25 bets 15-10 +14.8%, +11.3% then +18.0% by half, ~5.4/wk.
+    "mlb_prop_pitcher_outs":  {"min_prob": 0.5, "min_edge": 0.12},  # 2026-09-19 PAUSED (mlb Handicap) — current-artifact remesure, outs under 33 / -4.46u / -13.5% (game_date >= 2026-09-04, pregame BET, priced, WIN/LOSS, not VOID). Cut kept. 2026-08-31 (mike) UNPAUSED at its EXISTING cut -- the floor correction is what changed, not the numbers. On the uncorrected sweep this failed the time split; with the -140 floor applied (26.1% of its rows) the same cell grades 79 bets 46-33 +20.7%, ~25.1/wk, the largest volume on the board. The halves are +0.7% then +40.2%: positive throughout, so it survives, but the first half is break-even and the verdict rests on the second. FIRST TO RE-CHECK.
+    "mlb_prop_pitcher_k":     {"min_prob": 0.58, "min_edge": 0.08},  # 2026-09-19 PAUSED (mlb Handicap) — current-artifact remesure, K over 16 / -11.88u / -74.3%; K under +2.9%/40 Sep-only, no side gate, paused for consistency. Cut kept. 2026-08-31 (mike): 0.71/0.06 -> 0.58/0.08 on the floor-corrected calibrated sweep = 25 bets 15-10 +14.8%, +11.3% then +18.0% by half, ~5.4/wk.
     "mlb_prop_pitcher_er":    {"min_prob": 0.61, "min_edge": 0.08},  # 2026-06-21 ≥10% target: 0.61/0.08 = 81 bets +11.1% (CI [-8.3,+30.5])
-    "mlb_prop_pitcher_hits":  {"min_prob": 0.54, "min_edge": 0.08},  # 2026-08-31 (mike) UNPAUSED. The clearest evidence in the repo that the defect was the probability, not the model: on raw numbers this is the worst model on the board (-27.9% ROI, claims 70.5% and delivers 38.5% over 65 bets), and on calibrated numbers at 0.54/0.08 it grades 95 bets 49-46 +11.0%, +13.2% then +8.7% by half, ~19.8/wk. Identical before and after the price-floor correction -- its floor blocks only 23.5% and none of them mattered.
+    "mlb_prop_pitcher_hits":  {"min_prob": 0.54, "min_edge": 0.08},  # 2026-09-19 PAUSED (mlb Handicap) — current-artifact remesure, hits over 27 / -5.90u / -21.8% (game_date >= 2026-09-04). Cut kept. 2026-08-31 (mike) UNPAUSED. The clearest evidence in the repo that the defect was the probability, not the model: on raw numbers this is the worst model on the board (-27.9% ROI, claims 70.5% and delivers 38.5% over 65 bets), and on calibrated numbers at 0.54/0.08 it grades 95 bets 49-46 +11.0%, +13.2% then +8.7% by half, ~19.8/wk. Identical before and after the price-floor correction -- its floor blocks only 23.5% and none of them mattered.
     "mlb_prop_pitcher_walks": {"min_prob": 0.6, "min_edge": 0.08},  # 2026-06-21 full-outcome: +6.3%/66
     # Binary/rare-event models — prob scale differs from Poisson
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.10},  # NO winning cut — already current-window v2; needs feature work, not retrain
@@ -1044,6 +1044,20 @@ PAUSED_MODELS: set = {
     # in the dicts below for the unpause.
     "mlb_prop_pitcher_er",
     "mlb_prop_pitcher_walks",
+    # 2026-09-19 PAUSED (mlb Handicap). Current-artifact remesure — pregame
+    # BET, priced, result IN (WIN,LOSS), not VOID, game_date >= 2026-09-04
+    # (active pkls from 2026-09-03; first live BET 2026-09-04):
+    #   mlb_prop_pitcher_k    over  16 / -11.88u / -74.3%
+    #                         under 40 / +1.15u  / +2.9%   (Sep-only)
+    #   mlb_prop_pitcher_outs under 33 / -4.46u  / -13.5%
+    #   mlb_prop_pitcher_hits over  27 / -5.90u  / -21.8%
+    # No per-side gate exists (scorer writes both sides of one model_id).
+    # K under is thin and Sep-only; pause the whole writer for consistency.
+    # Cuts stay in ACTION_THRESHOLDS. Still score as NONE rows. Do not
+    # unpause anything else; I24 / mlb_spread_market stay PUBLISH=0.
+    "mlb_prop_pitcher_k",
+    "mlb_prop_pitcher_hits",
+    "mlb_prop_pitcher_outs",
     "mlb_prop_batter_tb",      # best 60+ cut -1.7% — retrain (efficient market; needs contact-quality features)
     "mlb_prop_batter_sb",      # can't reach 60 bets at any cut — needs catcher CS%/pop-time (not ingested)
     # 2026-09-03 PAUSED (mike). Dormant since 2026-07-23, not broken -- it scored
