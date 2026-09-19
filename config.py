@@ -1543,6 +1543,18 @@ MLB_TOTAL_PUBLIC_FADE_PUBLISH: bool = (
 MLB_TOTAL_PUBLIC_FADE_TICKET_PCT: float = float(
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_TICKET_PCT", "70")
 )
+# Under-juice filter on the shopped price. any | ge_m115 | ge_m110 |
+# ge_m105 | plus. Default any = the blunt card. Selective grid:
+# docs/mlb_total_public_fade_selective.md. Do not flip PUBLISH with this.
+MLB_TOTAL_PUBLIC_FADE_JUICE: str = (
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_JUICE", "any").strip().lower()
+    or "any"
+)
+# Max UNDER flags per game_date after ticket+juice. Empty/0 = unlimited.
+_fade_cap = os.environ.get("MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", "").strip()
+MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE: int | None = (
+    int(_fade_cap) if _fade_cap and _fade_cap not in ("0", "none") else None
+)
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
 )

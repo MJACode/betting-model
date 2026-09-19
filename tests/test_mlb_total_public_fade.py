@@ -208,6 +208,53 @@ def test_under_price_outside_window_is_dropped():
     assert bets2 == []
 
 
+def test_juice_ge_m110_drops_minus_115_keeps_minus_105():
+    juicy = _dk_board(under=-115)
+    keep = _dk_board(under=-105)
+    out, diag = fade.find_fade_bets(
+        {"G1": _split(ticket=90)}, juicy, min_over_tickets=70, juice="ge_m110")
+    assert out == []
+    assert diag["juice_out"] == 1
+    kept, _ = fade.find_fade_bets(
+        {"G1": _split(ticket=90)}, keep, min_over_tickets=70, juice="ge_m110")
+    assert len(kept) == 1
+    assert kept[0].price == -105
+    plus, _ = fade.find_fade_bets(
+        {"G1": _split(ticket=90)}, _dk_board(under=100),
+        min_over_tickets=70, juice="plus")
+    assert len(plus) == 1
+    no_plus, _ = fade.find_fade_bets(
+        {"G1": _split(ticket=90)}, keep, min_over_tickets=70, juice="plus")
+    assert no_plus == []
+
+
+def test_slate_cap_keeps_highest_ticket_unders():
+    splits = {
+        "G1": _split(gid="G1", ticket=95, **{"game_date": "2026-09-19"}),
+        "G2": _split(gid="G2", ticket=80, **{"game_date": "2026-09-19"}),
+        "G3": _split(gid="G3", ticket=88, **{"game_date": "2026-09-19"}),
+        "G4": _split(gid="G4", ticket=91, **{"game_date": "2026-09-19"}),
+    }
+    quotes = {}
+    for gid in splits:
+        k, row = _quote(gid, "draftkings")
+        quotes[k] = row
+    bets, diag = fade.find_fade_bets(
+        splits, quotes, min_over_tickets=70, juice="any", slate_cap=3)
+    assert {b.game_id for b in bets} == {"G1", "G3", "G4"}
+    assert diag["slate_capped"] == 1
+    uncapped, _ = fade.find_fade_bets(
+        splits, quotes, min_over_tickets=70, juice="any", slate_cap=None)
+    assert len(uncapped) == 4
+
+
+def test_juice_and_cap_defaults_do_not_change_the_blunt_card():
+    assert fade.juice_spec() == "any"
+    assert fade.max_per_slate() is None
+    assert config.MLB_TOTAL_PUBLIC_FADE_JUICE == "any"
+    assert config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE is None
+
+
 def test_always_under_one_per_game():
     quotes = _quotes(
         _quote("G1", "draftkings", under=-110),

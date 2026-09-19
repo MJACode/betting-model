@@ -7,12 +7,20 @@ Code: `models/mlb_total_public_fade.py`, `scripts/mlb_total_public_fade_card.py`
 Runs on the same pipeline step as the other MLB game-line cards
 (`mlb-game-market` / refresh_pass) and as `--step mlb-total-public-fade`.
 
+**Selective recut (2026-09-19 grid):** blunt t70 flooded 12/12 on
+2026-09-19 (those 12 are VOID). The ticket × juice × holdout grid is
+`docs/mlb_total_public_fade_selective.md`. Recommended paper rule:
+**over tickets ≥ 90, juice any, max 3 / slate.** Defaults in config stay
+70 / any / unlimited. Do not flip `PUBLISH`.
+
 ## The card
 
 | Piece | Rule |
 |---|---|
 | Source | `public_betting` consensus totals, **last** snapshot with `snapshot_at < commence_time` |
-| Trigger | OVER tickets ≥ `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` (default **70**; **80** supported) |
+| Trigger | OVER tickets ≥ `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` (default **70**; **80** and **90** supported) |
+| Juice | `MLB_TOTAL_PUBLIC_FADE_JUICE` default **any** (grid rejected every floor) |
+| Slate cap | `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` default unlimited; recommended paper **3** |
 | Side | Always UNDER |
 | Price | Best open under among DK / FD / MGM / WH (`williamhill_us`) at **DK’s open total**; fallback DK |
 | Line | Main total **5.5–14.5** |
@@ -68,13 +76,18 @@ coverage caveat, not a re-grade of the table above.
 
 ## Caveats (load-bearing)
 
-1. **~85–99 pre-commence public games in the DB**, not a season. Action
-   Network splits start 2026-05-31. **Zero rows in 2019–2025.**
+1. **136 honest pre-commence public games as of 2026-09-19**, not a
+   season (Jun 59, Jul 25, Aug **0**, Sep 52). Action Network splits
+   start 2026-05-31. **Zero rows in 2019–2025.** The 2026-09-16 note of
+   ~85–99 is the same table before Sep 16–19 honest coverage landed.
 2. `public_betting` is `UNIQUE(game_id, market, side, book)` — last upsert
    wins. Hourly refresh historically overwrote the pre-game split with a
-   post-start fetch (August honest coverage: 2 games). The ingestor now
+   post-start fetch (August honest coverage: 0). The ingestor now
    refuses post-start upserts; **already-overwritten history stays unusable**.
-3. n=64 is small. The t70 cell is the card; t80 is an env, not a second model.
+3. The 2026-09-16 t70 +8.5% / 64 is the overwrite leftover. Re-grade
+   2026-09-19: t70 +5.0% / 101 overall, **−11.5% / 43** on complete-
+   coverage days, **−15.8% / 34** in September. See
+   `docs/mlb_total_public_fade_selective.md`.
 4. Do **not** set `MLB_TOTAL_PUBLIC_FADE_PUBLISH=1` without mike. Default 0
    means the worker logs flags and writes nothing. Railway is 0 after the
    2026-09-19 all-under card; **leave default 0** until mike says
@@ -88,4 +101,6 @@ coverage caveat, not a re-grade of the table above.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` | `0` | `1` writes BET rows |
-| `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Over-ticket cut; `80` is the tighter neighbour |
+| `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Over-ticket cut; recommended paper **90** |
+| `MLB_TOTAL_PUBLIC_FADE_JUICE` | `any` | `any` / `ge_m115` / `ge_m110` / `ge_m105` / `plus` |
+| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | empty | Max unders per date; recommended paper **3** |

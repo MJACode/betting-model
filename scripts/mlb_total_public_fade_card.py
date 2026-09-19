@@ -151,7 +151,11 @@ def publish(conn, rows: list[dict]) -> int:
 def render(bets, diag) -> str:
     lines = [f"MLB totals public-fade card — {len(bets)} flag(s)  "
              f"[cut {fade.ticket_threshold():.0f}tix · "
+             f"juice {fade.juice_spec()} · "
+             f"cap {fade.max_per_slate() or 'none'} · "
              f"below {diag.get('below_cut', 0)} · "
+             f"juice-out {diag.get('juice_out', 0)} · "
+             f"slate-capped {diag.get('slate_capped', 0)} · "
              f"no-DK {diag.get('no_dk', 0)} · "
              f"line-out {diag.get('line_out', 0)} · "
              f"no-price {diag.get('no_price', 0)}]"]
@@ -179,7 +183,11 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
         quotes = mk.load_latest_quotes(conn, SPORT, MARKET, gids)
         splits = fade.load_public_over_splits(conn, gids)
         bets, diag = fade.find_fade_bets(
-            splits, quotes, min_over_tickets=fade.ticket_threshold())
+            splits, quotes,
+            min_over_tickets=fade.ticket_threshold(),
+            juice=fade.juice_spec(),
+            slate_cap=fade.max_per_slate(),
+        )
         logger.info("\n" + render(bets, diag))
         published = 0
         will_insert = bool(do_publish) and fade.publish_enabled()

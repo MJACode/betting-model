@@ -59,6 +59,18 @@ PRICE_MAX = 200.0
 DEFAULT_OVER_TICKETS = 70.0
 
 
+# Juice floors the grid names. American comparison is valid in-window:
+# +100 > -105 > -110 > -115 > -130. "plus" is price > 0.
+JUICE_SPECS = ("any", "ge_m115", "ge_m110", "ge_m105", "plus")
+JUICE_FLOORS = {
+    "any": None,
+    "ge_m115": -115.0,
+    "ge_m110": -110.0,
+    "ge_m105": -105.0,
+    "plus": 0.0,  # exclusive; juice_allows uses spec == "plus"
+}
+
+
 @dataclass(frozen=True)
 class PublicFadeBet:
     game_id: str
@@ -68,11 +80,79 @@ class PublicFadeBet:
     over_ticket_pct: float
     quote_snap: str | None = None
     public_snap: str | None = None
+    game_date: str | None = None
+    over_money_pct: float | None = None
 
 
 def ticket_threshold() -> float:
     """Over-ticket cut. Env MLB_TOTAL_PUBLIC_FADE_TICKET_PCT, default 70."""
     return float(config.MLB_TOTAL_PUBLIC_FADE_TICKET_PCT)
+
+
+def juice_spec() -> str:
+    """Under-juice filter. Env MLB_TOTAL_PUBLIC_FADE_JUICE, default any."""
+    spec = str(getattr(config, "MLB_TOTAL_PUBLIC_FADE_JUICE", "any") or "any")
+    spec = spec.strip().lower()
+    if spec not in JUICE_SPECS:
+        raise ValueError(f"unknown juice spec {spec!r}; allowed {JUICE_SPECS}")
+    return spec
+
+
+def max_per_slate() -> int | None:
+    """Optional per-date cap. Env MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE."""
+    raw = getattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", None)
+    if raw is None or raw == "":
+        return None
+    n = int(raw)
+    if n <= 0:
+        return None
+    return n
+
+
+def juice_allows(price: float, spec: str = "any") -> bool:
+    """True when the shopped under American clears `spec`.
+
+    `any` keeps the existing [-200, 200] window (already applied at shop).
+    `ge_m115` / `ge_m110` / `ge_m105` are inclusive American floors.
+    `plus` is plus-money only (price > 0).
+    """
+    if spec not in JUICE_SPECS:
+        raise ValueError(f"unknown juice spec {spec!r}")
+    p = float(price)
+    if spec == "any":
+        return True
+    if spec == "plus":
+        return p > 0
+    floor = JUICE_FLOORS[spec]
+    return p >= float(floor)
+
+
+def apply_juice(bets: list[PublicFadeBet], spec: str = "any"
+                ) -> list[PublicFadeBet]:
+    return [b for b in bets if juice_allows(b.price, spec)]
+
+
+def apply_slate_cap(bets: list[PublicFadeBet], cap: int | None
+                    ) -> list[PublicFadeBet]:
+    """Keep the heaviest over-ticket bets per game_date, up to `cap`.
+
+    Tie-break: better (higher American) under price, then game_id.
+    Bets without a game_date share one bucket. cap None/<=0 is a no-op.
+    """
+    if cap is None or int(cap) <= 0:
+        return list(bets)
+    groups: dict[str, list[PublicFadeBet]] = defaultdict(list)
+    for b in bets:
+        groups[b.game_date or ""].append(b)
+    keep: list[PublicFadeBet] = []
+    limit = int(cap)
+    for _day, rows in groups.items():
+        ranked = sorted(
+            rows,
+            key=lambda b: (-b.over_ticket_pct, -b.price, b.game_id),
+        )
+        keep.extend(ranked[:limit])
+    return keep
 
 
 def publish_enabled() -> bool:
@@ -182,6 +262,8 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
                    min_over_tickets: float | None = None,
                    soft_books: tuple[str, ...] | None = None,
                    fallback_book: str = FALLBACK_BOOK,
+                   juice: str | None = None,
+                   slate_cap: int | None = None,
                    ) -> tuple[list[PublicFadeBet], dict]:
     """One UNDER per game when pre-commence over tickets clear the cut.
 
@@ -190,10 +272,16 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
     from `models.mlb_game_market.load_latest_quotes` (OPEN, leak-bounded).
     DK open is required (the measured universe is public ∩ DK open). Other
     books may improve the under price at the same total.
+
+    `juice` defaults to `juice_spec()` (env, default `any`). `slate_cap`
+    defaults to `max_per_slate()` (env, default None = unlimited). Neither
+    changes the blunt t70 card unless the env is set.
     """
     cut = (DEFAULT_OVER_TICKETS if min_over_tickets is None
            else float(min_over_tickets))
     books_order = tuple(soft_books) if soft_books is not None else SOFT_BOOKS
+    spec = juice_spec() if juice is None else str(juice)
+    cap = max_per_slate() if slate_cap is None else slate_cap
     diag: dict[str, int] = defaultdict(int)
     by_game: dict[str, dict] = defaultdict(dict)
     for (gid, bk), q in quotes.items():
@@ -223,13 +311,23 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
             diag["no_price"] += 1
             continue
         book, price, snap = shopped
+        if not juice_allows(price, spec):
+            diag["juice_out"] += 1
+            continue
+        money = numeric_feature_value(
+            raw.get("over_money_pct", raw.get("public_money_pct")))
+        date = raw.get("game_date")
         diag["bets"] += 1
         bets.append(PublicFadeBet(
             game_id=gid, book=book, line=float(line), price=float(price),
             over_ticket_pct=float(ticket),
             quote_snap=snap, public_snap=raw.get("snapshot_at"),
+            game_date=str(date)[:10] if date else None,
+            over_money_pct=float(money) if money is not None else None,
         ))
-    return bets, dict(diag)
+    capped = apply_slate_cap(bets, cap)
+    diag["slate_capped"] = max(0, len(bets) - len(capped))
+    return capped, dict(diag)
 
 
 def apply_slate_guard(
@@ -266,7 +364,7 @@ def load_public_over_splits(conn, game_ids: list[str]) -> dict[str, dict]:
         return {}
     rows = conn.execute("""
         SELECT pb.game_id, pb.public_bet_pct, pb.public_money_pct,
-               pb.snapshot_at, g.commence_time
+               pb.snapshot_at, g.commence_time, g.game_date
         FROM public_betting pb
         JOIN games g ON g.game_id = pb.game_id
         WHERE pb.game_id = ANY(%s)
@@ -282,6 +380,8 @@ def load_public_over_splits(conn, game_ids: list[str]) -> dict[str, dict]:
             "public_money_pct": r[2],
             "snapshot_at": r[3],
             "commence_time": r[4],
+            "game_date": r[5],
             "ticket": r[1],
+            "over_money_pct": r[2],
         })
     return select_latest_pre_commence_over(parsed)
