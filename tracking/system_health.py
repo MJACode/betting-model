@@ -508,6 +508,7 @@ def _calibration_eligibility_notes(conn, model_ids: list[str]) -> list[str]:
             transfer_gap_pp=verdict.get("transfer_gap_pp"),
             promoted=bool(promoted),
             cand_a=a, cand_b=b, prom_a=pa, prom_b=pb,
+            endorsed=verdict.get("endorsed"),
         )
         if note:
             notes.append(note)

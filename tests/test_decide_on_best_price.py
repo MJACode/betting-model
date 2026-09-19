@@ -67,6 +67,8 @@ def _rules(monkeypatch):
     monkeypatch.setattr(scorer, "DECIDE_ON_BEST_PRICE", True)
     monkeypatch.setattr(scorer, "_is_paused", lambda mid: False)
     monkeypatch.setattr(scorer, "_blocked_by_min_odds", lambda mid, odds: False)
+    # The best-price mechanics, not the global EV floor (tests/test_global_ev_floor.py).
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.0)
 
 
 def _dk_pick(model_id=MODEL, prob=0.66, dk_odds=-150.0, **over):

@@ -1269,6 +1269,19 @@ def _decide(model_id: str, model_prob: float, implied_prob: float | None,
     else:
         signal_type = "NONE"
 
+    # THE GLOBAL EV FLOOR (mike, 2026-09-19: "only best of the best in terms of
+    # expected value"). On the CALIBRATED probability at the deciding price,
+    # after the cut so it only ever tightens, and only where a price exists.
+    # config.min_ev_for is the one accessor every writer reads.
+    if signal_type == "BET" and not no_price:
+        ev = config.expected_value(decision_prob, odds)
+        floor = config.min_ev_for(model_id)
+        if ev is not None and ev < floor:
+            logger.debug(f"  {model_id}: EV {ev:+.3f} below the {floor:.2f} floor "
+                         f"(p {model_prob:.3f}->{decision_prob:.3f} at {odds:+.0f}) "
+                         f"— BET → NONE")
+            signal_type = "NONE"
+
     # Price too juicy for this model (config.MODEL_MIN_ODDS) -- no bet. A NULL
     # price (prob-only fallback) is never blocked here; _missing_price is.
     if signal_type == "BET" and _blocked_by_min_odds(model_id, odds):

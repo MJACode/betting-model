@@ -98,6 +98,10 @@ class Decision:
     state_ref: datetime | None = None
     quote_ref: datetime | None = None
     context: dict = field(default_factory=dict)
+    # The HONEST probability the EV was judged on (2026-09-19): model_prob is
+    # the model's raw claim, kept raw so the record reads like every other
+    # model's; this is the promoted calibration map applied to it.
+    model_prob_cal: float | None = None
 
     def to_row(self) -> dict:
         return {
@@ -119,7 +123,35 @@ class Decision:
             "state_ref": self.state_ref.isoformat() if self.state_ref else None,
             "quote_ref": self.quote_ref.isoformat() if self.quote_ref else None,
             "context": self.context,
+            "model_prob_cal": self.model_prob_cal,
         }
+
+
+def honest_probability(model_id: str, model_prob: float) -> float:
+    """The platform's promoted calibration map applied (2026-09-19, mike:
+    every model decides on its honest number). Identity when the platform
+    models are not importable (this package also runs standalone) or the
+    lookup fails -- models.scorer._calibrated never raises."""
+    # importlib, not a bare `models` import: under nfl/ that name resolves
+    # to the platform's package on every scheduled run
+    # (tests/test_nfl_model_imports.py) -- which here is the one we want,
+    # and the loader form keeps the tripwire honest.
+    try:
+        _hp = importlib.import_module("models.honest_ev").honest_probability
+        return _hp(model_id, model_prob)
+    except Exception:  # noqa: BLE001 - standalone use
+        return model_prob
+
+
+def ev_floor(model_id: str) -> float:
+    """This lane's EV bar: its own EV_THRESHOLDS entry or the platform's
+    global floor (config.min_ev_for), whichever is higher."""
+    own = EV_THRESHOLDS.get(model_id, 0.0)
+    try:
+        import config as _platform
+        return max(own, _platform.min_ev_for(model_id))
+    except Exception:  # noqa: BLE001 - standalone use
+        return own
 
 
 # --------------------------------------------------------------------- edge
@@ -288,7 +320,12 @@ class Executor:
             if _v and _k not in ctx:
                 ctx[_k] = _v
         market_prob = american_to_prob(quote.price)
-        ev = expected_value(model_prob, quote.price)
+        # THE EV IS JUDGED ON THE HONEST PROBABILITY (2026-09-19). model_prob
+        # stays the raw claim on the record; the calibrated number rides
+        # beside it and is what the floor below reads.
+        model_prob_cal = (honest_probability(model_id, model_prob)
+                          if 0.0 < model_prob < 1.0 else model_prob)
+        ev = expected_value(model_prob_cal, quote.price)
 
         def _mk(bet: bool, reason: str, stake: float = 0.0) -> Decision:
             d = Decision(
@@ -298,6 +335,7 @@ class Executor:
                 market_prob=market_prob, ev=ev, bet=bet, reason=reason,
                 stake_fraction=stake, player=getattr(quote, "player", None),
                 state_ref=state.ts, quote_ref=quote.ts, context=ctx,
+                model_prob_cal=model_prob_cal,
             )
             self._record(d)
             return d
@@ -360,7 +398,9 @@ class Executor:
         if quote.price < MIN_PRICE:
             return _mk(False, f"price_past_ceiling:{quote.price:.0f}<{MIN_PRICE:.0f}")
 
-        threshold = EV_THRESHOLDS[model_id]
+        # The lane's own bar or the platform's global EV floor, whichever is
+        # higher (2026-09-19), on the calibrated EV computed above.
+        threshold = ev_floor(model_id)
         if ev < threshold:
             return _mk(False, f"below_threshold:{ev:.4f}<{threshold:.4f}")
 

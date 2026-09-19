@@ -296,6 +296,14 @@ than a surviving one. **~63 bets/week at an unchanged cut.**
 | `ncaaf_live_total` | 0.66 | 0.12 | 0.22 | 20/wk | **PAUSED 2026-09-11 (mike)** |
 | `ncaaf_live_win_prob` | 0.66 | 0.10 | 0.22 | 10/wk | **PAUSED 2026-09-11 (mike)** |
 
+**Since 2026-09-19 the platform's global EV floor binds over every EV in this
+table** (`config.GLOBAL_MIN_EV` 0.30 via `config.min_ev_for`; the table's EV
+column is the model's own `MODEL_MIN_EV`, which only matters where it is
+higher), and it is judged on the CALIBRATED probability — every live model now
+carries a promoted map (`docs/probability_calibration.md`, Phase 3), the NCAAF
+loop applying it on top of its stage-3 number. `tracking/live_calibration.py`
+reports the current cut through the same accessor.
+
 `LIVE_MAX_BETS_PER_WEEK` is **not** a runtime cap — nothing enforces it at score
 time. It is the constraint the recommender optimises UNDER, because a cut that
 earns more ROI by making more bets is not an answer to "too many bets". Left

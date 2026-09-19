@@ -126,8 +126,12 @@ Every one of these is a way a number can be wrong while looking right.
   sport or market — every live pick is made out of sample. **So a retrain is not
   the fix**; it moves the boundary, not the behaviour. The fix is a
   claimed-to-realised map (`models/probability_calibration.py`,
-  `docs/probability_calibration.md`), published but deliberately NOT yet used to
-  decide, because every threshold was swept on raw probabilities.
+  `docs/probability_calibration.md`). Since 2026-09-19 (phase 3, mike) EVERY
+  model decides on it — a thin or empty record gets a one-parameter offset
+  shrunk toward the pooled correction, never the raw claim — and one EV floor
+  on the calibrated number at the deciding price (`config.min_ev_for`) gates
+  every path that writes a BET. A new writer that skips `models/honest_ev.gate`
+  (or the scorer's `_decide`) is a surface that bets the raw number.
 - **Gate the number that gets BET, not the one that is convenient to compute.**
   `_mean_calibration_error` averages bins unweighted and across the whole
   probability range, so a 10pp error in the small band that gets bet is diluted

@@ -151,6 +151,9 @@ def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> di
         "pick_side": side,
         "pick_label": label,
         "model_probability": float(decision.model_prob),
+        "model_probability_cal": (
+            None if getattr(decision, "model_prob_cal", None) is None
+            else float(decision.model_prob_cal)),
         "dk_implied_prob": float(decision.market_prob),
         "edge": float(decision.model_prob) - float(decision.market_prob),
         "dk_odds": float(decision.price),
@@ -186,13 +189,14 @@ _INSERT_SQL = """
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
                        confidence_tier, prop_market, player_key, player_id,
-                       is_live, score_diff_at_pick)
+                       is_live, score_diff_at_pick, model_probability_cal)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s,
-            %(player_key)s, %(player_id)s, %(is_live)s, %(score_diff_at_pick)s)
+            %(player_key)s, %(player_id)s, %(is_live)s, %(score_diff_at_pick)s,
+            %(model_probability_cal)s)
     ON CONFLICT DO NOTHING
 """
 

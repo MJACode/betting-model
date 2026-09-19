@@ -347,8 +347,17 @@ def publishable_games(games: dict, now: datetime,
 
 def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
     """Card bets -> picks rows. Pure, so the mapping is testable without a DB."""
+    from models.honest_ev import gate
     rows = []
     for b in bets:
+        # THE GLOBAL EV FLOOR on the honest probability at the bet price
+        # (2026-09-19). A rule has no decision function -- its selection was
+        # the bet -- so the platform gate is applied here, before the row.
+        ev = gate(MODEL_ID, b.fair, b.price)
+        if not ev.clears:
+            logger.info(f"{MODEL_ID}: {ev.reason} — dropped {b.player} "
+                        f"{b.market} {b.side} {b.line:g}")
+            continue
         g = games.get(b.game_id, {})
         who = (names or {}).get(b.player, b.player)
         side = "Over" if b.side == "over" else "Under"
@@ -363,6 +372,7 @@ def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
             "game_date": g.get("date"), "game_time": g.get("kickoff"),
             "pick_side": b.side, "pick_label": f"{label} ({_BOOK.get(b.book, b.book)})",
             "model_probability": b.fair,
+            "model_probability_cal": round(ev.cal_prob, 4),
             # The soft book's own de-vigged number, so edge on the row is the
             # same quantity the rule selected on: fair - book's de-vigged prob.
             "dk_implied_prob": b.fair - b.edge,
@@ -384,12 +394,14 @@ _INSERT = """
                        pick_side, pick_label, model_probability, dk_implied_prob,
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
-                       confidence_tier, prop_market, player_key)
+                       confidence_tier, prop_market, player_key,
+                       model_probability_cal)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
-            %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s)
+            %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s,
+            %(model_probability_cal)s)
     ON CONFLICT DO NOTHING
 """
 

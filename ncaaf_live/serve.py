@@ -122,8 +122,10 @@ else:
     TOTAL_MIN_EDGE = _cut("ncaaf_live_total", "min_edge", TOTAL_MIN_EDGE)
     ML_MIN_PROB = _cut("ncaaf_live_win_prob", "min_prob", ML_MIN_PROB)
     ML_MIN_EDGE = _cut("ncaaf_live_win_prob", "min_edge", ML_MIN_EDGE)
-    TOTAL_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
-    ML_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+    # The platform's global EV floor or the model's own, whichever is higher
+    # (config.min_ev_for, 2026-09-19).
+    TOTAL_MIN_EV = _platform_config.min_ev_for("ncaaf_live_total")
+    ML_MIN_EV = _platform_config.min_ev_for("ncaaf_live_win_prob")
 
 
 # ── the pregame-status correction (stage 3 of the win-probability model) ────
@@ -623,8 +625,9 @@ class LiveEngine:
             # (mike: "best book always"). The stale-line cap already worked
             # this way, judging the DK edge rather than the decision edge, for
             # the same reason; this extends that to the floors it sits beside.
-            pick = self._decide(p, edge, min_prob, min_edge, c["dk_odds"],
-                                min_ev, cap_edge=edge)
+            pick = self.decide_honest(c["model_id"], p, implied, min_prob,
+                                      min_edge, c["dk_odds"], min_ev,
+                                      cap_edge=edge)
             pick = self._unless_paused(pick, c["model_id"])
             if not pick:
                 continue
@@ -683,6 +686,27 @@ class LiveEngine:
                       model_id)
             return None
         return pick
+
+    @staticmethod
+    def decide_honest(model_id: str, p: float, implied: float, min_prob: float,
+                      min_edge: float, dk_odds=None, min_ev: float | None = None,
+                      *, cap_edge: float | None = None) -> str | None:
+        """_decide on the HONEST probability (2026-09-19, mike: every model
+        decides on its calibrated number). `p` is the engine's stage-3
+        output -- the number written to picks.model_probability and the one
+        the map was fitted on -- so the promoted map applies on top of it.
+        The stale-line cap stays on the RAW DraftKings edge, as the MLB live
+        path keeps it: a map cannot make a frozen quote fresh. Standalone use
+        (no platform models importable) decides on `p` unchanged."""
+        try:
+            from models.honest_ev import honest_probability
+            p_cal = honest_probability(model_id, p)
+        except Exception:  # pragma: no cover - standalone/offline use
+            p_cal = p
+        raw_edge = p - implied
+        return LiveEngine._decide(p_cal, p_cal - implied, min_prob, min_edge,
+                                  dk_odds, min_ev,
+                                  cap_edge=raw_edge if cap_edge is None else cap_edge)
 
     @staticmethod
     def _decide(p: float, edge: float, min_prob: float, min_edge: float,

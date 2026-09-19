@@ -748,6 +748,9 @@ RETIRED_MODELS: frozenset = frozenset({
 # here would remove profitable bets to solve a problem MLB does not have.
 LIVE_MAX_EDGE_CAP: float = float(os.environ.get("LIVE_MAX_EDGE_CAP", 0.20))
 
+# Since 2026-09-19 GLOBAL_MIN_EV (below min_odds_for) binds over every entry
+# here unless the entry is higher -- read through config.min_ev_for, never
+# this dict directly.
 MODEL_MIN_EV: dict = {
     # 0.32, set 2026-08-29 and RESTORED 2026-08-30 (mike) after a brief 0.28.
     #
@@ -1703,6 +1706,53 @@ def min_odds_for(model_id: str) -> float:
     None meant "no floor at all" -- see the block comment above.
     """
     return MODEL_MIN_ODDS.get(model_id, DEFAULT_MIN_ODDS)
+
+
+# ── THE GLOBAL EV FLOOR (mike, 2026-09-19) ────────────────────────────────────
+# "I want only best of the best in terms of expected value ... these should not
+# be a volume models it should be a best big bet models." Not a pick count --
+# he rejected a top-N the same day -- a BAR: every BET written anywhere on the
+# platform clears
+#
+#     calibrated_probability x decimal(deciding price) - 1  >=  GLOBAL_MIN_EV
+#
+# on top of the model's own prob/edge cut (the floor only ever tightens), on
+# the HONEST probability (models/probability_calibration.py PHASE 3: every
+# model carries a promoted map), at the price the pick is decided at. A
+# per-model MODEL_MIN_EV above it still binds; below it, this does.
+#
+# 0.30 is his number, chosen on 2026-09-19 from a table computed with identity
+# maps. Re-measured that evening on the honest maps
+# (scripts/ev_floor_replay.py, every model's graded record, the floor applied
+# on top of the current cuts): 0.30 keeps 13 bets over the whole record at
+# +45.5%; 0.25 keeps 40 at +40.4%; 0.20 keeps 102 at +15.7%; 0.10 keeps 258
+# at +10.1%. The floor ALONE (no prob/edge cut) is negative at every level
+# (-10% to -18%): it selects longshots. Env-overridable so the number moves
+# without a deploy; the docs and the replay are where the evidence lives.
+GLOBAL_MIN_EV: float = float(os.environ.get("GLOBAL_MIN_EV", "0.30"))
+
+
+def min_ev_for(model_id: str) -> float:
+    """The EV floor this model actually bets over: the global floor, or the
+    model's own MODEL_MIN_EV when that is higher. ONE accessor, for the same
+    reason min_odds_for is one: the scorer's gate, every card, both live
+    loops and the Discord "good to" bound have to agree on the number."""
+    own = MODEL_MIN_EV.get(model_id)
+    return GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
+
+
+def expected_value(prob, american) -> float | None:
+    """EV per unit staked, prob x decimal - 1. None when there is no price
+    to compute against -- a floor then cannot apply, which is the honest
+    outcome rather than assuming -110."""
+    try:
+        p, a = float(prob), float(american)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return None
+    decimal = 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+    return p * decimal - 1.0
 
 
 # ── How each model produces its number ────────────────────────────────────────

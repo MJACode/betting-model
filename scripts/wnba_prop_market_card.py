@@ -94,8 +94,17 @@ def apply_price_floor(bets):
 def pick_rows(bets, games, quotes, pid_by_name, game_date: str,
               bankroll: float) -> list[dict]:
     """Card bets -> picks rows. Pure given its inputs, so it is testable."""
+    from models.honest_ev import gate
     rows = []
     for b in bets:
+        # THE GLOBAL EV FLOOR on the honest probability at the bet price
+        # (2026-09-19). A rule has no decision function, so the platform
+        # gate is applied here, before the row.
+        ev = gate(MODEL_ID, b.fair, b.price)
+        if not ev.clears:
+            logger.info(f"{MODEL_ID}: {ev.reason} — dropped {b.player} "
+                        f"{b.market} {b.side} {b.line:g}")
+            continue
         pid = pid_by_name.get(norm_name(b.player))
         if pid is None:
             # No game-log identity -> the wnba_player settle branch could never
@@ -119,6 +128,7 @@ def pick_rows(bets, games, quotes, pid_by_name, game_date: str,
             # book named in pick_label (the §28 precedent for rules that don't
             # score against DK).
             "model_probability": b.fair,
+            "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": b.fair - b.edge,
             "edge": b.edge,
             "dk_odds": b.price, "scored_line": b.line,
@@ -138,13 +148,14 @@ _INSERT = """
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
                        confidence_tier, prop_market, player_key, player_id,
-                       dk_bet_link)
+                       dk_bet_link, model_probability_cal)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s,
-            %(player_key)s, %(player_id)s, %(dk_bet_link)s)
+            %(player_key)s, %(player_id)s, %(dk_bet_link)s,
+            %(model_probability_cal)s)
 """
 
 
