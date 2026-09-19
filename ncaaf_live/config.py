@@ -270,8 +270,17 @@ LIVE_SCORE_LAG_TOLERANCE_SEC = float(
 # `ncaaf_live_states` now records every state change, so the caps can be
 # re-measured on the real quantity after one slate. Move them on that, never
 # to unblock a pick.
+#
+# 0.08 -> 0.05 (2026-09-19, same day, mike: "There is no way these are +ev
+# picks"). North Carolina at Clemson, 16:12Z, before the guard deployed:
+# DraftKings -143 -> -116 -> -105 in two and a half minutes on a 0-0 state,
+# the loop bet Clemson -105, and the book went +108 forty-five seconds later.
+# That move is 0.076 implied -- UNDER the 0.08 cap. The single-republish
+# distribution puts 0.05 between p90 (0.042) and p95 (0.066): a move the book
+# makes one republish in fifteen is not drift, and a moneyline model that
+# cannot see field position has no business betting into it.
 LIVE_BOOK_MOVE_MAX_ML = float(
-    os.environ.get("NCAAF_LIVE_BOOK_MOVE_MAX_ML", "0.08"))       # implied prob
+    os.environ.get("NCAAF_LIVE_BOOK_MOVE_MAX_ML", "0.05"))       # implied prob
 LIVE_BOOK_MOVE_MAX_TOTAL = float(
     os.environ.get("NCAAF_LIVE_BOOK_MOVE_MAX_TOTAL", "3.0"))     # points
 # Measured 2026-08-28 against the live API (not the documented formula): one

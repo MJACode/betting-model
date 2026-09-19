@@ -225,6 +225,17 @@ class BookMoveClock:
     whole game, and a clock that refused to anchor on it would be dead for
     exactly the games it is for.
 
+    AND A None IS NEVER A CHANGE. Measured on the first slate this ran
+    (2026-09-19, North Texas at Texas State): CFBD blanks `possession` around
+    every scoring play -- 'away' at 17:37:51, None at 17:38:55, then the
+    touchdown. The blank READ AS A STATE CHANGE, the anchor was dropped, the
+    first quote after it was DraftKings' post-touchdown -129, and the loop
+    bet Texas State on that "baseline" 44 seconds before the feed reported
+    the score: the Delaware failure through a side door. So a None position
+    in a tuple state is filled from the last state seen for that key before
+    it is compared or stored -- a field the feed stopped reporting keeps its
+    last value until the feed reports a new one.
+
     `state` is any equatable snapshot of what the MODEL consumes and that
     changes on an event rather than every tick -- the NCAAF loop passes
     (home_score, away_score, period, possession); clock, down and distance
@@ -249,6 +260,10 @@ class BookMoveClock:
             return None
         now = now or datetime.now(timezone.utc)
         prev = self._state.get(key, _UNSET)
+        if (prev is not _UNSET and isinstance(state, tuple)
+                and isinstance(prev, tuple) and len(prev) == len(state)
+                and None in state):
+            state = tuple(p if s is None else s for s, p in zip(state, prev))
         if prev is _UNSET:
             self._state[key] = state
             self._anchor[key] = (state, float(number))

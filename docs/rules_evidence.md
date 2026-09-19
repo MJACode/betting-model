@@ -1164,6 +1164,30 @@ a slate behind it. Tests: `tests/test_live_book_move_guard.py` — the Delaware
 timeline is declined, and a control asserts a fresh loop still bets it, so the
 test cannot pass for the wrong reason.
 
-The pick itself (pick_id 2476480) is his call under §1c: produced on a state
-that was factually wrong at write time, which is the void case, not line
-movement. Not voided by the session that found it.
+The pick itself (pick_id 2476480) was voided on mike's call the same
+afternoon.
+
+**The same afternoon, three more things, each measured (mike: "Why did
+Delaware fire again and Clemson these are horrid picks. There is no way these
+are +ev picks"):**
+
+- **Delaware "fired again" because the first-signal restore resurrected the
+  voided pick.** The worker redeployed at 16:47 with the guard; the NCAAF
+  loop runs `restore_first_signals` on every start; a voided row carries
+  `result='NO_ACTION'`, so `_standing` (which filters `result IS NULL`) saw
+  "nothing standing", re-inserted the bet from `picks_log` as pick 2478678
+  and cleared the push ledger — Discord and push re-announced it at 17:30:58Z.
+  `_lane_voided` now skips any lane with a VOID row; 2478678 voided too.
+- **Clemson (16:12Z, before the guard deployed) was the Delaware shape under
+  the cap.** DraftKings −143 → −116 → −105 on a 0–0 state in 2½ minutes, bet
+  at −105, +108 forty-five seconds later. That move is 0.076 implied — under
+  the 0.08 cap. Cap moved to **0.05**, between p90 (0.042) and p95 (0.066) of
+  the single-republish distribution.
+- **Texas State (17:39Z, WITH the guard) got through a side door.** CFBD
+  blanks `possession` around scoring plays; the blank read as a state
+  change, the anchor was dropped, DraftKings' post-touchdown −129 became the
+  new baseline, and the loop bet Texas State 44 s before the feed reported
+  28–27. The guard had been declining that game at 0.113–0.128 for two
+  minutes at 17:17. A None field now keeps its last value in the state key.
+  `ncaaf_live_states` — written since the deploy — is what made this
+  diagnosable in minutes; 212 rows on 14 games in the first 50 minutes.
