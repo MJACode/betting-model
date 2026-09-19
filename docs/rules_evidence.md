@@ -1149,7 +1149,11 @@ that state is unchanged, a move past the cap declines the market. It
 re-anchors on the first quote that POSTDATES the state change, so a re-hang
 arriving after a late score report is not read as a move; first sight and a
 restart report nothing, the same rule `ScoreClock` applies, so the age bound
-remains the floor. Wired into all three loops the same day — NCAAF
+remains the floor. **It fires on the production timeline:** the loop had
+priced this game since 15:34:39, and every DraftKings publish from 15:34:22 to
+15:42:40 sat between −167 and −217 (0.626–0.685 implied), so whichever of
+them was the anchor, +100 is a move of 0.126–0.185 against the 0.08 cap
+(`test_the_production_anchor_range_all_fires`). Wired into all three loops the same day — NCAAF
 `serve.LiveEngine.price`, MLB `live_scorer._get_live_dk_odds` (table-backed,
 for the same reason `_score_changed_at` is), NFL `executor.Executor.evaluate`
 (refusal reason `book_moved`). Caps are a first cut from the one distribution

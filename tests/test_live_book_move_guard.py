@@ -121,6 +121,28 @@ def test_a_quote_with_no_timestamp_re_anchors_at_once():
     assert clock.observe("g", COASTAL_UP, 0.41, None, _at(90)) == pytest.approx(0.01)
 
 
+def test_a_none_inside_the_state_still_anchors():
+    """The CFBD scoreboard's possession parses defensively and can be None
+    for a whole game. A clock that refused to anchor on that would be dead
+    for exactly the games it exists for -- the one that bet Delaware."""
+    clock = BookMoveClock()
+    no_poss = (0, 0, 1, None)
+    assert clock.observe("g", no_poss, american_to_implied(-174), _iso(0), _at(3)) is None
+    move = clock.observe("g", no_poss, american_to_implied(100), _iso(150), _at(158))
+    assert move == pytest.approx(0.1350, abs=5e-4)
+
+
+def test_the_production_anchor_range_all_fires():
+    """The loop had priced this game since 15:34:39, and every DraftKings
+    publish from 15:34:22 to 15:42:40 sat between -167 and -217. Whichever of
+    them was the anchor, the re-hang to +100 clears the 0.08 cap."""
+    for price in (-211, -196, -217, -209, -182, -196, -174, -167):
+        clock = BookMoveClock()
+        clock.observe("g", TIED, american_to_implied(price), _iso(0), _at(1))
+        move = clock.observe("g", TIED, american_to_implied(100), _iso(150), _at(158))
+        assert move > 0.08, price
+
+
 def test_a_missing_number_or_state_is_ignored_not_recorded():
     clock = BookMoveClock()
     clock.observe("g", TIED, 0.60, _iso(0), _at(0))
@@ -194,8 +216,11 @@ def test_the_ncaaf_loop_no_longer_bets_the_delaware_re_hang():
 
 def test_the_control_a_fresh_loop_would_still_have_bet_it():
     """If this stops betting, the test above proves nothing. A loop that sees
-    +100 at first sight has no anchor, exactly as production did after its
-    restart -- and the cuts (0.62 prob, 0.10 edge, 0.26 EV) all clear."""
+    +100 at first sight has no anchor, so only the cuts decide -- and they
+    clear, as they did in production. (Production was NOT at first sight: it
+    had watched the game since 15:34 and every DraftKings publish before the
+    re-hang sat at -167..-217, so the guard fires on the real timeline
+    whichever of them was the anchor.)"""
     engine = _ncaaf_engine()
     picks = engine.price(_tied_q1(), _delaware_ctx(), _dk(100, -133, 150),
                          now=_at(158))

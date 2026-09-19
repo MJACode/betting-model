@@ -212,9 +212,18 @@ class BookMoveClock:
     FIRST SIGHT RECORDS AND REPORTS NOTHING, the same rule as ScoreClock: a
     game seen for the first time -- or every game after a restart -- has no
     anchor to move from. The age bound applies throughout, so this is a
-    floor, not a hole; production was in exactly that state after its
-    restart and it is why the control test in
-    tests/test_live_book_move_guard.py still bets the Delaware number.
+    floor, not a hole. It is NOT why Delaware was bet: the loop had watched
+    that game since 15:34:39 and every DraftKings publish from 15:34:22 to
+    15:42:40 sat between -167 and -217 (0.626-0.685 implied), so whichever of
+    them was the anchor, +100 is a move of 0.126-0.185 against a 0.08 cap.
+    The guard fires on the production timeline. The control test in
+    tests/test_live_book_move_guard.py bets the number at first sight to
+    prove the decline test is testing the guard and not the cuts.
+
+    A None INSIDE the state is a legitimate value, not a reason to skip: the
+    CFBD scoreboard's `possession` parses defensively and can be None for a
+    whole game, and a clock that refused to anchor on it would be dead for
+    exactly the games it is for.
 
     `state` is any equatable snapshot of what the MODEL consumes and that
     changes on an event rather than every tick -- the NCAAF loop passes
@@ -237,9 +246,6 @@ class BookMoveClock:
         compare against (first sight, a state change awaiting a post-change
         quote, or a missing state or number)."""
         if state is None or number is None:
-            return None
-        if isinstance(state, tuple) and None in state and key not in self._state:
-            # A half-parsed first payload is not a baseline worth keeping.
             return None
         now = now or datetime.now(timezone.utc)
         prev = self._state.get(key, _UNSET)
