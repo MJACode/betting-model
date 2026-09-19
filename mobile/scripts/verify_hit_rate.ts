@@ -27,6 +27,7 @@ import {
 
 const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 import { STAT_CATALOG, defaultThresholdFor, type StatDef } from '../src/lib/statCatalog';
+import { rulerScaleFor } from '../src/lib/lineRuler';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -214,13 +215,17 @@ check(
   // ── the UX review's fixes, 2026-09-06 ───────────────────────────────────
   // A face carrying a decimal is up to four characters, and the old fixed
   // 26pt pitch left "23.5" and "24.5" abutting with a point of air.
+  // Measured against `hi`, the last REACHABLE stop, rather than `scale.max`:
+  // once the stops can be five apart (2026-09-19) a ceiling off the grid is a
+  // number no tick ever prints, and sizing the pitch to it would widen every
+  // tick on the strip for a face that is never drawn.
   check('the tick pitch follows the widest face, not the stop count',
-    screen.includes('const faceChars = Math.max(faceOf(min).length, faceOf(max).length);')
+    screen.includes('const faceChars = Math.max(faceOf(min).length, faceOf(hi).length);')
       && screen.includes('const tickW = count <= 30 ? Math.max(26, faceChars * 8 + 6) : TICK_W;'));
   // VoiceOver drives the ruler and nothing else: a bare "0.5" never says which
   // bet it is setting, because the side and the stat are other elements.
   check('the adjustable announces the whole bet, not the bare face',
-    screen.includes('accessibilityValue={{ min, max, now: value, text: describeOf(value) }}')
+    screen.includes('accessibilityValue={{ min, max: hi, now: value, text: describeOf(value) }}')
       && screen.includes('describe={(n) => hitModeHeadline(n, hitMode, stat?.label ?? \'\')}')
       && screen.includes('const describeOf = describe ?? faceOf;'));
   // The board headline and the book's own number appear in ONE sentence in the
@@ -289,8 +294,22 @@ check(
   // Every mode resolves a stop to the same line, so a mode change leaves the
   // bet where it stands — but Under n names "n-1 or fewer", so it needs one
   // extra stop to reach the ceiling the other two express at maxLineN.
+  // Asserted on the SCALE rather than on a line of JSX since 2026-09-19: the
+  // extra stop is one STEP now, not one unit, because NFL and NCAAF yardage
+  // counts in fives and a `+1` there lands between ticks. The screen's job is
+  // only to hand the ruler the scale; the arithmetic is checked in
+  // scripts/verify_line_ruler.ts, on every stat in the catalog.
   check('Under can still say what At Least can say',
-    screen.includes("max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}"));
+    screen.includes('scale={rulerScale}')
+      && screen.includes('rulerScaleFor(stat, hitMode)')
+      && HIT_MODES.every(({ mode }) =>
+        STAT_CATALOG.every((d) => {
+          const plain = rulerScaleFor(d, 'atLeast');
+          const here = rulerScaleFor(d, mode);
+          return mode === 'under'
+            ? here.max === plain.max + plain.step
+            : here.max === plain.max;
+        })));
   check('and it is exactly the ceiling At Least reaches',
     hitModeHeadline(10, 'atLeast', 'Hits') === '10+ Hits'
       && hitModeHeadline(11, 'under', 'Hits') === 'Under 10.5 Hits');
