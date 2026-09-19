@@ -146,7 +146,9 @@ not a band: it keeps plus-money and only drops heavy juice.
 `TICKET_PCT`) and the shopped under American in **[−110, −100]**
 inclusive. Top-K (`MAX_PER_SLATE` / `RANK=ticket`) and the
 concentration guard stay as on master. Unset env is no band so merge
-does not recut the card.
+does not recut the card. The 2026-09-19 beyond-I24 hunt
+(`docs/mlb_over_under_edge_hunt.md`) found **no second CLEAR** and
+does not recut this band.
 
 | Construction | n | Units | ROI | Months |
 |---|---|---|---|---|

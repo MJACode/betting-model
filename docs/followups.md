@@ -21,6 +21,18 @@
 
 ---
 
+## [ ] MLB totals edge hunt was empty — worker can fill Sep steam / Sep 1–15 pin
+
+2026-09-19 `scripts/mlb_over_under_edge_hunt.py` (same bar as #757):
+**no CLEAR**. I24 not recut; `mlb_over_under` stays paused; no
+`PUBLISH=1`. Sandbox MCP timed out on September DK steam (even the
+39 public games) and on Sep 1–15 pin/soft latest-per-book. Jun+Jul
+steam (712) already produced no CLEAR; pin-devig cells that reached
+n≥40 went red on Sep 16–18. A worker run of
+`python -m scripts.mlb_over_under_edge_hunt` (no `--json`) fills those
+two holes. Do not treat a fill as permission to unpause or publish.
+`docs/mlb_over_under_edge_hunt.md`.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
