@@ -106,6 +106,16 @@ slate guard. Optional under-juice **band**
 `mlb_over_under` stays paused. Coverage caveat: only
 ~99–136 pre-commence public totals-over games in the DB.
 
+## 11b5. PITCHER PROPS — `docs/mlb_prop_pitcher_edge_search.md`
+
+2026-09-19 remesure of the live `mlb_prop_pitcher_*` cards (K / outs /
+hits) plus Pin / FG-public / juice overlays. **Empty.** Current-artifact
+K −10.73u / 56, outs −3.47u / 36; dated-review n≥75 not met. Public is
+FG-only and August pre-commence is 0. Pitcher-only Pin-vs-DK outs 3pp
+is Aug +2.0% / 52 then Sep −9.7% / 28 — not a card.
+`mlb_prop_market` stays unwired. No `PUBLISH=1`. Do not unpause
+XGBoost / ER / walks.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 

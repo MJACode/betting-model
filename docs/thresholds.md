@@ -354,8 +354,8 @@ even money and a fixed number would mis-call every one of them.
 
 | Model | Since | Trigger | Count at 2026-09-08 | Then |
 |---|---|---|---|---|
-| `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | 35 (16W, bx .530, −4.81u, z −0.86) | pause if still below breakeven |
-| `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | 15 (6W, bx .503, −3.92u, z −0.80) | pause if still below breakeven |
+| `mlb_prop_pitcher_k` | 2026-09-04 | n ≥ 75 | 35 (16W, bx .530, −4.81u, z −0.86) | pause if still below breakeven. **2026-09-19 remesure:** 56 (24W, bx .529, −10.73u, wr .429). Still below n=75. `docs/mlb_prop_pitcher_edge_search.md` |
+| `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | 15 (6W, bx .503, −3.92u, z −0.80) | pause if still below breakeven. **2026-09-19 remesure:** 36 (16W, bx .487, −3.47u, wr .444). Still below n=75. Same doc |
 | `mlb_live_total_runs` | ~~2026-08-31~~ **2026-09-09** | ~~n ≥ 150~~ **n ≥ 75** | 0 on the current artifact (the 70 above were the June model, retired 09-09) | re-sweep the cut on the honest replay — see "mlb_live_total_runs cut, 2026-09-09" |
 | `ncaaf_live_total` | 2026-08-30 | 2026-09-13 | **LIVE, 0.73 × EV 0.24, FBS-vs-FBS only (mike, 2026-09-13)**. Unpaused 09-12 at 0.72 × 0.22; tightened after 43 BETs in one week, 24 of them FBS-vs-FCS. Replay FBS-vs-FBS 17 bets +21.3%, only 3 in the second half — not proven better. `docs/sports/ncaaf.md` | re-sweep on production once ~50 BETs settle under these rules |
 | `ncaaf_live_win_prob` | 2026-08-30 | 2026-09-12 | **LIVE, 0.65 × EV 0.26 on the pregame-corrected scale, FBS-vs-FBS only from 2026-09-13**. Qualifies at DK, bets at the best book (#694) | same |
