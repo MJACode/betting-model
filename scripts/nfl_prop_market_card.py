@@ -104,6 +104,20 @@ def _kalshi_ladders_or_empty() -> dict:
     return ladders_or_empty()
 
 
+def reference_ladders(replay: bool) -> dict:
+    """The exchange ladders the card may price off on THIS run.
+
+    Empty on a replay (a past soft book must not be priced off today's
+    board) and empty unless `config.NFL_PROP_MARKET_KALSHI_REFERENCE` is on
+    -- which it is not, because the ladder has no graded record and on
+    2026-09-19 it wrote 25 unders in one pass that no sharp book could have
+    produced (the config comment has the numbers). Nothing is fetched when
+    nothing may be used."""
+    if replay or not config.NFL_PROP_MARKET_KALSHI_REFERENCE:
+        return {}
+    return _kalshi_ladders_or_empty()
+
+
 def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
          games: dict | None = None,
          now: datetime | None = None,
@@ -165,7 +179,7 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     # not mix today's Kalshi board with a past soft book (fail closed -> {}).
     # Explicit {} / a passed dict skips the network (tests, offline).
     if kalshi_ladders is None:
-        kalshi_ladders = {} if replay else _kalshi_ladders_or_empty()
+        kalshi_ladders = reference_ladders(replay)
     game_dates = {g: str(d.get("date", ""))[:10] for g, d in games.items()
                   if g in open_games and d.get("date")}
     # The over side is held to a stricter floor than the under side; the lean

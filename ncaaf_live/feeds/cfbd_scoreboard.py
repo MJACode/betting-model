@@ -123,6 +123,67 @@ def _parse_situation(text) -> tuple[int | None, int | None]:
     return (None, None)
 
 
+_YARD_RE = re.compile(r"\bat\s+([A-Z][A-Z&.\-]*)\s+(\d{1,2})\s*$")
+
+
+def _abbrev_fits(abbr: str, school: str) -> bool:
+    """Does a scoreboard abbreviation ('CCU', 'BGSU', 'UNC', 'NCSU') name
+    this school? The feed never supplies its abbreviations, so this is a
+    shape rule measured on the first stored slate (2026-09-19, 13 distinct
+    strings): strip a leading 'U' and a trailing 'U', then the core is either
+    a prefix of the squashed name (ARK/Arkansas, NCS/NC State, ILL/Illinois)
+    or the name's initials plus at most one letter (CC/Coastal Carolina,
+    BGS/Bowling Green, NT/North Texas, AS/Arizona State)."""
+    core = abbr.upper().replace(".", "").replace("&", "").replace("-", "")
+    if len(core) > 2 and core.startswith("U"):
+        core = core[1:]
+    if len(core) > 2 and core.endswith("U"):
+        core = core[:-1]
+    if len(core) < 2:
+        return False
+    words = [w for w in re.split(r"[\s\-]+", school.upper()) if w]
+    squashed = "".join(words)
+    initials = "".join(w[0] for w in words)
+    if squashed.startswith(core):
+        return True
+    if len(initials) >= 2 and core.startswith(initials) \
+            and len(core) - len(initials) <= 1:
+        return True
+    # A two-letter code on a one-word school ('ME' for Maine): first letter
+    # plus a later letter of the name. The both-sides refusal in the caller
+    # is what keeps this from guessing.
+    return (len(core) == 2 and len(words) == 1
+            and squashed.startswith(core[0]) and core[1] in squashed[1:])
+
+
+def _parse_yardline(text, home: str, away: str,
+                    possession: str | None) -> int | None:
+    """'2nd & 8 at EMU 27' -> yards to the opponent's end zone for the
+    offense (the training column, CFBD's yardsToGoal), or None.
+
+    The ball is on the named team's side of the field. If that team has the
+    ball it is 100 minus the yard; if the other team does, the yard itself;
+    the 50 is the 50. None when possession is unknown, when the abbreviation
+    fits neither school or BOTH (Michigan / Michigan State), or when the
+    string is any other shape -- a guess here is a feature value the model
+    will trust."""
+    if not isinstance(text, str) or possession not in ("home", "away"):
+        return None
+    m = _YARD_RE.search(text.strip())
+    if not m:
+        return None
+    abbr, yard = m.group(1), int(m.group(2))
+    if not 0 <= yard <= 50:
+        return None
+    if yard == 50:
+        return 50
+    fits_home, fits_away = _abbrev_fits(abbr, home), _abbrev_fits(abbr, away)
+    if fits_home == fits_away:
+        return None
+    side = "home" if fits_home else "away"
+    return 100 - yard if side == possession else yard
+
+
 def _strip_mascot(name: str, known_schools: set[str]) -> str | None:
     """
     'TCU Horned Frogs' -> 'TCU' by longest-prefix match against the known
@@ -207,7 +268,17 @@ def extract_live_states_cfbd(payload: list, id_to_school: dict[int, str],
             "possession": possession,
             "down": down,
             "distance": distance,
-            "yardline_100": None,          # not in the scoreboard - NaN degrade
+            # FIELD POSITION, from the situation string (2026-09-19). The
+            # model was trained on yardsToGoal and served NaN here, which is
+            # half of why it could only see an "edge" when the book moved:
+            # a drive to the 5 changed the book's number and nothing in our
+            # state. Parsed from the real live shape ("4th & 3 at UNC 5"),
+            # stored on the first slate the string was kept; None on any
+            # doubt (_parse_yardline).
+            "yardline_100": _parse_yardline(g.get("situation"), home, away,
+                                            possession),
+            # The raw string rides along in `ncaaf_live_states.raw_state`.
+            "situation": g.get("situation"),
             "home_timeouts": None,
             "away_timeouts": None,
             "plays_run": None,

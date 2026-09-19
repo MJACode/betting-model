@@ -44,8 +44,9 @@ import pandas as pd
 
 from .config import (ARTIFACT_DIR, LEAGUE_PASS_RATE, LIVE_BOOK_MOVE_MAX_ML,
                      LIVE_BOOK_MOVE_MAX_TOTAL, LIVE_QUOTE_MAX_AGE_SEC,
-                     LIVE_SCORE_LAG_TOLERANCE_SEC, PASS_RATE_PRIOR_PLAYS,
-                     SNAPSHOT_BOOK, SNAPSHOT_BOOKS)
+                     LIVE_SCORE_LAG_TOLERANCE_SEC, LIVE_SETTLED_SEC,
+                     LIVE_SETTLED_TOL_ML, LIVE_SETTLED_TOL_TOTAL,
+                     PASS_RATE_PRIOR_PLAYS, SNAPSHOT_BOOK, SNAPSHOT_BOOKS)
 from data.live_quote_guard import (BookMoveClock, american_to_implied,
                                    quote_predates_score)
 from .engine.distribution import ScoreDistribution
@@ -534,8 +535,10 @@ class LiveEngine:
         # can see. A book that reprices on anything else has information
         # we do not have -- see data/live_quote_guard.BookMoveClock.
         state_key = (hs, as_, period, state.get("possession"))
-        for key, label, cap in (("h2h", "h2h", LIVE_BOOK_MOVE_MAX_ML),
-                                ("total", "totals", LIVE_BOOK_MOVE_MAX_TOTAL)):
+        for key, label, cap, move_tol in (
+                ("h2h", "h2h", LIVE_BOOK_MOVE_MAX_ML, LIVE_SETTLED_TOL_ML),
+                ("total", "totals", LIVE_BOOK_MOVE_MAX_TOTAL,
+                 LIVE_SETTLED_TOL_TOTAL)):
             mkt = (odds or {}).get(key)
             if not mkt or not market_is_takeable(mkt, label, ctx.game_id, now,
                                                  score_seen_at):
@@ -544,12 +547,30 @@ class LiveEngine:
                       else mkt.get("line"))
             move = self._book_moves.observe((ctx.game_id, key), state_key,
                                             number, mkt.get("ts"), now,
-                                            LIVE_SCORE_LAG_TOLERANCE_SEC)
+                                            LIVE_SCORE_LAG_TOLERANCE_SEC,
+                                            move_tol)
             if move is not None and move > cap:
                 log.info("%s: %s has moved %.3f at the book (cap %g) with no "
                          "change in our state %s - declining; our state is "
                          "behind the book, not the book behind us",
                          ctx.game_id, label, move, cap, state_key)
+                continue
+            # THE SETTLED-STATE RULE (2026-09-19, mike: "I said to fix it not
+            # pause it"). The cap catches a loud move; it cannot catch the
+            # same defect once the book's re-hang is already the anchor
+            # (Texas State) or the move is under the cap (Clemson, 0.076).
+            # What separates a lag from a disagreement is time: only when
+            # the book's number AND our state have both been still for
+            # longer than the worst measured feed lag (72s today, FanDuel;
+            # the book re-hangs within ~40s of a score) has everything the
+            # book knew reached us, and only then is an edge a real
+            # disagreement on the same facts rather than the book's
+            # information lead read backwards.
+            quiet = self._book_moves.quiet_seconds((ctx.game_id, key), now)
+            if quiet is None or quiet < LIVE_SETTLED_SEC:
+                log.debug("%s: %s not settled (%.0fs quiet < %ds) - not "
+                          "pricing yet", ctx.game_id, label, quiet or 0.0,
+                          LIVE_SETTLED_SEC)
                 continue
             takeable[key] = mkt
         if takeable.get("total") and secs < TOTAL_MIN_SECONDS:

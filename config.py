@@ -2507,6 +2507,36 @@ NFL_PROP_MARKET_SIDE_EDGE: dict = {
     "under": float(os.environ.get("NFL_PROP_MARKET_UNDER_EDGE", "0.05")),
 }
 
+# THE KALSHI LADDER IS NOT A REFERENCE THIS MODEL MAY BET OFF UNTIL IT HAS A
+# GRADED RECORD. OFF (2026-09-19, mike: "I just saw a million nfl prop unders
+# go. WHAT THE FUCK").
+#
+# What happened. At 17:27Z on the Saturday before week 2 the card wrote 39
+# BETs in ONE pass across the eight 1pm games -- 37 of them unders -- and
+# Discord and push announced all of them. The rule's validated construction
+# compares EQUAL lines only ("the one thing that makes this honest", the
+# module docstring), and in 25 of the 42 written that hour NO sharp book
+# quoted the soft book's line at all: Chase Brown Under 22.5 rec yds at
+# BetMGM, with Pinnacle and BetOnline both at 19.5. Those 25 came from the
+# Kalshi ladder, wired on 2026-09-14 (commit 1d58cea3, no Updated-By) as an
+# "OR" reference that "prices ANY line inside its ladder" -- interpolated,
+# for Chase Brown, between the 14.5 strike (0.57-0.62) and the 24.5 strike
+# (0.34-0.39): ten yards apart, a five-cent spread, $287 and $407 traded.
+# Its own docstring says NOT GRADED, and `tests/test_nfl_prop_market_kalshi`
+# pins that the historical grader never joins it -- so every one of those 25
+# was written on a reference no backtest has ever scored. Since it was
+# wired: 14 settled bets that no sharp book could have produced, 7-7,
+# -1.46u. A soft line sitting ABOVE the ladder's median is exactly the case
+# a thin exchange calls an under every time, which is why the pass was 95%
+# unders against the rule's validated 45%.
+#
+# Fail-closed means fail-closed: the card passes empty ladders until this is
+# flipped on the strength of a graded record (a resolved_at on
+# kalshi_prop_ladders and a season of it). The Pinnacle/BetOnline path --
+# the validated one -- is untouched. Recording continues.
+NFL_PROP_MARKET_KALSHI_REFERENCE: bool = (
+    os.environ.get("NFL_PROP_MARKET_KALSHI_REFERENCE", "0") == "1")
+
 
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()
