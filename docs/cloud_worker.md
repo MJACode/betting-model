@@ -232,9 +232,9 @@ Notes:
      cards log every pass; they INSERT picks only when the matching flag is
      `1` (redeploy after setting). Totals Pin-vs-soft INSERT is Pin fair −
      soft implied, BEST_LINE, pin-lean. Public-OVER fade INSERT is
-     `mlb_total_public_fade` (ticket cut `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT`,
-     default 70; `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` clamped 1–2,
-     default 2 + `RANK=ticket` — the card never all-passes a slate). See
+     `mlb_total_public_fade` (code `TICKET_PCT` default 70; recommended
+     Railway env **80** + `MAX_PER_SLATE=2` + `RANK=ticket`. Cap
+     clamped 1–2 — the card never all-passes). See
      `docs/mlb_runline_ou_edge_search.md` and
      `docs/mlb_total_public_fade.md`.
 4. Deploy. Open the **Logs** — on boot you should see

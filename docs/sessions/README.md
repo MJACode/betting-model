@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, fade follow-up: recommended env t80 + MAX_PER_SLATE=2 + RANK=ticket. Code TICKET_PCT stays 70. Never-floods clamp lands (missed #750 squash). PUBLISH stays 0. #751 superseded |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade never-floods: MAX_PER_SLATE clamped 1–2 default 2. t75 ∩ −115 top-1 is June-only +19.4%/13, pooled +5.7%/24 — cut stays 70. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2. Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, slate concentration guard: suppress mlb_total_public_fade when one side is ≥70% of n_bet ≥ 4 (12/12 under card). PUBLISH stays 0. RL/OU stay paused |

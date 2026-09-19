@@ -12,7 +12,7 @@ Runs on the same pipeline step as the other MLB game-line cards
 | Piece | Rule |
 |---|---|
 | Source | `public_betting` consensus totals, **last** snapshot with `snapshot_at < commence_time` |
-| Trigger | OVER tickets ≥ `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` (default **70**; **80** supported) |
+| Trigger | OVER tickets ≥ `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` (code default **70**; recommended env **80**) |
 | Side | Always UNDER |
 | Price | Best open under among DK / FD / MGM / WH (`williamhill_us`) at **DK’s open total**; fallback DK |
 | Line | Main total **5.5–14.5** |
@@ -124,15 +124,18 @@ win rate (28–20). n=48 is still small.
 **Recommended flag (PUBLISH stays 0):**
 
 ```
-MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=70
+MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=80
 MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE=2
 MLB_TOTAL_PUBLIC_FADE_RANK=ticket
 MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR=0
 ```
 
-t80 + top-2 is the tighter neighbour (+17.8% / 42), not a second
-model. Do not set RANK to gap / juice / composite / ev — those
-cells are in the fail table above. Sweep:
+t80 + ticket top-2 is the recommended paper env (**+17.8% / 42**,
+max 2/day). Code default `TICKET_PCT` stays **70** so a merge
+without the Railway env does not silently recut. `MAX_PER_SLATE`
+code default is **2** (never all-pass). Do not set RANK to gap /
+juice / composite / ev. t90 / cap-3 (#751) is an alternate paper
+grid, not this ranking path. Sweep:
 `python -m scripts.mlb_total_public_fade_topk`.
 
 ## t75 ∩ juice ≥ −115 top-1 (2026-09-19 month chunks)
@@ -168,9 +171,10 @@ the three heaviest piles went 1-2: `CHC vs ATL Under 7.5` LOSS,
 `CWS vs DET Under 8.5` WIN, `BAL vs MIL Under 8.0` LOSS. Gap /
 juice / composite stay negative on this pool too.
 
-Do **not** move the ticket cut to 75 or add a −115 juice floor.
-That pool + top-1 is weaker than t70 ticket top-2 on the wider
-board (+11.2% / 48). Rank stays `ticket`. Cap stays 2.
+Do **not** move the code default to 75 or add a −115 juice floor.
+That pool + top-1 is weaker than ticket top-2. Recommended Railway
+env is **t80 + top-2**; code `TICKET_PCT` stays 70. Rank stays
+`ticket`. Cap stays 2.
 
 ## Caveats (load-bearing)
 
@@ -196,7 +200,7 @@ board (+11.2% / 48). Rank stays `ticket`. Cap stays 2.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` | `0` | `1` writes BET rows |
-| `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Over-ticket cut; `80` is the tighter neighbour |
+| `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Code default 70 (safe). Recommended Railway env **80** with top-2 |
 | `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `2` | Clamped to 1 or 2. 0 / >2 become 2. The card never all-passes |
 | `MLB_TOTAL_PUBLIC_FADE_RANK` | `ticket` | `ticket` \| `gap` \| `juice` \| `composite` \| `ev`. Only `ticket` cleared the holdout. `ev` without a bucket table ranks as ticket |
 | `MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR` | `0` | LOMO estimated-edge floor. Sweep-only (card has no bucket table). Every floor tried (≥2/3/5pp) lost |

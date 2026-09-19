@@ -8,8 +8,9 @@ Deliberate and load-bearing:
   NOT mlb_over_under and NOT mlb_total_market. Those ids stay paused /
   Pin-vs-soft respectively. This lane fades a public OVER pile.
 
-  TICKET CUT IS ENV. MLB_TOTAL_PUBLIC_FADE_TICKET_PCT default 70; 80 is
-  supported. The finder applies it. ACTION_THRESHOLDS min_edge is 0 so the
+  TICKET CUT IS ENV. MLB_TOTAL_PUBLIC_FADE_TICKET_PCT code default 70;
+  recommended Railway env 80 + MAX_PER_SLATE=2 + RANK=ticket. The
+  finder applies the env. ACTION_THRESHOLDS min_edge is 0 so the
   action filter does not invent a second cut.
 
   INSERT-ONCE (§1c). Re-pricing a locked under after the ticket pile

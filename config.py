@@ -603,9 +603,10 @@ ACTION_THRESHOLDS: dict = {
     # the card passes 0.02 explicitly. vs=devig is a sweep flag.
     "mlb_total_market":           {"min_prob": 0.0, "min_edge": 0.02},
     # MLB totals public-fade paper rule. Fade consensus OVER tickets ≥
-    # MLB_TOTAL_PUBLIC_FADE_TICKET_PCT (default 70; 80 supported), bet
-    # UNDER at best DK/FD/MGM/WH open (fallback DK). Ticket% is the cut
-    # — min_edge 0 so the action filter does not invent a second one.
+    # MLB_TOTAL_PUBLIC_FADE_TICKET_PCT (code default 70; recommended
+    # env 80 + MAX_PER_SLATE=2 + RANK=ticket), bet UNDER at best
+    # DK/FD/MGM/WH open (fallback DK). Ticket% is the cut — min_edge 0
+    # so the action filter does not invent a second one.
     # INSERT off until MLB_TOTAL_PUBLIC_FADE_PUBLISH=1.
     # mlb_over_under stays paused. Not mlb_total_market (Pin-vs-soft).
     # docs/mlb_total_public_fade.md.
