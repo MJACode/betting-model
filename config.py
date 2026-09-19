@@ -604,8 +604,10 @@ ACTION_THRESHOLDS: dict = {
     "mlb_total_market":           {"min_prob": 0.0, "min_edge": 0.02},
     # MLB totals public-fade paper rule. Fade consensus OVER tickets ≥
     # MLB_TOTAL_PUBLIC_FADE_TICKET_PCT (default 70; 80 supported), bet
-    # UNDER at best DK/FD/MGM/WH open (fallback DK). Ticket% is the cut
-    # — min_edge 0 so the action filter does not invent a second one.
+    # UNDER at best DK/FD/MGM/WH open (fallback DK). Optional under
+    # American band MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_{MIN,MAX} (unset =
+    # no band; I24 is −110/−100). Ticket% is the cut — min_edge 0 so
+    # the action filter does not invent a second one.
     # INSERT off until MLB_TOTAL_PUBLIC_FADE_PUBLISH=1.
     # mlb_over_under stays paused. Not mlb_total_market (Pin-vs-soft).
     # docs/mlb_total_public_fade.md.
@@ -1547,6 +1549,8 @@ MLB_TOTAL_PUBLIC_FADE_TICKET_PCT: float = float(
 # slate guard). Set 1 or 2 to keep only the highest-ranked fades per day.
 # RANK is ticket|gap|juice|composite|ev. EDGE_FLOOR is estimated
 # (bucket wr − implied); 0 disables. PUBLISH stays 0.
+# Optional under-juice BAND (not a floor). Unset = no band. I24 is
+# MIN=-110 MAX=-100 inclusive; #751 one-sided floors (≥−115 etc.) failed.
 # docs/mlb_total_public_fade.md.
 MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE: int = int(
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", "0")
@@ -1556,6 +1560,18 @@ MLB_TOTAL_PUBLIC_FADE_RANK: str = os.environ.get(
 ).strip().lower()
 MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR: float = float(
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR", "0")
+)
+_FADE_UNDER_ODDS_MIN_RAW = os.environ.get(
+    "MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN", ""
+).strip()
+MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN = (
+    float(_FADE_UNDER_ODDS_MIN_RAW) if _FADE_UNDER_ODDS_MIN_RAW else None
+)
+_FADE_UNDER_ODDS_MAX_RAW = os.environ.get(
+    "MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX", ""
+).strip()
+MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX = (
+    float(_FADE_UNDER_ODDS_MAX_RAW) if _FADE_UNDER_ODDS_MAX_RAW else None
 )
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")

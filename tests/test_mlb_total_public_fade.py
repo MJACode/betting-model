@@ -235,6 +235,7 @@ def test_publish_defaults_off_and_xgboost_stays_paused():
     assert config.scoring_method("mlb_total_public_fade") == "rule"
     assert fade.SOFT_BOOKS == ("draftkings", "fanduel", "betmgm", "williamhill_us")
     assert fade.FALLBACK_BOOK == "draftkings"
+    assert fade.under_odds_band() == (None, None)
 
 
 def test_settlement_grades_totals_not_h2h():
@@ -378,6 +379,9 @@ def test_publish_stays_off_and_xgboost_stays_paused_after_the_guard():
     assert config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE == 0
     assert fade.rank_kind() == fade.RANK_TICKET
     assert fade.edge_floor() == 0.0
+    assert fade.under_odds_band() == (None, None)
+    assert config.MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN is None
+    assert config.MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX is None
 
 
 # ── top-K ranking ────────────────────────────────────────────────────────────
@@ -515,3 +519,98 @@ def test_topk_flag_keeps_two_on_a_ten_under_slate_instead_of_suppressing_all(
     assert {r["game_id"] for r in rows} == {"G7", "G4"}
     assert all(r["signal_type"] == "BET" and r["pick_side"] == "under"
                for r in rows)
+
+
+# ── under-juice band (I24: [-110, -100] inclusive) ───────────────────────────
+
+
+I24_LO, I24_HI = -110.0, -100.0
+
+
+def test_juice_band_unset_does_not_filter():
+    """Default env is no band — a −115 under still flags."""
+    assert fade.under_in_odds_band(-115) is True
+    assert fade.under_in_odds_band(-115, None, None) is True
+    quotes = _dk_board(under=-115)
+    bets, diag = fade.find_fade_bets(
+        {"G1": _split(ticket=80)}, quotes, min_over_tickets=80)
+    assert len(bets) == 1
+    assert diag.get("odds_band", 0) == 0
+
+
+def test_juice_band_inclusive_boundaries():
+    """I24 is closed on both ends. −111 is outside; −110 and −100 are in."""
+    assert fade.under_in_odds_band(-110, I24_LO, I24_HI) is True
+    assert fade.under_in_odds_band(-100, I24_LO, I24_HI) is True
+    assert fade.under_in_odds_band(-105, I24_LO, I24_HI) is True
+    assert fade.under_in_odds_band(Decimal("-110"), I24_LO, I24_HI) is True
+    assert fade.under_in_odds_band(-111, I24_LO, I24_HI) is False
+    assert fade.under_in_odds_band(-115, I24_LO, I24_HI) is False
+    assert fade.under_in_odds_band(-99, I24_LO, I24_HI) is False
+
+    kept, _ = fade.find_fade_bets(
+        {"G1": _split(ticket=80)}, _dk_board(under=-110),
+        min_over_tickets=80, under_odds_min=I24_LO, under_odds_max=I24_HI)
+    assert len(kept) == 1
+    even, _ = fade.find_fade_bets(
+        {"G1": _split(ticket=80)}, _dk_board(under=-100),
+        min_over_tickets=80, under_odds_min=I24_LO, under_odds_max=I24_HI)
+    assert len(even) == 1
+    juicy, diag = fade.find_fade_bets(
+        {"G1": _split(ticket=80)}, _dk_board(under=-111),
+        min_over_tickets=80, under_odds_min=I24_LO, under_odds_max=I24_HI)
+    assert juicy == []
+    assert diag["odds_band"] == 1
+
+
+def test_juice_band_american_plus_100_is_even_money():
+    """Books post even as +100, not −100. implied(+100) == implied(−100).
+
+    A numeric −110 ≤ price ≤ −100 would drop +100 and miss the even-money
+    quote. The band compares juiced implied so +100 matches a −100 cap.
+    +105 is plus-money past the cap and is out — this is not a floor.
+    """
+    assert implied(100) == implied(-100)
+    assert fade.under_in_odds_band(100, I24_LO, I24_HI) is True
+    assert fade.under_in_odds_band(105, I24_LO, I24_HI) is False
+    plus, _ = fade.find_fade_bets(
+        {"G1": _split(ticket=80)}, _dk_board(under=100),
+        min_over_tickets=80, under_odds_min=I24_LO, under_odds_max=I24_HI)
+    assert len(plus) == 1
+    assert plus[0].price == 100
+    long, diag = fade.find_fade_bets(
+        {"G1": _split(ticket=80)}, _dk_board(under=105),
+        min_over_tickets=80, under_odds_min=I24_LO, under_odds_max=I24_HI)
+    assert long == []
+    assert diag["odds_band"] == 1
+
+
+def test_juice_band_runs_in_the_finder_before_rank_and_cap(monkeypatch):
+    """Heavier-ticket juiced games must not reach top-K.
+
+    G_juice is 95% over tickets at −120. G_hi is 90% at −110. G_mid is
+    85% at −105. Band drops G_juice first; then RANK=ticket / K=2 keeps
+    G_hi and G_mid — not the 95% pile.
+    """
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN", -110.0)
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX", -100.0)
+
+    splits = {
+        "G_juice": _split(gid="G_juice", ticket=95.0),
+        "G_hi": _split(gid="G_hi", ticket=90.0),
+        "G_mid": _split(gid="G_mid", ticket=85.0),
+        "G_lo": _split(gid="G_lo", ticket=80.0),
+    }
+    quotes = _quotes(
+        _quote("G_juice", "draftkings", under=-120),
+        _quote("G_hi", "draftkings", under=-110),
+        _quote("G_mid", "draftkings", under=-105),
+        _quote("G_lo", "draftkings", under=-108),
+    )
+    bets, diag = fade.find_fade_bets(splits, quotes, min_over_tickets=80)
+    assert diag["odds_band"] == 1
+    assert {b.game_id for b in bets} == {"G_hi", "G_mid", "G_lo"}
+    kept = fade.select_top_k(
+        bets, max_per_slate=2, slate_of=lambda _b: "2026-06-15",
+        kind=fade.RANK_TICKET)
+    assert {b.game_id for b in kept} == {"G_hi", "G_mid"}

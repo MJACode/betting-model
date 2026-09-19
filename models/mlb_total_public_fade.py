@@ -19,6 +19,8 @@ under among DK/FD/MGM/WH at DK's open total (fallback DK), main total
 
 INSERT is gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` (default 0). This is
 not an unpause of `mlb_over_under` and not `mlb_total_market`. Optional
+under-juice band (`MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN` /
+`_MAX`, unset = no band) runs in the finder before top-K. Optional
 top-K ranking (`MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE`, default 0 =
 all-pass) keeps 1–2 highest-ranked fades per day before the slate
 guard. A slate where one side is ≥70% of BETs and n_bet ≥ 4 is then
@@ -117,6 +119,46 @@ def rank_kind() -> str:
 def edge_floor() -> float:
     """Minimum estimated edge after juice. 0 = no floor. Env MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR."""
     return float(config.MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR)
+
+
+def under_odds_band() -> tuple[float | None, float | None]:
+    """Inclusive American under-juice band. Unset = no band.
+
+    Env MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN / _MAX. I24 is −110 / −100.
+    This is a band, not a floor: #751 one-sided floors (≥−115 etc.) failed.
+    """
+    return (
+        config.MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN,
+        config.MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX,
+    )
+
+
+def under_in_odds_band(price, lo=None, hi=None) -> bool:
+    """True when `price` sits inside the inclusive American band [lo, hi].
+
+    Unset bounds do not filter. American odds jump −100 → +100 at even
+    money; comparison is by juiced implied so a posted +100 matches a
+    −100 cap. lo = most juice allowed (more negative). hi = least juice
+    / plus allowed. Missing or unimplied prices fail closed when a
+    bound is set.
+    """
+    if lo is None and hi is None:
+        return True
+    p = numeric_feature_value(price)
+    if p is None:
+        return False
+    ip = implied(p)
+    if ip is None:
+        return False
+    if lo is not None:
+        ilo = implied(float(lo))
+        if ilo is None or ip > ilo:
+            return False
+    if hi is not None:
+        ihi = implied(float(hi))
+        if ihi is None or ip < ihi:
+            return False
+    return True
 
 
 def is_pre_commence(snapshot_at, commence_time) -> bool:
@@ -337,6 +379,8 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
                    min_over_tickets: float | None = None,
                    soft_books: tuple[str, ...] | None = None,
                    fallback_book: str = FALLBACK_BOOK,
+                   under_odds_min: float | None = None,
+                   under_odds_max: float | None = None,
                    ) -> tuple[list[PublicFadeBet], dict]:
     """One UNDER per game when pre-commence over tickets clear the cut.
 
@@ -345,10 +389,16 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
     from `models.mlb_game_market.load_latest_quotes` (OPEN, leak-bounded).
     DK open is required (the measured universe is public ∩ DK open). Other
     books may improve the under price at the same total.
+
+    The optional under-juice band is applied to the shopped price here,
+    before top-K / rank. Unset min+max (and unset env) is no band.
     """
     cut = (DEFAULT_OVER_TICKETS if min_over_tickets is None
            else float(min_over_tickets))
     books_order = tuple(soft_books) if soft_books is not None else SOFT_BOOKS
+    cfg_lo, cfg_hi = under_odds_band()
+    band_lo = cfg_lo if under_odds_min is None else float(under_odds_min)
+    band_hi = cfg_hi if under_odds_max is None else float(under_odds_max)
     diag: dict[str, int] = defaultdict(int)
     by_game: dict[str, dict] = defaultdict(dict)
     for (gid, bk), q in quotes.items():
@@ -378,6 +428,9 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
             diag["no_price"] += 1
             continue
         book, price, snap = shopped
+        if not under_in_odds_band(price, band_lo, band_hi):
+            diag["odds_band"] += 1
+            continue
         money = numeric_feature_value(
             raw.get("public_money_pct", raw.get("over_money_pct")))
         diag["bets"] += 1

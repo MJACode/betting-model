@@ -19,6 +19,11 @@ Deliberate and load-bearing:
   logs; it writes picks only when the env is 1. Do not flip that env
   without mike.
 
+  JUICE BAND (optional). MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN / _MAX
+  default unset = no band. I24 is −110 / −100 inclusive on the shopped
+  under. Applied in the finder BEFORE top-K. This is a band, not the
+  #751 one-sided floors (≥−115 etc.) that failed.
+
   TOP-K RANKING (optional). MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE default
   0 = all-pass. Set 1 or 2 to keep only the highest-ranked fades per
   day (RANK=ticket|gap|juice|composite|ev; default ticket — the only
@@ -173,9 +178,15 @@ def publish(conn, rows: list[dict]) -> int:
 
 
 def render(bets, diag) -> str:
+    lo, hi = fade.under_odds_band()
+    band = ("no-band" if lo is None and hi is None
+            else f"band {lo if lo is not None else 'open'}/"
+                 f"{hi if hi is not None else 'open'}")
     lines = [f"MLB totals public-fade card — {len(bets)} flag(s)  "
              f"[cut {fade.ticket_threshold():.0f}tix · "
+             f"{band} · "
              f"below {diag.get('below_cut', 0)} · "
+             f"odds-band {diag.get('odds_band', 0)} · "
              f"no-DK {diag.get('no_dk', 0)} · "
              f"line-out {diag.get('line_out', 0)} · "
              f"no-price {diag.get('no_price', 0)}]"]
