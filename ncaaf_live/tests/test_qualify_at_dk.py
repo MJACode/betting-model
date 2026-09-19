@@ -28,9 +28,14 @@ def test_the_gate_reads_the_draftkings_numbers():
     `_decide`, not the decision-price versions."""
     src = Path(serve.__file__).read_text(encoding="utf-8")
     body = src.split("def price(")[1].split("\n    @")[0]
-    assert 'self._decide(p, edge, min_prob, min_edge, c["dk_odds"]' in body, (
+    # Since 2026-09-19 the gate runs through decide_honest (the calibrated
+    # probability), which still takes the DraftKings implied and price and
+    # keeps the stale-line cap on the raw DK edge.
+    assert ('self.decide_honest(c["model_id"], p, implied, min_prob,' in body
+            and 'min_edge, c["dk_odds"], min_ev,' in body), (
         "the gate is no longer reading the DraftKings edge/price -- every floor "
         "is then loosened by whatever the shop saves")
+    assert "cap_edge=edge)" in body
     assert "d_edge, min_prob, min_edge, d_price" not in body
 
 

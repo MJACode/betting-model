@@ -70,10 +70,49 @@ class _FakeConn:
         return self._rows
 
 
-def test_a_model_with_too_few_graded_picks_is_not_fitted():
-    conn = _FakeConn([(0.7, "WIN")] * (pc.MIN_GRADED - 1))
-    rep = pc.fit_model(conn, "mlb_moneyline", "2026-04-14")
-    assert rep["method"] is None and "identity map" in rep["note"]
+def test_a_model_with_too_few_graded_picks_gets_the_shrunk_offset_not_a_platt_map():
+    """PHASE 3 (2026-09-19, mike): a thin record is not "no evidence" -- the
+    overclaim tracks sample size -- so under MIN_GRADED the model gets a
+    one-parameter offset shrunk toward the pooled prior, never the
+    two-parameter map (a slope fitted on 40 picks is a slope of 40 picks)."""
+    rng = np.random.RandomState(3)
+    rows = [(0.70, "WIN" if w else "LOSS")
+            for w in rng.binomial(1, 0.55, pc.MIN_GRADED - 1)]
+    rep = pc.fit_model(_FakeConn(rows), "mlb_moneyline", "2026-04-14", {"b": -0.25})
+    assert rep["fit"] == "offset" and "platt" not in rep
+    assert rep["a"] == 1.0
+    # A 0.70 claim delivering 0.55 pulls the offset BELOW the prior.
+    assert rep["b"] < -0.25 and rep["helps"] is True
+
+
+def test_a_model_with_no_record_takes_the_pooled_correction():
+    rep = pc.fit_model(_FakeConn([]), "nhl_moneyline", "2026-04-14", {"b": -0.267})
+    assert rep["fit"] == "offset" and rep["method"] == "platt"
+    assert rep["a"] == 1.0 and rep["b"] == pytest.approx(-0.267, abs=1e-6)
+    assert rep["endorsed"] is True and "prior-dominated" in rep["note"]
+
+
+def test_the_pooled_prior_counts_each_model_once():
+    """Two 10,000-row calibrated models must not BE the prior."""
+    rng = np.random.RandomState(7)
+    fat = [(0.70, 1 if w else 0) for w in rng.binomial(1, 0.70, 5000)]
+    thin = [(0.70, 1 if w else 0) for w in rng.binomial(1, 0.55, 200)]
+    pool = pc.pooled_prior({"a": fat, "b": fat, "c": thin, "d": thin,
+                            "tiny": thin[: pc.POOL_MIN_N - 1]})
+    assert pool["n_models"] == 4 and "tiny" not in pool["per_model"]
+    assert pool["b"] == pytest.approx(
+        sum(pool["per_model"].values()) / 4, abs=1e-6)
+    assert pool["b"] < -0.2, pool
+
+
+def test_the_offset_shrinks_toward_the_prior_by_sample_size():
+    rng = np.random.RandomState(8)
+    probs = [0.70] * 40
+    wins = list(rng.binomial(1, 0.50, 40))
+    own = pc.fit_offset(probs, wins)
+    shrunk = pc.fit_offset(probs, wins, prior_b=0.0, k=pc.SHRINK_K)
+    assert own < shrunk < 0.0, (own, shrunk)
+    assert pc.fit_offset([], [], prior_b=-0.3, k=pc.SHRINK_K) == pytest.approx(-0.3)
 
 
 def test_prob_only_models_are_never_fitted():
@@ -93,8 +132,8 @@ def test_a_map_that_does_not_help_out_of_sample_is_not_applied():
     rows = ([(0.75, "WIN" if w else "LOSS") for w in rng.binomial(1, 0.50, 300)]
             + [(0.75, "WIN" if w else "LOSS") for w in rng.binomial(1, 0.75, 300)])
     rep = pc.fit_model(_FakeConn(rows), "mlb_moneyline", "2026-04-14")
-    assert rep["method"] == "platt", "it should still FIT, so the numbers are visible"
-    assert rep["applied"] is False
+    assert rep["platt"]["a"] is not None, "it should still FIT, so the numbers are visible"
+    assert rep["method"] is None and rep["applied"] is False
     assert "DOES NOT HELP" in rep["note"]
 
 

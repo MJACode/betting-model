@@ -378,12 +378,14 @@ def classify_live_signal(model_id: str, model_prob: float,
             return "NONE"
         # EV floor. Applied AFTER prob/edge so it only ever tightens, and only
         # when a price exists -- a prob-only pick has no EV and is judged on the
-        # thresholds alone.
-        floor = MODEL_MIN_EV.get(model_id)
-        if floor is not None:
-            ev = expected_value(decision_prob, dk_odds)
-            if ev is not None and ev < floor:
-                return "NONE"
+        # thresholds alone. The floor is the platform's global one or the
+        # model's own MODEL_MIN_EV, whichever is higher (config.min_ev_for,
+        # 2026-09-19); MODEL_MIN_EV alone left a model with no entry unfloored.
+        import config as _config
+        floor = _config.min_ev_for(model_id)
+        ev = expected_value(decision_prob, dk_odds)
+        if ev is not None and ev < floor:
+            return "NONE"
         return "BET"
     if decision_edge <= -bet_thresh:
         return "AVOID"

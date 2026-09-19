@@ -102,12 +102,21 @@ def slate(conn, game_date: str) -> dict[str, dict]:
 def pick_rows(bets, games, quotes, bankroll: float,
               model_id: str = MODEL_ID, market: str = MARKET) -> list[dict]:
     """Card bets -> picks rows. Pure given its inputs, so it is testable."""
+    from models.honest_ev import gate
     floor = config.min_odds_for(model_id)
     rows = []
     for b in bets:
         if floor is not None and b.price < floor:
             logger.info(f"price floor {floor}: dropped {b.game_id} {b.side} "
                         f"@{b.book} {b.price:+.0f}")
+            continue
+        # THE GLOBAL EV FLOOR on the honest probability at the bet price
+        # (2026-09-19). A rule has no decision function, so the platform
+        # gate is applied here, before the row.
+        ev = gate(model_id, b.fair, b.price)
+        if not ev.clears:
+            logger.info(f"{model_id}: {ev.reason} — dropped {b.game_id} {b.side} "
+                        f"@{b.book}")
             continue
         g = games.get(b.game_id, {})
         home, away = g.get("home", ""), g.get("away", "")

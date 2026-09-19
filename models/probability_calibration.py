@@ -76,6 +76,37 @@ MAX_TRANSFER_GAP_PP = 6.0
 # (1.106, 0.012) — the b-shift alone is 0.36, an order of magnitude above this.
 MAP_PARAM_ATOL = 0.02
 
+# ── PHASE 3 (2026-09-19, mike: "I want only best of the best in terms of
+# expected value ... it should be a best big bet model"): EVERY model decides
+# on an honest number, and a global EV floor on that number is the selector.
+#
+# The two-parameter Platt fit above needs MIN_GRADED picks and a held-out gap
+# under MAX_TRANSFER_GAP_PP, and the models that overclaim MOST are exactly the
+# ones that can never clear it: a live model's evidence is one BET band above
+# its own floor (fetch_graded), a rule model has a few dozen settled bets, a
+# new model has none. Under phase 2 those kept deciding on the RAW claim --
+# ncaaf_live_total claiming 69.8% and delivering 52.0% over 98 bets (measured
+# 2026-09-19), mlb_live_total_runs 73.0% vs 59.7% over 144. The overclaim
+# tracks sample size, not sport (module header), so a thin record is not "no
+# evidence": it is evidence the model is one of these.
+#
+# So the fit is tiered. A model with a fat record and a Platt map that helps
+# AND transfers keeps that map. Every other model gets a ONE-parameter offset
+# on the logit (a = 1, b fitted), shrunk toward the POOLED offset fitted
+# across every model with a record, with the prior worth SHRINK_K graded
+# picks: b = argmin sum(logloss) + (SHRINK_K / 2) (b - b_pool)^2. n = 0 lands
+# on the pooled correction; n >> SHRINK_K lands on the model's own. It is verified the same way as the Platt map -- fitted on the older
+# half, judged on the newer half against leaving the number raw -- and a
+# model under OFFSET_HOLDOUT_MIN graded picks is prior-dominated by
+# construction and takes the pooled correction without a held-out verdict
+# (25 rows cannot deliver one).
+SHRINK_K = float(MIN_GRADED)
+# A model with fewer graded picks than this in its era contributes nothing to
+# the pooled prior (its own offset is noise) and takes the prior without a
+# held-out test.
+POOL_MIN_N = 25
+OFFSET_HOLDOUT_MIN = 50
+
 # Contamination the repo documents, which would otherwise be fitted as if it
 # were the model talking: mlb_over_under's live probabilities before the
 # NaN-total_line fix, and mlb_runline's before the frozen-bullpen catch-up.
@@ -126,6 +157,52 @@ def fit_platt(probs: list[float], wins: list[int],
     return a, b
 
 
+def fit_offset(probs: list[float], wins: list[int], *, prior_b: float = 0.0,
+               k: float = 0.0, iters: int = 400, lr: float = 0.08) -> float:
+    """One-parameter offset on the logit, shrunk toward a prior:
+    p' = sigmoid(logit(p) + b), b = argmin sum logloss + (k/2)(b - prior_b)^2.
+
+    `k` is the prior's weight in graded picks: with n = k the data and the
+    prior carry equal weight; with n = 0 the answer IS the prior. a is pinned
+    at 1 because on one band of evidence the slope is not identified (a Platt
+    fit there "is close to a single offset", fetch_graded) and a free slope
+    fitted on 40 picks is a slope of 40 picks.
+    """
+    xs = [_logit(p) for p in probs]
+    n = len(xs)
+    b = prior_b
+    scale = float(max(n, 1))
+    for _ in range(iters):
+        g = sum(_sigmoid(x + b) - y for x, y in zip(xs, wins))
+        g += k * (b - prior_b)
+        b -= lr * g / (scale + k)
+    return b
+
+
+def pooled_prior(pairs_by_model: dict[str, list[tuple[float, int]]]) -> dict:
+    """The offset the models share, fitted with every model counting once.
+
+    Equal weight per model, not per pick, or the two batter props with 10,000
+    graded rows each would BE the prior and the thin models it exists for
+    would be shrunk toward a number two well-calibrated models produced.
+    Models under POOL_MIN_N contribute nothing. Returns the pooled b, the
+    per-model unshrunk offsets it was pooled from, and their count.
+    """
+    per_model = {}
+    for m, pairs in pairs_by_model.items():
+        if len(pairs) < POOL_MIN_N:
+            continue
+        per_model[m] = round(fit_offset([p for p, _ in pairs],
+                                        [y for _, y in pairs]), 6)
+    if not per_model:
+        return {"b": 0.0, "per_model": {}, "n_models": 0}
+    # Weighted MLE with weight 1/n_m per pair == mean of the per-model score
+    # equations; the mean of the per-model offsets is its first-order solution
+    # and is the number a reader can check by hand.
+    b = sum(per_model.values()) / len(per_model)
+    return {"b": round(b, 6), "per_model": per_model, "n_models": len(per_model)}
+
+
 def maps_materially_differ(a1, b1, a2, b2, atol: float = MAP_PARAM_ATOL) -> bool:
     """True when two Platt maps are not the same decision.
 
@@ -142,17 +219,22 @@ def maps_materially_differ(a1, b1, a2, b2, atol: float = MAP_PARAM_ATOL) -> bool
 def eligibility_clause(model_id: str, *, helps: bool, transfers: bool,
                        transfer_gap_pp: float | None,
                        promoted: bool,
-                       cand_a, cand_b, prom_a, prom_b) -> str | None:
+                       cand_a, cand_b, prom_a, prom_b,
+                       endorsed: bool | None = None) -> str | None:
     """One sentence for the health check: promote, re-promote, or not eligible.
 
-    `helps` alone is the publish bar (`applied`). Promotion still requires
-    `helps AND transfers`. A promoted map whose transferring candidate has
-    moved is the 2026-09-14 batter_runs failure: the 09-07 map inflated
-    claimed probabilities by ~10pp on a version that was already calibrated.
+    `helps` alone is the publish bar (`applied`). Promotion requires the fit's
+    `endorsed` verdict -- `helps AND transfers` for a two-parameter map, which
+    is also what a caller that does not pass `endorsed` gets. A promoted map
+    whose transferring candidate has moved is the 2026-09-14 batter_runs
+    failure: the 09-07 map inflated claimed probabilities by ~10pp on a
+    version that was already calibrated.
     """
-    if not helps:
+    if endorsed is None:
+        endorsed = bool(helps and transfers)
+    if not helps and not endorsed:
         return None
-    if not transfers:
+    if not endorsed:
         gap = (f"{float(transfer_gap_pp):.1f}pp"
                if transfer_gap_pp is not None else "held-out")
         return (f"{model_id} candidate helps but does not close "
@@ -261,6 +343,28 @@ def fetch_graded(conn, model_id: str, since: str) -> list[tuple[float, int]]:
         """, {"m": model_id, "minp": MIN_PROB, "since": since}).fetchall()
         return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
 
+    if not _in_graded_matview(model_id):
+        # THE THIRD SOURCE (2026-09-19). The matview grades MLB and WNBA only
+        # (materialize_scored_pick_outcomes.sql: five game models plus the
+        # mlb_prop_/wnba_prop_ families), so every NFL, NCAAF, UFC and
+        # market-rule model read back ZERO here -- nfl_prop_market with 39
+        # settled BETs claiming 55.2% and hitting 48.7%, ncaaf_over_under
+        # with 16 claiming 70.2% and hitting 43.8% (measured 2026-09-19). The
+        # same "invisible, reported as thin" failure the live branch above
+        # fixed on 09-07, one source over. These models write BET rows only
+        # (a rule has no dead zone), so like a live model the evidence is the
+        # bet band alone.
+        rows = conn.execute("""
+            SELECT model_probability::float8, result
+            FROM picks
+            WHERE model_id = %(m)s AND NOT coalesce(is_live, false)
+              AND signal_type = 'BET' AND result IN ('WIN','LOSS')
+              AND model_probability >= %(minp)s AND game_date >= %(since)s
+              AND coalesce(decision_odds, dk_odds) IS NOT NULL
+              AND coalesce(condition_status, '') <> 'VOID'
+        """, {"m": model_id, "minp": MIN_PROB, "since": since}).fetchall()
+        return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
+
     clauses = " OR ".join(
         f"(game_date BETWEEN '{lo}' AND '{hi}')" for lo, hi in CLEAN_WINDOWS)
     rows = conn.execute(f"""
@@ -273,6 +377,19 @@ def fetch_graded(conn, model_id: str, since: str) -> list[tuple[float, int]]:
     return [(float(p), 1 if r == "WIN" else 0) for p, r in rows]
 
 
+# The models mv_scored_pick_outcomes grades -- the WHERE clause of
+# data/migrations/materialize_scored_pick_outcomes.sql, restated. Everything
+# else settles in `picks` and is read from there.
+MATVIEW_GAME_MODELS = frozenset({"mlb_moneyline", "mlb_over_under", "mlb_runline",
+                                 "mlb_f5_moneyline", "wnba_moneyline"})
+
+
+def _in_graded_matview(model_id: str) -> bool:
+    return (model_id in MATVIEW_GAME_MODELS
+            or model_id.startswith("mlb_prop_")
+            or model_id.startswith("wnba_prop_"))
+
+
 def _gap_pp(pairs: list[tuple[float, int]], params: dict | None = None) -> float:
     if not pairs:
         return 0.0
@@ -283,24 +400,8 @@ def _gap_pp(pairs: list[tuple[float, int]], params: dict | None = None) -> float
 
 # ── fitting ──────────────────────────────────────────────────────────────────
 
-def fit_model(conn, model_id: str, active_since: str | None) -> dict:
-    """Fit one model's map, or refuse and say why."""
-    since = _era_start(model_id, active_since)
-    pairs = fetch_graded(conn, model_id, since)
-    out = {"model_id": model_id, "era_from": since, "n": len(pairs),
-           "method": None, "a": None, "b": None,
-           "raw_gap_pp": round(_gap_pp(pairs), 2),
-           "fitted_at": datetime.now().astimezone().isoformat()}
-
-    if model_id in config.PROB_ONLY_MODELS:
-        out["note"] = ("prob-only model — its probability is the whole signal and "
-                       "is not compared to a price; not fitted")
-        return out
-    if len(pairs) < MIN_GRADED:
-        out["note"] = (f"only {len(pairs)} graded picks since {since} "
-                       f"(need {MIN_GRADED}) — identity map, unfitted")
-        return out
-
+def _platt_report(pairs: list[tuple[float, int]]) -> dict:
+    """Fit the two-parameter map and judge it on the newer half."""
     # Time split: fit on the older half, check the map on the newer half. A map
     # that cannot transfer across six weeks of its own season will not transfer
     # to next week either.
@@ -313,30 +414,127 @@ def fit_model(conn, model_id: str, active_since: str | None) -> dict:
     # applied to unseen picks beats leaving them raw.
     transfer_raw = abs(_gap_pp(holdout))
     transfer = abs(_gap_pp(holdout, {"method": "platt", "a": a1, "b": b1}))
-
     a, b = fit_platt([p for p, _ in pairs], [y for _, y in pairs])
-    params = {"method": "platt", "a": a, "b": b}
-    out.update(method="platt", a=round(a, 6), b=round(b, 6),
-               cal_gap_pp=round(_gap_pp(pairs, params), 2),
-               transfer_gap_pp=round(transfer, 2),
+    return {"a": round(a, 6), "b": round(b, 6),
+            "cal_gap_pp": round(_gap_pp(pairs, {"method": "platt", "a": a, "b": b}), 2),
+            "transfer_gap_pp": round(transfer, 2),
+            "transfer_raw_gap_pp": round(transfer_raw, 2),
+            "helps": bool(transfer < transfer_raw),
+            "transfers": bool(transfer <= MAX_TRANSFER_GAP_PP)}
+
+
+def _offset_report(pairs: list[tuple[float, int]], pool_b: float) -> dict:
+    """Fit the shrunk offset and, where there are enough rows, judge it the
+    same way: fitted on the older half (with the prior), gap on the newer."""
+    b = fit_offset([p for p, _ in pairs], [y for _, y in pairs],
+                   prior_b=pool_b, k=SHRINK_K)
+    out = {"a": 1.0, "b": round(b, 6), "pool_b": round(pool_b, 6),
+           "prior_dominated": len(pairs) < OFFSET_HOLDOUT_MIN,
+           "cal_gap_pp": round(_gap_pp(pairs, {"method": "platt", "a": 1.0, "b": b}), 2),
+           "helps": None, "transfers": None,
+           "transfer_gap_pp": None, "transfer_raw_gap_pp": None}
+    if out["prior_dominated"]:
+        return out
+    half = len(pairs) // 2
+    b1 = fit_offset([p for p, _ in pairs[:half]], [y for _, y in pairs[:half]],
+                    prior_b=pool_b, k=SHRINK_K)
+    holdout = pairs[half:]
+    transfer_raw = abs(_gap_pp(holdout))
+    transfer = abs(_gap_pp(holdout, {"method": "platt", "a": 1.0, "b": b1}))
+    out.update(transfer_gap_pp=round(transfer, 2),
                transfer_raw_gap_pp=round(transfer_raw, 2),
                helps=bool(transfer < transfer_raw),
                transfers=bool(transfer <= MAX_TRANSFER_GAP_PP))
-    # A map is only PUBLISHED where it demonstrably makes the number more honest
-    # on picks it was not fitted on. Nine models earn that (pitcher_hits goes
-    # 12.9pp -> 1.3pp); seven do not, and for those the honest answer is to keep
-    # the raw number and say the gap is not stable enough to map. Fitting a map
-    # and applying it anyway would be trading a known bias for an unknown one.
-    out["applied"] = bool(out["helps"])
-    if not out["transfers"] and out["helps"]:
-        out["note"] = (f"improves but does not close: {transfer_raw:.1f}pp raw -> "
-                       f"{transfer:.1f}pp calibrated on the held-out half. Publish "
-                       f"it; do not build a threshold on it yet")
-    elif not out["helps"]:
-        out["note"] = (f"DOES NOT HELP out of sample: {transfer_raw:.1f}pp raw -> "
-                       f"{transfer:.1f}pp calibrated on the held-out half. The gap "
-                       f"is not stable enough to map")
     return out
+
+
+def fit_model(conn, model_id: str, active_since: str | None,
+              pool: dict | None = None) -> dict:
+    """Fit one model's map, or refuse and say why.
+
+    `pool` is pooled_prior()'s result (optionally carrying "pairs", the graded
+    rows it was pooled from, so they are not fetched twice). Without it the
+    prior is 0 -- the offset then shrinks toward "calibrated", which is the
+    pre-2026-09-19 behaviour for a thin model and is only right for a test.
+
+    The report's `method` / `a` / `b` are the map that DECIDES if promoted;
+    `fit` says which tier produced it ("platt" or "offset"), and the raw
+    two-parameter numbers stay visible under "platt" even when the offset
+    was chosen. `endorsed` is the promotion bar (see promote()).
+    """
+    since = _era_start(model_id, active_since)
+    if pool and model_id in (pool.get("pairs") or {}):
+        pairs = pool["pairs"][model_id]
+    else:
+        pairs = fetch_graded(conn, model_id, since)
+    out = {"model_id": model_id, "era_from": since, "n": len(pairs),
+           "method": None, "a": None, "b": None, "fit": None,
+           "raw_gap_pp": round(_gap_pp(pairs), 2),
+           "helps": None, "transfers": None, "applied": False, "endorsed": False,
+           "fitted_at": datetime.now().astimezone().isoformat()}
+
+    if model_id in config.PROB_ONLY_MODELS:
+        out["note"] = ("prob-only model — its probability is the whole signal and "
+                       "is not compared to a price; not fitted")
+        return out
+
+    # TIER 1: the two-parameter map, where the record can carry one.
+    if len(pairs) >= MIN_GRADED:
+        platt = _platt_report(pairs)
+        out["platt"] = platt
+        if platt["helps"] and platt["transfers"]:
+            out.update(method="platt", fit="platt", applied=True, endorsed=True,
+                       **{k: platt[k] for k in ("a", "b", "cal_gap_pp", "transfer_gap_pp",
+                                                "transfer_raw_gap_pp", "helps", "transfers")})
+            return out
+
+    # TIER 2: one offset, shrunk toward what the models share. Stored with
+    # method "platt" and a = 1 so apply_calibration and every reader of the
+    # promoted_* columns need no new case; `fit` records how it was made.
+    pool_b = float((pool or {}).get("b", 0.0))
+    off = _offset_report(pairs, pool_b)
+    out["offset"] = off
+    common = {k: off[k] for k in ("a", "b", "cal_gap_pp", "transfer_gap_pp",
+                                  "transfer_raw_gap_pp", "helps", "transfers")}
+    if off["prior_dominated"]:
+        out.update(method="platt", fit="offset", applied=True, endorsed=True, **common)
+        out["note"] = (f"prior-dominated: {len(pairs)} graded picks since {since} "
+                       f"(< {OFFSET_HOLDOUT_MIN}); pooled offset {pool_b:+.3f} "
+                       f"worth {SHRINK_K:.0f} picks pulls to b={off['b']:+.3f}")
+        return out
+    if off["helps"]:
+        out.update(method="platt", fit="offset", applied=True, endorsed=True, **common)
+        closes = "closes" if off["transfers"] else "does not close"
+        out["note"] = (f"offset (shrunk to pool {pool_b:+.3f}) helps and {closes}: "
+                       f"{off['transfer_raw_gap_pp']:.1f}pp raw -> "
+                       f"{off['transfer_gap_pp']:.1f}pp on the held-out half")
+        return out
+    # Neither tier beats the raw number on picks it was not fitted on. Fitting
+    # a map and applying it anyway would be trading a known bias for an
+    # unknown one. The Platt numbers, if any, stay visible under "platt".
+    out.update(**common)
+    out["note"] = (f"DOES NOT HELP out of sample: {off['transfer_raw_gap_pp']:.1f}pp raw -> "
+                   f"{off['transfer_gap_pp']:.1f}pp with the shrunk offset on the "
+                   f"held-out half. The gap is not stable enough to map")
+    return out
+
+
+def fit_pool(conn, active: dict[str, str] | None = None) -> dict:
+    """Fetch every model's graded record once and pool the prior from it."""
+    if active is None:
+        active = dict(conn.execute("""
+            SELECT model_id, substring(created_at,1,10)
+            FROM model_registry WHERE is_active = 1
+        """).fetchall())
+    pairs = {}
+    for model_id in sorted(config.ACTION_THRESHOLDS):
+        if model_id in config.PROB_ONLY_MODELS:
+            continue
+        pairs[model_id] = fetch_graded(conn, model_id,
+                                       _era_start(model_id, active.get(model_id)))
+    pool = pooled_prior(pairs)
+    pool["pairs"] = pairs
+    return pool
 
 
 DDL = """
@@ -547,7 +745,12 @@ def promote(conn, model_ids: list[str] | None = None) -> list[str]:
             verdict = {}
         helps = bool(verdict.get("helps"))
         transfers = bool(verdict.get("transfers"))
-        if not (helps and transfers):
+        # `endorsed` is the fit's own promotion verdict (2026-09-19): helps AND
+        # transfers for a two-parameter map, helps (or prior-dominated) for a
+        # shrunk offset. A payload written before it existed falls back to the
+        # two-bar rule it encoded.
+        endorsed = bool(verdict.get("endorsed", helps and transfers))
+        if not endorsed:
             logger.warning(
                 "promote: {} not endorsed (helps={}, transfers={}) — skipped",
                 model_id, helps, transfers)
@@ -639,9 +842,12 @@ def run_calibration_fit(conn=None) -> list[dict]:
             SELECT model_id, substring(created_at,1,10)
             FROM model_registry WHERE is_active = 1
         """).fetchall())
+        pool = fit_pool(conn, active)
+        logger.info("probability calibration: pooled offset {:+.4f} from {} models",
+                    pool["b"], pool["n_models"])
         for model_id in sorted(config.ACTION_THRESHOLDS):
             try:
-                rep = fit_model(conn, model_id, active.get(model_id))
+                rep = fit_model(conn, model_id, active.get(model_id), pool)
                 persist(conn, rep)
                 reports.append(rep)
             except Exception as exc:  # one model must not sink the rest
@@ -707,19 +913,22 @@ def main() -> None:
             SELECT model_id, substring(created_at,1,10)
             FROM model_registry WHERE is_active = 1
         """).fetchall())
-        print(f"{'model':<30}{'n':>7}{'raw gap':>9}"
-              f"{'held-out raw->cal':>14}{'helps':>7}  note")
+        pool = fit_pool(conn, active)
+        print(f"pooled offset {pool['b']:+.4f} from {pool['n_models']} models: "
+              + ", ".join(f"{m} {b:+.2f}" for m, b in sorted(pool["per_model"].items())))
+        print(f"{'model':<30}{'n':>7}{'raw gap':>9}{'fit':>7}{'b':>8}"
+              f"{'held-out raw->cal':>18}{'helps':>7}  note")
         for model_id in sorted(config.ACTION_THRESHOLDS):
-            rep = fit_model(conn, model_id, active.get(model_id))
-            if rep["n"] == 0:
-                continue
-            if rep.get("method"):
+            rep = fit_model(conn, model_id, active.get(model_id), pool)
+            if rep.get("transfer_gap_pp") is not None:
                 tr = f"{rep['transfer_raw_gap_pp']:.1f}->{rep['transfer_gap_pp']:.1f}"
                 helps = "yes" if rep["helps"] else "NO"
             else:
                 tr, helps = "—", "—"
+            b = f"{rep['b']:+.3f}" if rep.get("b") is not None else "—"
             print(f"{model_id:<30}{rep['n']:>7}{rep['raw_gap_pp']:>+9.1f}"
-                  f"{tr:>14}{helps:>7}  {rep.get('note','')[:44]}")
+                  f"{rep.get('fit') or '—':>7}{b:>8}"
+                  f"{tr:>18}{helps:>7}  {rep.get('note','')[:60]}")
             if not args.dry_run:
                 persist(conn, rep)
         if not args.dry_run:

@@ -462,8 +462,11 @@ def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds) -> int | N
             required.append(1.0 / (p - float(min_edge)))
     except (TypeError, ValueError):
         pass
-    ev_floor = config.MODEL_MIN_EV.get(model_id)
-    if ev_floor is not None:
+    # The platform's global EV floor or the model's own, whichever is higher
+    # (config.min_ev_for, 2026-09-19). `prob` is the CALIBRATED probability
+    # where the pick carries one -- the number the floor was applied to.
+    ev_floor = config.min_ev_for(model_id)
+    if ev_floor > 0:
         required.append((1.0 + float(ev_floor)) / p)
     floor_dec = _decimal_or_none(min_odds)
     if floor_dec:
@@ -682,7 +685,8 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             SELECT DISTINCT ON ({key_partition_sql()})
                    {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
-                   p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
+                   COALESCE(p.model_probability_cal, p.model_probability) AS model_probability,
+                   p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
@@ -800,7 +804,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
             SELECT DISTINCT ON ({key_partition_sql()})
                    {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
-                   p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
+                   COALESCE(p.model_probability_cal, p.model_probability) AS model_probability,
+                   p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
                    t.min_edge, t.min_odds, p.game_date,
@@ -1477,7 +1482,8 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     the same signal, and two players' props in one game are two signals."""
     rows = conn.execute(f"""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
-               p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
+               COALESCE(p.model_probability_cal, p.model_probability) AS model_probability,
+                   p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
                g.commence_time, p.created_at, t.min_edge, t.min_odds,
                {live_lock_key_sql()} AS lock_key,

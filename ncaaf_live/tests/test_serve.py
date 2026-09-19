@@ -94,10 +94,20 @@ def test_no_pregame_context_means_no_picks(engine):
     assert engine.price(_state(), _ctx(pregame_spread=None), _ODDS) == []
 
 
-def test_a_non_fbs_matchup_is_not_priced(engine):
+def _no_ev_floor(monkeypatch):
+    """The global EV floor (2026-09-19) is tested in tests/test_global_ev_floor.py;
+    these fixtures predate it and price at -190/-220, which no honest
+    probability clears at 0.30."""
+    import ncaaf_live.serve as serve
+    for name in ("TOTAL_MIN_EV", "ML_MIN_EV"):
+        monkeypatch.setattr(serve, name, None)
+
+
+def test_a_non_fbs_matchup_is_not_priced(engine, monkeypatch):
     """The live models price FBS-vs-FBS only, like every pre-game NCAAF model.
     The control matters: the same state and odds must still produce picks when
     the matchup IS FBS, or `return []` everywhere would pass this test."""
+    _no_ev_floor(monkeypatch)
     # A shaded over that clears the stale-line cap, so the control prices.
     odds = {"h2h": {"home": -220, "away": 180},
             "total": {"line": 45.0, "over": -190, "under": -110}}
@@ -105,8 +115,9 @@ def test_a_non_fbs_matchup_is_not_priced(engine):
     assert _settled(engine, _state(), _ctx(fbs_matchup=False), odds) == []
 
 
-def test_a_context_nobody_checked_is_not_priced(engine):
+def test_a_context_nobody_checked_is_not_priced(engine, monkeypatch):
     """False by default: an unproven matchup declines rather than passes."""
+    _no_ev_floor(monkeypatch)
     base = dict(game_id="NCAAF_2026-08-29_north-carolina_tcu", home="TCU",
                 away="North Carolina", commence_time="2026-08-29T16:00:00Z",
                 pregame_spread=-9.5, pregame_total=46.5, wind_mph=5.0,
