@@ -103,9 +103,9 @@ top-K (`MAX_PER_SLATE` default 0 = all-pass; recommended **2** +
 `RANK=ticket`) keeps the two heaviest OVER piles per day before the
 slate guard. Optional under-juice **band**
 (`UNDER_ODDS_MIN`/`_MAX`, unset = no band; I24 is −110/−100).
-2026-09-19 remesure: the +9.51u/38 print is first-open DK-only; the
-finder latest-open shop (what the card uses) is I24 all-pass **41 −8.84u**
-and live top-2 **27 −1.73u**. No tighten-only upgrade. Do not recut I24.
+2026-09-19 remesure: production band-then-top-2 **27 −1.73u −6.4%**
+(red). Handicap #759 n=22 −12.2% is top-2-then-band, not production.
++9.51u/38 is first-open DK-only. `PUBLISH` stays 0. Do not recut I24.
 `mlb_over_under` stays paused. Coverage: 138 pre-commence (Aug 0).
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)

@@ -19,6 +19,7 @@ from scripts.mlb_total_public_fade_i24 import (
     apply_live_card,
     build_finder_candidates,
     cell_clears,
+    handicap_top2_then_band,
     is_tighter,
     numeric_band,
 )
@@ -130,6 +131,40 @@ def test_apply_live_card_caps_at_two_and_guard_is_noop():
         })
     kept = apply_live_card(rows, k=2)
     assert [r["game_id"] for r in kept] == ["G0", "G1"]
+
+
+def _row(gid, date, tix, price):
+    return {
+        "game_id": gid, "game_date": date, "month": date[:7],
+        "bet": fade.PublicFadeBet(
+            game_id=gid, book="draftkings", line=8.5,
+            price=float(price), over_ticket_pct=float(tix)),
+        "result": "WIN", "units": 0.91, "over_tix": float(tix),
+        "over_money": 80.0, "price": float(price), "line": 8.5,
+        "book": "draftkings", "implied": implied(price), "has_over": True,
+    }
+
+
+def test_production_bands_before_topk_handicap_does_the_reverse():
+    """#759 n=22 −12.2% is top-2-then-band, not the live card.
+
+    One slate: two juicy heavies (97% −120, 95% −115) and an in-band
+    81% at −108. Production bands first and keeps the 81%. Handicap
+    fills top-2 with the juicers and then drops both — the 81% never
+    enters. That is the 5-bet gap (27 vs 22).
+    """
+    t80 = [
+        _row("JUICE1", "2026-06-15", 97, -120),
+        _row("JUICE2", "2026-06-15", 95, -115),
+        _row("INBAND", "2026-06-15", 81, -108),
+        _row("OTHER", "2026-06-16", 90, -110),
+    ]
+    banded = [r for r in t80 if fade.under_in_odds_band(r["price"], -110, -100)]
+    prod = apply_live_card(banded, k=2)
+    hand = handicap_top2_then_band(t80)
+    assert {r["game_id"] for r in prod} == {"INBAND", "OTHER"}
+    assert {r["game_id"] for r in hand} == {"OTHER"}
+    assert "INBAND" not in {r["game_id"] for r in hand}
 
 
 def test_cell_clears_requires_n40_every_month_green_and_cap2():

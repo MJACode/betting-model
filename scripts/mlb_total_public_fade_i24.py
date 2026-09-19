@@ -11,7 +11,9 @@ finder** (`find_fade_bets`: DK open total, shop DK/FD/MGM/WH, leak-
 bounded `snapshot_type='open'` AND `snapshot_at <= commence_time`) and
 asks whether any **tighten-only** neighbour beats the live card.
 
-Live I24 (Railway, PUBLISH=1 — do not weaken from this file):
+Live I24 guards (do not weaken from this file). Railway
+`MLB_TOTAL_PUBLIC_FADE_PUBLISH` is **0** pending this remesure — do not
+flip it to 1 from this file:
   TICKET_PCT=80, UNDER_ODDS_MIN=-110, UNDER_ODDS_MAX=-100,
   MAX_PER_SLATE=2, RANK=ticket, slate concentration suppress-all.
 
@@ -157,9 +159,27 @@ def numeric_band(rows: list[dict], lo: float, hi: float) -> list[dict]:
 
 
 def apply_live_card(rows: list[dict], *, k: int = LIVE_K) -> list[dict]:
-    """ticket top-K then suppress-all. After K=2 the n≥4 guard is a no-op."""
+    """ticket top-K then suppress-all. After K=2 the n≥4 guard is a no-op.
+
+    `rows` must already be I24-banded. Production applies the juice band
+    in `find_fade_bets` **before** top-K (`docs/mlb_total_public_fade.md`).
+    """
     ranked = take(rows, kind=LIVE_RANK, k=k)
     return fade_suppress_all(ranked)
+
+
+def handicap_top2_then_band(t80_any: list[dict]) -> list[dict]:
+    """PR #759 labelled I24: ticket top-2 on t80-any, *then* the juice band.
+
+    That is not production. The finder bands first, so a day whose two
+    heaviest piles sit at −114 still keeps the next in-band under. This
+    order drops those days instead. Handicap's board: n=22 −12.2%.
+    """
+    ranked = take(t80_any, kind=LIVE_RANK, k=LIVE_K)
+    return [
+        r for r in ranked
+        if fade.under_in_odds_band(r["price"], LIVE_ODDS_MIN, LIVE_ODDS_MAX)
+    ]
 
 
 def fade_suppress_all(rows: list[dict], min_bets: int = 4) -> list[dict]:
@@ -289,10 +309,22 @@ def report(splits: list[dict], quotes: list[dict]) -> dict:
     print(f"  of implied-band, plus-money (+100)   {_fmt(summarize(plus))}")
 
     live = apply_live_card(claimed, k=LIVE_K)
-    print(f"\n=== live I24 card (band then ticket top-2 then suppress-all n≥4) ===")
+    print(f"\n=== live I24 card (PRODUCTION: band then ticket top-2) ===")
     print(f"  LIVE  {_fmt(summarize(live))}  {month_print(live)}")
     live_top2_only = take(claimed, kind=LIVE_RANK, k=2)
     print(f"  top-2 no guard (same; guard is no-op at K=2)  {_fmt(summarize(live_top2_only))}")
+
+    # PR #759 labelled the other order. Reproduce it so the prints do not
+    # fight. Both are red; production is band-first.
+    hand = handicap_top2_then_band(t80_any)
+    print(f"\n=== Handicap labelled I24 (top-2 on t80-any THEN band) ===")
+    print(f"  #759  {_fmt(summarize(hand))}  {month_print(hand)}")
+    prod_ids = {r["game_id"] for r in live}
+    hand_ids = {r["game_id"] for r in hand}
+    print(f"  overlap {len(prod_ids & hand_ids)}  "
+          f"prod-only {len(prod_ids - hand_ids)}  "
+          f"hand-only {len(hand_ids - prod_ids)}")
+    print("  PUBLISH stays 0. Neither cell is month-stable +ROI.")
 
     print("\n=== tighten-only neighbours ===")
     grid = []
@@ -357,6 +389,7 @@ def report(splits: list[dict], quotes: list[dict]) -> dict:
     return {
         "claimed": summarize(claimed),
         "live": summarize(live),
+        "handicap": summarize(hand),
         "numeric": summarize(numeric),
         "n_clears": len(clears),
     }

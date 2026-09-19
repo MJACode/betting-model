@@ -194,15 +194,30 @@ Sep 19 still unscored). May 0/15. August last-upsert overwrite.
 | First-open DK only | ticket top-2 | 28 | +5.21u | +18.6% | Jun +24.5%/15, Jul +37.8%/7, **Sep −18.7%/6** |
 | First-open shop (SOFT_BOOKS) | live card top-2 | 33 | +4.30u | +13.0% | Jun +29.2%/19, Jul +22.2%/8, **Sep −50.3%/6** |
 
-**Which number is truthful.** The stored **+9.51u** is first-open
-DraftKings-only, all-pass (n this pull is 41, not 38; units match).
-The live card does **not** use that board: it shops four books on
-**latest** open (`load_latest_quotes`). On that as-of the same I24
-filters are red. PR #758’s −34.2%/37 is a third shop (both sides
-required at the latest equal DK line) and is also red — same
-direction, different intersection. Production `mlb_total_public_fade`
+**Which number is truthful.** Three prints, three constructions:
+
+| Print | What it actually is | Verdict |
+|---|---|---|
+| **+9.51u / 38** (docs, +25%) | First-open **DK-only**, t80+band, **all-pass** (n this pull 41; units match) | Not the live card |
+| **n=22 −12.2% (−2.67u)** (Handicap #759) | Latest-open shop, t80 **top-2 then** juice band | Reproduced exactly. **Not production order** |
+| **n=27 −6.4% (−1.73u)** (this remesure) | Latest-open shop, **band then** ticket top-2 — `find_fade_bets` before `select_top_k` | **Production as-of** |
+
+The finder applies the juice band **before** top-K. Handicap’s labelled
+I24 ranked every t80 under first, then kept those that landed in
+[−110, −100]. That drops a day whose two heaviest piles are −114 and
+fills nothing; production fills with the next in-band under. The five
+prod-only games (DET_HOU 06-15, BAL_SEA / TB_LAD 06-16, BOS_LAA 07-04,
+PHI_NYM 09-17) are exactly those fills. Handicap hand-only is empty.
+
+PR #758’s −34.2%/37 is a fourth shop (both sides required at the latest
+equal DK line) and is also red. Production `mlb_total_public_fade`
 settled **37 −7.19u** is the Sep 16–18 **t70 all-pass** card (12 VOID
 on Sep 19), not the I24 cell.
+
+**Decision.** Both production n=27 −6.4% and Handicap n=22 −12.2% are
+red (July wipeout; Sep not green). **`PUBLISH` stays 0.** Do not flip
+it back to 1 from this file. Mlb Handicap asks Michael before any
+republish.
 
 468 of 552 first-vs-latest open quotes differ on price or line. Using
 the last pre-commence open is look-ahead relative to a morning lock;
