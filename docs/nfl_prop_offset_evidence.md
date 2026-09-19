@@ -263,6 +263,19 @@ ceiling, so it needs no state.
 | `NFL_PROP_PUBLISH_HOUR_UTC` | **13** | the one hourly pass that may **publish** |
 | `NFL_PROP_PUBLISH_MIN_LEAD_HOURS` | 2 | a guard for the early international window |
 
+**One pass means no second chance, so the missed-tick case was measured, not
+assumed.** Every hourly pass writes an `api_call_log` row tagged
+`nfl-prop-card`. Over 2026-09-13→19 the worker ticked 24/24 hours on six of
+seven days and missed exactly one hour all week — **13:00 UTC on 2026-09-18**,
+the one hour this gate depends on. `publish_hour_missed()` therefore asks
+whether the publish pass RAN, and lets the next pass catch up if it did not.
+
+It is keyed on the TICK and not on "does this game have a pick yet", which
+matters: a publish pass that legitimately found no qualifying edge looks
+identical to one that never ran, and treating the two alike would let every
+later pass publish — the hourly harvest coming back in through the fallback. If
+the pass did run it has already published, so no later pass may add to it.
+
 What the union costs, as far as the historical board can show it: production's
 ~24 looks cannot be graded here (the board carries at most 4 offsets per game),
 but unioning the offsets it does carry is the same shape of error — **2,348 bets

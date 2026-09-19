@@ -231,7 +231,44 @@ def render(bets, diag, games, names=None) -> str:
 MODEL_ID = "nfl_prop_market"
 
 
-def publishable_games(games: dict, now: datetime) -> set[str]:
+def publish_hour_missed(conn, now: datetime) -> bool:
+    """Did the scheduler skip this game-day's publish pass entirely?
+
+    ONE PUBLISH PASS MEANS NO SECOND CHANCE, so a tick the worker misses is not
+    a delay — it is a whole slate written off in silence. That is not
+    hypothetical. Every hourly pass writes an `api_call_log` row tagged
+    `nfl-prop-card`, and over 2026-09-13..19 the worker ticked 24/24 hours on
+    six of seven days and missed exactly ONE hour all week: 13:00 UTC on
+    2026-09-18 -- the one hour this gate depends on.
+
+    So the primary rule keeps its exactly-once guarantee and this answers the
+    only question that can safely reopen it: did the publish-hour pass RUN? If
+    it did, it already published whatever qualified and no later pass may add
+    to it. If it did not, no pick was written at that hour, so a catch-up pass
+    is the first read of the day rather than a second one — the guarantee is
+    preserved, not traded away.
+
+    The check is on the TICK, deliberately, and not on "does this game have a
+    pick yet". A publish pass that legitimately found no qualifying edge looks
+    identical to one that never ran, and treating the two the same is how
+    hourly harvesting gets back in through the fallback.
+    """
+    if conn is None:
+        return False
+    start = now.replace(hour=NFL_PROP_PUBLISH_HOUR_UTC, minute=0,
+                        second=0, microsecond=0)
+    if now < start:                      # the hour is still ahead of us today
+        return False
+    row = conn.execute("""
+        SELECT 1 FROM api_call_log
+        WHERE source = 'nfl-prop-card' AND ts >= %s AND ts < %s
+        LIMIT 1
+    """, (start, start + timedelta(hours=1))).fetchone()
+    return row is None
+
+
+def publishable_games(games: dict, now: datetime,
+                      is_catch_up: bool = False) -> set[str]:
     """The games this pass may PUBLISH for — one read per game, at 13:xx UTC.
 
     THE CARD IS SCORED HOURLY AND MUST NOT BET HOURLY. The tick runs every hour
@@ -262,8 +299,14 @@ def publishable_games(games: dict, now: datetime) -> set[str]:
     1.1h after a 13:25 pass, and the grader dropped those quotes as
     post-kickoff, so no measured band describes them. Domestic slots are all 3h+
     from this pass and are unaffected.
+
+    `is_catch_up` is publish_hour_missed()'s answer: the scheduler skipped the
+    publish pass, nothing was written at that hour, and this pass is therefore
+    the day's FIRST read rather than a second one. It does not widen the rule —
+    see publish_hour_missed() for why it is keyed on the tick and not on
+    whether a game already has a pick.
     """
-    if now.hour != NFL_PROP_PUBLISH_HOUR_UTC:
+    if now.hour != NFL_PROP_PUBLISH_HOUR_UTC and not is_catch_up:
         return set()
     out = set()
     for gid, d in games.items():
@@ -420,7 +463,14 @@ def main() -> None:
             # fresh for everything else that scores off it; it may only PUBLISH
             # on the 13:xx UTC pass, which is the single wall-clock read the
             # record was measured on. See publishable_games().
-            allowed = publishable_games(games, now)
+            catch_up = publish_hour_missed(conn, now)
+            if catch_up:
+                # LOUD, because a silent catch-up hides a worker that is
+                # missing ticks -- and the next miss might be of this pass too.
+                logger.warning(
+                    f"the {NFL_PROP_PUBLISH_HOUR_UTC:02d}:xx UTC publish pass "
+                    f"did not run today — publishing from this pass instead")
+            allowed = publishable_games(games, now, is_catch_up=catch_up)
             publishing = [b for b in bets if b.game_id in allowed]
             withheld = len(bets) - len(publishing)
             if withheld:

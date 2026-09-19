@@ -149,6 +149,88 @@ def test_the_cuts_are_untouched():
     assert config.NFL_PROP_MAX_LEAD_HOURS == 24
 
 
+# ── The catch-up, and why it does not reopen the harvest ─────────────────────
+
+class _Conn:
+    """A connection that answers the one question publish_hour_missed asks."""
+
+    def __init__(self, tick_rows):
+        self.tick_rows = tick_rows
+        self.args = None
+
+    def execute(self, sql, params=None):
+        self.args = params
+        return self
+
+    def fetchone(self):
+        return self.tick_rows
+
+
+def test_a_missed_publish_pass_is_caught_up_by_the_next_one():
+    """ONE PASS MEANS NO SECOND CHANCE, so a skipped tick is a whole slate.
+
+    Measured over 2026-09-13..19: the worker ticked 24/24 hours on six of seven
+    days and missed exactly ONE hour all week -- 13:00 UTC on 2026-09-18, the
+    one hour this gate depends on. Without this, that day's entire slate is
+    written off with no pick and no error.
+    """
+    now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 1)
+    games = _games(now, 6.0)
+    # no api_call_log row in the publish hour => the pass never ran
+    assert card_mod.publish_hour_missed(_Conn(None), now) is True
+    assert card_mod.publishable_games(games, now, is_catch_up=True) == set(games)
+
+
+def test_no_catch_up_when_the_publish_pass_did_run():
+    """If the pass ran it already published, so no later pass may add to it.
+    This is what keeps the exactly-once guarantee intact."""
+    now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 1)
+    assert card_mod.publish_hour_missed(_Conn((1,)), now) is False
+    assert card_mod.publishable_games(_games(now, 6.0), now,
+                                      is_catch_up=False) == set()
+
+
+def test_no_catch_up_before_the_publish_hour_has_arrived():
+    """At 09:xx the 13:xx pass has not been missed — it has not happened yet.
+    Treating 'not yet' as 'skipped' would publish every game hours early."""
+    now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC - 4)
+    assert card_mod.publish_hour_missed(_Conn(None), now) is False
+
+
+def test_the_catch_up_is_keyed_on_the_tick_not_on_having_no_picks():
+    """A publish pass that legitimately found nothing looks identical to one
+    that never ran. Keying the catch-up on 'this game has no pick yet' would
+    let every later pass publish, which is the hourly harvest coming back in
+    through the fallback."""
+    import inspect
+    src = inspect.getsource(card_mod.publish_hour_missed)
+    assert "api_call_log" in src, "the catch-up must ask whether the TICK ran"
+    assert "FROM picks" not in src, (
+        "keying the catch-up on existing picks reopens hourly accumulation")
+
+
+def test_the_catch_up_still_respects_the_lead_floor():
+    """A catch-up is the day's first read, not a licence to bet a game that is
+    about to kick off."""
+    now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 1)
+    late = _games(now, config.NFL_PROP_PUBLISH_MIN_LEAD_HOURS - 0.5)
+    assert card_mod.publishable_games(late, now, is_catch_up=True) == set()
+
+
+def test_catch_up_is_off_by_default():
+    """The normal path must be the exactly-once path: a caller that forgets the
+    flag gets the strict rule, not the loose one."""
+    now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 1)
+    assert card_mod.publishable_games(_games(now, 6.0), now) == set()
+
+
+def test_publish_hour_missed_is_a_noop_without_a_database():
+    """--offline has no connection and cannot publish anyway; it must not
+    crash, and it must not claim the pass was missed."""
+    assert card_mod.publish_hour_missed(
+        None, _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 1)) is False
+
+
 def test_main_reads_the_clock_once_for_the_whole_pass():
     """card() and the publish gate must agree about what time it is.
 
@@ -163,8 +245,10 @@ def test_main_reads_the_clock_once_for_the_whole_pass():
     assert src.count("datetime.now(") <= 1, (
         "main() reads the wall clock more than once; card() and "
         "publishable_games() can then straddle the publish hour boundary")
-    assert "publishable_games(games, now)" in src, (
+    assert "publishable_games(games, now" in src, (
         "the publish gate must use the same `now` the card was built with")
+    assert "publish_hour_missed(conn, now)" in src, (
+        "the catch-up check must use that same `now` too")
 
 
 def test_a_game_with_no_kickoff_is_never_published():
