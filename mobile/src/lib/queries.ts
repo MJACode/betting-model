@@ -599,6 +599,55 @@ export async function fetchPropLinesForDates(
 }
 
 /**
+ * Every book's latest line for ONE market across a HANDFUL of games — what the
+ * player card prices its bet bar from.
+ *
+ * Bounded to game ids rather than to a date, because a player card is about one
+ * player: the whole-slate read above is 12,246 rows for `batter_hits` and
+ * 13,829 for `player_reception_yds` over a forward week (measured 2026-09-18),
+ * and paging that onto a phone to price one player is the second half of the
+ * 1,000-row lesson — don't ask for what the screen will throw away.
+ *
+ * PAGED EVEN AT ONE GAME. Measured the same day, the worst SINGLE game for one
+ * market with its alternates folded in is 1,258 rows (`player_reception_yds`,
+ * NFL; `player_receptions` 915, `batter_total_bases` 814), so a single-game
+ * read is already over the cap and a `.limit()` here would silently return an
+ * arbitrary first 1,000 — a player card that prices some books and blanks
+ * others with no way to tell which. Two games (a Thursday and a Sunday player)
+ * is ~2,500.
+ *
+ * The caller joins on the NORMALIZED player name (statsOdds buildQuoteIndex),
+ * never server-side on `player_name`: the view carries the feed's spelling and
+ * the card carries the leaderboard's, and the two differ on exactly the names
+ * that are dangerous to guess at (data/name_match.py).
+ */
+export async function fetchPropLinesForGames(
+  gameIds: readonly string[],
+  market: string,
+): Promise<PropOddsByBookRow[]> {
+  if (gameIds.length === 0) return [];
+  return foldAlternateRows(
+    await fetchAllPages<PropOddsByBookRow>(
+      (lo, hi) =>
+        supabase
+          .from('v_latest_prop_odds_all_books')
+          .select(PROP_ODDS_BY_BOOK_COLUMNS)
+          .in('game_id', gameIds as string[])
+          .in('market', [market, alternateMarketFor(market)])
+          // Deterministic on the REQUEST — the refresh pass writes between
+          // pages, and range paging without a total order repeats or skips.
+          .order('game_id')
+          .order('market')
+          .order('player_name')
+          .order('bookmaker')
+          .order('line')
+          .range(lo, hi),
+      propLineRowKey,
+    ),
+  );
+}
+
+/**
  * Every book's latest line for every game market on one date — the Teams
  * board's LINE column. ~15 games x 3 markets x 13 books on a full MLB slate.
  * The caller bounds it to its sport's games, for the same reason as above.
