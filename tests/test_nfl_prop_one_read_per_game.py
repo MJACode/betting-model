@@ -166,6 +166,22 @@ class _Conn:
         return self.tick_rows
 
 
+class _Log:
+    """api_call_log ticks, filtered to the window publish_hour_missed asks for."""
+
+    def __init__(self, ticks):
+        self.ticks = list(ticks)
+        self.args = None
+
+    def execute(self, sql, params=None):
+        self.args = params
+        return self
+
+    def fetchone(self):
+        start, end = self.args
+        return (1,) if any(start <= ts < end for ts in self.ticks) else None
+
+
 def test_a_missed_publish_pass_is_caught_up_by_the_next_one():
     """ONE PASS MEANS NO SECOND CHANCE, so a skipped tick is a whole slate.
 
@@ -195,6 +211,65 @@ def test_no_catch_up_before_the_publish_hour_has_arrived():
     Treating 'not yet' as 'skipped' would publish every game hours early."""
     now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC - 4)
     assert card_mod.publish_hour_missed(_Conn(None), now) is False
+
+
+def test_no_catch_up_during_the_publish_hour_itself():
+    """At 13:xx this IS the publish pass, not a catch-up — even if this hour's
+    fetch logs have not flushed yet. Calling it a miss would log a false
+    WARNING on the one hour that is supposed to publish."""
+    now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC)
+    assert card_mod.publish_hour_missed(_Log([]), now) is False
+
+
+def test_miss_at_13_catch_up_at_14_later_hours_stay_closed():
+    """13:xx missed → 14:xx catches up once → 15:xx+ do not catch up again.
+
+    THE FAILURE MODE THIS PINS. publish_hour_missed used to ask only whether
+    [13:00, 14:00) had a tick. A 14:xx catch-up logs at 14:xx, so that window
+    stayed empty and every later hour stayed catch_up=True — newly crossed
+    props harvested all afternoon, the exact defect the publish hour exists
+    to stop. The 14:xx tick is the durable one-shot marker.
+    """
+    ticks = []
+    at_13 = _at(config.NFL_PROP_PUBLISH_HOUR_UTC)
+    at_14 = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 1)
+    at_15 = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 2)
+    at_16 = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 3)
+    at_22 = _at(22)
+
+    assert card_mod.publish_hour_missed(_Log(ticks), at_13) is False
+    assert card_mod.publishable_games(_games(at_13, 6.0), at_13)
+
+    assert card_mod.publish_hour_missed(_Log(ticks), at_14) is True
+    assert card_mod.publishable_games(_games(at_14, 6.0), at_14,
+                                      is_catch_up=True) == set(_games(at_14, 6.0))
+
+    ticks.append(at_14)
+    for later in (at_15, at_16, at_22):
+        assert card_mod.publish_hour_missed(_Log(ticks), later) is False, later
+        assert card_mod.publishable_games(
+            _games(later, 6.0), later, is_catch_up=False) == set()
+
+
+def test_the_current_hour_tick_does_not_hide_a_miss():
+    """--fetch writes api_call_log rows BEFORE publish_hour_missed runs.
+    Those rows are this hour and must not count as 'the day's read already
+    happened', or a 14:xx catch-up would see its own fetch and stay closed.
+    """
+    at_14 = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 1)
+    assert card_mod.publish_hour_missed(_Log([at_14]), at_14) is True
+
+
+def test_catch_up_window_runs_from_publish_hour_to_this_hour():
+    """The marker is any tick after 13:00, not only one inside [13:00, 14:00)."""
+    log = _Log([])
+    now = _at(config.NFL_PROP_PUBLISH_HOUR_UTC + 2)
+    assert card_mod.publish_hour_missed(log, now) is True
+    start, end = log.args
+    assert start == datetime(2026, 9, 17, config.NFL_PROP_PUBLISH_HOUR_UTC, 0,
+                             tzinfo=timezone.utc)
+    assert end == datetime(2026, 9, 17, config.NFL_PROP_PUBLISH_HOUR_UTC + 2, 0,
+                           tzinfo=timezone.utc)
 
 
 def test_the_catch_up_is_keyed_on_the_tick_not_on_having_no_picks():
@@ -249,6 +324,12 @@ def test_main_reads_the_clock_once_for_the_whole_pass():
         "the publish gate must use the same `now` the card was built with")
     assert "publish_hour_missed(conn, now)" in src, (
         "the catch-up check must use that same `now` too")
+    assert "now=now" in src and "now=as_of" not in src, (
+        "card() must receive the same `now`; passing as_of (None on a live "
+        "run) re-reads the clock inside card()")
+    assert "replay=as_of is not None" in src, (
+        "a live pass supplies now but is not a replay — the quote filter "
+        "would otherwise clip to the pass start and drop the --fetch")
 
 
 def test_a_game_with_no_kickoff_is_never_published():

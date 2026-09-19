@@ -268,13 +268,21 @@ assumed.** Every hourly pass writes an `api_call_log` row tagged
 `nfl-prop-card`. Over 2026-09-13→19 the worker ticked 24/24 hours on six of
 seven days and missed exactly one hour all week — **13:00 UTC on 2026-09-18**,
 the one hour this gate depends on. `publish_hour_missed()` therefore asks
-whether the publish pass RAN, and lets the next pass catch up if it did not.
+whether the day's read has already happened, and lets the next pass catch up
+if it has not.
+
+The catch-up is ONE-SHOT. Asking only whether [13:00, 14:00) had a tick would
+keep every later hour on catch-up: a 14:xx pass logs at 14:xx and never fills
+that window, so newly crossed props would harvest all afternoon — the defect
+the publish hour exists to stop. The durable marker is any `nfl-prop-card`
+tick from 13:00 through the start of this hour (the 13:xx pass if it ran,
+otherwise the first hour after the miss). Later hours see that tick and stay
+closed.
 
 It is keyed on the TICK and not on "does this game have a pick yet", which
 matters: a publish pass that legitimately found no qualifying edge looks
 identical to one that never ran, and treating the two alike would let every
-later pass publish — the hourly harvest coming back in through the fallback. If
-the pass did run it has already published, so no later pass may add to it.
+later pass publish — the hourly harvest coming back in through the fallback.
 
 What the union costs, as far as the historical board can show it: production's
 ~24 looks cannot be graded here (the board carries at most 4 offsets per game),

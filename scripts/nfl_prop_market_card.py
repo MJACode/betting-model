@@ -108,16 +108,23 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
          games: dict | None = None,
          now: datetime | None = None,
          snapshot_types: tuple[str, ...] | None = None,
-         kalshi_ladders: dict | None = None) -> tuple[list, dict, dict]:
+         kalshi_ladders: dict | None = None,
+         replay: bool | None = None) -> tuple[list, dict, dict]:
     """`now` overrides the clock, which is what makes a past slate replayable
     exactly as the card would have seen it (the §28 replay harness pattern).
     Everything else — the started-game guard, the quote filter — is unchanged,
-    so a replay and a live run take the same path."""
+    so a replay and a live run take the same path.
+
+    A live pass also supplies `now` (one clock read for the whole process) but
+    must pass `replay=False`: keyed only on "was a clock supplied", the quote
+    filter would clip to the pass start and drop rows `--fetch` just stored.
+    """
     games = slate(conn, start, end) if games is None else games
     if not games:
         return [], {"reason": "no scheduled games in window"}, {}
 
-    replay = now is not None
+    if replay is None:
+        replay = now is not None
     now = now or datetime.now(timezone.utc)
     live = {g for g, d in games.items()
             if (_as_dt(d["kickoff"]) or now) <= now}
@@ -232,7 +239,7 @@ MODEL_ID = "nfl_prop_market"
 
 
 def publish_hour_missed(conn, now: datetime) -> bool:
-    """Did the scheduler skip this game-day's publish pass entirely?
+    """Did today's publish pass never run, and has no later pass already caught up?
 
     ONE PUBLISH PASS MEANS NO SECOND CHANCE, so a tick the worker misses is not
     a delay — it is a whole slate written off in silence. That is not
@@ -241,12 +248,16 @@ def publish_hour_missed(conn, now: datetime) -> bool:
     six of seven days and missed exactly ONE hour all week: 13:00 UTC on
     2026-09-18 -- the one hour this gate depends on.
 
-    So the primary rule keeps its exactly-once guarantee and this answers the
-    only question that can safely reopen it: did the publish-hour pass RUN? If
-    it did, it already published whatever qualified and no later pass may add
-    to it. If it did not, no pick was written at that hour, so a catch-up pass
-    is the first read of the day rather than a second one — the guarantee is
-    preserved, not traded away.
+    ONE-SHOT, not "every hour after a miss". Asking only whether [13:00, 14:00)
+    is empty is the harvest coming back in: a 14:xx catch-up logs at 14:xx, so
+    that window stays empty and every later hour would publish newly crossed
+    props. The durable marker is any `nfl-prop-card` tick from the publish hour
+    through the start of THIS hour — the 13:xx pass if it ran, otherwise the
+    first hour after the miss. Later hours see that tick and stay closed.
+
+    The current hour is excluded on purpose. `--fetch` writes `api_call_log`
+    rows before this check runs; counting them would hide a miss from the
+    catch-up pass that is supposed to fill it.
 
     The check is on the TICK, deliberately, and not on "does this game have a
     pick yet". A publish pass that legitimately found no qualifying edge looks
@@ -257,13 +268,14 @@ def publish_hour_missed(conn, now: datetime) -> bool:
         return False
     start = now.replace(hour=NFL_PROP_PUBLISH_HOUR_UTC, minute=0,
                         second=0, microsecond=0)
-    if now < start:                      # the hour is still ahead of us today
+    this_hour = now.replace(minute=0, second=0, microsecond=0)
+    if this_hour <= start:               # still before or inside the publish hour
         return False
     row = conn.execute("""
         SELECT 1 FROM api_call_log
         WHERE source = 'nfl-prop-card' AND ts >= %s AND ts < %s
         LIMIT 1
-    """, (start, start + timedelta(hours=1))).fetchone()
+    """, (start, this_hour)).fetchone()
     return row is None
 
 
@@ -455,7 +467,7 @@ def main() -> None:
     try:
         games = slate(conn, start, end)
         bets, diag, names = card(conn, start, end, a.min_edge, games=games,
-                                 now=as_of)
+                                 now=now, replay=as_of is not None)
         if a.publish and as_of:
             raise SystemExit("--as-of is a replay; refusing to publish from it")
         if a.publish and bets:
