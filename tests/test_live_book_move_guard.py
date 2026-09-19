@@ -240,7 +240,19 @@ def _dk(home_price: int, away_price: int, sec: float) -> dict:
     return {"h2h": {"home": home_price, "away": away_price, "ts": _iso(sec)}}
 
 
-def test_the_ncaaf_loop_no_longer_bets_the_delaware_re_hang():
+def _the_days_cut(monkeypatch):
+    """The cut production ran on 2026-09-19 afternoon (0.65 / edge 0.10),
+    when Delaware fired: the re-sweep that evening moved ncaaf_live_win_prob
+    to 0.50 / 0.16 (a plus-money-dog cell), under which this +100 favourite
+    fixture is one edge point short and the control would go dark for a
+    reason that has nothing to do with the guard."""
+    from ncaaf_live import serve
+    monkeypatch.setattr(serve, "ML_MIN_PROB", 0.65)
+    monkeypatch.setattr(serve, "ML_MIN_EDGE", 0.10)
+
+
+def test_the_ncaaf_loop_no_longer_bets_the_delaware_re_hang(monkeypatch):
+    _the_days_cut(monkeypatch)
     engine = _ncaaf_engine()
     ctx, state = _delaware_ctx(), _tied_q1()
     # Two passes on the pre-touchdown number, then the post-touchdown one,
@@ -251,7 +263,7 @@ def test_the_ncaaf_loop_no_longer_bets_the_delaware_re_hang():
     assert [p for p in picks if p["signal_type"] == "BET"] == []
 
 
-def test_the_control_a_settled_board_still_bets_the_number():
+def test_the_control_a_settled_board_still_bets_the_number(monkeypatch):
     """If this stops betting, the test above proves nothing. The same +100
     and the same 0-0 state, but held still for longer than the settled
     window: no anchor move, nothing recent, so only the cuts decide -- and
@@ -260,6 +272,7 @@ def test_the_control_a_settled_board_still_bets_the_number():
     before the re-hang sat at -167..-217, so the cap fires on the real
     timeline whichever of them was the anchor.)"""
     from ncaaf_live.config import LIVE_SETTLED_SEC
+    _the_days_cut(monkeypatch)
     engine = _ncaaf_engine()
     ctx, state = _delaware_ctx(), _tied_q1()
     engine.price(state, ctx, _dk(100, -133, 0), now=_at(1))
