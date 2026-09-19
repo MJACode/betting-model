@@ -55,6 +55,9 @@ converging on the same place from the other side.
   at 1.8pp exists but INSERT is gated (`MLB_SPREAD_MARKET_PUBLISH` default 0).
   GROK Pin-vs-DK ≥2pp spreads ~−5% n≈200 — do not live-publish that construction.
   Not an unpause of this id. `docs/mlb_runline_ou_edge_search.md`.
+  2026-09-19 hunt (`docs/mlb_runline_edge_hunt.md`): public fade / RLM /
+  steam exhausted; no new paper publisher. The +1.2%/42 fade-fav top-2
+  peak is not shipped.
 * **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last
   three starts), shared by the daily ingest and the rebuild via
   `data/pitcher_rates.py`. It used to be `AVG(era)` over the last three stored

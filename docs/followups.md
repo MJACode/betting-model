@@ -33,7 +33,10 @@ After this merges: `mlb_runline_retrain_sweep` register=false. Worker job
 `mlb_over_under_retrain_sweep` (declared
 `mlb-over-under-retrain-sweep-2026-09-16`, #741) is the totals twin and
 consumes the same `FEATURE_MAP`. Do not flip `PAUSED_MODELS` or
-`MLB_*_MARKET_PUBLISH`.
+`MLB_*_MARKET_PUBLISH`. 2026-09-19 hunt
+(`docs/mlb_runline_edge_hunt.md`) exhausted public fade / RLM / steam /
+Pin-aligned: no new paper publisher. Do not treat the +1.2%/42 peak as
+a ship.
 
 ## [ ] `mlb_prop_pitcher_er` still fails transfer (6.28pp > 6.0pp)
 
