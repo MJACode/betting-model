@@ -759,6 +759,32 @@ def _job_health_check(**kw):
             "checks": len(res.get("results") or [])}
 
 
+def _job_model_quality(**kw):
+    """Run the model-quality monitor ON THE WORKER.
+
+    Same reason health_check is a job type: a verification run needs TZ and
+    DATABASE_URL, and borrowing another container is how a wrong-dated
+    day-set reached the board. Writes only model_quality_checks. Never
+    pauses a model. CRIT is in the result dict; this does not raise.
+    """
+    from tracking.model_quality import run_model_quality
+    res = run_model_quality(kw.get("run_date") or None)
+    return {"ok": res["ok"], "crit": res["crit"], "warn": res["warn"],
+            "checks": len(res.get("results") or [])}
+
+
+def _validate_model_quality(args: dict) -> dict:
+    run_date = args.get("run_date")
+    if run_date in (None, ""):
+        return {}
+    run_date = str(run_date)
+    try:
+        datetime.strptime(run_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(f"run_date must be YYYY-MM-DD, got {run_date!r}") from exc
+    return {"run_date": run_date}
+
+
 def _validate_health_check(args: dict) -> dict:
     run_date = args.get("run_date")
     if run_date in (None, ""):
@@ -1359,6 +1385,9 @@ JOBS = {
     # Read-mostly: writes only system_health_checks. Here so nobody has to
     # borrow another service's container to run it -- see _job_health_check.
     "health_check":    (_job_health_check,     _validate_health_check),
+    # Read-mostly: writes only model_quality_checks. Report only — never
+    # pauses. Same invoke path as health_check (CLI / --step / worker_jobs).
+    "model_quality":   (_job_model_quality,    _validate_model_quality),
     "promote_calibration": (_job_promote_calibration, _validate_promote_calibration),
     "team_stats_asof_verify": (_job_team_stats_asof_verify,
                               _validate_team_stats_asof_verify),

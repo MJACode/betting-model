@@ -1,5 +1,10 @@
 # Daily system health check + retrain workflow
 
+Betting-quality failures (one-sided slates, public-fade concentration,
+CLV/ROI collapse, volume spikes) are a **separate** monitor:
+[`model_quality.md`](model_quality.md) / `model_quality_checks`. This file
+is feed freshness and pipeline observability only.
+
 > Moved out of CLAUDE.md on 2026-08-30 (that file had reached 909 KB and was
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.

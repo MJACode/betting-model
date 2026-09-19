@@ -1360,6 +1360,23 @@ CREATE TABLE IF NOT EXISTS system_health_checks (
 );
 CREATE INDEX IF NOT EXISTS idx_health_run_date ON system_health_checks(run_date);
 
+-- Daily model-quality findings (tracking/model_quality.py). One row per
+-- (run_date, check_name, model_key); re-runs upsert. Report only.
+CREATE TABLE IF NOT EXISTS model_quality_checks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date    TEXT NOT NULL,
+    check_name  TEXT NOT NULL,
+    model_key   TEXT NOT NULL,
+    sport       TEXT,
+    status      TEXT NOT NULL,          -- OK | FLAGGED | SKIPPED | ERROR
+    severity    TEXT NOT NULL,          -- CRIT | WARN
+    detail      TEXT,
+    metrics     TEXT,                   -- JSON object
+    created_at  TEXT NOT NULL,
+    UNIQUE(run_date, check_name, model_key)
+);
+CREATE INDEX IF NOT EXISTS idx_model_quality_run_date ON model_quality_checks(run_date);
+
 -- Odds API credit telemetry: latest x-requests-used/-remaining observation per
 -- UTC day (last write wins — see data/ingestors/odds_quota.py). Feeds the
 -- odds_api_credits health check so quota exhaustion warns BEFORE the feed dies

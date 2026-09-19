@@ -38,6 +38,7 @@ SCANNED = [
     "tracking/paper_tracker.py",
     "tracking/opening_signals.py",
     "tracking/system_health.py",
+    "tracking/model_quality.py",
     "tracking/discord_notifier.py",
     "tracking/push_notifier.py",
     "tracking/run_ledger.py",

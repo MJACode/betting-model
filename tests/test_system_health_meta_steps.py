@@ -22,6 +22,11 @@ def test_health_check_is_excluded():
     assert "health-check" in _meta_steps()
 
 
+def test_model_quality_is_excluded():
+    """Same class as health-check: observability, not a producer."""
+    assert "model-quality" in _meta_steps()
+
+
 def test_aborted_sentinel_is_excluded():
     """Written by _abort_orphans; a deploy is not a failing pipeline step."""
     assert "aborted" in _meta_steps()
