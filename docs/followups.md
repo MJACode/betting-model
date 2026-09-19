@@ -21,6 +21,18 @@
 
 ---
 
+## [x] I24 / `mlb_total_public_fade` remesure (2026-09-19)
+
+Done. Finder latest-open shop (live as-of): I24 all-pass **41 −8.84u
+−21.6%**; live card top-2 **27 −1.73u −6.4%** (Jul wipeout). The
+documented +9.51u/38 is first-open **DK-only** all-pass (units match;
+n this pull 41). PR #758 shop-replay −34.2%/37 is a third board, also
+red. 60 tighten-only cells, **none** clear n≥40 + month-stable +ROI.
+Do not recut I24, do not flip `PUBLISH`, do not unpause XGBoost.
+**Pause this family until new honest public** (August empty; September
+is three settled days). `docs/mlb_total_public_fade.md`,
+`python -m scripts.mlb_total_public_fade_i24`.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`

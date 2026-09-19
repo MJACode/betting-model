@@ -148,21 +148,19 @@ inclusive. Top-K (`MAX_PER_SLATE` / `RANK=ticket`) and the
 concentration guard stay as on master. Unset env is no band so merge
 does not recut the card.
 
-| Construction | n | Units | ROI | Months |
-|---|---|---|---|---|
-| **I24: t80 + under ∈ [−110, −100]** | **38** | **+9.51u** | **+25%** | Jun / Jul / Sep all + |
-
 A posted **+100** is even money (`implied(+100) == implied(−100)`) and
 sits on the cap; **+105** is plus-money past the cap and is out.
 
 **Not steam_cap2.** That construction is tickets ≥75 AND
 money ≥ tickets, juice **floor** ≥ −115, cap 2. Regrade of the first
 honest Sep pregame public (2026-09-16→18): **5 settled, 2-3, −1.18u,
-−23.6%** (Jun +12.0%/12, Jul +12.5%/7). September failed; I24 is the
-band that stayed positive across Jun/Jul/Sep. Do not ship steam_cap2
-from this file.
+−23.6%** (Jun +12.0%/12, Jul +12.5%/7). September failed. Do not ship
+steam_cap2 from this file.
 
-**Recommended I24 flags (PUBLISH stays 0):**
+The 2026-09-19 **+9.51u / 38** print is **not** the fade-finder shop.
+See the remesure below. Do not treat that number as the live card.
+
+**Live I24 flags (do not weaken; a recut needs Michael):**
 
 ```
 MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=80
@@ -170,24 +168,77 @@ MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN=-110
 MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX=-100
 MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE=2
 MLB_TOTAL_PUBLIC_FADE_RANK=ticket
-MLB_TOTAL_PUBLIC_FADE_PUBLISH=0
 ```
+
+Code default `PUBLISH` stays **0**. Railway may already be `1`.
+
+## I24 remesure (2026-09-19 evening) — finder as-of
+
+The fade finder (`find_fade_bets` + `load_latest_quotes`) shops
+DK/FD/MGM/WH at **DK’s latest leak-bounded open** (`snapshot_type='open'`
+AND `snapshot_at <= commence_time`, `ORDER BY snapshot_at DESC`). That
+is the truthful board for the live card. Replay:
+`python -m scripts.mlb_total_public_fade_i24`.
+
+**Coverage (Supabase, 2026-09-19).** Honest pre-commence totals-over:
+Jun 59 / Jul 25 / **Aug 0** / Sep 54 = **138** games (123 settled;
+Sep 19 still unscored). May 0/15. August last-upsert overwrite.
+
+| Board | Construction | n | Units | ROI | Months |
+|---|---|---|---|---|---|
+| **Finder latest-open shop (live as-of)** | I24 all-pass t80+band | **41** | **−8.84u** | **−21.6%** | Jun −2.6%/16, Jul −44.7%/7, Sep −29.5%/18 |
+| **Finder latest-open shop** | live card (band → ticket top-2 → suppress-all) | **27** | **−1.73u** | **−6.4%** | Jun +3.9%/15, Jul −35.5%/6, Sep −3.2%/6 |
+| Finder latest-open, numeric `−110≤price≤−100` | drops +100 | 34 | −6.84u | −20.1% | Jun +13.2%/12, Jul −35.5%/6, Sep −39.4%/16 |
+| PR #758 latest-open **both-sides** shop | I24-shaped, not this finder | 37 | −12.65u | −34.2% | Jun −9.1%/15, Jul −68.0%/6, Sep −45.0%/16 |
+| First-open **DK only** | t80+band all-pass | **41** | **+9.51u** | +23.2% | Jun +32.0%/20, Jul +28.6%/9, Sep +4.5%/12 |
+| First-open DK only | ticket top-2 | 28 | +5.21u | +18.6% | Jun +24.5%/15, Jul +37.8%/7, **Sep −18.7%/6** |
+| First-open shop (SOFT_BOOKS) | live card top-2 | 33 | +4.30u | +13.0% | Jun +29.2%/19, Jul +22.2%/8, **Sep −50.3%/6** |
+
+**Which number is truthful.** The stored **+9.51u** is first-open
+DraftKings-only, all-pass (n this pull is 41, not 38; units match).
+The live card does **not** use that board: it shops four books on
+**latest** open (`load_latest_quotes`). On that as-of the same I24
+filters are red. PR #758’s −34.2%/37 is a third shop (both sides
+required at the latest equal DK line) and is also red — same
+direction, different intersection. Production `mlb_total_public_fade`
+settled **37 −7.19u** is the Sep 16–18 **t70 all-pass** card (12 VOID
+on Sep 19), not the I24 cell.
+
+468 of 552 first-vs-latest open quotes differ on price or line. Using
+the last pre-commence open is look-ahead relative to a morning lock;
+using first-open is not what `load_latest_quotes` returns on an
+evening refresh. Neither first-open live-card print is month-stable
+(Sep red).
+
+**Tighten-only sweep on the finder as-of (60 cells).** Higher ticket
+(t85/t90/t95), narrower band ([−110,−105], [−110,−102], [−108,−100],
+[−105,−100]), top-1, and conc n≥2. **Zero** cleared n≥40 + every
+populated month green + max/day≤2. Closest misses (all n<40 and/or
+Sep red): t85 [−110,−105] top-1 +28.6%/12; t90 [−110,−105] top-2
+conc≥2 +60.1%/6; t80 [−110,−102] top-1 +21.1%/16.
+
+**No upgrade.** Do not recut live I24. Do not widen the ticket/juice
+band. Do not flip `PUBLISH` from this file. Pause this family until
+new honest public (August is empty; September is three settled days).
 
 ## Caveats (load-bearing)
 
-1. **~85–99 pre-commence public games in the DB**, not a season. Action
-   Network splits start 2026-05-31. **Zero rows in 2019–2025.**
+1. **138 pre-commence public games** (2026-09-19 remesure: Jun 59 / Jul 25 /
+   Aug 0 / Sep 54), not a season. Action Network splits start 2026-05-31.
+   **Zero rows in 2019–2025.**
 2. `public_betting` is `UNIQUE(game_id, market, side, book)` — last upsert
    wins. Hourly refresh historically overwrote the pre-game split with a
    post-start fetch (August honest coverage: 2 games). The ingestor now
    refuses post-start upserts; **already-overwritten history stays unusable**.
 3. n is small. The 2026-09-16 t70 cell was 64; the 2026-09-19 remasure
-   is 101 all-pass / 48 ticket-top-2. I24 (t80 + [−110, −100]) is 38.
+   is 101 all-pass / 48 ticket-top-2. The 2026-09-19 I24 print of 38
+   +9.51u is first-open DK-only, not the finder shop (remesure:
+   latest-open shop I24 all-pass **41 −8.84u**; live top-2 **27 −1.73u**).
    t80 is an env, not a second model.
-4. Do **not** set `MLB_TOTAL_PUBLIC_FADE_PUBLISH=1` without mike. Default 0
-   means the worker logs flags and writes nothing. Railway is 0 after the
-   2026-09-19 all-under card; **leave default 0** until mike says
-   otherwise. The slate guard is not a substitute for that gate.
+4. Code default `MLB_TOTAL_PUBLIC_FADE_PUBLISH` is **0**. Do not flip it
+   from this file. A remesure that goes red is not permission to unpublish
+   a live I24 card Michael already turned on, and is not permission to
+   widen the ticket/juice/K guards. The slate guard is not a substitute.
 5. Do **not** unpause `mlb_over_under` / `mlb_runline` from this file.
 6. An all-under (or ≥70% one-side) slate of 4+ BETs is suppressed in full.
    That is a sanity bound, not a new ticket cut.
