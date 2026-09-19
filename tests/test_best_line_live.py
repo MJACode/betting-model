@@ -339,7 +339,7 @@ def test_the_live_discord_card_headlines_the_deciding_price():
     body = src[src.index("def _new_live_signals"):src.index("def notify_discord_live")]
     assert "COALESCE(p.decision_odds, p.dk_odds) AS decision_odds" in body
     assert "p.best_book, p.best_odds, p.best_bet_link" in body
-    assert '"good_to": price_bound(r[5], r[1], r[15], r[16], r[21])' in body
+    assert '"good_to": price_bound(_honest(r[1], r[5]), r[1], r[15], r[16], r[21])' in body
 
 
 def test_the_tag_is_the_insert_path_fallback_not_the_decision():

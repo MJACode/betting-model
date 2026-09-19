@@ -424,6 +424,16 @@ def _decimal_to_american(dec: float) -> int:
     return -int(math.floor(100.0 / (dec - 1.0) + 1e-9))
 
 
+def _honest(model_id, prob):
+    """The promoted calibration map applied (models.honest_ev); the raw
+    number when there is no map or the lookup fails. Never raises."""
+    try:
+        from models.honest_ev import honest_probability
+        return honest_probability(str(model_id), float(prob))
+    except Exception:  # noqa: BLE001 - a display bound must not stop a post
+        return prob
+
+
 def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds) -> int | None:
     """The WORST price at which this pick would still have been generated.
 
@@ -685,7 +695,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             SELECT DISTINCT ON ({key_partition_sql()})
                    {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
-                   COALESCE(p.model_probability_cal, p.model_probability) AS model_probability,
+                   p.model_probability,
                    p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
@@ -750,7 +760,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         # 2026-09-03: "for bonus, post a good to xx odds".
         # Bounded from the DECIDING price (r[19]), which is also the one
         # publish_price puts on the card.
-        "good_to": price_bound(r[4], r[3], r[16], r[17], r[19]),
+        # On the HONEST probability (2026-09-19): the same promoted map the
+        # EV floor was applied through, so the bound solves the gate the pick
+        # actually cleared. The card still SHOWS model_probability, as the app.
+        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19]),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
         # (2026-09-06) a pass can post picks for more than one day, and the
@@ -804,7 +817,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
             SELECT DISTINCT ON ({key_partition_sql()})
                    {lock_key_sql()} AS lock_key,
                    p.pick_label, p.sport, p.model_id,
-                   COALESCE(p.model_probability_cal, p.model_probability) AS model_probability,
+                   p.model_probability,
                    p.edge, p.dk_odds, p.kelly_fraction,
                    p.confidence_tier, g.home_team, g.away_team, g.commence_time,
                    p.dk_bet_link, p.created_at, p.best_book, p.best_odds,
@@ -856,7 +869,10 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         # 2026-09-03: "for bonus, post a good to xx odds".
         # Bounded from the DECIDING price (r[19]), which is also the one
         # publish_price puts on the card.
-        "good_to": price_bound(r[4], r[3], r[16], r[17], r[19]),
+        # On the HONEST probability (2026-09-19): the same promoted map the
+        # EV floor was applied through, so the bound solves the gate the pick
+        # actually cleared. The card still SHOWS model_probability, as the app.
+        "good_to": price_bound(_honest(r[3], r[4]), r[3], r[16], r[17], r[19]),
         "decision_odds": r[19],
         # THE PICK'S OWN DATE, not the run date. Since the look-ahead
         # (2026-09-06) a pass can post picks for more than one day, and the
@@ -1482,8 +1498,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     the same signal, and two players' props in one game are two signals."""
     rows = conn.execute(f"""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
-               COALESCE(p.model_probability_cal, p.model_probability) AS model_probability,
-                   p.edge, p.dk_odds, p.kelly_fraction,
+               p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
                g.commence_time, p.created_at, t.min_edge, t.min_odds,
                {live_lock_key_sql()} AS lock_key,
@@ -1523,7 +1538,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "side": r[2], "line": r[23],
         # "good to" from the deciding price, the same way the pre-game
         # producers bound theirs.
-        "good_to": price_bound(r[5], r[1], r[15], r[16], r[21]),
+        "good_to": price_bound(_honest(r[1], r[5]), r[1], r[15], r[16], r[21]),
     } for r in rows]
 
 

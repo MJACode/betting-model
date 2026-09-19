@@ -170,4 +170,4 @@ def test_the_live_path_publishes_the_deciding_price():
     body = _SRC[i:j]
     assert "p.best_book, p.best_odds, p.best_bet_link" in body
     assert "COALESCE(p.decision_odds, p.dk_odds) AS decision_odds" in body
-    assert '"good_to": price_bound(r[5], r[1], r[15], r[16], r[21])' in body
+    assert '"good_to": price_bound(_honest(r[1], r[5]), r[1], r[15], r[16], r[21])' in body
