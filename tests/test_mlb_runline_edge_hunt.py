@@ -13,8 +13,12 @@ import config
 from scripts.mlb_runline_edge_hunt import (
     _sane_split,
     american_units,
+    attach_steam,
+    fade_home_dog,
+    fade_money_side,
     grade_rl,
     is_runline,
+    overlay_public_steam,
     summarize,
 )
 
@@ -111,6 +115,63 @@ def test_a_true_clear_needs_n_two_green_months_and_no_red_month():
     assert s2["clears"] is True
 
 
+def _board(**kw):
+    base = {
+        "game_id": "MLB_2026-06-15_AAA_BBB",
+        "game_date": "2026-06-15",
+        "hs": 5, "aws": 1, "line": -1.5,
+        "home_tix": 80.0, "away_tix": 20.0,
+        "home_money": 70.0, "away_money": 30.0,
+        "public_side": "home", "public_tix": 80.0,
+        "home_book": "draftkings", "home_price": -110.0,
+        "away_book": "draftkings", "away_price": -110.0,
+        "fav": "home", "dog": "away",
+        "fav_tix": 80.0, "fav_money": 70.0, "fav_rlm": -10.0,
+        "home_rlm": -10.0,
+        "move_home_pp": None,
+    }
+    base.update(kw)
+    return base
+
+
+def test_overlay_oppose_fades_public_when_steam_leaves_them():
+    """Public home + steam away → fade home. Same side as follow-steam oppose."""
+    b = _board(move_home_pp=-2.5)
+    fade = overlay_public_steam(
+        [b], tix_cut=70, pp_cut=2.0, mode="oppose", follow_steam=False)
+    follow = overlay_public_steam(
+        [b], tix_cut=70, pp_cut=2.0, mode="oppose", follow_steam=True)
+    assert len(fade) == 1 and fade[0]["side"] == "away"
+    assert len(follow) == 1 and follow[0]["side"] == "away"
+    agree = overlay_public_steam(
+        [b], tix_cut=70, pp_cut=2.0, mode="agree", follow_steam=False)
+    assert agree == []
+
+
+def test_money_heavy_fades_the_money_pile_not_tickets():
+    b = _board(home_tix=55.0, away_tix=45.0, home_money=80.0, away_money=20.0,
+               public_side="home", public_tix=55.0)
+    rows = fade_money_side([b], cut=70.0)
+    assert len(rows) == 1
+    assert rows[0]["side"] == "away"
+
+
+def test_home_dog_only_when_dk_plus_one_five():
+    fav = _board(line=-1.5, away_tix=80.0)
+    dog = _board(line=1.5, away_tix=80.0, home_tix=20.0, public_side="away",
+                 public_tix=80.0)
+    assert fade_home_dog([fav], away_tix_cut=70.0) == []
+    rows = fade_home_dog([dog], away_tix_cut=70.0)
+    assert len(rows) == 1
+    assert rows[0]["side"] == "home"
+
+
+def test_attach_steam_copies_move_pp_by_game_id():
+    b = _board()
+    attach_steam([b], [{"game_id": b["game_id"], "move_home_pp": 3.1}])
+    assert b["move_home_pp"] == 3.1
+
+
 def test_hunt_does_not_unpause_or_publish():
     src = Path("scripts/mlb_runline_edge_hunt.py").read_text(encoding="utf-8")
     assert "PAUSED_MODELS" not in src
@@ -118,3 +179,11 @@ def test_hunt_does_not_unpause_or_publish():
     assert "mlb_runline" in config.PAUSED_MODELS
     assert config.MLB_SPREAD_MARKET_PUBLISH is False
     assert "MLB_RUNLINE_PUBLIC_FADE_PUBLISH" not in dir(config)
+    # I24 totals guards stay where the totals card left them.
+    assert config.MLB_TOTAL_PUBLIC_FADE_TICKET_PCT == 70
+    assert config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE == 0
+    assert config.MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MIN is None
+    assert config.MLB_TOTAL_PUBLIC_FADE_UNDER_ODDS_MAX is None
+    fade_src = Path("models/mlb_total_public_fade.py").read_text(encoding="utf-8")
+    assert "UNDER_ODDS_MIN" in fade_src
+    assert "MAX_PER_SLATE" in fade_src

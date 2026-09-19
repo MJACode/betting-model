@@ -4,8 +4,9 @@ WHY THIS EXISTS
 ---------------
 `mlb_runline` stays paused. `mlb_spread_market` is Pin-de-vig vs bettable-soft
 de-vig at 1.8pp with INSERT gated off (GROK Pin-vs-DK ≥2pp was −5% / ~200).
-This script measures the *other* constructions: fade a public runline pile,
-RLM-dog, Pin-lean vs soft implied, and steam / anti-steam.
+This script measures the *other* constructions: fade a public runline pile
+(tickets or money), home-dog, RLM-dog, Pin-lean vs soft implied, steam /
+anti-steam, and public × steam overlays.
 
 It does not write picks, does not flip any PUBLISH env, and does not unpause
 mlb_runline. Measure only.
@@ -43,7 +44,7 @@ SOFT = ("draftkings", "fanduel", "betmgm", "williamhill_us")
 FALLBACK = "draftkings"
 PRICE_MIN = -200.0
 PRICE_MAX = 200.0
-FAMILIES = ("public", "rlm", "pin", "steam")
+FAMILIES = ("public", "rlm", "pin", "steam", "overlay")
 
 
 def american_units(price: float, won: bool) -> float:
@@ -635,6 +636,89 @@ def pin_agrees(board_row: dict, side: str) -> bool:
     return (fair >= 0.5) if side == "home" else (fair < 0.5)
 
 
+def attach_steam(board: list[dict], steam_rows: list[dict]) -> list[dict]:
+    """Copy DK open→latest home-implied move onto the public board."""
+    smap = {}
+    for m in steam_rows:
+        gid = m.get("game_id")
+        if gid:
+            smap[gid] = _f(m.get("move_home_pp"))
+    for b in board:
+        b["move_home_pp"] = smap.get(b["game_id"])
+    return board
+
+
+def fade_money_side(board: list[dict], *, cut: float) -> list[dict]:
+    """Fade the money-heavier runline side when that pile ≥ cut."""
+    rows = []
+    for b in board:
+        hm, am = b.get("home_money"), b.get("away_money")
+        if hm is None or am is None:
+            continue
+        if hm >= am:
+            pile, bet_side = hm, "away"
+        else:
+            pile, bet_side = am, "home"
+        if pile < cut:
+            continue
+        row = bet_row(b, bet_side)
+        if row:
+            row["fade_tix"] = pile
+            rows.append(row)
+    return rows
+
+
+def fade_home_dog(board: list[dict], *, away_tix_cut: float) -> list[dict]:
+    """Home dog (DK +1.5) when the away favorite's ticket pile ≥ cut."""
+    rows = []
+    for b in board:
+        if b["line"] <= 0:
+            continue
+        if b["away_tix"] is None or b["away_tix"] < away_tix_cut:
+            continue
+        row = bet_row(b, "home")
+        if row:
+            row["fade_tix"] = b["away_tix"]
+            rows.append(row)
+    return rows
+
+
+def overlay_public_steam(board: list[dict], *, tix_cut: float, pp_cut: float,
+                         mode: str, follow_steam: bool) -> list[dict]:
+    """Public pile × DK steam. `mode` is oppose / agree / any.
+
+    Prices stay the public-board shop (same as fade_public_side). Steam is
+    only a direction / magnitude filter — move_home_pp from DK open→latest.
+    oppose + fade-public == oppose + follow-steam (same side).
+    """
+    if mode not in ("oppose", "agree", "any"):
+        raise ValueError(mode)
+    rows = []
+    for b in board:
+        move = b.get("move_home_pp")
+        if move is None or abs(move) < pp_cut:
+            continue
+        if b["public_tix"] < tix_cut:
+            continue
+        public_home = b["public_side"] == "home"
+        steam_home = move > 0
+        oppose = public_home != steam_home
+        if mode == "oppose" and not oppose:
+            continue
+        if mode == "agree" and oppose:
+            continue
+        if follow_steam:
+            bet_side = "home" if steam_home else "away"
+        else:
+            bet_side = "away" if public_home else "home"
+        row = bet_row(b, bet_side)
+        if row:
+            row["move"] = move
+            row["fade_tix"] = b["public_tix"]
+            rows.append(row)
+    return rows
+
+
 def fade_public_pin_agree(board: list[dict], *, cut: float) -> list[dict]:
     """Fade the heaviest public pile only when Pin leans the faded side."""
     rows = []
@@ -683,8 +767,48 @@ def run_public(board: list[dict]) -> dict:
             f"fade public ∩ Pin-agree t{cut} top-2",
             top_k(rows, 2, lambda r: r["fade_tix"]),
         ))
+    for cut in (60, 65, 70, 75, 80, 85, 90):
+        rows = fade_money_side(board, cut=float(cut))
+        cells.append((f"fade money-heavy m{cut}", rows))
+        for k in (2, 3, 4):
+            cells.append((
+                f"fade money-heavy m{cut} top-{k}",
+                top_k(rows, k, lambda r: r["fade_tix"]),
+            ))
+    for cut in (60, 65, 70, 75, 80):
+        rows = fade_home_dog(board, away_tix_cut=float(cut))
+        cells.append((f"home-dog fade-away t{cut}", rows))
+        cells.append((
+            f"home-dog fade-away t{cut} top-2",
+            top_k(rows, 2, lambda r: r["fade_tix"]),
+        ))
     winners.update(report_cells("public fade RL", cells))
     return winners
+
+
+def run_overlay(board: list[dict]) -> dict:
+    n_move = sum(1 for b in board if b.get("move_home_pp") is not None)
+    print(f"\n=== public × steam overlay ===\n  "
+          f"board rows with move_pp: {n_move}/{len(board)}")
+    if n_move == 0:
+        print("  (no steam attached — pass steam rows in --json)")
+        return {}
+    cells = []
+    for follow in (False, True):
+        verb = "follow-steam" if follow else "fade-public"
+        for mode in ("oppose", "agree", "any"):
+            for tix in (65, 70, 75, 80):
+                for pp in (1.0, 2.0, 3.0):
+                    rows = overlay_public_steam(
+                        board, tix_cut=float(tix), pp_cut=pp,
+                        mode=mode, follow_steam=follow)
+                    tag = f"{verb} {mode} t{tix} ≥{pp:.0f}pp"
+                    cells.append((tag, rows))
+                    cells.append((
+                        f"{tag} top-2",
+                        top_k(rows, 2, lambda r: r["fade_tix"]),
+                    ))
+    return report_cells("public × steam overlay", cells)
 
 
 def run_rlm(board: list[dict]) -> dict:
@@ -743,9 +867,10 @@ def main() -> None:
                     help="splits+quotes JSON (sandbox cache of Supabase)")
     ap.add_argument("--family", action="append", default=[],
                     choices=FAMILIES,
-                    help="Repeatable. Default: public+rlm; pin/steam need boards")
+                    help="Repeatable. Default: public+rlm+overlay; pin/steam need boards")
     args = ap.parse_args()
-    families = tuple(args.family) if args.family else ("public", "rlm", "pin", "steam")
+    families = tuple(args.family) if args.family else (
+        "public", "rlm", "pin", "steam", "overlay")
 
     if args.json:
         raw = load_json(args.json)
@@ -762,8 +887,10 @@ def main() -> None:
               f"{len(raw['steam'])} steam rows")
 
     board = attach_board(raw.get("splits") or [], raw.get("quotes") or [])
+    attach_steam(board, raw.get("steam") or [])
     print(f"public intersect DK-runline board: {len(board)} games  "
-          f"months={sorted({b['month'] for b in board})}")
+          f"months={sorted({b['month'] for b in board})}  "
+          f"with_move={sum(1 for b in board if b.get('move_home_pp') is not None)}")
 
     winners: dict = {}
     if "public" in families:
@@ -781,6 +908,8 @@ def main() -> None:
         winners.update(run_pin(raw.get("pin_quotes") or [], games))
     if "steam" in families:
         winners.update(run_steam(raw.get("steam") or []))
+    if "overlay" in families:
+        winners.update(run_overlay(board))
 
     print("\n=== cells that clear n≥40, every month green (≥2), "
           "ROI>0, max/day≤4 ===")
