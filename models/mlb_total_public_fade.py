@@ -18,7 +18,9 @@ under among DK/FD/MGM/WH at DK's open total (fallback DK), main total
 5.5–14.5, under American in [-200, 200]. Always UNDER. One bet per game.
 
 INSERT is gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` (default 0). This is
-not an unpause of `mlb_over_under` and not `mlb_total_market`.
+not an unpause of `mlb_over_under` and not `mlb_total_market`. A slate
+where one side is ≥70% of BETs and n_bet ≥ 4 is suppressed in full
+(`models.slate_concentration`, policy=suppress_all) before INSERT/notify.
 
 CAVEAT. `public_betting` is 2026-05-31→present only, UNIQUE last-upsert.
 Honest pre-commence totals-over coverage measured 2026-09-16: 99 games.
@@ -35,6 +37,11 @@ from dataclasses import dataclass
 import config
 from features.feature_engine import _parse_iso_ts, numeric_feature_value
 from models.market_relative import implied
+from models.slate_concentration import (
+    POLICY_SUPPRESS_ALL,
+    SlateConcentration,
+    apply_slate_concentration_guard,
+)
 
 MODEL_ID = "mlb_total_public_fade"
 SPORT = "MLB"
@@ -223,6 +230,34 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
             quote_snap=snap, public_snap=raw.get("snapshot_at"),
         ))
     return bets, dict(diag)
+
+
+def apply_slate_guard(
+    candidates,
+    *,
+    model_id: str = MODEL_ID,
+    log: bool = True,
+) -> tuple[list, SlateConcentration]:
+    """Suppress an all-under (or otherwise concentrated) fade slate.
+
+    Always `suppress_all`. This card only produces UNDER, so any slate of
+    4+ flags is 100% one side and is dropped in full. Mixed-side callers
+    (other game-market cards) should call
+    `apply_slate_concentration_guard` directly.
+    """
+    return apply_slate_concentration_guard(
+        candidates,
+        policy=POLICY_SUPPRESS_ALL,
+        side_of=lambda b: getattr(b, "side", None)
+        or (b.get("pick_side") if isinstance(b, dict) else None)
+        or SIDE,
+        edge_of=lambda b: (
+            b.get("edge") if isinstance(b, dict)
+            else (b.over_ticket_pct - 50.0) / 100.0
+        ),
+        model_id=model_id,
+        log=log,
+    )
 
 
 def load_public_over_splits(conn, game_ids: list[str]) -> dict[str, dict]:
