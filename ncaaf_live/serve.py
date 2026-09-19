@@ -23,8 +23,11 @@ BOTH LANES ARE LIVE (not in config.PAUSED_MODELS):
     24 of them FBS-vs-FCS. Replay FBS-vs-FBS 17 bets +21.3%, only 3 in
     the second half -- not proven better. Re-sweep on production once
     ~50 BETs settle under these rules.
-  * ncaaf_live_win_prob: 0.65 x EV 0.26 on the pregame-corrected scale,
-    FBS-vs-FBS only from 2026-09-13. Qualifies at DK, bets at the best
+  * ncaaf_live_win_prob: 0.50 x edge 0.16 x EV 0.30 (global floor) on the
+    HONEST number (promoted map over the pregame-corrected scale),
+    FBS-vs-FBS only. Re-swept 2026-09-19 (mike) on the bought 2025 replay
+    with the floor on: the old 0.65/0.10 takes zero bets under it;
+    0.50/0.16 = 43 bets 20-23 +38.6%. Qualifies at DK, bets at the best
     book (#694).
 
 A pause (if one is added) still prices every pass and its polled quotes

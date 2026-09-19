@@ -275,6 +275,14 @@ NCAAF - no bueno. need only the best of the best"*).** Two changes, one PR:
   (0.69 × 0.28, 15 bets) are peaks with 4 second-half bets, and its volume
   fix is #694, which had four clean games behind it when this shipped.
 
+**What shipped 2026-09-19 (mike: honest re-sweep under the 0.30 floor).**
+`ncaaf_live_win_prob` 0.65/0.10 → **0.50 × edge 0.16 × EV 0.30** on the
+honest (promoted-map) number. Under the floor the old cut takes zero bets
+on the 2025 replay; 0.50/0.16 is 43 bets 20-23 +38.6%, halves +26.4/+50.2,
+plateau 5. A plus-money-dog population, not the favourites of the 2026
+forward record. `ncaaf_live_total` kept at 0.73/0.12 (dark under the floor).
+Canonical write-up: `docs/thresholds.md`.
+
 **Production runs 2–3× the replay's bet rate per game, and the reason is not
 fully measured.** DraftKings totals were snapshotted 141 times per in-play
 game on 2026-09-12 against the replay's 64, and the best-book gate that ran

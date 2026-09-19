@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19 evening, #775 follow-up: serve docstring + ncaaf.md aligned to 0.50/0.16 after the mobile-mirror CI fix landed; artifact shipped_cut left as 09-12 provenance |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19 evening, the honest re-sweep under the 0.30 floor: no pre-game cut reaches 25 bets (the floor binds); ncaaf_live_win_prob 0.65/0.10 → 0.50/0.16 on the 2025 replay (43 bets +38.6%); 51 standing pre-floor bets voided |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, every model decides on an honest number (tiered fit: Platt, else a pooled-shrunk offset, n=0 takes the pool) and one global EV floor 0.30 on the calibrated number at the deciding price gates every BET writer; replay: 0.30 keeps 13 bets over the record, floor alone negative everywhere |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, #766 catch-up is one-shot: publish_hour_missed looked only at [13:00, 14:00), so a 14:xx catch-up never filled that window and every later hour stayed catch_up=True (hourly harvest back in). Marker is any nfl-prop-card tick from 13:00 through this hour; card() now gets now=now |
