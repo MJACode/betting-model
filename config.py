@@ -499,7 +499,7 @@ ACTION_THRESHOLDS: dict = {
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
-    "ncaaf_live_win_prob": {"min_prob": 0.65, "min_edge": 0.10},  # 2026-09-12 mike: RE-SWEPT ON THE CORRECTED SCALE. Stage 3 (ncaaf_live/serve.correct_for_pregame) changed what this number means, so the 0.62/0.68 cuts swept on raw probabilities were the wrong number on the wrong scale -- 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities 0.65 x EV 0.26 is 33 bets +25.7%, halves +23.8%/+34.2%, and its four neighbours are ALL positive in both halves: a plateau, where the raw scale only ever had islands
+    "ncaaf_live_win_prob": {"min_prob": 0.50, "min_edge": 0.16},  # 2026-09-19 mike: RE-SWEPT ON THE HONEST NUMBER WITH THE 0.30 FLOOR ON (scripts/live_honest_cut, the bought 2025 replay, fresh quotes, promoted map a=1 b=-0.270). Under the floor the old 0.65/0.10 takes ZERO bets: EV 0.30 at a favourite's price needs a calibrated ~0.70+ that the map no longer grants. What clears is the other end -- calibrated >= 0.50 at +160 or longer, edge >= 0.16: 43 bets 20-23 +38.6%, halves +26.4%/+50.2%, 5 positive neighbours; the widest surviving cell 0.50/0.02 is 73 bets +24.1% (+31.1%/+17.4%). A different population from the favourites the 2026 forward record was built on (25 bets, claimed 0.75). Previously (2026-09-12): RE-SWEPT ON THE CORRECTED SCALE. Stage 3 (ncaaf_live/serve.correct_for_pregame) changed what this number means, so the 0.62/0.68 cuts swept on raw probabilities were the wrong number on the wrong scale -- 0.68 took 2 bets on the held-out half and lost both. On corrected probabilities 0.65 x EV 0.26 is 33 bets +25.7%, halves +23.8%/+34.2%, and its four neighbours are ALL positive in both halves: a plateau, where the raw scale only ever had islands
     "ncaaf_live_total":    {"min_prob": 0.73, "min_edge": 0.12},  # 2026-09-13 mike ("only the best of the best"): 0.72 x EV 0.22 -> 0.73 x EV 0.24, shipped WITH the FBS-only gate in ncaaf_live/serve.price. 2025 replay, first signal per game, FBS-vs-FBS: 39 bets +2.9% -> 17 bets +21.3% (0.097 -> 0.042 per game). Of those 17, 14 are first-half (+21.5%) and 3 second-half (+20.0%): the replay says NOT WORSE, it does not prove better, and there is no production evidence of profit yet. 0.735 flips negative on one second-half bet. A stricter cut, not a pause and not a cap
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
@@ -1875,7 +1875,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
     "ncaaf_spread_premium": 0.0,   # the [2.5, inf) band IS the filter
-    "ncaaf_live_win_prob": 0.10,
+    "ncaaf_live_win_prob": 0.16,  # 2026-09-19 mike: aligned to ACTION_THRESHOLDS (honest re-sweep under the floor)
     "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
@@ -1973,7 +1973,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
-    "ncaaf_live_win_prob": 0.65,  # 2026-09-13: aligned to ACTION_THRESHOLDS; the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
+    "ncaaf_live_win_prob": 0.50,  # 2026-09-19 mike: aligned to ACTION_THRESHOLDS (honest re-sweep under the floor); the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
     "ncaaf_live_total":    0.73,  # 2026-09-13 mike: aligned to ACTION_THRESHOLDS (0.73 x EV 0.24); the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,

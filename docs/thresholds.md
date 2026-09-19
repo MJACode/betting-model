@@ -360,7 +360,7 @@ even money and a fixed number would mis-call every one of them.
 | `mlb_prop_pitcher_outs` | 2026-09-05 | n ≥ 75 | **PAUSED 2026-09-19 (mlb Handicap)** before n=75. Current-artifact remesure: outs under 33 / −4.46u / −13.5% | paused; cut kept |
 | `mlb_live_total_runs` | ~~2026-08-31~~ **2026-09-09** | ~~n ≥ 150~~ **n ≥ 75** | 0 on the current artifact (the 70 above were the June model, retired 09-09) | re-sweep the cut on the honest replay — see "mlb_live_total_runs cut, 2026-09-09" |
 | `ncaaf_live_total` | 2026-08-30 | 2026-09-13 | **LIVE, 0.73 × EV 0.24, FBS-vs-FBS only (mike, 2026-09-13)**. Unpaused 09-12 at 0.72 × 0.22; tightened after 43 BETs in one week, 24 of them FBS-vs-FCS. Replay FBS-vs-FBS 17 bets +21.3%, only 3 in the second half — not proven better. `docs/sports/ncaaf.md` | re-sweep on production once ~50 BETs settle under these rules |
-| `ncaaf_live_win_prob` | 2026-08-30 | 2026-09-12 | **LIVE, 0.65 × EV 0.26 on the pregame-corrected scale, FBS-vs-FBS only from 2026-09-13**. Qualifies at DK, bets at the best book (#694) | same |
+| `ncaaf_live_win_prob` | 2026-08-30 | 2026-09-19 | **LIVE, 0.50 × edge 0.16 × EV 0.30 (global floor) on the HONEST number (promoted map a=1 b=−0.270 over the pregame-corrected scale), FBS-vs-FBS only**. Re-swept 2026-09-19 (mike) on the bought 2025 replay with the floor on: the old 0.65/0.10 takes zero bets under it; 0.50/0.16 = 43 bets 20-23 +38.6%, halves +26.4%/+50.2%, 5 positive neighbours (widest surviving 0.50/0.02: 73 bets +24.1%). A dog-at-plus-money population, not the favourites of the 2026 record. `scripts/live_honest_cut` | re-sweep at ~25 forward bets under this cut |
 
 **Why `k` / `outs` / `hits` are paused (2026-09-19, mlb Handicap).** The dated-review
 n≥75 clock was not met. A later current-artifact remesure (`game_date >= 2026-09-04`,
@@ -398,6 +398,36 @@ are ONE decision, never two.
 
 
 ---
+
+## The honest re-sweep under the floor, 2026-09-19 (mike: "do the needful")
+
+Every cut in `ACTION_THRESHOLDS` was chosen on the model's RAW claim. On
+2026-09-19 every model was promoted a calibration map that shrinks that claim
+and a 0.30 EV floor on the corrected number went on top, so a bar like "prob
+≥ 0.72" now asks for a raw claim near 0.80 and several profitable models went
+dark by arithmetic. `scripts/honest_cut_sweep.py` (pre-game and rule models,
+the full BET/AVOID/NONE universe where the matview grades it) and
+`scripts/live_honest_cut.py` (the two in-play loops on their bought replays)
+re-choose each cut on the number the decision path reads, with the floor
+applied inside the cell. Ship rule: ≥25 settled, positive in both date halves,
+≥4 positive neighbours.
+
+**At the 0.30 floor the floor is what binds, not the cuts.** Across every
+pre-game and rule model, no cell reaches 25 settled bets under the floor
+(`mlb_prop_batter_hits`, paused, is the one exception: 0.56/0.00 = 56 bets
++3.0%, halves +1.9/+9.9 — not moved, it is paused). The floor at −110 needs
+a calibrated 0.68; the maps grant that to almost nothing. What the same sweep
+finds if the floor moved (measured, not shipped): at 0.25 nothing new; at
+0.20 `wnba_prop_player_assists` 0.54/0.00 = 22-6 +63.4% (halves +79/+55),
+`mlb_prop_batter_tb` (paused) 0.56/0.10 = 53-49 +13.3%.
+
+**In-play, on the bought replays with the promoted map and the floor:**
+
+| model | replay | current cut under the floor | re-swept |
+|---|---|---|---|
+| `ncaaf_live_win_prob` | 2025, 482 games, fresh quotes | 0.65/0.10: **0 bets** | **0.50/0.16 = 43 bets 20-23 +38.6%**, halves +26.4/+50.2, plateau 5. Widest surviving 0.50/0.02 = 73 bets +24.1% (+31.1/+17.4). **Shipped.** A plus-money-dog population (calibrated ≥ 0.50 at +160 or longer), not the favourites of the 2026 record |
+| `ncaaf_live_total` | 2025, 504 games | 0.73/0.12: 0 bets | no cell reaches 25; every populated cell negative (0.50/0.00 = 10 bets −53%). **Cut kept; dark under the floor** |
+| `mlb_live_total_runs` | 2026 in-play states since 07-22 (650 games) through the 09-09 artifact, map a=1 b=−0.253, floor 0.32 (its own) | 0.72/0.14: **0 bets** | **negative in every cell**: the loosest 0.50/0.00 = 161 bets −3.7%, 0.54/0.00 = 70 bets −2.9%, nothing above 0.54 clears the floor. **Cut kept; dark under the floor.** The +12.2u forward record was the June artifact deciding on raw claims; the honest replay of the current artifact does not reproduce it |
 
 ## `nfl_prop_market` cut, 2026-09-12 (mike): one floor → two, over 5pp → 6pp
 

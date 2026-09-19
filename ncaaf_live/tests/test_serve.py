@@ -445,9 +445,13 @@ def test_a_stale_total_does_not_take_the_moneyline_with_it(engine):
     assert all(p["model_id"] != "ncaaf_live_total" for p in picks)
 
 
-def test_a_quote_with_no_timestamp_still_prices(engine):
+def test_a_quote_with_no_timestamp_still_prices(engine, monkeypatch):
     """Backward compatible on purpose: a feed shape change is logged, not
     allowed to blank the board.
+
+    Cuts wide open (2026-09-19): this is a timestamp test, and the re-swept
+    win-prob cut (0.50 / edge 0.16 under the 0.30 floor) selects plus-money
+    dogs, which a -280 favourite fixture is not.
 
     The h2h price is local rather than `_ODDS`: this fixture's home side is a
     9.5-point pregame favourite, and stage 3 (correct_for_pregame, 2026-09-12)
@@ -456,6 +460,7 @@ def test_a_quote_with_no_timestamp_still_prices(engine):
     timestamps. Measured before changing it -- the cap refuses 38.2% of
     raw qualifying states and 40.0% of corrected ones on the 2025 replay, so
     this is a fixture artifact, not the correction crowding the cap."""
+    _wide_open(monkeypatch)
     odds = {"h2h": {"home": -280, "away": 230}, "total": _ODDS["total"]}
     assert _settled(engine, _state(), _ctx(), odds) != []
 
