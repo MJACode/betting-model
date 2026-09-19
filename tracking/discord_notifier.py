@@ -56,6 +56,7 @@ from tracking.publish_keys import key_partition_sql, lock_key_sql
 from tracking.postable import still_pre_game as _still_pre_game
 # Nothing is sent whose label disagrees with its side and line (2026-09-12).
 from tracking.pick_integrity import refuse_mismatched
+from tracking.publish_sanity import filter_for_publish
 
 ET = ZoneInfo("America/New_York")
 
@@ -1408,9 +1409,10 @@ def notify_discord_signals(target_date: str | None = None, dry_run: bool = False
 
 def _post_new_signals(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_discord_signals, under the publisher lock."""
-    # Refused picks are not ledgered, so they retry and keep logging until the
-    # row is fixed; the pick_label_integrity health check turns that CRIT.
-    signals = refuse_mismatched(_new_signals(conn, target_date), "Discord")
+    # Integrity + publish_sanity. Refused picks are not ledgered, so they
+    # retry and keep logging until the row is fixed.
+    signals = filter_for_publish(_new_signals(conn, target_date), "Discord",
+                                 live=False)
     if not signals:
         logger.info(f"Discord: no new signals for {target_date}")
         _log_stale_pause_hiding_bets(conn, target_date)
@@ -1546,7 +1548,8 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
 
 def _post_new_live_signals(conn, target_date: str, dry_run: bool) -> int:
     """The body of notify_discord_live, under the publisher lock."""
-    signals = refuse_mismatched(_new_live_signals(conn, target_date), "Discord(live)")
+    signals = filter_for_publish(_new_live_signals(conn, target_date),
+                                 "Discord(live)", live=True)
     if not signals:
         return 0
 

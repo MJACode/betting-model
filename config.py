@@ -274,6 +274,13 @@ DISCORD_FREE_PICK_PRIORITY: tuple = ("NFL",)
 # cap is left un-ledgered and posts on the next refresh pass.
 DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN", 20))
 
+# Pre-publish qualitative sanity gate (tracking/publish_sanity.py). Default ON.
+# RUN_PUBLISH_SANITY=0 disables the new checks only; pick_integrity stays.
+# Not a model update: no pause, no unit bump, no threshold move.
+RUN_PUBLISH_SANITY: bool = (
+    os.environ.get("RUN_PUBLISH_SANITY", "1").strip() not in ("0", "false", "False")
+)
+
 # ── Price requirement ─────────────────────────────────────────────────────────
 # A BET must be placeable: no real book price, no bet. When True, any pick whose
 # dk_odds is NULL is downgraded BET -> NONE (dead-zone treatment: still written

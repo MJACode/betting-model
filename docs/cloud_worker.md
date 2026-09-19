@@ -227,6 +227,9 @@ Notes:
      the NFL card on a dedicated key/quota.
    - `DISCORD_WEBHOOK_*` — OPTIONAL, see [Discord](#discord-picks-to-your-server)
      below. Omit them all and nothing Discord-related runs.
+   - `RUN_PUBLISH_SANITY` — OPTIONAL, default `1`. `0` disables the
+     pre-publish qualitative gate only (`tracking/publish_sanity.py`);
+     pick_integrity stays. See `docs/publish_sanity.md`.
    - `MLB_SPREAD_MARKET_PUBLISH` / `MLB_TOTAL_MARKET_PUBLISH` /
      `MLB_TOTAL_PUBLIC_FADE_PUBLISH` — OPTIONAL, default `0`. MLB game-line
      cards log every pass; they INSERT picks only when the matching flag is

@@ -99,4 +99,6 @@ Anon/authenticated hold SELECT. The pipeline writes as the table owner.
 
 Related: [`health_checks.md`](health_checks.md), [`clv.md`](clv.md),
 [`mlb_total_public_fade.md`](mlb_total_public_fade.md),
-[`cloud_worker.md`](cloud_worker.md).
+[`cloud_worker.md`](cloud_worker.md),
+[`publish_sanity.md`](publish_sanity.md) (send-time refuse on Discord/push;
+report hook `last_refusals()`, no writes to this table).
