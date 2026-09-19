@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, mlb_over_under edge hunt **empty**: same #757 bar, no CLEAR. I24 not recut (this-board I24 n=22 −12.2%). No PUBLISH=1, OU/RL stay paused. Measure script + docs table |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade I24 juice band: optional UNDER_ODDS_MIN/MAX (unset = no band; I24 −110/−100). Finder before top-K. Claim n=38 +9.51u +25%; steam_cap2 Sep −23.6%/5. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |

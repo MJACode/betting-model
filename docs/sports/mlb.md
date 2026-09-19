@@ -106,6 +106,11 @@ slate guard. Optional under-juice **band**
 `mlb_over_under` stays paused. Coverage caveat: only
 ~99–136 pre-commence public totals-over games in the DB.
 
+2026-09-19 hunt for a *second* stakeable totals construction
+(public-over variants beyond I24, under-fade, Pin 300s, steam/RLM,
+ticket×juice, top-K): **empty**. Same #757 bar; no CLEAR. I24 not
+recut. `docs/mlb_over_under_edge_hunt.md`.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 
