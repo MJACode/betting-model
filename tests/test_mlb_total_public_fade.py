@@ -208,6 +208,25 @@ def test_under_price_outside_window_is_dropped():
     assert bets2 == []
 
 
+def test_i24_juice_band_is_inclusive_minus_110_to_minus_100():
+    """I24: [-110, -100]. Not a ≥ −115 floor. −115 / −111 / −99 / +100 fail."""
+    assert fade.juice_min() == -110.0
+    assert fade.juice_max() == -100.0
+    assert config.MLB_TOTAL_PUBLIC_FADE_JUICE_MIN == -110.0
+    assert config.MLB_TOTAL_PUBLIC_FADE_JUICE_MAX == -100.0
+    splits = {"G1": _split(ticket=80)}
+    for price in (-110.0, -105.0, -100.0):
+        bets, _ = fade.find_fade_bets(
+            splits, _dk_board(under=price), min_over_tickets=80)
+        assert len(bets) == 1, price
+        assert bets[0].price == price
+    for price in (-115.0, -111.0, -99.0, 100.0):
+        bets, diag = fade.find_fade_bets(
+            splits, _dk_board(under=price), min_over_tickets=80)
+        assert bets == [], price
+        assert diag["no_price"] == 1
+
+
 def test_always_under_one_per_game():
     quotes = _quotes(
         _quote("G1", "draftkings", under=-110),

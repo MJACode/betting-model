@@ -15,7 +15,9 @@ Source: `public_betting` consensus totals, last snapshot with
 `-04:00` / `+00:00` clocks is a leak). Trigger: over tickets ≥ the
 configured cut (70 default; 80 is a supported env). Price: best open
 under among DK/FD/MGM/WH at DK's open total (fallback DK), main total
-5.5–14.5, under American in [-200, 200]. Always UNDER. One bet per game.
+5.5–14.5. Under American must sit in the I24 juice band
+(MLB_TOTAL_PUBLIC_FADE_JUICE_MIN/MAX, default [-110, -100], inclusive
+— not a ≥ −115 floor). Always UNDER. One bet per game.
 
 INSERT is gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` (default 0). This is
 not an unpause of `mlb_over_under` and not `mlb_total_market`. Optional
@@ -119,6 +121,16 @@ def edge_floor() -> float:
     return float(config.MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR)
 
 
+def juice_min() -> float:
+    """Inclusive under-American floor. Env MLB_TOTAL_PUBLIC_FADE_JUICE_MIN."""
+    return float(config.MLB_TOTAL_PUBLIC_FADE_JUICE_MIN)
+
+
+def juice_max() -> float:
+    """Inclusive under-American ceiling. Env MLB_TOTAL_PUBLIC_FADE_JUICE_MAX."""
+    return float(config.MLB_TOTAL_PUBLIC_FADE_JUICE_MAX)
+
+
 def is_pre_commence(snapshot_at, commence_time) -> bool:
     """True iff snapshot_at is strictly before commence_time.
 
@@ -162,10 +174,18 @@ def select_latest_pre_commence_over(rows: list[dict]) -> dict[str, dict]:
 
 
 def _price_in_window(price) -> bool:
+    """True iff `price` is inside the I24 juice band and the hard ±200 window.
+
+    Band is inclusive [juice_min, juice_max]. −115 is out. +100 is out.
+    A swapped env (min > max) qualifies nothing.
+    """
     p = numeric_feature_value(price)
     if p is None:
         return False
-    return PRICE_MIN <= p <= PRICE_MAX
+    if not (PRICE_MIN <= p <= PRICE_MAX):
+        return False
+    lo, hi = juice_min(), juice_max()
+    return lo <= p <= hi
 
 
 def _line_in_window(line) -> bool:

@@ -1557,6 +1557,15 @@ MLB_TOTAL_PUBLIC_FADE_RANK: str = os.environ.get(
 MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR: float = float(
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR", "0")
 )
+# I24 juice band: open under American in [MIN, MAX] inclusive.
+# Narrow window, not a ≥ −115 floor. −115 / plus-money / −111 fail.
+# PUBLISH stays 0. docs/mlb_total_public_fade.md.
+MLB_TOTAL_PUBLIC_FADE_JUICE_MIN: float = float(
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_JUICE_MIN", "-110")
+)
+MLB_TOTAL_PUBLIC_FADE_JUICE_MAX: float = float(
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_JUICE_MAX", "-100")
+)
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
 )

@@ -44,10 +44,9 @@ converging on the same place from the other side.
   (`MLB_TOTAL_MARKET_PUBLISH` default 0). Pin-de-vig vs soft-de-vig May–Jun
   2pp −11.13% / 79 is a sweep flag. Do not resurrect 0.50/0.06.
   A **separate** paper lane, `mlb_total_public_fade`, fades consensus OVER
-  tickets ≥70 (env; 80 supported) and bets UNDER. INSERT off
-  (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). Optional top-K
-  (`MAX_PER_SLATE` default 0; recommended 2 + `RANK=ticket`). Not an
-  unpause. `docs/mlb_total_public_fade.md`.
+  and bets UNDER. INSERT off (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0).
+  I24 target: tickets ≥80 ∩ open under **[-110, −100]** inclusive;
+  optional max 2/slate. Not an unpause. `docs/mlb_total_public_fade.md`.
   `docs/mlb_runline_ou_edge_search.md`.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
   base rate moving 0.364 → 0.495, so the target mix is itself changing. The
@@ -96,13 +95,14 @@ is the next worker job. Moneyline and F5 lists are unchanged.
 ## 11b4. PUBLIC-OVER FADE TOTALS — `docs/mlb_total_public_fade.md`
 
 As of 2026-09-16 a **paper** rule `mlb_total_public_fade` fades Action
-Network consensus OVER tickets ≥70 (env; 80 supported) and bets UNDER at
-the best DK/FD/MGM/WH open (fallback DK). INSERT gated
-(`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). As of 2026-09-19 optional
-top-K (`MAX_PER_SLATE` default 0 = all-pass; recommended **2** +
-`RANK=ticket`) keeps the two heaviest OVER piles per day before the
-slate guard. `mlb_over_under` stays paused. Coverage caveat: only
-~99–136 pre-commence public totals-over games in the DB.
+Network consensus OVER and bets UNDER at the best DK/FD/MGM/WH open
+(fallback DK). INSERT gated (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0).
+**I24** (2026-09-19): tickets ≥80 ∩ open under American **[-110, −100]**
+inclusive (`JUICE_MIN`/`JUICE_MAX` — not a ≥ −115 floor); optional
+`MAX_PER_SLATE=2`. Measured n=38 +9.51u +25% (Jun +30% / Jul +45% /
+Sep +4.5%). Code `TICKET_PCT` default stays 70. `mlb_over_under` stays
+paused. Coverage caveat: only ~99–136 pre-commence public totals-over
+games in the DB.
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)

@@ -16,7 +16,7 @@ Runs on the same pipeline step as the other MLB game-line cards
 | Side | Always UNDER |
 | Price | Best open under among DK / FD / MGM / WH (`williamhill_us`) at **DK’s open total**; fallback DK |
 | Line | Main total **5.5–14.5** |
-| Price window | Under American in **[-200, 200]** |
+| Price window | I24 juice band: under American in **[-110, -100]** inclusive (`JUICE_MIN` / `JUICE_MAX`). Not a ≥ −115 floor. Hard cap remains ±200. |
 | INSERT | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default **0** |
 | Top-K | Optional. `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` default **0** = all-pass. Set **2** + `RANK=ticket` to keep the two heaviest OVER piles per day. Runs **before** the slate guard. |
 | Slate guard | After ranking: if one `pick_side` is **≥70%** of that model's BET count **and** n_bet **≥ 4**, **suppress all**. Shared helper: `models/slate_concentration.py`. |
@@ -121,19 +121,24 @@ gives back some units for a 2-bet cap. September all-pass is the
 bleed; top-2 cuts it. Wilson on the pooled top-2 cell is 44–71%
 win rate (28–20). n=48 is still small.
 
-**Recommended flag (PUBLISH stays 0):**
+**Recommended flag — I24 (PUBLISH stays 0):**
 
 ```
-MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=70
+MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=80
+MLB_TOTAL_PUBLIC_FADE_JUICE_MIN=-110
+MLB_TOTAL_PUBLIC_FADE_JUICE_MAX=-100
 MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE=2
 MLB_TOTAL_PUBLIC_FADE_RANK=ticket
-MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR=0
+MLB_TOTAL_PUBLIC_FADE_PUBLISH=0
 ```
 
-t80 + top-2 is the tighter neighbour (+17.8% / 42), not a second
-model. Do not set RANK to gap / juice / composite / ev — those
-cells are in the fail table above. Sweep:
-`python -m scripts.mlb_total_public_fade_topk`.
+I24 is t80 ∩ open under in **[-110, −100]** inclusive, optional
+top-2 by ticket if several qualify. Measured 2026-09-19: **n=38
++9.51u +25%** (Jun +30% / Jul +45% / Sep +4.5%, all green). This
+replaces steam_cap2 (Sep −37%, three-month +0.8%) and plain t80
+top-2 as the paper target. Code `TICKET_PCT` stays 70; juice-band
+code default is the I24 window. `MAX_PER_SLATE` default stays 0
+(optional cap). Not #751 t90/cap-3.
 
 ## Caveats (load-bearing)
 
@@ -158,7 +163,9 @@ cells are in the fail table above. Sweep:
 | Variable | Default | Meaning |
 |---|---|---|
 | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` | `0` | `1` writes BET rows |
-| `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Over-ticket cut; `80` is the tighter neighbour |
-| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `0` | `0` = all-pass. Set `2` to keep top-K per day (recommended with `RANK=ticket`) |
-| `MLB_TOTAL_PUBLIC_FADE_RANK` | `ticket` | `ticket` \| `gap` \| `juice` \| `composite` \| `ev`. Only `ticket` cleared the holdout. `ev` without a bucket table ranks as ticket |
-| `MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR` | `0` | LOMO estimated-edge floor. Sweep-only (card has no bucket table). Every floor tried (≥2/3/5pp) lost |
+| `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Code default 70. I24 recommended env **80** |
+| `MLB_TOTAL_PUBLIC_FADE_JUICE_MIN` | `-110` | Inclusive under-American floor. I24 band. −111 / −115 fail |
+| `MLB_TOTAL_PUBLIC_FADE_JUICE_MAX` | `-100` | Inclusive under-American ceiling. I24 band. −99 / +100 fail |
+| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `0` | `0` = all-pass. I24 optional **2** by ticket if several qualify |
+| `MLB_TOTAL_PUBLIC_FADE_RANK` | `ticket` | Used only when `MAX_PER_SLATE` > 0 |
+| `MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR` | `0` | Unused on I24 |

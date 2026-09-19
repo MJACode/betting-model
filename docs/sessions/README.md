@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, I24 juice band: JUICE_MIN=-110 JUICE_MAX=-100 (inclusive, not ≥−115). t80 ∩ band n=38 +25%. PUBLISH stays 0. No more top-K PRs |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, slate concentration guard: suppress mlb_total_public_fade when one side is ≥70% of n_bet ≥ 4 (12/12 under card). PUBLISH stays 0. RL/OU stay paused |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, daily model-quality monitor (all sports): one-sided slates, fade risk, CLV/ROI, volume → `model_quality_checks`. Job + `--step` + 11am ET cron. Report only |
