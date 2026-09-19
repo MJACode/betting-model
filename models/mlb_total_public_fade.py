@@ -18,11 +18,12 @@ under among DK/FD/MGM/WH at DK's open total (fallback DK), main total
 5.5–14.5, under American in [-200, 200]. Always UNDER. One bet per game.
 
 INSERT is gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` (default 0). This is
-not an unpause of `mlb_over_under` and not `mlb_total_market`. Optional
-top-K ranking (`MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE`, default 0 =
-all-pass) keeps 1–2 highest-ranked fades per day before the slate
-guard. A slate where one side is ≥70% of BETs and n_bet ≥ 4 is then
-suppressed in full (`models.slate_concentration`, policy=suppress_all).
+not an unpause of `mlb_over_under` and not `mlb_total_market`. The card
+never floods a slate: `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` is clamped
+to 1 or 2 (default 2), ranked by over-ticket % before the slate guard.
+A slate where one side is ≥70% of BETs and n_bet ≥ 4 is then
+suppressed in full (`models.slate_concentration`, policy=suppress_all)
+— with the cap that backstop does not fire on a normal day.
 
 CAVEAT. `public_betting` is 2026-05-31→present only, UNIQUE last-upsert.
 Honest pre-commence totals-over coverage measured 2026-09-16: 99 games.
@@ -59,6 +60,11 @@ LINE_MAX = 14.5
 PRICE_MIN = -200.0
 PRICE_MAX = 200.0
 DEFAULT_OVER_TICKETS = 70.0
+# Hard cap. The card must never write a whole-slate UNDER pile
+# (2026-09-19 was 12/12). 0 in the env is not all-pass.
+SLATE_CAP_MIN = 1
+SLATE_CAP_MAX = 2
+DEFAULT_MAX_PER_SLATE = 2
 
 # Ranking kinds the top-K selector understands. `ev` needs a bucket
 # under-win-rate lookup (month-holdout or a frozen table). The others
@@ -104,8 +110,15 @@ def publish_enabled() -> bool:
 
 
 def max_per_slate() -> int:
-    """Top-K cap. 0 = all-pass (current card). Env MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE."""
-    return int(config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE)
+    """Bets per slate. Always 1 or 2. Env MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE.
+
+    0 / negative / >2 clamp to 2. The sweep may still pass 0 into
+    `select_top_k` for an all-pass cell; the card never does.
+    """
+    raw = int(config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE)
+    if raw < SLATE_CAP_MIN or raw > SLATE_CAP_MAX:
+        return DEFAULT_MAX_PER_SLATE
+    return raw
 
 
 def rank_kind() -> str:

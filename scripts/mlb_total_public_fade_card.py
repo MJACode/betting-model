@@ -19,12 +19,11 @@ Deliberate and load-bearing:
   logs; it writes picks only when the env is 1. Do not flip that env
   without mike.
 
-  TOP-K RANKING (optional). MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE default
-  0 = all-pass. Set 1 or 2 to keep only the highest-ranked fades per
-  day (RANK=ticket|gap|juice|composite|ev; default ticket — the only
-  formula that beat all-pass on the 2026-09-19 holdout). Ranking runs
-  BEFORE the slate guard so a 10-under board can keep 1–2 instead of
-  vanishing.
+  TOP-K RANKING. MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE is clamped to
+  1 or 2 (default 2). The card never all-passes a slate. RANK default
+  ticket — the only formula that beat all-pass on the 2026-09-19
+  holdout. Ranking runs BEFORE the slate guard so a 10-under board
+  keeps 1–2 instead of vanishing or writing twelve unders.
 
   SLATE CONCENTRATION. After ranking, if one pick_side is ≥70% of that
   model's BET count and n_bet ≥ 4, suppress every BET (skip insert /
@@ -130,10 +129,13 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
 
 
 def ranked_bets(bets, games) -> list:
-    """Apply the optional top-K / edge-floor flag. 0 = all-pass."""
+    """Keep at most max_per_slate() (1 or 2) fades per game_date."""
+    cap = fade.max_per_slate()
+    if cap < fade.SLATE_CAP_MIN:
+        cap = fade.DEFAULT_MAX_PER_SLATE
     return fade.select_top_k(
         list(bets or []),
-        max_per_slate=fade.max_per_slate(),
+        max_per_slate=cap,
         slate_of=lambda b: (games.get(b.game_id) or {}).get("game_date")
         or b.game_id,
         kind=fade.rank_kind(),
@@ -144,9 +146,9 @@ def ranked_bets(bets, games) -> list:
 def rows_for_insert(bets, games, quotes, bankroll: float) -> list[dict]:
     """BET rows that may be INSERTed. Rank then slate-concentration.
 
-    Top-K (env, default 0 = all-pass) runs first so a 10-under slate can
-    keep 1–2 instead of the whole board. The suppress-all guard still
-    fires when ranking is off and n_bet ≥ 4. Finder flags stay raw.
+    Top-K (clamped 1–2, default 2) runs first so a 10-under slate
+    keeps 1–2, never the whole board. The suppress-all guard is a
+    backstop if n_bet still reaches 4. Finder flags stay raw.
     """
     chosen = ranked_bets(bets, games)
     rows = pick_rows(chosen, games, quotes, bankroll)
