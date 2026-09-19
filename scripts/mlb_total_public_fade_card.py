@@ -53,6 +53,7 @@ import config
 import models.mlb_game_market as mk
 import models.mlb_total_public_fade as fade
 from models.market_relative import implied
+from models.honest_ev import gate
 from models.scorer import (
     _build_pick_label,
     _get_current_bankroll,
@@ -92,6 +93,16 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
         under_imp = implied(b.price)
         if under_imp is None:
             logger.info(f"unimplied under {b.price}: dropped {b.game_id}")
+            continue
+        # THE GLOBAL EV FLOOR on the honest probability at the bet price
+        # (2026-09-19). This rule's probability IS the price's implied number
+        # -- it claims no edge in probability terms -- so its EV at the price
+        # is the vig, negative, and the floor refuses every row. That is the
+        # floor reading a model that cannot state a positive expected value,
+        # not a pause: the row is dropped with the reason logged.
+        ev = gate(MODEL_ID, under_imp, b.price)
+        if not ev.clears:
+            logger.info(f"{MODEL_ID}: {ev.reason} — dropped {b.game_id}")
             continue
         # Stored edge is public OVER share above 50pp, NOT model − implied.
         # Ticket 70 → 0.20. Documented in docs/mlb_total_public_fade.md.

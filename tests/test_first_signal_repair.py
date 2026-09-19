@@ -252,3 +252,34 @@ def test_a_lane_with_no_sibling_still_restores(patch_conn):
     conn = patch_conn([FIRST], CHURNED, siblings=[])
     assert fsr.restore_first_signals("2026-08-29") == 1
     assert len(_sql_of(conn, "INSERT", "picks")) == 1
+
+
+# ── A voided lane is never restored (2026-09-19) ─────────────────────────────
+
+class _VoidedConn(_Conn):
+    """The lane has a VOID row on it (scripts/void_picks.py)."""
+
+    def fetchall(self):
+        if "condition_status = 'VOID'" in self._last:
+            return [(1,)]
+        return super().fetchall()
+
+
+def test_a_voided_lane_is_left_alone(patch_conn, monkeypatch):
+    """Delaware ML (live), 2026-09-19: voided at 16:2x, worker redeployed at
+    16:47, this repair found "nothing standing" (a voided row carries
+    result='NO_ACTION'), re-inserted the bet from picks_log and cleared the
+    push ledger -- the struck pick was re-announced an hour later. A void is
+    an exit from the record, the same as a grade."""
+    conn = _VoidedConn([FIRST], None)
+    monkeypatch.setattr(fsr, "get_connection", lambda: conn)
+    assert fsr.restore_first_signals("2026-08-29") == 0
+    assert _sql_of(conn, "INSERT", "picks") == []
+    assert _sql_of(conn, "DELETE", "push_sent") == []
+
+
+def test_an_unvoided_lane_with_nothing_standing_is_still_restored(patch_conn):
+    """The control: the void check must not swallow the repair's own case."""
+    conn = patch_conn([FIRST], None)
+    assert fsr.restore_first_signals("2026-08-29") == 1
+    assert len(_sql_of(conn, "INSERT", "picks")) == 1

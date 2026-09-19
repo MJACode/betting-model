@@ -66,6 +66,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-12: BIGINT was not enough either -- a CFBD value exceeds 2^63.
     # NUMERIC has no ceiling, which ends the guessing rather than raising it.
     "ncaaf_plays_numeric_not_bigint.sql",
+    # 2026-09-19 (Delaware): the game state the NCAAF live loop priced on,
+    # one row per change. The loop bet a 0-0 state 15s before the scoreboard
+    # reported the touchdown the book had already priced, and the state it
+    # saw was never stored -- so the same question could not be asked of the
+    # other bets. Beside the in-play quotes in `odds`, keyed by game and time.
+    "add_ncaaf_live_states.sql",
     # 2026-09-10 (session 280, mike): point-in-time ISSUED weather forecasts
     # for NCAAF games, the train/serve repair for the totals model's wx_*
     # features (it trained on reanalysis and is served a forecast).

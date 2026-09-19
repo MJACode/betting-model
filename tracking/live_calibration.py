@@ -259,7 +259,7 @@ def analyse(conn, model_id: str, today: date | None = None) -> dict:
     recent, days = _regime(rows, today)
 
     cur_prob = config.MODEL_PROB_THRESHOLDS.get(model_id, 0.0)
-    cur_ev = config.MODEL_MIN_EV.get(model_id)
+    cur_ev = config.min_ev_for(model_id)   # global floor or the model's own
     cur_rows = [r for r in rows
                 if r["prob"] >= cur_prob
                 and (cur_ev is None or r["ev"] is None or r["ev"] >= cur_ev)]

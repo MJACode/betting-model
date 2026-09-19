@@ -59,13 +59,18 @@ def test_it_no_ops_when_the_table_is_missing_or_already_empty():
     assert "GET DIAGNOSTICS" in stmts
 
 
-def test_the_two_models_are_not_moved_into_paused_models():
-    """Unpausing by listing them in PAUSED_MODELS would be the opposite of
-    the policy. They go live when the table is empty, not by joining the
-    deliberate-pause set."""
+def test_clearing_auto_pauses_did_not_park_batter_runs():
+    """The 2026-09-14 migration cleared unauthorized auto-pauses so those
+    models went live when the table emptied. Listing them in PAUSED_MODELS
+    would have been the opposite of that policy.
+
+    mlb_prop_pitcher_k was the other unauthorized row. It is now in
+    PAUSED_MODELS by a later person's call (2026-09-19, mlb Handicap,
+    current-artifact remesure), not by this migration. batter_runs stays
+    off the deliberate-pause set."""
     import config
-    for mid in UNAUTHORIZED:
-        assert mid not in config.PAUSED_MODELS
+    assert "mlb_prop_batter_runs" not in config.PAUSED_MODELS
+    assert "mlb_prop_pitcher_k" in config.PAUSED_MODELS
 
 
 def test_it_does_not_touch_picks_thresholds_or_the_review_ledger():

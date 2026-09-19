@@ -76,17 +76,24 @@ def test_the_binding_gate_is_the_tightest_one():
     assert _dec(got) < from_ev + 0.02, got
 
 
-def test_a_model_with_no_ev_floor_uses_its_edge_floor():
-    """A model outside MODEL_MIN_EV is bounded by its edge floor alone.
-
-    Picked dynamically: this test used to name ncaaf_live_total, which acquired
-    an EV floor on 2026-08-30 and quietly stopped testing the thing it says."""
+def test_a_model_with_no_own_ev_floor_is_bound_by_the_global_one(monkeypatch):
+    """Since 2026-09-19 every model carries the platform floor
+    (config.min_ev_for); a model outside MODEL_MIN_EV is bounded by it, and
+    by its edge floor only where that is tighter."""
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.30)
     model = next(m for m in ("mlb_moneyline", "nhl_moneyline", "ufc_moneyline")
                  if m not in config.MODEL_MIN_EV and m not in config.MODEL_MIN_ODDS)
     prob, edge_floor = 0.62, 0.08
     got = price_bound(prob, model, edge_floor, None, 200)
-    assert _dec(got) >= 1.0 / (prob - edge_floor) - 1e-9
-    assert _dec(got) < 1.0 / (prob - edge_floor) + 0.02, got
+    from_ev = 1.30 / prob
+    from_edge = 1.0 / (prob - edge_floor)
+    assert from_ev > from_edge, "fixture no longer exercises the global floor"
+    assert _dec(got) >= from_ev - 1e-9
+    assert _dec(got) < from_ev + 0.02, got
+    # With the global floor off, the edge floor is what binds.
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.0)
+    got = price_bound(prob, model, edge_floor, None, 200)
+    assert _dec(got) >= from_edge - 1e-9 and _dec(got) < from_edge + 0.02, got
 
 
 def test_a_price_floor_can_be_the_binding_gate():
@@ -114,8 +121,12 @@ def test_no_bound_when_the_edge_floor_is_unreachable():
 def test_no_bound_from_junk_rather_than_a_guess():
     for bad in (None, "", "abc", 0.0, 1.0, 1.5, -0.2):
         assert price_bound(bad, "ncaaf_live_total", 0.08, None, -110) is None
-    # no gates at all -> nothing to solve for
-    assert price_bound(0.70, "some_model_with_no_gates", None, None, -110) is None
+    # no gates at all -> nothing to solve for. Since 2026-09-19 the global EV
+    # floor is always a gate, so this needs it switched off to be "no gates".
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(config, "GLOBAL_MIN_EV", 0.0)
+        assert price_bound(0.70, "some_model_with_no_gates", None, None, -110) is None
 
 
 # ── what actually reaches the channel ────────────────────────────────────────

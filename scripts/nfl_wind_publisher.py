@@ -61,6 +61,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
+from models.honest_ev import gate
 
 NFL_WIND_MODEL_ID = "nfl_wind_totals"
 NFL_OPENER_MODEL_ID = "nfl_opener_spread"
@@ -187,6 +188,14 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
             continue
 
         game_id = f"NFL_{nflverse_id}"
+        # THE GLOBAL EV FLOOR on the honest probability at the bet price
+        # (2026-09-19). The card has no decision function -- its row IS the
+        # bet -- so the platform gate is applied here, before the row.
+        ev = gate(NFL_WIND_MODEL_ID, model_prob, price)
+        if not ev.clears:
+            print(f"{NFL_WIND_MODEL_ID}: {ev.reason} — dropped {game_id}",
+                  file=sys.stderr)
+            continue
         kelly_fraction = round(stake_pct / 100.0, 6)
         games.append({
             "game_id": game_id,
@@ -210,6 +219,7 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
                 f"· {stake_pct:.2f}u"
             ),
             "model_probability": model_prob,
+            "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": market_prob,   # de-vigged best-book prob
             "edge": edge,
             "dk_odds": price,                 # best-book price; book in label
@@ -295,6 +305,13 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             if units < OPENER_MIN_UNITS:
                 continue
             kelly_fraction = round(units * OPENER_UNIT_PCT, 6)
+        # THE GLOBAL EV FLOOR on the honest probability at the bet price
+        # (2026-09-19), same gate as the wind rows above.
+        ev = gate(NFL_OPENER_MODEL_ID, model_prob, price)
+        if not ev.clears:
+            print(f"{NFL_OPENER_MODEL_ID}: {ev.reason} — dropped {game_id}",
+                  file=sys.stderr)
+            continue
         games.append({
             "game_id": game_id,
             "sport": "NFL",
@@ -317,6 +334,7 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
                 f"· {kelly_fraction / OPENER_UNIT_PCT:.2f}u"
             ),
             "model_probability": model_prob,
+            "model_probability_cal": round(ev.cal_prob, 4),
             "dk_implied_prob": market_prob,
             "edge": edge,
             "dk_odds": price,                 # soft-book price; book in label
@@ -581,12 +599,13 @@ def publish(run_date: str | None = None) -> int:
                                    pick_side, pick_label, model_probability,
                                    dk_implied_prob, edge, dk_odds, scored_line,
                                    kelly_fraction, recommended_bet, bankroll_at_pick,
-                                   signal_type)
+                                   signal_type, model_probability_cal)
                 VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
                         %(game_time)s, %(pick_side)s, %(pick_label)s,
                         %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
                         %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
-                        %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s)
+                        %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
+                        %(model_probability_cal)s)
             """, p)
         conn.commit()
     finally:
@@ -650,12 +669,13 @@ def publish_opener(run_date: str | None = None) -> int:
                                    pick_side, pick_label, model_probability,
                                    dk_implied_prob, edge, dk_odds, scored_line,
                                    kelly_fraction, recommended_bet, bankroll_at_pick,
-                                   signal_type)
+                                   signal_type, model_probability_cal)
                 VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
                         %(game_time)s, %(pick_side)s, %(pick_label)s,
                         %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
                         %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
-                        %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s)
+                        %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
+                        %(model_probability_cal)s)
             """, p)
             written += 1
         conn.commit()

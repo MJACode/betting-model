@@ -28,9 +28,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import (
-    DERIV_LAG_RATIO, EV_THRESHOLDS, KELLY_FRACTION, KELLY_HAIRCUT,
-    MAX_DAILY_EXPOSURE_FRACTION, MAX_QUOTE_AGE_SEC, MAX_STAKE_FRACTION,
-    MAX_STATE_AGE_SEC, MIN_PRICE, MIN_SECONDS_FOR_PRICING, SCRIPT_LEAD_TRIGGER,
+    BOOK_MOVE_MAX, DERIV_LAG_RATIO, EV_THRESHOLDS, KELLY_FRACTION,
+    KELLY_HAIRCUT, MAX_DAILY_EXPOSURE_FRACTION, MAX_QUOTE_AGE_SEC,
+    MAX_STAKE_FRACTION, MAX_STATE_AGE_SEC, MIN_PRICE, MIN_SECONDS_FOR_PRICING,
+    SCRIPT_LEAD_TRIGGER, SETTLED_SEC, SETTLED_TOL,
 )
 from .engine.pricing import american_to_decimal, american_to_prob
 from .state import GameState
@@ -97,6 +98,10 @@ class Decision:
     state_ref: datetime | None = None
     quote_ref: datetime | None = None
     context: dict = field(default_factory=dict)
+    # The HONEST probability the EV was judged on (2026-09-19): model_prob is
+    # the model's raw claim, kept raw so the record reads like every other
+    # model's; this is the promoted calibration map applied to it.
+    model_prob_cal: float | None = None
 
     def to_row(self) -> dict:
         return {
@@ -118,7 +123,35 @@ class Decision:
             "state_ref": self.state_ref.isoformat() if self.state_ref else None,
             "quote_ref": self.quote_ref.isoformat() if self.quote_ref else None,
             "context": self.context,
+            "model_prob_cal": self.model_prob_cal,
         }
+
+
+def honest_probability(model_id: str, model_prob: float) -> float:
+    """The platform's promoted calibration map applied (2026-09-19, mike:
+    every model decides on its honest number). Identity when the platform
+    models are not importable (this package also runs standalone) or the
+    lookup fails -- models.scorer._calibrated never raises."""
+    # importlib, not a bare `models` import: under nfl/ that name resolves
+    # to the platform's package on every scheduled run
+    # (tests/test_nfl_model_imports.py) -- which here is the one we want,
+    # and the loader form keeps the tripwire honest.
+    try:
+        _hp = importlib.import_module("models.honest_ev").honest_probability
+        return _hp(model_id, model_prob)
+    except Exception:  # noqa: BLE001 - standalone use
+        return model_prob
+
+
+def ev_floor(model_id: str) -> float:
+    """This lane's EV bar: its own EV_THRESHOLDS entry or the platform's
+    global floor (config.min_ev_for), whichever is higher."""
+    own = EV_THRESHOLDS.get(model_id, 0.0)
+    try:
+        import config as _platform
+        return max(own, _platform.min_ev_for(model_id))
+    except Exception:  # noqa: BLE001 - standalone use
+        return own
 
 
 # --------------------------------------------------------------------- edge
@@ -259,6 +292,9 @@ class Executor:
         # workers/gameday.py already performs before its price-log import.
         guard = _platform_guard()
         self._score_clock = guard.ScoreClock() if guard else None
+        # The mirror guard (2026-09-19): the book moved, our state did not.
+        # Same lifetime argument as the score clock above.
+        self._book_moves = guard.BookMoveClock() if guard else None
 
     def evaluate(self, *, state: GameState, quote, model_prob: float,
                  model_id: str, now: datetime | None = None,
@@ -284,7 +320,12 @@ class Executor:
             if _v and _k not in ctx:
                 ctx[_k] = _v
         market_prob = american_to_prob(quote.price)
-        ev = expected_value(model_prob, quote.price)
+        # THE EV IS JUDGED ON THE HONEST PROBABILITY (2026-09-19). model_prob
+        # stays the raw claim on the record; the calibrated number rides
+        # beside it and is what the floor below reads.
+        model_prob_cal = (honest_probability(model_id, model_prob)
+                          if 0.0 < model_prob < 1.0 else model_prob)
+        ev = expected_value(model_prob_cal, quote.price)
 
         def _mk(bet: bool, reason: str, stake: float = 0.0) -> Decision:
             d = Decision(
@@ -294,6 +335,7 @@ class Executor:
                 market_prob=market_prob, ev=ev, bet=bet, reason=reason,
                 stake_fraction=stake, player=getattr(quote, "player", None),
                 state_ref=state.ts, quote_ref=quote.ts, context=ctx,
+                model_prob_cal=model_prob_cal,
             )
             self._record(d)
             return d
@@ -311,6 +353,33 @@ class Executor:
         ok, why = quote_is_fresh(quote, now, score_seen_at)
         if not ok:
             return _mk(False, why)
+        # THE BOOK MOVED AND WE DID NOT SEE WHY. A quote the book has moved
+        # past the cap since our state last changed has priced something our
+        # feed has not reported yet (Delaware, 2026-09-19: a touchdown, 23s
+        # before the scoreboard said so). Declined until the state catches up
+        # and the book publishes again; see data/live_quote_guard.BookMoveClock.
+        cap = BOOK_MOVE_MAX.get(quote.market)
+        if cap is not None and self._book_moves is not None:
+            number = (quote.line if quote.line is not None
+                      else american_to_prob(quote.price))
+            move = self._book_moves.observe(
+                (state.game_id, quote.market, quote.side,
+                 getattr(quote, "player", None)),
+                (state.home_score, state.away_score, state.period,
+                 state.possession),
+                number, getattr(quote, "ts", None), now,
+                move_tol=SETTLED_TOL.get(quote.market, 0.0))
+            if move is not None and move > cap:
+                return _mk(False, f"book_moved:{move:.2f}>{cap:g}")
+            # THE SETTLED-STATE RULE (2026-09-19): no bet until the book's
+            # number and our state have both been still for SETTLED_SEC --
+            # the quiet version of the defect above, caught by time rather
+            # than by size. See ncaaf_live/config.LIVE_SETTLED_SEC.
+            quiet = self._book_moves.quiet_seconds(
+                (state.game_id, quote.market, quote.side,
+                 getattr(quote, "player", None)), now)
+            if quiet is None or quiet < SETTLED_SEC:
+                return _mk(False, f"not_settled:{(quiet or 0):.0f}s<{SETTLED_SEC}")
         if model_id not in EV_THRESHOLDS:
             return _mk(False, f"unknown_model:{model_id}")
         if not (0.0 < model_prob < 1.0):
@@ -329,7 +398,9 @@ class Executor:
         if quote.price < MIN_PRICE:
             return _mk(False, f"price_past_ceiling:{quote.price:.0f}<{MIN_PRICE:.0f}")
 
-        threshold = EV_THRESHOLDS[model_id]
+        # The lane's own bar or the platform's global EV floor, whichever is
+        # higher (2026-09-19), on the calibrated EV computed above.
+        threshold = ev_floor(model_id)
         if ev < threshold:
             return _mk(False, f"below_threshold:{ev:.4f}<{threshold:.4f}")
 

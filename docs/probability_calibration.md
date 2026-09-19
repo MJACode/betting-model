@@ -223,3 +223,122 @@ promotion is one command (`python -m models.probability_calibration --promote`)
 and must be preceded by re-sweeping `MODEL_EDGE_THRESHOLDS` /
 `MODEL_PROB_THRESHOLDS` on calibrated probabilities —
 `scripts/calibrated_threshold_sweep.py` already exists for exactly that.
+
+## Phase 3 — every model decides on an honest number, and one EV floor selects (mike, 2026-09-19)
+
+mike, after a live NCAAF total and a flood of NFL prop unders on the same
+afternoon: *"I want only best of the best in terms of expected value ... these
+should not be a volume models it should be a best big bet models."* Not a pick
+count — he rejected a top-N the same day — a bar. Two changes, one PR
+(`Updated-By: mike`):
+
+1. **Every model carries a map that decides.** The two-parameter Platt fit
+   above needs 150 graded picks and a held-out gap under 6pp, and the models
+   that overclaim MOST can never clear it: a live model's evidence is one BET
+   band above its own floor, a rule has a few dozen settled bets, a new model
+   has none. Under phase 2 those kept deciding on the raw claim —
+   `ncaaf_live_total` claiming 69.8% and delivering 52.0% over 98 bets,
+   `mlb_live_total_runs` 73.0% vs 59.7% over 144 (measured 2026-09-19). So the
+   fit is **tiered** (`fit_model`):
+   - **Platt** where the record carries it (≥150, helps AND transfers): batter_runs,
+     batter_tb, pitcher_walks, runline, four WNBA props — unchanged.
+   - **A one-parameter offset on the logit, shrunk toward the pooled offset**
+     fitted across every model with ≥25 graded picks, each model counting
+     once, the prior worth 150 picks (`fit_offset`, `pooled_prior`,
+     `SHRINK_K`). Verified the same way — fitted on the older half, judged on
+     the newer half against leaving the number raw. Under 50 graded picks the
+     model is prior-dominated by construction and takes the pooled
+     correction without a held-out verdict; **n = 0 lands on the pooled
+     correction**, so a new model decides on a corrected number from its
+     first pick.
+   - **Identity** only where neither tier beats raw out of sample
+     (mlb_moneyline, mlb_f5_moneyline, batter_hits, batter_walks,
+     wnba_moneyline, wnba threes — all within ±3pp raw except wnba_moneyline,
+     which UNDERclaims by 9pp and whose offset would push the wrong way).
+   - **A third graded source.** `fetch_graded` read the matview, which grades
+     MLB and WNBA only, so every NFL, NCAAF, UFC and market-rule model read
+     back ZERO — `nfl_prop_market` with 39 settled BETs claiming 55.2% and
+     hitting 48.7%, `ncaaf_over_under` 16 claiming 70.2% hitting 43.8%. Those
+     now read `picks` (BET rows, not VOID). Same failure `fetch_graded`'s live
+     branch fixed on 09-07, one source over.
+
+   Pooled offset on 2026-09-19: **−0.267** on the logit from 21 models — a
+   claimed 0.70 becomes 0.641, 0.75 → 0.697. Promotion bar (`promote`,
+   `endorsed` in the payload): helps AND transfers for Platt; helps, or
+   prior-dominated, for the offset. The offset **helps but does not close** on
+   the big overclaimers (ncaaf_live_total 13.3 → 6.3pp held-out, pitcher_k
+   16.8 → 9.6, pitcher_hits 21.3 → 14.1, mlb_over_under 19.2 → 12.0): less
+   wrong beats raw, and the floor below is what selects, so the transfer bar
+   that guarded a prob/edge cut is not the bar here. Stated so it can be
+   reversed.
+
+2. **One EV floor, on the calibrated probability, at the deciding price,
+   wherever a BET is written.** `config.GLOBAL_MIN_EV` (0.30, his number),
+   `config.min_ev_for(model_id)` = the higher of it and the model's own
+   `MODEL_MIN_EV`, `config.expected_value`. Applied AFTER the model's prob/edge
+   cut, so it only tightens, and only where a price exists. The paths, each
+   with a test in `tests/test_global_ev_floor.py` that fails without the gate:
+   `models/scorer._decide` (pre-game, at DK and again at the best price),
+   `models/live_scorer.classify_live_signal`, `ncaaf_live/serve.LiveEngine.
+   decide_honest` (the NCAAF loop now applies the shared map on top of its
+   stage-3 number, which is what the map was fitted on; the stale-line cap
+   stays on the raw DK edge), `nfl/live_model/executor.evaluate` (calibrates,
+   writes `model_probability_cal`), and the five rule cards through
+   `models/honest_ev.gate`: `nfl_prop_market`, `wnba_prop_market`,
+   `mlb_game_market`, `mlb_total_public_fade`, NFL wind/opener. The Discord
+   "good to" bound solves the same floor on the calibrated probability.
+   `model_action_thresholds` has no `min_ev` column and needs none: the floor
+   is enforced at write time, so every surface reads the same `picks`.
+
+### The replay — READ THIS BEFORE MOVING THE FLOOR
+
+`scripts/ev_floor_replay.py` replays every model's graded record (the matview
+for MLB/WNBA, `picks` for the rest and for the in-play models) through the map
+the tiered fit produces today, then applies each floor on the calibrated EV at
+the stored price — once on top of the model's current cut (what ships) and
+once as the sole selector. Volume is per slate day the model had a graded row;
+ROI is split by date halves. Run 2026-09-19 (cut + floor, platform sum):
+
+| floor | bets kept | units | ROI |
+|---|---|---|---|
+| 0.10 | 258 | +26.2 | +10.1% |
+| 0.15 | 160 | +15.6 | +9.8% |
+| 0.20 | 102 | +16.0 | +15.7% |
+| 0.25 | 40 | +16.1 | +40.4% |
+| **0.30** | **13** | **+5.9** | **+45.5%** |
+| 0.35 | 3 | −0.4 | −13.7% |
+
+**The floor ALONE — no prob/edge cut — is negative at every level** (0.10:
+3,910 bets −9.6%; 0.30: 499 bets −17.8%): high EV at a plus price is a
+longshot, and the cuts are what carry the ROI. So the floor stays on TOP of the
+cuts, never instead of them.
+
+At 0.30 on honest numbers the board is **13 bets over the whole record** —
+`mlb_prop_pitcher_outs` 3, `ncaaf_live_win_prob` 2, `wnba_moneyline` 4,
+`wnba_prop_player_assists` 3, `wnba_prop_player_threes` 1. Every de-vig market
+rule (`nfl_prop_market`, `wnba_prop_market`, `mlb_spread_market`,
+`mlb_total_market`) prices 1–6pp edges by construction and cannot reach a 30%
+EV; `mlb_total_public_fade` claims no probability at all (its number IS the
+price's implied) so its EV is the vig. Models whose current cut on the honest
+number keeps a profitable record that the 0.30 floor then removes:
+`mlb_prop_pitcher_walks` (25 bets +25.5% today → 0), `wnba_prop_player_pra`
+(39 +23.5% → 0), `ncaaf_live_win_prob` (19 +17.0% → 2), `mlb_live_total_runs`
+(13 +42.4% on its 09-09 artifact → 0 through its cut, 2 on the floor alone).
+That is the arithmetic of his number, printed before it shipped; the number is
+one env variable (`GLOBAL_MIN_EV`) and the table above is where 0.20 and 0.25
+sit.
+
+### Operating it
+
+- `python -m models.probability_calibration --promote` after the merge writes
+  every endorsed map (Platt or offset) into the `promoted_*` columns. **Then
+  redeploy the worker and pollers:** `models.scorer._CAL_CACHE` loads once per
+  process, and the live loops are long-lived — a promotion lands in the table
+  and a running loop keeps the old map until restart. The 6am pipeline is a
+  fresh process.
+- The nightly fit and the weekly agent refit CANDIDATES with the pooled prior
+  (`fit_pool` first, then `fit_model(..., pool)`); promotion stays a person's
+  command. The health check's eligibility note reads the payload's `endorsed`.
+- A model's stored `model_probability` stays RAW everywhere; the honest number
+  travels in `model_probability_cal` (the NFL live writer and the four
+  rule-card INSERTs now carry it too).

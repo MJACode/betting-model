@@ -555,11 +555,11 @@ Predict expected count per player per game (regression), then compare to DK line
 
 | Model ID | Target | Method | Notes |
 |---|---|---|---|
-| `mlb_prop_pitcher_k` | Strikeouts per start | Poisson regression | **Priority 1 — build first** |
-| `mlb_prop_pitcher_hits` | Hits allowed per start | Poisson regression | |
-| `mlb_prop_pitcher_er` | Earned runs per start | Poisson regression | |
-| `mlb_prop_pitcher_outs` | Outs recorded | Poisson regression | |
-| `mlb_prop_pitcher_walks` | Walks per game | Poisson regression | |
+| `mlb_prop_pitcher_k` | Strikeouts per start | Poisson regression | **PAUSED 2026-09-19 (mlb Handicap)** — remesure K over −74.3%/16 |
+| `mlb_prop_pitcher_hits` | Hits allowed per start | Poisson regression | **PAUSED 2026-09-19 (mlb Handicap)** — remesure hits over −21.8%/27 |
+| `mlb_prop_pitcher_er` | Earned runs per start | Poisson regression | PAUSED 2026-07-11 |
+| `mlb_prop_pitcher_outs` | Outs recorded | Poisson regression | **PAUSED 2026-09-19 (mlb Handicap)** — remesure outs under −13.5%/33 |
+| `mlb_prop_pitcher_walks` | Walks per game | Poisson regression | PAUSED 2026-07-11 |
 | `mlb_prop_batter_hits` | Hits per game | Poisson regression | |
 | `mlb_prop_batter_tb` | Total bases per game | Poisson regression | |
 | `mlb_prop_batter_rbi` | RBIs per game | Poisson regression | RETIRED 2026-09-02 |

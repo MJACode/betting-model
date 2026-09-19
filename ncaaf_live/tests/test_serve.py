@@ -60,6 +60,21 @@ _ODDS = {"h2h": {"home": -220, "away": 180},
          "total": {"line": 52.5, "over": -110, "under": -110}}
 
 
+def _settled(engine, state, ctx, odds):
+    """Price after the engine has watched this state and this number, still,
+    for longer than the settled window (2026-09-19, the settled-state rule):
+    a first look at a quote is never a bet, so a test that expects one has to
+    have looked before. Resets the engine's clock so the module-scoped engine
+    does not carry one test's anchors into the next."""
+    from datetime import datetime, timedelta, timezone
+    from data.live_quote_guard import BookMoveClock
+    from ncaaf_live.config import LIVE_SETTLED_SEC
+    engine._book_moves = BookMoveClock()
+    now = datetime.now(timezone.utc)
+    engine.price(state, ctx, odds, now=now - timedelta(seconds=LIVE_SETTLED_SEC + 10))
+    return engine.price(state, ctx, odds, now=now)
+
+
 # ── the licenses ──────────────────────────────────────────────────────────────
 
 def test_overtime_is_declined_entirely(engine):
@@ -79,27 +94,38 @@ def test_no_pregame_context_means_no_picks(engine):
     assert engine.price(_state(), _ctx(pregame_spread=None), _ODDS) == []
 
 
-def test_a_non_fbs_matchup_is_not_priced(engine):
+def _no_ev_floor(monkeypatch):
+    """The global EV floor (2026-09-19) is tested in tests/test_global_ev_floor.py;
+    these fixtures predate it and price at -190/-220, which no honest
+    probability clears at 0.30."""
+    import ncaaf_live.serve as serve
+    for name in ("TOTAL_MIN_EV", "ML_MIN_EV"):
+        monkeypatch.setattr(serve, name, None)
+
+
+def test_a_non_fbs_matchup_is_not_priced(engine, monkeypatch):
     """The live models price FBS-vs-FBS only, like every pre-game NCAAF model.
     The control matters: the same state and odds must still produce picks when
     the matchup IS FBS, or `return []` everywhere would pass this test."""
+    _no_ev_floor(monkeypatch)
     # A shaded over that clears the stale-line cap, so the control prices.
     odds = {"h2h": {"home": -220, "away": 180},
             "total": {"line": 45.0, "over": -190, "under": -110}}
-    assert engine.price(_state(), _ctx(), odds) != []
-    assert engine.price(_state(), _ctx(fbs_matchup=False), odds) == []
+    assert _settled(engine, _state(), _ctx(), odds) != []
+    assert _settled(engine, _state(), _ctx(fbs_matchup=False), odds) == []
 
 
-def test_a_context_nobody_checked_is_not_priced(engine):
+def test_a_context_nobody_checked_is_not_priced(engine, monkeypatch):
     """False by default: an unproven matchup declines rather than passes."""
+    _no_ev_floor(monkeypatch)
     base = dict(game_id="NCAAF_2026-08-29_north-carolina_tcu", home="TCU",
                 away="North Carolina", commence_time="2026-08-29T16:00:00Z",
                 pregame_spread=-9.5, pregame_total=46.5, wind_mph=5.0,
                 is_dome=False, game_date="2026-08-29")
     odds = {"h2h": {"home": -220, "away": 180},
             "total": {"line": 45.0, "over": -190, "under": -110}}
-    assert engine.price(_state(), GameContext(**base, fbs_matchup=True), odds) != []
-    assert engine.price(_state(), GameContext(**base), odds) == []
+    assert _settled(engine, _state(), GameContext(**base, fbs_matchup=True), odds) != []
+    assert _settled(engine, _state(), GameContext(**base), odds) == []
 
 
 def test_no_odds_means_no_picks_never_prob_only(engine):
@@ -122,7 +148,7 @@ def test_stale_line_cap_declines_absurd_edges(engine):
 
 def test_picks_carry_the_settlement_contract(engine):
     """Whatever fires must settle through the platform's generic game path."""
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     for p in picks:
         assert p["is_live"] is True
         assert p["signal_type"] in ("BET", "AVOID")
@@ -310,6 +336,60 @@ def test_cfbd_situation_parsing():
     assert _parse_situation("Kickoff") == (None, None)
 
 
+# Every distinct situation string the loop stored on the first slate it kept
+# them (2026-09-19, ncaaf_live_states.raw_state), with the possession the feed
+# reported beside it: (string, home, away, possession, yards to goal).
+_REAL_SITUATIONS = [
+    ("4th & 7 at CCU 47", "Delaware", "Coastal Carolina", "away", 53),
+    ("2nd & 14 at ARK 36", "Arkansas", "Georgia", "away", 36),
+    ("2nd & 10 at BGSU 18", "Iowa State", "Bowling Green", "away", 82),
+    ("1st & 10 at ASU 31", "Kansas", "Arizona State", "away", 69),
+    ("1st & 10 at MER 31", "Georgia Tech", "Mercer", "home", 31),
+    ("4th & 3 at UNC 5", "Clemson", "North Carolina", "home", 5),
+    ("4th & 10 at AKR 14", "Minnesota", "Akron", "away", 86),
+    ("1st & 10 at UNT 44", "Texas State", "North Texas", "home", 44),
+    ("2nd & 8 at EMU 27", "Wisconsin", "Eastern Michigan", "away", 73),
+    ("1st & 17 at NCSU 8", "Vanderbilt", "NC State", "away", 92),
+    ("2nd & 3 at ME 22", "Boston College", "Maine", "away", 78),
+    ("2nd & 4 at ILL 41", "Illinois", "Southern Illinois", "home", 59),
+]
+
+
+@pytest.mark.parametrize("text,home,away,poss,want", _REAL_SITUATIONS)
+def test_cfbd_yardline_from_every_stored_situation(text, home, away, poss, want):
+    """The training column is CFBD's yardsToGoal: distance to the opponent's
+    end zone for the offense. The ball on the named team's own side is 100
+    minus the yard; on the other team's side it is the yard."""
+    from ncaaf_live.feeds.cfbd_scoreboard import _parse_yardline
+    assert _parse_yardline(text, home, away, poss) == want
+
+
+def test_cfbd_yardline_refuses_rather_than_guesses():
+    from ncaaf_live.feeds.cfbd_scoreboard import _parse_yardline
+    # Unknown possession: the side of the field has no meaning.
+    assert _parse_yardline("1st & 10 at UNT 44", "Texas State", "North Texas", None) is None
+    # Fits both schools (Michigan / Michigan State): refuse.
+    assert _parse_yardline("1st & 10 at MICH 30", "Michigan", "Michigan State", "home") is None
+    # Fits neither.
+    assert _parse_yardline("1st & 10 at XYZ 30", "Delaware", "Coastal Carolina", "home") is None
+    # Midfield is midfield whoever has it; a bare "at 50" is not a shape we know.
+    assert _parse_yardline("1st & 10 at CCU 50", "Delaware", "Coastal Carolina", "home") == 50
+    assert _parse_yardline("1st & 10 at 50", "Delaware", "Coastal Carolina", "home") is None
+    # Any other shape.
+    assert _parse_yardline("Kickoff", "Delaware", "Coastal Carolina", "home") is None
+    assert _parse_yardline(None, "Delaware", "Coastal Carolina", "home") is None
+
+
+def test_cfbd_state_carries_the_yardline_and_the_raw_situation():
+    from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
+    g = _cfbd_game()
+    g["situation"] = "3rd & 7 at TCU 25"
+    g["possession"] = "home"                 # TCU is home in the fixture
+    st = extract_live_states_cfbd([g], _IDS)[0]
+    assert st["situation"] == "3rd & 7 at TCU 25"
+    assert st["yardline_100"] == 75         # own 25 -> 75 to go
+
+
 def test_cfbd_engine_prices_the_degraded_state(engine):
     """End to end: the reduced CFBD state must flow through the SAME engine."""
     from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
@@ -365,9 +445,13 @@ def test_a_stale_total_does_not_take_the_moneyline_with_it(engine):
     assert all(p["model_id"] != "ncaaf_live_total" for p in picks)
 
 
-def test_a_quote_with_no_timestamp_still_prices(engine):
+def test_a_quote_with_no_timestamp_still_prices(engine, monkeypatch):
     """Backward compatible on purpose: a feed shape change is logged, not
     allowed to blank the board.
+
+    Cuts wide open (2026-09-19): this is a timestamp test, and the re-swept
+    win-prob cut (0.50 / edge 0.16 under the 0.30 floor) selects plus-money
+    dogs, which a -280 favourite fixture is not.
 
     The h2h price is local rather than `_ODDS`: this fixture's home side is a
     9.5-point pregame favourite, and stage 3 (correct_for_pregame, 2026-09-12)
@@ -376,8 +460,9 @@ def test_a_quote_with_no_timestamp_still_prices(engine):
     timestamps. Measured before changing it -- the cap refuses 38.2% of
     raw qualifying states and 40.0% of corrected ones on the 2025 replay, so
     this is a fixture artifact, not the correction crowding the cap."""
+    _wide_open(monkeypatch)
     odds = {"h2h": {"home": -280, "away": 230}, "total": _ODDS["total"]}
-    assert engine.price(_state(), _ctx(), odds) != []
+    assert _settled(engine, _state(), _ctx(), odds) != []
 
 
 # ── the edge is a band, not a floor ──────────────────────────────────────────
@@ -427,7 +512,7 @@ def test_the_fixture_fires_when_wide_open(engine, monkeypatch):
     _wide_open(monkeypatch)
     import config as platform_config
     monkeypatch.setattr(platform_config, "PAUSED_MODELS", set())
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     assert {p["model_id"] for p in picks if p["signal_type"] == "BET"} == {
         "ncaaf_live_win_prob", "ncaaf_live_total"}
 
@@ -445,7 +530,7 @@ def test_a_paused_lane_never_writes_a_bet(engine, monkeypatch):
     import config as platform_config
     monkeypatch.setattr(platform_config, "PAUSED_MODELS",
                         {"ncaaf_live_win_prob", "ncaaf_live_total"})
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     assert [p for p in picks if p["signal_type"] == "BET"] == []
 
 
@@ -454,6 +539,6 @@ def test_the_pause_is_per_lane(engine, monkeypatch):
     _wide_open(monkeypatch)
     import config as platform_config
     monkeypatch.setattr(platform_config, "PAUSED_MODELS", {"ncaaf_live_total"})
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     bets = {p["model_id"] for p in picks if p["signal_type"] == "BET"}
     assert bets == {"ncaaf_live_win_prob"}

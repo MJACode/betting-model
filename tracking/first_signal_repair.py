@@ -134,6 +134,27 @@ def _standing(conn: DBConnection, game_id: str, model_id: str,
             "pick_label": r[3], "created_at": r[4]}
 
 
+def _lane_voided(conn: DBConnection, game_id: str, model_id: str,
+                 pick_side: str) -> bool:
+    """Has any pick on this lane/side been VOIDED (CLAUDE.md 1c)?
+
+    2026-09-19: Delaware ML (live) was voided at 16:2x, the worker redeployed
+    at 16:47, this repair ran on the loop's start, found "nothing standing"
+    (a voided row carries result='NO_ACTION', so `_standing` does not see
+    it), re-inserted the bet from picks_log and cleared the push ledger -- so
+    the voided pick was re-announced to Discord and the app an hour after it
+    was struck. A void is an exit from the record, the same as a grade: the
+    lane is history and is never restored.
+    """
+    rows = conn.execute("""
+        SELECT 1 FROM picks
+        WHERE game_id = %(g)s AND model_id = %(m)s AND pick_side = %(s)s
+          AND condition_status = 'VOID'
+        LIMIT 1
+    """, {"g": game_id, "m": model_id, "s": pick_side}).fetchall()
+    return bool(rows)
+
+
 def _same_bet(first: dict, standing: dict) -> bool:
     """Is the standing row already the original bet?
 
@@ -165,6 +186,10 @@ def restore_first_signals(game_date: str | None = None,
             standing = _standing(conn, gid, mid, side)
             if standing is not None and _same_bet(first, standing):
                 continue                      # already the bet of record
+            if _lane_voided(conn, gid, mid, side):
+                logger.info(f"first-signal repair: {gid}/{mid}/{side} — "
+                            f"voided, left alone")
+                continue                      # struck from the record (1c)
 
             was = (f"{standing['pick_label']} @ {standing['dk_odds']}"
                    if standing else "nothing standing")

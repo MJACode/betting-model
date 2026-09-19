@@ -71,6 +71,14 @@ answer is "nothing".
   NONE rows for games that have not started, and the UFC/NCAAF look-ahead
   window, where picks are explicitly not yet locked and re-score until game
   morning (`docs/sports/{ufc,ncaaf}.md`). A BET is never in that set.
+- **AN IN-PLAY LOOP DECLINES A QUOTE THE BOOK HAS MOVED PAST A CAP WITH NO
+  CHANGE IN THE STATE IT PRICES — our state is the stale thing.** (2026-09-19,
+  Delaware: bet +100 on a 0–0 state 15 s before the feed reported the touchdown
+  DraftKings had already re-hung for; every age/score/edge guard passed
+  correctly.) Every live loop calls the shared `data/live_quote_guard.
+  BookMoveClock` and keeps its state key to what changes on an EVENT (score,
+  period, possession). A new loop that prices without it is that bet again.
+  Evidence: `docs/rules_evidence.md`; tests: `tests/test_live_book_move_guard.py`.
 - **The audit log is the backstop.** `picks_log` records every INSERT and
   DELETE, so a pick destroyed by pre-lock churn is recoverable.
   `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on

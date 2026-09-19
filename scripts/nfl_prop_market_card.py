@@ -33,7 +33,8 @@ from loguru import logger
 import models.nfl_prop_market as mk
 from data import local_store
 import config
-from config import NFL_PROP_MAX_LEAD_HOURS
+from config import (NFL_PROP_MAX_LEAD_HOURS, NFL_PROP_PUBLISH_HOUR_UTC,
+                    NFL_PROP_PUBLISH_MIN_LEAD_HOURS)
 from data.db import get_connection
 from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_quotes
 from models.nfl_prop_backtest import _as_dt
@@ -103,20 +104,41 @@ def _kalshi_ladders_or_empty() -> dict:
     return ladders_or_empty()
 
 
+def reference_ladders(replay: bool) -> dict:
+    """The exchange ladders the card may price off on THIS run.
+
+    Empty on a replay (a past soft book must not be priced off today's
+    board) and empty unless `config.NFL_PROP_MARKET_KALSHI_REFERENCE` is on
+    -- which it is not, because the ladder has no graded record and on
+    2026-09-19 it wrote 25 unders in one pass that no sharp book could have
+    produced (the config comment has the numbers). Nothing is fetched when
+    nothing may be used."""
+    if replay or not config.NFL_PROP_MARKET_KALSHI_REFERENCE:
+        return {}
+    return _kalshi_ladders_or_empty()
+
+
 def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
          games: dict | None = None,
          now: datetime | None = None,
          snapshot_types: tuple[str, ...] | None = None,
-         kalshi_ladders: dict | None = None) -> tuple[list, dict, dict]:
+         kalshi_ladders: dict | None = None,
+         replay: bool | None = None) -> tuple[list, dict, dict]:
     """`now` overrides the clock, which is what makes a past slate replayable
     exactly as the card would have seen it (the §28 replay harness pattern).
     Everything else — the started-game guard, the quote filter — is unchanged,
-    so a replay and a live run take the same path."""
+    so a replay and a live run take the same path.
+
+    A live pass also supplies `now` (one clock read for the whole process) but
+    must pass `replay=False`: keyed only on "was a clock supplied", the quote
+    filter would clip to the pass start and drop rows `--fetch` just stored.
+    """
     games = slate(conn, start, end) if games is None else games
     if not games:
         return [], {"reason": "no scheduled games in window"}, {}
 
-    replay = now is not None
+    if replay is None:
+        replay = now is not None
     now = now or datetime.now(timezone.utc)
     live = {g for g, d in games.items()
             if (_as_dt(d["kickoff"]) or now) <= now}
@@ -157,7 +179,7 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     # not mix today's Kalshi board with a past soft book (fail closed -> {}).
     # Explicit {} / a passed dict skips the network (tests, offline).
     if kalshi_ladders is None:
-        kalshi_ladders = {} if replay else _kalshi_ladders_or_empty()
+        kalshi_ladders = reference_ladders(replay)
     game_dates = {g: str(d.get("date", ""))[:10] for g, d in games.items()
                   if g in open_games and d.get("date")}
     # The over side is held to a stricter floor than the under side; the lean
@@ -230,10 +252,112 @@ def render(bets, diag, games, names=None) -> str:
 MODEL_ID = "nfl_prop_market"
 
 
+def publish_hour_missed(conn, now: datetime) -> bool:
+    """Did today's publish pass never run, and has no later pass already caught up?
+
+    ONE PUBLISH PASS MEANS NO SECOND CHANCE, so a tick the worker misses is not
+    a delay — it is a whole slate written off in silence. That is not
+    hypothetical. Every hourly pass writes an `api_call_log` row tagged
+    `nfl-prop-card`, and over 2026-09-13..19 the worker ticked 24/24 hours on
+    six of seven days and missed exactly ONE hour all week: 13:00 UTC on
+    2026-09-18 -- the one hour this gate depends on.
+
+    ONE-SHOT, not "every hour after a miss". Asking only whether [13:00, 14:00)
+    is empty is the harvest coming back in: a 14:xx catch-up logs at 14:xx, so
+    that window stays empty and every later hour would publish newly crossed
+    props. The durable marker is any `nfl-prop-card` tick from the publish hour
+    through the start of THIS hour — the 13:xx pass if it ran, otherwise the
+    first hour after the miss. Later hours see that tick and stay closed.
+
+    The current hour is excluded on purpose. `--fetch` writes `api_call_log`
+    rows before this check runs; counting them would hide a miss from the
+    catch-up pass that is supposed to fill it.
+
+    The check is on the TICK, deliberately, and not on "does this game have a
+    pick yet". A publish pass that legitimately found no qualifying edge looks
+    identical to one that never ran, and treating the two the same is how
+    hourly harvesting gets back in through the fallback.
+    """
+    if conn is None:
+        return False
+    start = now.replace(hour=NFL_PROP_PUBLISH_HOUR_UTC, minute=0,
+                        second=0, microsecond=0)
+    this_hour = now.replace(minute=0, second=0, microsecond=0)
+    if this_hour <= start:               # still before or inside the publish hour
+        return False
+    row = conn.execute("""
+        SELECT 1 FROM api_call_log
+        WHERE source = 'nfl-prop-card' AND ts >= %s AND ts < %s
+        LIMIT 1
+    """, (start, this_hour)).fetchone()
+    return row is None
+
+
+def publishable_games(games: dict, now: datetime,
+                      is_catch_up: bool = False) -> set[str]:
+    """The games this pass may PUBLISH for — one read per game, at 13:xx UTC.
+
+    THE CARD IS SCORED HOURLY AND MUST NOT BET HOURLY. The tick runs every hour
+    so the board is re-fetched for the twelve distributional models that score
+    off it, and until 2026-09-19 every one of those passes could also publish.
+    Because publish() is insert-once per proposition, nothing was ever
+    re-priced — but anything that had newly crossed the cut since the last pass
+    was ADDED, so a game alone in its 24h window collected a bet or two an hour
+    all day. DEN_KC took 14 bets across 11 hourly passes; DET_BUF took 12, all
+    unders, across 6. A crowded Sunday window gave 1-2 per game, because each
+    game was only looked at once or twice before kickoff. The bet count was
+    tracking how many times we looked.
+
+    It skews UNDER for a mechanical reason, not because the market lean grew:
+    the under floor is 5pp and the over floor 6pp
+    (config.NFL_PROP_MARKET_SIDE_EDGE), so repeated looks cross the lower bar
+    far more often. The graded record is 72% under; production ran 96%.
+
+    THE RULE. Publish on the pass whose UTC hour is NFL_PROP_PUBLISH_HOUR_UTC,
+    and only then. That is not an arbitrary hour: the record this model ships
+    on is one board read per game, and every `open` row in the historical cache
+    is stamped 13:55 UTC. One 13:xx pass per game falls inside the 24h ceiling,
+    so this yields exactly one publish per game with no state to keep — a game
+    24h+ out is already skipped by the ceiling, and one that has kicked off is
+    already skipped by the started-game floor.
+
+    A LEAD FLOOR, because the hour is wall-clock. A 13:30 UTC London kickoff is
+    1.1h after a 13:25 pass, and the grader dropped those quotes as
+    post-kickoff, so no measured band describes them. Domestic slots are all 3h+
+    from this pass and are unaffected.
+
+    `is_catch_up` is publish_hour_missed()'s answer: the scheduler skipped the
+    publish pass, nothing was written at that hour, and this pass is therefore
+    the day's FIRST read rather than a second one. It does not widen the rule —
+    see publish_hour_missed() for why it is keyed on the tick and not on
+    whether a game already has a pick.
+    """
+    if now.hour != NFL_PROP_PUBLISH_HOUR_UTC and not is_catch_up:
+        return set()
+    out = set()
+    for gid, d in games.items():
+        ko = _as_dt(d.get("kickoff"))
+        if ko is None:
+            continue
+        lead = (ko - now).total_seconds() / 3600.0
+        if lead >= NFL_PROP_PUBLISH_MIN_LEAD_HOURS:
+            out.add(gid)
+    return out
+
+
 def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
     """Card bets -> picks rows. Pure, so the mapping is testable without a DB."""
+    from models.honest_ev import gate
     rows = []
     for b in bets:
+        # THE GLOBAL EV FLOOR on the honest probability at the bet price
+        # (2026-09-19). A rule has no decision function -- its selection was
+        # the bet -- so the platform gate is applied here, before the row.
+        ev = gate(MODEL_ID, b.fair, b.price)
+        if not ev.clears:
+            logger.info(f"{MODEL_ID}: {ev.reason} — dropped {b.player} "
+                        f"{b.market} {b.side} {b.line:g}")
+            continue
         g = games.get(b.game_id, {})
         who = (names or {}).get(b.player, b.player)
         side = "Over" if b.side == "over" else "Under"
@@ -248,6 +372,7 @@ def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
             "game_date": g.get("date"), "game_time": g.get("kickoff"),
             "pick_side": b.side, "pick_label": f"{label} ({_BOOK.get(b.book, b.book)})",
             "model_probability": b.fair,
+            "model_probability_cal": round(ev.cal_prob, 4),
             # The soft book's own de-vigged number, so edge on the row is the
             # same quantity the rule selected on: fair - book's de-vigged prob.
             "dk_implied_prob": b.fair - b.edge,
@@ -269,12 +394,14 @@ _INSERT = """
                        pick_side, pick_label, model_probability, dk_implied_prob,
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
-                       confidence_tier, prop_market, player_key)
+                       confidence_tier, prop_market, player_key,
+                       model_probability_cal)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
-            %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s)
+            %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s,
+            %(model_probability_cal)s)
     ON CONFLICT DO NOTHING
 """
 
@@ -346,7 +473,16 @@ def main() -> None:
         from data.ingestors.nfl_prop_odds_ingestor import run_nfl_prop_odds_ingestor
         logger.info(f"fetching: {run_nfl_prop_odds_ingestor(a.days)}")
 
-    anchor = datetime.fromisoformat(a.date).date() if a.date else datetime.now(timezone.utc).date()
+    # ONE CLOCK READ FOR THE WHOLE PASS, and everything below derives from it.
+    # card() and the publish gate must agree about what time it is: read the
+    # wall clock twice and a pass starting at 13:59 can build its card inside
+    # the publish hour and evaluate the gate at 14:00, silently skipping that
+    # game's ONLY publish window for the week and leaving no pick and no error.
+    as_of = (datetime.fromisoformat(a.as_of.replace("Z", "+00:00"))
+             if a.as_of else None)
+    now = as_of or datetime.now(timezone.utc)
+
+    anchor = datetime.fromisoformat(a.date).date() if a.date else now.date()
     start, end = anchor.isoformat(), (anchor + timedelta(days=a.days)).isoformat()
 
     if a.offline:
@@ -356,19 +492,43 @@ def main() -> None:
     conn = None if a.offline else get_connection()
     try:
         games = slate(conn, start, end)
-        as_of = (datetime.fromisoformat(a.as_of.replace("Z", "+00:00"))
-                 if a.as_of else None)
         bets, diag, names = card(conn, start, end, a.min_edge, games=games,
-                                 now=as_of)
+                                 now=now, replay=as_of is not None)
         if a.publish and as_of:
             raise SystemExit("--as-of is a replay; refusing to publish from it")
         if a.publish and bets:
-            from models.scorer import _get_current_bankroll
-            n = publish(conn, pick_rows(bets, games, names,
-                                        _get_current_bankroll(conn)))
-            # NOT "the rest were already locked": the FK guard can drop rows
-            # too, and it logs its own error naming them.
-            logger.info(f"published {n} new pick(s) of {len(bets)} on the card")
+            # ONE READ PER GAME. The card is built every hour so the board is
+            # fresh for everything else that scores off it; it may only PUBLISH
+            # on the 13:xx UTC pass, which is the single wall-clock read the
+            # record was measured on. See publishable_games().
+            catch_up = publish_hour_missed(conn, now)
+            if catch_up:
+                # LOUD, because a silent catch-up hides a worker that is
+                # missing ticks -- and the next miss might be of this pass too.
+                logger.warning(
+                    f"the {NFL_PROP_PUBLISH_HOUR_UTC:02d}:xx UTC publish pass "
+                    f"did not run today — publishing from this pass instead")
+            allowed = publishable_games(games, now, is_catch_up=catch_up)
+            publishing = [b for b in bets if b.game_id in allowed]
+            withheld = len(bets) - len(publishing)
+            if withheld:
+                # Logged, never written: this is the line that says what the
+                # old behaviour would have bet, so the season still measures
+                # which offsets pay without paying to find out.
+                logger.info(
+                    f"{withheld} card bet(s) not published — outside the "
+                    f"{NFL_PROP_PUBLISH_HOUR_UTC:02d}:xx UTC read: "
+                    + ", ".join(f"{b.player} {b.side} {b.line:g} {b.market}"
+                                f" @{b.edge:.1%}" for b in bets
+                                if b.game_id not in allowed))
+            if publishing:
+                from models.scorer import _get_current_bankroll
+                n = publish(conn, pick_rows(publishing, games, names,
+                                            _get_current_bankroll(conn)))
+                # NOT "the rest were already locked": the FK guard can drop rows
+                # too, and it logs its own error naming them.
+                logger.info(f"published {n} new pick(s) of {len(publishing)} "
+                            f"eligible ({len(bets)} on the card)")
         # Printed inside the try: if card() raised, bets/diag/names are unbound
         # and printing here would throw a NameError over the real traceback.
         print(render(bets, diag, games, names))

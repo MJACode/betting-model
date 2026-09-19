@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
     DECIDE_ON_BEST_PRICE,
     DECIDE_ON_CALIBRATED_PROB,
+    LIVE_BOOK_MOVE_MAX,
     LIVE_MODELS,
     LIVE_ODDS_MAX_AGE_SEC,
     LIVE_SCORE_LAG_TOLERANCE_SEC,
@@ -58,7 +59,7 @@ from config import (
     today_et,
 )
 from data.db import get_connection, DBConnection
-from data.live_quote_guard import quote_predates_score
+from data.live_quote_guard import american_to_implied, quote_predates_score
 from features.live_game_features import build_live_state_row
 from models.scorer import (
     _best_fields,
@@ -196,7 +197,102 @@ def _get_live_dk_odds(conn: DBConnection, game_id: str,
                      f"{odds.get('snapshot_at')} predates the score we saw at "
                      f"{score_seen_at} — skipping until the book re-hangs")
         return None
+    # THE MIRROR: THE BOOK MOVED AND OUR STATE DID NOT. The guard above asks
+    # whether the book has caught up with a score WE saw; this one asks
+    # whether WE have caught up with something the book priced. On 2026-09-19
+    # NCAAF bet Delaware +100 on a 0-0 state fifteen seconds before the
+    # scoreboard reported the touchdown DraftKings had already re-hung for
+    # (-174 -> +100). Anchor DraftKings' number at its first publish after the
+    # base-out state last changed; if the latest publish has moved past the
+    # cap with that state unchanged, the state is the stale thing. Same
+    # table-backed shape as `_score_changed_at`, for the same reason.
+    cap = LIVE_BOOK_MOVE_MAX.get(market)
+    if cap is not None:
+        changed_at = _state_changed_at(conn, game_id)
+        if changed_at:
+            anchor = _dk_odds_after(conn, game_id, market, changed_at)
+            move = _book_move(market, anchor, odds)
+            if move is not None and move > cap:
+                logger.info(f"  {game_id}/{market}: DraftKings has moved "
+                            f"{move:.3f} (cap {cap:g}) since the state last "
+                            f"changed at {changed_at} — declining; our state "
+                            f"is behind the book")
+                return None
     return odds
+
+
+_STATE_COLS = ("inning", "inning_half", "outs", "bases_state",
+               "home_score", "away_score")
+
+
+def _state_changed_at(conn: DBConnection, game_id: str) -> Optional[str]:
+    """When did we FIRST see this game's current base-out state? None if it
+    has never moved on record. `_score_changed_at` with the full fingerprint
+    the live model prices -- inning, half, outs, bases, score -- because the
+    book has a visible reason to reprice on any of them, and the guard is
+    for the reprices with NO visible reason."""
+    differs = " OR ".join(f"l.{c} IS DISTINCT FROM latest.{c}"
+                          for c in _STATE_COLS)
+    row = conn.execute(f"""
+        WITH latest AS (
+            SELECT {', '.join(_STATE_COLS)}, snapshot_at
+            FROM live_game_state
+            WHERE game_id = %(g)s
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        ), last_different AS (
+            SELECT MAX(l.snapshot_at) AS ts
+            FROM live_game_state l, latest
+            WHERE l.game_id = %(g)s
+              AND l.snapshot_at <= latest.snapshot_at
+              AND ({differs})
+        )
+        SELECT MIN(l.snapshot_at)
+        FROM live_game_state l, last_different
+        WHERE l.game_id = %(g)s
+          AND last_different.ts IS NOT NULL
+          AND l.snapshot_at > last_different.ts
+    """, {"g": game_id}).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def _dk_odds_after(conn: DBConnection, game_id: str, market: str,
+                   after: str) -> Optional[dict]:
+    """DraftKings' FIRST in-play publish at or after `after` -- the anchor
+    the book-move guard measures from. Same columns as _get_live_dk_odds."""
+    cols = ["home_price", "away_price", "spread_home", "total_line",
+            "over_price", "under_price", "snapshot_at",
+            "home_link", "away_link", "over_link", "under_link"]
+    row = conn.execute(f"""
+        SELECT {', '.join(cols)}
+        FROM odds
+        WHERE game_id = %(g)s
+          AND market = %(m)s
+          AND bookmaker = 'draftkings'
+          AND snapshot_type = 'in_play'
+          AND snapshot_at >= %(after)s
+        ORDER BY snapshot_at
+        LIMIT 1
+    """, {"g": game_id, "m": market, "after": after}).fetchone()
+    return dict(zip(cols, row)) if row else None
+
+
+def _book_move(market: str, anchor: Optional[dict],
+               latest: Optional[dict]) -> Optional[float]:
+    """|latest - anchor| in the market's own units: implied probability of
+    the home price for a moneyline, the line for a total or spread. None when
+    either side is missing -- unknown is not stale."""
+    if not anchor or not latest:
+        return None
+    if market == "h2h":
+        a = american_to_implied(anchor.get("home_price"))
+        b = american_to_implied(latest.get("home_price"))
+    else:
+        col = "total_line" if market == "totals" else "spread_home"
+        a, b = anchor.get(col), latest.get(col)
+    if a is None or b is None:
+        return None
+    return abs(float(b) - float(a))
 
 
 def expected_value(model_prob: float, dk_odds) -> Optional[float]:
@@ -216,6 +312,14 @@ def expected_value(model_prob: float, dk_odds) -> Optional[float]:
         return None
     decimal = 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
     return model_prob * decimal - 1.0
+
+
+def _ev_floor(model_id: str) -> float:
+    """config.min_ev_for, read through THIS module's MODEL_MIN_EV so a test
+    that stubs the per-model dict here still governs the per-model half."""
+    import config as _config
+    own = MODEL_MIN_EV.get(model_id)
+    return _config.GLOBAL_MIN_EV if own is None else max(_config.GLOBAL_MIN_EV, float(own))
 
 
 def classify_live_signal(model_id: str, model_prob: float,
@@ -282,12 +386,13 @@ def classify_live_signal(model_id: str, model_prob: float,
             return "NONE"
         # EV floor. Applied AFTER prob/edge so it only ever tightens, and only
         # when a price exists -- a prob-only pick has no EV and is judged on the
-        # thresholds alone.
-        floor = MODEL_MIN_EV.get(model_id)
-        if floor is not None:
-            ev = expected_value(decision_prob, dk_odds)
-            if ev is not None and ev < floor:
-                return "NONE"
+        # thresholds alone. The floor is the platform's global one or the
+        # model's own MODEL_MIN_EV, whichever is higher (config.min_ev_for,
+        # 2026-09-19); MODEL_MIN_EV alone left a model with no entry unfloored.
+        floor = _ev_floor(model_id)
+        ev = expected_value(decision_prob, dk_odds)
+        if ev is not None and ev < floor:
+            return "NONE"
         return "BET"
     if decision_edge <= -bet_thresh:
         return "AVOID"

@@ -63,7 +63,7 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
 
 ### Conventions (load-bearing — don't break)
 
-- **Three staleness guards, and they measure different things** (`data/live_quote_guard.py`).
+- **Four staleness guards, and they measure different things** (`data/live_quote_guard.py`).
   A live book price is refused if any one fires:
 
   | Guard | Catches | Where |
@@ -71,12 +71,61 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
   | quote AGE (`LIVE_QUOTE_MAX_AGE_SEC` / `MAX_QUOTE_AGE_SEC`, 90s) | a market the book has FROZEN | NCAAF `serve.py`, NFL `executor.py` |
   | quote vs SCORE (`quote_predates_score`) | a number the book stamped BEFORE the last score | all three |
   | edge CAP (`MAX_EDGE_CAP` 0.18 / `LIVE_MAX_EDGE_CAP` 0.2) | republished, but not yet moved | NCAAF, MLB |
+  | BOOK MOVE vs OUR STATE (`BookMoveClock`, 2026-09-19) | the book has moved past a cap and our state has NOT changed — **we are behind the book** | all three |
 
-  The middle one was added 2026-09-03 after an NCAAF total was bet 0.6s after a
+  The second was added 2026-09-03 after an NCAAF total was bet 0.6s after a
   touchdown against a quote 62.2s old — inside the 90s cap, with an edge of
   0.1577 inside the 0.18 cap. Both other guards are bounded on the quote's age
   or the edge's size, and **no such bound can see an event**. The score guard is
   self-clearing: it blocks only until the book republishes.
+
+  **The fourth is the mirror of the second, and it closes the direction the
+  first three cannot see.** All three protect against the book being behind
+  us. On 2026-09-19 (Coastal Carolina at Delaware) the book was AHEAD of us:
+  DraftKings went −174 → +100 and −3.5 → +2.5 inside two and a half minutes
+  while the CFBD scoreboard still said 0–0, and `ncaaf_live_win_prob` bet
+  Delaware +100 fifteen seconds before the feed reported the touchdown — a quote
+  8s old, edge 0.159, no score yet seen, so every guard passed and none was
+  wrong to. The model's 0.659 was the pregame prior carried into a tied first
+  quarter; the "edge" was a touchdown we had not been told about. **The same
+  shape sat behind 15 of the 20 live moneyline bets since the 09-12 unpause**
+  (DraftKings had moved against the side we then bet inside the two minutes
+  before each). The rule: per game and market, anchor the book's number at the
+  last change in the state we price (score, period, possession; MLB adds
+  inning, half, outs, bases); a move past the cap with that state unchanged
+  means the state is stale, and the market is declined until the state feed
+  catches up and the book publishes again. First sight and a restart report
+  nothing (the ScoreClock rule), so the age bound is the floor. Caps:
+  `ncaaf_live/config.LIVE_BOOK_MOVE_MAX_{ML,TOTAL}` (0.08 implied / 3.0 pts),
+  `config.LIVE_BOOK_MOVE_MAX` (MLB: 0.08 / 0.5 runs / 1.0), NFL
+  `live_model/config.BOOK_MOVE_MAX` (per market; the prop cap is an unmeasured
+  first cut, every refusal is logged as `book_moved`). **The caps are a first
+  cut from the single-republish distribution in `odds`;** the quantity they
+  bound is the cumulative move between state changes, which
+  `ncaaf_live_states` (one row per change, written by the loop since the same
+  day) now makes measurable. Re-measure after one slate.
+  Tests: `tests/test_live_book_move_guard.py` (the Delaware timeline, a control
+  that still bets it once settled, MLB and NFL wiring),
+  `tests/test_ncaaf_live_states.py`.
+
+  **And a fifth, which is a rule about TIME rather than size — the settled-state
+  rule (2026-09-19, later the same day, mike: "I said to fix it not pause
+  it").** The cap catches a loud move. It cannot catch the same defect once the
+  book's re-hang is already the anchor (Texas State, 17:39Z: CFBD blanked
+  `possession`, the anchor reset, DraftKings' post-touchdown −129 became the
+  baseline) or when the move sits under the cap (Clemson, 16:12Z: 0.076).
+  What separates a lag from a disagreement is time: **no market is priced
+  until the book's number and our state have both been unchanged for
+  `LIVE_SETTLED_SEC` (120 s)** — past the worst measured feed lag (72 s) plus
+  the book's re-hang (~40 s). An edge still there after two quiet minutes is a
+  disagreement on the same facts; one that appears inside them is the book's
+  information lead read backwards, which is what every one of the day's four
+  bets was. A republish inside the tolerance (2 implied points / 0.5 pt) does
+  not reset the clock; first sight and a restart do, so a restart waits a
+  window rather than betting blind. `BookMoveClock.quiet_seconds`; NCAAF and
+  NFL (`SETTLED_SEC`, refusal `not_settled`); not MLB, whose 15 s state feed
+  leads the book (measured 2026-09-03) and whose base-out state changes every
+  few pitches.
   **MLB reads the score change out of `live_game_state` instead of keeping a
   `ScoreClock`.** `run_live_scorer` is invoked fresh per trigger, so an
   in-memory clock would report first sight forever — a guard dead code can
@@ -246,6 +295,14 @@ than a surviving one. **~63 bets/week at an unchanged cut.**
 | `mlb_live_total_runs` | 0.70 | 0.14 | 0.28 | 30/wk |
 | `ncaaf_live_total` | 0.66 | 0.12 | 0.22 | 20/wk | **PAUSED 2026-09-11 (mike)** |
 | `ncaaf_live_win_prob` | 0.66 | 0.10 | 0.22 | 10/wk | **PAUSED 2026-09-11 (mike)** |
+
+**Since 2026-09-19 the platform's global EV floor binds over every EV in this
+table** (`config.GLOBAL_MIN_EV` 0.30 via `config.min_ev_for`; the table's EV
+column is the model's own `MODEL_MIN_EV`, which only matters where it is
+higher), and it is judged on the CALIBRATED probability — every live model now
+carries a promoted map (`docs/probability_calibration.md`, Phase 3), the NCAAF
+loop applying it on top of its stage-3 number. `tracking/live_calibration.py`
+reports the current cut through the same accessor.
 
 `LIVE_MAX_BETS_PER_WEEK` is **not** a runtime cap — nothing enforces it at score
 time. It is the constraint the recommender optimises UNDER, because a cut that

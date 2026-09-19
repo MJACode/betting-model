@@ -224,6 +224,74 @@ return "NOT BEATABLE, CI includes zero" at every offset, so a ceiling would
 change the volume of a losing lane rather than fix it. Their record is in the
 table below.
 
+### A ceiling bounds how EARLY, not how OFTEN (2026-09-19)
+
+The ceiling above was necessary and not sufficient, and the gap took eleven days
+to show up. mike: *"way too many as per usual like a million on this lions game
+and every single one is an under."*
+
+**The card is RUN hourly and was PUBLISHED hourly.** `NFL_PROP_MAX_LEAD_HOURS`
+stopped a pick being written six days out; nothing stopped one being written at
+every hour inside that 24h window. `publish()` is insert-once per proposition,
+so no lock broke and nothing was re-priced — but each pass ADDED whatever had
+newly crossed the cut since the last one. A game alone in its window collected a
+bet or two an hour:
+
+| game | bets | how they arrived |
+|---|---|---|
+| `NFL_2026_01_DEN_KC` | 14 | across **11 separate hourly passes**, 1-2 at a time |
+| `NFL_2026_02_DET_BUF` | 12 (all unders) | across 6 passes on one game day |
+| `NFL_2026_01_GB_MIN` | 2 | one pass (crowded Sunday window) |
+
+The per-pass arrival is what rules out the innocent explanation. If standalone
+games simply had more propositions quoted, the bets would land in one burst.
+
+**The under skew follows mechanically and is not the measured lean.** The floors
+are asymmetric (`NFL_PROP_MARKET_SIDE_EDGE`: under 5pp, over 6pp), so repeated
+looks cross the LOWER bar far more often. Graded record: 72% under (898 of
+1,248). Production: 96%.
+
+**The fix is a publish HOUR, and the reason is on this page.** The bands above
+are kickoff-slot labels as much as lead labels, because the whole 2023-25 series
+is one snapshot per game — every one of the **1,900,449** `open` rows is stamped
+**13:55 UTC**. A fixed LEAD would not reproduce that population; a fixed
+wall-clock hour does, and exactly one such pass falls inside a game's 24h
+ceiling, so it needs no state.
+
+| constant | value | governs |
+|---|---|---|
+| `NFL_PROP_PUBLISH_HOUR_UTC` | **13** | the one hourly pass that may **publish** |
+| `NFL_PROP_PUBLISH_MIN_LEAD_HOURS` | 2 | a guard for the early international window |
+
+**One pass means no second chance, so the missed-tick case was measured, not
+assumed.** Every hourly pass writes an `api_call_log` row tagged
+`nfl-prop-card`. Over 2026-09-13→19 the worker ticked 24/24 hours on six of
+seven days and missed exactly one hour all week — **13:00 UTC on 2026-09-18**,
+the one hour this gate depends on. `publish_hour_missed()` therefore asks
+whether the day's read has already happened, and lets the next pass catch up
+if it has not.
+
+The catch-up is ONE-SHOT. Asking only whether [13:00, 14:00) had a tick would
+keep every later hour on catch-up: a 14:xx pass logs at 14:xx and never fills
+that window, so newly crossed props would harvest all afternoon — the defect
+the publish hour exists to stop. The durable marker is any `nfl-prop-card`
+tick from 13:00 through the start of this hour (the 13:xx pass if it ran,
+otherwise the first hour after the miss). Later hours see that tick and stay
+closed.
+
+It is keyed on the TICK and not on "does this game have a pick yet", which
+matters: a publish pass that legitimately found no qualifying edge looks
+identical to one that never ran, and treating the two alike would let every
+later pass publish — the hourly harvest coming back in through the fallback.
+
+What the union costs, as far as the historical board can show it: production's
+~24 looks cannot be graded here (the board carries at most 4 offsets per game),
+but unioning the offsets it does carry is the same shape of error — **2,348 bets
+at +7.81%** against **1,248 at +13.33%** for a single read, i.e. ~1,100 marginal
+bets returning **≈ +1.6%** against a ~3% hold. The board is still FETCHED every
+hour, because the twelve distributional models score off it in the same tick.
+`tests/test_nfl_prop_one_read_per_game.py`.
+
 ## The eleven distributional models, for comparison
 
 Backtested 2023-25 at each model's own live cut, one flat unit per bet:

@@ -263,12 +263,42 @@ def test_the_shipped_cut_is_the_one_that_was_swept(model_id, cut):
     assert config.MODEL_EDGE_THRESHOLDS[model_id] == pytest.approx(edge)
 
 
-@pytest.mark.parametrize("model_id", sorted(_FLOOR_CORRECTED_CUTS))
+# 2026-09-19 (mlb Handicap): k/hits/outs stay on the 2026-08-31 cuts above
+# but BET is paused on the current-artifact remesure. Shipping a cut and
+# leaving the model paused is still a silent no-op for the rest of the slate.
+_CALIBRATED_CUTS_STILL_LIVE = {
+    mid: cut for mid, cut in _FLOOR_CORRECTED_CUTS.items()
+    if mid not in {
+        "mlb_prop_pitcher_k",
+        "mlb_prop_pitcher_hits",
+        "mlb_prop_pitcher_outs",
+    }
+}
+
+_PITCHER_PROPS_PAUSED_20260919 = (
+    "mlb_prop_pitcher_k",
+    "mlb_prop_pitcher_hits",
+    "mlb_prop_pitcher_outs",
+)
+
+
+@pytest.mark.parametrize("model_id", sorted(_CALIBRATED_CUTS_STILL_LIVE))
 def test_a_model_on_a_calibrated_cut_is_not_paused(model_id):
     """Shipping a cut and leaving the model paused is a silent no-op, and it
     has happened here before: the cut moves, nobody sees a pick change, and the
     pause is only noticed when someone asks why volume never rose."""
     assert model_id not in config.PAUSED_MODELS
+
+
+@pytest.mark.parametrize("model_id", _PITCHER_PROPS_PAUSED_20260919)
+def test_live_pitcher_props_paused_on_current_artifact_remesure(model_id):
+    """2026-09-19 (mlb Handicap). Current-artifact remesure (pregame BET,
+    priced, WIN/LOSS, not VOID, game_date >= 2026-09-04):
+      k over 16 / -11.88u / -74.3%; k under +2.9%/40 Sep-only, no side gate
+      outs under 33 / -4.46u / -13.5%
+      hits over 27 / -5.90u / -21.8%
+    Cuts stay; the writers stop firing BET."""
+    assert model_id in config.PAUSED_MODELS
 
 
 def test_wnba_threes_is_re_paused_after_the_floor_correction():

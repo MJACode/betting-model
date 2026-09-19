@@ -1092,3 +1092,188 @@ attribution *"puts a decision in someone's mouth"* — this is what that costs.
 The commit is merged and cannot be rewritten; the record is corrected here.
 `config.RECORD_EXCLUSIONS` therefore requires an `asked_by` on every entry, and
 `tests/test_settled_record_is_immutable.py` fails if one is missing.
+
+## An ungraded reference wrote 25 bets in one pass (2026-09-19)
+
+The rule this is the evidence for: **a model's reference is part of the
+model, and a new one is paper-only until it has a graded record** (§2's
+go-live gate, applied to the thing that produces the probability).
+
+mike, 18:3xZ: *"I just saw a million nfl prop unders go. WHAT THE FUCK."* At
+17:27Z — the moment the 24h lead ceiling opened on the eight Sunday 1pm games
+— `nfl_prop_market` wrote 39 BETs in one pass, 37 of them unders, and Discord
+and push announced them (`push_sent`: 42 `discord_signal`, 42 `new_bet`
+between 17:28 and 18:29Z). The previous Saturday's same hour wrote 2.
+
+The rule's validated construction compares EQUAL lines only — the module
+docstring calls it "the one thing that makes this honest". Of the 42 written
+that hour, **25 had no sharp book at the soft book's line at all** (query:
+`player_prop_odds` for pinnacle/betonlineag at the pick's line within the ten
+minutes before `created_at`). Chase Brown Under 22.5 rec yds at BetMGM:
+BetMGM alone at 22.5 (−115/−115 from 12:25 to 17:25Z); Pinnacle, BetOnline
+and every other book at 19.5. The only reference that "prices ANY line
+inside its ladder" is the Kalshi ladder (commit 1d58cea3, 2026-09-14 01:37,
+no Updated-By trailer), and its ladder for that proposition at 16:40Z had
+strikes at 14.5 (yes 0.57–0.62, $287 traded) and 24.5 (0.34–0.39, $407) —
+an interpolation across ten yards on a five-cent spread produced the 0.609
+the pick carries. `_bets_from_kalshi`'s own docstring: "NOT GRADED.
+kalshi_prop_ladders has no settlement column." Since it was wired: 14
+settled bets no sharp book could have produced, 7-7, −1.46u; the sharp-equal
+path's unders over the same days 4-6, −2.39u.
+
+Why all unders: a soft line sitting above a thin ladder's median is read as
+an under every time, so the reference's output is one-directional by
+construction — 95% unders in the pass, against 45% in the rule's 1,990-bet
+validation.
+
+Fix: `config.NFL_PROP_MARKET_KALSHI_REFERENCE` (default off) and
+`scripts/nfl_prop_market_card.reference_ladders`, which passes empty ladders
+and fetches nothing unless the flag is on. The validated Pinnacle/BetOnline
+path is unchanged. The 25 Kalshi-origin picks standing at the time: 2480901,
+2480902, 2480903, 2480904, 2480906, 2480907, 2480911, 2480913, 2480914,
+2480915, 2480917, 2480918, 2480920, 2480921, 2480922, 2480925, 2480926,
+2480927, 2480928, 2480929, 2480930, 2480931, 2480936, 2480938, 2480939.
+
+## The standing board was written before the floor, and the floor is a bar on the board (2026-09-19, evening)
+
+mike, after the global EV floor merged: *"Are all the nfl picks that should have
+been voided are they voided? I still see 30 FUCKING nfl picks in the signal
+base app."* The 25 Kalshi-origin picks WERE voided (above). What he was seeing
+was the other 23 `nfl_prop_market` picks from the same passes, 4
+`nfl_prop_tackles_assists` and 4 `nfl_wind_totals` -- 31 rows, every one
+written before the 0.30 floor landed at 21:44Z, and every one under it on the
+honest probability (EV −0.10 to +0.28).
+
+The floor is enforced at WRITE time so every surface stays identical; that
+also means a pick already on the board is untouched by it. The board he had
+asked for -- only the best of the best -- and the board he had were different
+things until the standing rows were held to the same bar. Measured across
+every sport: **51 standing BETs on games not yet started, 51 under the floor,
+0 clearing it** (NFL 31, NCAAF 13 `ncaaf_over_under`, MLB 6, UFC 1). All 51
+voided (`scripts/void_picks.void`, result NO_ACTION, condition_status VOID,
+reason recorded), none graded, rows kept. Ids: 2485756, 2490755, 2415404,
+2415403, 2419408, 2433727, 1769812, 1769753, 1769626, 1992830, 2109187,
+2109205, 2109285, 2118752, 2118792, 2126249, 2167581, 2222900, 2399357,
+2480919, 2480905, 2480908, 2480909, 2480910, 2480912, 2480916, 2480923,
+2480924, 2480932, 2480933, 2480934, 2480935, 2480937, 2481955, 2481953,
+2481954, 2484540, 2484537, 2487559, 2487560, 2487557, 2487558, 2482065,
+2488341, 2488358, 2492153, 2293338, 2293337, 2316660, 2340309, 2482412.
+
+The lesson for the next bar change: **a write-time gate changes tomorrow's
+board; the standing board has to be held to it by hand the same hour, or the
+person sees yesterday's rule for a day.**
+
+## Our state was behind the book, and every guard passed (2026-09-19)
+
+The rule this is the evidence for: **a live quote the book has moved past a
+cap, with no change in the state we can see, is declined — our state is the
+stale thing** (§1b: a change to one live model is assessed against all of
+them; the guard is shared, `data/live_quote_guard.BookMoveClock`).
+
+mike, 2026-09-19: *"Why did Delaware ML fire as a bet just now, the live ncaaf
+models are too aggressive"* — and, once traced, *"This is a major flaw and it
+needs to be fixed across the board."*
+
+The timeline, from the in-play quotes in `odds`, the pollers service log and
+ESPN's scoreboard (Coastal Carolina at Delaware, `ncaaf_live_win_prob`):
+
+| UTC | What happened |
+|---|---|
+| 15:41:51 | DraftKings live: Delaware **−174**, spread Delaware −3.5 |
+| 15:43:32 | FanDuel flips to Delaware **+102** / Coastal −130 |
+| 15:44:21 | DraftKings re-hangs: Delaware **+100**, spread Delaware **+2.5** |
+| **15:44:29** | **`WROTE BET ncaaf_live_win_prob Delaware ML (live) p=0.659 edge=+0.159 DK=100.0`** — on a state still reading 0–0, Q1 |
+| 15:44:44 | `score change seen` — the CFBD scoreboard reports the touchdown: 15 s after the bet, 23 s after DraftKings, 72 s after FanDuel |
+| 15:44:44+ | `quote predates the score we have already seen (book ts 15:44:21, score seen 15:44:44) - declining` — the loop refuses the quote it just bet on |
+
+ESPN at 15:48: Coastal 7, Delaware 0, 6:37 left in the first.
+
+Why the three existing guards passed, each correctly: the quote was 8 s old
+(cap 90); the edge was 0.159 (cap 0.18); `quote_predates_score` can only fire
+once WE have seen a score, and we had not. All three protect against the book
+being behind us. Nothing protected against us being behind the book, which is
+the common case — the book prices the play from a courtside feed; the loop
+reads a scoreboard endpoint every 5 s, and that endpoint is CFBD's because
+ESPN is 403-blocked on the worker (`scheduler.py`). The model's 0.659 was the
+pregame prior (the pregame moneyline model had Delaware at 0.686 at −205)
+carried into a tied first quarter. The "edge" was the touchdown.
+
+**It was the model's main trigger, not a one-off.** The DraftKings price two
+minutes before each of the 20 live moneyline bets since the 09-12 unpause,
+against the price at the bet: in **15 of 20** DraftKings had moved AGAINST the
+side we then bet. The biggest: Tulsa 81 % → 61 % implied, Texas State 75 → 57,
+East Carolina 75 → 62, Delaware 64 → 50, Texas Tech 80 → 69. Only Delaware's
+log proves the state was stale at write time — the loop read the scoreboard,
+priced it and threw it away, so for the other 14 the book's move is measurable
+and our lag is not. `ncaaf_live_states` exists so that the next question like
+this is a query (one row per change in score/period/possession, written by
+`ncaaf_live/gameday.py`).
+
+**"Too aggressive", with the denominator:** on 09-12, 79 NCAAF games had
+in-play quotes and 48 of them got a live bet (55 bets: 37 totals, 18
+moneylines).
+
+The guard, and why its shape is what it is: per game and market, the book's
+number is anchored at the last change in the state the model prices; while
+that state is unchanged, a move past the cap declines the market. It
+re-anchors on the first quote that POSTDATES the state change, so a re-hang
+arriving after a late score report is not read as a move; first sight and a
+restart report nothing, the same rule `ScoreClock` applies, so the age bound
+remains the floor. **It fires on the production timeline:** the loop had
+priced this game since 15:34:39, and every DraftKings publish from 15:34:22 to
+15:42:40 sat between −167 and −217 (0.626–0.685 implied), so whichever of
+them was the anchor, +100 is a move of 0.126–0.185 against the 0.08 cap
+(`test_the_production_anchor_range_all_fires`). Wired into all three loops the same day — NCAAF
+`serve.LiveEngine.price`, MLB `live_scorer._get_live_dk_odds` (table-backed,
+for the same reason `_score_changed_at` is), NFL `executor.Executor.evaluate`
+(refusal reason `book_moved`). Caps are a first cut from the one distribution
+that is stored (single DraftKings republishes: NCAAF moneyline p95 6.6 / p99
+15.1 implied points on the 09-12 slate; MLB totals p99 1.0 run over 108 games)
+and are to be re-measured on the cumulative move once `ncaaf_live_states` has
+a slate behind it. Tests: `tests/test_live_book_move_guard.py` — the Delaware
+timeline is declined, and a control asserts a fresh loop still bets it, so the
+test cannot pass for the wrong reason.
+
+The pick itself (pick_id 2476480) was voided on mike's call the same
+afternoon.
+
+**The same afternoon, three more things, each measured (mike: "Why did
+Delaware fire again and Clemson these are horrid picks. There is no way these
+are +ev picks"):**
+
+- **Delaware "fired again" because the first-signal restore resurrected the
+  voided pick.** The worker redeployed at 16:47 with the guard; the NCAAF
+  loop runs `restore_first_signals` on every start; a voided row carries
+  `result='NO_ACTION'`, so `_standing` (which filters `result IS NULL`) saw
+  "nothing standing", re-inserted the bet from `picks_log` as pick 2478678
+  and cleared the push ledger — Discord and push re-announced it at 17:30:58Z.
+  `_lane_voided` now skips any lane with a VOID row; 2478678 voided too.
+- **Clemson (16:12Z, before the guard deployed) was the Delaware shape under
+  the cap.** DraftKings −143 → −116 → −105 on a 0–0 state in 2½ minutes, bet
+  at −105, +108 forty-five seconds later. That move is 0.076 implied — under
+  the 0.08 cap. Cap moved to **0.05**, between p90 (0.042) and p95 (0.066) of
+  the single-republish distribution.
+- **Texas State (17:39Z, WITH the guard) got through a side door.** CFBD
+  blanks `possession` around scoring plays; the blank read as a state
+  change, the anchor was dropped, DraftKings' post-touchdown −129 became the
+  new baseline, and the loop bet Texas State 44 s before the feed reported
+  28–27. The guard had been declining that game at 0.113–0.128 for two
+  minutes at 17:17. A None field now keeps its last value in the state key.
+  `ncaaf_live_states` — written since the deploy — is what made this
+  diagnosable in minutes; 212 rows on 14 games in the first 50 minutes.
+
+**Then the fix he actually asked for (mike: "I said to fix it not pause it").**
+Both patches above are about the SIZE of a move; the defect is about TIME.
+The model — pregame line, score, clock; no field position, on a feed 20–70 s
+behind the books — can only ever see an "edge" when the book has moved and it
+has not, and the guard cannot tell a 30-second-old re-hang from a genuine
+disagreement once the re-hang is the anchor. The settled-state rule
+(`LIVE_SETTLED_SEC`, 120 s): no market is priced until the book's number and
+our state have both been still for longer than the worst measured lag plus
+the re-hang. The settled record was not the argument — 9 book-moved bets went
+6–3 (+1.17u), 10 others 6–4 (+0.69u), n too small to say anything — the
+mechanism was. Applied to NCAAF and NFL; MLB excluded because its state feed
+leads the book (2026-09-03 measurement) and its base-out state changes every
+few pitches. The raw CFBD `situation` string is now stored in
+`ncaaf_live_states.raw_state` so the yard line the model was trained on can be
+parsed once its live shape has been seen.

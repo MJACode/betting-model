@@ -160,8 +160,9 @@ def test_ncaaf_live_floors_come_from_the_platform_config():
 def test_ncaaf_live_ev_floor_is_wired_from_config():
     from ncaaf_live import serve
     import config as platform_config
-    assert serve.TOTAL_MIN_EV == platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
-    assert serve.ML_MIN_EV == platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+    # config.min_ev_for since 2026-09-19: the global floor or the model's own.
+    assert serve.TOTAL_MIN_EV == platform_config.min_ev_for("ncaaf_live_total")
+    assert serve.ML_MIN_EV == platform_config.min_ev_for("ncaaf_live_win_prob")
 
 
 def test_ev_floor_declines_a_qualifying_pick_that_is_priced_too_short():

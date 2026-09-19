@@ -23,8 +23,11 @@ BOTH LANES ARE LIVE (not in config.PAUSED_MODELS):
     24 of them FBS-vs-FCS. Replay FBS-vs-FBS 17 bets +21.3%, only 3 in
     the second half -- not proven better. Re-sweep on production once
     ~50 BETs settle under these rules.
-  * ncaaf_live_win_prob: 0.65 x EV 0.26 on the pregame-corrected scale,
-    FBS-vs-FBS only from 2026-09-13. Qualifies at DK, bets at the best
+  * ncaaf_live_win_prob: 0.50 x edge 0.16 x EV 0.30 (global floor) on the
+    HONEST number (promoted map over the pregame-corrected scale),
+    FBS-vs-FBS only. Re-swept 2026-09-19 (mike) on the bought 2025 replay
+    with the floor on: the old 0.65/0.10 takes zero bets under it;
+    0.50/0.16 = 43 bets 20-23 +38.6%. Qualifies at DK, bets at the best
     book (#694).
 
 A pause (if one is added) still prices every pass and its polled quotes
@@ -42,10 +45,13 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from .config import (ARTIFACT_DIR, LEAGUE_PASS_RATE, LIVE_QUOTE_MAX_AGE_SEC,
-                     LIVE_SCORE_LAG_TOLERANCE_SEC, PASS_RATE_PRIOR_PLAYS,
-                     SNAPSHOT_BOOK, SNAPSHOT_BOOKS)
-from data.live_quote_guard import quote_predates_score
+from .config import (ARTIFACT_DIR, LEAGUE_PASS_RATE, LIVE_BOOK_MOVE_MAX_ML,
+                     LIVE_BOOK_MOVE_MAX_TOTAL, LIVE_QUOTE_MAX_AGE_SEC,
+                     LIVE_SCORE_LAG_TOLERANCE_SEC, LIVE_SETTLED_SEC,
+                     LIVE_SETTLED_TOL_ML, LIVE_SETTLED_TOL_TOTAL,
+                     PASS_RATE_PRIOR_PLAYS, SNAPSHOT_BOOK, SNAPSHOT_BOOKS)
+from data.live_quote_guard import (BookMoveClock, american_to_implied,
+                                   quote_predates_score)
 from .engine.distribution import ScoreDistribution
 from .engine.pricing import (
     american_to_prob, price_moneyline, total_pmf)
@@ -119,8 +125,10 @@ else:
     TOTAL_MIN_EDGE = _cut("ncaaf_live_total", "min_edge", TOTAL_MIN_EDGE)
     ML_MIN_PROB = _cut("ncaaf_live_win_prob", "min_prob", ML_MIN_PROB)
     ML_MIN_EDGE = _cut("ncaaf_live_win_prob", "min_edge", ML_MIN_EDGE)
-    TOTAL_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
-    ML_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+    # The platform's global EV floor or the model's own, whichever is higher
+    # (config.min_ev_for, 2026-09-19).
+    TOTAL_MIN_EV = _platform_config.min_ev_for("ncaaf_live_total")
+    ML_MIN_EV = _platform_config.min_ev_for("ncaaf_live_win_prob")
 
 
 # ── the pregame-status correction (stage 3 of the win-probability model) ────
@@ -357,6 +365,14 @@ class GameContext:
 class LiveEngine:
     def __init__(self):
         self.models = load_models(ARTIFACT_DIR)
+        # THE BOOK MOVED AND WE DID NOT SEE WHY (2026-09-19, Delaware). Per
+        # game and market: DraftKings' number anchored at the last change in
+        # the state we price; a move past the cap with that state unchanged
+        # means the state is stale, not that value appeared. Lives on the
+        # engine because gameday.py builds ONE engine for the whole run, so
+        # the anchors persist across passes -- a per-pass clock would be at
+        # first sight forever, a guard dead code can satisfy.
+        self._book_moves = BookMoveClock()
         self.dist = ScoreDistribution.load(ARTIFACT_DIR / "score_distribution.npz")
 
     # ---------------------------------------------------------------- state
@@ -517,11 +533,51 @@ class LiveEngine:
         # that has frozen, or one stamped before the last score, is dropped
         # before pricing so the candidates are the takeable ones only.
         takeable: dict = {}
-        for key, label in (("h2h", "h2h"), ("total", "totals")):
+        # What the model prices that changes on an EVENT rather than every
+        # tick. Clock, down and distance would re-anchor the book-move guard
+        # every play and make it dead code; the score, the period and who
+        # has the ball are the changes a book reprices on for a reason we
+        # can see. A book that reprices on anything else has information
+        # we do not have -- see data/live_quote_guard.BookMoveClock.
+        state_key = (hs, as_, period, state.get("possession"))
+        for key, label, cap, move_tol in (
+                ("h2h", "h2h", LIVE_BOOK_MOVE_MAX_ML, LIVE_SETTLED_TOL_ML),
+                ("total", "totals", LIVE_BOOK_MOVE_MAX_TOTAL,
+                 LIVE_SETTLED_TOL_TOTAL)):
             mkt = (odds or {}).get(key)
-            if mkt and market_is_takeable(mkt, label, ctx.game_id, now,
-                                          score_seen_at):
-                takeable[key] = mkt
+            if not mkt or not market_is_takeable(mkt, label, ctx.game_id, now,
+                                                 score_seen_at):
+                continue
+            number = (american_to_implied(mkt.get("home")) if key == "h2h"
+                      else mkt.get("line"))
+            move = self._book_moves.observe((ctx.game_id, key), state_key,
+                                            number, mkt.get("ts"), now,
+                                            LIVE_SCORE_LAG_TOLERANCE_SEC,
+                                            move_tol)
+            if move is not None and move > cap:
+                log.info("%s: %s has moved %.3f at the book (cap %g) with no "
+                         "change in our state %s - declining; our state is "
+                         "behind the book, not the book behind us",
+                         ctx.game_id, label, move, cap, state_key)
+                continue
+            # THE SETTLED-STATE RULE (2026-09-19, mike: "I said to fix it not
+            # pause it"). The cap catches a loud move; it cannot catch the
+            # same defect once the book's re-hang is already the anchor
+            # (Texas State) or the move is under the cap (Clemson, 0.076).
+            # What separates a lag from a disagreement is time: only when
+            # the book's number AND our state have both been still for
+            # longer than the worst measured feed lag (72s today, FanDuel;
+            # the book re-hangs within ~40s of a score) has everything the
+            # book knew reached us, and only then is an edge a real
+            # disagreement on the same facts rather than the book's
+            # information lead read backwards.
+            quiet = self._book_moves.quiet_seconds((ctx.game_id, key), now)
+            if quiet is None or quiet < LIVE_SETTLED_SEC:
+                log.debug("%s: %s not settled (%.0fs quiet < %ds) - not "
+                          "pricing yet", ctx.game_id, label, quiet or 0.0,
+                          LIVE_SETTLED_SEC)
+                continue
+            takeable[key] = mkt
         if takeable.get("total") and secs < TOTAL_MIN_SECONDS:
             log.debug("%s: totals lane closed (%.0fs left < %s)",
                       ctx.game_id, secs, TOTAL_MIN_SECONDS)
@@ -572,8 +628,9 @@ class LiveEngine:
             # (mike: "best book always"). The stale-line cap already worked
             # this way, judging the DK edge rather than the decision edge, for
             # the same reason; this extends that to the floors it sits beside.
-            pick = self._decide(p, edge, min_prob, min_edge, c["dk_odds"],
-                                min_ev, cap_edge=edge)
+            pick = self.decide_honest(c["model_id"], p, implied, min_prob,
+                                      min_edge, c["dk_odds"], min_ev,
+                                      cap_edge=edge)
             pick = self._unless_paused(pick, c["model_id"])
             if not pick:
                 continue
@@ -632,6 +689,27 @@ class LiveEngine:
                       model_id)
             return None
         return pick
+
+    @staticmethod
+    def decide_honest(model_id: str, p: float, implied: float, min_prob: float,
+                      min_edge: float, dk_odds=None, min_ev: float | None = None,
+                      *, cap_edge: float | None = None) -> str | None:
+        """_decide on the HONEST probability (2026-09-19, mike: every model
+        decides on its calibrated number). `p` is the engine's stage-3
+        output -- the number written to picks.model_probability and the one
+        the map was fitted on -- so the promoted map applies on top of it.
+        The stale-line cap stays on the RAW DraftKings edge, as the MLB live
+        path keeps it: a map cannot make a frozen quote fresh. Standalone use
+        (no platform models importable) decides on `p` unchanged."""
+        try:
+            from models.honest_ev import honest_probability
+            p_cal = honest_probability(model_id, p)
+        except Exception:  # pragma: no cover - standalone/offline use
+            p_cal = p
+        raw_edge = p - implied
+        return LiveEngine._decide(p_cal, p_cal - implied, min_prob, min_edge,
+                                  dk_odds, min_ev,
+                                  cap_edge=raw_edge if cap_edge is None else cap_edge)
 
     @staticmethod
     def _decide(p: float, edge: float, min_prob: float, min_edge: float,
