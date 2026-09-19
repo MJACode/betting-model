@@ -149,6 +149,24 @@ def test_the_cuts_are_untouched():
     assert config.NFL_PROP_MAX_LEAD_HOURS == 24
 
 
+def test_main_reads_the_clock_once_for_the_whole_pass():
+    """card() and the publish gate must agree about what time it is.
+
+    A pass that starts at 13:59 would build its card inside the publish hour
+    and then evaluate the gate at 14:00 — silently skipping that game's ONLY
+    publish window for the week, and leaving no pick and no error. Reading
+    `datetime.now()` twice in main() is what makes that possible, so pin the
+    single read.
+    """
+    import inspect
+    src = inspect.getsource(card_mod.main)
+    assert src.count("datetime.now(") <= 1, (
+        "main() reads the wall clock more than once; card() and "
+        "publishable_games() can then straddle the publish hour boundary")
+    assert "publishable_games(games, now)" in src, (
+        "the publish gate must use the same `now` the card was built with")
+
+
 def test_a_game_with_no_kickoff_is_never_published():
     """No kickoff means the lead is unknowable, and an unknown lead is exactly
     what the ceiling exists to stop."""

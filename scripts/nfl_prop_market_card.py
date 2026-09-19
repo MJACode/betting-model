@@ -392,7 +392,16 @@ def main() -> None:
         from data.ingestors.nfl_prop_odds_ingestor import run_nfl_prop_odds_ingestor
         logger.info(f"fetching: {run_nfl_prop_odds_ingestor(a.days)}")
 
-    anchor = datetime.fromisoformat(a.date).date() if a.date else datetime.now(timezone.utc).date()
+    # ONE CLOCK READ FOR THE WHOLE PASS, and everything below derives from it.
+    # card() and the publish gate must agree about what time it is: read the
+    # wall clock twice and a pass starting at 13:59 can build its card inside
+    # the publish hour and evaluate the gate at 14:00, silently skipping that
+    # game's ONLY publish window for the week and leaving no pick and no error.
+    as_of = (datetime.fromisoformat(a.as_of.replace("Z", "+00:00"))
+             if a.as_of else None)
+    now = as_of or datetime.now(timezone.utc)
+
+    anchor = datetime.fromisoformat(a.date).date() if a.date else now.date()
     start, end = anchor.isoformat(), (anchor + timedelta(days=a.days)).isoformat()
 
     if a.offline:
@@ -402,8 +411,6 @@ def main() -> None:
     conn = None if a.offline else get_connection()
     try:
         games = slate(conn, start, end)
-        as_of = (datetime.fromisoformat(a.as_of.replace("Z", "+00:00"))
-                 if a.as_of else None)
         bets, diag, names = card(conn, start, end, a.min_edge, games=games,
                                  now=as_of)
         if a.publish and as_of:
@@ -413,7 +420,7 @@ def main() -> None:
             # fresh for everything else that scores off it; it may only PUBLISH
             # on the 13:xx UTC pass, which is the single wall-clock read the
             # record was measured on. See publishable_games().
-            allowed = publishable_games(games, datetime.now(timezone.utc))
+            allowed = publishable_games(games, now)
             publishing = [b for b in bets if b.game_id in allowed]
             withheld = len(bets) - len(publishing)
             if withheld:
