@@ -46,7 +46,7 @@ converging on the same place from the other side.
   A **separate** paper lane, `mlb_total_public_fade`, fades consensus OVER
   tickets ≥70 (env; 80 supported) and bets UNDER. INSERT off
   (`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). Optional top-K
-  (`MAX_PER_SLATE` default 0; recommended 2 + `RANK=ticket`). Not an
+  (`MAX_PER_SLATE` clamped 1–2, default 2, `RANK=ticket`). Not an
   unpause. `docs/mlb_total_public_fade.md`.
   `docs/mlb_runline_ou_edge_search.md`.
 * **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
@@ -98,11 +98,12 @@ is the next worker job. Moneyline and F5 lists are unchanged.
 As of 2026-09-16 a **paper** rule `mlb_total_public_fade` fades Action
 Network consensus OVER tickets ≥70 (env; 80 supported) and bets UNDER at
 the best DK/FD/MGM/WH open (fallback DK). INSERT gated
-(`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). As of 2026-09-19 optional
-top-K (`MAX_PER_SLATE` default 0 = all-pass; recommended **2** +
-`RANK=ticket`) keeps the two heaviest OVER piles per day before the
-slate guard. `mlb_over_under` stays paused. Coverage caveat: only
-~99–136 pre-commence public totals-over games in the DB.
+(`MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0). As of 2026-09-19 the
+card **never floods**: `MAX_PER_SLATE` is clamped to 1 or 2
+(default **2**, `RANK=ticket`). The t75 ∩ juice ≥ −115 top-1
+signal is June-only (+19.4% / 13); pooled +5.7% / 24 — cut stays
+70. `mlb_over_under` stays paused. Coverage caveat: only ~99–136
+pre-commence public totals-over games in the DB.
 
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)

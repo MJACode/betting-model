@@ -18,7 +18,7 @@ Runs on the same pipeline step as the other MLB game-line cards
 | Line | Main total **5.5–14.5** |
 | Price window | Under American in **[-200, 200]** |
 | INSERT | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default **0** |
-| Top-K | Optional. `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` default **0** = all-pass. Set **2** + `RANK=ticket` to keep the two heaviest OVER piles per day. Runs **before** the slate guard. |
+| Top-K | **Always on.** `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` is clamped to **1 or 2** (default **2**, `RANK=ticket`). 0 is not all-pass. Runs **before** the slate guard. |
 | Slate guard | After ranking: if one `pick_side` is **≥70%** of that model's BET count **and** n_bet **≥ 4**, **suppress all**. Shared helper: `models/slate_concentration.py`. |
 
 As-of is offset-aware (`_parse_iso_ts`). A lexicographic compare on
@@ -135,6 +135,43 @@ model. Do not set RANK to gap / juice / composite / ev — those
 cells are in the fail table above. Sweep:
 `python -m scripts.mlb_total_public_fade_topk`.
 
+## t75 ∩ juice ≥ −115 top-1 (2026-09-19 month chunks)
+
+Prior signal: top-1/day among over tickets ≥75 and under ≥ −115
+looked ~+18% on n~23, September thin. Re-graded on leak-bounded
+opens, chunk SQL Jun / Jul / Sep (Sep 16–18 settled; Sep 19
+unsettled and excluded; three 09-18 west-coast scores still NULL
+and excluded).
+
+**t75 ∩ ≥ −115 pool** (flat 1 unit):
+
+| Construction | n | Units | ROI | max/day |
+|---|---:|---:|---:|---:|
+| all-pass | 87 | +2.43u | +2.8% | 14 |
+| **ticket top-1** | **24** | **+1.36u** | **+5.7%** | **1** |
+| ticket top-2 | 45 | +1.38u | +3.1% | 2 |
+| gap top-1 | 24 | −2.50u | −10.4% | 1 |
+| juice top-1 | 24 | −2.17u | −9.0% | 1 |
+| composite top-1 | 24 | −2.46u | −10.3% | 1 |
+
+**Month chunks (ticket top-1):**
+
+| Month | all-pass | ticket top-1 |
+|---|---|---|
+| Jun | +8.0% / 42 | **+19.4% / 13** |
+| Jul | −2.4% / 16 | −0.8% / 8 |
+| Sep 16–18 | −1.9% / 29 | −36.4% / 3 |
+
+Jun+Jul ticket top-1 is **+11.7% / 21**, not +18% / ~23. The ~+18%
+cell is **June alone**. July is flat. September is three days and
+the three heaviest piles went 1-2: `CHC vs ATL Under 7.5` LOSS,
+`CWS vs DET Under 8.5` WIN, `BAL vs MIL Under 8.0` LOSS. Gap /
+juice / composite stay negative on this pool too.
+
+Do **not** move the ticket cut to 75 or add a −115 juice floor.
+That pool + top-1 is weaker than t70 ticket top-2 on the wider
+board (+11.2% / 48). Rank stays `ticket`. Cap stays 2.
+
 ## Caveats (load-bearing)
 
 1. **~85–99 pre-commence public games in the DB**, not a season. Action
@@ -151,7 +188,8 @@ cells are in the fail table above. Sweep:
    otherwise. The slate guard is not a substitute for that gate.
 5. Do **not** unpause `mlb_over_under` / `mlb_runline` from this file.
 6. An all-under (or ≥70% one-side) slate of 4+ BETs is suppressed in full.
-   That is a sanity bound, not a new ticket cut.
+   That is a sanity bound, not a new ticket cut. With the 1–2 cap the
+   guard is a backstop; ranking is what stops a twelve-under card.
 
 ## Env (Railway; redeploy after setting)
 
@@ -159,6 +197,6 @@ cells are in the fail table above. Sweep:
 |---|---|---|
 | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` | `0` | `1` writes BET rows |
 | `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Over-ticket cut; `80` is the tighter neighbour |
-| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `0` | `0` = all-pass. Set `2` to keep top-K per day (recommended with `RANK=ticket`) |
+| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `2` | Clamped to 1 or 2. 0 / >2 become 2. The card never all-passes |
 | `MLB_TOTAL_PUBLIC_FADE_RANK` | `ticket` | `ticket` \| `gap` \| `juice` \| `composite` \| `ev`. Only `ticket` cleared the holdout. `ev` without a bucket table ranks as ticket |
 | `MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR` | `0` | LOMO estimated-edge floor. Sweep-only (card has no bucket table). Every floor tried (≥2/3/5pp) lost |

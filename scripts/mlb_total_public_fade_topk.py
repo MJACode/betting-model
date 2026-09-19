@@ -397,6 +397,19 @@ def report(universe: list[dict], title: str) -> None:
             rows = take(universe, kind=kind, k=k, price_floor=-115)
             print(f"  {kind} top-{k} ∩ ≥−115  {_fmt(summarize(rows))}")
 
+    print("\n-- prior signal: t75 ∩ juice≥−115 --")
+    t75j = [r for r in universe if r["over_tix"] >= 75 and r["price"] >= -115]
+    print(f"  all-pass                       {_fmt(summarize(t75j))}")
+    print(f"  ticket top-1                   {_fmt(summarize(take(t75j, kind=fade.RANK_TICKET, k=1)))}")
+    print(f"  ticket top-2                   {_fmt(summarize(take(t75j, kind=fade.RANK_TICKET, k=2)))}")
+    print(f"  gap top-1                      {_fmt(summarize(take(t75j, kind=fade.RANK_GAP, k=1)))}")
+    print(f"  juice top-1                    {_fmt(summarize(take(t75j, kind=fade.RANK_JUICE, k=1)))}")
+    print(f"  composite top-1                {_fmt(summarize(take(t75j, kind=fade.RANK_COMPOSITE, k=1)))}")
+    for m in months:
+        chunk = [r for r in t75j if r["month"] == m]
+        print(f"  {m} all-pass                {_fmt(summarize(chunk))}")
+        print(f"  {m} ticket top-1            {_fmt(summarize(take(chunk, kind=fade.RANK_TICKET, k=1)))}")
+
     print("\n-- alternatives --")
     t80 = [r for r in universe if r["over_tix"] >= 80]
     t90 = [r for r in universe if r["over_tix"] >= 90]

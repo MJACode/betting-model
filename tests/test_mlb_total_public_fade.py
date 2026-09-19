@@ -318,10 +318,11 @@ class _EmptyConn:
         return None
 
 
-def test_ten_game_all_under_slate_inserts_zero_bets(monkeypatch):
+def test_ten_game_all_under_slate_keeps_two_never_twelve(monkeypatch):
     """The 2026-09-19 shape: every game ≥70% public over → every under.
 
-    Finder still flags them. The guard must make INSERT a no-op.
+    Finder still flags all ten. The card must keep two, not ten and
+    not the suppress-all empty set.
     """
     from scripts.mlb_total_public_fade_card import pick_rows, publish, rows_for_insert
 
@@ -331,15 +332,18 @@ def test_ten_game_all_under_slate_inserts_zero_bets(monkeypatch):
     assert len(bets) == 10, diag
     assert all(b.over_ticket_pct >= 70 for b in bets)
 
-    # Without the guard this slate is 10 BET rows — the 2026-09-19 card.
+    # Raw finder output is still the whole pile — ranking is the cap.
     unguarded = pick_rows(bets, games, quotes, bankroll=10_000)
     assert len(unguarded) == 10
     assert all(r["signal_type"] == "BET" and r["pick_side"] == "under"
                for r in unguarded)
 
     rows = rows_for_insert(bets, games, quotes, bankroll=10_000)
-    assert rows == []
-    assert not any(r.get("signal_type") == "BET" for r in rows)
+    assert len(rows) == 2
+    # Highest tickets: 95 (G7) and 90 (G4).
+    assert {r["game_id"] for r in rows} == {"G7", "G4"}
+    assert all(r["signal_type"] == "BET" and r["pick_side"] == "under"
+               for r in rows)
 
     recorded = []
     monkeypatch.setattr(
@@ -347,12 +351,12 @@ def test_ten_game_all_under_slate_inserts_zero_bets(monkeypatch):
         lambda _conn, keep: recorded.extend(keep),
     )
     n = publish(_EmptyConn(), rows)
-    assert n == 0
-    assert recorded == []
+    assert n == 2
+    assert {r["game_id"] for r in recorded} == {"G7", "G4"}
 
 
-def test_mixed_slate_three_unders_of_eight_still_allows_qualifying_unders():
-    """8 games, only 3 clear the ticket cut. n_bet=3 < 4 → guard is silent."""
+def test_mixed_slate_three_unders_keeps_the_two_heaviest():
+    """8 games, 3 clear the cut. Cap is 2 — never the third, never zero."""
     from scripts.mlb_total_public_fade_card import rows_for_insert
 
     tickets = [80.0, 75.0, 90.0, 55.0, 40.0, 60.0, 50.0, 65.0]
@@ -362,8 +366,9 @@ def test_mixed_slate_three_unders_of_eight_still_allows_qualifying_unders():
     assert {b.game_id for b in bets} == {"G1", "G2", "G3"}
 
     rows = rows_for_insert(bets, games, quotes, bankroll=10_000)
-    assert len(rows) == 3
-    assert {r["game_id"] for r in rows} == {"G1", "G2", "G3"}
+    assert len(rows) == 2
+    # 90 (G3) and 80 (G1). 75 (G2) is the one the cap drops.
+    assert {r["game_id"] for r in rows} == {"G3", "G1"}
     assert all(r["pick_side"] == "under" for r in rows)
     assert all(r["signal_type"] == "BET" for r in rows)
     assert all("Under" in r["pick_label"] for r in rows)
@@ -374,10 +379,24 @@ def test_publish_stays_off_and_xgboost_stays_paused_after_the_guard():
     assert fade.publish_enabled() is False
     assert "mlb_over_under" in config.PAUSED_MODELS
     assert "mlb_runline" in config.PAUSED_MODELS
-    assert fade.max_per_slate() == 0
-    assert config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE == 0
+    assert fade.max_per_slate() == 2
+    assert config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE == 2
     assert fade.rank_kind() == fade.RANK_TICKET
     assert fade.edge_floor() == 0.0
+
+
+def test_max_per_slate_clamps_to_one_or_two(monkeypatch):
+    """0 is not all-pass. 99 is not a twelve-under card."""
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", 0)
+    assert fade.max_per_slate() == 2
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", -3)
+    assert fade.max_per_slate() == 2
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", 99)
+    assert fade.max_per_slate() == 2
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", 1)
+    assert fade.max_per_slate() == 1
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", 2)
+    assert fade.max_per_slate() == 2
 
 
 # ── top-K ranking ────────────────────────────────────────────────────────────
@@ -498,10 +517,10 @@ def test_topk_sweep_grades_under_the_same_way_paper_tracker_does():
     assert grade_under(8.5, -110, None, 4) == (None, None)
 
 
-def test_topk_flag_keeps_two_on_a_ten_under_slate_instead_of_suppressing_all(
+def test_topk_flag_one_keeps_only_the_heaviest_on_a_ten_under_slate(
         monkeypatch):
-    """The point of ranking: 10 unders → top-2, not the suppress-all empty set."""
-    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", 2)
+    """Env 1 is the only legal tighter cap. Still never zero, never ten."""
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", 1)
     monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_RANK", "ticket")
     from scripts.mlb_total_public_fade_card import rows_for_insert
 
@@ -510,8 +529,5 @@ def test_topk_flag_keeps_two_on_a_ten_under_slate_instead_of_suppressing_all(
     bets, _ = fade.find_fade_bets(splits, quotes, min_over_tickets=70)
     assert len(bets) == 10
     rows = rows_for_insert(bets, games, quotes, bankroll=10_000)
-    assert len(rows) == 2
-    # Highest tickets: 95 (G7) and 90 (G4).
-    assert {r["game_id"] for r in rows} == {"G7", "G4"}
-    assert all(r["signal_type"] == "BET" and r["pick_side"] == "under"
-               for r in rows)
+    assert [r["game_id"] for r in rows] == ["G7"]
+    assert rows[0]["signal_type"] == "BET" and rows[0]["pick_side"] == "under"
