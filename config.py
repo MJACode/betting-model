@@ -2041,6 +2041,30 @@ LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 30))
 # is a grand slam landing between the book's publish and ours.
 LIVE_SCORE_LAG_TOLERANCE_SEC: float = float(
     os.environ.get("LIVE_SCORE_LAG_TOLERANCE_SEC", 0))
+# How far DraftKings' own number may move, with NO change in the base-out
+# state we can see (inning, half, outs, bases, score), before that state is
+# treated as stale and the market declined. The mirror of the tolerance
+# above: that one declines a quote stamped before a score we HAVE seen; this
+# one declines a quote that has priced something we have NOT seen yet.
+#
+# 2026-09-19, NCAAF, Coastal Carolina at Delaware: DraftKings went -174 -> +100
+# on a touchdown the CFBD scoreboard reported 23 seconds later, and the loop
+# bet Delaware +100 in the gap. MLB's state feed is the fastest of the three
+# sports, so this is expected to fire rarely; it is set anyway because a
+# change to one live model is assessed against all of them (CLAUDE.md 1b).
+# Full timeline: data/live_quote_guard.py, BookMoveClock.
+#
+# FIRST CUT, from the one distribution that is stored: DraftKings in-play
+# republishes on MLB, 2026-09-12 to 09-19 (108 games). Moneyline: p95 1.6
+# implied points, p99 6.2. Totals: p95 0.0 runs, p99 1.0 -- so the totals cap
+# is 0.5: a line that has moved a FULL run with nothing visible changing is
+# declined, a half-run tick is not. Keyed by `odds.market`; a market not
+# listed is not guarded. The test is strictly "more than the cap".
+LIVE_BOOK_MOVE_MAX: dict = {
+    "h2h":     float(os.environ.get("LIVE_BOOK_MOVE_MAX_H2H", 0.08)),   # implied
+    "totals":  float(os.environ.get("LIVE_BOOK_MOVE_MAX_TOTALS", 0.5)), # runs
+    "spreads": float(os.environ.get("LIVE_BOOK_MOVE_MAX_SPREADS", 1.0)),  # runs
+}
 
 # ── Pre-game line poller (2026-08-30) ────────────────────────────────────────
 # The pre-game board used to be re-read by the 28-job refresh pass, which takes

@@ -28,9 +28,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import (
-    DERIV_LAG_RATIO, EV_THRESHOLDS, KELLY_FRACTION, KELLY_HAIRCUT,
-    MAX_DAILY_EXPOSURE_FRACTION, MAX_QUOTE_AGE_SEC, MAX_STAKE_FRACTION,
-    MAX_STATE_AGE_SEC, MIN_PRICE, MIN_SECONDS_FOR_PRICING, SCRIPT_LEAD_TRIGGER,
+    BOOK_MOVE_MAX, DERIV_LAG_RATIO, EV_THRESHOLDS, KELLY_FRACTION,
+    KELLY_HAIRCUT, MAX_DAILY_EXPOSURE_FRACTION, MAX_QUOTE_AGE_SEC,
+    MAX_STAKE_FRACTION, MAX_STATE_AGE_SEC, MIN_PRICE, MIN_SECONDS_FOR_PRICING,
+    SCRIPT_LEAD_TRIGGER,
 )
 from .engine.pricing import american_to_decimal, american_to_prob
 from .state import GameState
@@ -259,6 +260,9 @@ class Executor:
         # workers/gameday.py already performs before its price-log import.
         guard = _platform_guard()
         self._score_clock = guard.ScoreClock() if guard else None
+        # The mirror guard (2026-09-19): the book moved, our state did not.
+        # Same lifetime argument as the score clock above.
+        self._book_moves = guard.BookMoveClock() if guard else None
 
     def evaluate(self, *, state: GameState, quote, model_prob: float,
                  model_id: str, now: datetime | None = None,
@@ -311,6 +315,23 @@ class Executor:
         ok, why = quote_is_fresh(quote, now, score_seen_at)
         if not ok:
             return _mk(False, why)
+        # THE BOOK MOVED AND WE DID NOT SEE WHY. A quote the book has moved
+        # past the cap since our state last changed has priced something our
+        # feed has not reported yet (Delaware, 2026-09-19: a touchdown, 23s
+        # before the scoreboard said so). Declined until the state catches up
+        # and the book publishes again; see data/live_quote_guard.BookMoveClock.
+        cap = BOOK_MOVE_MAX.get(quote.market)
+        if cap is not None and self._book_moves is not None:
+            number = (quote.line if quote.line is not None
+                      else american_to_prob(quote.price))
+            move = self._book_moves.observe(
+                (state.game_id, quote.market, quote.side,
+                 getattr(quote, "player", None)),
+                (state.home_score, state.away_score, state.period,
+                 state.possession),
+                number, getattr(quote, "ts", None), now)
+            if move is not None and move > cap:
+                return _mk(False, f"book_moved:{move:.2f}>{cap:g}")
         if model_id not in EV_THRESHOLDS:
             return _mk(False, f"unknown_model:{model_id}")
         if not (0.0 < model_prob < 1.0):

@@ -99,6 +99,34 @@ POLL_HALFTIME_SEC = 60              # inside the halftime window
 # live loss: skip and log rather than guess.
 MAX_QUOTE_AGE_SEC = 90
 MAX_STATE_AGE_SEC = 45
+# How far the book's own number may move, with NO change in the state we can
+# see (score, period, possession), before that state is treated as stale and
+# the quote declined with reason `book_moved`. The mirror of the pre-score
+# guard: that one declines a quote stamped before a score we HAVE seen; this
+# one declines a quote that has priced something we have NOT seen yet.
+# 2026-09-19, NCAAF: DraftKings went -174 -> +100 on a touchdown the score
+# feed reported 23s later, and the loop bet in the gap. The NFL lane gets the
+# guard the same day, before its own incident (CLAUDE.md 1b -- one live
+# model's change is assessed against all of them). Timeline and rule:
+# data/live_quote_guard.py, BookMoveClock.
+#
+# Keyed by market; a market not listed is not guarded. Moneylines in implied
+# probability, everything else in the line's own units. THE PROP CAP IS NOT
+# MEASURED: the deployed lane's snapshots live on the worker volume as gzip
+# blobs (`nfl_live_prop_snapshots`), which cannot be read from here. 8.0
+# attempts is chosen to catch an injury-scale move (a starter leaving takes
+# the line down by half) and NOT a long drive (accrual moves it a few
+# attempts a possession, and possession is in the state). Every refusal is
+# recorded in the decisions log with this reason, so after one Sunday the
+# count is a query and the cap moves on that.
+BOOK_MOVE_MAX = {
+    "h2h": 0.08,
+    "spreads": 3.0,
+    "totals": 3.0,
+    "totals_h2": 3.0,
+    "spreads_h2": 3.0,
+    "player_pass_attempts": 8.0,
+}
 
 # ------------------------------------------------------------------- credits
 # The live endpoint costs 1 credit per market per region per poll. A full

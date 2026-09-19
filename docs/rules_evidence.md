@@ -1092,3 +1092,78 @@ attribution *"puts a decision in someone's mouth"* — this is what that costs.
 The commit is merged and cannot be rewritten; the record is corrected here.
 `config.RECORD_EXCLUSIONS` therefore requires an `asked_by` on every entry, and
 `tests/test_settled_record_is_immutable.py` fails if one is missing.
+
+## Our state was behind the book, and every guard passed (2026-09-19)
+
+The rule this is the evidence for: **a live quote the book has moved past a
+cap, with no change in the state we can see, is declined — our state is the
+stale thing** (§1b: a change to one live model is assessed against all of
+them; the guard is shared, `data/live_quote_guard.BookMoveClock`).
+
+mike, 2026-09-19: *"Why did Delaware ML fire as a bet just now, the live ncaaf
+models are too aggressive"* — and, once traced, *"This is a major flaw and it
+needs to be fixed across the board."*
+
+The timeline, from the in-play quotes in `odds`, the pollers service log and
+ESPN's scoreboard (Coastal Carolina at Delaware, `ncaaf_live_win_prob`):
+
+| UTC | What happened |
+|---|---|
+| 15:41:51 | DraftKings live: Delaware **−174**, spread Delaware −3.5 |
+| 15:43:32 | FanDuel flips to Delaware **+102** / Coastal −130 |
+| 15:44:21 | DraftKings re-hangs: Delaware **+100**, spread Delaware **+2.5** |
+| **15:44:29** | **`WROTE BET ncaaf_live_win_prob Delaware ML (live) p=0.659 edge=+0.159 DK=100.0`** — on a state still reading 0–0, Q1 |
+| 15:44:44 | `score change seen` — the CFBD scoreboard reports the touchdown: 15 s after the bet, 23 s after DraftKings, 72 s after FanDuel |
+| 15:44:44+ | `quote predates the score we have already seen (book ts 15:44:21, score seen 15:44:44) - declining` — the loop refuses the quote it just bet on |
+
+ESPN at 15:48: Coastal 7, Delaware 0, 6:37 left in the first.
+
+Why the three existing guards passed, each correctly: the quote was 8 s old
+(cap 90); the edge was 0.159 (cap 0.18); `quote_predates_score` can only fire
+once WE have seen a score, and we had not. All three protect against the book
+being behind us. Nothing protected against us being behind the book, which is
+the common case — the book prices the play from a courtside feed; the loop
+reads a scoreboard endpoint every 5 s, and that endpoint is CFBD's because
+ESPN is 403-blocked on the worker (`scheduler.py`). The model's 0.659 was the
+pregame prior (the pregame moneyline model had Delaware at 0.686 at −205)
+carried into a tied first quarter. The "edge" was the touchdown.
+
+**It was the model's main trigger, not a one-off.** The DraftKings price two
+minutes before each of the 20 live moneyline bets since the 09-12 unpause,
+against the price at the bet: in **15 of 20** DraftKings had moved AGAINST the
+side we then bet. The biggest: Tulsa 81 % → 61 % implied, Texas State 75 → 57,
+East Carolina 75 → 62, Delaware 64 → 50, Texas Tech 80 → 69. Only Delaware's
+log proves the state was stale at write time — the loop read the scoreboard,
+priced it and threw it away, so for the other 14 the book's move is measurable
+and our lag is not. `ncaaf_live_states` exists so that the next question like
+this is a query (one row per change in score/period/possession, written by
+`ncaaf_live/gameday.py`).
+
+**"Too aggressive", with the denominator:** on 09-12, 79 NCAAF games had
+in-play quotes and 48 of them got a live bet (55 bets: 37 totals, 18
+moneylines).
+
+The guard, and why its shape is what it is: per game and market, the book's
+number is anchored at the last change in the state the model prices; while
+that state is unchanged, a move past the cap declines the market. It
+re-anchors on the first quote that POSTDATES the state change, so a re-hang
+arriving after a late score report is not read as a move; first sight and a
+restart report nothing, the same rule `ScoreClock` applies, so the age bound
+remains the floor. **It fires on the production timeline:** the loop had
+priced this game since 15:34:39, and every DraftKings publish from 15:34:22 to
+15:42:40 sat between −167 and −217 (0.626–0.685 implied), so whichever of
+them was the anchor, +100 is a move of 0.126–0.185 against the 0.08 cap
+(`test_the_production_anchor_range_all_fires`). Wired into all three loops the same day — NCAAF
+`serve.LiveEngine.price`, MLB `live_scorer._get_live_dk_odds` (table-backed,
+for the same reason `_score_changed_at` is), NFL `executor.Executor.evaluate`
+(refusal reason `book_moved`). Caps are a first cut from the one distribution
+that is stored (single DraftKings republishes: NCAAF moneyline p95 6.6 / p99
+15.1 implied points on the 09-12 slate; MLB totals p99 1.0 run over 108 games)
+and are to be re-measured on the cumulative move once `ncaaf_live_states` has
+a slate behind it. Tests: `tests/test_live_book_move_guard.py` — the Delaware
+timeline is declined, and a control asserts a fresh loop still bets it, so the
+test cannot pass for the wrong reason.
+
+The pick itself (pick_id 2476480) is his call under §1c: produced on a state
+that was factually wrong at write time, which is the void case, not line
+movement. Not voided by the session that found it.
