@@ -1,6 +1,7 @@
 """MLB game-line market rule: Pinnacle vs bettable soft books, equal lines.
 
-The 1.8pp cut is measured in docs/mlb_runline_ou_edge_search.md. These tests
+The 1.8pp cut is measured in docs/mlb_runline_ou_edge_search.md;
+2026-09-19 remesure (park) is docs/mlb_spread_market_2026.md. These tests
 pin the traps that would manufacture a fake edge: mismatched lines, a 6-hour
 quote gap, Bovada as a "soft" book, two bets on the same game, a totals path
 that publishes under the wall default.
@@ -114,6 +115,13 @@ def test_the_measured_cut_is_eighteen_tenths():
     assert config.MLB_TOTAL_MARKET_PUBLISH is False
     assert mk.publish_enabled("spreads") is False
     assert mk.publish_enabled("totals") is False
+    # 2026-09-19 remesure parked this family. A session that "finds"
+    # +ROI in September must not treat that as a PUBLISH flip.
+    remesure = (Path(__file__).resolve().parents[1]
+                / "docs" / "mlb_spread_market_2026.md"
+                ).read_text(encoding="utf-8")
+    assert "PUBLISH" in remesure and "Stays 0" in remesure
+    assert "Park this family" in remesure
 
 
 def test_totals_paper_cut_is_two_pp_and_not_the_wall():
