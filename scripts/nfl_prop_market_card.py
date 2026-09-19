@@ -33,7 +33,8 @@ from loguru import logger
 import models.nfl_prop_market as mk
 from data import local_store
 import config
-from config import NFL_PROP_MAX_LEAD_HOURS
+from config import (NFL_PROP_MAX_LEAD_HOURS, NFL_PROP_PUBLISH_HOUR_UTC,
+                    NFL_PROP_PUBLISH_MIN_LEAD_HOURS)
 from data.db import get_connection
 from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_quotes
 from models.nfl_prop_backtest import _as_dt
@@ -230,6 +231,51 @@ def render(bets, diag, games, names=None) -> str:
 MODEL_ID = "nfl_prop_market"
 
 
+def publishable_games(games: dict, now: datetime) -> set[str]:
+    """The games this pass may PUBLISH for — one read per game, at 13:xx UTC.
+
+    THE CARD IS SCORED HOURLY AND MUST NOT BET HOURLY. The tick runs every hour
+    so the board is re-fetched for the twelve distributional models that score
+    off it, and until 2026-09-19 every one of those passes could also publish.
+    Because publish() is insert-once per proposition, nothing was ever
+    re-priced — but anything that had newly crossed the cut since the last pass
+    was ADDED, so a game alone in its 24h window collected a bet or two an hour
+    all day. DEN_KC took 14 bets across 11 hourly passes; DET_BUF took 12, all
+    unders, across 6. A crowded Sunday window gave 1-2 per game, because each
+    game was only looked at once or twice before kickoff. The bet count was
+    tracking how many times we looked.
+
+    It skews UNDER for a mechanical reason, not because the market lean grew:
+    the under floor is 5pp and the over floor 6pp
+    (config.NFL_PROP_MARKET_SIDE_EDGE), so repeated looks cross the lower bar
+    far more often. The graded record is 72% under; production ran 96%.
+
+    THE RULE. Publish on the pass whose UTC hour is NFL_PROP_PUBLISH_HOUR_UTC,
+    and only then. That is not an arbitrary hour: the record this model ships
+    on is one board read per game, and every `open` row in the historical cache
+    is stamped 13:55 UTC. One 13:xx pass per game falls inside the 24h ceiling,
+    so this yields exactly one publish per game with no state to keep — a game
+    24h+ out is already skipped by the ceiling, and one that has kicked off is
+    already skipped by the started-game floor.
+
+    A LEAD FLOOR, because the hour is wall-clock. A 13:30 UTC London kickoff is
+    1.1h after a 13:25 pass, and the grader dropped those quotes as
+    post-kickoff, so no measured band describes them. Domestic slots are all 3h+
+    from this pass and are unaffected.
+    """
+    if now.hour != NFL_PROP_PUBLISH_HOUR_UTC:
+        return set()
+    out = set()
+    for gid, d in games.items():
+        ko = _as_dt(d.get("kickoff"))
+        if ko is None:
+            continue
+        lead = (ko - now).total_seconds() / 3600.0
+        if lead >= NFL_PROP_PUBLISH_MIN_LEAD_HOURS:
+            out.add(gid)
+    return out
+
+
 def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
     """Card bets -> picks rows. Pure, so the mapping is testable without a DB."""
     rows = []
@@ -363,12 +409,31 @@ def main() -> None:
         if a.publish and as_of:
             raise SystemExit("--as-of is a replay; refusing to publish from it")
         if a.publish and bets:
-            from models.scorer import _get_current_bankroll
-            n = publish(conn, pick_rows(bets, games, names,
-                                        _get_current_bankroll(conn)))
-            # NOT "the rest were already locked": the FK guard can drop rows
-            # too, and it logs its own error naming them.
-            logger.info(f"published {n} new pick(s) of {len(bets)} on the card")
+            # ONE READ PER GAME. The card is built every hour so the board is
+            # fresh for everything else that scores off it; it may only PUBLISH
+            # on the 13:xx UTC pass, which is the single wall-clock read the
+            # record was measured on. See publishable_games().
+            allowed = publishable_games(games, datetime.now(timezone.utc))
+            publishing = [b for b in bets if b.game_id in allowed]
+            withheld = len(bets) - len(publishing)
+            if withheld:
+                # Logged, never written: this is the line that says what the
+                # old behaviour would have bet, so the season still measures
+                # which offsets pay without paying to find out.
+                logger.info(
+                    f"{withheld} card bet(s) not published — outside the "
+                    f"{NFL_PROP_PUBLISH_HOUR_UTC:02d}:xx UTC read: "
+                    + ", ".join(f"{b.player} {b.side} {b.line:g} {b.market}"
+                                f" @{b.edge:.1%}" for b in bets
+                                if b.game_id not in allowed))
+            if publishing:
+                from models.scorer import _get_current_bankroll
+                n = publish(conn, pick_rows(publishing, games, names,
+                                            _get_current_bankroll(conn)))
+                # NOT "the rest were already locked": the FK guard can drop rows
+                # too, and it logs its own error naming them.
+                logger.info(f"published {n} new pick(s) of {len(publishing)} "
+                            f"eligible ({len(bets)} on the card)")
         # Printed inside the try: if card() raised, bets/diag/names are unbound
         # and printing here would throw a NameError over the real traceback.
         print(render(bets, diag, games, names))

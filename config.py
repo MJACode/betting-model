@@ -2424,6 +2424,51 @@ NFL_PROP_WINDOW_HOURS: float = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "24
 NFL_PROP_MAX_LEAD_HOURS: float = float(
     os.environ.get("NFL_PROP_MAX_LEAD_HOURS", "24"))
 
+# ONE READ PER GAME, AT THE HOUR THE RECORD WAS MEASURED AT.
+# (2026-09-19, mike: "there's way too many as per usual like a million on this
+# lions game and every single one is an under".)
+#
+# THE DEFECT. scripts/nfl_prop_market_card runs HOURLY while a kickoff is
+# inside NFL_PROP_WINDOW_HOURS, and publish() is insert-once per proposition.
+# So every pass ADDED any proposition that had newly crossed the cut, and a
+# game sitting alone in its 24h window collected a bet or two an hour for a
+# day. Measured on production picks:
+#
+#   NFL_2026_01_DEN_KC   14 bets, accumulated over 11 separate hourly passes
+#   NFL_2026_02_DET_BUF  12 bets, all unders, over 6 passes on one game day
+#   NFL_2026_01_GB_MIN    2 bets, one pass  (crowded Sunday window)
+#
+# The bet count followed HOW MANY TIMES WE LOOKED, not how much the books
+# disagreed. Week of 09-07: 16 bets over 12 games, 56% under. Week of 09-14:
+# 26 bets over 2 games, 96% under.
+#
+# WHY IT SKEWS UNDER. The two sides are held to different floors
+# (NFL_PROP_MARKET_SIDE_EDGE: under 5pp, over 6pp). Repeated looks cross the
+# LOWER bar far more often, so unioning ~24 hourly passes is overwhelmingly an
+# under harvest. The graded record is 72% under (898 of 1,248); production ran
+# 96%. That gap is the bug, not the lean -- the lean is real and measured.
+#
+# WHY THIS HOUR. The graded series is ONE board read per game, and every one of
+# the 1,900,449 `open` rows in the local cache is stamped 13:55 UTC -- one
+# wall-clock read, not one lead offset. Publishing only on the 13:xx pass
+# reproduces the population the +13.3% was measured on; a fixed LEAD would not,
+# because the historical band is a kickoff-slot label as much as a lead label
+# (docs/nfl_prop_offset_evidence.md).
+#
+# NOT A THRESHOLD CHANGE. The 5pp/6pp cuts, the books, the markets and the 24h
+# ceiling are all untouched. This decides WHEN the card may publish, so that
+# the bets it writes are the bets the record describes.
+NFL_PROP_PUBLISH_HOUR_UTC: int = int(
+    os.environ.get("NFL_PROP_PUBLISH_HOUR_UTC", "13"))
+
+# A guard, not a fitted cut. A game kicking off within this many hours of the
+# publish pass is one the graded series either EXCLUDED (13:55 UTC is after a
+# 13:30 UTC London kickoff, so the grader dropped it as post-kickoff) or saw at
+# a lead no measured band describes. Affects only the early-window
+# international games; every domestic slot is 3h+ from the 13:xx pass.
+NFL_PROP_PUBLISH_MIN_LEAD_HOURS: float = float(
+    os.environ.get("NFL_PROP_PUBLISH_MIN_LEAD_HOURS", "2"))
+
 # THE TWO SIDES OF models/nfl_prop_market ARE NOT HELD TO THE SAME FLOOR.
 # (2026-09-12, mike: "find evidence for stat models any way you can.")
 #
