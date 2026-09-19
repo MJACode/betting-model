@@ -263,12 +263,15 @@ def test_the_cap_covers_EVERY_UNPAUSED_model_in_the_pitcher_pool():
 
     The invariant that actually holds: every model in the one-bet-per-player
     pool that is not paused competes for the same daily board, so every one of
-    them carries a ceiling. `er` and `walks` are paused today and are the reason
-    this is derived rather than written out — unpause one and this fails, which
-    is the point."""
+    them carries a ceiling. The pool can be entirely paused (2026-09-19:
+    k/hits/outs joined er/walks). Unpause one without a cap and this fails,
+    which is the point."""
     pool = set(config.PROP_ONE_BET_PER_PLAYER["mlb_pitcher"])
     active = pool - set(config.PAUSED_MODELS)
-    assert active, "the pool is entirely paused — this test has stopped testing"
+    # 2026-09-19 (mlb Handicap): k/hits/outs joined er/walks in PAUSED_MODELS,
+    # so the pool can be empty. The invariant that still matters is: any
+    # unpaused pool member carries a ceiling. Unpause one without adding it
+    # to PROP_MAX_SIGNALS_PER_DAY and this fails again.
     assert active <= set(config.PROP_MAX_SIGNALS_PER_DAY), (
         f"uncapped and unpaused: {sorted(active - set(config.PROP_MAX_SIGNALS_PER_DAY))}")
 

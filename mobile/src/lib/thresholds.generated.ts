@@ -4,7 +4,7 @@
  * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-09-16
+ * Last generated: 2026-09-19
  */
 
 export interface ModelThreshold {
@@ -103,6 +103,9 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_batter_sb',
   'mlb_prop_batter_tb',
   'mlb_prop_pitcher_er',
+  'mlb_prop_pitcher_hits',
+  'mlb_prop_pitcher_k',
+  'mlb_prop_pitcher_outs',
   'mlb_prop_pitcher_walks',
   'mlb_runline',
   'ncaaf_moneyline',
