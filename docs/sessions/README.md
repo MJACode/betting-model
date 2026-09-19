@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, I24 remesure: finder latest-open shop all-pass 41 −8.84u, live top-2 27 −1.73u. +9.51u is first-open DK-only. No tighten-only upgrade. PUBLISH default 0, guards not recut |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade I24 juice band: optional UNDER_ODDS_MIN/MAX (unset = no band; I24 −110/−100). Finder before top-K. Claim n=38 +9.51u +25%; steam_cap2 Sep −23.6%/5. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |

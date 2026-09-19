@@ -21,6 +21,14 @@
 
 ---
 
+## [x] I24 / `mlb_total_public_fade` remesure (2026-09-19)
+
+Done. Production as-of (band then top-2): **27 −1.73u −6.4%**.
+Handicap #759 **n=22 −12.2%** is top-2-then-band (reproduced; not
+production). +9.51u/38 is first-open DK-only all-pass. Both live-order
+cells red. `PUBLISH` stays 0. Pause this family until new honest
+public. Next family: `mlb_spread_market` Sep remesure.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
