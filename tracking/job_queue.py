@@ -1113,7 +1113,12 @@ def _run_script_main(mod_name: str, argv: list[str]) -> str:
 
 
 _GAME_LINE_SPORTS = frozenset({"MLB", "NCAAF"})
-_GAME_LINE_MARKETS = frozenset({"h2h", "spreads", "totals"})
+# Full-game + MLB first-five Odds API keys. F5 grades home_score_f5.
+# docs/mlb_f5_edge_search.md. Pin has no h2h_1st_5_innings.
+_GAME_LINE_MARKETS = frozenset({
+    "h2h", "spreads", "totals",
+    "h2h_1st_5_innings", "spreads_1st_5_innings", "totals_1st_5_innings",
+})
 
 
 _GAME_LINE_RICH_KEYS = frozenset({

@@ -42,6 +42,7 @@ when n is small). A cell with n < 25 is labelled thin; it is not dropped.
     python -m scripts.game_line_market_sweep --sport MLB --market totals --bettable --edges 0.02 0.03 0.04 --by-month
     python -m scripts.game_line_market_sweep --sport MLB --market spreads --bettable --edges 0.02 0.03 0.04 --by-month
     python -m scripts.game_line_market_sweep --sport MLB --market totals --soft-books draftkings --vs implied --pin-lean --edges 0.02 0.03 0.04 --by-month
+    python -m scripts.game_line_market_sweep --sport MLB --market totals_1st_5_innings --bettable --edges 0.015 0.02 0.025 --by-month --date-from 2026-09-02
 """
 from __future__ import annotations
 
@@ -63,6 +64,17 @@ SOFT = ("draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
 SNAPSHOT_TYPES = ("open", "in_play", "close")
 VS_MODES = ("devig", "implied")
 DEFAULT_EDGES = (0.02, 0.03, 0.04)
+# First-five Odds API keys. Family is what collect_picks / grade already
+# know; F5 scores live on games.home_score_f5 / away_score_f5.
+# Pin has no h2h_1st_5_innings row (measured 2026-09-19). Pin
+# spreads_1st_5_innings is stored at spread_home=0 (F5 ML), so equal-line
+# vs soft -0.5 is empty. totals_1st_5_innings is the only F5 Pin-vs-soft
+# cell with real n — Sep 2+ only. docs/mlb_f5_edge_search.md.
+F5_MARKETS = {
+    "h2h_1st_5_innings": "h2h",
+    "totals_1st_5_innings": "totals",
+    "spreads_1st_5_innings": "spreads",
+}
 # Unbounded odds scans time out on MCP. Month windows keep each SELECT inside
 # an index-friendly range. Pad snapshot_at 14 days before the game_date window
 # so an opener posted in March for an April game is not dropped.
@@ -109,6 +121,12 @@ def iter_months(date_from: str, date_to: str):
         d = nxt
 
 
+def market_family(market: str) -> str:
+    """Map an Odds API key to h2h|spreads|totals. F5 keys stay themselves
+    on `odds.market`; grading uses the family + F5 scores."""
+    return F5_MARKETS.get(market, market)
+
+
 def load(conn, sport: str, market: str, snapshot_type: str = "open",
          date_from: str | None = None, date_to: str | None = None):
     """Latest OPEN quote per (game, book) plus the game's result.
@@ -116,6 +134,7 @@ def load(conn, sport: str, market: str, snapshot_type: str = "open",
     `snapshot_type` lives on `odds`. `commence_time` lives on `games`.
     Month-bounded callers pass date_from/date_to so the odds scan stays
     inside an index-friendly window (unbounded scans time out on MCP).
+    F5 markets grade `home_score_f5` / `away_score_f5`, not full-game.
     """
     if snapshot_type not in SNAPSHOT_TYPES:
         raise ValueError(f"snapshot_type must be one of {SNAPSHOT_TYPES}, "
@@ -135,15 +154,23 @@ def load(conn, sport: str, market: str, snapshot_type: str = "open",
         extra.append("AND o.snapshot_at < %s")
         params.append(date_to)
     extra_sql = "\n          ".join(extra)
+    if market in F5_MARKETS:
+        score_cols = "g.home_score_f5, g.away_score_f5"
+        score_where = ("AND g.home_score_f5 IS NOT NULL "
+                       "AND g.away_score_f5 IS NOT NULL")
+    else:
+        score_cols = "g.home_score, g.away_score"
+        score_where = ("AND g.home_score IS NOT NULL "
+                       "AND g.away_score IS NOT NULL")
     rows = conn.execute(f"""
         SELECT DISTINCT ON (o.game_id, o.bookmaker)
                o.game_id, o.bookmaker, o.home_price, o.away_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
-               g.home_score, g.away_score, g.game_date, o.snapshot_at
+               {score_cols}, g.game_date, o.snapshot_at
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s AND o.market = %s
-          AND g.home_score IS NOT NULL AND g.away_score IS NOT NULL
+          {score_where}
           AND o.snapshot_type = %s
           AND o.snapshot_at::timestamptz <= g.commence_time::timestamptz
           {extra_sql}
@@ -183,13 +210,18 @@ def _gap_seconds(a, b) -> float | None:
 
 
 def grade(market, side, m, line):
-    """True/False/None(push) for a side, given the final score."""
+    """True/False/None(push) for a side, given the final score.
+
+    `market` may be an Odds API F5 key; grading uses the family and the
+    scores `load()` already selected (F5 or full-game).
+    """
     hs, as_, _gd = m
-    if market == "h2h":
+    family = market_family(market)
+    if family == "h2h":
         if hs == as_:
             return None
         return (hs > as_) if side == "home" else (as_ > hs)
-    if market == "spreads":
+    if family == "spreads":
         marg = hs - as_ + float(line)          # line is the HOME number (§4)
         if marg == 0:
             return None
@@ -212,6 +244,7 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
     if vs not in VS_MODES:
         raise ValueError(f"vs must be one of {VS_MODES}, got {vs!r}")
     soft = tuple(soft_books) if soft_books is not None else SOFT
+    family = market_family(market)
     picks = []
     diag = defaultdict(int)
     for gid, books in by_game.items():
@@ -219,12 +252,12 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
         if not sharp:
             diag["no_sharp"] += 1
             continue
-        if market == "h2h":
+        if family == "h2h":
             sf, _ = devig(sharp["home"], sharp["away"])
             su = 1 - sf if sf is not None else None
             sline = None
             sides = (("home", sf, "home"), ("away", su, "away"))
-        elif market == "spreads":
+        elif family == "spreads":
             sline = sharp["spread"]
             sf, _ = devig(sharp["home"], sharp["away"])
             su = 1 - sf if sf is not None else None
@@ -244,8 +277,8 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
         for bk, q in books.items():
             if bk not in soft:
                 continue
-            bline = q["spread"] if market == "spreads" else (
-                q["total"] if market == "totals" else None)
+            bline = q["spread"] if family == "spreads" else (
+                q["total"] if family == "totals" else None)
             if sline is not None and (bline is None or float(bline) != float(sline)):
                 diag["line_mismatch"] += 1
                 continue
@@ -261,7 +294,7 @@ def collect_picks(by_game, meta, market: str, max_gap_s: float | None = 300,
                 if gap is None or gap > max_gap_s:
                     diag["not_simultaneous"] += 1
                     continue
-            if market == "totals":
+            if family == "totals":
                 a, b = q["over"], q["under"]
             else:
                 a, b = q["home"], q["away"]

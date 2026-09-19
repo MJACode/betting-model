@@ -21,6 +21,27 @@
 
 ---
 
+## [ ] Remeasure F5 totals Pin-vs-soft after a second full month
+
+2026-09-19 hunt (`docs/mlb_f5_edge_search.md`) found no stakeable F5
+construction. Closest miss: Pin de-vig vs bettable-soft de-vig on
+`totals_1st_5_innings` 1.5pp **+7.37% / 69** Sep 2–18, both week
+halves +, max 9/day. Pin F5 quotes begin 2026-09-02. After October
+settles, run:
+
+```bash
+python -m scripts.game_line_market_sweep \
+  --sport MLB --market totals_1st_5_innings \
+  --bettable --edges 0.015 0.02 0.025 --by-month \
+  --date-from 2026-09-02
+```
+
+Ship a `PUBLISH=0` card only if both months +, n≥40, few/day, neighbours
+not a lone peak. Do not unpause XGBoost. Do not re-hunt F5 ML steam /
+FG-public-on-F5 / F5-vs-FG on the May–Sep window — those cells are
+measured and red or month-unstable. Next family after a second empty
+F5 remesure: props / other sports.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`
