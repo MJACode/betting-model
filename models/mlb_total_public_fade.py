@@ -18,9 +18,11 @@ under among DK/FD/MGM/WH at DK's open total (fallback DK), main total
 5.5–14.5, under American in [-200, 200]. Always UNDER. One bet per game.
 
 INSERT is gated by `MLB_TOTAL_PUBLIC_FADE_PUBLISH` (default 0). This is
-not an unpause of `mlb_over_under` and not `mlb_total_market`. A slate
-where one side is ≥70% of BETs and n_bet ≥ 4 is suppressed in full
-(`models.slate_concentration`, policy=suppress_all) before INSERT/notify.
+not an unpause of `mlb_over_under` and not `mlb_total_market`. Optional
+top-K ranking (`MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE`, default 0 =
+all-pass) keeps 1–2 highest-ranked fades per day before the slate
+guard. A slate where one side is ≥70% of BETs and n_bet ≥ 4 is then
+suppressed in full (`models.slate_concentration`, policy=suppress_all).
 
 CAVEAT. `public_betting` is 2026-05-31→present only, UNIQUE last-upsert.
 Honest pre-commence totals-over coverage measured 2026-09-16: 99 games.
@@ -58,6 +60,26 @@ PRICE_MIN = -200.0
 PRICE_MAX = 200.0
 DEFAULT_OVER_TICKETS = 70.0
 
+# Ranking kinds the top-K selector understands. `ev` needs a bucket
+# under-win-rate lookup (month-holdout or a frozen table). The others
+# are slate-local: ticket pile, ticket−money gap, under juice, or a
+# juice-adjusted composite. The 2026-09-19 holdout winner was `ticket`
+# (see docs/mlb_total_public_fade.md).
+RANK_TICKET = "ticket"
+RANK_GAP = "gap"
+RANK_JUICE = "juice"
+RANK_COMPOSITE = "composite"
+RANK_EV = "ev"
+RANK_KINDS = (RANK_TICKET, RANK_GAP, RANK_JUICE, RANK_COMPOSITE, RANK_EV)
+
+# Ticket buckets for holdout EV. Edges are [lo, hi). 100 sits in the last.
+EV_TICKET_BUCKETS: tuple[tuple[float, float], ...] = (
+    (65.0, 75.0),
+    (75.0, 85.0),
+    (85.0, 95.0),
+    (95.0, 101.0),
+)
+
 
 @dataclass(frozen=True)
 class PublicFadeBet:
@@ -68,6 +90,7 @@ class PublicFadeBet:
     over_ticket_pct: float
     quote_snap: str | None = None
     public_snap: str | None = None
+    over_money_pct: float | None = None
 
 
 def ticket_threshold() -> float:
@@ -78,6 +101,22 @@ def ticket_threshold() -> float:
 def publish_enabled() -> bool:
     """INSERT gate. Default off: the card logs, it does not write picks."""
     return bool(config.MLB_TOTAL_PUBLIC_FADE_PUBLISH)
+
+
+def max_per_slate() -> int:
+    """Top-K cap. 0 = all-pass (current card). Env MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE."""
+    return int(config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE)
+
+
+def rank_kind() -> str:
+    """Ranking formula. Env MLB_TOTAL_PUBLIC_FADE_RANK, default ticket."""
+    raw = str(config.MLB_TOTAL_PUBLIC_FADE_RANK).strip().lower()
+    return raw if raw in RANK_KINDS else RANK_TICKET
+
+
+def edge_floor() -> float:
+    """Minimum estimated edge after juice. 0 = no floor. Env MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR."""
+    return float(config.MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR)
 
 
 def is_pre_commence(snapshot_at, commence_time) -> bool:
@@ -178,6 +217,122 @@ def shop_under(books: dict, *, line: float,
     return best_book, float(best_price), best_snap
 
 
+def ticket_money_gap(bet: PublicFadeBet) -> float:
+    """over tickets − over money. Positive = ticket-heavy public pile."""
+    money = numeric_feature_value(bet.over_money_pct)
+    if money is None:
+        return 0.0
+    return float(bet.over_ticket_pct) - float(money)
+
+
+def ticket_bucket(over_ticket_pct: float) -> tuple[float, float] | None:
+    """Which EV_TICKET_BUCKETS cell `over_ticket_pct` falls in."""
+    x = float(over_ticket_pct)
+    for lo, hi in EV_TICKET_BUCKETS:
+        if lo <= x < hi:
+            return (lo, hi)
+    return None
+
+
+def composite_score(bet: PublicFadeBet) -> float:
+    """ticket + gap − 100×implied. Higher = heavier fade at a better take.
+
+    Juice is subtracted so a 96% pile at −130 does not outrank a 90% pile
+    at +100. Missing implied is unrankable (sent to the bottom).
+    """
+    imp = implied(bet.price)
+    if imp is None:
+        return float("-inf")
+    return float(bet.over_ticket_pct) + ticket_money_gap(bet) - (100.0 * imp)
+
+
+def rank_score(bet: PublicFadeBet, kind: str,
+               ev_of=None) -> float:
+    """Higher is a stronger fade. Empty kind is composite; unknown is ticket.
+
+    RANK=ev without `ev_of` is ticket — the card does not load a bucket
+    table, so ev/edge_floor are sweep-only until one is passed in.
+    """
+    k = (kind or RANK_COMPOSITE).strip().lower()
+    if k == RANK_TICKET:
+        return float(bet.over_ticket_pct)
+    if k == RANK_GAP:
+        return ticket_money_gap(bet)
+    if k == RANK_JUICE:
+        imp = implied(bet.price)
+        return float("-inf") if imp is None else -imp
+    if k == RANK_COMPOSITE:
+        return composite_score(bet)
+    if k == RANK_EV:
+        if ev_of is None:
+            return float(bet.over_ticket_pct)
+        val = ev_of(bet)
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return float("-inf")
+    return float(bet.over_ticket_pct)
+
+
+def estimated_edge(bet: PublicFadeBet,
+                   bucket_win_rate: dict[tuple[float, float], float],
+                   ) -> float | None:
+    """Holdout bucket under-win-rate minus juiced implied. None if unpriced."""
+    imp = implied(bet.price)
+    if imp is None:
+        return None
+    key = ticket_bucket(bet.over_ticket_pct)
+    wr = bucket_win_rate.get(key) if key is not None else None
+    if wr is None:
+        wr = bucket_win_rate.get(("all", "all"))
+    if wr is None:
+        return None
+    return float(wr) - float(imp)
+
+
+def select_top_k(
+    bets: list[PublicFadeBet],
+    *,
+    max_per_slate: int,
+    slate_of,
+    kind: str = RANK_COMPOSITE,
+    ev_of=None,
+    min_edge: float = 0.0,
+    bucket_win_rate: dict | None = None,
+) -> list[PublicFadeBet]:
+    """Keep the top `max_per_slate` bets per slate, optionally behind an edge floor.
+
+    `max_per_slate <= 0` is all-pass (the current card). `min_edge` drops
+    a bet whose estimated_edge is below the floor when `bucket_win_rate`
+    is provided; without rates the floor is ignored (nothing to measure).
+    Ties break on game_id so a re-run is deterministic.
+    """
+    incoming = list(bets or [])
+    if min_edge > 0 and bucket_win_rate:
+        kept = []
+        for b in incoming:
+            edge = estimated_edge(b, bucket_win_rate)
+            if edge is None or edge < min_edge:
+                continue
+            kept.append(b)
+        incoming = kept
+    if max_per_slate <= 0:
+        return incoming
+
+    def _key(b: PublicFadeBet) -> tuple[float, str]:
+        return (rank_score(b, kind, ev_of=ev_of), b.game_id)
+
+    by_slate: dict = defaultdict(list)
+    for b in incoming:
+        by_slate[slate_of(b)].append(b)
+    out: list[PublicFadeBet] = []
+    k = max(0, int(max_per_slate))
+    for group in by_slate.values():
+        ranked = sorted(group, key=_key, reverse=True)
+        out.extend(ranked[:k])
+    return out
+
+
 def find_fade_bets(splits: dict[str, dict], quotes: dict,
                    min_over_tickets: float | None = None,
                    soft_books: tuple[str, ...] | None = None,
@@ -223,11 +378,14 @@ def find_fade_bets(splits: dict[str, dict], quotes: dict,
             diag["no_price"] += 1
             continue
         book, price, snap = shopped
+        money = numeric_feature_value(
+            raw.get("public_money_pct", raw.get("over_money_pct")))
         diag["bets"] += 1
         bets.append(PublicFadeBet(
             game_id=gid, book=book, line=float(line), price=float(price),
             over_ticket_pct=float(ticket),
             quote_snap=snap, public_snap=raw.get("snapshot_at"),
+            over_money_pct=None if money is None else float(money),
         ))
     return bets, dict(diag)
 

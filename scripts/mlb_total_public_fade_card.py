@@ -19,10 +19,17 @@ Deliberate and load-bearing:
   logs; it writes picks only when the env is 1. Do not flip that env
   without mike.
 
-  SLATE CONCENTRATION. After candidate BETs are built, if one pick_side
-  is ≥70% of that model's BET count and n_bet ≥ 4, suppress every BET
-  (skip insert / notify). The 2026-09-19 card was 12/12 under. The
-  helper lives in models/slate_concentration.py.
+  TOP-K RANKING (optional). MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE default
+  0 = all-pass. Set 1 or 2 to keep only the highest-ranked fades per
+  day (RANK=ticket|gap|juice|composite|ev; default ticket — the only
+  formula that beat all-pass on the 2026-09-19 holdout). Ranking runs
+  BEFORE the slate guard so a 10-under board can keep 1–2 instead of
+  vanishing.
+
+  SLATE CONCENTRATION. After ranking, if one pick_side is ≥70% of that
+  model's BET count and n_bet ≥ 4, suppress every BET (skip insert /
+  notify). The 2026-09-19 card was 12/12 under. The helper lives in
+  models/slate_concentration.py.
 
     python -m scripts.mlb_total_public_fade_card
     python -m scripts.mlb_total_public_fade_card --date 2026-09-16 --publish
@@ -114,18 +121,35 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
             "dk_bet_link": link if b.book == "draftkings" else None,
             "best_bet_link": link,
             "public_bet_pct": round(100.0 - b.over_ticket_pct, 1),
-            "public_money_pct": None,
+            "public_money_pct": (
+                None if b.over_money_pct is None
+                else round(100.0 - b.over_money_pct, 1)
+            ),
         })
     return rows
 
 
-def rows_for_insert(bets, games, quotes, bankroll: float) -> list[dict]:
-    """BET rows that may be INSERTed. Slate concentration is applied here.
+def ranked_bets(bets, games) -> list:
+    """Apply the optional top-K / edge-floor flag. 0 = all-pass."""
+    return fade.select_top_k(
+        list(bets or []),
+        max_per_slate=fade.max_per_slate(),
+        slate_of=lambda b: (games.get(b.game_id) or {}).get("game_date")
+        or b.game_id,
+        kind=fade.rank_kind(),
+        min_edge=fade.edge_floor(),
+    )
 
-    A concentrated slate (one side ≥70% of n_bet ≥ 4) returns []. The
-    finder still reports the raw flags; this is the INSERT/notify bound.
+
+def rows_for_insert(bets, games, quotes, bankroll: float) -> list[dict]:
+    """BET rows that may be INSERTed. Rank then slate-concentration.
+
+    Top-K (env, default 0 = all-pass) runs first so a 10-under slate can
+    keep 1–2 instead of the whole board. The suppress-all guard still
+    fires when ranking is off and n_bet ≥ 4. Finder flags stay raw.
     """
-    rows = pick_rows(bets, games, quotes, bankroll)
+    chosen = ranked_bets(bets, games)
+    rows = pick_rows(chosen, games, quotes, bankroll)
     kept, _ = fade.apply_slate_guard(rows, model_id=MODEL_ID)
     return kept
 
@@ -181,6 +205,12 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
         bets, diag = fade.find_fade_bets(
             splits, quotes, min_over_tickets=fade.ticket_threshold())
         logger.info("\n" + render(bets, diag))
+        if fade.max_per_slate() > 0 and bets:
+            chosen = ranked_bets(bets, games)
+            logger.info(
+                f"mlb total public fade: top-{fade.max_per_slate()} "
+                f"by {fade.rank_kind()} kept {len(chosen)} of {len(bets)}"
+            )
         published = 0
         will_insert = bool(do_publish) and fade.publish_enabled()
         # Guard runs even when INSERT is gated off so a concentrated slate
