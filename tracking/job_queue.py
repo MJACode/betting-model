@@ -325,6 +325,52 @@ def _validate_market_coverage(args: dict) -> dict:
     return {"sport": sport, "markets": markets}
 
 
+def _job_player_news(**kw):
+    """Run the ESPN player-news ingestor for real, on the worker.
+
+    WHY THIS EXISTS. `player_news` has written ZERO rows since it shipped
+    (~2026-08-30) despite running in every daily/hourly pipeline pass
+    (`run_pipeline.step_player_news`) -- and a dead feed is a quiet zero by
+    design (`fetch_espn_news`'s own docstring), so the pipeline's green runs
+    can never surface this. `injuries` reads the same site.api.espn.com host
+    and IS fresh (checked 2026-09-19), which rules out the known ESPN
+    IP-block (sessions 112, 115) as the cause here -- so the remaining
+    suspects are the `categories` shape `_athletes_in` parses, or the news
+    endpoint simply tagging no athletes at all. Neither is answerable from a
+    dev sandbox: the egress proxy here 403s site.api.espn.com outright (both
+    `requests` and WebFetch), so this has to run where ESPN is reachable.
+
+    max_age_min is NOT passed through -- this always fetches for real, unlike
+    the refresh-pass call, so the diagnostic (now carried in the per-sport
+    summary's "warnings" key; see ingest_player_news) is never skipped as
+    "fresh" by a table that has never once been fresh.
+    """
+    from data.ingestors.player_news_ingestor import ingest_player_news
+    return ingest_player_news(sports=kw.get("sports"), run_date=kw.get("run_date"))
+
+
+def _validate_player_news(args: dict) -> dict:
+    sports = args.get("sports")
+    if sports is not None:
+        if not isinstance(sports, list) or not sports:
+            raise ValueError("sports must be a non-empty list")
+        sports = [str(s).upper() for s in sports]
+        # Checked against the ESPN path map, not PLAYER_NEWS_SPORTS -- a
+        # diagnostic run may deliberately ask about a sport the scheduled
+        # config does not cover.
+        known = set(config.ESPN_NEWS_PATHS)
+        bad = sorted(set(sports) - known)
+        if bad:
+            raise ValueError(f"unknown sport {bad}; known {sorted(known)}")
+    run_date = args.get("run_date")
+    if run_date not in (None, ""):
+        datetime.strptime(str(run_date), "%Y-%m-%d")
+        run_date = str(run_date)
+    else:
+        run_date = None
+    return {"sports": sports, "run_date": run_date}
+
+
 def _validate_ncaaf_prop_odds(args: dict) -> dict:
     """College props, measured before they are scheduled.
 
@@ -1413,6 +1459,9 @@ JOBS = {
                               _validate_ncaaf_player_backfill),
     "ncaaf_prop_odds": (_job_ncaaf_prop_odds,  _validate_ncaaf_prop_odds),
     "market_coverage": (_job_market_coverage,  _validate_market_coverage),
+    # Read-mostly: writes only player_news. Forces a real ESPN fetch (no
+    # max-age skip) and returns per-sport diagnostics. See _job_player_news.
+    "player_news": (_job_player_news, _validate_player_news),
 }
 
 
