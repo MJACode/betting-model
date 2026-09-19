@@ -1093,6 +1093,47 @@ The commit is merged and cannot be rewritten; the record is corrected here.
 `config.RECORD_EXCLUSIONS` therefore requires an `asked_by` on every entry, and
 `tests/test_settled_record_is_immutable.py` fails if one is missing.
 
+## An ungraded reference wrote 25 bets in one pass (2026-09-19)
+
+The rule this is the evidence for: **a model's reference is part of the
+model, and a new one is paper-only until it has a graded record** (§2's
+go-live gate, applied to the thing that produces the probability).
+
+mike, 18:3xZ: *"I just saw a million nfl prop unders go. WHAT THE FUCK."* At
+17:27Z — the moment the 24h lead ceiling opened on the eight Sunday 1pm games
+— `nfl_prop_market` wrote 39 BETs in one pass, 37 of them unders, and Discord
+and push announced them (`push_sent`: 42 `discord_signal`, 42 `new_bet`
+between 17:28 and 18:29Z). The previous Saturday's same hour wrote 2.
+
+The rule's validated construction compares EQUAL lines only — the module
+docstring calls it "the one thing that makes this honest". Of the 42 written
+that hour, **25 had no sharp book at the soft book's line at all** (query:
+`player_prop_odds` for pinnacle/betonlineag at the pick's line within the ten
+minutes before `created_at`). Chase Brown Under 22.5 rec yds at BetMGM:
+BetMGM alone at 22.5 (−115/−115 from 12:25 to 17:25Z); Pinnacle, BetOnline
+and every other book at 19.5. The only reference that "prices ANY line
+inside its ladder" is the Kalshi ladder (commit 1d58cea3, 2026-09-14 01:37,
+no Updated-By trailer), and its ladder for that proposition at 16:40Z had
+strikes at 14.5 (yes 0.57–0.62, $287 traded) and 24.5 (0.34–0.39, $407) —
+an interpolation across ten yards on a five-cent spread produced the 0.609
+the pick carries. `_bets_from_kalshi`'s own docstring: "NOT GRADED.
+kalshi_prop_ladders has no settlement column." Since it was wired: 14
+settled bets no sharp book could have produced, 7-7, −1.46u; the sharp-equal
+path's unders over the same days 4-6, −2.39u.
+
+Why all unders: a soft line sitting above a thin ladder's median is read as
+an under every time, so the reference's output is one-directional by
+construction — 95% unders in the pass, against 45% in the rule's 1,990-bet
+validation.
+
+Fix: `config.NFL_PROP_MARKET_KALSHI_REFERENCE` (default off) and
+`scripts/nfl_prop_market_card.reference_ladders`, which passes empty ladders
+and fetches nothing unless the flag is on. The validated Pinnacle/BetOnline
+path is unchanged. The 25 Kalshi-origin picks standing at the time: 2480901,
+2480902, 2480903, 2480904, 2480906, 2480907, 2480911, 2480913, 2480914,
+2480915, 2480917, 2480918, 2480920, 2480921, 2480922, 2480925, 2480926,
+2480927, 2480928, 2480929, 2480930, 2480931, 2480936, 2480938, 2480939.
+
 ## Our state was behind the book, and every guard passed (2026-09-19)
 
 The rule this is the evidence for: **a live quote the book has moved past a
