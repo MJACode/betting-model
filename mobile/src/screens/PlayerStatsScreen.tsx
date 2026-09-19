@@ -12,12 +12,18 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { AddLineSheet } from '@/components/AddLineSheet';
 import { GroupTabs } from '@/components/GroupTabs';
+import { HitModeSheet } from '@/components/HitModeSheet';
 import { HitRateChart } from '@/components/HitRateChart';
+import { PlayerBetBar } from '@/components/PlayerBetBar';
 import { PlayerNewsButton } from '@/components/PlayerNewsButton';
 import { TrendStrip } from '@/components/TrendStrip';
+import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
+import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
 import { usePlayerTrends } from '@/hooks/usePlayerTrends';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
@@ -34,16 +40,26 @@ import {
   type PlayerLogEntry,
   type PlayerLogSport,
 } from '@/lib/playerLog';
-import { propModelForStat } from '@/lib/statCatalog';
+import { propMarketForStat, propModelForStat } from '@/lib/statCatalog';
 import type { StatDef } from '@/lib/statCatalog';
-import { buildPickIndex, slipPickFor } from '@/lib/statsOdds';
+import { anyBookPostsSide, buildPickIndex, slipPickFor } from '@/lib/statsOdds';
+import {
+  hitModeHeadline,
+  hitModeLabel,
+  modeLineLabel,
+  rulerValueLabel,
+  selectionFor,
+  type HitMode,
+} from '@/lib/hitMode';
+import { propLineSheetInput, type LineSheetInput } from '@/lib/lineLegs';
+import { computeHitRate, isHit, type HitDirection } from '@/lib/hitRate';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
-import { bookName, storedQuoteBook } from '@/lib/markets';
+import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
@@ -68,6 +84,12 @@ export function PlayerStatsScreen() {
   const [gameWindow, setGameWindow] = useState<GameWindow>(10);
   // The "at least" threshold. null = auto-default to the rounded median once data loads.
   const [line, setLine] = useState<number | null>(null);
+  // At Least / Over / Under — the SAME control the Stats board has had since
+  // 2026-09-05 (lib/hitMode.ts), which this screen never adopted. It is what
+  // makes the card able to ask for the other side of a bet at all: until now
+  // every number on it was an over, silently.
+  const [mode, setMode] = useState<HitMode>('atLeast');
+  const [modeOpen, setModeOpen] = useState(false);
 
   useEffect(() => {
     navigation.setOptions({ title: playerName });
@@ -111,12 +133,16 @@ export function PlayerStatsScreen() {
   //
   // This screen's stepper is an "N+" threshold; the market line is the
   // half-point below it, which is how lineFor() converts on the Stats board.
+  //
+  // OVER ONLY. A prop model's pick is an over at its scored line; offering it
+  // under an "Under 1.5" card would hand someone the opposite of the bet they
+  // are reading. The card's own bet bar covers the under — the model does not.
   const slipPick = useMemo(() => {
-    if (line == null) return null;
+    if (line == null || mode === 'under') return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
     const found = slipPickFor({ player_id: playerId }, idx, line - 0.5);
     return found && found.pick.result == null ? found : null;
-  }, [todayPicks, stat, playerId, line]);
+  }, [todayPicks, stat, playerId, line, mode]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
   const toggleSlip = () => {
@@ -153,11 +179,58 @@ export function PlayerStatsScreen() {
   }, [line, median, step]);
 
   const effLine = line ?? 0;
-  const hits = useMemo(
-    () => (line == null ? 0 : windowed.filter((v) => v >= line).length),
-    [windowed, line],
+
+  // ── The sportsbook line behind the number on screen ────────────────────────
+  // The card's threshold and the book's line are the same bet in two idioms:
+  // "2+ Hits" is Over 1.5. `selectionFor` is the one translation, shared with
+  // the board, so the price can never be fetched for a different bet than the
+  // chart is drawing. It holds at every step size — a 250-yard threshold is
+  // Over 249.5 exactly as a 2-hit one is Over 1.5.
+  const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
+  const market = useMemo(() => propMarketForStat(stat), [stat]);
+  const { books } = usePreferredBooks();
+  // Threaded into the quote so "which games have not started" re-derives on
+  // the tick instead of freezing at mount.
+  const now = useNow();
+  const propQuote = usePlayerPropQuote({
+    sport,
+    team: games[0]?.team ?? null,
+    playerName,
+    market: line == null ? null : market,
+    line: selection.line,
+    side: selection.side,
+    books,
+    now,
+  });
+
+  // "2+ Total Bases" / "Over 1.5 Total Bases" — the bet in the active idiom.
+  // One string, read by the card's headline, the bet bar and the sheet, so
+  // they cannot drift into naming the same bet two ways on one screen.
+  const headline = useMemo(
+    () => hitModeHeadline(effLine, mode, statLabel),
+    [effLine, mode, statLabel],
   );
-  const hitPct = windowed.length > 0 ? hits / windowed.length : 0;
+
+  // The compare sheet — the same AddLineSheet a Stats pill opens, so a line
+  // added from here is the same Stats LINE leg, keyed the same way, and
+  // re-prices on the betslip exactly like one added from the board.
+  const [lineSheet, setLineSheet] = useState<LineSheetInput | null>(null);
+  const openCompare = () => {
+    if (!propQuote.quote) return;
+    setLineSheet(
+      propLineSheetInput(propQuote.quote, sport, statLabel, headline, (l, s) =>
+        modeLineLabel(l, s, mode),
+      ),
+    );
+  };
+
+  // The board's own hit math, against the book's half-point line and the
+  // card's side — so an under card counts unders instead of silently counting
+  // overs, and the count agrees with the chart bar for bar.
+  const { hits, total: hitTotal, pct: hitPct } = useMemo(
+    () => (line == null ? { hits: 0, total: 0, pct: 0 } : computeHitRate(windowed, selection.line, selection.side)),
+    [windowed, line, selection],
+  );
   const hitColor = hitPct >= 0.6 ? colors.bet : hitPct >= 0.45 ? colors.med : colors.avoid;
 
   const stepLine = (deltaSteps: number) => {
@@ -243,6 +316,15 @@ export function PlayerStatsScreen() {
               <Pressable
                 key={`${c.group}:${String(c.key)}`}
                 onPress={() => setStat(c)}
+                // Pre-existing (ux_scan a11y-pressable, byte-identical to
+                // master): a chip whose only child is a Text announces as
+                // "button" and nothing else, and neither row said which chip
+                // was ACTIVE. Cleared here because this change made the stat
+                // row the bet-type selector and brought the file into the
+                // reviewed set — the same courtesy the stepper was paid.
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${c.label} bets`}
                 style={[styles.windowChip, active && styles.windowChipActive]}
               >
                 <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
@@ -265,6 +347,11 @@ export function PlayerStatsScreen() {
               <Pressable
                 key={String(w.value)}
                 onPress={() => setGameWindow(w.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={
+                  w.value === 'all' ? 'All games' : `Last ${w.value} games`
+                }
                 style={[styles.windowChip, active && styles.windowChipActive]}
               >
                 <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
@@ -294,10 +381,10 @@ export function PlayerStatsScreen() {
               <View style={styles.hitTop}>
                 <View>
                   <Text style={styles.hitLabel}>
-                    {statLabel} {effLine}+ · {windowLabel}
+                    {headline} · {windowLabel}
                   </Text>
                   <Text style={styles.hitCount}>
-                    Hit {hits} of {windowed.length} games
+                    Hit {hits} of {hitTotal} games
                   </Text>
                 </View>
                 <View style={[styles.hitBadge, { backgroundColor: hitColor }]}>
@@ -315,7 +402,21 @@ export function PlayerStatsScreen() {
                   <Text style={styles.statCellLabel}>Median</Text>
                 </View>
                 <View style={styles.stepper}>
-                  <Text style={styles.stepperLabel}>At least</Text>
+                  {/* The board's own mode control, not a second one. It opens
+                      HitModeSheet, which is the one place the three idioms are
+                      shown side by side — "2+ Hits", "Over 1.5 Hits", "Under
+                      1.5 Hits" — so nobody hunts for a difference between the
+                      first two that isn't there. */}
+                  <Pressable
+                    onPress={() => setModeOpen(true)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Direction: ${hitModeLabel(mode)}. Change`}
+                    style={({ pressed }) => [styles.modeBtn, pressed && { opacity: 0.7 }]}
+                  >
+                    <Text style={styles.stepperLabel}>{hitModeLabel(mode)}</Text>
+                    <Ionicons name="chevron-down" size={12} color={colors.textSecondary} />
+                  </Pressable>
                   {/* Icon-only, so the label is the only thing VoiceOver has
                       — an unlabelled glyph button is announced as "button" and
                       nothing else. Pre-existing; cleared here because this
@@ -329,7 +430,7 @@ export function PlayerStatsScreen() {
                   >
                     <Ionicons name="remove" size={18} color={colors.tint} />
                   </Pressable>
-                  <Text style={styles.stepValue}>{effLine}</Text>
+                  <Text style={styles.stepValue}>{rulerValueLabel(effLine, mode)}</Text>
                   <Pressable
                     onPress={() => stepLine(1)}
                     hitSlop={8}
@@ -342,19 +443,58 @@ export function PlayerStatsScreen() {
                 </View>
               </View>
 
-              <HitRateChart values={windowed} line={effLine} avg={avg} median={median} />
+              {/* The bet, between the control that sets it and the evidence
+                  for it. Above the chart because the stepper directly above
+                  changes which bet this is and the price is that change's
+                  result — and because below a 200pt chart it fell entirely
+                  under the fold on a 4.7" phone, which is a poor home for the
+                  one thing this screen gained (UX review). NOT pinned:
+                  BetslipBar is mounted at the app root and owns the bottom of
+                  this screen the moment the slip has a leg. */}
+              <PlayerBetBar
+                quote={propQuote.quote}
+                game={propQuote.game}
+                headline={headline}
+                mode={mode}
+                side={selection.side}
+                books={books}
+                statLabel={statLabel}
+                marketPriced={market != null}
+                hasGame={propQuote.hasGame}
+                sidePosted={propQuote.sidePosted}
+                loading={propQuote.loading}
+                error={propQuote.error}
+                onRetry={propQuote.reload}
+                onCompare={openCompare}
+              />
+
+              <HitRateChart
+                values={windowed}
+                line={selection.line}
+                side={selection.side}
+                lineLabel={modeLineLabel(selection.line, selection.side, mode, true)}
+                avg={avg}
+                median={median}
+              />
 
               <View style={styles.legendRow}>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.bet }]} />
-                  <Text style={styles.legendText}>Hit ({effLine}+)</Text>
+                  {/* Both halves named in the ACTIVE idiom. "Hit (2+)" beside
+                      "Under" read as two different vocabularies on one
+                      legend, and on an under card the second one was simply
+                      wrong — it labelled the losing bar with the bet. */}
+                  <Text style={styles.legendText}>
+                    Hit ({modeLineLabel(selection.line, selection.side, mode)})
+                  </Text>
                 </View>
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.avoid }]} />
-                  <Text style={styles.legendText}>Under</Text>
+                  <Text style={styles.legendText}>Miss</Text>
                 </View>
               </View>
             </View>
+
 
             {/* The betslip leg. The Stats board's line pills go straight to the
                 sportsbook now, so this is the one place a leg joins OUR slip —
@@ -409,12 +549,50 @@ export function PlayerStatsScreen() {
                 row={g}
                 sport={sport}
                 stat={stat}
-                line={effLine}
+                line={selection.line}
+                side={selection.side}
               />
             ))}
           </>
         )}
       </ScrollView>
+
+      <HitModeSheet
+        visible={modeOpen}
+        mode={mode}
+        lineN={effLine}
+        statLabel={statLabel}
+        onPick={(m) => {
+          setMode(m);
+          setModeOpen(false);
+        }}
+        // What the member's books actually sell, from the rows already
+        // loaded — so a side none of them prices is closed here rather than
+        // answered with an empty bet bar one screen down. A market with no
+        // coverage read yet leaves both open: an unknown is not a no.
+        overAvailable={propQuote.coverage.size === 0 || anyBookPostsSide(propQuote.coverage, 'over')}
+        underAvailable={
+          propQuote.coverage.size === 0 || anyBookPostsSide(propQuote.coverage, 'under')
+        }
+        // WHY the row is greyed. A disabled option with no reason is the "why
+        // is FanDuel blank" question in a smaller box — the same sentence the
+        // bet bar composes, from the one helper, so the sheet and the card can
+        // never explain the same absence two ways.
+        unavailableNote={
+          propQuote.coverage.size > 0 && !anyBookPostsSide(propQuote.coverage, 'under')
+            ? sideNotPostedNote(books, 'under', statLabel)
+            : propQuote.coverage.size > 0 && !anyBookPostsSide(propQuote.coverage, 'over')
+              ? sideNotPostedNote(books, 'over', statLabel)
+              : undefined
+        }
+        onClose={() => setModeOpen(false)}
+      />
+      <AddLineSheet
+        input={lineSheet}
+        game={propQuote.game}
+        onClose={() => setLineSheet(null)}
+        onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
+      />
     </SafeAreaView>
   );
 }
@@ -434,17 +612,21 @@ function GameRow({
   sport,
   stat,
   line,
+  side,
 }: {
   row: PlayerLogEntry;
   sport: PlayerLogSport;
   stat: StatDef | null;
+  /** The book's half-point line, so the dot, the chart and the count all
+   *  compare the same number the same way. */
   line: number;
+  side: HitDirection;
 }) {
   const num = logStatValue(row, stat);
   // Yardage arrives as a NUMERIC string and can be fractional in nflverse — one
   // decimal at most, so a 78-yard game never renders as 78.0000001.
   const value = num == null ? '—' : String(Math.round(num * 10) / 10);
-  const hit = num != null && num >= line;
+  const hit = isHit(num, line, side);
   return (
     <View style={styles.gameRow}>
       <View style={styles.gameDot}>
@@ -509,7 +691,12 @@ const styles = StyleSheet.create({
   },
   slipBtnTextIn: { color: colors.bet },
   container: { flex: 1, backgroundColor: colors.bg },
-  list: { paddingBottom: spacing.xl },
+  // Clears BetslipBar, which is mounted at the app ROOT and sits over the
+  // bottom of this screen whenever the slip has a leg — at 24pt the tail of
+  // the game log was underneath it. Pre-existing; this change gave the screen
+  // a second way to put a leg in the slip without leaving it, so it now
+  // happens to anyone who uses the card as intended.
+  list: { paddingBottom: spacing.xxl * 2 },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -642,7 +829,16 @@ const styles = StyleSheet.create({
   stepperLabel: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-    marginRight: spacing.xs,
+  },
+  // 44pt tall so the control that changes which BET the screen is about meets
+  // the minimum target, which a bare text label did not.
+  modeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    minHeight: 44,
+    paddingRight: spacing.xs,
+    justifyContent: 'center',
   },
   stepBtn: {
     width: 30,

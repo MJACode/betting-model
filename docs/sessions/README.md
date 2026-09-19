@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, player card bet types + place at a book: usePlayerPropQuote (next unstarted game, alternates, buildQuoteIndex), PlayerBetBar (place / compare), hitMode adopted. Read paged per game — worst single game 1,258 rows. Chart/count predicate unified |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19 evening, #775 follow-up: serve docstring + ncaaf.md aligned to 0.50/0.16 after the mobile-mirror CI fix landed; artifact shipped_cut left as 09-12 provenance |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19 evening, the honest re-sweep under the 0.30 floor: no pre-game cut reaches 25 bets (the floor binds); ncaaf_live_win_prob 0.65/0.10 → 0.50/0.16 on the 2025 replay (43 bets +38.6%); 51 standing pre-floor bets voided |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, every model decides on an honest number (tiered fit: Platt, else a pooled-shrunk offset, n=0 takes the pool) and one global EV floor 0.30 on the calibrated number at the deciding price gates every BET writer; replay: 0.30 keeps 13 bets over the record, floor alone negative everywhere |
