@@ -75,7 +75,7 @@ def test_the_delaware_re_hang_is_declined_on_a_tied_state():
     assert clock.observe(key, TIED, american_to_implied(-167), _iso(49), _at(52)) == pytest.approx(0.0097, abs=5e-4)
     move = clock.observe(key, TIED, american_to_implied(100), _iso(150), _at(158))
     assert move == pytest.approx(0.1350, abs=5e-4)
-    assert move > 0.08                      # NCAAF moneyline cap
+    assert move > 0.05                      # NCAAF moneyline cap
 
 
 def test_first_sight_has_nothing_to_compare_against():
@@ -140,7 +140,44 @@ def test_the_production_anchor_range_all_fires():
         clock = BookMoveClock()
         clock.observe("g", TIED, american_to_implied(price), _iso(0), _at(1))
         move = clock.observe("g", TIED, american_to_implied(100), _iso(150), _at(158))
-        assert move > 0.08, price
+        assert move > 0.05, price
+
+
+def test_a_blank_possession_is_not_a_state_change():
+    """North Texas at Texas State, 2026-09-19, the first slate the guard ran.
+    CFBD blanks possession around a scoring play; the blank read as a state
+    change, the anchor was dropped, the post-touchdown -129 became the new
+    baseline and the loop bet Texas State 44s before the feed reported the
+    score. A field the feed stops reporting keeps its last value."""
+    clock = BookMoveClock()
+    key = ("NCAAF_2026-09-19_north-texas_texas-state", "h2h")
+    up7_away = (28, 21, 2, "away")            # 17:37:51 our feed
+    up7_blank = (28, 21, 2, None)             # 17:38:55 our feed
+    clock.observe(key, up7_away, american_to_implied(-213), _iso(0), _at(1))     # 17:38:13 DK
+    move = clock.observe(key, up7_blank, american_to_implied(-129), _iso(49), _at(56))  # 17:39:02 DK
+    assert move == pytest.approx(abs(american_to_implied(-129)
+                                     - american_to_implied(-213)), abs=1e-6)
+    assert move > 0.05                        # NCAAF moneyline cap, declined
+
+
+def test_a_blank_that_is_later_filled_is_still_not_a_change():
+    clock = BookMoveClock()
+    clock.observe("g", (28, 21, 2, "away"), 0.68, _iso(0), _at(1))
+    clock.observe("g", (28, 21, 2, None), 0.68, _iso(30), _at(31))
+    assert clock.observe("g", (28, 21, 2, "away"), 0.69, _iso(60), _at(61)) == pytest.approx(0.01)
+
+
+def test_the_clemson_move_clears_the_tightened_cap():
+    """North Carolina at Clemson, 16:12Z, before the guard deployed:
+    DraftKings -143 -> -116 -> -105 on a 0-0 state, bet at -105, +108
+    forty-five seconds later. 0.076 implied -- under the original 0.08 cap."""
+    from ncaaf_live.config import LIVE_BOOK_MOVE_MAX_ML
+    clock = BookMoveClock()
+    clock.observe("g", TIED, american_to_implied(-143), _iso(0), _at(1))
+    clock.observe("g", TIED, american_to_implied(-116), _iso(102), _at(103))
+    move = clock.observe("g", TIED, american_to_implied(-105), _iso(156), _at(157))
+    assert move == pytest.approx(0.076, abs=1e-3)
+    assert move > LIVE_BOOK_MOVE_MAX_ML
 
 
 def test_a_missing_number_or_state_is_ignored_not_recorded():
