@@ -44,6 +44,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -459,7 +460,21 @@ def ingest_player_news(
 
         for sport in targets:
             teams = teams_with_props_today(conn, sport, run_date)
-            items = provider(sport, teams, fetch) if fetch else provider(sport, teams)
+            # This ingestor has written ZERO rows since it shipped, and the
+            # fetcher's own diagnostic (the "0 raw articles" / "named nobody"
+            # warnings in fetch_espn_news) only ever reached loguru's stream --
+            # invisible to a caller that only reads the returned summary, which
+            # is exactly how this job's result is read back (worker_jobs.result
+            # via Supabase, since the dev sandbox cannot reach ESPN itself to
+            # look at a live response, see rules_evidence.md). Capture whatever
+            # WARNING-level lines this sport's fetch logs and carry them home in
+            # the summary so a zero-row run is diagnosable without log access.
+            log_buf = io.StringIO()
+            sink_id = logger.add(log_buf, level="WARNING", format="{message}")
+            try:
+                items = provider(sport, teams, fetch) if fetch else provider(sport, teams)
+            finally:
+                logger.remove(sink_id)
             index = build_name_index(conn, sport)
             written = store_items(conn, sport, items, index)
             conn.commit()
@@ -470,6 +485,9 @@ def ingest_player_news(
                 if index.get(normalize_player_name(p.name))
             )
             summary[sport] = {"items": len(items), "rows": written, "resolved": resolved}
+            warnings = log_buf.getvalue().strip()
+            if warnings:
+                summary[sport]["warnings"] = warnings.splitlines()
             logger.info(
                 f"{sport}: {len(items)} news items → {written} player rows "
                 f"({resolved} matched to a player id)"

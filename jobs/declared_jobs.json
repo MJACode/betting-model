@@ -840,5 +840,14 @@
     "requested_by": "mike",
     "note": "ONE-SHOT bootstrap of model_quality_checks after the monitor ships. The 6am daily and 11:00am ET cron cover subsequent days; this run writes today's findings as soon as the worker picks up the declaration. Report only — no pause, no unit bump, no threshold change.",
     "args": {}
+  },
+  {
+    "key": "player-news-diagnose-2026-09-19",
+    "job_type": "player_news",
+    "requested_by": "matt",
+    "note": "DIAGNOSTIC. A scheduled staleness sweep found player_news at 0 rows, total, ever -- despite step_player_news running in every daily/hourly pipeline pass since the feature shipped ~2026-08-30 and always reporting success (a dead ESPN feed is a quiet zero by design). injuries reads the same site.api.espn.com host and is fresh, ruling out the known ESPN IP-block (sessions 112, 115). Could not confirm the real cause locally: the dev sandbox's egress proxy 403s site.api.espn.com outright, for both requests and WebFetch, and public docs for ESPN's OTHER news API (now.core.api.espn.com) show `categories` entries with `description` directly on the category, not nested under an `athlete` key the way this repo's test fixtures assume -- unconfirmed for this endpoint, so not acted on blind. This job (added same commit) forces a real fetch, scoped to MLB only to keep it to one league-feed call, and the per-sport summary now carries a `warnings` key with whatever fetch_espn_news logged (0 raw articles / raw articles that named nobody, with a sample). Read worker_jobs.result once this runs to see the actual ESPN shape and rows written, then land the confirmed parser fix as a follow-up.",
+    "args": {
+      "sports": ["MLB"]
+    }
   }
 ]
