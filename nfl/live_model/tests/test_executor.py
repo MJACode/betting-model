@@ -38,6 +38,24 @@ def quote(price=-110, ts=None, market="totals_h2", side="over", line=23.5):
     return Quote("g", market, "draftkings", side, price, line, ts or NOW)
 
 
+def _prime(ex, st=None, q=None):
+    """Watch the same state and quote, unchanged, for longer than the settled
+    window (2026-09-19, the settled-state rule): a first look at a quote is
+    never a bet, so a test that expects one has to have looked before."""
+    from dataclasses import replace
+    from live_model.config import SETTLED_SEC
+    st = st if st is not None else state()
+    q = q if q is not None else quote()
+    earlier = NOW - timedelta(seconds=SETTLED_SEC + 30)
+    rec, al = ex.recorder, ex.alerter
+    ex.recorder = ex.alerter = None
+    ex.evaluate(state=replace(st, ts=earlier), quote=replace(q, ts=earlier),
+                model_prob=0.5, model_id="nfl_live_deriv", now=earlier)
+    ex.decisions.clear()
+    ex.recorder, ex.alerter = rec, al
+    return ex
+
+
 # --------------------------------------------------------------------- math
 def test_expected_value_is_on_the_quoted_price():
     assert expected_value(0.55, -110) == pytest.approx(0.05, abs=1e-3)
@@ -89,6 +107,7 @@ def test_halftime_is_priceable_even_with_no_clock_left():
     """Halftime has zero seconds on the quarter clock and is the single most
     valuable window in the system. The too-little-time guard must not eat it."""
     ex = Executor()
+    _prime(ex, state(period=2, clock=0), quote())
     d = ex.evaluate(state=state(period=2, clock=0), quote=quote(),
                     model_prob=0.62, model_id="nfl_live_halftime", now=NOW)
     assert d.bet
@@ -96,6 +115,7 @@ def test_halftime_is_priceable_even_with_no_clock_left():
 
 def test_an_unknown_model_id_cannot_bet():
     ex = Executor()
+    _prime(ex, state(), quote())
     d = ex.evaluate(state=state(), quote=quote(), model_prob=0.9,
                     model_id="nfl_live_nonsense", now=NOW)
     assert not d.bet and d.reason.startswith("unknown_model")
@@ -104,6 +124,7 @@ def test_an_unknown_model_id_cannot_bet():
 @pytest.mark.parametrize("model_id", sorted(EV_THRESHOLDS))
 def test_each_lane_enforces_its_own_threshold(model_id):
     ex = Executor()
+    _prime(ex, state(), quote(price=100))
     thresh = EV_THRESHOLDS[model_id]
     # Just under the lane's threshold at even money.
     p_under = (1.0 + thresh) / 2.0 - 0.005
@@ -117,6 +138,7 @@ def test_each_lane_enforces_its_own_threshold(model_id):
 
 def test_daily_exposure_is_capped_and_the_last_bet_is_clipped():
     ex = Executor()
+    _prime(ex, state(), quote())
     for _ in range(20):
         ex.evaluate(state=state(), quote=quote(), model_prob=0.75,
                     model_id="nfl_live_deriv", now=NOW)
@@ -133,6 +155,7 @@ def test_every_pass_is_recorded_not_only_every_bet():
     """
     rows = []
     ex = Executor(recorder=rows.append)
+    _prime(ex, state(), quote())
     ex.evaluate(state=state(), quote=quote(), model_prob=0.30,
                 model_id="nfl_live_deriv", now=NOW)
     ex.evaluate(state=state(), quote=quote(), model_prob=0.62,
@@ -146,6 +169,7 @@ def test_a_recorder_that_raises_cannot_break_the_loop():
     def boom(_):
         raise RuntimeError("postgres is down")
     ex = Executor(recorder=boom)
+    _prime(ex, state(), quote())
     d = ex.evaluate(state=state(), quote=quote(), model_prob=0.62,
                     model_id="nfl_live_deriv", now=NOW)
     assert d.bet
@@ -156,6 +180,7 @@ def test_an_alerter_that_raises_cannot_unmake_the_bet():
         raise RuntimeError("discord is down")
     rows = []
     ex = Executor(recorder=rows.append, alerter=boom)
+    _prime(ex, state(), quote())
     d = ex.evaluate(state=state(), quote=quote(), model_prob=0.62,
                     model_id="nfl_live_deriv", now=NOW)
     assert d.bet and rows[-1].bet
@@ -163,6 +188,7 @@ def test_an_alerter_that_raises_cannot_unmake_the_bet():
 
 def test_the_decision_row_round_trips():
     ex = Executor()
+    _prime(ex, state(), quote())
     d = ex.evaluate(state=state(), quote=quote(), model_prob=0.62,
                     model_id="nfl_live_deriv", now=NOW)
     row = d.to_row()
@@ -295,6 +321,7 @@ def test_a_quote_past_the_juice_ceiling_is_refused():
     trusting.
     """
     ex = Executor()
+    _prime(ex, state(), quote(price=-250))
     d = ex.evaluate(state=state(), quote=quote(price=-250), model_prob=0.95,
                     model_id="nfl_live_prop", now=NOW)
     assert d.bet is False
@@ -305,6 +332,7 @@ def test_the_ceiling_is_checked_before_the_edge():
     """Eligibility, not an edge question. Pinned by giving the quote an EV so
     large that any ordering bug would let it through as a bet."""
     ex = Executor()
+    _prime(ex, state(), quote(price=-1000))
     d = ex.evaluate(state=state(), quote=quote(price=-1000), model_prob=0.99,
                     model_id="nfl_live_prop", now=NOW)
     assert d.bet is False
@@ -316,6 +344,7 @@ def test_a_quote_at_the_ceiling_still_bets():
     off-by-one here silently removes the whole -140 rung, which is where a lot
     of prop pricing actually sits."""
     ex = Executor()
+    _prime(ex, state(), quote(price=MIN_PRICE))
     d = ex.evaluate(state=state(), quote=quote(price=MIN_PRICE), model_prob=0.85,
                     model_id="nfl_live_prop", now=NOW)
     assert d.bet is True, d.reason
@@ -325,6 +354,7 @@ def test_a_plus_price_is_never_juice():
     """+120 is numerically greater than -140 and must pass the ceiling. A naive
     abs() comparison would reject the best prices the lane can get."""
     ex = Executor()
+    _prime(ex, state(), quote(price=150))
     d = ex.evaluate(state=state(), quote=quote(price=150), model_prob=0.60,
                     model_id="nfl_live_prop", now=NOW)
     assert d.bet is True, d.reason
@@ -336,6 +366,7 @@ def test_the_refusal_is_recorded_not_skipped():
     candidate since week 3"."""
     seen = []
     ex = Executor(recorder=seen.append)
+    _prime(ex, state(), quote(price=-300))
     ex.evaluate(state=state(), quote=quote(price=-300), model_prob=0.95,
                 model_id="nfl_live_prop", now=NOW)
     assert len(seen) == 1 and seen[0].bet is False

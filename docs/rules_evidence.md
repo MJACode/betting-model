@@ -1191,3 +1191,19 @@ are +ev picks"):**
   minutes at 17:17. A None field now keeps its last value in the state key.
   `ncaaf_live_states` — written since the deploy — is what made this
   diagnosable in minutes; 212 rows on 14 games in the first 50 minutes.
+
+**Then the fix he actually asked for (mike: "I said to fix it not pause it").**
+Both patches above are about the SIZE of a move; the defect is about TIME.
+The model — pregame line, score, clock; no field position, on a feed 20–70 s
+behind the books — can only ever see an "edge" when the book has moved and it
+has not, and the guard cannot tell a 30-second-old re-hang from a genuine
+disagreement once the re-hang is the anchor. The settled-state rule
+(`LIVE_SETTLED_SEC`, 120 s): no market is priced until the book's number and
+our state have both been still for longer than the worst measured lag plus
+the re-hang. The settled record was not the argument — 9 book-moved bets went
+6–3 (+1.17u), 10 others 6–4 (+0.69u), n too small to say anything — the
+mechanism was. Applied to NCAAF and NFL; MLB excluded because its state feed
+leads the book (2026-09-03 measurement) and its base-out state changes every
+few pitches. The raw CFBD `situation` string is now stored in
+`ncaaf_live_states.raw_state` so the yard line the model was trained on can be
+parsed once its live shape has been seen.

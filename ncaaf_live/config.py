@@ -283,6 +283,29 @@ LIVE_BOOK_MOVE_MAX_ML = float(
     os.environ.get("NCAAF_LIVE_BOOK_MOVE_MAX_ML", "0.05"))       # implied prob
 LIVE_BOOK_MOVE_MAX_TOTAL = float(
     os.environ.get("NCAAF_LIVE_BOOK_MOVE_MAX_TOTAL", "3.0"))     # points
+
+# THE SETTLED-STATE RULE (2026-09-19, mike: "I said to fix it not pause it").
+# No market is priced until the book's number AND our state have both been
+# unchanged for this long. The cap above catches a loud move; it cannot catch
+# the same defect once the book's re-hang is already the anchor (Texas State,
+# 17:39Z: CFBD blanked possession, the anchor reset, DraftKings' post-
+# touchdown -129 became the baseline) or when the move sits under the cap
+# (Clemson, 16:12Z: 0.076). What separates a lag from a disagreement is TIME.
+# Measured today: the CFBD score feed reported the Delaware touchdown 23s
+# after DraftKings re-hung and 72s after FanDuel; on 2026-09-03 DraftKings
+# re-hung 37.6s after the score. 120s is past the sum of both. An edge that
+# is still there after two quiet minutes is a disagreement on the same
+# facts; one that appears inside them is the book's information lead read
+# backwards -- which is what every one of today's four bets was.
+#
+# The tolerances say what counts as the book MOVING for this clock, so the
+# ~50s republish wobble (median 0.4 implied points on the 09-12 slate) does
+# not reset it: 2 implied points on a moneyline, half a point on a total.
+LIVE_SETTLED_SEC = int(os.environ.get("NCAAF_LIVE_SETTLED_SEC", "120"))
+LIVE_SETTLED_TOL_ML = float(
+    os.environ.get("NCAAF_LIVE_SETTLED_TOL_ML", "0.02"))         # implied prob
+LIVE_SETTLED_TOL_TOTAL = float(
+    os.environ.get("NCAAF_LIVE_SETTLED_TOL_TOTAL", "0.5"))       # points
 # Measured 2026-08-28 against the live API (not the documented formula): one
 # historical NCAAF odds snapshot, one market, one bookmaker = 10 credits.
 MEASURED_CREDITS_PER_SNAPSHOT = 10

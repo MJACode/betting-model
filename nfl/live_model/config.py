@@ -127,6 +127,17 @@ BOOK_MOVE_MAX = {
     "spreads_h2": 3.0,
     "player_pass_attempts": 8.0,
 }
+# THE SETTLED-STATE RULE (2026-09-19): no bet on a guarded market until the
+# book's number and our state have both been still for this long -- the
+# quiet version of the defect the cap catches, caught by time rather than by
+# size. Same window as NCAAF (ncaaf_live/config.LIVE_SETTLED_SEC, where the
+# feed lags were measured); ESPN's NFL feed is the faster one, so this is
+# conservative here. `SETTLED_TOL` is what counts as the book moving for the
+# clock (juice wobble does not); a market not listed uses 0.0, i.e. any
+# change. Refusals are recorded as `not_settled`, so the cost is a query.
+SETTLED_SEC = int(os.getenv("NFL_LIVE_SETTLED_SEC", "120"))
+SETTLED_TOL = {"h2h": 0.02, "spreads": 0.5, "totals": 0.5, "totals_h2": 0.5,
+               "spreads_h2": 0.5, "player_pass_attempts": 0.5}
 
 # ------------------------------------------------------------------- credits
 # The live endpoint costs 1 credit per market per region per poll. A full

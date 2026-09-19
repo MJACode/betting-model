@@ -60,6 +60,21 @@ _ODDS = {"h2h": {"home": -220, "away": 180},
          "total": {"line": 52.5, "over": -110, "under": -110}}
 
 
+def _settled(engine, state, ctx, odds):
+    """Price after the engine has watched this state and this number, still,
+    for longer than the settled window (2026-09-19, the settled-state rule):
+    a first look at a quote is never a bet, so a test that expects one has to
+    have looked before. Resets the engine's clock so the module-scoped engine
+    does not carry one test's anchors into the next."""
+    from datetime import datetime, timedelta, timezone
+    from data.live_quote_guard import BookMoveClock
+    from ncaaf_live.config import LIVE_SETTLED_SEC
+    engine._book_moves = BookMoveClock()
+    now = datetime.now(timezone.utc)
+    engine.price(state, ctx, odds, now=now - timedelta(seconds=LIVE_SETTLED_SEC + 10))
+    return engine.price(state, ctx, odds, now=now)
+
+
 # ── the licenses ──────────────────────────────────────────────────────────────
 
 def test_overtime_is_declined_entirely(engine):
@@ -86,8 +101,8 @@ def test_a_non_fbs_matchup_is_not_priced(engine):
     # A shaded over that clears the stale-line cap, so the control prices.
     odds = {"h2h": {"home": -220, "away": 180},
             "total": {"line": 45.0, "over": -190, "under": -110}}
-    assert engine.price(_state(), _ctx(), odds) != []
-    assert engine.price(_state(), _ctx(fbs_matchup=False), odds) == []
+    assert _settled(engine, _state(), _ctx(), odds) != []
+    assert _settled(engine, _state(), _ctx(fbs_matchup=False), odds) == []
 
 
 def test_a_context_nobody_checked_is_not_priced(engine):
@@ -98,8 +113,8 @@ def test_a_context_nobody_checked_is_not_priced(engine):
                 is_dome=False, game_date="2026-08-29")
     odds = {"h2h": {"home": -220, "away": 180},
             "total": {"line": 45.0, "over": -190, "under": -110}}
-    assert engine.price(_state(), GameContext(**base, fbs_matchup=True), odds) != []
-    assert engine.price(_state(), GameContext(**base), odds) == []
+    assert _settled(engine, _state(), GameContext(**base, fbs_matchup=True), odds) != []
+    assert _settled(engine, _state(), GameContext(**base), odds) == []
 
 
 def test_no_odds_means_no_picks_never_prob_only(engine):
@@ -122,7 +137,7 @@ def test_stale_line_cap_declines_absurd_edges(engine):
 
 def test_picks_carry_the_settlement_contract(engine):
     """Whatever fires must settle through the platform's generic game path."""
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     for p in picks:
         assert p["is_live"] is True
         assert p["signal_type"] in ("BET", "AVOID")
@@ -377,7 +392,7 @@ def test_a_quote_with_no_timestamp_still_prices(engine):
     raw qualifying states and 40.0% of corrected ones on the 2025 replay, so
     this is a fixture artifact, not the correction crowding the cap."""
     odds = {"h2h": {"home": -280, "away": 230}, "total": _ODDS["total"]}
-    assert engine.price(_state(), _ctx(), odds) != []
+    assert _settled(engine, _state(), _ctx(), odds) != []
 
 
 # ── the edge is a band, not a floor ──────────────────────────────────────────
@@ -427,7 +442,7 @@ def test_the_fixture_fires_when_wide_open(engine, monkeypatch):
     _wide_open(monkeypatch)
     import config as platform_config
     monkeypatch.setattr(platform_config, "PAUSED_MODELS", set())
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     assert {p["model_id"] for p in picks if p["signal_type"] == "BET"} == {
         "ncaaf_live_win_prob", "ncaaf_live_total"}
 
@@ -445,7 +460,7 @@ def test_a_paused_lane_never_writes_a_bet(engine, monkeypatch):
     import config as platform_config
     monkeypatch.setattr(platform_config, "PAUSED_MODELS",
                         {"ncaaf_live_win_prob", "ncaaf_live_total"})
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     assert [p for p in picks if p["signal_type"] == "BET"] == []
 
 
@@ -454,6 +469,6 @@ def test_the_pause_is_per_lane(engine, monkeypatch):
     _wide_open(monkeypatch)
     import config as platform_config
     monkeypatch.setattr(platform_config, "PAUSED_MODELS", {"ncaaf_live_total"})
-    picks = engine.price(_state(), _ctx(), _ODDS)
+    picks = _settled(engine, _state(), _ctx(), _ODDS)
     bets = {p["model_id"] for p in picks if p["signal_type"] == "BET"}
     assert bets == {"ncaaf_live_win_prob"}

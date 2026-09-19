@@ -105,8 +105,27 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
   `ncaaf_live_states` (one row per change, written by the loop since the same
   day) now makes measurable. Re-measure after one slate.
   Tests: `tests/test_live_book_move_guard.py` (the Delaware timeline, a control
-  that still bets it at first sight, MLB and NFL wiring),
+  that still bets it once settled, MLB and NFL wiring),
   `tests/test_ncaaf_live_states.py`.
+
+  **And a fifth, which is a rule about TIME rather than size — the settled-state
+  rule (2026-09-19, later the same day, mike: "I said to fix it not pause
+  it").** The cap catches a loud move. It cannot catch the same defect once the
+  book's re-hang is already the anchor (Texas State, 17:39Z: CFBD blanked
+  `possession`, the anchor reset, DraftKings' post-touchdown −129 became the
+  baseline) or when the move sits under the cap (Clemson, 16:12Z: 0.076).
+  What separates a lag from a disagreement is time: **no market is priced
+  until the book's number and our state have both been unchanged for
+  `LIVE_SETTLED_SEC` (120 s)** — past the worst measured feed lag (72 s) plus
+  the book's re-hang (~40 s). An edge still there after two quiet minutes is a
+  disagreement on the same facts; one that appears inside them is the book's
+  information lead read backwards, which is what every one of the day's four
+  bets was. A republish inside the tolerance (2 implied points / 0.5 pt) does
+  not reset the clock; first sight and a restart do, so a restart waits a
+  window rather than betting blind. `BookMoveClock.quiet_seconds`; NCAAF and
+  NFL (`SETTLED_SEC`, refusal `not_settled`); not MLB, whose 15 s state feed
+  leads the book (measured 2026-09-03) and whose base-out state changes every
+  few pitches.
   **MLB reads the score change out of `live_game_state` instead of keeping a
   `ScoreClock`.** `run_live_scorer` is invoked fresh per trigger, so an
   in-memory clock would report first sight forever — a guard dead code can
