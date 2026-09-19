@@ -8,8 +8,9 @@ find_total_bets, print the card, and INSERT only when the matching
 Deliberate and load-bearing:
 
   SPREADS THRESHOLD IS 1.8pp. Measured 2026-09-15 on the 2026 season against
-  BEST_LINE_BOOKMAKERS. GROK Pin-vs-DK ≥2pp was ~−5% n≈200 — do not live
-  INSERT until MLB_SPREAD_MARKET_PUBLISH=1.
+  BEST_LINE_BOOKMAKERS. 2026-09-19 remesure (last pre-commence) does not
+  clear the ship bar (docs/mlb_spread_market_2026.md). GROK Pin-vs-DK ≥2pp
+  was ~−5% n≈200 — do not live INSERT until MLB_SPREAD_MARKET_PUBLISH=1.
 
   TOTALS THRESHOLD IS 2.0pp (MIN_EDGE_TOTALS_PAPER). Pin no-vig lean minus
   the best bettable soft implied, equal total. Never fade Pinnacle.

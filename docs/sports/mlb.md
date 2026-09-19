@@ -53,8 +53,11 @@ converging on the same place from the other side.
   base rate moving 0.364 → 0.495, so the target mix is itself changing. The
   folds do not agree and the mean is not actionable. 2026-09-15: `mlb_spread_market`
   at 1.8pp exists but INSERT is gated (`MLB_SPREAD_MARKET_PUBLISH` default 0).
-  GROK Pin-vs-DK ≥2pp spreads ~−5% n≈200 — do not live-publish that construction.
-  Not an unpause of this id. `docs/mlb_runline_ou_edge_search.md`.
+  2026-09-19 remesure (last pre-commence BEST_LINE de-vig): Sep +2.09u / 40;
+  season +15.75u / 368; Apr/May red; max 7/day — **does not clear ship bar;
+  family parked.** GROK Pin-vs-DK ≥2pp spreads ~−5% n≈200 — do not live-publish
+  that construction. Not an unpause of this id.
+  `docs/mlb_spread_market_2026.md`.
 * **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last
   three starts), shared by the daily ingest and the rebuild via
   `data/pitcher_rates.py`. It used to be `AVG(era)` over the last three stored

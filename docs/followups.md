@@ -21,6 +21,15 @@
 
 ---
 
+## [x] `mlb_spread_market` September remesure — family parked (2026-09-19)
+
+Production as-of (last pre-commence BEST_LINE de-vig, −200): Sep
+**40 / +2.09u / +5.2%**; season **368 / +15.75u / +4.3%**; Apr/May red;
+max 7/day. Tighten-only empty (2.0pp / top-2 / pin-lean / sides; August
+public last-pre-commence = 0). **Do not flip `MLB_SPREAD_MARKET_PUBLISH`.**
+Do not reopen this neighbourhood as a publisher. Next hunt is a different
+construction. `docs/mlb_spread_market_2026.md`.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`

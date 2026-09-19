@@ -16,19 +16,16 @@ quotes (5 min), one bet per game (best edge).
 
 THE CUT. 1.8pp, measured 2026-09-15 on 2026 settled MLB spreads, Pinnacle
 vs config.BEST_LINE_BOOKMAKERS (pinnacle/bovada/espnbet excluded — those
-are not a price a US bettor can take):
+are not a price a US bettor can take). 2026-09-19 remesure (last
+pre-commence, −200 floor, through Sep 18) does **not** clear the ship
+bar — Apr/May red, max 7/day — and the family is parked. Numbers and
+the tighten-only empties: docs/mlb_spread_market_2026.md.
 
-    min_edge   n     ROI     early (to 06-30)    late (from 07-01)
-    0.015    622   +2.22%   −1.55% / 361        +7.44% / 261
-    0.018    367   +4.80%   +1.52% / 214        +9.38% / 153
-    0.020    233   +7.28%   −0.05% / 139       +18.12% / 94
+    remesure 0.018   368   +4.3%   +1.53% / 210        +7.9% / 158
+    Sep 0.018         40   +5.2%   (+2.09u, 23-17, max 5/day)
 
-0.018 is the only cell in that neighbourhood with both time halves
-positive, n >> 25, and pooled neighbours (0.015, 0.020) also positive.
-Monthly at 0.018: Apr +0.45 / May −2.15 / Jun +9.69 / Jul +9.10 /
-Aug +8.68 / Sep +11.19 (5 of 6 months positive). Both sides positive
-(away +3.25% / 175, home +7.19% / 192). Every matching line in the
-sample is the run line (±1.5).
+Do not treat the 2026-09-15 monthly list (Apr +0.45 … Sep +11.19 on a
+few days) as live. Do not flip MLB_SPREAD_MARKET_PUBLISH.
 
 TOTALS. The paper publisher is Pin OPEN no-vig lean minus the best
 bettable soft book's juiced implied, equal total, ≥2pp. GROK vs DK
