@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, MLB totals edge hunt Deliverable B: no stakeable mlb_over_under construction. Public-board steam follow CLEAR refused (full July −118.50u/197). I24 untouched. No PUBLISH / no unpause |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade I24 juice band: optional UNDER_ODDS_MIN/MAX (unset = no band; I24 −110/−100). Finder before top-K. Claim n=38 +9.51u +25%; steam_cap2 Sep −23.6%/5. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, public-fade top-K: rank by over tickets, recommended MAX_PER_SLATE=2 (default 0 = all-pass). Ticket top-2 +11.2%/48 vs all-pass +5.9%/101; gap/juice/EV/suppress-all failed. PUBLISH stays 0 |

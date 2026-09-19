@@ -21,6 +21,19 @@
 
 ---
 
+## [ ] Careful I24 upgrades after the totals hunt came back empty
+
+2026-09-19 `docs/mlb_over_under_edge_hunt.md` (Deliverable B): no
+stakeable `mlb_over_under` construction under the runline ship bar.
+Public / RLM / Pin-agree / money-heavy / Pin-vs-soft all failed
+month-stability or n. Public-board steam follow mechanically CLEARs and
+is **refused** (full July DK follow ≥1pp −118.50u / 197 — coverage-
+selected sample). Do **not** unpause XGBoost, do **not** flip PUBLISH,
+do **not** weaken I24 guards. Next totals work is a remesure of the
+**existing** fade-finder I24 cell (`docs/mlb_total_public_fade.md`,
+claimed n=38 +9.51u +25%) on that finder’s own as-of, then careful
+upgrades only if that cell still holds. `scripts/mlb_total_public_fade_topk.py`.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`

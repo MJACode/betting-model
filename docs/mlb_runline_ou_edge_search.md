@@ -41,6 +41,11 @@ A **separate** paper lane, `mlb_total_public_fade`, fades public OVER
 tickets. It is not this card and not an unpause.
 `docs/mlb_total_public_fade.md`. `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default 0.
 
+2026-09-19 totals hunt (`docs/mlb_over_under_edge_hunt.md`): **no
+stakeable `mlb_over_under` construction** under the runline ship bar.
+Public-board steam follow mechanically CLEARs and is refused (full July
+DK follow ≥1pp −118.50u / 197). I24 guards not recut. No new publisher.
+
 ---
 
 ## Production facts (Error Handler, 2026-09-15 — do not re-litigate calibration cuts)
