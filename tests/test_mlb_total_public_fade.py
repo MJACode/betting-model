@@ -374,3 +374,144 @@ def test_publish_stays_off_and_xgboost_stays_paused_after_the_guard():
     assert fade.publish_enabled() is False
     assert "mlb_over_under" in config.PAUSED_MODELS
     assert "mlb_runline" in config.PAUSED_MODELS
+    assert fade.max_per_slate() == 0
+    assert config.MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE == 0
+    assert fade.rank_kind() == fade.RANK_TICKET
+    assert fade.edge_floor() == 0.0
+
+
+# ── top-K ranking ────────────────────────────────────────────────────────────
+
+
+def _bet(gid="G1", ticket=80.0, money=70.0, price=-110.0, line=8.5):
+    return fade.PublicFadeBet(
+        game_id=gid, book="draftkings", line=line, price=price,
+        over_ticket_pct=ticket, over_money_pct=money,
+    )
+
+
+def test_finder_copies_over_money_pct():
+    quotes = _dk_board()
+    bets, _ = fade.find_fade_bets(
+        {"G1": _split(ticket=80.0, public_money_pct=72.0)},
+        quotes, min_over_tickets=70)
+    assert len(bets) == 1
+    assert bets[0].over_money_pct == 72.0
+
+
+def test_ticket_rank_picks_the_heavier_pile_not_the_lighter():
+    """A lowest-ticket selector would keep G_lo. The formula must not."""
+    heavy = _bet("G_hi", ticket=94.0, money=90.0, price=-110)
+    light = _bet("G_lo", ticket=71.0, money=50.0, price=-110)
+    assert fade.rank_score(heavy, fade.RANK_TICKET) > fade.rank_score(
+        light, fade.RANK_TICKET)
+    kept = fade.select_top_k(
+        [light, heavy], max_per_slate=1,
+        slate_of=lambda _b: "2026-06-15", kind=fade.RANK_TICKET)
+    assert [b.game_id for b in kept] == ["G_hi"]
+
+
+def test_juice_rank_prefers_plus_money_over_heavy_juice():
+    plus = _bet("G_plus", ticket=80.0, money=80.0, price=100)
+    juicy = _bet("G_juice", ticket=80.0, money=80.0, price=-130)
+    assert fade.rank_score(plus, fade.RANK_JUICE) > fade.rank_score(
+        juicy, fade.RANK_JUICE)
+    kept = fade.select_top_k(
+        [juicy, plus], max_per_slate=1,
+        slate_of=lambda _b: "d", kind=fade.RANK_JUICE)
+    assert [b.game_id for b in kept] == ["G_plus"]
+
+
+def test_composite_can_outrank_a_higher_ticket_that_is_juiced():
+    """96tix at −130 vs 90tix at +100: juice + gap can flip ticket order."""
+    piled = _bet("G_pile", ticket=96.0, money=96.0, price=-130)
+    clean = _bet("G_clean", ticket=90.0, money=70.0, price=100)
+    assert fade.rank_score(piled, fade.RANK_TICKET) > fade.rank_score(
+        clean, fade.RANK_TICKET)
+    assert fade.composite_score(clean) > fade.composite_score(piled)
+    kept = fade.select_top_k(
+        [piled, clean], max_per_slate=1,
+        slate_of=lambda _b: "d", kind=fade.RANK_COMPOSITE)
+    assert [b.game_id for b in kept] == ["G_clean"]
+
+
+def test_top_k_is_per_slate_and_zero_is_all_pass():
+    a1 = _bet("A1", ticket=90)
+    a2 = _bet("A2", ticket=80)
+    b1 = _bet("B1", ticket=85)
+    dates = {"A1": "2026-06-15", "A2": "2026-06-15", "B1": "2026-06-16"}
+    all_pass = fade.select_top_k(
+        [a1, a2, b1], max_per_slate=0,
+        slate_of=lambda b: dates[b.game_id], kind=fade.RANK_TICKET)
+    assert {b.game_id for b in all_pass} == {"A1", "A2", "B1"}
+    top1 = fade.select_top_k(
+        [a1, a2, b1], max_per_slate=1,
+        slate_of=lambda b: dates[b.game_id], kind=fade.RANK_TICKET)
+    assert {b.game_id for b in top1} == {"A1", "B1"}
+
+
+def test_ev_without_a_lookup_ranks_as_ticket():
+    """Card does not load a bucket table; RANK=ev must not invent one."""
+    heavy = _bet("G_hi", ticket=94.0)
+    light = _bet("G_lo", ticket=71.0)
+    assert fade.rank_score(heavy, fade.RANK_EV) == fade.rank_score(
+        heavy, fade.RANK_TICKET)
+    kept = fade.select_top_k(
+        [light, heavy], max_per_slate=1,
+        slate_of=lambda _b: "d", kind=fade.RANK_EV)
+    assert [b.game_id for b in kept] == ["G_hi"]
+
+
+def test_edge_floor_without_rates_is_ignored():
+    dear = _bet("G_no", ticket=90, price=-130)
+    kept = fade.select_top_k(
+        [dear], max_per_slate=0,
+        slate_of=lambda _b: "d", kind=fade.RANK_TICKET,
+        min_edge=0.05)
+    assert [b.game_id for b in kept] == ["G_no"]
+
+
+def test_edge_floor_drops_a_bet_whose_bucket_wr_does_not_clear_juice():
+    cheap = _bet("G_ok", ticket=90, price=100)
+    dear = _bet("G_no", ticket=90, price=-130)
+    rates = {(85.0, 95.0): 0.52}
+    # implied(100)≈0.500, implied(-130)≈0.565. Floor 0.01 keeps only +100.
+    kept = fade.select_top_k(
+        [cheap, dear], max_per_slate=2,
+        slate_of=lambda _b: "d", kind=fade.RANK_TICKET,
+        min_edge=0.01, bucket_win_rate=rates)
+    assert [b.game_id for b in kept] == ["G_ok"]
+
+
+def test_topk_sweep_grades_under_the_same_way_paper_tracker_does():
+    """Units = profit_flat/100. Under wins when home+away < line."""
+    from scripts.mlb_total_public_fade_topk import american_units, grade_under
+
+    assert american_units(-110, True) == pytest.approx(100.0 / 110.0)
+    assert american_units(-110, False) == -1.0
+    assert american_units(100, True) == pytest.approx(1.0)
+    result, units = grade_under(8.5, -110, 3, 4)
+    assert result == "WIN"
+    assert units == pytest.approx(100.0 / 110.0)
+    assert grade_under(8.5, -110, 5, 4)[0] == "LOSS"
+    assert grade_under(8.5, -110, 4, 4.5) == ("PUSH", 0.0)
+    assert grade_under(8.5, -110, None, 4) == (None, None)
+
+
+def test_topk_flag_keeps_two_on_a_ten_under_slate_instead_of_suppressing_all(
+        monkeypatch):
+    """The point of ranking: 10 unders → top-2, not the suppress-all empty set."""
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", 2)
+    monkeypatch.setattr(config, "MLB_TOTAL_PUBLIC_FADE_RANK", "ticket")
+    from scripts.mlb_total_public_fade_card import rows_for_insert
+
+    tickets = [75.0, 80.0, 82.0, 90.0, 88.0, 77.0, 95.0, 71.0, 73.0, 85.0]
+    splits, quotes, games = _slate(tickets)
+    bets, _ = fade.find_fade_bets(splits, quotes, min_over_tickets=70)
+    assert len(bets) == 10
+    rows = rows_for_insert(bets, games, quotes, bankroll=10_000)
+    assert len(rows) == 2
+    # Highest tickets: 95 (G7) and 90 (G4).
+    assert {r["game_id"] for r in rows} == {"G7", "G4"}
+    assert all(r["signal_type"] == "BET" and r["pick_side"] == "under"
+               for r in rows)

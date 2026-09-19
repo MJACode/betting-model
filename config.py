@@ -1543,6 +1543,20 @@ MLB_TOTAL_PUBLIC_FADE_PUBLISH: bool = (
 MLB_TOTAL_PUBLIC_FADE_TICKET_PCT: float = float(
     os.environ.get("MLB_TOTAL_PUBLIC_FADE_TICKET_PCT", "70")
 )
+# Top-K ranking. 0 = all-pass (the 2026-09-16 card, then the suppress-all
+# slate guard). Set 1 or 2 to keep only the highest-ranked fades per day.
+# RANK is ticket|gap|juice|composite|ev. EDGE_FLOOR is estimated
+# (bucket wr − implied); 0 disables. PUBLISH stays 0.
+# docs/mlb_total_public_fade.md.
+MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE: int = int(
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE", "0")
+)
+MLB_TOTAL_PUBLIC_FADE_RANK: str = os.environ.get(
+    "MLB_TOTAL_PUBLIC_FADE_RANK", "ticket"
+).strip().lower()
+MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR: float = float(
+    os.environ.get("MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR", "0")
+)
 GAME_MARKET_GATE_ENABLED: bool = (
     os.environ.get("GAME_MARKET_GATE_ENABLED", "1").strip() not in ("0", "false", "False")
 )

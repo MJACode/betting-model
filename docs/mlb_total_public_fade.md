@@ -18,7 +18,8 @@ Runs on the same pipeline step as the other MLB game-line cards
 | Line | Main total **5.5–14.5** |
 | Price window | Under American in **[-200, 200]** |
 | INSERT | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` default **0** |
-| Slate guard | After candidate BETs: if one `pick_side` is **≥70%** of that model's BET count **and** n_bet **≥ 4**, **suppress all** (skip INSERT / notify). Shared helper: `models/slate_concentration.py`. |
+| Top-K | Optional. `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` default **0** = all-pass. Set **2** + `RANK=ticket` to keep the two heaviest OVER piles per day. Runs **before** the slate guard. |
+| Slate guard | After ranking: if one `pick_side` is **≥70%** of that model's BET count **and** n_bet **≥ 4**, **suppress all**. Shared helper: `models/slate_concentration.py`. |
 
 As-of is offset-aware (`_parse_iso_ts`). A lexicographic compare on
 `public_betting.snapshot_at` (`-04:00`) vs `games.commence_time` (`+00:00`)
@@ -66,6 +67,74 @@ This pass independently measured (Supabase, 2026-09-16):
 **99** of those have `snapshot_at::timestamptz < commence_time`. That is the
 coverage caveat, not a re-grade of the table above.
 
+## Top-K remeasure (2026-09-19)
+
+The 2026-09-16 card is whole-slate. On 2026-09-19 that was 12/12 UNDER.
+This pass ranked the same finder universe and kept top-1 / top-2 per
+`game_date`. Prices are leak-bounded **open** (`snapshot_type='open'`
+and `snapshot_at::timestamptz <= commence_time`). September
+`latest_odds` is late juice (−500 to −10000) and is not this board.
+
+**Coverage (Supabase, 2026-09-19).** `public_betting` totals-over
+consensus **1,406** games; **136** pre-commence. Monthly pre / post:
+May 0/15, Jun 59/341, Jul 25/317, **Aug 0/397**, Sep 52/200. Graded
+intersection with a shopped DK-line under in [5.5, 14.5] × [−200, 200]:
+**106** at t65, **101** at t70. August is empty. September is three
+settled days (16–18), not a month.
+
+**t70 all-pass vs top-K** (flat 1 unit, pushes in *n*, ROI = units/*n*):
+
+| Construction | n | Units | ROI | max/day |
+|---|---|---|---|---|
+| all-pass t70 | 101 | **+5.92u** | **+5.9%** | 15 |
+| ticket top-1 | 26 | +2.72u | +10.5% | 1 |
+| **ticket top-2** | **48** | **+5.37u** | **+11.2%** | **2** |
+| t80 ticket top-2 | 42 | +7.46u | +17.8% | 2 |
+| t90 ticket top-2 | 27 | +5.38u | +19.9% | 2 |
+| gap top-2 | 48 | +1.60u | +3.3% | 2 |
+| juice top-2 | 48 | −4.52u | −9.4% | 2 |
+| composite top-2 | 48 | +1.79u | +3.7% | 2 |
+| LOMO-EV top-2 | 48 | −0.10u | −0.2% | 2 |
+| LOMO-EV top-1 | 26 | −2.86u | −11.0% | 1 |
+| edge floor ≥2pp (LOMO, all-pass) | 53 | −9.16u | −17.3% | 9 |
+| under ≥ −115 | 86 | −3.02u | −3.5% | 14 |
+| suppress-all (drop days n≥4) | 29 | −0.40u | −1.4% | 3 |
+
+Ticket top-2 is the only ranking whose neighbourhood stays positive
+(t70 / t80 / t90 top-2 all +). Gap, juice, the juice-adjusted
+composite, and month-holdout EV (bucket wr − implied) do not. The
+2026-09-16 juice floor (under ≥ −115, then +10.8%) is **−3.5%** on
+this board — September killed it. The 2026-09-19 suppress-all guard
+is **−1.4%**: it keeps only thin slates and throws away the days
+that printed.
+
+**Month holdout (ticket top-2, t70 pool):**
+
+| Month | all-pass ROI | ticket top-2 ROI |
+|---|---|---|
+| Jun | +15.8% / 47 | +15.5% / 28 |
+| Jul | +15.0% / 20 | +9.8% / 14 |
+| Sep (16–18 only) | −13.3% / 34 | −5.8% / 6 |
+
+Jun+Jul all-pass +15.6% / 67 vs ticket top-2 +13.6% / 42 — ranking
+gives back some units for a 2-bet cap. September all-pass is the
+bleed; top-2 cuts it. Wilson on the pooled top-2 cell is 44–71%
+win rate (28–20). n=48 is still small.
+
+**Recommended flag (PUBLISH stays 0):**
+
+```
+MLB_TOTAL_PUBLIC_FADE_TICKET_PCT=70
+MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE=2
+MLB_TOTAL_PUBLIC_FADE_RANK=ticket
+MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR=0
+```
+
+t80 + top-2 is the tighter neighbour (+17.8% / 42), not a second
+model. Do not set RANK to gap / juice / composite / ev — those
+cells are in the fail table above. Sweep:
+`python -m scripts.mlb_total_public_fade_topk`.
+
 ## Caveats (load-bearing)
 
 1. **~85–99 pre-commence public games in the DB**, not a season. Action
@@ -74,7 +143,8 @@ coverage caveat, not a re-grade of the table above.
    wins. Hourly refresh historically overwrote the pre-game split with a
    post-start fetch (August honest coverage: 2 games). The ingestor now
    refuses post-start upserts; **already-overwritten history stays unusable**.
-3. n=64 is small. The t70 cell is the card; t80 is an env, not a second model.
+3. n is small. The 2026-09-16 t70 cell was 64; the 2026-09-19 remasure
+   is 101 all-pass / 48 ticket-top-2. t80 is an env, not a second model.
 4. Do **not** set `MLB_TOTAL_PUBLIC_FADE_PUBLISH=1` without mike. Default 0
    means the worker logs flags and writes nothing. Railway is 0 after the
    2026-09-19 all-under card; **leave default 0** until mike says
@@ -89,3 +159,6 @@ coverage caveat, not a re-grade of the table above.
 |---|---|---|
 | `MLB_TOTAL_PUBLIC_FADE_PUBLISH` | `0` | `1` writes BET rows |
 | `MLB_TOTAL_PUBLIC_FADE_TICKET_PCT` | `70` | Over-ticket cut; `80` is the tighter neighbour |
+| `MLB_TOTAL_PUBLIC_FADE_MAX_PER_SLATE` | `0` | `0` = all-pass. Set `2` to keep top-K per day (recommended with `RANK=ticket`) |
+| `MLB_TOTAL_PUBLIC_FADE_RANK` | `ticket` | `ticket` \| `gap` \| `juice` \| `composite` \| `ev`. Only `ticket` cleared the holdout. `ev` without a bucket table ranks as ticket |
+| `MLB_TOTAL_PUBLIC_FADE_EDGE_FLOOR` | `0` | LOMO estimated-edge floor. Sweep-only (card has no bucket table). Every floor tried (≥2/3/5pp) lost |
