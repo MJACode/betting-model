@@ -298,6 +298,62 @@ export function chipsForLoadedPlayer(chips: StatDef[], games: PlayerLogEntry[]):
   return kept.length > 0 ? kept : chips;
 }
 
+/**
+ * The chip a caller asked this screen to open on, resolved against the
+ * player's own chip list.
+ *
+ * The board (and a prop pick) hands the stat over as two loose strings on the
+ * route rather than a StatDef, because a route param is serialised into
+ * navigation state and restored from it — the same reason `matchupGrade`
+ * travels as a string. The group is what disambiguates: football shares stat
+ * keys across groups, so `receiving_tds` alone is ambiguous where
+ * `Receiving:receiving_tds` is not. A key with no group still resolves, to the
+ * first group holding it, so an older build's params keep working.
+ *
+ * The MLB innings→outs swap (chipsForPlayer) is applied here too: the board
+ * sums innings, the detail screen charts outs, and they are one stat to a
+ * reader tapping a pitcher's row.
+ */
+export function requestedChip(
+  chips: StatDef[],
+  statKey?: string | null,
+  statGroup?: string | null,
+): StatDef | null {
+  if (!statKey) return null;
+  const key = statKey === 'innings_pitched' ? String(OUTS_STAT.key) : statKey;
+  const matches = chips.filter((c) => String(c.key) === key);
+  if (matches.length === 0) return null;
+  if (statGroup) {
+    const inGroup = matches.find((c) => c.group === statGroup);
+    if (inGroup) return inGroup;
+  }
+  return matches[0] ?? null;
+}
+
+/**
+ * `chipsForLoadedPlayer` with the ASKED-FOR stat's group kept, whatever the
+ * log says.
+ *
+ * The two rules pull opposite ways and both are right. A tab the player has
+ * never filled is a control that leads nowhere — unless the reader has just
+ * tapped that very stat, in which case "he has not scored in ten games" is the
+ * answer they came for, and silently rehoming them on Receptions is the bug
+ * this fixes. So: the filter still decides every OTHER group, and the group
+ * the caller named is exempt from it.
+ *
+ * Whole groups, in catalog order, exactly as chipsForLoadedPlayer keeps them.
+ */
+export function chipsWithRequested(
+  all: StatDef[],
+  kept: StatDef[],
+  requested: StatDef | null,
+): StatDef[] {
+  if (!requested) return kept;
+  if (kept.some((c) => chipKey(c) === chipKey(requested))) return kept;
+  const keptKeys = new Set(kept.map(chipKey));
+  return all.filter((c) => keptKeys.has(chipKey(c)) || c.group === requested.group);
+}
+
 /** A chip's identity: two sports share stat keys, and football shares them across groups. */
 export function chipKey(c: StatDef): string {
   return `${c.group}:${String(c.key)}`;

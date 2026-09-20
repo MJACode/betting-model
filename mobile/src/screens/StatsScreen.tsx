@@ -1391,6 +1391,13 @@ export function StatsScreen() {
       // The matchup FACT rides along, because the board's column is now just
       // the grade (MatchupCell). Computed here rather than refetched there.
       ...matchupParams(p),
+      // ...and so does the STAT the row was read under. Without it the detail
+      // screen opens on whatever this player fills most often, which landed an
+      // Anytime TD tap on Receptions (Matt, 2026-09-20). The board already
+      // knows what question was being asked; the answer should not change
+      // sport-wide on the way through.
+      statKey: stat ? String(stat.key) : undefined,
+      statGroup: stat?.group,
     });
   };
 

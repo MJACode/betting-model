@@ -437,6 +437,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                   sport: propSport,
                   // MLB only — decides batter vs pitcher chips on the detail screen.
                   playerType: isPitcherProp ? 'pitcher' : isBatterProp ? 'batter' : undefined,
+                  // Open on THIS pick's stat. The chart directly above is the
+                  // prop's own stat, so the screen this button opens has to be
+                  // the same one — it was the model's most-filled stat instead.
+                  statKey: propStat ? String(propStat.key) : undefined,
+                  statGroup: propStat?.group,
                 })
               }
               style={({ pressed }) => [styles.viewStatsBtn, pressed && styles.viewStatsBtnPressed]}

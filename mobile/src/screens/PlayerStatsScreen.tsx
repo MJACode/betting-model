@@ -31,6 +31,7 @@ import {
   chipKey,
   chipsForLoadedPlayer,
   chipsForPlayer,
+  chipsWithRequested,
   defaultChipForPlayer,
   filledChipCounts,
   gameContextLine,
@@ -39,6 +40,7 @@ import {
   logStatValue,
   openingChip,
   playerSubtitle,
+  requestedChip,
   roundLineToStep,
   windowOptionsFor,
   type GameWindow,
@@ -103,9 +105,21 @@ export function PlayerStatsScreen() {
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
 
   const allChips = useMemo(() => chipsForPlayer(sport, playerType), [sport, playerType]);
-  // What the user last tapped. The stat actually charted is derived from it
-  // below, because the load can retire the group it belongs to.
-  const [picked, setPicked] = useState<StatDef | null>(() => defaultChipForPlayer(sport, playerType));
+  // The stat the caller was already looking at — the Stats board's selected
+  // stat, or the stat a prop pick is written on. It is what this screen OPENS
+  // on: tapping Rashee Rice off the Anytime TD board opened him on Receptions,
+  // because the screen chose the stat he fills most and the tap carried no
+  // question with it (Matt, 2026-09-20).
+  const requested = useMemo(
+    () => requestedChip(allChips, route.params.statKey, route.params.statGroup),
+    [allChips, route.params.statKey, route.params.statGroup],
+  );
+  // What the user last tapped, seeded with what they arrived asking for. The
+  // stat actually charted is derived from it below, because the load can
+  // retire the group it belongs to.
+  const [picked, setPicked] = useState<StatDef | null>(
+    () => requested ?? defaultChipForPlayer(sport, playerType),
+  );
   const windows = useMemo(() => windowOptionsFor(sport), [sport]);
   const [gameWindow, setGameWindow] = useState<GameWindow>(10);
   // The "at least" threshold. null = auto-default to the rounded median once data loads.
@@ -124,9 +138,9 @@ export function PlayerStatsScreen() {
   // Sport/player changed (the screen is reused across pushes) — reset to that
   // sport's default stat and window rather than charting a stat it has no data for.
   useEffect(() => {
-    setPicked(defaultChipForPlayer(sport, playerType));
+    setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setGameWindow(windows.some((w) => w.value === 10) ? 10 : windows[0]!.value);
-  }, [sport, playerType, playerId, windows]);
+  }, [sport, playerType, playerId, windows, requested]);
 
   const beforeDate = todayET();
   const { games, loading, loaded, error } = usePlayerTrends({
@@ -148,7 +162,13 @@ export function PlayerStatsScreen() {
   // The tabs this player actually fills, read off the LOADED log: a quarterback
   // offered a Defense tab is a control that leads nowhere — ten charted zeroes
   // and a 0% badge in alarm red (Matt, 2026-09-19).
-  const chips = useMemo(() => chipsForLoadedPlayer(allChips, games), [allChips, games]);
+  // ...plus the group the caller asked for, whatever the log says about it: a
+  // receiver with no touchdown in ten games still opens on Anytime TD when
+  // that is the row that was tapped, and 0 of 10 is the answer, not a bug.
+  const chips = useMemo(
+    () => chipsWithRequested(allChips, chipsForLoadedPlayer(allChips, games), requested),
+    [allChips, games, requested],
+  );
   const groups = useMemo(() => groupsOfChips(chips), [chips]);
   // Which of those chips the player has a number in — what a tab opens on.
   const filled = useMemo(() => filledChipCounts(chips, games), [chips, games]);
