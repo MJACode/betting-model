@@ -97,6 +97,23 @@ export function rulerScaleFor(def: StatDef | null, mode: HitMode): RulerScale {
   return { min, max: min + Math.max(0, Math.floor((ceiling - min) / step)) * step, step };
 }
 
+/**
+ * The stop count the ruler chooses its PITCH from — always At Least's, never
+ * the live mode's.
+ *
+ * Under carries one extra stop, and the pitch is branched on a count, so a
+ * stat sitting on the branch's boundary changed appearance on one tap of the
+ * direction pill: NFL Rush Yards is 30 stops in At Least and 31 in Under, and
+ * that tipped it from 30pt ticks labelled every 5 yards to 12pt ticks labelled
+ * every 25 — the same drag worth 3.8x as much, on a control whose whole
+ * documented promise is that a mode change renames the bet without moving it
+ * (UX review, 2026-09-19). Unreachable while every yardage board was 135+
+ * stops; a step of five put three of them on the boundary.
+ */
+export function baseStopCount(def: StatDef | null): number {
+  return stopCount(rulerScaleFor(def, 'atLeast'));
+}
+
 /** How many stops the ruler has. */
 export function stopCount(s: RulerScale): number {
   return Math.max(1, Math.floor((s.max - s.min) / s.step) + 1);

@@ -127,6 +127,7 @@ import {
   type StatDef,
 } from '@/lib/statCatalog';
 import {
+  baseStopCount,
   defaultLineN,
   rulerScaleFor,
   snapStop,
@@ -1811,6 +1812,7 @@ export function StatsScreen() {
             <LineRuler
               value={lineN}
               scale={rulerScale}
+              baseCount={baseStopCount(stat)}
               onChange={setLineN}
               format={(n) => rulerValueLabel(n, hitMode)}
               // Carries the book's number in At Least mode because the
@@ -2380,6 +2382,8 @@ export function StatsScreen() {
 
 /** Width of one ruler tick on long rulers — the snap interval. */
 const TICK_W = 12;
+/** …and on a long ruler whose ticks are worth more than one unit. */
+const WIDE_TICK_W = 18;
 /** Fixed width of a tick's value label (fits 3 digits). */
 const LABEL_W = 44;
 
@@ -2409,6 +2413,7 @@ const LABEL_W = 44;
 function LineRuler({
   value,
   scale,
+  baseCount,
   onChange,
   format,
   describe,
@@ -2419,6 +2424,9 @@ function LineRuler({
   value: number;
   /** Which numbers the ruler can reach, and how far apart they sit. */
   scale: RulerScale;
+  /** The stop count the PITCH is chosen from — At Least's, so that switching
+   *  mode cannot redraw the strip at a different density (lib/lineRuler.ts). */
+  baseCount: number;
   onChange: (n: number) => void;
   /** The stop drawn in the caller's units — the mode's idiom on the stat
    *  board, where Over reads 0.5 where At Least reads 1 (lib/hitMode.ts).
@@ -2447,12 +2455,24 @@ function LineRuler({
   // grew wide enough to cover its neighbours (UX review, 2026-09-06).
   const describeOf = describe ?? faceOf;
   const faceChars = Math.max(faceOf(min).length, faceOf(hi).length);
-  const tickW = count <= 30 ? Math.max(26, faceChars * 8 + 6) : TICK_W;
+  // Branched on baseCount, never on `count`: `count` carries Under's extra
+  // stop, and three yardage boards sit ON this boundary (lib/lineRuler.ts).
+  const dense = baseCount > 30;
+  // A DENSE tick is wider when it is worth more than one unit. The pitch sets
+  // how much a drag is worth and how big a tick is to tap, and both got five
+  // times more consequential without moving: at 12pt a flick on Pass Yards
+  // travelled 5x the value it used to, into a 12pt target (UX review,
+  // 2026-09-19 — HIG wants 44). 18pt still leaves the strip 3.3x shorter than
+  // the one-per-yard version it replaced, so the drag stays fast.
+  const tickW = dense ? (step > 1 ? WIDE_TICK_W : TICK_W) : Math.max(26, faceChars * 8 + 6);
   // In STOPS, not in units — the pixel gap between two labels is what has to
   // stay legible, and that is a count of ticks whatever each tick is worth.
   // The VALUES it lands on are then multiples of the step, so a step-5 ruler
-  // still labels round numbers (225, 275, …) and never 227.
-  const labelEvery = count > 120 ? 10 : count > 30 ? 5 : 1;
+  // labels round numbers (225, 250, 275 — the ones books hang) and never 227.
+  // Every 10th stop is right when the nine between are a yard each and nobody
+  // counts them; at five yards each they are the unit being chosen in, and a
+  // 50-yard gap left 1.4 labels on a ~170pt strip with nothing to aim at.
+  const labelEvery = !dense ? 1 : step > 1 ? 5 : baseCount > 120 ? 10 : 5;
   const labelUnits = labelEvery * step;
   // Pad each end by half the viewport so the first/last values can reach the
   // centre marker.
@@ -2550,6 +2570,13 @@ function LineRuler({
                 <Text
                   style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
                   numberOfLines={1}
+                  // The box is a fixed LABEL_W, so a face that outgrows it
+                  // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
+                  // truncation, it reads as a different number. Capping the
+                  // scale is the sanctioned trade for numerals in a dense
+                  // strip (UX_REVIEW §5); it matters more now that the wide
+                  // branch labels EVERY stop on a five-character Over face.
+                  maxFontSizeMultiplier={1.3}
                 >
                   {labeled ? faceOf(v) : ''}
                 </Text>
