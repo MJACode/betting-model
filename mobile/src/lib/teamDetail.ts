@@ -134,7 +134,7 @@ export interface SharpRead {
   /** Pinnacle's no-vig probability of the team's side (over, on totals). */
   sharpProb: number | null;
   sharpLine: number | null;
-  /** The member's book's raw implied probability of the same side, vig included. */
+  /** The member's book's no-vig probability of the same side. */
   bookProb: number | null;
   /** The member's book's NO-VIG probability of the side — its own two-way pair
    *  de-vigged the same way, so the comparison below is fair-to-fair. */
@@ -476,6 +476,10 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
     if (!g) continue;
     if (p.signal_type !== 'BET') continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
+    // nfl_prop_market writes player_id NULL and pick_side over/under — those
+    // are player props, not team totals. Same for every *prop* model_id.
+    if ((p.model_id ?? '').includes('prop')) continue;
+    if (p.player_id != null) continue;
     const side = String(p.pick_side ?? '').toLowerCase();
     const teamIsHome = g.home_team === team;
     if (side === 'over') addPick(out.over, p);

@@ -909,9 +909,8 @@ function TonightLineCard({
             'The line your sportsbooks have hung for this stat tonight, and the best over and under price ' +
             'among them. The chart above follows this number until you move the ruler.\n\n' +
             'LINE MOVEMENT is DraftKings’ opening number against its latest — a line that has climbed is ' +
-            'money on the over. SHARP compares Pinnacle’s no-vig over probability with what your book ' +
-            'charges for the same over; a positive gap means you are paying more than the sharp book thinks ' +
-            'the over is worth.',
+            'money on the over. SHARP compares Pinnacle’s no-vig over with your book’s no-vig over at the ' +
+            'same line; a positive gap means your book prices the over richer than Pinnacle does.',
         }}
       />
       <View style={styles.card}>
@@ -999,7 +998,7 @@ function TonightLineCard({
               />
             )}
             <Text style={styles.source}>
-              Best price among your sportsbooks at the posted line. Sharp read is Pinnacle’s no-vig over probability.
+              Best price among your sportsbooks at the posted line. Sharp read is Pinnacle’s no-vig over versus your book’s no-vig over.
             </Text>
           </>
         )}

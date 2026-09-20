@@ -468,8 +468,8 @@ function MarketRead({
             'LINE MOVEMENT is the DraftKings number at open against now. A line that moved toward a side ' +
             'is steam on it; the move itself is the information, not a reason to chase it.\n\n' +
             'SHARP vs YOUR BOOK compares Pinnacle’s no-vig price — the book the market follows — with ' +
-            'what your book charges for the same side. A positive gap means you are paying more than the ' +
-            'sharp book thinks the side is worth.\n\n' +
+            'your book’s no-vig price on the same side. A positive gap means your book prices the side ' +
+            'richer than Pinnacle does.\n\n' +
             'PUBLIC MONEY is the consensus share of tickets and money on this side. Money outrunning tickets ' +
             'is bigger bettors on the side; a crowd piled on one side is the side the book has already shaded.',
         }}

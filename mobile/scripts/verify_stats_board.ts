@@ -32,6 +32,7 @@ import {
   buildSlateGameIndex,
   buildTonightSlate,
   compareRows,
+  earliestUpcomingGame,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
@@ -327,6 +328,52 @@ check(
     slateGameFor({ team: 'SF' }, buildSlateGameIndex(nflSlate, { date: SUB_TODAY, keys: new Set(['SF']), isToday: true }, NOW))?.game ?? null,
     null,
   ) ?? '').endsWith('· @ SEA'),
+);
+
+// ── Next game in a multi-day window (team / player detail) ──
+// buildTonightSlate + game_date === t.date drops a Thursday kickoff when the
+// sport's "tonight" is Sunday. earliestUpcomingGame ranks the WHOLE window.
+
+const thu = subGame({
+  game_id: 'thu',
+  sport: 'NFL',
+  home_team: 'BUF',
+  away_team: 'MIA',
+  game_date: '2099-01-07',
+  commence_time: '2099-01-07T01:20:00Z',
+});
+const sunOther = subGame({
+  game_id: 'sun-other',
+  sport: 'NFL',
+  home_team: 'KC',
+  away_team: 'DEN',
+  game_date: SUB_TODAY,
+  commence_time: at('17:00'),
+});
+const sunBufLate = subGame({
+  game_id: 'sun-buf',
+  sport: 'NFL',
+  home_team: 'BUF',
+  away_team: 'NYJ',
+  game_date: SUB_TODAY,
+  commence_time: at('20:20'),
+});
+check(
+  'a Thursday game wins when tonight’s slate is a different NFL Sunday',
+  earliestUpcomingGame([thu, sunOther], 'BUF', NOW)?.game.game_id === 'thu',
+);
+check(
+  'the sooner kickoff in the window wins over a later same-team game',
+  earliestUpcomingGame([thu, sunBufLate], 'BUF', NOW)?.game.game_id === 'sun-buf',
+);
+const startedThu = { ...thu, commence_time: '2000-01-01T01:20:00Z', game_date: '2000-01-01' };
+check(
+  'an already-started game loses to a later unstarted kickoff',
+  earliestUpcomingGame([startedThu, sunBufLate], 'BUF', NOW)?.game.game_id === 'sun-buf',
+);
+check(
+  'a team with no row in the window is null, not tonight’s leftover',
+  earliestUpcomingGame([sunOther], 'BUF', NOW) === null,
 );
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

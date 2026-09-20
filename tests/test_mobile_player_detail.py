@@ -115,3 +115,26 @@ def test_the_starter_split_reads_the_integer_column():
     assert m
     assert "s === 1 || s === '1'" in m.group(0)
     assert "s === true" not in m.group(0)
+
+
+def test_next_game_is_earliest_in_the_window_not_tonights_date():
+    """Same rule as the team page: the player's next kickoff, not tonight."""
+    hook = _read(HOOK)
+    assert "earliestUpcomingGame(" in hook
+    assert "game_date === t.date" not in hook
+    assert "buildTonightSlate(" not in hook
+
+
+def test_sharp_gap_is_no_vig_vs_no_vig():
+    lib = _read(LIB)
+    m = re.search(r"export function tonightLine\(.*?\n\}\n", lib, re.S)
+    assert m
+    body = m.group(0)
+    assert "noVigOver(sharp.over, sharp.under)" in body
+    assert "noVigOver(first.over, first.under)" in body
+    assert "americanImplied(first.over)" not in body
+
+
+def test_this_file_is_on_the_pr_ci_subset():
+    yml = _read(ROOT / ".github" / "workflows" / "pr-ci.yml")
+    assert "tests/test_mobile_player_detail.py" in yml

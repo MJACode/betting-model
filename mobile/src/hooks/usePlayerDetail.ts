@@ -27,7 +27,7 @@ import {
   fetchSlateGames,
 } from '@/lib/queries';
 import { propMarketForStat, type StatDef } from '@/lib/statCatalog';
-import { buildSlateGameIndex, buildTonightSlate, slateGameFor, type SlateGame } from '@/lib/statsBoard';
+import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
   playerPickRecord,
@@ -105,24 +105,18 @@ export function usePlayerDetail(args: {
   const team = games[0]?.team ?? null;
   const market = useMemo(() => propMarketForStat(stat), [stat]);
 
-  // ── Tonight's game, from the player's current team ───────────────────────
-  const slate = useSection<{ date: string; isToday: boolean; games: GameRow[] }>(
-    { date: '', isToday: false, games: [] },
-    async () => {
-      const rows = await fetchSlateGames(sport, today, addDays(today, 7));
-      const t = buildTonightSlate(rows, sport, today);
-      return { date: t.date, isToday: t.isToday, games: rows.filter((g) => g.game_date === t.date) };
-    },
+  // ── Next game, from the player's current team ────────────────────────────
+  // Same 7-day window as the team page. earliestUpcomingGame, not tonight's
+  // slate date: a player whose team kicks off Thursday must still get a line
+  // when the board's "tonight" is Sunday.
+  const slate = useSection<GameRow[]>(
+    [],
+    () => fetchSlateGames(sport, today, addDays(today, 7)),
     [sport, today],
   );
   const nextGame: PlayerNextGame | null = useMemo(() => {
     if (!team) return null;
-    const idx = buildSlateGameIndex(
-      slate.data.games,
-      { date: slate.data.date, isToday: slate.data.isToday, keys: new Set<string>() },
-      new Date(now).toISOString(),
-    );
-    const entry = slateGameFor({ team }, idx)?.game ?? null;
+    const entry = earliestUpcomingGame(slate.data, team, new Date(now).toISOString());
     if (!entry) return null;
     return { entry, unstarted: unstartedGameIds([entry.game], new Date(now).toISOString()).has(entry.game.game_id) };
   }, [slate.data, team, now]);

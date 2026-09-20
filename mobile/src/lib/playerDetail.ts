@@ -67,9 +67,9 @@ export interface TonightLine {
   /** Pinnacle's no-vig over probability at that line, and its own line. */
   sharpOverProb: number | null;
   sharpLine: number | null;
-  /** The member's first book's implied over probability at that line, vig in. */
+  /** The member's first book's no-vig over probability at that line. */
   bookOverProb: number | null;
-  /** bookOverProb − sharpOverProb in points; positive = paying more than fair. */
+  /** bookOverProb − sharpOverProb in points; positive = book richer than Pinnacle. */
   gapPp: number | null;
   /** How many books post the market at all. */
   books: number;
@@ -148,7 +148,7 @@ export function tonightLine(
     ?? null;
   const sharpOverProb = sharp && sharp.line === line ? noVigOver(sharp.over, sharp.under) : null;
   const first = mine.find((q) => q.over != null) ?? null;
-  const bookOverProb = first?.over != null ? americanImplied(first.over) : null;
+  const bookOverProb = first ? noVigOver(first.over, first.under) : null;
   return {
     market,
     line,

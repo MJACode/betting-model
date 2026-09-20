@@ -139,6 +139,13 @@ def test_the_pick_record_read_is_the_record_filter_on_the_server():
     assert ".eq('signal_type', 'BET')" in body, "the record is BET rows, filtered server-side"
     assert ".in('result', ['WIN', 'LOSS', 'PUSH'])" in body, "the record is settled rows"
     assert ".is('player_id', null)" in body, "props are bets on players, not on the team"
+    assert ".in('pick_side', ['home', 'away', 'over', 'under'])" in body, (
+        "game-level sides only — a prop over/under must not land in team totals"
+    )
+    assert ".not('model_id', 'ilike', '%prop%')" in body, (
+        "nfl_prop_market writes player_id NULL; excluding *prop* model_ids is "
+        "what keeps those rows out of the team O/U buckets"
+    )
     assert "model_action_thresholds" not in body, (
         "a record query never joins the threshold table (CLAUDE.md §1c)"
     )
@@ -178,3 +185,42 @@ def test_the_nfl_spread_sign_is_normalised_the_way_the_board_does_it():
     assert m
     assert "r.is_home ? -spreadLine : spreadLine" in m.group(0)
     assert "margin + teamSpread" in m.group(0)
+
+
+def test_next_game_is_earliest_in_the_window_not_tonights_date():
+    """A Thursday kickoff must win when the sport's 'tonight' is Sunday.
+
+    The board's buildTonightSlate + `game_date === t.date` is the wrong
+    filter for a team/player page: it dropped every fixture not on the
+    slate date. Both hooks call earliestUpcomingGame on the 7-day window.
+    """
+    hook = _read(HOOK)
+    assert "earliestUpcomingGame(" in hook
+    assert "game_date === t.date" not in hook
+    assert "buildTonightSlate(" not in hook
+    board = _read(MOBILE / "src" / "lib" / "statsBoard.ts")
+    m = re.search(r"export function earliestUpcomingGame\(.*?\n\}\n", board, re.S)
+    assert m, "earliestUpcomingGame is missing from statsBoard.ts"
+    body = m.group(0)
+    assert "commence_time > nowIso" in body, "unstarted kickoffs must win"
+    assert "compareKickoff" in body
+    assert "game_date ===" not in body, "must not re-narrow to tonight's date"
+
+
+def test_sharp_gap_is_no_vig_vs_no_vig():
+    """The sentence is fair-to-fair; vig-in is labelled separately as 'you pay'."""
+    lib = _read(LIB)
+    m = re.search(r"export function sharpRead\(.*?\n\}\n", lib, re.S)
+    assert m
+    body = m.group(0)
+    assert "noVigProb(teamPrice(sharp" in body
+    assert "noVigProb(teamPrice(mine" in body
+    assert "bookFairProb" in body
+    assert "fairGapPp" in body
+    assert "(bookFairProb - sharpProb)" in body
+    assert "includes('prop')" in _read(LIB)
+
+
+def test_this_file_is_on_the_pr_ci_subset():
+    yml = _read(ROOT / ".github" / "workflows" / "pr-ci.yml")
+    assert "tests/test_mobile_team_detail.py" in yml

@@ -237,6 +237,51 @@ export interface SlateGame {
 /** Sports whose `games` row has no home side — see `SlateGame.isHome`. */
 const NEUTRAL_SITE_SPORTS = new Set(['UFC', 'GOLF']);
 
+function toSlateGame(game: GameRow, key: string): SlateGame {
+  const isHome = NEUTRAL_SITE_SPORTS.has(game.sport) ? null : game.home_team === key;
+  return {
+    game,
+    opponent: game.home_team === key ? game.away_team : game.home_team,
+    isHome,
+  };
+}
+
+/** Soonest kickoff, then game_date, then game_id. Missing commence_time sorts last. */
+export function compareKickoff(a: GameRow, b: GameRow): number {
+  const ta = Date.parse(a.commence_time ?? '');
+  const tb = Date.parse(b.commence_time ?? '');
+  if (Number.isNaN(ta) && Number.isNaN(tb)) {
+    if (a.game_date !== b.game_date) return a.game_date < b.game_date ? -1 : 1;
+    return a.game_id < b.game_id ? -1 : 1;
+  }
+  if (Number.isNaN(ta)) return 1;
+  if (Number.isNaN(tb)) return -1;
+  if (ta !== tb) return ta - tb;
+  return a.game_id < b.game_id ? -1 : 1;
+}
+
+/**
+ * The next game for one team (or UFC fighter name) in a multi-day window —
+ * the soonest UNSTARTED kickoff, else the earliest kickoff in the window.
+ *
+ * Not tonight's slate date: `buildTonightSlate` is a board filter (today, else
+ * the next day anything in the sport plays). A Thursday NFL game must still
+ * win when that filter's date is Sunday.
+ */
+export function earliestUpcomingGame(
+  games: GameRow[],
+  team: string,
+  nowIso: string,
+): SlateGame | null {
+  if (!team) return null;
+  const mine = games.filter((g) => g.home_team === team || g.away_team === team);
+  if (mine.length === 0) return null;
+  const unstarted = mine.filter((g) => !!g.commence_time && g.commence_time > nowIso);
+  const pool = (unstarted.length > 0 ? unstarted : mine).slice().sort(compareKickoff);
+  const game = pool[0];
+  return game ? toSlateGame(game, team) : null;
+}
+
 /**
  * key → the game that key plays on the slate date. Keyed by BOTH team abbrevs,
  * which is what `isOnSlate` matches on: team sports key on the abbrev, and UFC
@@ -271,12 +316,7 @@ export function buildSlateGameIndex(
       .sort((a, b) => String(a.commence_time ?? '').localeCompare(String(b.commence_time ?? '')));
     const upcoming = sorted.find((g) => !!g.commence_time && g.commence_time > nowIso);
     const game = upcoming ?? sorted[sorted.length - 1];
-    const isHome = NEUTRAL_SITE_SPORTS.has(game.sport) ? null : game.home_team === key;
-    out.set(key, {
-      game,
-      opponent: game.home_team === key ? game.away_team : game.home_team,
-      isHome,
-    });
+    out.set(key, toSlateGame(game, key));
   }
   return out;
 }

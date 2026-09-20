@@ -28,7 +28,7 @@ import {
   fetchTeamRecentGamesForSport,
   fetchTeamStats,
 } from '@/lib/queries';
-import { buildSlateGameIndex, buildTonightSlate, slateGameFor, type SlateGame } from '@/lib/statsBoard';
+import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
   formFromGames,
@@ -164,35 +164,18 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   );
 
   // ── The next game: fixture, lines, movement, sharp read, public read ────
-  const slate = useSection<{ date: string; isToday: boolean; games: GameRow[]; window: GameRow[] }>(
-    { date: '', isToday: false, games: [], window: [] },
-    async () => {
-      const games = await fetchSlateGames(sport, today, addDays(today, 7));
-      const t = buildTonightSlate(games, sport, today);
-      return { date: t.date, isToday: t.isToday, games: games.filter((g) => g.game_date === t.date), window: games };
-    },
+  // The 7-day window, not tonight's slate date: a Thursday NFL kickoff has
+  // to win when the board's "tonight" is Sunday (buildTonightSlate). Prefers
+  // the soonest unstarted kickoff; if none remain, the earliest in the window.
+  const slate = useSection<GameRow[]>(
+    [],
+    () => fetchSlateGames(sport, today, addDays(today, 7)),
     [sport, today, nonce],
   );
-  // The NEXT game is the first one in the window that has not started; only
-  // when the team has none left this week does the page fall back to today's
-  // slate entry (a game in progress or just finished), which the card then
-  // labels Live / Final rather than "next" (UX review, 2026-09-20).
-  const entry = useMemo(() => {
-    const nowIso = new Date(now).toISOString();
-    const upcoming = slate.data.window
-      .filter((g) => (g.home_team === team || g.away_team === team) && !!g.commence_time && g.commence_time > nowIso)
-      .sort((a, b) => String(a.commence_time).localeCompare(String(b.commence_time)))[0];
-    if (upcoming) {
-      const isHome = upcoming.home_team === team;
-      return { game: upcoming, opponent: isHome ? upcoming.away_team : upcoming.home_team, isHome } as SlateGame;
-    }
-    const idx = buildSlateGameIndex(
-      slate.data.games,
-      { date: slate.data.date, isToday: slate.data.isToday, keys: new Set<string>() },
-      nowIso,
-    );
-    return slateGameFor({ team }, idx)?.game ?? null;
-  }, [slate.data, team, now]);
+  const entry = useMemo(
+    () => earliestUpcomingGame(slate.data, team, new Date(now).toISOString()),
+    [slate.data, team, now],
+  );
   const gameId = entry?.game.game_id ?? null;
   const isHome = entry?.isHome === true;
 

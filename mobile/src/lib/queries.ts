@@ -2283,8 +2283,13 @@ export async function fetchNflTeamGameStats(team: string, season: number): Promi
  * record on this team". The RECORD filter, on the server: `signal_type =
  * 'BET'` and a real result, which is what the pick WAS (CLAUDE.md §1c — never
  * a join to model_action_thresholds, and a VOID row has result NO_ACTION so
- * it is out by construction). Props are excluded: a prop in the team's game
- * is a bet on a player, not on the team.
+ * it is out by construction).
+ *
+ * Props are excluded two ways, both required: `player_id` IS NULL is not
+ * enough because `nfl_prop_market` writes no player_id (39 of 39 settled
+ * BETs, measured 2026-09-20) and its over/under sides would land in the
+ * team O/U buckets. So: no `prop` in model_id, and pick_side is a game
+ * side (home/away/over/under), not a player.
  */
 export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<SettledPick[]> {
   if (gameIds.length === 0) return [];
@@ -2297,7 +2302,9 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       .in('game_id', chunk)
       .eq('signal_type', 'BET')
       .in('result', ['WIN', 'LOSS', 'PUSH'])
-      .is('player_id', null);
+      .is('player_id', null)
+      .in('pick_side', ['home', 'away', 'over', 'under'])
+      .not('model_id', 'ilike', '%prop%');
     if (error) throw error;
     out.push(...((data ?? []) as unknown as SettledPick[]));
   }
