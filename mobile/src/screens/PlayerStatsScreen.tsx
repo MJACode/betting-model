@@ -65,6 +65,21 @@ import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
+import { InfoTooltip } from '@/components/InfoTooltip';
+import { StatTile } from '@/components/StatTile';
+import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
+import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
+import {
+  formatRecordLine,
+  thresholdFromBookLine,
+  type PlayerPickRecord,
+  type PropLineMove,
+  type SplitBucket,
+  type StatSplits,
+  type TonightLine,
+} from '@/lib/playerDetail';
+import type { LineupSlotRow, PlayerType, SavantStatsRow } from '@/types';
+import { ordinal } from '@/lib/teamDetail';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
@@ -152,6 +167,24 @@ export function PlayerStatsScreen() {
   // must never cost the chart, and vice versa.
   const news = usePlayerNews({ sport, playerId: playerId || null, playerName });
 
+  // ── Everything around the chart: tonight's line and its movement, the
+  // sharp read, splits at the same threshold, our record on the player, and
+  // the MLB context (Matt, 2026-09-20: "do the same for player props, there
+  // should be more helpful information there"). Each section fails alone.
+  const detail = usePlayerDetail({
+    sport,
+    playerId: playerId || null,
+    playerName,
+    playerType,
+    games,
+    stat,
+    threshold: line,
+  });
+  // Has the reader stepped the line themselves? Until they do, the ruler
+  // follows the BOOK's posted line once it arrives — a hit rate at 5.5 when
+  // the book hangs 6.5 answers a question nobody is being asked.
+  const [lineTouched, setLineTouched] = useState(false);
+
   // ── The betslip leg ────────────────────────────────────────────────────────
   // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
   // this is where a leg joins OUR slip. It is deliberately the model's pick and
@@ -195,6 +228,7 @@ export function PlayerStatsScreen() {
   // sense for rebounds.
   useEffect(() => {
     setLine(null);
+    setLineTouched(false);
   }, [stat?.key, sport, playerId]);
 
   // Values come most-recent-first. Window slices the most recent N.
@@ -213,6 +247,16 @@ export function PlayerStatsScreen() {
       setLine(roundLineToStep(median, step));
     }
   }, [line, median, step]);
+
+  // The book's number wins over the median whenever one is posted and the
+  // reader hasn't moved the ruler. Snapped onto the stepper's grid so an
+  // Outs line of 16.5 lands on 17+, not 16.5+.
+  const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
+  useEffect(() => {
+    if (lineTouched || postedThreshold == null) return;
+    const snapped = roundLineToStep(postedThreshold, step);
+    setLine((prev) => (prev === snapped ? prev : snapped));
+  }, [postedThreshold, lineTouched, step]);
 
   const effLine = line ?? 0;
 
@@ -285,6 +329,7 @@ export function PlayerStatsScreen() {
         : colors.avoid;
 
   const stepLine = (deltaSteps: number) => {
+    setLineTouched(true);
     setLine((prev) => {
       const base = prev ?? roundLineToStep(median ?? step, step);
       return Math.min(Math.max(0, base + deltaSteps * step), Math.ceil(maxValue) + step * 5);
@@ -623,6 +668,39 @@ export function PlayerStatsScreen() {
               </View>
             ) : null}
 
+            {/* ── Tonight's line for this stat, and what the market says about it ── */}
+            <TonightLineCard
+              statLabel={statLabel}
+              nextGame={detail.nextGame}
+              tonight={detail.tonight}
+              move={detail.move}
+              market={detail.market}
+              books={detail.books}
+              booksReady={detail.booksReady}
+              loading={detail.slateLoading || detail.linesLoading}
+              error={detail.linesError}
+              lineup={detail.lineup}
+              sport={sport}
+            />
+
+            {/* ── The same threshold, split ─────────────────────────────── */}
+            {detail.splits ? (
+              <SplitsCard splits={detail.splits} statLabel={statLabel} threshold={effLine} loading={detail.splitsLoading} />
+            ) : null}
+
+            {/* ── MLB context the prop models train on ─────────────────── */}
+            {sport === 'MLB' && detail.savant ? (
+              <StatcastCard savant={detail.savant} playerType={playerType ?? null} />
+            ) : null}
+
+            {/* ── Our record on this player ─────────────────────────────── */}
+            <PickRecordCard
+              playerName={playerName}
+              record={detail.record}
+              loading={detail.picksLoading}
+              error={detail.picksError}
+            />
+
             <TrendStrip
               title={`${statLabel} — rolling averages`}
               trends={trends}
@@ -736,7 +814,402 @@ function GameRow({
   );
 }
 
+// ── Added sections (2026-09-20) ─────────────────────────────────────────────
+
+function SectionTitle({ title, tooltip }: { title: string; tooltip?: { title: string; body: string } }) {
+  return (
+    <View style={styles.sectionRow}>
+      <Text style={styles.sectionHeader}>{title}</Text>
+      {tooltip ? <InfoTooltip title={tooltip.title} body={tooltip.body} accessibilityLabel={`About ${title}`} /> : null}
+    </View>
+  );
+}
+
+function ReadRow({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <View style={styles.readRow}>
+      <Text style={styles.readLabel}>{label}</Text>
+      <View style={styles.readRight}>
+        <Text style={styles.readValue}>{value}</Text>
+        {note ? <Text style={styles.readNote}>{note}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+function signedPp(n: number): string {
+  const r = Math.round(n * 10) / 10;
+  if (r === 0) return '0.0pp';
+  return `${r > 0 ? '+' : '−'}${Math.abs(r).toFixed(1)}pp`;
+}
+
+/**
+ * The number the books actually posted for the selected stat tonight — the
+ * member's price on it, how DraftKings' line has moved since it opened, and
+ * where the sharp book has the over. All from the team's fixture on the
+ * slate; a player with no game in the next week shows the fixture line only.
+ */
+function TonightLineCard({
+  statLabel,
+  nextGame,
+  tonight,
+  move,
+  market,
+  books,
+  booksReady,
+  loading,
+  error,
+  lineup,
+  sport,
+}: {
+  statLabel: string;
+  nextGame: PlayerNextGame | null;
+  tonight: TonightLine | null;
+  move: PropLineMove | null;
+  market: string | null;
+  books: readonly string[];
+  booksReady: boolean;
+  loading: boolean;
+  error: string | null;
+  lineup: LineupSlotRow | null;
+  sport: PlayerLogSport;
+}) {
+  if (!nextGame) {
+    if (loading) return null;
+    return (
+      <>
+        <SectionTitle title="Tonight's line" />
+        <View style={styles.card}>
+          <Text style={styles.muted}>No game on the schedule in the next 7 days.</Text>
+        </View>
+      </>
+    );
+  }
+  const { entry, unstarted } = nextGame;
+  const side = entry.isHome === null ? `vs ${entry.opponent}` : `${entry.isHome ? 'vs' : '@'} ${entry.opponent}`;
+  const day = weekdayShortET(entry.game.commence_time);
+  const time = formatGameTimeET(entry.game.commence_time);
+  const when = unstarted ? `${day ? `${day} ` : ''}${time}` : 'Started';
+  const myBooks = books.length === 1 ? bookName(books[0]) : 'your books';
+
+  const slot =
+    sport === 'MLB' && lineup && lineup.batting_order != null
+      ? `Batting ${ordinal(lineup.batting_order)}${lineup.position ? ` · ${lineup.position}` : ''}${
+          lineup.is_confirmed ? ' · lineup confirmed' : ' · projected'
+        }`
+      : null;
+
+  return (
+    <>
+      <SectionTitle
+        title="Tonight's line"
+        tooltip={{
+          title: 'The posted number',
+          body:
+            'The line your sportsbooks have hung for this stat tonight, and the best over and under price ' +
+            'among them. The chart above follows this number until you move the ruler.\n\n' +
+            'LINE MOVEMENT is DraftKings’ opening number against its latest — a line that has climbed is ' +
+            'money on the over. SHARP compares Pinnacle’s no-vig over probability with what your book ' +
+            'charges for the same over; a positive gap means you are paying more than the sharp book thinks ' +
+            'the over is worth.',
+        }}
+      />
+      <View style={styles.card}>
+        <Text style={styles.fixture}>
+          {side}
+          <Text style={styles.fixtureWhen}>  {when}</Text>
+        </Text>
+        {slot ? <Text style={styles.slot}>{slot}</Text> : null}
+
+        {!market ? (
+          <Text style={[styles.muted, styles.gapTop]}>No sportsbook prices {statLabel} as a prop.</Text>
+        ) : !unstarted ? (
+          <Text style={[styles.muted, styles.gapTop]}>The game has started — no pre-game line to take.</Text>
+        ) : loading && !tonight ? (
+          <ActivityIndicator style={styles.loadingInline} />
+        ) : !tonight ? (
+          <Text style={[styles.muted, styles.gapTop]}>
+            {error
+              ? `Couldn’t load lines — ${error}`
+              : `No book has posted ${statLabel} for this game yet.`}
+          </Text>
+        ) : (
+          <>
+            <View style={styles.lineRow}>
+              <View style={styles.lineMain}>
+                <Text style={styles.lineNumber}>
+                  {statLabel} {tonight.line}
+                </Text>
+                <Text style={styles.lineSub}>
+                  {tonight.books} {tonight.books === 1 ? 'book' : 'books'} posted
+                  {booksReady && tonight.mine.length === 0 ? ` · not at ${myBooks}` : ''}
+                </Text>
+              </View>
+              {booksReady && tonight.bestOver ? (
+                <View style={styles.priceCell}>
+                  <Text style={styles.priceLabel}>OVER</Text>
+                  <Text style={styles.priceValue}>{formatAmerican(tonight.bestOver.over)}</Text>
+                  <Text style={styles.priceBook}>{bookName(tonight.bestOver.book)}</Text>
+                </View>
+              ) : null}
+              {booksReady && tonight.bestUnder ? (
+                <View style={styles.priceCell}>
+                  <Text style={styles.priceLabel}>UNDER</Text>
+                  <Text style={styles.priceValue}>{formatAmerican(tonight.bestUnder.under)}</Text>
+                  <Text style={styles.priceBook}>{bookName(tonight.bestUnder.book)}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {move ? (
+              <ReadRow
+                label="Since open"
+                value={
+                  move.openLine != null && move.nowLine != null
+                    ? `${move.openLine} → ${move.nowLine}`
+                    : `${formatPct(move.openOverProb, 0)} → ${formatPct(move.nowOverProb, 0)} over`
+                }
+                note={
+                  move.direction === 'flat'
+                    ? 'steady at DraftKings'
+                    : move.direction === 'up'
+                      ? 'money on the over'
+                      : 'money on the under'
+                }
+              />
+            ) : (
+              <ReadRow label="Since open" value="—" note="no DraftKings history stored yet" />
+            )}
+
+            {tonight.sharpOverProb != null ? (
+              <ReadRow
+                label="Sharp"
+                value={`Pinnacle ${formatPct(tonight.sharpOverProb, 0)} over`}
+                note={
+                  tonight.bookOverProb != null && tonight.gapPp != null && tonight.mine[0]
+                    ? `${bookName(tonight.mine[0].book)} ${formatPct(tonight.bookOverProb, 0)} · ${signedPp(tonight.gapPp)}`
+                    : 'your book has no price at this line'
+                }
+              />
+            ) : (
+              <ReadRow
+                label="Sharp"
+                value="—"
+                note={tonight.sharpLine != null ? `Pinnacle is at ${tonight.sharpLine}, a different line` : 'Pinnacle hasn’t posted this market'}
+              />
+            )}
+            <Text style={styles.source}>
+              Best price among your sportsbooks at the posted line. Sharp read is Pinnacle’s no-vig over probability.
+            </Text>
+          </>
+        )}
+      </View>
+    </>
+  );
+}
+
+/** The chart's threshold, split by venue, opponent and (basketball) role. */
+function SplitsCard({
+  splits,
+  statLabel,
+  threshold,
+  loading,
+}: {
+  splits: StatSplits;
+  statLabel: string;
+  threshold: number;
+  loading: boolean;
+}) {
+  const buckets: SplitBucket[] = [splits.home, splits.away];
+  if (splits.vsOpponent) buckets.push(splits.vsOpponent);
+  if (splits.starting && splits.starting.games > 0) buckets.push(splits.starting);
+  if (splits.bench && splits.bench.games > 0) buckets.push(splits.bench);
+  const rows: SplitBucket[][] = [];
+  for (let i = 0; i < buckets.length; i += 3) rows.push(buckets.slice(i, i + 3));
+  return (
+    <>
+      <SectionTitle
+        title={`${statLabel} ${threshold}+ by situation`}
+        tooltip={{
+          title: 'Same line, different spots',
+          body:
+            'How often the player has cleared the line above at home, on the road and against tonight’s ' +
+            'opponent, over the games loaded on this page. Small samples swing hard — the game count is ' +
+            'under every number for that reason. Home and away come from the game itself, not from the box score.',
+        }}
+      />
+      {loading && buckets.every((b) => b.games === 0) ? (
+        <ActivityIndicator style={styles.loading} />
+      ) : (
+        rows.map((r, i) => (
+          <View key={i} style={styles.tileRow}>
+            {r.map((b) => (
+              <StatTile
+                key={b.label}
+                label={b.label}
+                value={b.hitRate == null ? '—' : formatPct(b.hitRate, 0)}
+                caption={
+                  b.games === 0
+                    ? 'no games'
+                    : `${b.hits} of ${b.games}${b.avg != null ? ` · avg ${b.avg.toFixed(1)}` : ''}`
+                }
+                tint={b.hitRate == null || b.games < 3 ? undefined : b.hitRate >= 0.6 ? colors.gradeGood : b.hitRate <= 0.4 ? colors.gradeBad : undefined}
+              />
+            ))}
+            {r.length < 3 ? Array.from({ length: 3 - r.length }).map((_, k) => <View key={`pad-${k}`} style={styles.tilePad} />) : null}
+          </View>
+        ))
+      )}
+    </>
+  );
+}
+
+/** Season Statcast, the rows the MLB prop models train on (PropContextCard's set). */
+function StatcastCard({ savant, playerType }: { savant: SavantStatsRow; playerType: PlayerType | null }) {
+  const pct = (v: number | null) => (v == null ? null : `${Number(v).toFixed(1)}%`);
+  const rows: Array<{ label: string; value: string | null }> =
+    playerType === 'pitcher'
+      ? [
+          { label: 'xERA', value: savant.xera != null ? Number(savant.xera).toFixed(2) : null },
+          { label: 'K rate', value: pct(savant.k_pct) },
+          { label: 'Whiff rate', value: pct(savant.whiff_pct) },
+          { label: 'CSW rate', value: pct(savant.csw_pct) },
+          { label: 'Groundball rate', value: pct(savant.gb_pct) },
+          { label: 'Avg fastball', value: savant.avg_velocity != null ? `${Number(savant.avg_velocity).toFixed(1)} mph` : null },
+        ]
+      : [
+          { label: 'Barrel rate', value: pct(savant.barrel_pct) },
+          { label: 'Hard-hit rate', value: pct(savant.hard_hit_pct) },
+          { label: 'xBA', value: savant.xba != null ? Number(savant.xba).toFixed(3) : null },
+          { label: 'xSLG', value: savant.xslg != null ? Number(savant.xslg).toFixed(3) : null },
+          { label: 'Launch angle', value: savant.launch_angle != null ? `${Number(savant.launch_angle).toFixed(1)}°` : null },
+          { label: 'Sprint speed', value: savant.sprint_speed != null ? `${Number(savant.sprint_speed).toFixed(1)} ft/s` : null },
+        ];
+  const present = rows.filter((r) => r.value != null);
+  if (present.length === 0) return null;
+  return (
+    <>
+      <SectionTitle
+        title={`Statcast · ${savant.season}`}
+        tooltip={{
+          title: 'Quality of contact, not results',
+          body:
+            'Season Statcast metrics — the inputs our MLB prop models train on. Expected numbers (xBA, xSLG, xERA) ' +
+            'strip out luck on balls in play, so a player whose expected numbers run ahead of his actual ones is ' +
+            'due some regression the right way.',
+        }}
+      />
+      <View style={styles.card}>
+        {present.map((r) => (
+          <ReadRow key={r.label} label={r.label} value={r.value!} />
+        ))}
+      </View>
+    </>
+  );
+}
+
+/** Our settled BETs on this player, per market, in units (CLAUDE.md §4). */
+function PickRecordCard({
+  playerName,
+  record,
+  loading,
+  error,
+}: {
+  playerName: string;
+  record: PlayerPickRecord;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <>
+      <SectionTitle
+        title={`Our picks on ${playerName}`}
+        tooltip={{
+          title: 'Settled bets only',
+          body:
+            `Every settled BET our prop models made on ${playerName}, by market. Results are in units: one unit is one ` +
+            'flat bet. A pick that carried no price counts in the record and not the units, so nothing is priced at an invented −110.',
+        }}
+      />
+      {loading && record.settled === 0 ? (
+        <ActivityIndicator style={styles.loading} />
+      ) : record.settled === 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.muted}>
+            {error ? `Couldn’t load our picks — ${error}` : `No settled picks on ${playerName} yet.`}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.card}>
+          <View style={styles.recordTop}>
+            <Text style={styles.recordTotal}>{formatRecordLine(record)}</Text>
+            <Text style={styles.recordCount}>
+              {record.settled} settled {record.settled === 1 ? 'bet' : 'bets'}
+              {record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}
+            </Text>
+          </View>
+          {record.lines.map((l) => (
+            <ReadRow
+              key={l.modelId}
+              label={l.label}
+              value={formatRecordLine(l)}
+              note={
+                l.overs + l.unders > 0
+                  ? `${l.overs} over${l.overs === 1 ? '' : 's'} · ${l.unders} under${l.unders === 1 ? '' : 's'}`
+                  : undefined
+              }
+            />
+          ))}
+        </View>
+      )}
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
+  // ── Added sections (2026-09-20) ──
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  card: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  tileRow: { flexDirection: 'row', gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.sm },
+  tilePad: { flex: 1 },
+  muted: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18 },
+  gapTop: { marginTop: spacing.sm },
+  loadingInline: { marginTop: spacing.sm },
+  source: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.sm, lineHeight: 16 },
+  fixture: { fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  fixtureWhen: { fontSize: font.size.footnote, fontWeight: font.weight.regular, color: colors.textSecondary },
+  slot: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
+  lineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.md, marginBottom: spacing.xs },
+  lineMain: { flex: 1, minWidth: 0 },
+  lineNumber: { fontSize: font.size.title3, fontWeight: font.weight.bold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+  lineSub: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
+  priceCell: { alignItems: 'flex-end', minWidth: 64 },
+  priceLabel: { fontSize: font.size.micro, fontWeight: font.weight.semibold, color: colors.textSecondary, letterSpacing: 0.3 },
+  priceValue: { fontSize: font.size.body, fontWeight: font.weight.bold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+  priceBook: { fontSize: font.size.caption, color: colors.textSecondary },
+  readRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    gap: spacing.md,
+  },
+  readLabel: { fontSize: font.size.footnote, color: colors.textSecondary, width: 96 },
+  readRight: { flex: 1, alignItems: 'flex-end' },
+  readValue: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textPrimary, fontVariant: ['tabular-nums'], textAlign: 'right' },
+  readNote: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 1, textAlign: 'right' },
+  recordTop: { marginBottom: spacing.xs },
+  recordTotal: { fontSize: font.size.title3, fontWeight: font.weight.bold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+  recordCount: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
+
   slipCard: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -2305,6 +2305,44 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
 }
 
 /**
+ * Settled prop BETs on ONE player — the player page's "our picks on {name}".
+ * Matched by `player_id` when the model wrote one, and by the label's leading
+ * name otherwise: nfl_prop_market writes `player_key` and no player_id
+ * (measured 2026-09-20: 39 of its 39 settled BETs carry NULL), and that
+ * column is not in the settled-pick projection. The RECORD filter runs on the
+ * server, exactly as the team page's does (CLAUDE.md §1c). Sized: the busiest
+ * player on any model has 50 settled BETs.
+ */
+export async function fetchSettledPropPicksForPlayer(args: {
+  sport: string;
+  playerId?: string | null;
+  playerName?: string | null;
+}): Promise<SettledPick[]> {
+  const { sport, playerId, playerName } = args;
+  const clauses: string[] = [];
+  if (playerId) clauses.push(`player_id.eq."${playerId}"`);
+  // Labels are "Blake Snell Over 5.5 Ks" — the name, a space, the side.
+  const name = (playerName ?? '').replace(/[",()]/g, '').trim();
+  if (name) clauses.push(`pick_label.ilike."${name} %"`);
+  if (clauses.length === 0) return [];
+  const { data, error } = await supabase
+    .from('picks')
+    .select(SETTLED_PICK_COLUMNS)
+    .eq('sport', sport)
+    .eq('signal_type', 'BET')
+    .in('result', ['WIN', 'LOSS', 'PUSH'])
+    .or(clauses.join(','))
+    .order('game_date', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  // A game-level pick can never match a player_id; the label match could in
+  // theory catch a team whose name starts a label, so keep prop rows only.
+  return ((data ?? []) as unknown as SettledPick[]).filter(
+    (p) => p.player_id != null || p.model_id.includes('prop'),
+  );
+}
+
+/**
  * Recent news notes for one player, newest first.
  *
  * Resolved by our `player_id` when we have one, and by the normalized name
