@@ -51,6 +51,7 @@ import { propMarketForStat, propModelForStat } from '@/lib/statCatalog';
 import type { StatDef } from '@/lib/statCatalog';
 import { anyBookPostsSide, buildPickIndex, slipPickFor } from '@/lib/statsOdds';
 import {
+  asHitMode,
   hitModeHeadline,
   hitModeLabel,
   modeLineLabel,
@@ -114,6 +115,13 @@ export function PlayerStatsScreen() {
     () => requestedChip(allChips, route.params.statKey, route.params.statGroup),
     [allChips, route.params.statKey, route.params.statGroup],
   );
+  // The side the row was read on, for the same reason: a board showing
+  // "Under 1.5 Receptions · 7 of 10" landed here on "2+ Receptions · 3 of 10",
+  // the complementary bet on the same ten games (UX review, 2026-09-20).
+  const requestedMode = useMemo(
+    () => asHitMode(route.params.hitMode) ?? 'atLeast',
+    [route.params.hitMode],
+  );
   // What the user last tapped, seeded with what they arrived asking for. The
   // stat actually charted is derived from it below, because the load can
   // retire the group it belongs to.
@@ -127,8 +135,9 @@ export function PlayerStatsScreen() {
   // At Least / Over / Under — the SAME control the Stats board has had since
   // 2026-09-05 (lib/hitMode.ts), which this screen never adopted. It is what
   // makes the card able to ask for the other side of a bet at all: until now
-  // every number on it was an over, silently.
-  const [mode, setMode] = useState<HitMode>('atLeast');
+  // every number on it was an over, silently. Seeded with the side the board
+  // was showing, so the card cannot open on the complement of the row tapped.
+  const [mode, setMode] = useState<HitMode>(requestedMode);
   const [modeOpen, setModeOpen] = useState(false);
 
   useEffect(() => {
@@ -139,8 +148,9 @@ export function PlayerStatsScreen() {
   // sport's default stat and window rather than charting a stat it has no data for.
   useEffect(() => {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
+    setMode(requestedMode);
     setGameWindow(windows.some((w) => w.value === 10) ? 10 : windows[0]!.value);
-  }, [sport, playerType, playerId, windows, requested]);
+  }, [sport, playerType, playerId, windows, requested, requestedMode]);
 
   const beforeDate = todayET();
   const { games, loading, loaded, error } = usePlayerTrends({
@@ -364,7 +374,10 @@ export function PlayerStatsScreen() {
   // same stat is untouched: 25 of 25 is a real answer to a real question.
   const noEvidence =
     stat != null && (filled.get(chipKey(stat)) ?? 0) === 0 && hitTotal > 0 && hits === 0;
-  const noEvidenceText = `No ${statLabel.toLowerCase()} in ${hitTotal} games`;
+  // The stat keeps its own capitalisation: lower-casing a label that is half
+  // acronym renders "No rush+rec tds in 10 games", which reads as a typo on
+  // the one sentence a reader who tapped that stat came for (UX review).
+  const noEvidenceText = `No ${statLabel} in the last ${hitTotal} games`;
   const hitColor = noEvidence
     ? colors.none
     : hitPct >= HIT_RATE_GOOD

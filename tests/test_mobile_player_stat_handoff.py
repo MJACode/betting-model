@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LIB = ROOT / "mobile" / "src" / "lib" / "playerLog.ts"
 TYPES = ROOT / "mobile" / "src" / "types" / "index.ts"
 SCREEN = ROOT / "mobile" / "src" / "screens" / "PlayerStatsScreen.tsx"
+HIT_MODE = ROOT / "mobile" / "src" / "lib" / "hitMode.ts"
 CALLERS = (
     ROOT / "mobile" / "src" / "screens" / "StatsScreen.tsx",
     ROOT / "mobile" / "src" / "screens" / "PickDetailScreen.tsx",
@@ -96,13 +97,18 @@ def test_screen_opens_on_the_requested_stat():
     assert reset and "requested" in reset.group(1), "reset effect ignores the requested stat"
 
 
-def test_the_requested_group_survives_the_loaded_player_filter():
+def test_the_requested_stat_survives_the_loaded_player_filter():
     """A receiver with no touchdown still opens on Anytime TD when asked.
 
     `chipsForLoadedPlayer` drops a group the player has never filled -- right
     for a tab row nobody asked for, wrong for the stat they just tapped, whose
     honest answer is "0 of 10". Without the exemption the screen falls back to
     `openingChip` and the bug returns for exactly the players it hurt most.
+
+    ONE CHIP, never its group (UX review, 2026-09-20). Readmitting the group
+    hands that receiver Rush Yards, Rush TDs and Carries as well, all flat
+    zero -- the controls 2026-09-19 removed, coming back through the exemption
+    meant to answer a question he was actually asked.
     """
     screen = _src(SCREEN)
     assert "chipsWithRequested(allChips, chipsForLoadedPlayer(allChips, games), requested)" in screen
@@ -114,8 +120,39 @@ def test_the_requested_group_survives_the_loaded_player_filter():
     # No request -> the filter stands untouched, so 2026-09-19's rule holds
     # everywhere it held before.
     assert "if (!requested) return kept;" in body
-    # Whole groups, the way chipsForLoadedPlayer keeps them.
-    assert "c.group === requested.group" in body
+    # The chip, by its full identity...
+    assert "chipKey(c) === key" in body
+    # ...and NOT its group-mates, which is the regression this guards.
+    assert "c.group === requested.group" not in body, (
+        "the exemption readmits the whole group -- the 2026-09-19 zero tabs are back"
+    )
+
+
+def test_the_side_travels_with_the_stat():
+    """"Under 1.5 · 7 of 10" must not land on "2+ · 3 of 10".
+
+    The board renders every row in the active idiom, so without this the
+    complementary bet on the same ten games is one tap away and nothing on
+    either screen connects the two numbers (UX review, 2026-09-20). Averages
+    rows carry no side and must send none.
+    """
+    assert "hitMode?: string;" in _src(TYPES)
+
+    board = _src(CALLERS[0])
+    assert "hitMode: effectiveMode === 'hitRate' ? hitMode : undefined," in board, (
+        "the board must send its side, and only where the row has one"
+    )
+
+    screen = _src(SCREEN)
+    assert "asHitMode(route.params.hitMode) ?? 'atLeast'" in screen
+    assert "useState<HitMode>(requestedMode)" in screen, "the side is not seeded at mount"
+    assert "setMode(requestedMode);" in screen, "the side is not re-seeded for the next player"
+
+    # Validated, not cast: navigation state is serialised and restored, so a
+    # value this build does not know has to fall back rather than reach HitMode.
+    fn = re.search(r"export function asHitMode\((.*?)\n\}", _src(HIT_MODE), re.S)
+    assert fn, "asHitMode not found in hitMode.ts"
+    assert "'atLeast'" in fn.group(1) and "'under'" in fn.group(1)
 
 
 def test_innings_resolves_to_the_outs_chip():

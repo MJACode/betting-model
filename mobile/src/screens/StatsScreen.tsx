@@ -1398,6 +1398,10 @@ export function StatsScreen() {
       // sport-wide on the way through.
       statKey: stat ? String(stat.key) : undefined,
       statGroup: stat?.group,
+      // ...and the SIDE, which is half of what the row said. Only in Hit Rate
+      // mode: an Averages row has no side to carry, and sending one would
+      // flip the detail card to Under off a board that never mentioned it.
+      hitMode: effectiveMode === 'hitRate' ? hitMode : undefined,
     });
   };
 

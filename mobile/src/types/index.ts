@@ -496,6 +496,15 @@ export type RootStackParamList = {
      */
     statKey?: string;
     statGroup?: string;
+    /**
+     * And which SIDE of the line was being read: 'atLeast' | 'over' | 'under'
+     * (lib/hitMode). The board renders every row in the active idiom, so
+     * "Under 1.5 Receptions · 7 of 10" tapped through without this landed on
+     * "2+ Receptions · 3 of 10" — the same ten games, the complementary bet,
+     * one tap apart (UX review, 2026-09-20). Validated on arrival by
+     * `asHitMode`; absent, the screen opens in its own 'atLeast'.
+     */
+    hitMode?: string;
   };
   /**
    * One team's page off the Stats tab's Teams board: next-game market read,

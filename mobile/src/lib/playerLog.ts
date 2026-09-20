@@ -331,17 +331,20 @@ export function requestedChip(
 }
 
 /**
- * `chipsForLoadedPlayer` with the ASKED-FOR stat's group kept, whatever the
- * log says.
+ * `chipsForLoadedPlayer` with the ASKED-FOR stat kept, whatever the log says.
  *
  * The two rules pull opposite ways and both are right. A tab the player has
  * never filled is a control that leads nowhere — unless the reader has just
  * tapped that very stat, in which case "he has not scored in ten games" is the
  * answer they came for, and silently rehoming them on Receptions is the bug
- * this fixes. So: the filter still decides every OTHER group, and the group
- * the caller named is exempt from it.
+ * this fixes. So the filter still decides everything else and ONE chip is
+ * exempt from it.
  *
- * Whole groups, in catalog order, exactly as chipsForLoadedPlayer keeps them.
+ * One CHIP, not its group (UX review, 2026-09-20): readmitting the group would
+ * hand a touchdown-less receiver a Rushing tab holding Rush Yards, Rush TDs
+ * and Carries as well, all flat zero — the three controls 2026-09-19 removed,
+ * smuggled back in by the exemption. A one-chip tab reads honestly, and it is
+ * the only chip in the tab anyone asked for.
  */
 export function chipsWithRequested(
   all: StatDef[],
@@ -349,9 +352,10 @@ export function chipsWithRequested(
   requested: StatDef | null,
 ): StatDef[] {
   if (!requested) return kept;
-  if (kept.some((c) => chipKey(c) === chipKey(requested))) return kept;
+  const key = chipKey(requested);
+  if (kept.some((c) => chipKey(c) === key)) return kept;
   const keptKeys = new Set(kept.map(chipKey));
-  return all.filter((c) => keptKeys.has(chipKey(c)) || c.group === requested.group);
+  return all.filter((c) => keptKeys.has(chipKey(c)) || chipKey(c) === key);
 }
 
 /** A chip's identity: two sports share stat keys, and football shares them across groups. */

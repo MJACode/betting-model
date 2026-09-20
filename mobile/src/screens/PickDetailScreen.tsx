@@ -445,6 +445,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                 })
               }
               style={({ pressed }) => [styles.viewStatsBtn, pressed && styles.viewStatsBtnPressed]}
+              // The row is three unlabelled children to VoiceOver, and the
+              // button now opens a SPECIFIC stat — the label is the only place
+              // that can say which (UX review, 2026-09-20). Visible copy stays
+              // "View all stats": every other tab is still there on arrival.
+              accessibilityRole="button"
+              accessibilityLabel={`View ${propStat?.label ?? 'all'} stats for ${playerName ?? 'player'}`}
             >
               <Ionicons name="bar-chart-outline" size={16} color={colors.tint} />
               <Text style={styles.viewStatsText}>View all stats for {playerName ?? 'player'}</Text>
