@@ -118,7 +118,9 @@ export function propMarketForModel(modelId: string): string | null {
  * Returns null for game-level picks or an unrecognized label.
  */
 export function playerNameFromPickLabel(label: string): string | null {
-  const m = label.match(/^([A-Za-z .'\-]+?)\s+(?:Over|Under)\s/);
+  // Unicode letters — José / Acuña / Rodríguez are real stored labels.
+  // ASCII-only left those cards on a single truncated pick_label.
+  const m = label.match(/^([\p{L} .'\-]+?)\s+(?:Over|Under)\s/u);
   return m ? m[1] : null;
 }
 

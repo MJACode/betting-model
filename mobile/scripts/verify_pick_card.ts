@@ -337,6 +337,20 @@ check(
   );
 }
 {
+  const jose = splitPickTitle({ pick_label: 'José Soriano Over 4.5 Ks' });
+  check(
+    'accented given name splits',
+    jose.primary === 'Over 4.5 Ks' && jose.secondary === 'José Soriano',
+  );
+}
+{
+  const acuna = splitPickTitle({ pick_label: 'Ronald Acuña Jr. Under 0.5 Runs' });
+  check(
+    'accented surname + Jr. splits',
+    acuna.primary === 'Under 0.5 Runs' && acuna.secondary === 'Ronald Acuña Jr.',
+  );
+}
+{
   const gameMl = splitPickTitle({ pick_label: 'NYY ML' });
   check('moneyline stays a single pick_label', gameMl.primary === 'NYY ML' && gameMl.secondary === null);
 }
@@ -375,6 +389,10 @@ check(
   check(
     'PickCard does not write pick_label',
     !/pick\.pick_label\s*=/.test(src),
+  );
+  check(
+    'prop bet shrink floor stays above the caption (0.75 × 17 > 12)',
+    /minimumFontScale:\s*0\.75/.test(src),
   );
 }
 

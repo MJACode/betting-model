@@ -222,7 +222,7 @@ export function PickCard({
               style={styles.label}
               numberOfLines={1}
               {...(titleSecondary
-                ? { adjustsFontSizeToFit: true, minimumFontScale: 0.7 }
+                ? { adjustsFontSizeToFit: true, minimumFontScale: 0.75 }
                 : {})}
             >
               {titlePrimary}
