@@ -323,17 +323,18 @@ export function filledChipCounts(chips: StatDef[], games: PlayerLogEntry[]): Map
 }
 
 /**
- * The chip a screen (or one of its tabs) should open on: the stat this player
- * fills MOST OFTEN, ties going to catalog order, and the first chip there is
- * when they fill none.
+ * The chip a screen (or one of its tabs) should open on: within a group, the
+ * stat this player fills most often; across groups, the most-filled chip of
+ * the group they fill most overall. Ties go to catalog order, and a player who
+ * fills nothing gets the first chip there is.
  *
- * Most-often, not first, because first is a position's stat order and this
- * screen has no position for NCAAF and the wrong one often enough elsewhere: a
- * receiver's chips run Rushing before Receiving, so "first filled" opens a
- * wideout on the two carries he took rather than the twenty-five games he
- * caught something in. Measured 2026-09-19: 82 of 252 wide receivers and 75 of
- * 146 tight ends with a game since 2025 hold a Rushing tab on Rush+Rec TDs
- * alone, where every other chip in that tab is flat zero.
+ * Not simply "the first filled chip", because first is catalog order and
+ * catalog order is a position's: a receiver's chips run Rushing before
+ * Receiving, and Rush+Rec TDs sits in the Rushing group, so one receiving
+ * touchdown would open a tight end on the Rushing tab. Measured 2026-09-19:
+ * 82 of 252 wide receivers and 75 of 146 tight ends with a game since 2025
+ * hold their Rushing tab on that chip alone, every other chip in it flat zero.
+ * Weighing the whole group settles it on one game as well as on twenty-five.
  */
 export function openingChip(
   chips: StatDef[],
@@ -341,13 +342,22 @@ export function openingChip(
   group?: StatGroup | null,
 ): StatDef | null {
   const inGroup = group ? chips.filter((c) => c.group === group) : chips;
+  if (inGroup.length === 0) return null;
+  const weight = new Map<StatGroup, number>();
+  for (const c of inGroup) {
+    weight.set(c.group, (weight.get(c.group) ?? 0) + (filled.get(chipKey(c)) ?? 0));
+  }
   let best: StatDef | null = null;
-  let bestCount = 0;
+  let bestScore = 0;
+  let bestGroupWeight = 0;
   for (const c of inGroup) {
     const n = filled.get(chipKey(c)) ?? 0;
-    if (n > bestCount) {
+    if (n === 0) continue;
+    const w = weight.get(c.group) ?? 0;
+    if (w > bestGroupWeight || (w === bestGroupWeight && n > bestScore)) {
       best = c;
-      bestCount = n;
+      bestScore = n;
+      bestGroupWeight = w;
     }
   }
   return best ?? inGroup[0] ?? null;

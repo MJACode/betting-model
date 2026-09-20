@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchPlayerGameLog } from '@/lib/queries';
 import {
   logStatValue,
@@ -34,6 +34,28 @@ function reduce(values: number[], n: number) {
   const known = slice.filter((v) => v != null);
   const avg = known.length > 0 ? known.reduce((a, b) => a + b, 0) / known.length : null;
   return { avg, winPct: null, games: slice.length };
+}
+
+/**
+ * A stat's per-game values off a loaded log, newest first, with missing games
+ * dropped rather than counted as zero. Exported because the player detail
+ * screen picks its stat FROM the loaded rows (a tab it cannot fill is not
+ * offered), so it resolves the stat after this hook has returned and charts
+ * the result itself.
+ */
+export function logValues(games: PlayerLogEntry[], def: StatDef | null): number[] {
+  if (!def) return [];
+  const vals: number[] = [];
+  for (const r of games) {
+    const v = logStatValue(r, def);
+    if (v != null) vals.push(v);
+  }
+  return vals;
+}
+
+/** L3 / L5 / L10 / L20 / all, from a values list. */
+export function trendBuckets(values: number[]): TrendBuckets {
+  return bucketize(values);
 }
 
 function bucketize(values: number[]): TrendBuckets {
@@ -86,48 +108,63 @@ export function usePlayerTrends({
   limit,
 }: Args) {
   const [games, setGames] = useState<PlayerLogEntry[]>([]);
-  const [values, setValues] = useState<number[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  // Whether a fetch has RESOLVED for the current player — not the same as
+  // "not loading", which is also true in the frame before the first one
+  // starts. The player screen shows no stat controls until this is true,
+  // because it cannot know which tabs a player fills until the rows land.
+  const [loaded, setLoaded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const key = stat?.key ?? statKey ?? null;
+  // Whether a stat is selected at all gates the fetch; WHICH stat does not.
+  const hasStat = key != null;
 
+  // The FETCH does not depend on the stat. `fetchPlayerGameLog` asks for a
+  // sport's whole column list (LOG_COLUMNS), so every stat this screen can
+  // chart is already in the rows — re-running it on a stat change bought the
+  // same 25 rows again and left `values` showing the PREVIOUS stat's numbers
+  // under the new stat's label for the length of a network round trip (UX
+  // review, 2026-09-20; the player screen now re-picks the stat by itself
+  // after a load, so that window opened on its own). Deriving the values
+  // below also makes a chip tap instant instead of a refetch.
   useEffect(() => {
-    if (!beforeDate || !key || !supportsPlayerDetail(sport) || (!playerId && !playerName)) {
+    if (!beforeDate || !hasStat || !supportsPlayerDetail(sport) || (!playerId && !playerName)) {
       setGames([]);
-      setValues([]);
+      setLoaded(true);
       return;
     }
     let mounted = true;
     setLoading(true);
+    setLoaded(false);
     setError(null);
-
-    const def = stat ?? defForKey(sport, String(key), playerType);
 
     fetchPlayerGameLog(sport, { playerId, playerName }, beforeDate, limit)
       .then((rows) => {
         if (!mounted) return;
         setGames(rows);
-        const vals: number[] = [];
-        for (const r of rows) {
-          const v = logStatValue(r, def);
-          if (v != null) vals.push(v);
-        }
-        setValues(vals);
       })
       .catch((e: unknown) => {
         if (!mounted) return;
         setError(errorText(e));
       })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (!mounted) return;
+        setLoading(false);
+        setLoaded(true);
       });
 
     return () => {
       mounted = false;
     };
-    // `stat` is an object literal at some call sites — key it by its stat key.
-  }, [playerId, playerName, beforeDate, key, sport, playerType, limit]);
+  }, [playerId, playerName, beforeDate, hasStat, sport, playerType, limit]);
 
-  return { games, values, trends: bucketize(values), loading, error };
+  // Newest-first, missing games dropped rather than counted as zero.
+  const values = useMemo(() => {
+    if (key == null) return [];
+    return logValues(games, stat ?? defForKey(sport, String(key), playerType));
+    // `stat` is an object literal at some call sites — key it by its stat key.
+  }, [games, key, sport, playerType]);
+
+  return { games, values, trends: bucketize(values), loading, loaded, error };
 }

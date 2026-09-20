@@ -22,7 +22,7 @@ import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePlayerPropQuote } from '@/hooks/usePlayerPropQuote';
-import { usePlayerTrends } from '@/hooks/usePlayerTrends';
+import { logValues, trendBuckets, usePlayerTrends } from '@/hooks/usePlayerTrends';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -82,7 +82,9 @@ export function PlayerStatsScreen() {
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
 
   const allChips = useMemo(() => chipsForPlayer(sport, playerType), [sport, playerType]);
-  const [stat, setStat] = useState<StatDef | null>(() => defaultChipForPlayer(sport, playerType));
+  // What the user last tapped. The stat actually charted is derived from it
+  // below, because the load can retire the group it belongs to.
+  const [picked, setPicked] = useState<StatDef | null>(() => defaultChipForPlayer(sport, playerType));
   const windows = useMemo(() => windowOptionsFor(sport), [sport]);
   const [gameWindow, setGameWindow] = useState<GameWindow>(10);
   // The "at least" threshold. null = auto-default to the rounded median once data loads.
@@ -101,37 +103,50 @@ export function PlayerStatsScreen() {
   // Sport/player changed (the screen is reused across pushes) — reset to that
   // sport's default stat and window rather than charting a stat it has no data for.
   useEffect(() => {
-    setStat(defaultChipForPlayer(sport, playerType));
+    setPicked(defaultChipForPlayer(sport, playerType));
     setGameWindow(windows.some((w) => w.value === 10) ? 10 : windows[0]!.value);
   }, [sport, playerType, playerId, windows]);
 
   const beforeDate = todayET();
-  const { games, values, trends, loading, error } = usePlayerTrends({
+  const { games, loading, loaded, error } = usePlayerTrends({
     playerId: playerId || null,
     playerName: playerId ? null : playerName,
     beforeDate,
     sport,
-    stat,
+    // Only tells the hook a stat is selected at all: the fetch reads the
+    // sport's whole column list, and the chart below is drawn from the stat
+    // resolved after the rows land.
+    stat: picked,
     playerType,
   });
+  // `loaded` is the hook's: until the first fetch RESOLVES this screen knows
+  // nothing about the player, so it offers no stat controls. A tab row drawn
+  // from the catalog would show the Defense tab on a quarterback for the
+  // length of the fetch and then withdraw it (UX review, 2026-09-20).
 
   // The tabs this player actually fills, read off the LOADED log: a quarterback
   // offered a Defense tab is a control that leads nowhere — ten charted zeroes
-  // and a 0% badge in alarm red (Matt, 2026-09-19). Everything shows until the
-  // log arrives, so the row never shrinks to a guess and then grows back.
+  // and a 0% badge in alarm red (Matt, 2026-09-19).
   const chips = useMemo(() => chipsForLoadedPlayer(allChips, games), [allChips, games]);
   const groups = useMemo(() => groupsOfChips(chips), [chips]);
   // Which of those chips the player has a number in — what a tab opens on.
   const filled = useMemo(() => filledChipCounts(chips, games), [chips, games]);
 
-  // The load can retire the group the screen opened on — an NFL screen opens
-  // on Pass Yards, which a linebacker will never fill. Fall back to the first
-  // stat this player DOES fill rather than charting one whose tab is gone.
-  useEffect(() => {
-    if (stat && !chips.some((c) => c.key === stat.key && c.group === stat.group)) {
-      setStat(openingChip(chips, filled));
-    }
-  }, [chips, filled, stat]);
+  // DERIVED, not corrected after the fact: the load can retire the group the
+  // screen opened on (every football screen opens on Pass Yards, which no
+  // linebacker will ever fill), and an effect that fixed it afterwards painted
+  // one frame with an empty chip row and nothing selected (UX review,
+  // 2026-09-20). Resolving it here means that frame cannot exist.
+  const stat = useMemo(() => {
+    if (picked && chips.some((c) => c.key === picked.key && c.group === picked.group)) return picked;
+    return openingChip(chips, filled);
+  }, [picked, chips, filled]);
+
+  // Charted off the rows already in hand, for the stat resolved above — never
+  // a second fetch, so the numbers and the label they sit under always belong
+  // to the same stat.
+  const values = useMemo(() => logValues(games, stat), [games, stat]);
+  const trends = useMemo(() => trendBuckets(values), [values]);
 
   // Recent news for this player. Independent of the trend load: news failing
   // must never cost the chart, and vice versa.
@@ -252,7 +267,22 @@ export function PlayerStatsScreen() {
     () => (line == null ? { hits: 0, total: 0, pct: 0 } : computeHitRate(windowed, selection.line, selection.side)),
     [windowed, line, selection],
   );
-  const hitColor = hitPct >= 0.6 ? colors.bet : hitPct >= 0.45 ? colors.med : colors.avoid;
+  // This player has no number at all for the charted stat in the loaded
+  // window — a never-filled chip inside a surviving tab, or the position
+  // fallback (19 of 138 defensive ends have no sack and no interception in
+  // twenty-five games). A red 0% badge there reads "this bet loses" when the
+  // truth is "there is nothing here" (UX review, 2026-09-20). An UNDER on the
+  // same stat is untouched: 25 of 25 is a real answer to a real question.
+  const noEvidence =
+    stat != null && (filled.get(chipKey(stat)) ?? 0) === 0 && hitTotal > 0 && hits === 0;
+  const noEvidenceText = `No ${statLabel.toLowerCase()} in ${hitTotal} games`;
+  const hitColor = noEvidence
+    ? colors.none
+    : hitPct >= 0.6
+      ? colors.bet
+      : hitPct >= 0.45
+        ? colors.med
+        : colors.avoid;
 
   const stepLine = (deltaSteps: number) => {
     setLine((prev) => {
@@ -314,47 +344,67 @@ export function PlayerStatsScreen() {
 
         {/* Group tabs — the same two-level bar as the Stats tab (Matt,
             2026-09-04). Only sports whose stats span several groups (NFL) show
-            a row; one group means the chip row already says everything. */}
-        <GroupTabs
-          second={false}
-          groups={groups}
-          active={activeGroup}
-          onChange={(g) => {
-            const first = openingChip(chips, filled, g);
-            if (first) setStat(first);
-          }}
-        />
+            a row; one group means the chip row already says everything, and
+            when the sport HAS groups but this player fills one, the name is
+            kept as a plain header so a linebacker's two chips still say
+            "Defense" (UX review, 2026-09-20). */}
+        {!loaded ? (
+          <View
+            style={styles.controlsSkeleton}
+            accessible
+            accessibilityLabel="Loading this player's stats"
+          >
+            <View style={[styles.skeletonBlock, { width: '45%' }]} />
+            <View style={[styles.skeletonBlock, { width: '70%' }]} />
+          </View>
+        ) : (
+          <>
+            {groups.length === 1 && groupsOfChips(allChips).length > 1 ? (
+              <Text style={styles.sectionHeader}>{groups[0]}</Text>
+            ) : null}
+            <GroupTabs
+              second={false}
+              groups={groups}
+              active={activeGroup}
+              onChange={(g) => {
+                const first = openingChip(chips, filled, g);
+                if (first) setPicked(first);
+              }}
+            />
 
-        {/* Stat selector */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.windowRow}
-        >
-          {groupChips.map((c) => {
-            const active = c.key === stat?.key && c.group === stat?.group;
-            return (
-              <Pressable
-                key={chipKey(c)}
-                onPress={() => setStat(c)}
-                // Pre-existing (ux_scan a11y-pressable, byte-identical to
-                // master): a chip whose only child is a Text announces as
-                // "button" and nothing else, and neither row said which chip
-                // was ACTIVE. Cleared here because this change made the stat
-                // row the bet-type selector and brought the file into the
-                // reviewed set — the same courtesy the stepper was paid.
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`${c.label} bets`}
-                style={[styles.windowChip, active && styles.windowChipActive]}
-              >
-                <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
-                  {c.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+            {/* Stat selector */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.windowRow}
+            >
+              {groupChips.map((c) => {
+                const active = c.key === stat?.key && c.group === stat?.group;
+                return (
+                  <Pressable
+                    key={chipKey(c)}
+                    onPress={() => setPicked(c)}
+                    // Pre-existing (ux_scan a11y-pressable, byte-identical to
+                    // master): a chip whose only child is a Text announces as
+                    // "button" and nothing else, and neither row said which
+                    // chip was ACTIVE. Cleared here because this change made
+                    // the stat row the bet-type selector and brought the file
+                    // into the reviewed set — the same courtesy the stepper
+                    // was paid.
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`${c.label} bets`}
+                    style={[styles.windowChip, active && styles.windowChipActive]}
+                  >
+                    <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                      {c.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </>
+        )}
 
         {/* Game-range selector */}
         <ScrollView
@@ -390,10 +440,19 @@ export function PlayerStatsScreen() {
         ) : null}
 
         {loading && games.length === 0 ? (
-          <ActivityIndicator style={styles.loading} />
+          <ActivityIndicator style={styles.loading} accessibilityLabel="Loading recent games" />
         ) : windowed.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>No recent games on file.</Text>
+            {/* Two different nothings: no games at all, or games with no value
+                for THIS stat (NCAAF leaves a category's columns NULL for a
+                player who took no part in it). Saying "no recent games" above
+                a populated Recent games list made the screen contradict
+                itself (UX review, 2026-09-20). */}
+            <Text style={styles.emptyText}>
+              {games.length === 0
+                ? 'No recent games on file.'
+                : `No ${statLabel.toLowerCase()} in the last ${games.length} games.`}
+            </Text>
           </View>
         ) : (
           <>
@@ -405,11 +464,19 @@ export function PlayerStatsScreen() {
                     {headline} · {windowLabel}
                   </Text>
                   <Text style={styles.hitCount}>
-                    Hit {hits} of {hitTotal} games
+                    {noEvidence ? noEvidenceText : `Hit ${hits} of ${hitTotal} games`}
                   </Text>
                 </View>
-                <View style={[styles.hitBadge, { backgroundColor: hitColor }]}>
-                  <Text style={styles.hitBadgeText}>{Math.round(hitPct * 100)}%</Text>
+                <View
+                  style={[styles.hitBadge, { backgroundColor: hitColor }]}
+                  accessible
+                  accessibilityLabel={
+                    noEvidence ? noEvidenceText : `Hit rate ${Math.round(hitPct * 100)} percent`
+                  }
+                >
+                  <Text style={styles.hitBadgeText}>
+                    {noEvidence ? '—' : `${Math.round(hitPct * 100)}%`}
+                  </Text>
                 </View>
               </View>
 
@@ -947,6 +1014,19 @@ const styles = StyleSheet.create({
     fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
+  },
+  // Holds the stat controls' slot while the log loads, so the row does not
+  // appear, offer a tab this player cannot fill, and withdraw it.
+  controlsSkeleton: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+    gap: spacing.sm,
+  },
+  skeletonBlock: {
+    height: 10,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
   },
   emptyCard: {
     backgroundColor: colors.bgCard,

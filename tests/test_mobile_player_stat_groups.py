@@ -112,7 +112,8 @@ def test_a_tab_opens_on_the_stat_the_player_fills_most():
     m = re.search(r"export function openingChip\((.*?)\n\}", _src(LIB), re.S)
     assert m, "openingChip not found in playerLog.ts"
     body = m.group(0)
-    assert "n > bestCount" in body, "must pick the most-filled chip, not the first"
+    assert "w > bestGroupWeight" in body, "the group's own weight must break catalog order"
+    assert "n > bestScore" in body, "within a group, the most-filled chip wins"
     assert "best ?? inGroup[0] ?? null" in body, "a player who fills none still gets a chip"
 
     screen = _src(SCREEN)
