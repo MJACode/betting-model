@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-20 | [2026-09](./2026-09.md) | The team page off the Stats board (market read, form, splits, head-to-head, our record) and the player page's tonight-line / splits / Statcast / our-record sections |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, player detail offers only the stat tabs a player fills: the NFL log stores 0 (not NULL) off-position, so a QB got a Defense tab of ten zeroes. Groups now come from the loaded log, position is the net; a tab opens on the most-filled chip (Rush+Rec TDs holds a Rushing tab for 82/252 WRs). 0 of 82 QBs keep Defense |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, Stats line ruler drags by 5 on NFL/NCAAF yardage only (Pass/Rush/Rec Yards; TDs and receptions stay at 1, other sports untouched). Stop math extracted to `lib/lineRuler.ts`; Under's extra stop is a STEP not a unit; leaving Under no longer strands the line off the scale |
 | 2026-09-19 | [2026-09](./2026-09.md) | 2026-09-19, player card bet types + place at a book: usePlayerPropQuote (next unstarted game, alternates, buildQuoteIndex), PlayerBetBar (place / compare), hitMode adopted. Read paged per game — worst single game 1,258 rows. Chart/count predicate unified |

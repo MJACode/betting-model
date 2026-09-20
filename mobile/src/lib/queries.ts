@@ -40,6 +40,8 @@ import type {
   GameRow,
   GameWeather,
   LatestDkOddsRow,
+  NflTeamGameStatRow,
+  PublicBettingRow,
   LineupSlotRow,
   LiveGameStateRow,
   ModelRegistryRow,
@@ -2153,6 +2155,198 @@ export async function fetchTeamStats(
     }
   }
   return { season: null, rows: [] };
+}
+
+// ── Team detail (screens/TeamStatsScreen) ───────────────────────────────────
+//
+// Every read here was sized on production before it shipped (frontend rule:
+// get the row count, not the shape). Measured 2026-09-20:
+//   * games by team, one sport, last N finals ........ index scan, 2 ms
+//   * head-to-head, two teams, one sport ............. 23 rows scanned, 2 ms
+//   * odds opening snapshot, one game/market/book .... 1 row, 3 ms
+//   * picks in a team's last 25 MLB games ............ 2,840 rows in total,
+//     181 game-level, 13 settled BETs — so the filters below run on the
+//     SERVER, and the phone sees the 13, not the 2,840.
+//   * nfl_team_game_stats, one team-season ........... 19 rows
+// What is NOT here, and why: a per-game closing line for the other sports.
+// The DISTINCT ON walk over `odds` for one MLB team's last 10 games measured
+// 10.9 s (15,329 pages read) against a 3 s anon statement timeout. It needs
+// the board's cache treatment, not a client read — docs/followups.md.
+
+/**
+ * A team's most recent finished games IN ONE SPORT, newest first. Scoped by
+ * sport, unlike fetchTeamRecentGames: 'BUF' is Buffalo in the NFL and the
+ * NHL, and a form strip that mixes the two is wrong on both.
+ */
+export async function fetchTeamRecentGamesForSport(
+  sport: string,
+  team: string,
+  beforeDate: string,
+  limit = 25,
+): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('sport', sport)
+    .or(`home_team.eq."${team}",away_team.eq."${team}"`)
+    .lt('game_date', beforeDate)
+    .not('home_score', 'is', null)
+    .order('game_date', { ascending: false })
+    .order('game_id', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
+/** The last N finished meetings between two teams in one sport, newest first. */
+export async function fetchHeadToHead(
+  sport: string,
+  team: string,
+  opponent: string,
+  limit = 10,
+): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('sport', sport)
+    .or(
+      `and(home_team.eq."${team}",away_team.eq."${opponent}"),` +
+        `and(home_team.eq."${opponent}",away_team.eq."${team}")`,
+    )
+    .not('home_score', 'is', null)
+    .order('game_date', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
+/**
+ * The OPENING pre-game snapshot for one game market at one book — the first
+ * row stored, in-play excluded. Paired with the latest row from
+ * v_latest_odds_all_books it gives "opened at / now at" for the market read.
+ */
+export async function fetchOpeningLine(
+  gameId: string,
+  market: string,
+  bookmaker: string,
+): Promise<OddsSnapshotRow | null> {
+  const { data, error } = await supabase
+    .from('odds')
+    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
+    .eq('game_id', gameId)
+    .eq('market', market)
+    .eq('bookmaker', bookmaker)
+    .neq('snapshot_type', 'in_play')
+    .order('snapshot_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as OddsSnapshotRow | null) ?? null;
+}
+
+/** Every book's latest line for every game market of ONE game — ~40 rows. */
+export async function fetchGameLineRowsAllMarkets(gameId: string): Promise<OddsByBookRow[]> {
+  const { data, error } = await supabase
+    .from('v_latest_odds_all_books')
+    .select(ODDS_BY_BOOK_COLUMNS)
+    .eq('game_id', gameId)
+    .in('market', ['h2h', 'spreads', 'totals']);
+  if (error) throw error;
+  return (data ?? []) as unknown as OddsByBookRow[];
+}
+
+/** The consensus public splits stored for one game: at most 6 rows (3 markets x 2 sides). */
+export async function fetchPublicSplits(gameId: string): Promise<PublicBettingRow[]> {
+  const { data, error } = await supabase
+    .from('public_betting')
+    .select('game_id, market, side, book, public_bet_pct, public_money_pct, snapshot_at')
+    .eq('game_id', gameId)
+    .eq('book', 'consensus');
+  if (error) throw error;
+  return (data ?? []) as unknown as PublicBettingRow[];
+}
+
+/** nflverse's per-team box lines for one team-season, with the closing spread and total. */
+export async function fetchNflTeamGameStats(team: string, season: number): Promise<NflTeamGameStatRow[]> {
+  const { data, error } = await supabase
+    .from('nfl_team_game_stats')
+    .select('game_id, team, opponent, game_date, season, week, is_home, spread_line, total_line, points_for, points_against')
+    .eq('team', team)
+    .eq('season', season)
+    .order('game_date', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as unknown as NflTeamGameStatRow[];
+}
+
+/**
+ * Settled game-level BET rows in a set of games — the team page's "our
+ * record on this team". The RECORD filter, on the server: `signal_type =
+ * 'BET'` and a real result, which is what the pick WAS (CLAUDE.md §1c — never
+ * a join to model_action_thresholds, and a VOID row has result NO_ACTION so
+ * it is out by construction).
+ *
+ * Props are excluded two ways, both required: `player_id` IS NULL is not
+ * enough because `nfl_prop_market` writes no player_id (39 of 39 settled
+ * BETs, measured 2026-09-20) and its over/under sides would land in the
+ * team O/U buckets. So: no `prop` in model_id, and pick_side is a game
+ * side (home/away/over/under), not a player.
+ */
+export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<SettledPick[]> {
+  if (gameIds.length === 0) return [];
+  const out: SettledPick[] = [];
+  for (let i = 0; i < gameIds.length; i += 50) {
+    const chunk = gameIds.slice(i, i + 50);
+    const { data, error } = await supabase
+      .from('picks')
+      .select(SETTLED_PICK_COLUMNS)
+      .in('game_id', chunk)
+      .eq('signal_type', 'BET')
+      .in('result', ['WIN', 'LOSS', 'PUSH'])
+      .is('player_id', null)
+      .in('pick_side', ['home', 'away', 'over', 'under'])
+      .not('model_id', 'ilike', '%prop%');
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as SettledPick[]));
+  }
+  return out;
+}
+
+/**
+ * Settled prop BETs on ONE player — the player page's "our picks on {name}".
+ * Matched by `player_id` when the model wrote one, and by the label's leading
+ * name otherwise: nfl_prop_market writes `player_key` and no player_id
+ * (measured 2026-09-20: 39 of its 39 settled BETs carry NULL), and that
+ * column is not in the settled-pick projection. The RECORD filter runs on the
+ * server, exactly as the team page's does (CLAUDE.md §1c). Sized: the busiest
+ * player on any model has 50 settled BETs.
+ */
+export async function fetchSettledPropPicksForPlayer(args: {
+  sport: string;
+  playerId?: string | null;
+  playerName?: string | null;
+}): Promise<SettledPick[]> {
+  const { sport, playerId, playerName } = args;
+  const clauses: string[] = [];
+  if (playerId) clauses.push(`player_id.eq."${playerId}"`);
+  // Labels are "Blake Snell Over 5.5 Ks" — the name, a space, the side.
+  const name = (playerName ?? '').replace(/[",()]/g, '').trim();
+  if (name) clauses.push(`pick_label.ilike."${name} %"`);
+  if (clauses.length === 0) return [];
+  const { data, error } = await supabase
+    .from('picks')
+    .select(SETTLED_PICK_COLUMNS)
+    .eq('sport', sport)
+    .eq('signal_type', 'BET')
+    .in('result', ['WIN', 'LOSS', 'PUSH'])
+    .or(clauses.join(','))
+    .order('game_date', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  // A game-level pick can never match a player_id; the label match could in
+  // theory catch a team whose name starts a label, so keep prop rows only.
+  return ((data ?? []) as unknown as SettledPick[]).filter(
+    (p) => p.player_id != null || p.model_id.includes('prop'),
+  );
 }
 
 /**

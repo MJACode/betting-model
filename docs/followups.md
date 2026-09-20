@@ -21,6 +21,29 @@
 
 ---
 
+## [ ] Per-game closing lines for the team page, for every sport (not just NFL)
+
+The team page (mobile `TeamStatsScreen`, 2026-09-20) prints a cover / over
+mark on each of a team's last ten games — but only for the NFL, where
+`nfl_team_game_stats` already stores nflverse's closing spread and total per
+team-game. Every other sport shows W/L and score only, with a one-line note.
+
+**Why it was left out, measured:** the per-game pre-game close for one MLB
+team's last 10 games is a `DISTINCT ON (game_id, market)` over `odds`, and it
+ran **10.9 s** (15,329 pages read, `idx_odds_book_snap` walked 3,880 rows for
+30 kept) against a 3 s anon statement timeout. That is the same cost that made
+the Teams board time out on 2026-09-04, and the same answer applies: a
+finished game's close never changes, so compute it once.
+
+**Shape of the fix:** `team_stats_board_compute` already builds the
+per-team-game `paired` CTE (margin, `team_spread`, `total_line`, `total_pts`,
+rest days). Persist it — `team_game_results_cache (sport, season, team,
+game_id, game_date, is_home, margin, team_spread, total_line, total_pts,
+rest_days)` — in the same `refresh_team_stats_board` swap, grant anon SELECT,
+add it to `data/anon_readable.py`, and the page reads ~40 rows per team by
+`(sport, team)` and drops its NFL-only branch. One migration, one line in the
+daily refresh, first fill on the worker.
+
 ## [ ] Retrain `mlb_runline` / `mlb_over_under` on the *richer* handicap block
 
 Job 121848 (post-#740, register=false) found no shippable `mlb_runline`

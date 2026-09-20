@@ -152,6 +152,7 @@ import type {
   TonightMatchupRow,
   RootStackParamList,
   TabParamList,
+  TeamSport,
 } from '@/types';
 
 type Nav = CompositeNavigationProp<
@@ -1568,7 +1569,21 @@ export function StatsScreen() {
           <SportToggle />
         </View>
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
-        <TeamsBoard sport={sport} onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined} />
+        <TeamsBoard
+          sport={sport}
+          onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
+          // The board only renders for team sports (supportsTeamBoard), which is
+          // exactly the route's TeamSport — the cast narrows Sport to that set.
+          onOpenTeam={(row, season) =>
+            navigation.navigate('TeamStats', {
+              team: row.team,
+              sport: sport as TeamSport,
+              season,
+              conference: row.conference,
+              fromParlay: fromParlay || undefined,
+            })
+          }
+        />
       </SafeAreaView>
     );
   }

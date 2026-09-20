@@ -479,6 +479,20 @@ export type RootStackParamList = {
     matchupText?: string;
     matchupGrade?: string;
   };
+  /**
+   * One team's page off the Stats tab's Teams board: next-game market read,
+   * form, splits, head-to-head, our record on it, league ranks. `sport` is a
+   * team sport (UFC has no teams). `season` is the season the board was
+   * showing, so the page and the row it was opened from agree.
+   */
+  TeamStats: {
+    team: string;
+    sport: TeamSport;
+    season: number | null;
+    conference?: string | null;
+    /** Came from the Betslip to find a leg — adding one here bounces back. */
+    fromParlay?: boolean;
+  };
   Explainer: undefined;
   ConnectSportsbook: undefined;
   // TrackRecord is a tab now, but it's kept here too so the existing
@@ -866,6 +880,45 @@ export interface TeamSeasonStats {
   /** The season the rows are from, or null when there were none. */
   season: number | null;
   rows: TeamStatsRow[];
+}
+
+/** Sports with a Teams board — every league sport; UFC has no teams. */
+export type TeamSport = 'MLB' | 'WNBA' | 'NBA' | 'NHL' | 'NFL' | 'NCAAF';
+
+/**
+ * One row of `public_betting`: the consensus share of tickets and money on
+ * one side of one game market (Action Network, full-game ML / spread / total).
+ * MLB only as of 2026-09-20 — measured, not assumed: the ingestor covers one
+ * sport, so every other sport's game has no rows and the screen says so.
+ */
+export interface PublicBettingRow {
+  game_id: string;
+  market: string; // 'h2h' | 'spreads' | 'totals'
+  side: string; // 'home' | 'away' | 'over' | 'under'
+  book: string;
+  public_bet_pct: number | string | null;
+  public_money_pct: number | string | null;
+  snapshot_at: string | null;
+}
+
+/**
+ * One team-game from `nfl_team_game_stats` — nflverse's per-team box line,
+ * carrying the CLOSING spread and total. `spread_line` is nflverse's sign:
+ * POSITIVE means the home team is favoured, the opposite of `odds.spread_home`
+ * (see lib/teamDetail.nflCoverMarks and the team_stats_board SQL).
+ */
+export interface NflTeamGameStatRow {
+  game_id: string;
+  team: string;
+  opponent: string;
+  game_date: string;
+  season: number;
+  week: number | null;
+  is_home: number | null;
+  spread_line: number | string | null;
+  total_line: number | string | null;
+  points_for: number | null;
+  points_against: number | null;
 }
 
 export interface TeamStatsRow {
