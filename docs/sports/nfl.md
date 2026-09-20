@@ -26,14 +26,17 @@ weekly routine).
   on-disk size drift as the season accrues; do not treat a stale MB figure as
   current. Backup tarball: `nfl-model-odds-cache.tar.gz` (keep a copy outside
   this machine). See `nfl/data/odds_cache/README.md`.
-- `nfl/data/weather_cache/` is gitignored and is a CACHE of Supabase: every
-  file's hours are in `nfl_stadium_weather_hourly` (2026-09-20, 44 files /
-  117,192 stadium-hours imported by
-  `python -m data.ingestors.nfl_weather_cache_import --apply`, which resumes on
-  its `source` marker so a re-run writes nothing already stored). A fresh
-  pull -- `python nfl/scripts/validate_wind_forecast.py` rebuilds the files
-  in ~30 min -- is followed by that import, or the new hours exist on one
-  machine only.
+- `nfl/data/weather_cache/` is gitignored and is a CACHE of Supabase, in both
+  directions (2026-09-20). `fetch_issued_forecasts` reads the file on disk,
+  else every hour of the window from `nfl_stadium_weather_hourly` (measured:
+  a full season for one stadium, 2,976 hours, in 1.5 s with no network), else
+  Open-Meteo -- and an Open-Meteo response is written to the table in the same
+  call (only a full 1..7-lead pull; a one-lead replay pull is not stored, so
+  it cannot block the full row). With no `DATABASE_URL` the module falls
+  through to the file and the API and warns that the fetch was NOT stored;
+  `python -m data.ingestors.nfl_weather_cache_import --apply` catches up (it
+  resumes on its `source` marker, so a re-run writes nothing already stored).
+  The 44 files / 117,192 stadium-hours on this machine went in that way.
 - Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
   plain historical series before that is near-analysis and LEAKS if used as a forecast.
 - The package keeps its own credit ledger: `nfl/data/credit_ledger.json`.
