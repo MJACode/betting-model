@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, NHL 2026-27 research (docs/nhl_market_research.md): season opens 09-29 at 84 games; zero NHL picks ever; six pipeline defects (CAN/BLU team ids, September season label, goalieId vs playerId, GSAA = GAA, h2h_3way key, 2025-26 missing); nhl_moneyline walk-forward AUC 0.605 leaked vs 0.563 clean; graded evidence on what has beaten NHL lines; odds-history and stats sources |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, the four master failures: backlog checkboxes + the parlay test re-pinned to #703 (#782), the stored-edge calibration assertion (#783), and the NFL weather cache imported to Supabase (117,192 stadium-hours into nfl_stadium_weather_hourly, #784) |
 | 2026-09-20 | [2026-09](./2026-09.md) | The team page off the Stats board (market read, form, splits, head-to-head, our record) and the player page's tonight-line / splits / Statcast / our-record sections |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, PickCard prop titles: bet on the bold line, player name on a caption. Game markets stay a single pick_label. UI-only; stored label unchanged |

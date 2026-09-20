@@ -606,6 +606,7 @@ to be known BEFORE deciding which file to open.
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
 | **Who has beaten player props, how, and with what data** | `docs/prop_market_research.md` |
 | **Odds providers: what exists, what it costs, what it adds** | `docs/odds_sources.md` |
+| **NHL 2026-27: markets, evidence, defects, plan** | `docs/nhl_market_research.md` |
 | **The eleven NFL prop models hold no information the line lacks** | `docs/nfl_prop_information_test.md` |
 | **The search for a profitable NFL prop model: tackles was the wrong stat, DK is flat** | `docs/nfl_prop_profitability_search.md` |
 | **The stat models: what is exhausted, what the outside world does, the one method left (market-anchored shape simulation)** | `docs/nfl_prop_method_search.md` |

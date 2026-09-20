@@ -4,6 +4,13 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+> **Read `docs/nhl_market_research.md` first (2026-09-20).** The holdout
+> numbers in the table below were produced on season-final inputs: on clean
+> inputs `nhl_moneyline` walks forward at AUC 0.563, not 0.642. That doc also
+> lists six measured defects in this pipeline (team ids, the September season
+> label, the goalie lookup, "GSAA", the 3-way market key, the missing 2025-26
+> season) — several statements below are wrong until they are fixed.
+
 ## 24. NHL — Pipeline Operations
 ### Models (moneyline + regulation LIVE — trained 2026-06-21; O/U + puckline blocked)
 
