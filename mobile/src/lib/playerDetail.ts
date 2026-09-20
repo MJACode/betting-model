@@ -35,7 +35,9 @@ export function thresholdFromBookLine(line: number): number {
   return Number.isInteger(line) ? line : Math.ceil(line);
 }
 
-/** The page's "6+" is the book's 5.5. */
+/** The page's "6+" is the book's 5.5. Inverse of a HALF-POINT conversion
+ *  only — an integer scored_line of 7 is already 7, not a 7+ threshold
+ *  that came from 6.5. Provenance labels print the source line instead. */
 export function bookLineFromThreshold(threshold: number): number {
   return threshold - 0.5;
 }
