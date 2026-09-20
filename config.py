@@ -1740,11 +1740,48 @@ def min_odds_for(model_id: str) -> float:
 GLOBAL_MIN_EV: float = float(os.environ.get("GLOBAL_MIN_EV", "0.20"))
 
 
+# ── THE TWO NFL RULES CARRY THEIR OWN FLOOR (mike, 2026-09-20) ───────────────
+# "give wind and opener their own floors". MODEL_MIN_EV can only TIGHTEN the
+# global floor; these two sit BELOW it, on purpose, so they are a separate
+# dict and min_ev_for returns them outright.
+#
+# WHY. The global floor asks for a big mispricing. These two rules take a small
+# one, by construction: across every bet either has ever written (`picks`,
+# 2026-09-20) the EV on the rule's own probability is 0.058-0.100 for
+# nfl_wind_totals (5 bets) and 0.011-0.053 for nfl_opener_spread (9 bets). No
+# global floor above ~0.10 lets either bet at all, so under 0.30 and under 0.20
+# they were switched off, and a rule that never bets never builds the record
+# it is being tracked for (docs/nfl_rule_2026_track.md).
+#
+# THE NUMBERS ARE NOT SWEPT. 0.05 and 0.01 sit just under the smallest bet each
+# rule has written, so each behaves as it did before 2026-09-19 while still
+# refusing a quote the juice has eaten. Graded record when set: wind 1-0
+# (+0.95u), opener 2-0 (+1.74u) -- evidence of nothing either way.
+# nfl_prop_market is deliberately NOT here (19-20, -2.49u over 39).
+MODEL_OWN_EV_FLOOR: dict = {
+    "nfl_wind_totals":   0.05,
+    "nfl_opener_spread": 0.01,
+}
+
+# The same two decide on the rule's OWN probability, not the promoted map. A
+# floor alone would not have let them bet: with one and two graded bets their
+# map is the pooled offset borrowed from other models (~-0.24 logit), which
+# takes wind's 0.574 to 0.510 -- EV -0.043 at -114, under any floor. Their
+# probabilities are lookups calibrated on the rule's own backtest
+# (wind_totals.CALIBRATED_UNDER_RATE, opener_spread), which is what they were
+# approved on. Revisit at 50 graded bets each, when a map of their own exists.
+# Read through models.honest_ev.honest_probability, never directly.
+MODELS_ON_OWN_PROBABILITY: frozenset = frozenset(MODEL_OWN_EV_FLOOR)
+
+
 def min_ev_for(model_id: str) -> float:
-    """The EV floor this model actually bets over: the global floor, or the
-    model's own MODEL_MIN_EV when that is higher. ONE accessor, for the same
-    reason min_odds_for is one: the scorer's gate, every card, both live
-    loops and the Discord "good to" bound have to agree on the number."""
+    """The EV floor this model actually bets over: its OWN floor when it
+    carries one (MODEL_OWN_EV_FLOOR, the two NFL rules), else the global
+    floor, or the model's MODEL_MIN_EV when that is higher. ONE accessor, for
+    the same reason min_odds_for is one: the scorer's gate, every card, both
+    live loops and the Discord "good to" bound have to agree on the number."""
+    if model_id in MODEL_OWN_EV_FLOOR:
+        return float(MODEL_OWN_EV_FLOOR[model_id])
     own = MODEL_MIN_EV.get(model_id)
     return GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
 

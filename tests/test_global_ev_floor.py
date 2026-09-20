@@ -26,6 +26,10 @@ SHRINK = {"method": "platt", "a": 1.0, "b": -0.3}
 def floor_030(monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.30)
     monkeypatch.setattr(config, "MODEL_MIN_EV", {})
+    # no model on its own floor or its own probability: these tests are about
+    # the shared gate being wired into every writer
+    monkeypatch.setattr(config, "MODEL_OWN_EV_FLOOR", {})
+    monkeypatch.setattr(config, "MODELS_ON_OWN_PROBABILITY", frozenset())
     return 0.30
 
 
@@ -263,6 +267,54 @@ def test_nfl_wind_and_opener_rows_drop_a_bet_under_the_floor(floor_030, identity
               "model_prob": "0.60", "market_prob": "0.52", "edge": "0.08",
               "stake_pct": "1.0"}
     _, picks = build_opener_rows([opener], 1000.0)
+    assert picks == []
+
+
+# ── the two NFL rules on their own floor and their own probability ───────────
+
+# The 2026-09-20 MIN @ CHI row, as the 15:40 UTC card wrote it.
+MIN_CHI = {"game_id": "2026_02_MIN_CHI", "matchup": "MIN @ CHI",
+           "kick_utc": "2026-09-20T17:00:00Z", "stadium_id": "CHI98",
+           "lead_days": "0.1", "forecast_wind": "13.3", "exp_true_wind": "11.8",
+           "total_line": "47.5", "book": "betrivers", "price": "-114",
+           "model_prob": "0.5735", "market_prob": "0.5075", "edge": "0.066",
+           "stake_pct": "0.958", "ev_pct": "7.66"}
+
+
+def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch):
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
+    assert config.min_ev_for("nfl_wind_totals") == 0.05
+    assert config.min_ev_for("nfl_opener_spread") == 0.01
+    # and nobody else does
+    assert config.min_ev_for("nfl_prop_market") == 0.20
+    assert set(config.MODEL_OWN_EV_FLOOR) == {"nfl_wind_totals", "nfl_opener_spread"}
+    assert config.MODELS_ON_OWN_PROBABILITY == frozenset(config.MODEL_OWN_EV_FLOOR)
+
+
+def test_the_two_rules_decide_on_their_own_probability(monkeypatch):
+    import models.scorer as sc
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
+    monkeypatch.setattr(sc, "_CAL_CACHE", {"nfl_wind_totals": SHRINK,
+                                           "nfl_opener_spread": SHRINK,
+                                           "nfl_prop_market": SHRINK})
+    g = honest_ev.gate("nfl_wind_totals", 0.5735, -114)
+    assert g.cal_prob == pytest.approx(0.5735) and g.clears
+    assert honest_ev.gate("nfl_opener_spread", 0.5557, -110).clears
+    # a model not on the list is still marked down, and still under the floor
+    other = honest_ev.gate("nfl_prop_market", 0.5735, -114)
+    assert other.cal_prob < 0.5735 and not other.clears
+
+
+def test_the_min_chi_wind_row_is_written_as_a_bet(monkeypatch):
+    import models.scorer as sc
+    from scripts.nfl_wind_publisher import build_rows
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
+    monkeypatch.setattr(sc, "_CAL_CACHE", {"nfl_wind_totals": SHRINK})
+    _, picks = build_rows([MIN_CHI], 1000.0)
+    assert [p["signal_type"] for p in picks] == ["BET"]
+    assert picks[0]["model_probability_cal"] == pytest.approx(0.5735)
+    # a quote the juice has eaten is still refused: 0.5735 at -135 is EV -0.002
+    _, picks = build_rows([{**MIN_CHI, "price": "-135"}], 1000.0)
     assert picks == []
 
 
