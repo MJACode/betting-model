@@ -285,10 +285,19 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
     assert config.min_ev_for("nfl_wind_totals") == 0.05
     assert config.min_ev_for("nfl_opener_spread") == 0.01
-    # and nobody else does
+    # nfl_prop_market's own entry is the global number ON PURPOSE: #794 left it
+    # under the floor on its record (19-20, -2.49u over 39) and 2026-09-20 wrote
+    # that choice out rather than leaving it implicit.
     assert config.min_ev_for("nfl_prop_market") == 0.20
-    assert set(config.MODEL_OWN_EV_FLOOR) == {"nfl_wind_totals", "nfl_opener_spread"}
-    assert config.MODELS_ON_OWN_PROBABILITY == frozenset(config.MODEL_OWN_EV_FLOOR)
+    # The dict is no longer these two alone (mike, 2026-09-20: "each model will
+    # need its own floor"), but DECIDING ON ITS OWN PROBABILITY still is. The
+    # two were one expression until today; widening the floors must not take
+    # every model off the calibration map.
+    assert {"nfl_wind_totals", "nfl_opener_spread"} <= set(config.MODEL_OWN_EV_FLOOR)
+    assert config.MODELS_ON_OWN_PROBABILITY == frozenset(
+        {"nfl_wind_totals", "nfl_opener_spread"}
+    )
+    assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 
 
 def test_the_two_rules_decide_on_their_own_probability(monkeypatch):

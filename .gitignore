@@ -139,3 +139,6 @@ models/saved/*_????????_??????.pkl
 
 # Do NOT gitignore nfl/data/odds_cache/ — irreplaceable (~45k Odds API credits).
 # See nfl/data/odds_cache/README.md and docs/sports/nfl.md.
+
+# Claude Code local permissions (machine-specific)
+.claude/settings.local.json
