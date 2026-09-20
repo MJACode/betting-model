@@ -478,6 +478,33 @@ export type RootStackParamList = {
      */
     matchupText?: string;
     matchupGrade?: string;
+    /**
+     * The stat the reader was ALREADY looking at when they tapped through —
+     * the Stats board's selected stat, or a prop pick's own stat. The screen
+     * opens on it instead of guessing from the log.
+     *
+     * Matt, 2026-09-20: tapping Rashee Rice off the Anytime TD board landed on
+     * Receptions, because the screen picked the stat he fills most and nothing
+     * carried what was on screen when he tapped.
+     *
+     * Two loose strings, not a StatDef: a route param is serialised into
+     * navigation state and restored from it, so it stays plain data and is
+     * narrowed on arrival (`requestedChip`) — the same shape `matchupGrade`
+     * uses. `statGroup` disambiguates, because football shares stat keys
+     * across groups; absent, the first group holding the key wins. Absent
+     * both, the screen chooses as it always has.
+     */
+    statKey?: string;
+    statGroup?: string;
+    /**
+     * And which SIDE of the line was being read: 'atLeast' | 'over' | 'under'
+     * (lib/hitMode). The board renders every row in the active idiom, so
+     * "Under 1.5 Receptions · 7 of 10" tapped through without this landed on
+     * "2+ Receptions · 3 of 10" — the same ten games, the complementary bet,
+     * one tap apart (UX review, 2026-09-20). Validated on arrival by
+     * `asHitMode`; absent, the screen opens in its own 'atLeast'.
+     */
+    hitMode?: string;
   };
   /**
    * One team's page off the Stats tab's Teams board: next-game market read,
