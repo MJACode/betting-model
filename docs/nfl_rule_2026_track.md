@@ -26,6 +26,21 @@
 Units stay `UNIT_PCT = 0.01` on both cards. Wind `MAX_UNITS = 2`. Opener
 `MAX_UNITS = 4`. A good month does not raise them.
 
+## 2026-09-20 — the two rules carry their own EV floor (mike)
+
+The platform's global EV floor (0.30 on 2026-09-19, 0.20 from 2026-09-20)
+switched both rules off: across every bet either has written, the EV on the
+rule's own probability is 0.058-0.100 for wind (5 bets) and 0.011-0.053 for
+opener (9 bets), and the pooled calibration offset took wind's 0.574 to 0.510.
+A rule that never bets cannot be tracked. mike: *"give wind and opener their
+own floors"*. `config.MODEL_OWN_EV_FLOOR` (wind 0.05, opener 0.01 -- set just
+under the smallest bet each has written, NOT swept) and
+`config.MODELS_ON_OWN_PROBABILITY` (both decide on the rule's own lookup until
+they have 50 graded bets). This restores how they bet before 2026-09-19; it is
+not a new threshold and not a unit change, and everything above still holds --
+including that the wind rule's measured issued-forecast under rate is 47.5% on
+n=101, which is under break-even at -110.
+
 ## How to re-score in October (or at season end)
 
 ```bash

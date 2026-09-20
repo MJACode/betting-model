@@ -350,6 +350,15 @@ keeps 0.30 through `MODEL_MIN_EV`, because its 0.50/0.16 cut was swept with
 so its map is the pooled offset (about -0.24), which takes the wind model's
 0.574 to 0.510 -- under its own 0.52 cut before any floor applies.
 
+**The two NFL rules were taken off both, the same day (mike: "give wind and
+opener their own floors").** `config.MODEL_OWN_EV_FLOOR` -- wind 0.05, opener
+0.01, returned outright by `config.min_ev_for` -- and
+`config.MODELS_ON_OWN_PROBABILITY`, which `models.honest_ev.honest_probability`
+reads so the gate AND the Discord bound use the rule's own number. Neither
+number is swept: each sits just under the smallest bet that rule has written
+(`docs/nfl_rule_2026_track.md`). `scripts/ev_floor_replay.py` still shows the
+marked-down view for them, because it applies the fitted map directly.
+
 ### Operating it
 
 - `python -m models.probability_calibration --promote` after the merge writes
