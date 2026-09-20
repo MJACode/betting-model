@@ -124,7 +124,8 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   // it used; the page labels its numbers from that, never from the request.
   const board = useSection<{ season: number | null; rows: TeamStatsRow[] }>(
     { season: null, rows: [] },
-    () => fetchTeamStats(sport, season ?? new Date().getUTCFullYear()),
+    // The ET year, never a bare new Date(): CLAUDE.md §7's "today is ET".
+    () => fetchTeamStats(sport, season ?? Number(today.slice(0, 4))),
     [sport, season, nonce],
   );
   const row = useMemo(() => board.data.rows.find((r) => r.team === team) ?? null, [board.data.rows, team]);
@@ -163,20 +164,32 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   );
 
   // ── The next game: fixture, lines, movement, sharp read, public read ────
-  const slate = useSection<{ date: string; isToday: boolean; games: GameRow[] }>(
-    { date: '', isToday: false, games: [] },
+  const slate = useSection<{ date: string; isToday: boolean; games: GameRow[]; window: GameRow[] }>(
+    { date: '', isToday: false, games: [], window: [] },
     async () => {
       const games = await fetchSlateGames(sport, today, addDays(today, 7));
       const t = buildTonightSlate(games, sport, today);
-      return { date: t.date, isToday: t.isToday, games: games.filter((g) => g.game_date === t.date) };
+      return { date: t.date, isToday: t.isToday, games: games.filter((g) => g.game_date === t.date), window: games };
     },
     [sport, today, nonce],
   );
+  // The NEXT game is the first one in the window that has not started; only
+  // when the team has none left this week does the page fall back to today's
+  // slate entry (a game in progress or just finished), which the card then
+  // labels Live / Final rather than "next" (UX review, 2026-09-20).
   const entry = useMemo(() => {
+    const nowIso = new Date(now).toISOString();
+    const upcoming = slate.data.window
+      .filter((g) => (g.home_team === team || g.away_team === team) && !!g.commence_time && g.commence_time > nowIso)
+      .sort((a, b) => String(a.commence_time).localeCompare(String(b.commence_time)))[0];
+    if (upcoming) {
+      const isHome = upcoming.home_team === team;
+      return { game: upcoming, opponent: isHome ? upcoming.away_team : upcoming.home_team, isHome } as SlateGame;
+    }
     const idx = buildSlateGameIndex(
       slate.data.games,
       { date: slate.data.date, isToday: slate.data.isToday, keys: new Set<string>() },
-      new Date(now).toISOString(),
+      nowIso,
     );
     return slateGameFor({ team }, idx)?.game ?? null;
   }, [slate.data, team, now]);
@@ -239,6 +252,9 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   );
 
   const loading = board.loading || recent.loading || slate.loading;
+  // The picks read waits on the recent-games read, so "loading" is both — or
+  // the card prints its empty sentence for a frame before the spinner.
+  const picksLoading = recent.loading || picks.loading;
 
   return {
     refresh,
@@ -250,6 +266,7 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
     recent,
     form,
     picks,
+    picksLoading,
     pickRecords,
     slate,
     nextGame,

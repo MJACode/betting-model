@@ -90,7 +90,7 @@ def test_units_never_price_an_unpriced_pick():
     lib = _read(LIB)
     m = re.search(r"export function playerPickRecord\(.*?\n\}\n", lib, re.S)
     assert m
-    assert "decision_odds ?? p.dk_odds" in m.group(0)
+    assert "hasPricedLine(p)" in m.group(0)
     assert "unpriced" in m.group(0)
 
 

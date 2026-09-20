@@ -21,6 +21,7 @@
  * pick's `pick_side` is 'home' / 'away' / 'over' / 'under', never a team name.
  */
 import { americanImplied } from '@/lib/format';
+import { hasPricedLine } from '@/lib/decisionPrice';
 import {
   teamStatsForSport,
   teamStatValue,
@@ -91,6 +92,8 @@ export interface LineMove {
    * For totals, 'toward' is the total rising (steam on the over).
    */
   direction: 'toward' | 'away' | 'flat';
+  /** When the "now" row was captured. */
+  asOf: string | null;
 }
 
 /**
@@ -119,7 +122,7 @@ export function lineMove(
   } else if (openProb != null && nowProb != null && Math.abs(nowProb - openProb) >= 0.005) {
     direction = nowProb > openProb ? 'toward' : 'away';
   }
-  return { market, openLine, nowLine, openProb, nowProb, direction };
+  return { market, openLine, nowLine, openProb, nowProb, direction, asOf: now.snapshot_at ?? null };
 }
 
 // ── Sharp book vs the member's book ────────────────────────────────────────
@@ -133,13 +136,25 @@ export interface SharpRead {
   sharpLine: number | null;
   /** The member's book's raw implied probability of the same side, vig included. */
   bookProb: number | null;
+  /** The member's book's NO-VIG probability of the side — its own two-way pair
+   *  de-vigged the same way, so the comparison below is fair-to-fair. */
+  bookFairProb: number | null;
   bookLine: number | null;
   book: string | null;
   /**
-   * Book implied − sharp fair, in probability points. Positive means the
-   * member is paying more than the sharp book thinks the side is worth.
+   * Book implied (vig in) − sharp fair, in probability points. This is the
+   * price the member actually pays against fair value; its NEUTRAL is the
+   * book's hold (about +2.4pp at −110 both ways), not zero.
    */
   gapPp: number | null;
+  /**
+   * Book fair − sharp fair, in points. Zero when the two books agree on the
+   * side and only the vig differs; this is the number a sentence about
+   * "dearer" or "cheaper" has to be built on (UX review, 2026-09-20).
+   */
+  fairGapPp: number | null;
+  /** When the rows were captured — the newest snapshot among the pair. */
+  asOf: string | null;
 }
 
 /**
@@ -167,18 +182,31 @@ export function sharpRead(
   const sharpProb = noVigProb(teamPrice(sharp, market, isHome), oppPrice(sharp, market, isHome));
   const bookPrice = mine ? teamPrice(mine, market, isHome) : null;
   const bookProb = bookPrice == null ? null : americanImplied(bookPrice);
+  const bookFairProb = mine ? noVigProb(teamPrice(mine, market, isHome), oppPrice(mine, market, isHome)) : null;
+  const stamps = [sharp.snapshot_at, mine?.snapshot_at].filter((s): s is string => !!s).sort();
   return {
     market,
     sharpProb,
     sharpLine: teamLine(sharp, market, isHome),
     bookProb,
+    bookFairProb,
     bookLine: mine ? teamLine(mine, market, isHome) : null,
     book: mine?.bookmaker ?? null,
     gapPp: sharpProb != null && bookProb != null ? (bookProb - sharpProb) * 100 : null,
+    fairGapPp: sharpProb != null && bookFairProb != null ? (bookFairProb - sharpProb) * 100 : null,
+    asOf: stamps.length ? stamps[stamps.length - 1]! : null,
   };
 }
 
 // ── Public splits ───────────────────────────────────────────────────────────
+
+/**
+ * Sports the public-splits ingestor covers. MEASURED 2026-09-20: every row in
+ * public_betting is MLB (8,448 rows, 1,408 games). Named here so the page's
+ * "captured for MLB only" sentence has one source that a coverage change
+ * updates, rather than a literal in a component that goes stale silently.
+ */
+export const PUBLIC_SPLITS_SPORTS: ReadonlySet<string> = new Set(['MLB']);
 
 export interface PublicRead {
   market: TeamMarket;
@@ -424,8 +452,9 @@ function addPick(rec: PickRecord, p: SettledPick): void {
   else if (p.result === 'LOSS') rec.losses += 1;
   else if (p.result === 'PUSH') rec.pushes += 1;
   // profit_flat fabricates −110 for a priceless pick (CLAUDE.md §6), so a
-  // pick with no price counts in the record and stays out of the units.
-  const priced = (p.decision_odds ?? p.dk_odds) != null;
+  // pick with no price counts in the record and stays out of the units. Read
+  // through decisionPrice, never the columns (UX_REVIEW §0).
+  const priced = hasPricedLine(p);
   const pf = numOrNull(p.profit_flat);
   if (priced && pf != null) rec.units = (rec.units ?? 0) + pf / 100;
   else rec.unpriced += 1;
@@ -462,11 +491,21 @@ export function teamPickRecords(picks: SettledPick[], games: GameRow[], team: st
 export function formatPickRecord(r: PickRecord): string {
   const rec = r.pushes > 0 ? `${r.wins}-${r.losses}-${r.pushes}` : `${r.wins}-${r.losses}`;
   if (r.units == null) return rec;
-  return `${rec} · ${formatUnits(r.units)}`;
+  return `${rec} · ${formatSignedUnits(r.units)}`;
 }
 
-/** "+2.4u" / "−0.5u" — results are always units (CLAUDE.md §4). */
-export function formatUnits(u: number): string {
+/** "3-1" or "3-1-1" — the record without the units. */
+export function formatWinLoss(r: { wins: number; losses: number; pushes: number }): string {
+  return r.pushes > 0 ? `${r.wins}-${r.losses}-${r.pushes}` : `${r.wins}-${r.losses}`;
+}
+
+/**
+ * "+2.4u" / "−0.5u" — a SIGNED result in units (CLAUDE.md §4). Named apart
+ * from thresholds.ts's `formatUnits`, which prints an unsigned stake ("2.4u"):
+ * two exports with one name and two meanings is how the next screen imports
+ * the wrong one (UX review, 2026-09-20).
+ */
+export function formatSignedUnits(u: number): string {
   const rounded = Math.round(u * 10) / 10;
   if (rounded === 0) return '0.0u';
   return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}u`;

@@ -508,14 +508,23 @@ function TeamRow({
         style={({ pressed }) => [styles.rowMain, pressed && onOpen ? styles.pressed : null]}
         hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
         accessibilityRole={onOpen ? 'button' : undefined}
-        accessibilityLabel={onOpen ? `${row.team}, ${row.wins} and ${row.losses}. Open team page` : undefined}
+        accessibilityLabel={
+          onOpen
+            ? `${row.team}, ${row.wins} ${row.wins === 1 ? 'win' : 'wins'}, ${row.losses} ${row.losses === 1 ? 'loss' : 'losses'}. Open team page`
+            : undefined
+        }
         accessibilityHint={onOpen ? 'Shows the next game, line movement, splits and head-to-head' : undefined}
       >
-        <Text style={styles.rowName} numberOfLines={1}>
-          {row.team}
-          {row.conference ? <Text style={styles.rowSub}>  {row.conference}</Text> : null}
-          {onOpen ? <Text style={styles.rowChevron}>  ›</Text> : null}
-        </Text>
+        {/* Name and chevron are siblings in a row, not one Text: as the last
+            inline run of a numberOfLines={1} Text the chevron truncated first
+            on exactly the long NCAAF names that fill the column (UX review). */}
+        <View style={styles.rowNameRow}>
+          <Text style={styles.rowName} numberOfLines={1}>
+            {row.team}
+            {row.conference ? <Text style={styles.rowSub}>  {row.conference}</Text> : null}
+          </Text>
+          {onOpen ? <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} /> : null}
+        </View>
         {/* The game sits directly under the name, exactly where the Players
             board puts it: the two boards are one toggle apart, and the same
             fact at two different vertical positions makes the eye re-find it
@@ -688,10 +697,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
-  // Reserved ONLY on a row that has a game. A TeamRow is not tappable, so the
-  // height buys no touch target — it exists so the list does not re-flow when
-  // the slate query settles. Unconditional, it was ~14pt of dead space on
-  // every row of every off-day board (UX review, 2026-09-05).
+  // Reserved ONLY on a row that has a game — it exists so the list does not
+  // re-flow when the slate query settles; unconditional, it was ~14pt of dead
+  // space on every row of every off-day board (UX review, 2026-09-05). Since
+  // 2026-09-20 the name/record block IS tappable (the team page), and on a
+  // row with a game this is also what keeps that target past 44pt.
   rowWithGame: { minHeight: 54 },
   rowMain: { flex: 1, minWidth: 0 },
   rank: {
@@ -702,14 +712,16 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   rowName: {
+    flexShrink: 1,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
   rowSub: { fontSize: font.size.micro, fontWeight: font.weight.semibold, color: colors.textTertiary },
-  // The disclosure mark on a tappable name. Not the only carrier: the row is
-  // a labelled button for VoiceOver, and a press dims it.
-  rowChevron: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textTertiary },
+  // The disclosure mark on a tappable name, outside the truncating Text. Not
+  // the only carrier: the row is a labelled button for VoiceOver, and a press
+  // dims it.
+  rowNameRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   rowMeta: { fontSize: font.size.micro, color: colors.textSecondary, marginTop: 1 },
   // The game, directly under the name. Same size and colour as the record
   // below it: textTertiary is ~3.4:1 on the card at this size, under the AA

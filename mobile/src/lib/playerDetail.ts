@@ -21,6 +21,8 @@
  * are the only two places that conversion lives here.
  */
 import { americanImplied } from '@/lib/format';
+import { hasPricedLine } from '@/lib/decisionPrice';
+import { formatSignedUnits } from '@/lib/teamDetail';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropModel, type StatDef } from '@/lib/statCatalog';
 import { modelShort } from '@/lib/modelMeta';
@@ -333,7 +335,8 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     const side = String(p.pick_side ?? '').toLowerCase();
     if (side === 'over') line.overs += 1;
     else if (side === 'under') line.unders += 1;
-    const priced = (p.decision_odds ?? p.dk_odds) != null;
+    // Through decisionPrice, never the columns (UX_REVIEW §0).
+    const priced = hasPricedLine(p);
     const pf = num(p.profit_flat);
     if (priced && pf != null) {
       line.units = (line.units ?? 0) + pf / 100;
@@ -351,12 +354,5 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
 export function formatRecordLine(r: { wins: number; losses: number; pushes: number; units: number | null }): string {
   const rec = r.pushes > 0 ? `${r.wins}-${r.losses}-${r.pushes}` : `${r.wins}-${r.losses}`;
   if (r.units == null) return rec;
-  return `${rec} · ${formatUnits(r.units)}`;
-}
-
-/** "+2.4u" / "−0.5u" — results are always units (CLAUDE.md §4). */
-export function formatUnits(u: number): string {
-  const rounded = Math.round(u * 10) / 10;
-  if (rounded === 0) return '0.0u';
-  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}u`;
+  return `${rec} · ${formatSignedUnits(r.units)}`;
 }

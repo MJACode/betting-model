@@ -37,22 +37,26 @@ import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AddLineSheet } from '@/components/AddLineSheet';
+import { GameStatusPill } from '@/components/GameStatusPill';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { StatTile } from '@/components/StatTile';
 import { TeamLineCell } from '@/components/TeamsBoard';
 import { FORM_GAMES, RECORD_GAMES, useTeamDetail, type NextGame } from '@/hooks/useTeamDetail';
-import { formatPct, weekdayShortET, formatGameTimeET } from '@/lib/format';
+import { formatPct, weekdayShortET, formatGameTimeET, formatStampET } from '@/lib/format';
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookName } from '@/lib/markets';
 import { buildTeamLineIndex, type TeamLineQuote } from '@/lib/statsOdds';
 import { isThinSample, sampleFor, type Tier } from '@/lib/teamBoard';
 import {
-  formatPickRecord,
+  formatSignedUnits,
   formatTeamLine,
+  formatWinLoss,
   ordinal,
+  PUBLIC_SPLITS_SPORTS,
   summarizeForm,
   teamRanks,
   type FormGame,
+  type PickRecord,
   type TeamMarket,
 } from '@/lib/teamDetail';
 import { formatTeamStat, TEAM_STAT_CATALOG, type TeamStatDef } from '@/lib/teamStatCatalog';
@@ -103,19 +107,35 @@ export function TeamStatsScreen() {
 
   const boardEmpty = !d.board.loading && !row;
 
+  // The pull spinner shows for a PULL, not for the first load — each section
+  // already has its own indicator, and two spinners for one fetch reads as
+  // two fetches (UX review).
+  const [pulled, setPulled] = useState(false);
+  useEffect(() => {
+    if (!d.loading) setPulled(false);
+  }, [d.loading]);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={d.loading} onRefresh={d.refresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={pulled && d.loading}
+            onRefresh={() => {
+              setPulled(true);
+              d.refresh();
+            }}
+          />
+        }
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <Text style={styles.teamName} numberOfLines={1}>
             {team}
-            {conference ? <Text style={styles.conference}>  {conference}</Text> : null}
           </Text>
           <Text style={styles.meta}>
+            {conference ? `${conference} · ` : ''}
             {row
               ? `${row.wins}-${row.losses}${
                   row.point_diff_pg != null
@@ -144,7 +164,7 @@ export function TeamStatsScreen() {
           loading={d.slate.loading || d.marketLoading}
           error={d.marketError}
           onLinePress={(q) => setLineSheet(q)}
-          publicCoverage={sport === 'MLB'}
+          publicCoverage={PUBLIC_SPLITS_SPORTS.has(sport)}
         />
 
         {/* ── 2. Form ────────────────────────────────────────────────────── */}
@@ -162,7 +182,13 @@ export function TeamStatsScreen() {
         ) : (
           <>
             <Card>
-              <FormStrip games={form} />
+              {/* College names do not fit a 10-cell strip ("Northwestern State"
+                  at 32pt a cell is "Nor…"), so NCAAF gets one row per game. */}
+              {sport === 'NCAAF' ? (
+                form.map((g) => <MeetingRow key={g.gameId} game={g} team={team} />)
+              ) : (
+                <FormStrip games={form} />
+              )}
               {hasCoverMarks ? (
                 <Text style={styles.legend}>
                   ✓ covered the closing spread · ✗ didn’t · O/U against the closing total
@@ -268,7 +294,7 @@ export function TeamStatsScreen() {
               'record but not the units, so nothing here is priced at an invented −110.',
           }}
         />
-        {d.picks.loading && d.pickRecords.settled === 0 ? (
+        {d.picksLoading && d.pickRecords.settled === 0 ? (
           <ActivityIndicator style={styles.loading} />
         ) : d.pickRecords.settled === 0 ? (
           <Card>
@@ -281,12 +307,12 @@ export function TeamStatsScreen() {
         ) : (
           <>
             <View style={styles.tileRow}>
-              <StatTile label={`On ${team}`} value={formatPickRecord(d.pickRecords.on)} tint={unitsTint(d.pickRecords.on.units)} />
-              <StatTile label={`Against ${team}`} value={formatPickRecord(d.pickRecords.against)} tint={unitsTint(d.pickRecords.against.units)} />
+              <RecordTile label={`On ${team}`} record={d.pickRecords.on} />
+              <RecordTile label={`Against ${team}`} record={d.pickRecords.against} />
             </View>
             <View style={styles.tileRow}>
-              <StatTile label="Overs" value={formatPickRecord(d.pickRecords.over)} tint={unitsTint(d.pickRecords.over.units)} />
-              <StatTile label="Unders" value={formatPickRecord(d.pickRecords.under)} tint={unitsTint(d.pickRecords.under.units)} />
+              <RecordTile label="Overs" record={d.pickRecords.over} />
+              <RecordTile label="Unders" record={d.pickRecords.under} />
             </View>
             <Text style={styles.footnote}>
               {d.pickRecords.settled} settled {d.pickRecords.settled === 1 ? 'bet' : 'bets'} in the last{' '}
@@ -347,12 +373,17 @@ function NextGameCard({
   publicCoverage: boolean;
 }) {
   if (!nextGame) {
-    if (loading) return null;
+    // Reserve the section while the slate loads, so the page does not reflow
+    // when it lands (UX review).
     return (
       <>
         <SectionTitle title="Next game" />
         <Card>
-          <Text style={styles.muted}>No {team} game on the schedule in the next 7 days.</Text>
+          {loading ? (
+            <ActivityIndicator style={styles.loadingInline} />
+          ) : (
+            <Text style={styles.muted}>No {team} game on the schedule in the next 7 days.</Text>
+          )}
         </Card>
       </>
     );
@@ -361,18 +392,22 @@ function NextGameCard({
   const side = entry.isHome === null ? `vs ${entry.opponent}` : `${entry.isHome ? 'vs' : '@'} ${entry.opponent}`;
   const day = weekdayShortET(entry.game.commence_time);
   const time = formatGameTimeET(entry.game.commence_time);
-  const when = unstarted ? `${day ? `${day} ` : ''}${time}` : 'Started';
   const anyQuote = MARKETS.some((m) => quotes[m]);
   const myBook = books.length === 1 ? bookName(books[0]) : 'your books';
 
   return (
     <>
-      <SectionTitle title="Next game" />
+      {/* A game already under way or finished is today's game, not the next
+          one — the title and the status pill say which (UX review). */}
+      <SectionTitle title={unstarted ? 'Next game' : 'Today’s game'} />
       <Card>
-        <Text style={styles.fixture}>
-          {side}
-          <Text style={styles.fixtureWhen}>  {when}</Text>
-        </Text>
+        <View style={styles.fixtureRow}>
+          <Text style={styles.fixture} numberOfLines={1}>
+            {side}
+            {unstarted ? <Text style={styles.fixtureWhen}>  {day ? `${day} ` : ''}{time}</Text> : null}
+          </Text>
+          {unstarted ? null : <GameStatusPill game={entry.game} />}
+        </View>
 
         {/* The member's own line for each market, from the team's side. The
             pill asks — a tap opens the add-to-betslip sheet, as on the board. */}
@@ -460,7 +495,9 @@ function MarketRead({
                 />
               );
             })}
-            <Text style={styles.source}>DraftKings, from the first stored line to the latest. Moneyline shown as no-vig win probability.</Text>
+            <Text style={styles.source}>
+              DraftKings, from the first stored line to the latest{asOf(MARKETS.map((m) => moves[m]?.asOf ?? null))}. Moneyline shown as no-vig win probability.
+            </Text>
           </>
         ) : (
           <Text style={styles.muted}>No opening line stored for this game yet.</Text>
@@ -482,19 +519,25 @@ function MarketRead({
               const mineTxt = s.book == null
                 ? '—'
                 : m === 'h2h'
-                  ? formatPct(s.bookProb, 0)
-                  : `${formatTeamLine(s.bookLine, m)} (${formatPct(s.bookProb, 0)})`;
+                  ? formatPct(s.bookFairProb, 0)
+                  : `${formatTeamLine(s.bookLine, m)} (${formatPct(s.bookFairProb, 0)})`;
               return (
                 <ReadRow
                   key={m}
                   label={MARKET_LABEL[m]}
                   value={`Pinnacle ${sharpTxt}`}
-                  note={s.book ? `${bookName(s.book)} ${mineTxt}${s.gapPp != null ? ` · ${signed(s.gapPp, 1)}pp` : ''}` : 'not posted at your book'}
+                  note={
+                    s.book
+                      ? `${bookName(s.book)} ${mineTxt}${s.fairGapPp != null ? ` · ${signed(s.fairGapPp, 1)}pp` : ''}${
+                          s.bookProb != null ? ` · you pay ${formatPct(s.bookProb, 0)}` : ''
+                        }`
+                      : 'not posted at your book'
+                  }
                 />
               );
             })}
             <Text style={styles.source}>
-              Pinnacle’s no-vig probability of the {team} side (the over, on the total) against your book’s implied price, vig included.
+              Both books de-vigged the same way, so the gap is fair-to-fair; “you pay” is your book’s price with its vig in{asOf(MARKETS.map((m) => sharp[m]?.asOf ?? null))}.
             </Text>
           </>
         ) : (
@@ -516,11 +559,13 @@ function MarketRead({
                   key={m}
                   label={MARKET_LABEL[m]}
                   value={`${p.betPct != null ? `${Math.round(p.betPct)}% of bets` : '—'}`}
-                  note={p.moneyPct != null ? `${Math.round(p.moneyPct)}% of money${p.gapPp != null && Math.abs(p.gapPp) >= 12 ? (p.gapPp > 0 ? ' · big money here' : ' · small tickets') : ''}` : 'money share not captured'}
+                  note={p.moneyPct != null ? `${Math.round(p.moneyPct)}% of money` : 'money share not captured'}
                 />
               );
             })}
-            <Text style={styles.source}>Action Network consensus, on the {team} side (the over, on the total).</Text>
+            <Text style={styles.source}>
+              Action Network consensus, on the {team} side (the over, on the total){asOf(MARKETS.map((m) => publicSide[m]?.snapshotAt ?? null))}.
+            </Text>
           </>
         ) : (
           <Text style={styles.muted}>
@@ -547,23 +592,51 @@ function movementLead(team: string, ng: NextGame): string {
     : `Money has gone the other way: ${what}. ${team} is cheaper than it opened.`;
 }
 
+// Fair-to-fair, not vig-in against fair: at −110 both ways a book's implied
+// is 52.4% against a ~50% fair, so a vig-in comparison said "you're paying
+// up" on every ordinary line (UX review, 2026-09-20). The band is a display
+// heuristic, not a model threshold.
+const SHARP_AGREE_PP = 1.0;
+
 function sharpLead(team: string, ng: NextGame): string {
   const s = ng.sharp.h2h ?? ng.sharp.spreads ?? null;
-  if (!s || s.gapPp == null || !s.book) return `Pinnacle has ${team} priced; your book hasn’t posted the same market yet.`;
-  const gap = Math.abs(s.gapPp);
-  if (gap < 1.5) return `${bookName(s.book)} is priced in line with the sharp book on ${team}.`;
-  return s.gapPp > 0
-    ? `${bookName(s.book)} charges ${gap.toFixed(1)}pp more for ${team} than Pinnacle’s fair price — you’re paying up.`
-    : `${bookName(s.book)} is ${gap.toFixed(1)}pp cheaper on ${team} than Pinnacle’s fair price — the better side of the vig.`;
+  if (!s || s.fairGapPp == null || !s.book) return `Pinnacle has ${team} priced; your book hasn’t posted the same market yet.`;
+  const gap = Math.abs(s.fairGapPp);
+  if (gap < SHARP_AGREE_PP) return `${bookName(s.book)} and Pinnacle agree on ${team} once the vig is taken out.`;
+  return s.fairGapPp > 0
+    ? `${bookName(s.book)} rates ${team} ${gap.toFixed(1)}pp higher than Pinnacle does — the sharp book has this side cheaper.`
+    : `${bookName(s.book)} rates ${team} ${gap.toFixed(1)}pp lower than Pinnacle does — the sharp book likes this side more than yours does.`;
 }
 
+// Descriptive on purpose: the board one tap back says betting splits are
+// context, not an edge, and the repo's public-fade is still a shadow-tracked card
+// (docs/mlb_total_public_fade.md). The tooltip carries the interpretation.
 function publicLead(team: string, ng: NextGame): string {
   const p = ng.publicSide.h2h ?? ng.publicSide.spreads ?? null;
   if (!p || p.betPct == null) return `Public splits are in for the total only.`;
-  const pct = Math.round(p.betPct);
-  if (pct >= 65) return `The crowd is piled on ${team} (${pct}% of tickets). The line has likely been shaded against you.`;
-  if (pct <= 40) return `${team} is the contrarian side — only ${pct}% of tickets. The value tends to sit here.`;
-  return `The public is split on this game (${pct}% of tickets on ${team}).`;
+  const which = ng.publicSide.h2h ? 'moneyline' : 'spread';
+  const money = p.moneyPct != null ? ` and ${Math.round(p.moneyPct)}% of the money` : '';
+  return `${Math.round(p.betPct)}% of ${which} tickets${money} are on ${team}.`;
+}
+
+/** " · as of 4:12 PM ET" from the newest of the stamps, or nothing. */
+function asOf(stamps: Array<string | null>): string {
+  const known = stamps.filter((s): s is string => !!s).sort();
+  if (known.length === 0) return '';
+  const t = formatStampET(known[known.length - 1]!);
+  return t ? ` · as of ${t}` : '';
+}
+
+/** One number per tile: the units, or the record when nothing was priced; the
+ *  record and the unpriced count in the caption (UX review). */
+function RecordTile({ label, record }: { label: string; record: PickRecord }) {
+  const units = record.units;
+  const value = units == null ? formatWinLoss(record) : formatSignedUnits(units);
+  const caption =
+    units == null
+      ? record.unpriced > 0 ? `${record.unpriced} unpriced` : undefined
+      : `${formatWinLoss(record)}${record.unpriced > 0 ? ` · ${record.unpriced} unpriced` : ''}`;
+  return <StatTile label={label} value={value} caption={caption} tint={unitsTint(units)} />;
 }
 
 // ── Form ────────────────────────────────────────────────────────────────────
@@ -740,11 +813,13 @@ function signed(n: number, digits: number): string {
   return n > 0 ? `+${r}` : `−${Math.abs(n).toFixed(digits)}`;
 }
 
+// The grade ramp, not positive/negative: theme.ts measures those at 2.2:1 and
+// 3.6:1 on a card, under AA for a 20pt number (UX review).
 function unitsTint(units: number | null): string | undefined {
   if (units == null) return undefined;
   const r = Math.round(units * 10) / 10;
-  if (r > 0) return colors.positive;
-  if (r < 0) return colors.negative;
+  if (r > 0) return colors.gradeGood;
+  if (r < 0) return colors.gradeBad;
   return undefined;
 }
 
@@ -752,8 +827,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingBottom: spacing.xxl },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
-  teamName: { fontSize: font.size.title1, fontWeight: font.weight.bold, color: colors.textPrimary },
-  conference: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textTertiary },
+  teamName: { fontSize: font.size.title2, fontWeight: font.weight.bold, color: colors.textPrimary },
   meta: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
   sectionRow: {
     flexDirection: 'row',
@@ -779,8 +853,9 @@ const styles = StyleSheet.create({
   tileRow: { flexDirection: 'row', gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   muted: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18 },
   footnote: { fontSize: font.size.caption, color: colors.textTertiary, paddingHorizontal: spacing.lg, marginTop: 2 },
-  legend: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.sm, lineHeight: 16 },
-  source: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.sm, lineHeight: 16 },
+  // textSecondary inside a card: textTertiary is ~3.4:1 on bgCard at this size (UX_REVIEW §5).
+  legend: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
+  source: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
   loading: { marginVertical: spacing.xl },
   loadingInline: { marginTop: spacing.sm },
   errorBanner: {
@@ -793,7 +868,8 @@ const styles = StyleSheet.create({
   },
   errorText: { color: colors.avoid, fontSize: font.size.footnote },
 
-  fixture: { fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  fixtureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  fixture: { flexShrink: 1, fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
   fixtureWhen: { fontSize: font.size.footnote, fontWeight: font.weight.regular, color: colors.textSecondary },
   pillRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md, gap: spacing.sm },
   pillCol: { flex: 1, alignItems: 'flex-end' },
@@ -833,8 +909,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.noneSoft,
   },
-  formChipWin: { backgroundColor: colors.betSoft },
-  formChipLoss: { backgroundColor: colors.avoidSoft },
+  // A result is not a side to take: the letter carries the grade ramp on a
+  // neutral ground rather than the BET / AVOID tints (UX review).
+  formChipWin: { backgroundColor: colors.noneSoft },
+  formChipLoss: { backgroundColor: colors.noneSoft },
   formChipTie: { backgroundColor: colors.noneSoft },
   formLetter: { fontSize: font.size.caption, fontWeight: font.weight.bold, color: colors.textSecondary },
   formLetterWin: { color: colors.gradeGood },

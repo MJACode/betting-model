@@ -58,7 +58,7 @@ def test_the_board_row_opens_the_team_page():
     assert "onOpenTeam" in board, "TeamsBoard lost its onOpenTeam prop"
     # The tap target is the name/record block, a labelled button, and the
     # LINE pill keeps its own press -- both Pressables must be present.
-    assert re.search(r"accessibilityLabel=\{onOpen \? `\$\{row\.team\}", board), (
+    assert re.search(r"accessibilityLabel=\{\s*onOpen\s*\?\s*`\$\{row\.team\}", board), (
         "the team row's Pressable must carry an accessibilityLabel naming the team"
     )
     stats = _read(STATS)
@@ -145,12 +145,13 @@ def test_the_pick_record_read_is_the_record_filter_on_the_server():
 
 
 def test_units_never_price_an_unpriced_pick():
-    """profit_flat fabricates -110 for a pick with no price (CLAUDE.md §6)."""
+    """profit_flat fabricates -110 for a pick with no price (CLAUDE.md §6), and
+    the priced-line rule is read through lib/decisionPrice, never the columns."""
     lib = _read(LIB)
     m = re.search(r"function addPick\(.*?\n\}\n", lib, re.S)
     assert m
     body = m.group(0)
-    assert "decision_odds ?? p.dk_odds" in body
+    assert "hasPricedLine(p)" in body
     assert "unpriced" in body
 
 
