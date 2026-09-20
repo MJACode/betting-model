@@ -120,3 +120,257 @@ our way. Accuracy scores (log loss, AUC) are diagnostics only.
   clear the vig), but any NHL moneyline rule should be tilted toward it.
 - **Blind unders lost 7.1%** over these seasons against -1.2% for overs —
   the opposite of the "NHL unders" folklore.
+
+---
+
+# Round two (2026-09-20): inputs rebuilt from the per-game logs, regularised models
+
+Scripts: `scripts/nhl_market_lab2.py`, `scripts/nhl_market_lab2_checks.py`,
+`scripts/nhl_prop_lab.py`. Round one's ablation said the signal was in shot
+share and special teams and that the untuned trees were badly over-confident,
+so this round builds every input from `nhl_team_game_log` /
+`nhl_goalie_game_log` as exponentially weighted as-of rates (the carry-over
+across the summer is the prior-season blend), groups them (form, shots, special
+teams, goalie, schedule, a running goal-margin rating), and fits a regularised
+logistic model and heavily regularised trees. Walk-forward, test seasons 2020,
+2021, 2022, 2023 (3,771 priced games); bets decided and graded at the OPEN.
+
+```
+games 2019-2023 with inputs: 6,193; with an opening moneyline: 5,134
+ALL inputs, logistic: n=3,771 model log loss 0.6628 AUC 0.6361 | market open 0.6634 / 0.6392
+ALL inputs, regularised trees: n=3,771 model log loss 0.6722 AUC 0.6155 | market open 0.6634 / 0.6392
+  minus form: n=3,771 model log loss 0.6625 AUC 0.6367 | market open 0.6634 / 0.6392
+  minus shots: n=3,771 model log loss 0.6653 AUC 0.6297 | market open 0.6634 / 0.6392
+  minus special: n=3,771 model log loss 0.6628 AUC 0.6359 | market open 0.6634 / 0.6392
+  minus goalie: n=3,771 model log loss 0.6633 AUC 0.6336 | market open 0.6634 / 0.6392
+  minus schedule: n=3,771 model log loss 0.6632 AUC 0.6347 | market open 0.6634 / 0.6392
+  minus rating: n=3,771 model log loss 0.6630 AUC 0.6346 | market open 0.6634 / 0.6392
+market open + ALL inputs, logistic: n=3,771 model log loss 0.6629 AUC 0.6358 | market open 0.6634 / 0.6392
+market open ALONE, logistic (the bar): n=3,776 model log loss 0.6641 AUC 0.6395 | market open 0.6633 / 0.6393
+
+### Moneyline, round two — bet at the OPEN when |model - no-vig open| >= edge
+
+                                model  edge>=  bets  units   roi           ci  clv_pts  beat_close  early  late
+                 ALL inputs, logistic    0.02  2961  105.6  3.57   -0.3..+7.5     0.71        57.9    6.5   0.6
+                 ALL inputs, logistic    0.04  2185  108.1  4.95   +0.3..+9.6     0.89        59.9    6.0   3.9
+                 ALL inputs, logistic    0.06  1561  124.4  7.97  +2.3..+13.6     1.08        61.9    9.4   6.6
+                 ALL inputs, logistic    0.08  1021  115.6 11.32  +4.0..+18.6     1.38        64.3   13.5   9.2
+                 ALL inputs, logistic    0.10   635   83.7 13.18  +3.3..+23.1     1.74        66.6   15.7  10.7
+        ALL inputs, regularised trees    0.02  3073   -4.9 -0.16   -3.9..+3.6     0.59        56.3    0.2  -0.5
+        ALL inputs, regularised trees    0.04  2427   31.2  1.29   -3.0..+5.6     0.68        57.2    1.1   1.5
+        ALL inputs, regularised trees    0.06  1812   13.6  0.75   -4.3..+5.8     0.78        58.1    1.7  -0.2
+        ALL inputs, regularised trees    0.08  1333   35.8  2.68   -3.4..+8.8     0.90        58.9    3.2   2.2
+        ALL inputs, regularised trees    0.10   943   31.3  3.32  -4.3..+10.9     0.98        58.9    1.7   5.0
+                           minus form    0.02  2925  132.2  4.52   +0.6..+8.5     0.80        58.9    6.3   2.7
+                           minus form    0.04  2161  112.6  5.21   +0.5..+9.9     0.98        60.8    7.0   3.4
+                           minus form    0.06  1501   99.7  6.64  +0.8..+12.5     1.16        63.0    8.3   5.0
+                           minus form    0.08   958  103.2 10.77  +3.2..+18.4     1.42        64.2   11.6   9.9
+                           minus form    0.10   606   80.4 13.27  +3.0..+23.6     1.92        68.8   12.7  13.8
+                          minus shots    0.02  2869   26.6  0.93   -3.2..+5.0     0.55        54.2    3.4  -1.5
+                          minus shots    0.04  2048   79.0  3.86   -1.1..+8.8     0.70        55.3    6.8   0.9
+                          minus shots    0.06  1402   71.2  5.08  -1.1..+11.3     0.85        56.1    9.8   0.4
+                          minus shots    0.08   901  108.7 12.07  +3.9..+20.2     1.01        56.8   13.3  10.9
+                          minus shots    0.10   548   97.3 17.75  +6.4..+29.1     1.42        59.3   23.9  11.6
+                        minus special    0.02  2796   57.8  2.07   -2.0..+6.1     0.91        60.6    4.3  -0.2
+                        minus special    0.04  1990   82.4  4.14   -0.8..+9.1     1.19        63.1    6.7   1.6
+                        minus special    0.06  1296  129.4  9.98  +3.5..+16.5     1.42        65.0   11.8   8.2
+                        minus special    0.08   779   89.7 11.51  +2.5..+20.5     1.80        68.7   12.6  10.4
+                        minus special    0.10   411   87.4 21.26  +7.5..+35.0     2.39        70.6   26.8  15.7
+                         minus goalie    0.02  2936   64.4  2.19   -1.7..+6.1     0.61        56.5    4.0   0.4
+                         minus goalie    0.04  2097  105.2  5.02   +0.3..+9.7     0.76        58.1    6.2   3.9
+                         minus goalie    0.06  1396  120.7  8.65  +2.6..+14.7     0.97        59.5    9.0   8.3
+                         minus goalie    0.08   877  100.8 11.50  +3.5..+19.5     1.33        63.1    9.2  13.8
+                         minus goalie    0.10   499   79.6 15.95  +4.4..+27.5     1.76        64.9   18.2  13.7
+                       minus schedule    0.02  2912   98.4  3.38   -0.6..+7.3     0.62        56.2    5.6   1.2
+                       minus schedule    0.04  2105  101.8  4.83   +0.1..+9.6     0.76        58.1    6.0   3.7
+                       minus schedule    0.06  1449   85.7  5.92  -0.0..+11.9     0.93        60.2    7.5   4.4
+                       minus schedule    0.08   902   85.9  9.52  +1.6..+17.4     1.31        63.9   11.2   7.9
+                       minus schedule    0.10   532   64.3 12.08  +0.9..+23.3     1.61        65.4   16.2   8.0
+                         minus rating    0.02  2930   92.0  3.14   -0.9..+7.1     0.71        57.5    5.8   0.5
+                         minus rating    0.04  2192  113.6  5.18   +0.4..+9.9     0.91        59.5    5.5   4.9
+                         minus rating    0.06  1541  101.6  6.59  +0.7..+12.5     1.09        61.8    6.3   6.9
+                         minus rating    0.08  1014  117.9 11.63  +4.0..+19.2     1.32        63.5   10.4  12.8
+                         minus rating    0.10   628   73.6 11.73  +1.5..+22.0     1.67        65.9   13.2  10.2
+   market open + ALL inputs, logistic    0.02  2930   89.4  3.05   -0.9..+7.0     0.63        57.2    5.2   0.9
+   market open + ALL inputs, logistic    0.04  2120  119.9  5.65  +0.9..+10.4     0.83        59.1    6.6   4.7
+   market open + ALL inputs, logistic    0.06  1467  117.1  7.98  +2.1..+13.8     1.02        61.0    8.4   7.6
+   market open + ALL inputs, logistic    0.08   943   88.5  9.39  +1.8..+17.0     1.34        63.8    8.4  10.4
+   market open + ALL inputs, logistic    0.10   558   79.1 14.18  +3.3..+25.0     1.69        65.4   16.4  11.9
+market open ALONE, logistic (the bar)    0.02   742  -15.0 -2.03  -12.2..+8.2    -0.06        47.7    1.0  -5.1
+market open ALONE, logistic (the bar)    0.04    36    4.0 11.14 -65.4..+87.7     1.25        33.3   16.1   6.2
+market open ALONE, logistic (the bar)    0.06     0    NaN   NaN          NaN      NaN         NaN    NaN   NaN
+market open ALONE, logistic (the bar)    0.08     0    NaN   NaN          NaN      NaN         NaN    NaN   NaN
+market open ALONE, logistic (the bar)    0.10     0    NaN   NaN          NaN      NaN         NaN    NaN   NaN
+
+### Blind favourite at the OPEN, by price band, all priced seasons
+
+favourite's no-vig open  bets  units   roi          ci  clv_pts  beat_close  roi_2019  roi_2020  roi_2021  roi_2022  roi_2023
+              0.50-0.55  1644 -104.7 -6.37 -10.8..-1.9     0.22        54.1      -6.8      -7.6      -2.3      -3.9     -21.7
+              0.55-0.60  1483    8.8  0.59  -3.6..+4.8     0.24        55.5      -0.8      -8.3       5.8       7.8      -6.2
+              0.60-0.65  1062  -18.1 -1.71  -6.2..+2.8     0.20        53.5      -7.4      -4.1      -6.1       6.2      12.1
+              0.65-0.70   582  -21.4 -3.67  -9.2..+1.8     0.43        59.5     -12.6      -7.9       8.4       1.2      -9.9
+              0.70-1.00   363  -15.6 -4.30 -10.4..+1.8    -0.52        61.4       2.5      -4.4      -5.8      -3.3     -19.3
+totals: log inputs + line + market, logistic: n=3,568 model log loss 0.6957 AUC 0.5221 | market open 0.6928 / 0.5227
+totals: same, regularised trees: n=3,568 model log loss 0.7036 AUC 0.5087 | market open 0.6928 / 0.5227
+totals: inputs WITHOUT the market's price: n=3,568 model log loss 0.6948 AUC 0.5244 | market open 0.6928 / 0.5227
+
+### Totals, round two
+
+                                       model  edge>=  bets  units   roi          ci  clv_pts  beat_close  early  late
+totals: log inputs + line + market, logistic    0.02  2525  -32.1 -1.27  -5.1..+2.5     0.76        41.0   -0.3  -2.2
+totals: log inputs + line + market, logistic    0.04  1559  -22.6 -1.45  -6.3..+3.4     1.03        44.3    2.3  -5.2
+totals: log inputs + line + market, logistic    0.06   843  -25.3 -3.00  -9.7..+3.7     1.44        49.6   -1.4  -4.6
+totals: log inputs + line + market, logistic    0.08   418   -4.2 -1.00 -10.8..+8.8     1.71        51.9    4.8  -6.8
+totals: log inputs + line + market, logistic    0.10   198   16.9  8.55 -6.3..+23.4     1.99        50.0    4.8  12.3
+             totals: same, regularised trees    0.02  2850 -104.3 -3.66  -7.2..-0.1     0.32        36.0   -1.2  -6.1
+             totals: same, regularised trees    0.04  2208  -97.6 -4.42  -8.5..-0.4     0.40        37.5   -1.4  -7.5
+             totals: same, regularised trees    0.06  1599  -69.0 -4.32  -9.1..+0.4     0.43        38.2   -1.8  -6.8
+             totals: same, regularised trees    0.08  1057  -17.5 -1.65  -7.6..+4.2     0.46        38.8   -2.3  -1.0
+             totals: same, regularised trees    0.10   684  -19.4 -2.83 -10.3..+4.6     0.59        39.3   -5.0  -0.7
+   totals: inputs WITHOUT the market's price    0.02  2512  -43.6 -1.74  -5.5..+2.1     0.80        41.8   -0.8  -2.7
+   totals: inputs WITHOUT the market's price    0.04  1531  -31.9 -2.08  -7.0..+2.8     1.12        45.9    1.0  -5.2
+   totals: inputs WITHOUT the market's price    0.06   793  -17.1 -2.15  -9.0..+4.7     1.53        52.3   -1.6  -2.7
+   totals: inputs WITHOUT the market's price    0.08   360    4.2  1.17 -9.3..+11.6     1.92        57.5    3.9  -1.6
+   totals: inputs WITHOUT the market's price    0.10   139   23.2 16.66 -1.1..+34.4     2.52        57.6   10.8  22.4
+puck line: ALL inputs + the line, logistic: n=3,770 model log loss 0.6610 AUC 0.6441 | market open 0.6566 / 0.6502
+puck line: market price + ALL inputs: n=3,770 model log loss 0.6606 AUC 0.6452 | market open 0.6566 / 0.6502
+puck line: same, regularised trees: n=3,770 model log loss 0.6674 AUC 0.6368 | market open 0.6566 / 0.6502
+
+### Puck line, round two (one archived price: no closing-line value)
+
+                                     model  edge>=  bets  units   roi          ci  early  late
+puck line: ALL inputs + the line, logistic    0.02  2917   11.9  0.41  -3.4..+4.2    3.9  -3.1
+puck line: ALL inputs + the line, logistic    0.04  2115   47.6  2.25  -2.2..+6.7    6.2  -1.7
+puck line: ALL inputs + the line, logistic    0.06  1410   74.5  5.29 -0.3..+10.9    7.7   2.9
+puck line: ALL inputs + the line, logistic    0.08   906   60.4  6.67 -0.3..+13.6    6.4   6.9
+puck line: ALL inputs + the line, logistic    0.10   516   26.8  5.19 -4.2..+14.6    6.5   3.9
+      puck line: market price + ALL inputs    0.02  2818   37.7  1.34  -2.4..+5.1    4.1  -1.5
+      puck line: market price + ALL inputs    0.04  1931    2.9  0.15  -4.3..+4.6    1.8  -1.5
+      puck line: market price + ALL inputs    0.06  1209   40.6  3.36  -2.4..+9.1    3.9   2.8
+      puck line: market price + ALL inputs    0.08   708   15.5  2.18  -5.4..+9.7    2.7   1.6
+      puck line: market price + ALL inputs    0.10   375    2.1  0.57 -9.6..+10.8   -6.3   7.4
+        puck line: same, regularised trees    0.02  2999  -60.4 -2.02  -5.7..+1.7   -0.1  -4.0
+        puck line: same, regularised trees    0.04  2330  -20.1 -0.86  -5.1..+3.4    0.5  -2.2
+        puck line: same, regularised trees    0.06  1758  -20.0 -1.14  -6.0..+3.7    0.6  -2.8
+        puck line: same, regularised trees    0.08  1260    2.7  0.21  -5.5..+5.9   -0.9   1.3
+        puck line: same, regularised trees    0.10   809    0.7  0.08  -7.1..+7.3    0.0   0.1
+```
+
+## Is the moneyline result real? The checks
+
+```
+                                          check  edge>=  bets  units   roi           ci  clv_pts  beat_close
+  0. as reported: decide at open, grade at OPEN    0.04  2185  108.1  4.95   +0.3..+9.6     0.89        59.9
+        1. same bets, graded at the CLOSE price    0.04  2185   75.3  3.45   -0.9..+7.8     0.89        59.9
+     2. decide vs the CLOSE, grade at the CLOSE    0.04  2174   94.4  4.34   -0.2..+8.9    -0.61        42.4
+  0. as reported: decide at open, grade at OPEN    0.06  1561  124.4  7.97  +2.3..+13.6     1.08        61.9
+        1. same bets, graded at the CLOSE price    0.06  1561   86.1  5.51  +0.3..+10.7     1.08        61.9
+     2. decide vs the CLOSE, grade at the CLOSE    0.06  1559   83.8  5.38  -0.1..+10.8    -0.76        40.5
+  0. as reported: decide at open, grade at OPEN    0.08  1021  115.6 11.32  +4.0..+18.6     1.38        64.3
+        1. same bets, graded at the CLOSE price    0.08  1021   72.6  7.11  +0.7..+13.5     1.38        64.3
+     2. decide vs the CLOSE, grade at the CLOSE    0.08   996   58.8  5.91  -1.0..+12.8    -0.97        38.4
+3a. no goalie inputs, no team on a back-to-back    0.04  1536   32.3  2.10   -3.3..+7.5     0.45        54.6
+                 3b. ...and graded at the CLOSE    0.04  1536   31.9  2.08   -3.2..+7.3     0.45        54.6
+3a. no goalie inputs, no team on a back-to-back    0.06   992   57.7  5.82  -1.1..+12.8     0.60        55.6
+                 3b. ...and graded at the CLOSE    0.06   992   48.8  4.92  -1.6..+11.5     0.60        55.6
+3a. no goalie inputs, no team on a back-to-back    0.08   623   41.7  6.69  -2.5..+15.9     0.89        59.2
+                 3b. ...and graded at the CLOSE    0.08   623   25.4  4.07  -4.2..+12.4     0.89        59.2
+                       4. bets on the FAVOURITE    0.04   998   39.0  3.90   -1.1..+8.9     1.16        65.6
+                        4. bets on the UNDERDOG    0.04  1187   69.1  5.83  -1.6..+13.3     0.67        55.1
+                       4. bets on the FAVOURITE    0.06   686   39.7  5.79  -0.2..+11.8     1.33        67.9
+                        4. bets on the UNDERDOG    0.06   875   84.7  9.68  +0.7..+18.7     0.89        57.1
+                       4. bets on the FAVOURITE    0.08   449   30.9  6.87  -0.5..+14.3     1.54        69.7
+                        4. bets on the UNDERDOG    0.08   572   84.7 14.81  +3.1..+26.5     1.26        60.0
+                                 5. season 2020    0.06   521   68.3 13.12  +2.9..+23.3     0.57        58.7
+                                 5. season 2021    0.06   384   -2.1 -0.55 -11.9..+10.8     0.73        57.0
+                                 5. season 2022    0.06   514   71.2 13.86  +3.8..+23.9     1.69        66.7
+                                 5. season 2023    0.06   142  -13.1 -9.20  -23.8..+5.4     1.71        69.0
+
+6. shuffled model probabilities, edge >= 0.06, 50 draws: mean ROI -5.07%, 95% of draws within -8.6..-2.0% (the real model: see row 0)
+games with a team on a back-to-back: 24.8% of 3,771
+```
+
+## Read, round two
+
+- **Moneyline: the first positive grid in this repo's NHL work, and not yet
+  proven.** The regularised logistic model on log-built inputs is +5.0% /
+  +8.0% / +11.3% at edge cuts 0.04 / 0.06 / 0.08 (1,021-2,185 bets, intervals
+  clear of zero), ROI RISES with the cut, both halves are positive, and it
+  beats the close 60-64% of the time. It survives grading at the CLOSING price
+  (+5.5% at 0.06) and a shuffled-probability test (shuffles average -5.1%,
+  95% within -8.6..-2.0). **Against it:** two of four seasons carry it
+  (2020 +13.1%, 2022 +13.9%; 2021 -0.6%, 2023 -9.2% on 142 bets); restricted
+  to what the opener could know (no goalie inputs, no team on a back-to-back —
+  24.8% of games) it is +5.8% on 992 bets with an interval of -1.1..+12.8; and
+  the model's own accuracy only MATCHES the market's open (log loss 0.6628 vs
+  0.6634), it does not beat the close (0.651 in round one's sample). The
+  heavily regularised trees on the same inputs make +1%.
+  **Verdict: a candidate, frozen as specified here, to be tested on seasons it
+  has never seen (2023-24 -> 2025-26) when those prices arrive on 2026-10-01.
+  Not a model to bet on this evidence.**
+- **Every input group is small on its own.** Removing shots costs the most
+  accuracy (AUC 0.636 -> 0.630); no single group's removal kills the ROI, which
+  says the edge — if it is one — is in the regularised combination and in
+  being less over-confident than round one, not in any one feature.
+- **Favourite lean, market only, five seasons:** not a rule. Only the 0.55-0.60
+  band is non-negative (+0.6% on 1,483, interval -3.6..+4.8) and no band is
+  positive in every season.
+- **Totals: nothing.** Model and market are both near coin-flip on the over
+  (AUC 0.52); every row with a usable sample loses 1-4%.
+- **Puck line:** logistic +5.3% at 0.06 (1,410 bets, interval -0.3..+10.9),
+  +6.7% at 0.08; trees lose. Same caveats as moneyline, plus one archived price
+  and no closing-line check. Second candidate for the 10-01 re-test.
+
+# Player props: do log-built models beat the projections a book gets for free?
+
+No NHL prop price is stored (the feed sells them from 2023-05-03), so this is
+NOT a profit test. It answers the prior question: on seasons never seen
+(2024-25, 2025-26; 92,384 skater-games, 4,081 full goalie starts), does a
+Poisson model on usage + matchup beat (a) the player's season-to-date average
+and (b) his last ten games? Columns `model` / `season avg` / `last 10` are log
+loss on P(over the line), lower is better; the `p>=.60` columns are calibration
+in the band that would actually be bet.
+
+```
+skater-games with 10+ prior games: 335,920 (92,384 in the holdout seasons)
+       market  line  test     n  over_rate  model  season avg  last 10  n p>=.60  hit p>=.60  avg p>=.60  n p<=.40  under hit p<=.40  beats both  gain vs best naive
+        shots   1.5  2025 42561      0.439 0.6128      0.6272   0.6444     10072       0.704       0.714     20468             0.723        True              0.0144
+        shots   2.5  2025 42561      0.226 0.4660      0.4762   0.4925      1148       0.627       0.678     35810             0.828        True              0.0102
+        shots   3.5  2025 42561      0.106 0.2899      0.2964   0.3073        91       0.495       0.637     41667             0.901        True              0.0065
+        shots   1.5  2026 42433      0.431 0.6079      0.6215   0.6394      9074       0.709       0.703     21279             0.725        True              0.0136
+        shots   2.5  2026 42433      0.222 0.4588      0.4690   0.4847       793       0.663       0.654     36820             0.825        True              0.0102
+        shots   3.5  2026 42433      0.104 0.2832      0.2892   0.3009        21       0.619       0.619     41897             0.901        True              0.0060
+       points   0.5  2025 42561      0.347 0.5915      0.6195   0.6710      2777       0.680       0.661     27978             0.748        True              0.0280
+       points   0.5  2026 42433      0.353 0.5943      0.6217   0.6692      2936       0.669       0.658     27942             0.744        True              0.0274
+      assists   0.5  2025 42561      0.239 0.5157      0.5522   0.6226       238       0.643       0.640     38015             0.788        True              0.0365
+      assists   0.5  2026 42433      0.245 0.5211      0.5571   0.6242       196       0.607       0.636     37917             0.783        True              0.0360
+        goals   0.5  2025 42561      0.152 0.3909      0.4286   0.4996         0         NaN         NaN     42263             0.850        True              0.0377
+        goals   0.5  2026 42433      0.155 0.3965      0.4336   0.5009         0         NaN         NaN     42235             0.847        True              0.0371
+blocked_shots   1.5  2025 42561      0.213 0.4425      0.4541   0.4710      1141       0.648       0.649     35298             0.848        True              0.0116
+blocked_shots   1.5  2026 42433      0.193 0.4156      0.4290   0.4469       561       0.611       0.637     36202             0.859        True              0.0134
+         hits   1.5  2025 42561      0.309 0.5059      0.5140   0.5314      6706       0.683       0.718     27348             0.829        True              0.0081
+         hits   2.5  2025 42561      0.155 0.3400      0.3459   0.3594      1151       0.672       0.682     38236             0.886        True              0.0059
+         hits   1.5  2026 42433      0.290 0.4790      0.4901   0.5048      5647       0.708       0.732     29591             0.832        True              0.0111
+         hits   2.5  2026 42433      0.142 0.3107      0.3180   0.3264      1178       0.711       0.691     38386             0.900        True              0.0073
+        saves  24.5  2025  2041      0.521 0.6906      0.7165   0.7260       598       0.642       0.697       584             0.582        True              0.0259
+        saves  27.5  2025  2041      0.344 0.6555      0.6728   0.6874        66       0.409       0.656      1560             0.692        True              0.0173
+        saves  29.5  2025  2041      0.239 0.5633      0.5704   0.5854         6       0.333       0.621      1910             0.771        True              0.0071
+        saves  24.5  2026  2040      0.492 0.6653      0.7068   0.7284       282       0.702       0.674       842             0.620        True              0.0415
+        saves  27.5  2026  2040      0.319 0.6067      0.6326   0.6551        18       0.778       0.668      1848             0.707        True              0.0259
+        saves  29.5  2026  2040      0.226 0.5284      0.5466   0.5653         2       1.000       0.637      2006             0.779        True              0.0182
+```
+
+## Read, props
+
+- **The model beats both free projections on all 24 market / line / season
+  rows.** Largest gains: goals 0.5 (anytime scorer), assists 0.5, points 0.5,
+  goalie saves — the markets where ice time, power-play time and the opponent
+  matter most relative to a raw average.
+- **Calibration where it would bet is good on shots and points** (shots 1.5:
+  claims 0.714 / 0.703, delivers 0.704 / 0.709), **over-confident by ~3-4
+  points on hits 1.5 and on 2024-25 saves** (claims 0.697, delivers 0.642).
+- **What this does not show:** that it beats the BOOK's line, which already
+  uses ice time and matchup. That needs prices: the feed's NHL props from
+  2023-05-03 (~672,000 credits for three seasons at open and close, measured
+  formula) — or collecting DraftKings / Pinnacle NHL props live from opening
+  night, which costs credits per game per market and is not switched on.
