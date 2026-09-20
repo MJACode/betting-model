@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchPlayerGameLog } from '@/lib/queries';
 import {
   logStatValue,
@@ -127,6 +127,11 @@ export function usePlayerTrends({
   const key = stat?.key ?? statKey ?? null;
   // Whether a stat is selected at all gates the fetch; WHICH stat does not.
   const hasStat = key != null;
+  // Identity without the refresh nonce: a pull must not flip `loaded` false
+  // or the screen swaps the filled chip row for a skeleton (UX review of
+  // the #781 follow-up). Player/sport change still does.
+  const identity = `${sport}|${playerId ?? ''}|${playerName ?? ''}|${playerType ?? ''}|${hasStat}|${beforeDate ?? ''}|${limit ?? ''}`;
+  const identityRef = useRef(identity);
 
   // The FETCH does not depend on the stat. `fetchPlayerGameLog` asks for a
   // sport's whole column list (LOG_COLUMNS), so every stat this screen can
@@ -137,14 +142,17 @@ export function usePlayerTrends({
   // after a load, so that window opened on its own). Deriving the values
   // below also makes a chip tap instant instead of a refetch.
   useEffect(() => {
+    const identityChanged = identityRef.current !== identity;
+    identityRef.current = identity;
     if (!beforeDate || !hasStat || !supportsPlayerDetail(sport) || (!playerId && !playerName)) {
       setGames([]);
       setLoaded(true);
+      setLoading(false);
       return;
     }
     let mounted = true;
     setLoading(true);
-    setLoaded(false);
+    if (identityChanged) setLoaded(false);
     setError(null);
 
     fetchPlayerGameLog(sport, { playerId, playerName }, beforeDate, limit)

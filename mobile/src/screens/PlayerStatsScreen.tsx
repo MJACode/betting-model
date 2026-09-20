@@ -197,7 +197,7 @@ export function PlayerStatsScreen() {
   // not the chart's threshold: a parlay leg is a bet of record (§1c), and the
   // pick states its own line, so the card can never offer a bet at a number
   // nobody priced. No edge, no EV — the Stats surface stays out of the models.
-  const { data: todayPicks } = useTodayPicks();
+  const { data: todayPicks, loading: picksLoading, refresh: refreshPicks } = useTodayPicks();
   const slip = useParlaySlip();
   //
   // GATED ON THE LINE THE CHART IS SHOWING. The card sits directly under a
@@ -376,7 +376,7 @@ export function PlayerStatsScreen() {
   // news and quote stale (Reviewer Medium on #781).
   const [pulled, setPulled] = useState(false);
   const refreshBusy =
-    detail.loading || loading || news.loading || propQuote.loading;
+    detail.loading || loading || news.loading || propQuote.loading || picksLoading;
   useEffect(() => {
     if (!refreshBusy) setPulled(false);
   }, [refreshBusy]);
@@ -394,6 +394,7 @@ export function PlayerStatsScreen() {
               news.reload();
               propQuote.reload();
               detail.reload();
+              void refreshPicks();
             }}
           />
         }
@@ -944,7 +945,8 @@ function TonightLineCard({
           title: 'The posted number',
           body:
             'The line your sportsbooks have hung for this stat tonight, and the best over and under price ' +
-            'among them. The chart above follows this number until you move the ruler.\n\n' +
+            'among them. The chart above follows a pick on this player and stat when one exists, else this ' +
+            'number, else the median — until you move the ruler.\n\n' +
             'SINCE OPEN is DraftKings’ opening number against its latest — a line that has climbed is ' +
             'money on the over. SHARP compares Pinnacle’s no-vig over with your book’s no-vig over at the ' +
             'same line; a positive gap means your book prices the over richer than Pinnacle does.',

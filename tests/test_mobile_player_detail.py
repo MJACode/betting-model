@@ -80,6 +80,14 @@ def test_ruler_snaps_exactly_not_through_round_line_to_step():
     assert "roundLineToStep(snapThreshold" not in screen
 
 
+def test_tonights_line_tooltip_names_the_snap_order():
+    """The posted-line tooltip must not say the chart follows the book after
+    the ruler started preferring a pick (UX review of the #781 follow-up)."""
+    screen = _read(SCREEN)
+    assert "The chart above follows this number until you move the ruler." not in screen
+    assert "follows a pick on this player and stat when one exists" in screen
+
+
 def test_pull_to_refresh_reloads_trends_news_and_quote():
     """Reviewer Medium on #781: RefreshControl must not only bump the detail
     nonce — the chart, news and quote have their own hooks."""
@@ -91,12 +99,15 @@ def test_pull_to_refresh_reloads_trends_news_and_quote():
     assert "news.reload()" in body
     assert "propQuote.reload()" in body
     assert "detail.reload()" in body
+    assert "refreshPicks()" in body
     assert "refreshBusy" in screen
     assert "news.loading" in screen
     assert "propQuote.loading" in screen
     trends = _read(TRENDS)
     assert "reload" in trends
     assert "setNonce((n) => n + 1)" in trends
+    assert "if (identityChanged) setLoaded(false)" in trends
+    assert "setLoading(false)" in trends
     news = _read(NEWS)
     assert "setLoading(true)" in news
     quote = _read(QUOTE)
