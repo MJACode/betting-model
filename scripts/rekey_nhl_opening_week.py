@@ -59,7 +59,7 @@ def main() -> None:
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    conn = get_connection()
+    conn = get_connection(session_mode=bool(args.apply))
     try:
         mapping = _mapping(conn)
         print(f"{len(mapping)} games stored under an invented team id")
@@ -99,6 +99,16 @@ def main() -> None:
             print("\ndry run — nothing written. Re-run with --apply.")
             return
 
+        # `odds` carries a per-ROW update trigger that recomputes `latest_odds`
+        # for the row's key. Moving 126,000 rows fired it 126,000 times and the
+        # first --apply hit the 2-minute statement timeout with nothing written
+        # (2026-09-20). For THIS transaction only: triggers off, a longer
+        # timeout, and `latest_odds` rebuilt once per (game, market, book) at
+        # the end by the same function the trigger calls.
+        conn.execute("SET LOCAL session_replication_role = replica")
+        conn.execute("SET LOCAL statement_timeout = '20min'")
+        moved_keys: set[tuple[str, str, str]] = set()
+
         game_cols = [r[0] for r in conn.execute("""
             SELECT column_name FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name = 'games'
@@ -106,10 +116,13 @@ def main() -> None:
         for old, m in mapping.items():
             # Children first would orphan them; parents first would break an FK.
             # Insert the corrected parent, move the children, drop the old parent.
+            for mk, bk in conn.execute(
+                    "SELECT DISTINCT market, bookmaker FROM odds WHERE game_id = ?",
+                    (old,)).fetchall():
+                moved_keys.add((m["new_id"], mk, bk))
+            # The state table is rebuilt below, never moved by hand.
+            conn.execute("DELETE FROM latest_odds WHERE game_id = ?", (old,))
             if m["exists"]:
-                # latest_odds is one row per (game, book, market): the corrected
-                # game already has its own, newer, state rows.
-                conn.execute("DELETE FROM latest_odds WHERE game_id = ?", (old,))
                 for table in touched:
                     if table != "latest_odds":
                         conn.execute(f"UPDATE {table} SET game_id = ? WHERE game_id = ?",
@@ -123,9 +136,13 @@ def main() -> None:
                 f"SELECT {select} FROM games WHERE game_id = ?",
                 tuple(swap[c] for c in game_cols if c in swap) + (old,))
             for table in touched:
-                conn.execute(f"UPDATE {table} SET game_id = ? WHERE game_id = ?",
-                             (m["new_id"], old))
+                if table != "latest_odds":
+                    conn.execute(f"UPDATE {table} SET game_id = ? WHERE game_id = ?",
+                                 (m["new_id"], old))
             conn.execute("DELETE FROM games WHERE game_id = ?", (old,))
+        for new_id, mk, bk in sorted(moved_keys):
+            conn.execute("SELECT latest_odds_recompute(?, ?, ?)", (new_id, mk, bk))
+        print(f"latest_odds rebuilt for {len(moved_keys)} (game, market, book) keys")
         for g, d, s in wrong:
             new_id = mapping.get(g, {}).get("new_id", g)
             conn.execute("UPDATE games SET season = ?, updated_at = NOW()::TEXT "
