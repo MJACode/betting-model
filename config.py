@@ -2268,9 +2268,12 @@ SPORTS = {
     },
     "NHL": {
         "odds_api_key":  "icehockey_nhl",
-        "seasons":       list(range(2019, 2026)),
-        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train
-        "test_season":   2025,                      # 2025 held out
+        # 2026-09-20 (mike): 2025-26 backfilled and every input rebuilt as-of
+        # from per-game logs (data/nhl_asof.py), so the newest season is the
+        # holdout and 2024-25 joins training. ENDING-year labels.
+        "seasons":       list(range(2019, 2027)),
+        "train_seasons": list(range(2019, 2026)),  # 2018-19 … 2024-25 train
+        "test_season":   2026,                      # 2025-26 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/nhl",
     },
     "WNBA": {

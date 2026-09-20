@@ -122,6 +122,14 @@ For scale: Lopez, Matthews & Baumer measured the **market's** AUC on 12,990
 NHL games at 0.595. The registry's 60.4% / AUC 0.642 holdout was trained
 2026-06-21, before the team-stats rebuild, when every input was its own
 season's final (`docs/team_stats_leak.md`).
+**The retrain (2026-09-20, mike)** on those inputs, Optuna-tuned and
+calibrated, train 2018-19 → 2024-25, holdout 2025-26 (1,352 games):
+`nhl_moneyline` accuracy 52.9% (always-home: 52.1%), AUC 0.558, Brier 0.2477,
+calibration error 2.82%; `nhl_moneyline_regulation` accuracy 41.6%
+(always-home-in-regulation: 39.5%), log loss 1.0772 against ≈ 1.0855 for the
+training class rates. Honest, calibrated, and almost no better than base
+rates. Both are paper-only under the §2 gate.
+
 What this does *not* measure: profit. There are no historical NHL prices in
 the database to grade against (the recorded "+22.6%" backtest assumed −110 on
 every game).
