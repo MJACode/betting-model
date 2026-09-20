@@ -1,13 +1,27 @@
 import React, { useRef } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
+import { isHit, type HitDirection } from '@/lib/hitRate';
 import { colors, font } from '@/lib/theme';
 
 interface Props {
   /** Per-game stat values, MOST RECENT FIRST (matches usePlayerTrends). */
   values: number[];
-  /** "At least" threshold — a game hits when value >= line. */
+  /** "At least" threshold — a game hits when value >= line (over), or when it
+   *  stays below it (under). */
   line: number;
+  /** Which way the bet runs. Defaults to 'over', which is what every caller
+   *  did before the player card gained a direction control — so the chart's
+   *  colours now follow the bet instead of always drawing an over. Leaving
+   *  this out on an under card would paint every losing game green. */
+  side?: HitDirection;
+  /** What to print on the threshold tick, in the CALLER'S idiom. The line is
+   *  drawn at the book's half-point number, but a card headed "2+ Hits" with a
+   *  stepper reading "2" and a legend reading "Hit (2+)" would then carry a
+   *  lone "1.5" — the only number on screen speaking the other vocabulary
+   *  (lib/hitMode.modeLineLabel exists for exactly this). Defaults to the raw
+   *  number for callers with no mode behind them. */
+  lineLabel?: string;
   avg: number | null;
   median: number | null;
   height?: number;
@@ -21,12 +35,26 @@ const TOP_PAD = 18; // room for the value label above each bar
 const BOTTOM_PAD = 18; // room for the game-index label under each bar
 
 /**
- * Bar chart of a player's per-game stat, colored by whether the game cleared
- * the line. Green = hit (value >= line), red = miss. A dashed reference line
- * marks the threshold and a faint dotted line marks the average. Oldest game on
- * the left, newest on the right; scrolls horizontally when there are many games.
+ * Bar chart of a player's per-game stat, colored by whether the game won the
+ * bet. Green = hit, red = miss, with `side` deciding which way that runs. A
+ * dashed reference line marks the line and a faint dotted line marks the
+ * average. Oldest game on the left, newest on the right; scrolls horizontally
+ * when there are many games.
+ *
+ * `line` is the BOOK'S half-point number (1.5), not the fan's threshold (2).
+ * They name the same bet, but only the half-point one can be compared against
+ * a game's value without a tie: no game ever lands on 0.5, so every bar is a
+ * hit or a miss and none sits ambiguously ON the dashed line.
  */
-export function HitRateChart({ values, line, avg, median, height = 200 }: Props) {
+export function HitRateChart({
+  values,
+  line,
+  side = 'over',
+  lineLabel,
+  avg,
+  median,
+  height = 200,
+}: Props) {
   const scrollRef = useRef<ScrollView>(null);
 
   if (values.length === 0) {
@@ -55,7 +83,12 @@ export function HitRateChart({ values, line, avg, median, height = 200 }: Props)
   const bars = ordered.map((v, i) => {
     const x = LEFT_PAD + i * (BAR_W + GAP);
     const y = yFor(v);
-    const hit = v >= line;
+    // The SAME predicate the hit count above the chart uses (lib/hitRate.ts),
+    // not a second copy of it. The chart drew `v >= line` against a whole
+    // threshold while the count ran `v > line` against the half-point one —
+    // identical on integers and NOT on fractional yardage, which is the shape
+    // of disagreement nobody reports because both numbers look plausible.
+    const hit = isHit(v, line, side);
     return { x, y, h: TOP_PAD + plotH - y, v, hit, gameNo: n - i };
   });
 
@@ -91,7 +124,7 @@ export function HitRateChart({ values, line, avg, median, height = 200 }: Props)
         fontSize={10}
         fontWeight="700"
       >
-        {fmtTick(line)}
+        {lineLabel ?? fmtTick(line)}
       </SvgText>
 
       {bars.map((b, i) => (

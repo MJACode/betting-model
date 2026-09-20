@@ -369,6 +369,29 @@ export function booksNoneName(books: readonly string[]): string {
   return `None of your ${books.length} sportsbooks`;
 }
 
+/**
+ * "Neither DraftKings nor FanDuel posts the under on Hits." — why a side is
+ * closed, in one sentence, for the two places that have to say it: the bet
+ * bar's empty state and the mode sheet's `unavailableNote`. A greyed row with
+ * no reason is the "why is FanDuel blank" question in a smaller box.
+ *
+ * ONE HOME BECAUSE `booksNoneName` ONLY CARRIES ITS OWN NEGATION FROM TWO
+ * BOOKS UP. At one book it returns the bare name, so "DraftKings posts the
+ * under" — the exact opposite of what is meant — is what a caller composing
+ * this inline gets. Both plural forms then take a SINGULAR verb ("Neither X
+ * nor Y posts", "None of your 3 sportsbooks posts").
+ */
+export function sideNotPostedNote(
+  books: readonly string[],
+  side: 'over' | 'under',
+  statLabel: string,
+): string {
+  const what = `the ${side} on ${statLabel}`;
+  return books.length === 1
+    ? `${bookName(books[0])} doesn’t post ${what}.`
+    : `${booksNoneName(books)} posts ${what}.`;
+}
+
 /** The set as pill labels: "DK · FD · MGM", truncated past four. */
 export function booksShortList(books: readonly string[]): string {
   if (books.length <= 4) return books.map(bookLabelShort).join(' · ');
