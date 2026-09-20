@@ -375,6 +375,26 @@ check(
   'a team with no row in the window is null, not tonight’s leftover',
   earliestUpcomingGame([sunOther], 'BUF', NOW) === null,
 );
+const dhEarly = subGame({
+  game_id: 'dh-early',
+  home_team: 'NYY',
+  away_team: 'BOS',
+  commence_time: at('17:10'),
+});
+const dhLate = subGame({
+  game_id: 'dh-late',
+  home_team: 'NYY',
+  away_team: 'BOS',
+  commence_time: at('23:10'),
+});
+check(
+  'an all-started doubleheader is the later game, not game one',
+  earliestUpcomingGame([dhEarly, dhLate], 'NYY', at('23:59'))?.game.game_id === 'dh-late',
+);
+check(
+  'before either doubleheader game, the sooner kickoff still wins',
+  earliestUpcomingGame([dhEarly, dhLate], 'NYY', at('16:00'))?.game.game_id === 'dh-early',
+);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

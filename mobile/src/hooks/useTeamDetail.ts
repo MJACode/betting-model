@@ -166,7 +166,7 @@ export function useTeamDetail(sport: TeamSport, team: string, season: number | n
   // ── The next game: fixture, lines, movement, sharp read, public read ────
   // The 7-day window, not tonight's slate date: a Thursday NFL kickoff has
   // to win when the board's "tonight" is Sunday (buildTonightSlate). Prefers
-  // the soonest unstarted kickoff; if none remain, the earliest in the window.
+  // the soonest unstarted kickoff; if none remain, the latest kickoff in the window.
   const slate = useSection<GameRow[]>(
     [],
     () => fetchSlateGames(sport, today, addDays(today, 7)),

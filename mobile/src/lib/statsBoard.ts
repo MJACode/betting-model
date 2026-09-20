@@ -261,12 +261,12 @@ export function compareKickoff(a: GameRow, b: GameRow): number {
 }
 
 /**
- * The next game for one team (or UFC fighter name) in a multi-day window —
- * the soonest UNSTARTED kickoff, else the earliest kickoff in the window.
+ * The next game for one team (or UFC fighter name) in a multi-day window.
  *
- * Not tonight's slate date: `buildTonightSlate` is a board filter (today, else
- * the next day anything in the sport plays). A Thursday NFL game must still
- * win when that filter's date is Sunday.
+ * Primary: the soonest UNSTARTED kickoff. Fallback (every game in the
+ * window has started): the LATEST kickoff — last-of-day on a doubleheader,
+ * not game one. `buildTonightSlate` is a board filter and is not used here:
+ * a Thursday NFL game must still win when that filter's date is Sunday.
  */
 export function earliestUpcomingGame(
   games: GameRow[],
@@ -277,8 +277,10 @@ export function earliestUpcomingGame(
   const mine = games.filter((g) => g.home_team === team || g.away_team === team);
   if (mine.length === 0) return null;
   const unstarted = mine.filter((g) => !!g.commence_time && g.commence_time > nowIso);
-  const pool = (unstarted.length > 0 ? unstarted : mine).slice().sort(compareKickoff);
-  const game = pool[0];
+  const ranked = (unstarted.length > 0 ? unstarted : mine).slice().sort(compareKickoff);
+  const timed = ranked.filter((g) => !!g.commence_time);
+  const pool = timed.length > 0 ? timed : ranked;
+  const game = unstarted.length > 0 ? pool[0] : pool[pool.length - 1];
   return game ? toSlateGame(game, team) : null;
 }
 

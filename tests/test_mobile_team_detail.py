@@ -204,6 +204,7 @@ def test_next_game_is_earliest_in_the_window_not_tonights_date():
     body = m.group(0)
     assert "commence_time > nowIso" in body, "unstarted kickoffs must win"
     assert "compareKickoff" in body
+    assert "pool[pool.length - 1]" in body, "all-started fallback is the latest kickoff, not game one"
     assert "game_date ===" not in body, "must not re-narrow to tonight's date"
 
 
