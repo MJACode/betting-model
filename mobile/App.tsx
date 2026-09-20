@@ -23,6 +23,7 @@ import { ModelDetailScreen } from '@/screens/ModelDetailScreen';
 import { BuiltInModelDetailScreen } from '@/screens/BuiltInModelDetailScreen';
 import { StatsScreen } from '@/screens/StatsScreen';
 import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
+import { TeamStatsScreen } from '@/screens/TeamStatsScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
@@ -263,6 +264,11 @@ export default function App() {
             name="PlayerStats"
             component={PlayerStatsScreen}
             options={{ title: 'Player Stats', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="TeamStats"
+            component={TeamStatsScreen}
+            options={{ title: 'Team', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="Explainer"

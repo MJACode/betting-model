@@ -97,11 +97,17 @@ function tierColor(tier: Tier): string | undefined {
 export function TeamsBoard({
   sport,
   onAdded,
+  onOpenTeam,
 }: {
   sport: Sport;
   /** After a line is added — the Stats screen bounces back to the betslip
    *  when the member came from there, on this board as on Players. */
   onAdded?: () => void;
+  /** A tap on a team's name opens its page (screens/TeamStatsScreen) —
+   *  Matt, 2026-09-19: "you should be able to click in a team and see useful
+   *  stats to help a user make a bet". The board hands over the row and the
+   *  season it is showing, so the page labels the same season. */
+  onOpenTeam?: (row: TeamStatsRow, season: number | null) => void;
 }) {
   const groups = useMemo(() => teamGroupsForSport(sport), [sport]);
   const [stat, setStat] = useState<TeamStatDef | null>(() => defaultTeamStatFor(sport));
@@ -416,6 +422,7 @@ export function TeamsBoard({
               showLine={showLines}
               // The pill asks: a tap opens the add-to-betslip sheet.
               onLinePress={quote ? () => setLineSheet(quote) : undefined}
+              onOpen={onOpenTeam ? () => onOpenTeam(item, season) : undefined}
             />
           );
         }}
@@ -463,6 +470,7 @@ function TeamRow({
   subline,
   showLine,
   onLinePress,
+  onOpen,
 }: {
   rank: number;
   row: TeamStatsRow;
@@ -474,6 +482,9 @@ function TeamRow({
   subline: string | null;
   showLine: boolean;
   onLinePress?: () => void;
+  /** Opens the team's page. The name and record are the target; the LINE
+   *  pill keeps its own tap, so the two never fight for one press. */
+  onOpen?: () => void;
 }) {
   const value = teamStatValue(row, def);
   const thin = isThinSample(row, def);
@@ -486,10 +497,24 @@ function TeamRow({
   return (
     <View style={[styles.row, subline ? styles.rowWithGame : null]}>
       <Text style={styles.rank}>{rank}</Text>
-      <View style={styles.rowMain}>
+      {/* The name + record block is the tap target for the team page. It is
+          the row's flex:1 column, so the target is the full row width minus
+          the value and the pill, and taller than 44pt on any row with a game
+          (rowWithGame) or close to it without one; the value column and the
+          LINE pill stay outside it so a tap on the pill still adds a leg. */}
+      <Pressable
+        onPress={onOpen}
+        disabled={!onOpen}
+        style={({ pressed }) => [styles.rowMain, pressed && onOpen ? styles.pressed : null]}
+        hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
+        accessibilityRole={onOpen ? 'button' : undefined}
+        accessibilityLabel={onOpen ? `${row.team}, ${row.wins} and ${row.losses}. Open team page` : undefined}
+        accessibilityHint={onOpen ? 'Shows the next game, line movement, splits and head-to-head' : undefined}
+      >
         <Text style={styles.rowName} numberOfLines={1}>
           {row.team}
           {row.conference ? <Text style={styles.rowSub}>  {row.conference}</Text> : null}
+          {onOpen ? <Text style={styles.rowChevron}>  ›</Text> : null}
         </Text>
         {/* The game sits directly under the name, exactly where the Players
             board puts it: the two boards are one toggle apart, and the same
@@ -513,7 +538,7 @@ function TeamRow({
             : ''}
           {thin ? ` · ${sample} game${sample === 1 ? '' : 's'}` : ''}
         </Text>
-      </View>
+      </Pressable>
       <View style={styles.valueWrap}>
         <Text style={[styles.value, color ? { color } : null]}>
           {formatTeamStat(value, def.format)}
@@ -534,7 +559,7 @@ function TeamRow({
  *  ask-to-add-to-betslip tap (Matt, 2026-09-05). The caption stays here —
  *  unlike the Players board, the market genuinely varies row to row only by
  *  which stat is selected, and "ML" / "−1.5" / "o8.5" is what names it. */
-function TeamLineCell({
+export function TeamLineCell({
   quote,
   team,
   started,
@@ -682,6 +707,9 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   rowSub: { fontSize: font.size.micro, fontWeight: font.weight.semibold, color: colors.textTertiary },
+  // The disclosure mark on a tappable name. Not the only carrier: the row is
+  // a labelled button for VoiceOver, and a press dims it.
+  rowChevron: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textTertiary },
   rowMeta: { fontSize: font.size.micro, color: colors.textSecondary, marginTop: 1 },
   // The game, directly under the name. Same size and colour as the record
   // below it: textTertiary is ~3.4:1 on the card at this size, under the AA

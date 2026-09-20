@@ -45,6 +45,10 @@ ANON_READABLE: tuple[str, ...] = (
     "lineup_slots",
     "model_action_thresholds",
     "model_registry",
+    # The team page's per-game NFL closing lines (2026-09-20). Held a policy
+    # and the default grant since the Teams board shipped; declared now that
+    # a `.from()` names it.
+    "nfl_team_game_stats",
     "odds",
     "parlay_correlations",
     "parlay_track_record",
@@ -54,6 +58,11 @@ ANON_READABLE: tuple[str, ...] = (
     "player_news",
     "player_prop_odds",
     "player_savant_stats",
+    # Consensus ticket/money splits per game market, for the team page's
+    # market read (2026-09-20). Anon held SELECT already but RLS was on with
+    # NO policy -- deny-all -- so the grant alone read as an empty screen.
+    # The policy is data/migrations/anon_read_public_betting_2026_09_20.sql.
+    "public_betting",
     "tracked_bets",
     "ufc_fight_log",
     "umpires",
