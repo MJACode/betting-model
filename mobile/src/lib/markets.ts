@@ -118,8 +118,37 @@ export function propMarketForModel(modelId: string): string | null {
  * Returns null for game-level picks or an unrecognized label.
  */
 export function playerNameFromPickLabel(label: string): string | null {
-  const m = label.match(/^([A-Za-z .'\-]+?)\s+(?:Over|Under)\s/);
+  // Unicode letters — José / Acuña / Rodríguez are real stored labels.
+  // ASCII-only left those cards on a single truncated pick_label.
+  const m = label.match(/^([\p{L} .'\-]+?)\s+(?:Over|Under)\s/u);
   return m ? m[1] : null;
+}
+
+/**
+ * PickCard title parts. Props show the bet on the primary (bold) line and
+ * the player name on a caption line; game markets stay a single `pick_label`.
+ *
+ * Secondary is set only when `playerNameFromPickLabel` returns a name that
+ * is not a game-total matchup. `_build_pick_label` writes totals as
+ * "{home} vs {away} Over {line}", and that string also matches the prop
+ * regex — without the `vs` / `@` guard those cards would split too.
+ *
+ * Primary is the remainder of the stored label (side + line + market, plus
+ * any suffix the scorer already wrote). The label is quoted, never rebuilt
+ * (CLAUDE.md §00 / §1c).
+ */
+export function splitPickTitle(pick: { pick_label: string }): {
+  primary: string;
+  secondary: string | null;
+} {
+  const label = pick.pick_label ?? '';
+  const player = playerNameFromPickLabel(label);
+  if (!player || /\s(?:vs|@)\s/.test(player)) {
+    return { primary: label, secondary: null };
+  }
+  const primary = label.slice(player.length).trim();
+  if (!primary) return { primary: label, secondary: null };
+  return { primary, secondary: player };
 }
 
 // ── Parlay correlation: market class ──────────────────────────────────────────
