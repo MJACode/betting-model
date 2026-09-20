@@ -41,15 +41,23 @@ scripts/validate_wind_forecast.py for the derivation.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 import requests
 
+log = logging.getLogger(__name__)
+
+# A CACHE of Supabase (CLAUDE.md section 1b). Every issued-forecast file here
+# is also a set of rows in `nfl_stadium_weather_hourly`: a window the table
+# already covers is read from the table and never re-fetched, and a window
+# fetched from Open-Meteo is written to the table in the same call. Created
+# on first write, not at import.
 CACHE = Path(os.environ.get("WX_CACHE", "data/weather_cache"))
-CACHE.mkdir(parents=True, exist_ok=True)
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 HISTFC_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
@@ -173,6 +181,7 @@ def _get(url: str, params: dict, key: str | None, retries: int = 5, timeout: int
             if r.status_code == 200:
                 d = r.json()
                 if cp is not None:
+                    cp.parent.mkdir(parents=True, exist_ok=True)
                     tmp = cp.with_suffix(".tmp")
                     tmp.write_text(json.dumps(d))
                     os.replace(tmp, cp)
@@ -209,24 +218,129 @@ def fetch_era5(sid: str, start: str, end: str) -> pd.DataFrame:
                            "temperature_2m": "era5_temp", "precipitation": "era5_precip"})
 
 
+ISSUED_TABLE = "nfl_stadium_weather_hourly"
+ALL_LEADS = (1, 2, 3, 4, 5, 6, 7)
+
+
+def _issued_columns(leads) -> dict[str, str]:
+    """table column -> frame column, in the frame's order."""
+    # the same order _frame() produces from an API response
+    cols = {"wind_analysis_mph": "om_analysis", "temp_f": "om_temp", "precip_mm": "om_precip"}
+    cols.update({f"fc_d{i}_mph": f"fc_d{i}" for i in leads})
+    return cols
+
+
+def _issued_from_supabase(sid: str, start: str, end: str, leads) -> pd.DataFrame | None:
+    """
+    The window [start 00:00, end 23:00] UTC from `nfl_stadium_weather_hourly`,
+    in the shape fetch_issued_forecasts returns -- or None when any hour is
+    missing, any requested lead is NULL on any hour, or the database cannot
+    be reached (no DATABASE_URL, the sandbox), in which case the caller falls
+    through to the cache file and then the API. A partial window is never
+    returned: the replays run wind_at_kickoff over the whole season and a gap
+    would read as a missing game, not as a missing hour.
+    """
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+    except Exception as exc:                 # noqa: BLE001 -- no DB is a normal state here
+        log.info(f"{ISSUED_TABLE} not reachable ({exc.__class__.__name__}); using the file/API")
+        return None
+    cols = _issued_columns(leads)
+    lo = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+    hi = datetime.fromisoformat(end).replace(tzinfo=timezone.utc) + timedelta(days=1)
+    try:
+        rows = conn.execute(
+            f"SELECT ts, {', '.join(cols)} FROM {ISSUED_TABLE} "
+            "WHERE stadium_id = %s AND ts >= %s AND ts < %s ORDER BY ts",
+            (sid, lo, hi),
+        ).fetchall()
+    except Exception as exc:                 # noqa: BLE001
+        log.warning(f"{ISSUED_TABLE} read failed ({exc}); using the file/API")
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:                    # noqa: BLE001
+            pass
+    expected = int((hi - lo).total_seconds() // 3600)
+    if len(rows) != expected:
+        log.info(f"{ISSUED_TABLE}: {sid} {start}..{end} holds {len(rows)}/{expected} hours; fetching")
+        return None
+    lead_idx = [1 + k for k, c in enumerate(cols) if c.startswith("fc_d")]
+    if any(r[i] is None for r in rows for i in lead_idx):
+        log.info(f"{ISSUED_TABLE}: {sid} {start}..{end} lacks a requested lead; fetching")
+        return None
+    out = pd.DataFrame({"stadium_id": sid,
+                        "ts": pd.to_datetime([r[0] for r in rows], utc=True)})
+    for k, dst in enumerate(cols.values(), start=1):
+        out[dst] = [None if r[k] is None else float(r[k]) for r in rows]
+    return out
+
+
+def _store_issued(payload: dict, name: str) -> int:
+    """
+    Write a freshly fetched issued-forecast response to `nfl_stadium_weather_hourly`
+    in the same call that fetched it (CLAUDE.md section 1b). Only a response
+    carrying every lead 1..7 is stored: the table's key is (stadium, hour) and
+    the insert is ON CONFLICT DO NOTHING, so a one-lead row written first
+    would block the full row forever. Returns rows written; 0 and a warning
+    when the database is unreachable -- the file on disk still exists, and
+    `python -m data.ingestors.nfl_weather_cache_import --apply` catches up.
+    """
+    hourly = payload.get("hourly") or {}
+    if any(f"wind_speed_10m_previous_day{i}" not in hourly for i in ALL_LEADS):
+        log.info(f"{name}: not every lead 1..7 requested; not stored (run the full pull to store)")
+        return 0
+    try:
+        from data.db import get_connection
+        from data.ingestors.nfl_weather_cache_import import _INSERT, rows_from_file
+        rows = rows_from_file(payload, name)
+        if not rows:
+            return 0
+        conn = get_connection()
+        try:
+            conn.executemany(_INSERT, rows)
+            conn.commit()
+        finally:
+            conn.close()
+        return len(rows)
+    except Exception as exc:                 # noqa: BLE001
+        log.warning(f"{name}: fetched but NOT stored in Supabase ({exc}); "
+                    "run data.ingestors.nfl_weather_cache_import --apply")
+        return 0
+
+
 def fetch_issued_forecasts(sid: str, start: str, end: str,
-                           leads=(1, 2, 3, 4, 5, 6, 7)) -> pd.DataFrame:
+                           leads=ALL_LEADS) -> pd.DataFrame:
     """
     Archived forecasts AS ISSUED N days before each timestamp. Leakage-free.
     Raises if the window predates ISSUED_FORECAST_START.
+
+    Three sources, in order: the cache file on disk; `nfl_stadium_weather_hourly`
+    when it holds every hour of the window; Open-Meteo, whose response is then
+    written to the table in the same call.
     """
     if end < ISSUED_FORECAST_START:
         raise OpenMeteoError(
             f"issued forecasts start {ISSUED_FORECAST_START}; requested window ends {end}. "
             "Before that date only the assembled near-analysis series exists, which leaks."
         )
+    key = f"issued_{sid}_{start}_{end}"
+    cached = (CACHE / f"{key}.json").exists()
+    if not cached:
+        stored = _issued_from_supabase(sid, start, end, leads)
+        if stored is not None:
+            return stored
     lat, lon = STADIUM_COORDS[sid]
     hourly = ["wind_speed_10m"] + [f"wind_speed_10m_previous_day{i}" for i in leads] + \
              ["temperature_2m", "precipitation"]
     p = {"latitude": lat, "longitude": lon, "start_date": start, "end_date": end,
          "hourly": ",".join(hourly), "wind_speed_unit": "mph",
          "temperature_unit": "fahrenheit", "timezone": "UTC"}
-    d = _get(HISTFC_URL, p, f"issued_{sid}_{start}_{end}")
+    d = _get(HISTFC_URL, p, key)
+    if not cached:
+        _store_issued(d, f"{key}.json")
     rename = {"wind_speed_10m": "om_analysis", "temperature_2m": "om_temp",
               "precipitation": "om_precip"}
     rename.update({f"wind_speed_10m_previous_day{i}": f"fc_d{i}" for i in leads})
