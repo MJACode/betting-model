@@ -119,7 +119,6 @@ import {
 import {
   GROUP_ORDER,
   defaultStatFor,
-  defaultThresholdFor,
   propMarketForStat,
   sportHasAnyPropMarket,
   statValue,
@@ -127,6 +126,16 @@ import {
   supportsHitRate,
   type StatDef,
 } from '@/lib/statCatalog';
+import {
+  baseStopCount,
+  defaultLineN,
+  rulerScaleFor,
+  snapStop,
+  stopAt,
+  stopCount,
+  stopIndexOf,
+  type RulerScale,
+} from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
@@ -286,11 +295,6 @@ function hitRateColor(pct: number, colorful: boolean): string {
 }
 
 /**
- * The integer threshold shown on the ruler for a stat, e.g. "1+ Hits",
- * "6+ Strikeouts". Stat defaults are half-lines (0.5 / 5.5) so the ceiling is
- * the first whole number that clears them.
- */
-/**
  * THE BOARD STARTS WHOLE, FOR EVERY SPORT.
  *
  * Matt, 2026-09-12: *"Instead of playing today. We should always show all
@@ -311,15 +315,6 @@ function hitRateColor(pct: number, colorful: boolean): string {
  * review, 2026-09-05).
  */
 const SLATE_ONLY_DEFAULT = false;
-
-function defaultLineN(def: StatDef | null): number {
-  return Math.max(1, Math.ceil(defaultThresholdFor(def)));
-}
-
-/** Upper bound of the ruler — generous enough to cover league leaders. */
-function maxLineN(def: StatDef | null): number {
-  return Math.max(10, defaultLineN(def) * 3);
-}
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
@@ -348,11 +343,13 @@ export function StatsScreen() {
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
   const [query, setQuery] = useState<string>('');
   // Hit Rate controls (front page): a ruler, plus which side of it the bet is
-  // on. `lineN` is the ruler's STOP INDEX, not the number on its face — the
-  // face is the stop drawn in the active mode's idiom (whole in At Least,
-  // the book's half-point line in Over / Under: lib/hitMode.ts). It starts at
-  // 1 for every mode, because stop 0 would be "at least none" — every game —
-  // and "under -0.5", which no game can be and no book prices.
+  // on. `lineN` is the ruler's whole-number STOP, not the number on its face —
+  // the face is that stop drawn in the active mode's idiom (whole in At Least,
+  // the book's half-point line in Over / Under: lib/hitMode.ts). Which stops
+  // exist is the stat's own business: one per unit on most boards, one per
+  // FIVE on NFL/NCAAF yardage (lib/lineRuler.ts). It never reaches 0, which
+  // would be "at least none" — every game — and "under -0.5", which no game
+  // can be and no book prices.
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [hitMode, setHitMode] = useState<HitMode>('atLeast');
   const [modeOpen, setModeOpen] = useState<boolean>(false);
@@ -675,6 +672,20 @@ export function StatsScreen() {
     setStat(s);
     setLineN(defaultLineN(s));
   };
+
+  // The stops this stat's ruler can reach, in the mode it is drawn in. ONE
+  // derivation, read by the ruler, by the mode switch and by the effect that
+  // keeps `lineN` on it — three copies of this arithmetic is three chances to
+  // leave the board on a number the strip cannot scroll back to.
+  const rulerScale: RulerScale = useMemo(() => rulerScaleFor(stat, hitMode), [stat, hitMode]);
+
+  // Leaving Under drops the one extra stop Under needs ("n-1 or fewer" has to
+  // reach a ceiling At Least says as "n+"), so a user parked on it would keep
+  // a line the shorter ruler no longer has — the pill printing a number the
+  // strip cannot return to. Snap it back onto whatever scale is now live.
+  useEffect(() => {
+    setLineN((n) => snapStop(n, rulerScale));
+  }, [rulerScale]);
 
   // The bet the board is about: a half-point line and a side. Everything
   // downstream — the hit rate, the odds cell, the betslip leg — reads these
@@ -1795,11 +1806,13 @@ export function StatsScreen() {
                 SET, though: Under n names "n-1 or fewer", so it needs one
                 extra to reach the ceiling At Least and Over both express at
                 maxLineN. Without it "10 or fewer Hits" is unsayable while
-                "10+ Hits" is (UX review, 2026-09-06). */}
+                "10+ Hits" is (UX review, 2026-09-06). Both that extra stop and
+                the PITCH of the stops are the scale's business now — NFL and
+                NCAAF yardage counts in fives (lib/lineRuler.ts). */}
             <LineRuler
               value={lineN}
-              min={1}
-              max={maxLineN(stat) + (hitMode === 'under' ? 1 : 0)}
+              scale={rulerScale}
+              baseCount={baseStopCount(stat)}
               onChange={setLineN}
               format={(n) => rulerValueLabel(n, hitMode)}
               // Carries the book's number in At Least mode because the
@@ -2369,6 +2382,8 @@ export function StatsScreen() {
 
 /** Width of one ruler tick on long rulers — the snap interval. */
 const TICK_W = 12;
+/** …and on a long ruler whose ticks are worth more than one unit. */
+const WIDE_TICK_W = 18;
 /** Fixed width of a tick's value label (fits 3 digits). */
 const LABEL_W = 44;
 
@@ -2378,29 +2393,40 @@ const LABEL_W = 44;
  * The old windowed row only offered ±1/±2 taps — unusable on stats whose lines
  * run into the hundreds (NFL Pass Yards: getting from 225 to 250 took 25 taps).
  * This is a real drag/flick ruler: the strip scrolls under a fixed centre
- * marker, snaps to whole values (snapToInterval), and reports the value under
- * the marker when the scroll settles. Tapping a tick still selects it.
+ * marker, snaps to the scale's stops (snapToInterval), and reports the value
+ * under the marker when the scroll settles. Tapping a tick still selects it.
+ *
+ * THE STOPS ARE NOT ALWAYS ONE APART. `scale.step` is how far one notch moves
+ * the number — 1 on most boards, 5 on NFL/NCAAF yardage (Matt, 2026-09-19) —
+ * so a tick's index and its value are two different numbers, and this
+ * component converts between them in exactly one place (lib/lineRuler.ts).
+ * The one thing that must not be reintroduced is arithmetic that assumes the
+ * two are the same: a `value + 1`, or a `(v - min) * tickW`, is a thumb that
+ * lands between stops and a strip that then snaps somewhere else.
  *
  * Sync rules: `reportedRef` is the last value THIS component emitted, so the
  * value-prop effect only repositions the strip for OUTSIDE changes (a stat
  * switch snapping to its default) and never fights an in-flight scroll.
- * Label cadence adapts to the range (every value for short rulers, every
- * 5th/25th for yard-scale ones) so the strip stays legible at any size.
+ * Label cadence adapts to the range (every stop for short rulers, every
+ * 5th/10th for yard-scale ones) so the strip stays legible at any size.
  */
 function LineRuler({
   value,
-  min,
-  max,
+  scale,
+  baseCount,
   onChange,
   format,
   describe,
   a11yLabel,
 }: {
   a11yLabel: string;
-  /** The ruler's STOP INDEX. What the user sees is `format(value)`. */
+  /** The ruler's whole-number STOP. What the user sees is `format(value)`. */
   value: number;
-  min: number;
-  max: number;
+  /** Which numbers the ruler can reach, and how far apart they sit. */
+  scale: RulerScale;
+  /** The stop count the PITCH is chosen from — At Least's, so that switching
+   *  mode cannot redraw the strip at a different density (lib/lineRuler.ts). */
+  baseCount: number;
   onChange: (n: number) => void;
   /** The stop drawn in the caller's units — the mode's idiom on the stat
    *  board, where Over reads 0.5 where At Least reads 1 (lib/hitMode.ts).
@@ -2414,7 +2440,10 @@ function LineRuler({
   const [width, setWidth] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const reportedRef = useRef(value);
-  const count = Math.max(1, max - min + 1);
+  const { min, step } = scale;
+  const count = stopCount(scale);
+  /** The last reachable stop — `scale.max` aligned onto the grid. */
+  const hi = stopAt(count - 1, scale);
   // Short rulers (hits, Ks) get wide ticks with every value labeled — the old
   // look, now scrollable. Long rulers (points, yards) get dense ticks with
   // labels every 5th/10th value so the strip stays legible and flickable.
@@ -2425,14 +2454,31 @@ function LineRuler({
   // default Dynamic Type, overlapping above it — while the opaque centre pill
   // grew wide enough to cover its neighbours (UX review, 2026-09-06).
   const describeOf = describe ?? faceOf;
-  const faceChars = Math.max(faceOf(min).length, faceOf(max).length);
-  const tickW = count <= 30 ? Math.max(26, faceChars * 8 + 6) : TICK_W;
-  const labelEvery = count > 120 ? 10 : count > 30 ? 5 : 1;
+  const faceChars = Math.max(faceOf(min).length, faceOf(hi).length);
+  // Branched on baseCount, never on `count`: `count` carries Under's extra
+  // stop, and three yardage boards sit ON this boundary (lib/lineRuler.ts).
+  const dense = baseCount > 30;
+  // A DENSE tick is wider when it is worth more than one unit. The pitch sets
+  // how much a drag is worth and how big a tick is to tap, and both got five
+  // times more consequential without moving: at 12pt a flick on Pass Yards
+  // travelled 5x the value it used to, into a 12pt target (UX review,
+  // 2026-09-19 — HIG wants 44). 18pt still leaves the strip 3.3x shorter than
+  // the one-per-yard version it replaced, so the drag stays fast.
+  const tickW = dense ? (step > 1 ? WIDE_TICK_W : TICK_W) : Math.max(26, faceChars * 8 + 6);
+  // In STOPS, not in units — the pixel gap between two labels is what has to
+  // stay legible, and that is a count of ticks whatever each tick is worth.
+  // The VALUES it lands on are then multiples of the step, so a step-5 ruler
+  // labels round numbers (225, 250, 275 — the ones books hang) and never 227.
+  // Every 10th stop is right when the nine between are a yard each and nobody
+  // counts them; at five yards each they are the unit being chosen in, and a
+  // 50-yard gap left 1.4 labels on a ~170pt strip with nothing to aim at.
+  const labelEvery = !dense ? 1 : step > 1 ? 5 : baseCount > 120 ? 10 : 5;
+  const labelUnits = labelEvery * step;
   // Pad each end by half the viewport so the first/last values can reach the
   // centre marker.
   const sidePad = Math.max(0, width / 2 - tickW / 2);
 
-  const offsetFor = (v: number) => (Math.min(max, Math.max(min, v)) - min) * tickW;
+  const offsetFor = (v: number) => stopIndexOf(v, scale) * tickW;
 
   // Position the strip once the viewport is measured (contentOffset alone is
   // unreliable on Android), and again whenever the value changes from outside.
@@ -2453,8 +2499,7 @@ function LineRuler({
   // both end events (a drag with no fling never gets a momentum-end); emitting
   // is idempotent via reportedRef.
   const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.x / tickW);
-    const v = Math.min(max, Math.max(min, min + idx));
+    const v = stopAt(e.nativeEvent.contentOffset.x / tickW, scale);
     if (v !== reportedRef.current) {
       reportedRef.current = v;
       onChange(v);
@@ -2485,11 +2530,14 @@ function LineRuler({
       // where the index is 1. It announces the whole BET rather than the bare
       // face, because the side and the stat live on other elements and this is
       // the one element a screen-reader user actually drives (UX review).
-      accessibilityValue={{ min, max, now: value, text: describeOf(value) }}
+      accessibilityValue={{ min, max: hi, now: value, text: describeOf(value) }}
       accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
       onAccessibilityAction={(e) => {
-        const next = e.nativeEvent.actionName === 'increment' ? value + 1 : value - 1;
-        if (next >= min && next <= max) pickTick(next);
+        // One STOP per action, so VoiceOver moves the line by the same amount
+        // a drag notch does. A hard-coded 1 here would leave a step-5 ruler
+        // reachable only by touch, at four values it can never settle on.
+        const next = value + (e.nativeEvent.actionName === 'increment' ? step : -step);
+        if (next >= min && next <= hi) pickTick(next);
       }}
     >
       {width > 0 ? (
@@ -2505,8 +2553,8 @@ function LineRuler({
           onScrollEndDrag={settle}
         >
           {Array.from({ length: count }, (_, i) => {
-            const v = min + i;
-            const labeled = v % labelEvery === 0 || v === min || v === max;
+            const v = stopAt(i, scale);
+            const labeled = v % labelUnits === 0 || v === min || v === hi;
             return (
               <Pressable
                 key={v}
@@ -2522,6 +2570,13 @@ function LineRuler({
                 <Text
                   style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
                   numberOfLines={1}
+                  // The box is a fixed LABEL_W, so a face that outgrows it
+                  // TAIL-TRUNCATES — and "149.…" on a tick does not read as a
+                  // truncation, it reads as a different number. Capping the
+                  // scale is the sanctioned trade for numerals in a dense
+                  // strip (UX_REVIEW §5); it matters more now that the wide
+                  // branch labels EVERY stop on a five-character Over face.
+                  maxFontSizeMultiplier={1.3}
                 >
                   {labeled ? faceOf(v) : ''}
                 </Text>
