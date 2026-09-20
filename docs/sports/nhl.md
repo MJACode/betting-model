@@ -43,7 +43,17 @@
   the logs do (130 games).
 
 ## 24. NHL — Pipeline Operations
-### Models (moneyline + regulation LIVE — trained 2026-06-21; O/U + puckline blocked)
+### Models (2026-09-20: moneyline + regulation RETRAINED on honest inputs — PAPER ONLY until the §2 gate; O/U + puckline blocked)
+
+**Retrained 2026-09-20 (mike), train 2018-19 → 2024-25, holdout 2025-26, 1,352 games.** A retrain resets the go-live gate: both are paper-only until ≥ 50 settled picks, positive flat ROI and calibration ≤ 5%.
+
+| Model | Holdout 2025-26 | The do-nothing baseline on the same season |
+|---|---|---|
+| `nhl_moneyline` `20260920_131606` | accuracy 52.9%, AUC 0.558, Brier 0.2477, calibration error 2.82% | always-home 52.1%; Brier ≈ 0.2498 quoting the training home-win rate |
+| `nhl_moneyline_regulation` `20260920_133544` | accuracy 41.6%, one-vs-rest AUC 0.550, log loss 1.0772, calibration error 3.95% | always-home-in-regulation 39.5%; log loss ≈ 1.0855 quoting training class rates (computed on all 1,394 games) |
+
+Both are calibrated and both are barely better than quoting base rates. Published closing lines run 0.655-0.674 log loss on the moneyline (`docs/nhl_market_research.md` §5); fixed-parameter walk-forward puts this model near 0.69. **Neither model has shown it knows anything the line does not.** The table below is the 2026-06-21 record, kept for provenance; its numbers came from season-final inputs.
+
 
 | Model ID | Type | Market | Odds source | Status |
 |---|---|---|---|---|
