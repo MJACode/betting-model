@@ -394,6 +394,11 @@ check(
     'prop bet shrink floor stays above the caption (0.75 × 17 > 12)',
     /minimumFontScale:\s*0\.75/.test(src),
   );
+  const labelRow = src.slice(src.indexOf('labelRow:'), src.indexOf('labelChip:'));
+  check(
+    'labelRow aligns chips to the primary line, not the two-line mid-point',
+    /alignItems:\s*'flex-start'/.test(labelRow) && !/alignItems:\s*'center'/.test(labelRow),
+  );
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILURE(S)`);

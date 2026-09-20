@@ -211,11 +211,13 @@ export function PickCard({
       <View style={styles.titleBlock}>
         <View style={styles.labelRow}>
           {preview ? (
-            <View style={styles.previewBadge}>
+            <View style={[styles.labelChip, styles.previewBadge]}>
               <Text style={styles.previewBadgeText}>PREVIEW</Text>
             </View>
           ) : showSignalBadge ? (
-            <SignalBadge signal={pick.signal_type} small />
+            <View style={styles.labelChip}>
+              <SignalBadge signal={pick.signal_type} small />
+            </View>
           ) : null}
           <View style={styles.labelStack}>
             <Text
@@ -233,9 +235,13 @@ export function PickCard({
               </Text>
             ) : null}
           </View>
-          {showSharp && sharp ? <SharpScorePill score={sharp.score} band={sharp.band} /> : null}
+          {showSharp && sharp ? (
+            <View style={styles.labelChip}>
+              <SharpScorePill score={sharp.score} band={sharp.band} />
+            </View>
+          ) : null}
           {showTier && pick.confidence_tier ? (
-            <View style={[styles.tierChip, tierBg(pick.confidence_tier)]}>
+            <View style={[styles.labelChip, styles.tierChip, tierBg(pick.confidence_tier)]}>
               <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
                 {pick.confidence_tier}
               </Text>
@@ -521,10 +527,22 @@ const styles = StyleSheet.create({
   },
   labelRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // Top of the stack (the 17pt bet), not the mid-point of a two-line
+    // prop title — otherwise badge / sharp / tier float between bet and
+    // player. flexWrap + rowGap still let a long bet + pills wrap at
+    // accessibility sizes (HIG); chips stay on the primary line of
+    // whichever wrap row they land on.
+    alignItems: 'flex-start',
     flexWrap: 'wrap',
     gap: spacing.sm,
     rowGap: spacing.xs,
+  },
+  // 2pt nudge: nano/caption pills (~16–18pt) vs 17pt headline line-box
+  // (~22pt). Keeps the chip optically on the bet when Dynamic Type
+  // grows the player caption underneath.
+  labelChip: {
+    marginTop: 2,
+    alignSelf: 'flex-start',
   },
   // Bet + player name stack so the badge / sharp / tier stay on the primary
   // row (props only). Game markets render a single headline in this stack.
