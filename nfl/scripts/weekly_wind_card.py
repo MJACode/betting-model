@@ -34,6 +34,7 @@ from data_ingest.weather import (STADIUM_COORDS, INDOOR_ROOFS, DEPLOY_THRESHOLD,
                                  open_air_mask,
                                  fetch_live_forecast, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
+from data_ingest.cards import clear_card
 from _nfl_models import load_nfl_model
 
 # NOT `from models.wind_totals import ...` -- the platform's top-level `models`
@@ -234,6 +235,10 @@ def main() -> int:
             n = int((windy.lead_days <= MAX_FIRE_LEAD).sum())
             print(f"(dry run: {n} game(s) clear the wind threshold AND the firing "
                   f"window; rerun without --dry-run to price them)")
+        else:
+            # A dry run priced nothing, so it says nothing about an earlier
+            # card. A priced run with no bets does: data_ingest/cards.py.
+            clear_card("wind_card")
         return 0
 
     print(f"\n=== WIND UNDER CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")

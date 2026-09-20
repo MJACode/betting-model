@@ -1198,9 +1198,16 @@ class TestMarketCardPublisher:
         assert c.publish(conn, rows) == 0          # second run re-prices nothing
         assert len(conn.inserted) == 1
 
-    def test_anytime_td_label_does_not_claim_a_line(self):
+    def test_anytime_td_label_does_not_claim_a_line(self, monkeypatch):
+        import config
         import scripts.nfl_prop_market_card as c
         from models.nfl_prop_market import MarketBet
+
+        # This test is about the LABEL, not the EV gate. nfl_prop_market's own
+        # floor (0.20 since 2026-09-20) drops this fixture at EV 0.100, and the
+        # conftest fixture holds only GLOBAL_MIN_EV at identity, not the
+        # per-model floors. Clear it so the label logic is what is exercised.
+        monkeypatch.setattr(config, "MODEL_OWN_EV_FLOOR", {})
         b = [MarketBet("NFL_2025_01_KC_BUF", "jamesscook", "player_anytime_td",
                        "over", "fanduel", 0.5, 150.0, 0.44, 0.07, 120.0)]
         r = c.pick_rows(b, self._games(), {"jamesscook": "James Cook"}, 1000.0)[0]

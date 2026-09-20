@@ -273,7 +273,7 @@ count — he rejected a top-N the same day — a bar. Two changes, one PR
    reversed.
 
 2. **One EV floor, on the calibrated probability, at the deciding price,
-   wherever a BET is written.** `config.GLOBAL_MIN_EV` (0.30, his number),
+   wherever a BET is written.** `config.GLOBAL_MIN_EV` (0.30, his number; 0.20 since 2026-09-20, below),
    `config.min_ev_for(model_id)` = the higher of it and the model's own
    `MODEL_MIN_EV`, `config.expected_value`. Applied AFTER the model's prob/edge
    cut, so it only tightens, and only where a price exists. The paths, each
@@ -327,6 +327,37 @@ number keeps a profitable record that the 0.30 floor then removes:
 That is the arithmetic of his number, printed before it shipped; the number is
 one env variable (`GLOBAL_MIN_EV`) and the table above is where 0.20 and 0.25
 sit.
+
+**Moved to 0.20 on 2026-09-20 (mike: "30% is too aggressive then").** The first
+NFL Sunday under 0.30 wrote zero NFL bets: the 13:25 UTC `nfl_prop_market` pass
+had 4 bets over its edge cut and dropped all 4 (best 0.209), and the largest EV
+across all 90 bets that model has ever written is 0.227. Replay re-run that day
+(cut + floor, platform sum):
+
+| floor | bets kept | units | ROI |
+|---|---|---|---|
+| 0.05 | 335 | +6.60 | +2.0% |
+| 0.10 | 269 | +19.18 | +7.1% |
+| 0.15 | 174 | +11.13 | +6.4% |
+| **0.20** | **118** | **+11.52** | **+9.8%** |
+| 0.25 | 48 | +13.56 | +28.2% |
+| 0.30 | 15 | +6.67 | +44.5% |
+
+All in-sample, on the record the cuts were chosen on. `ncaaf_live_win_prob`
+keeps 0.30 through `MODEL_MIN_EV`, because its 0.50/0.16 cut was swept with
+0.30 in force. **What 0.20 does NOT do:** `nfl_wind_totals` and
+`nfl_opener_spread` still place nothing at any floor. Each has one graded bet,
+so its map is the pooled offset (about -0.24), which takes the wind model's
+0.574 to 0.510 -- under its own 0.52 cut before any floor applies.
+
+**The two NFL rules were taken off both, the same day (mike: "give wind and
+opener their own floors").** `config.MODEL_OWN_EV_FLOOR` -- wind 0.05, opener
+0.01, returned outright by `config.min_ev_for` -- and
+`config.MODELS_ON_OWN_PROBABILITY`, which `models.honest_ev.honest_probability`
+reads so the gate AND the Discord bound use the rule's own number. Neither
+number is swept: each sits just under the smallest bet that rule has written
+(`docs/nfl_rule_2026_track.md`). `scripts/ev_floor_replay.py` still shows the
+marked-down view for them, because it applies the fitted map directly.
 
 ### Operating it
 

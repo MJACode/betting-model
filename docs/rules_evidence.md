@@ -1277,3 +1277,88 @@ leads the book (2026-09-03 measurement) and its base-out state changes every
 few pitches. The raw CFBD `situation` string is now stored in
 `ncaaf_live_states.raw_state` so the yard line the model was trained on can be
 parsed once its live shape has been seen.
+
+---
+
+## 1b (evidence). Every model carries its own EV floor
+
+**The rule in CLAUDE.md:** a session that finds a model with no entry in
+`config.MODEL_OWN_EV_FLOOR` adds one; the global floor is the fallback for a
+model nobody has measured, not the design. mike, 2026-09-20: *"never ask me,
+each model will need its own floor"*, after a reply asked him to approve floors
+for three models one at a time.
+
+**What the single global number did.** `GLOBAL_MIN_EV` arrived at 0.30 on
+2026-09-19 and moved to 0.20 on 2026-09-20 (#793, #794). On 2026-09-20 MLB
+wrote **zero BET rows** across every model. The pipeline ran: 470-odd MLB rows
+were scored that day. Two models produced nothing at all:
+
+```
+date     mlb_spread_market   mlb_total_public_fade
+09-17           11 BETs               8 BETs
+09-18           17                   14
+09-19            1                   12
+09-20            0, no rows           0, no rows
+```
+
+Those two write a row only when they have a bet, so neither left a trace of
+going dark. Computing the EV of all 78 BETs they had written since 09-16, on
+the calibrated probability at the deciding price:
+
+```
+mlb_spread_market       EV  -0.034 .. +0.026   (min_edge 0.018)
+mlb_total_public_fade   EV  -0.0001 .. +0.0001 (min_edge 0.000)
+clearing a 0.20 floor:  0 of 78
+```
+
+Neither can ever clear it. The drop from 17 to 1 to 0 on `mlb_spread_market` is
+the floor landing, not a quiet week. `nfl_live_prop` was the same story from the
+other direction: its deployed rule emits a CONSTANT 0.6003 probability
+(`DEPLOY_BIAS 1.50 / SIGMA 5.90`), worth EV +0.122 at -115 and +0.172 at -105
+against measured over-price quartiles of -125 / -115 / -105, so it could only
+bet if a book hung plus money on the over.
+
+**Why the numbers are not swept.** The cumulative floor grid was run on every
+model with ≥ 30 settled bets. Only `mlb_live_total_runs` (+14.6u at every floor)
+and `mlb_prop_pitcher_outs` (+3.3u to +4.5u, flat 0.00–0.25) are positive across
+a plateau. The rest are negative at every floor, or show a single-cell peak on a
+thinning sample — `mlb_prop_batter_runs` runs -25.2u at 0.00, -3.6u at 0.20,
+**+11.7u at 0.25**, +4.8u at 0.30 on 29 bets, which is the peak §7 forbids
+reading as a threshold. So each floor sits just under that model's **smallest
+written bet**, capped at `GLOBAL_MIN_EV`: the change only ever loosens, and
+never tightens one model.
+
+**The three deliberate departures.** `mlb_prop_pitcher_hits` (-0.123),
+`mlb_prop_pitcher_k` (-0.014) and `mlb_spread_market` (-0.034) have written bets
+their own calibrated probability prices as losing; restoring those exactly would
+enshrine betting a quote the juice has eaten, so all three are floored at 0.00.
+That cuts roughly half of `mlb_spread_market`'s historical volume (median EV
+-0.009) and is the only tightening in the dict. `mlb_total_public_fade` is the
+one negative entry (-0.01): its model probability IS the market's implied
+probability, so EV is zero by construction and a 0.00 floor drops half its card
+on the sign of a rounding error. `nfl_prop_market` keeps 0.20, written out
+rather than left absent, because #794 put it under the global floor on its
+record (19-20, -2.49u over 39) and that was a decision.
+
+**The landmine the widening created.** `MODELS_ON_OWN_PROBABILITY` was
+`frozenset(MODEL_OWN_EV_FLOOR)` while that dict held exactly two models, so
+"carries its own floor" and "decides on its own probability" were one
+expression. Widening the floors to every model would have taken all of them off
+the promoted calibration map — a far larger change than the floor, and one
+nobody asked for. It is now listed explicitly and pinned by
+`tests/test_config.py`.
+
+**Read alongside:** most models lose at every floor in the grid above. A floor
+is not what fixes that; §1b's rule is that a losing model is an assessment to
+run.
+
+---
+
+## 0 (evidence). "Decisions needed from you" is second person, never first
+
+The heading said "from me" until 2026-09-03. CLAUDE.md is dictated in the user's
+voice, so "me" read as the user when the file was written — but a REPLY is read
+the other way round, so "me" became Claude, and the section announcing what a
+PERSON must decide looked like a list of Claude's own decisions. mike,
+2026-09-03. The rule that came out of it: a heading addresses the reader, so
+"you" is the person and "I" is Claude, in the headings and inside them.

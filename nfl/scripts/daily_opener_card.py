@@ -190,6 +190,9 @@ def main() -> int:
     if bets is None or len(bets) == 0:
         print(f"No qualifying opener bets at |dev| >= {a.threshold} "
               f"({len(watch)} game(s) watched, {len(sched)} inside T-7..T-2).")
+        # An earlier run's card must not outlive it: data_ingest/cards.py.
+        from data_ingest.cards import clear_card
+        clear_card("opener_card")
         return 0
 
     print(f"\n=== OPENER SPREAD CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")
