@@ -48,6 +48,8 @@ from data.season_labels import nhl_season_label
 # an error message is a claim, and a claim that nothing verifies goes stale
 # pointing at the wrong thing.
 
+LOG_TOPUP_DAYS = 5     # trailing days of per-game logs re-pulled each morning
+
 NHL_API_BASE = "https://api-web.nhle.com/v1"
 NHL_STATS_BASE = "https://api.nhle.com/stats/rest/en"
 
@@ -487,6 +489,14 @@ def _build_nhl_team_rows(season: int, as_of_date: str,
         a = advanced.get(team, {})
         s = standings.get(team, {})
 
+        # NO ROW UNTIL THE TEAM HAS PLAYED. Before its first game the summary
+        # is empty but the standings still list all 32 teams, so this wrote a
+        # hollow season row (every stat NULL) — and the feature engine, finding
+        # a current-season row, never fell back to last season's. Measured on
+        # a dry build for 2026-09-29: 32 rows, none with a number in it.
+        if not b.get("games_played"):
+            continue
+
         row = {
             "team":             team,
             "season":           season,
@@ -582,6 +592,8 @@ def _build_goalie_rows(season: int, as_of_date: str,
     from data.ingestors.espn_probables import fetch_espn_nhl_probables
     espn_probables = fetch_espn_nhl_probables(as_of_date)
 
+    book = _goalie_book(conn, season)
+
     # Build lookup: team abbrev → starting goalie name
     # NHL API schedule includes probable starter info in game objects
     # The season summary spells the team `teamAbbrevs` (comma-separated for a
@@ -621,7 +633,13 @@ def _build_goalie_rows(season: int, as_of_date: str,
                         goalie_id = _goalie_id(g)
                         break
 
-            # Fall back to team's season leader if no probable listed
+            # No probable named: the goalie the team has actually been using
+            # (log, this season weighted double), then the summary's leader.
+            if not goalie_name and book:
+                pid = book.busiest(team_abbrev, season, as_of_date)
+                if pid:
+                    goalie_id = str(pid)
+                    goalie_name = book.by_player[pid][-1]["player_name"]
             if not goalie_name and team_abbrev in goalie_lookup:
                 g = goalie_lookup[team_abbrev]
                 goalie_name = g.get("goalieFullName", "")
@@ -643,9 +661,10 @@ def _build_goalie_rows(season: int, as_of_date: str,
                    _same_goalie_name(g.get("goalieFullName"), goalie_name):
                     g_stats = g
                     break
-            if not g_stats:
+            if not g_stats and goalie_stats:
+                # (An EMPTY summary is opening night, not a missing goalie.)
                 logger.warning(f"NHL goalie {goalie_name!r} ({team_abbrev}) is not in the "
-                               f"season summary — row written with no stats")
+                               f"season summary — rated from the game log alone")
 
             # Match game_id from our DB
             game_db = conn.execute("""
@@ -656,20 +675,17 @@ def _build_goalie_rows(season: int, as_of_date: str,
                 LIMIT 1
             """, (as_of_date, team_abbrev, team_abbrev)).fetchone()
 
-            # Last 5 starts from our DB
-            last5 = conn.execute("""
-                SELECT AVG(save_pct), AVG(gaa), AVG(gsaa)
-                FROM (
-                    SELECT save_pct, gaa, gsaa
-                    FROM nhl_goalie_stats
-                    WHERE player_name = ?
-                      AND season = ?
-                      AND game_date < ?
-                    ORDER BY game_date DESC
-                    LIMIT 5
-                )
-            """, (goalie_name, season, as_of_date)).fetchone()
-
+            # THE NUMBERS COME FROM THE PER-GAME LOG, through the same function
+            # that built every training row (data/nhl_asof.py) — strictly before
+            # today, this season and last, regressed to the league. The season
+            # summary above is used to NAME the goalie, never to rate him: it
+            # was the source of the "GSAA = GAA" placeholder, and a training
+            # row and a live row must mean the same thing.
+            line = book.asof(int(goalie_id), season, as_of_date) if (
+                book and goalie_id) else {}
+            if not line and book:
+                # Named, but not in the log (a debut): league-average, not blank.
+                line = book.asof(None, season, as_of_date)
             row = {
                 "player_name":    goalie_name,
                 "player_id":      goalie_id or None,
@@ -681,15 +697,13 @@ def _build_goalie_rows(season: int, as_of_date: str,
                 "saves":          None,
                 "shots_faced":    None,
                 "goals_allowed":  None,
-                # Season rolling
-                "save_pct":       _safe(g_stats.get("savePct")),
-                "gaa":            _safe(g_stats.get("goalsAgainstAverage")),
-                "gsaa":           _safe(g_stats.get("goalsAgainstAverage")),  # placeholder
+                "save_pct":       line.get("save_pct"),
+                "gaa":            line.get("gaa"),
+                "gsaa":           line.get("gsaa"),
                 "xga":            None,
-                # Last 5 starts
-                "save_pct_last5": _safe(last5[0]) if last5 and last5[0] else None,
-                "gaa_last5":      _safe(last5[1]) if last5 and last5[1] else None,
-                "gsaa_last5":     _safe(last5[2]) if last5 and last5[2] else None,
+                "save_pct_last5": line.get("save_pct_last5"),
+                "gaa_last5":      line.get("gaa_last5"),
+                "gsaa_last5":     line.get("gsaa_last5"),
             }
             rows.append(row)
 
@@ -842,8 +856,19 @@ def run_nhl_stats_ingestor(season: int = None, as_of_date: str = None) -> dict:
     conn = get_connection()
 
     try:
+        # ── Per-game logs first: every goalie number and team rate below is
+        # summed from them (data/nhl_asof.py). A historical snapshot run must
+        # not pull "the last few days" of a season that ended years ago.
+        if abs((date.fromisoformat(as_of_date[:10]) - today).days) <= LOG_TOPUP_DAYS:
+            try:
+                from data.ingestors.nhl_game_logs import top_up
+                top_up(LOG_TOPUP_DAYS, apply=True, today=as_of_date[:10])
+            except Exception as exc:
+                logger.error(f"NHL game-log top-up failed — rates will lag a day: {exc}")
+
         # ── Team stats ────────────────────────────────────────────────────────
         team_rows = _build_nhl_team_rows(season, as_of_date, conn)
+        _apply_asof_team_rates(conn, team_rows, season, as_of_date)
         n_teams   = _upsert_nhl_team_stats(conn, team_rows)
         logger.success(f"NHL team stats: {n_teams} rows upserted")
 
@@ -876,6 +901,36 @@ def run_nhl_stats_ingestor(season: int = None, as_of_date: str = None) -> dict:
         "goalie_rows": n_goalies,
         "duration_s":  (datetime.now() - start).total_seconds(),
     }
+
+
+def _apply_asof_team_rates(conn, team_rows: list[dict], season: int, as_of_date: str) -> None:
+    """Shot share, power play, penalty kill and shot rates from the per-game
+    log, blended toward last season by games played — the SAME function the
+    historical rebuild used, so tonight's row and a 2022 training row mean the
+    same thing. The API's live season-to-date stays only when the log has
+    nothing to say (then the column is left as fetched)."""
+    try:
+        from data.nhl_asof import team_book
+        book = team_book(conn, [season])
+    except Exception as exc:
+        logger.error(f"NHL team log unreadable — rate columns left as fetched: {exc}")
+        return
+    for row in team_rows:
+        for col, val in book.asof(row["team"], season, as_of_date[:10]).items():
+            if val is not None:
+                row[col] = val
+
+
+def _goalie_book(conn, season: int):
+    """The per-game goalie log, or None when it cannot be read — the row is
+    then written with no stats, which the scorer skips, rather than with
+    numbers from a different definition than the model was trained on."""
+    try:
+        from data.nhl_asof import goalie_book
+        return goalie_book(conn, [season])
+    except Exception as exc:
+        logger.error(f"NHL goalie log unreadable — goalie rows will carry no stats: {exc}")
+        return None
 
 
 def _goalie_id(row: dict) -> str:

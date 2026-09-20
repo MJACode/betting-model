@@ -96,6 +96,22 @@ class TestGoalieLookup:
             {"homeTeam": {"abbrev": "BOS"}, "awayTeam": {"abbrev": "TBL"}}])
         monkeypatch.setattr(ep, "fetch_espn_nhl_probables", lambda d: probables)
 
+        # The NUMBERS come from the per-game log (data/nhl_asof.py); the season
+        # summary only names the goalie. Swayman .900 on 300 shots last season,
+        # Vasilevskiy .930, the backup busier THIS season than either.
+        from data.nhl_asof import GoalieBook
+
+        def g(pid, name, team, d, season, sa, ga):
+            return {"nhl_game_id": hash((pid, d)) % 10**9, "player_id": pid,
+                    "player_name": name, "game_id": f"NHL_{d}_X_{team}", "season": season,
+                    "game_date": d, "team": team, "started": 1, "toi_seconds": 3600,
+                    "shots_against": sa, "goals_against": ga}
+        log = ([g(8480280, "Jeremy Swayman", "BOS", f"2026-01-{d:02d}", 2026, 30, 3)
+                for d in range(1, 11)]
+               + [g(8476883, "Andrei Vasilevskiy", "TBL", f"2026-01-{d:02d}", 2026, 30, 2)
+                  for d in range(1, 11)])
+        monkeypatch.setattr(ni, "_goalie_book", lambda conn, season: GoalieBook(log))
+
         class _Conn:
             def execute(self, *a, **k):
                 return self
@@ -109,20 +125,25 @@ class TestGoalieLookup:
         rows = self._rows(monkeypatch, {
             "BOS": {"player_name": "Jeremy Swayman"},
             "TBL": {"player_name": "Andrei Vasilevskiy"}})
-        assert rows["BOS"]["save_pct"] == pytest.approx(0.8921)
-        assert rows["TBL"]["save_pct"] == pytest.approx(0.9213)
+        assert rows["TBL"]["save_pct"] > rows["BOS"]["save_pct"]
+        assert rows["BOS"]["gsaa"] == 0 and rows["TBL"]["gsaa"] == 0   # new season
+        assert rows["BOS"]["gsaa"] != rows["BOS"]["gaa"], "GSAA was a copy of GAA"
         assert rows["BOS"]["player_id"] == "8480280"
         assert rows["TBL"]["player_id"] == "8476883"
 
-    def test_an_unknown_starter_gets_no_stats_not_the_first_rows(self, monkeypatch):
+    def test_an_unknown_starter_reads_as_league_average_not_as_the_first_row(self, monkeypatch):
         rows = self._rows(monkeypatch, {"BOS": {"player_name": "Rookie Callup"},
                                         "TBL": {"player_name": "Andrei Vasilevskiy"}})
-        assert rows["BOS"]["save_pct"] is None
-        assert rows["BOS"]["gaa"] is None
+        # A debut reads as the league's rate — the same for anyone unknown, and
+        # never the numbers of whichever goalie the API happened to list first.
+        assert rows["BOS"]["player_id"] is None
+        assert rows["BOS"]["save_pct"] == pytest.approx(
+            550 / 600, abs=1e-3)                # league: 600 shots, 50 goals
+        assert rows["BOS"]["save_pct"] != pytest.approx(0.7143)
 
     def test_with_no_probable_the_team_falls_back_to_its_busiest_goalie(self, monkeypatch):
         rows = self._rows(monkeypatch, {})
-        assert rows["BOS"]["player_name"] == "Jeremy Swayman"   # 58 GP, not the 20-GP backup
+        assert rows["BOS"]["player_name"] == "Jeremy Swayman"   # the goalie BOS has used
         assert rows["TBL"]["player_name"] == "Andrei Vasilevskiy"
 
     def test_accents_do_not_break_the_name_match(self):
@@ -160,3 +181,18 @@ class TestThreeWayMarketKey:
         assert {r["market"] for r in rows} == {"h2h_3way"}
         assert rows[0]["draw_price"] == 330
         assert rows[0]["game_id"] == "NHL_2026-09-29_MTL_TOR"
+
+
+class TestNoHollowTeamRowBeforeTheFirstGame:
+    def test_a_team_that_has_not_played_gets_no_row(self, monkeypatch):
+        """On 2026-09-29 the summary is empty and the standings list 32 teams.
+        A row of NULLs for the new season blocks the fall-back to last season."""
+        from data.ingestors import nhl_stats_ingestor as ni
+        monkeypatch.setattr(ni, "_fetch_nhl_team_stats", lambda s: {
+            "BOS": {"games_played": 1, "goals_per_game": 3.0}})
+        monkeypatch.setattr(ni, "_fetch_nhl_advanced_stats", lambda s: {})
+        monkeypatch.setattr(ni, "_fetch_nhl_standings", lambda s: {"BOS": {}, "TOR": {}})
+        monkeypatch.setattr(ni, "_rolling_goals", lambda *a, **k: None)
+        monkeypatch.setattr(ni, "_home_away_goals", lambda *a, **k: None)
+        rows = ni._build_nhl_team_rows(2027, "2026-09-30", conn=None)
+        assert [r["team"] for r in rows] == ["BOS"]
