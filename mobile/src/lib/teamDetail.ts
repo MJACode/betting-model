@@ -20,7 +20,7 @@
  * sign and is normalised in `nflCoverMarks` exactly as the board does it; a
  * pick's `pick_side` is 'home' / 'away' / 'over' / 'under', never a team name.
  */
-import { americanImplied } from '@/lib/format';
+import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
 import {
   teamStatsForSport,
@@ -503,17 +503,6 @@ export function formatWinLoss(r: { wins: number; losses: number; pushes: number 
   return r.pushes > 0 ? `${r.wins}-${r.losses}-${r.pushes}` : `${r.wins}-${r.losses}`;
 }
 
-/**
- * "+2.4u" / "−0.5u" — a SIGNED result in units (CLAUDE.md §4). Named apart
- * from thresholds.ts's `formatUnits`, which prints an unsigned stake ("2.4u"):
- * two exports with one name and two meanings is how the next screen imports
- * the wrong one (UX review, 2026-09-20).
- */
-export function formatSignedUnits(u: number): string {
-  const rounded = Math.round(u * 10) / 10;
-  if (rounded === 0) return '0.0u';
-  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}u`;
-}
 
 // ── League ranks ────────────────────────────────────────────────────────────
 

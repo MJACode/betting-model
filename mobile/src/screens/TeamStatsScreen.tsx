@@ -38,17 +38,17 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { GameStatusPill } from '@/components/GameStatusPill';
-import { InfoTooltip } from '@/components/InfoTooltip';
+import { ReadRow } from '@/components/ReadRow';
+import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { TeamLineCell } from '@/components/TeamsBoard';
 import { FORM_GAMES, RECORD_GAMES, useTeamDetail, type NextGame } from '@/hooks/useTeamDetail';
-import { formatPct, weekdayShortET, formatGameTimeET, formatStampET } from '@/lib/format';
+import { formatPct, formatSignedUnits, weekdayShortET, formatGameTimeET, formatStampET } from '@/lib/format';
 import { teamLineSheetInput } from '@/lib/lineLegs';
 import { bookName } from '@/lib/markets';
 import { buildTeamLineIndex, type TeamLineQuote } from '@/lib/statsOdds';
 import { isThinSample, sampleFor, type Tier } from '@/lib/teamBoard';
 import {
-  formatSignedUnits,
   formatTeamLine,
   formatWinLoss,
   ordinal,
@@ -780,31 +780,8 @@ function RankRow({
 
 // ── Shared bits ─────────────────────────────────────────────────────────────
 
-function SectionTitle({ title, tooltip }: { title: string; tooltip?: { title: string; body: string } }) {
-  return (
-    <View style={styles.sectionRow}>
-      <Text style={styles.sectionTitle}>{title.toUpperCase()}</Text>
-      {tooltip ? (
-        <InfoTooltip title={tooltip.title} body={tooltip.body} accessibilityLabel={`About ${title}`} />
-      ) : null}
-    </View>
-  );
-}
-
 function Card({ children }: { children: React.ReactNode }) {
   return <View style={styles.card}>{children}</View>;
-}
-
-function ReadRow({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <View style={styles.readRow}>
-      <Text style={styles.readLabel}>{label}</Text>
-      <View style={styles.readRight}>
-        <Text style={styles.readValue}>{value}</Text>
-        {note ? <Text style={styles.readNote}>{note}</Text> : null}
-      </View>
-    </View>
-  );
 }
 
 function signed(n: number, digits: number): string {
@@ -829,20 +806,6 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   teamName: { fontSize: font.size.title2, fontWeight: font.weight.bold, color: colors.textPrimary },
   meta: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    marginBottom: spacing.xs,
-  },
-  sectionTitle: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-    letterSpacing: 0.4,
-  },
   card: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
@@ -885,19 +848,6 @@ const styles = StyleSheet.create({
 
   readTitle: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
   readLead: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18, marginTop: 4, marginBottom: spacing.sm },
-  readRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-    gap: spacing.md,
-  },
-  readLabel: { fontSize: font.size.footnote, color: colors.textSecondary, width: 84 },
-  readRight: { flex: 1, alignItems: 'flex-end' },
-  readValue: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textPrimary, fontVariant: ['tabular-nums'], textAlign: 'right' },
-  readNote: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 1, textAlign: 'right' },
 
   formStrip: { flexDirection: 'row', justifyContent: 'space-between', gap: 2 },
   formCell: { flex: 1, alignItems: 'center', minWidth: 0 },
