@@ -281,20 +281,27 @@ def test_the_trigger_copies_line_book():
 
 # ── the app ──────────────────────────────────────────────────────────────────
 
-def test_a_pick_draftkings_never_priced_cannot_be_a_parlay_leg():
-    """A parlay is ONE DraftKings slip. `legFromPick` keys on dk_odds, which is
-    NULL on these picks -- so the gate that keeps a prob-only pick out keeps
-    these out too, and that is the correct answer, not an oversight. Pinned
-    because a tidy-up of the comment could widen it to the deciding price and
-    put an unplaceable leg on a slip (UX review, 2026-09-12)."""
+def test_a_pick_draftkings_never_priced_is_a_parlay_leg_at_its_own_book():
+    """A prop DraftKings never listed (line_book set, dk_odds NULL) IS a slip
+    leg, priced at the book that decided it and marked dkPriced=false so the
+    slip screen can say so. PR #703 (2026-09-13) made it so; the UX review of
+    2026-09-12 had ruled the other way ("a parlay is ONE DraftKings slip"),
+    and this test pinned that ruling until 2026-09-20, a week after the code
+    reversed it. `mobile/scripts/verify_betslip.ts` checks the same shape.
+
+    What stays pinned: a DraftKings-priced leg keeps DraftKings' own number
+    (a slip DK cannot price is worse than a slip at DK's number), and a
+    prob-only pick with no price at any book is still not a leg."""
     src = _src("mobile/src/lib/parlay.ts")
     body = src[src.index("export function legFromPick("):]
     body = body[:body.index("\nexport ")]
+    flat = body.replace("  ", " ").replace("\n", " ")
     assert "p.dk_odds == null ? null : Number(p.dk_odds)" in body
-    assert "a parlay is ONE DraftKings slip" in body.replace("  ", " ").replace("\n", " ") \
-        or "ONE DraftKings slip" in src
-
-
+    assert "const decided = decisionOdds(p);" in body, "the deciding price is the fallback"
+    assert "if (decided == null) return null;" in body, "prob-only stays out"
+    assert "const odds = dkOdds ?? decided;" in body, "DraftKings' own number wins when it exists"
+    assert "dkPriced: false" in flat and "pricedAt: lineBook(p) ?? storedQuoteBook(p)" in flat, (
+        "an off-DraftKings leg must say which book priced it")
 def test_the_app_reads_the_column_but_does_not_claim_a_settled_one():
     types = _src("mobile/src/types/index.ts")
     assert "  line_book: string | null;" in types, "every Pick carries it"
