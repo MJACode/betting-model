@@ -18,6 +18,7 @@ import {
   movementFromLatest,
   numOrNull,
   pickTimingInfo,
+  splitPickTitle,
   type Movement,
 } from '@/lib/markets';
 import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
@@ -174,6 +175,7 @@ export function PickCard({
   ]
     .filter((p): p is string => p != null)
     .join(' · ');
+  const { primary: titlePrimary, secondary: titleSecondary } = splitPickTitle(pick);
 
   return (
     // The card tap is the only route to the pick's breakdown now that the
@@ -206,25 +208,40 @@ export function PickCard({
         <GameStatusPill game={game} live={liveState} />
       </View>
 
-      <View style={styles.labelRow}>
-        {preview ? (
-          <View style={styles.previewBadge}>
-            <Text style={styles.previewBadgeText}>PREVIEW</Text>
-          </View>
-        ) : showSignalBadge ? (
-          <SignalBadge signal={pick.signal_type} small />
-        ) : null}
-        <Text style={styles.label} numberOfLines={1}>
-          {pick.pick_label}
-        </Text>
-        {showSharp && sharp ? <SharpScorePill score={sharp.score} band={sharp.band} /> : null}
-        {showTier && pick.confidence_tier ? (
-          <View style={[styles.tierChip, tierBg(pick.confidence_tier)]}>
-            <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
-              {pick.confidence_tier}
+      <View style={styles.titleBlock}>
+        <View style={styles.labelRow}>
+          {preview ? (
+            <View style={styles.previewBadge}>
+              <Text style={styles.previewBadgeText}>PREVIEW</Text>
+            </View>
+          ) : showSignalBadge ? (
+            <SignalBadge signal={pick.signal_type} small />
+          ) : null}
+          <View style={styles.labelStack}>
+            <Text
+              style={styles.label}
+              numberOfLines={1}
+              {...(titleSecondary
+                ? { adjustsFontSizeToFit: true, minimumFontScale: 0.7 }
+                : {})}
+            >
+              {titlePrimary}
             </Text>
+            {titleSecondary ? (
+              <Text style={styles.playerName} numberOfLines={1}>
+                {titleSecondary}
+              </Text>
+            ) : null}
           </View>
-        ) : null}
+          {showSharp && sharp ? <SharpScorePill score={sharp.score} band={sharp.band} /> : null}
+          {showTier && pick.confidence_tier ? (
+            <View style={[styles.tierChip, tierBg(pick.confidence_tier)]}>
+              <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
+                {pick.confidence_tier}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       <View style={styles.heroRow}>
@@ -499,20 +516,33 @@ const styles = StyleSheet.create({
   },
   // Signal-first on Today: badge immediately before the label. Wraps so a
   // long NFL prop + sharp pill cannot clip at accessibility sizes (HIG).
+  titleBlock: {
+    marginBottom: spacing.xs,
+  },
   labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: spacing.sm,
     rowGap: spacing.xs,
-    marginBottom: spacing.xs,
+  },
+  // Bet + player name stack so the badge / sharp / tier stay on the primary
+  // row (props only). Game markets render a single headline in this stack.
+  labelStack: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
   },
   label: {
-    flexShrink: 1,
-    flexGrow: 1,
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  playerName: {
+    marginTop: 1,
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
   },
   tierChip: {
     paddingHorizontal: 8,

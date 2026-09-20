@@ -18,6 +18,8 @@ import {
   isNflLineOnly,
   movementFromLatest,
   movementFromSameBookHistory,
+  playerNameFromPickLabel,
+  splitPickTitle,
   MODEL_BOOK,
 } from '../src/lib/markets';
 import type { BookPricedRow, LatestDkOddsRow, Pick, PickSide } from '../src/types';
@@ -305,6 +307,74 @@ check(
   check(
     'history fetches have no draftkings literal',
     hist.includes(".eq('bookmaker', bookmaker)") && !hist.includes("'draftkings'"),
+  );
+}
+
+// ── splitPickTitle (PickCard two-line prop titles) ─────────────────────────
+{
+  const prop = splitPickTitle({ pick_label: 'Roquan Smith Under 9.5 Tackles' });
+  check(
+    'prop primary is the bet only',
+    prop.primary === 'Under 9.5 Tackles' && prop.secondary === 'Roquan Smith',
+  );
+  check(
+    'prop parser and split agree on the player',
+    playerNameFromPickLabel('Roquan Smith Under 9.5 Tackles') === prop.secondary,
+  );
+}
+{
+  const suffix = splitPickTitle({ pick_label: 'Jadarian Price Over 1.5 Rec (FD)' });
+  check(
+    'prop keeps the stored suffix on the bet line',
+    suffix.primary === 'Over 1.5 Rec (FD)' && suffix.secondary === 'Jadarian Price',
+  );
+}
+{
+  const jr = splitPickTitle({ pick_label: "Ja'Marr Chase Over 4.5 Rec" });
+  check(
+    "apostrophe names stay on the caption line",
+    jr.primary === 'Over 4.5 Rec' && jr.secondary === "Ja'Marr Chase",
+  );
+}
+{
+  const gameMl = splitPickTitle({ pick_label: 'NYY ML' });
+  check('moneyline stays a single pick_label', gameMl.primary === 'NYY ML' && gameMl.secondary === null);
+}
+{
+  const spread = splitPickTitle({ pick_label: 'BUF +1' });
+  check('spread stays a single pick_label', spread.primary === 'BUF +1' && spread.secondary === null);
+}
+{
+  const totalVs = splitPickTitle({ pick_label: 'NYY vs BOS Over 8.5' });
+  check(
+    'game total with vs is not split (regex also matches Over/Under)',
+    totalVs.primary === 'NYY vs BOS Over 8.5' && totalVs.secondary === null,
+  );
+}
+{
+  const totalAt = splitPickTitle({ pick_label: 'NYJ @ BUF Over 8.5' });
+  check(
+    'game total with @ stays a single pick_label',
+    totalAt.primary === 'NYJ @ BUF Over 8.5' && totalAt.secondary === null,
+  );
+}
+{
+  const live = splitPickTitle({ pick_label: 'Over 9.5 (live)' });
+  check(
+    'live total with no player prefix stays a single pick_label',
+    live.primary === 'Over 9.5 (live)' && live.secondary === null,
+  );
+}
+{
+  const src = readFileSync(join(__dirname, '../src/components/PickCard.tsx'), 'utf-8');
+  check('PickCard titles through splitPickTitle', src.includes('splitPickTitle'));
+  check(
+    'PickCard a11y still announces the stored pick_label',
+    /accessibilityLabel=\{\[[\s\S]*?pick\.pick_label/.test(src),
+  );
+  check(
+    'PickCard does not write pick_label',
+    !/pick\.pick_label\s*=/.test(src),
   );
 }
 
