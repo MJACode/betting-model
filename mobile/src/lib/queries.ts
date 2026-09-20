@@ -2195,7 +2195,7 @@ export async function fetchTeamRecentGamesForSport(
     .order('game_id', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as GameRow[];
+  return (data ?? []) as unknown as GameRow[];
 }
 
 /** The last N finished meetings between two teams in one sport, newest first. */
@@ -2217,7 +2217,7 @@ export async function fetchHeadToHead(
     .order('game_date', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as GameRow[];
+  return (data ?? []) as unknown as GameRow[];
 }
 
 /**
