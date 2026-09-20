@@ -21,13 +21,6 @@ import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { StatePickerSheet } from '@/components/StatePickerSheet';
 import { useBettingState } from '@/hooks/useBettingState';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
-import { useBankroll } from '@/hooks/useBankroll';
-import {
-  MULTIPLIER_MAX,
-  MULTIPLIER_MIN,
-  MULTIPLIER_STEP,
-  useKellySettings,
-} from '@/hooks/useKellySettings';
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
@@ -53,7 +46,7 @@ import {
   WEBSITE_URL,
   openLink,
 } from '@/lib/socialLinks';
-import { formatPct } from '@/lib/format';
+import { formatUnits } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -104,12 +97,10 @@ function LinkRow({
 
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
-  const { bankroll, setBankroll, ready } = useBankroll();
   const { books } = usePreferredBooks();
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const { name: stateName } = useBettingState();
   const [statePickerOpen, setStatePickerOpen] = useState(false);
-  const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
   const { settings: rg, setExposureCapUnits } = useResponsibleGambling();
@@ -122,70 +113,29 @@ export function SettingsScreen() {
   const { entitled } = useEntitlement();
   const { access, unlink, busy: discordBusy } = useAccess();
   const [discordSheet, setDiscordSheet] = useState(false);
-  const [draft, setDraft] = useState<string>('');
-  const [capDraft, setCapDraft] = useState<string>('');
   const [rgDraft, setRgDraft] = useState<string>('');
 
   useEffect(() => {
     setRgDraft(rg.exposureCapUnits != null ? String(rg.exposureCapUnits) : '');
   }, [rg.exposureCapUnits]);
 
-  useEffect(() => {
-    if (ready) setDraft(String(bankroll));
-  }, [bankroll, ready]);
-
-  useEffect(() => {
-    setCapDraft(cap != null ? (cap * 100).toFixed(2) : '');
-  }, [cap]);
-
-  const onSave = () => {
-    const v = parseFloat(draft);
-    if (!Number.isFinite(v) || v <= 0) {
-      Alert.alert('Invalid bankroll', 'Enter a positive number.');
-      return;
-    }
-    setBankroll(v);
-    Alert.alert('Saved', `Bankroll set to $${v.toFixed(2)}.`);
-  };
-
-  const stepMultiplier = (delta: number) => {
-    const next = Math.round((multiplier + delta) * 100) / 100;
-    const clamped = Math.max(MULTIPLIER_MIN, Math.min(MULTIPLIER_MAX, next));
-    setMultiplier(clamped);
-  };
-
-  const commitCap = (raw: string) => {
-    if (raw.trim() === '') return;
-    const pct = parseFloat(raw);
-    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
-      Alert.alert('Invalid cap', 'Enter a percent between 0 and 100.');
-      setCapDraft(cap != null ? (cap * 100).toFixed(2) : '');
-      return;
-    }
-    setCap(pct / 100);
-  };
-
-  const toggleCap = (on: boolean) => {
-    if (!on) {
-      setCap(null);
-    } else {
-      // Sensible default when enabling: 5% of bankroll (the old hard cap).
-      setCap(0.05);
-    }
-  };
-
+  // The cap is stored, summed and displayed in UNITS end to end
+  // (useResponsibleGambling, and PicksHomeScreen's unitsFor sum). This field
+  // used to divide the entry by 100 under a "units / day" label, so typing 10
+  // stored 0.1u — a ceiling every single pick breached. Units, no conversion.
   const commitRgCap = (raw: string) => {
     if (raw.trim() === '') return;
-    const pct = parseFloat(raw);
-    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
-      Alert.alert('Invalid limit', 'Enter a percent between 0 and 100.');
-      setRgDraft(rg.exposureCapUnits != null ? (rg.exposureCapUnits * 100).toFixed(0) : '');
+    const units = parseFloat(raw);
+    if (!Number.isFinite(units) || units <= 0 || units > 100) {
+      Alert.alert('Invalid limit', 'Enter a number of units between 0 and 100.');
+      setRgDraft(rg.exposureCapUnits != null ? String(rg.exposureCapUnits) : '');
       return;
     }
-    setExposureCapUnits(pct / 100);
+    setExposureCapUnits(units);
   };
 
-  const toggleRgCap = (on: boolean) => setExposureCapUnits(on ? 0.15 : null);
+  // A typical BET lays ~1.1u, so 10u/day is roughly a nine-pick day.
+  const toggleRgCap = (on: boolean) => setExposureCapUnits(on ? 10 : null);
 
   const openHelpline = () => {
     Linking.openURL('tel:1-800-522-4700').catch(() =>
@@ -194,7 +144,7 @@ export function SettingsScreen() {
   };
 
   const confirmSignOut = () => {
-    Alert.alert('Sign out?', 'Your bankroll, models and tracked bets stay on this device.', [
+    Alert.alert('Sign out?', 'Your models and tracked bets stay on this device.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign out',
@@ -206,7 +156,6 @@ export function SettingsScreen() {
     ]);
   };
 
-  const multLabel = describeMultiplier(multiplier);
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
   const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
 
@@ -232,7 +181,7 @@ export function SettingsScreen() {
                 </View>
               </View>
               <Text style={styles.sub}>
-                Your bankroll, models and tracked bets stay on this device.
+                Your models and tracked bets stay on this device.
               </Text>
               <Pressable
                 onPress={confirmSignOut}
@@ -246,7 +195,7 @@ export function SettingsScreen() {
             // session-only today. Update when account-scoped data lands.
             <LinkRow
               label="Sign in"
-              sub="Optional. Everything works without an account — your bankroll, models and tracked bets stay on this device."
+              sub="Optional. Everything works without an account — your models and tracked bets stay on this device."
               onPress={() => navigation.navigate('SignIn')}
               right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
             />
@@ -299,27 +248,6 @@ export function SettingsScreen() {
         ) : null}
 
         <SectionHeader title="Betting" />
-
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Bankroll</Text>
-          <View style={styles.bankrollRow}>
-            <Text style={styles.dollar}>$</Text>
-            <TextInput
-              style={styles.input}
-              value={draft}
-              onChangeText={setDraft}
-              keyboardType="decimal-pad"
-              placeholder="1000"
-              placeholderTextColor={colors.textTertiary}
-            />
-            <Pressable onPress={onSave} style={styles.saveBtn}>
-              <Text style={styles.saveBtnText}>Save</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.sub}>
-            Bet sizes recompute across the app. Stored on this device.
-          </Text>
-        </View>
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Your sportsbooks</Text>
@@ -414,69 +342,7 @@ export function SettingsScreen() {
           }
         />
 
-        <SectionHeader title="Bet sizing" />
-
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Kelly aggressiveness</Text>
-          <View style={styles.stepperRow}>
-            <Pressable
-              onPress={() => stepMultiplier(-MULTIPLIER_STEP)}
-              style={({ pressed }) => [styles.stepperBtn, pressed && styles.pressed]}
-              disabled={multiplier <= MULTIPLIER_MIN}
-            >
-              <Ionicons name="remove" size={20} color={colors.tint} />
-            </Pressable>
-            <View style={styles.multValueWrap}>
-              <Text style={styles.multValue}>{multiplier.toFixed(2)}×</Text>
-              <Text style={styles.multSub}>{multLabel}</Text>
-            </View>
-            <Pressable
-              onPress={() => stepMultiplier(MULTIPLIER_STEP)}
-              style={({ pressed }) => [styles.stepperBtn, pressed && styles.pressed]}
-              disabled={multiplier >= MULTIPLIER_MAX}
-            >
-              <Ionicons name="add" size={20} color={colors.tint} />
-            </Pressable>
-          </View>
-          <Text style={styles.sub}>
-            Scales the tenth-Kelly stake we recommend. 1.00× is the default; 2.50× ≈ quarter-Kelly,
-            5.00× ≈ half-Kelly, 10.00× = full Kelly.
-          </Text>
-        </View>
-
-        <View style={styles.card}>
-          <View style={styles.capHeader}>
-            <Text style={styles.cardLabel}>Max bet cap</Text>
-            <Switch value={cap != null} onValueChange={toggleCap} />
-          </View>
-          {cap != null ? (
-            <>
-              <View style={styles.capRow}>
-                <TextInput
-                  style={styles.capInput}
-                  value={capDraft}
-                  onChangeText={setCapDraft}
-                  onBlur={() => commitCap(capDraft)}
-                  onSubmitEditing={() => commitCap(capDraft)}
-                  keyboardType="decimal-pad"
-                  placeholder="5"
-                  placeholderTextColor={colors.textTertiary}
-                  returnKeyType="done"
-                />
-                <Text style={styles.capUnit}>% of bankroll</Text>
-              </View>
-              <Text style={styles.sub}>
-                No suggestion will exceed {formatPct(cap)} of your bankroll. Stakes you’ve already
-                saved aren’t changed.
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.sub}>
-              No cap — suggestions are bounded only by the multiplier above. Turn this on to set
-              your own ceiling.
-            </Text>
-          )}
-        </View>
+        <SectionHeader title="Staying in control" />
 
         <View style={styles.card}>
           <View style={styles.capHeader}>
@@ -501,8 +367,8 @@ export function SettingsScreen() {
               </View>
               <Text style={styles.sub}>
                 We’ll warn you when today’s recommended stakes add up to more than{' '}
-                {formatPct(rg.exposureCapUnits)} of your bankroll. Staying small keeps you in the
-                game.
+                {formatUnits(rg.exposureCapUnits)}. One unit is one flat bet, so a typical pick
+                lays about 1.1u. Staying small keeps you in the game.
               </Text>
             </>
           ) : (
@@ -510,7 +376,18 @@ export function SettingsScreen() {
               Off by default. Turn it on for a heads-up before a day’s picks over-extend you.
             </Text>
           )}
-          <Pressable onPress={openHelpline} style={styles.helplineRow}>
+        </View>
+
+        {/* Its own card, deliberately: this used to sit inside the exposure
+            card, which is OFF by default — so the one support resource in the
+            app rendered as a footnote on a feature the member had declined. */}
+        <View style={styles.card}>
+          <Pressable
+            onPress={openHelpline}
+            accessibilityRole="link"
+            accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
+            style={styles.helplineRow}
+          >
             <Ionicons name="call-outline" size={15} color={colors.tint} />
             <Text style={styles.helplineText}>
               Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
@@ -544,7 +421,7 @@ export function SettingsScreen() {
 
         <LinkRow
           label="How this works"
-          sub="Edge, BET/AVOID, Kelly sizing and how results are tracked — explained."
+          sub="Edge, BET/AVOID, unit sizing and how results are tracked — explained."
           onPress={() => navigation.navigate('Explainer')}
         />
 
@@ -658,16 +535,6 @@ export function SettingsScreen() {
   );
 }
 
-function describeMultiplier(m: number): string {
-  if (m <= 0.5) return 'Conservative';
-  if (m < 1) return 'Below tenth-Kelly';
-  if (m === 1) return 'Tenth-Kelly (default)';
-  if (m < 2.5) return 'Above tenth-Kelly';
-  if (m < 5) return 'Roughly quarter-Kelly';
-  if (m < 10) return 'Roughly half-Kelly';
-  return 'Full Kelly';
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -766,73 +633,10 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginTop: spacing.sm,
   },
-  bankrollRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  dollar: {
-    fontSize: font.size.title3,
-    color: colors.textPrimary,
-    fontWeight: font.weight.semibold,
-  },
-  input: {
-    flex: 1,
-    fontSize: font.size.title3,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-    backgroundColor: colors.bg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-  },
-  saveBtn: {
-    backgroundColor: colors.tint,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-  },
-  saveBtnText: {
-    color: colors.textInverse,
-    fontWeight: font.weight.semibold,
-    fontSize: font.size.body,
-  },
   sub: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     lineHeight: 18,
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.bg,
-    borderRadius: radii.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  stepperBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radii.sm,
-    backgroundColor: colors.bgCard,
-  },
-  multValueWrap: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  multValue: {
-    fontSize: font.size.title2,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-  },
-  multSub: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    marginTop: 2,
   },
   capHeader: {
     flexDirection: 'row',

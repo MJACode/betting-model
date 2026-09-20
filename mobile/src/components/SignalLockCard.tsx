@@ -43,7 +43,7 @@ export function SignalLockCard({
         <Text style={styles.body}>
           {none
             ? "The models haven't found a bet that clears the line yet today. Zero-signal days are normal — subscribe and you'll see them the moment they fire."
-            : 'Subscribe to see which side the model likes, the price it wants, and the stake sized to your bankroll.'}
+            : 'Subscribe to see which side the model likes, the price it wants, and the unit stake that goes with it.'}
         </Text>
 
         <Pressable

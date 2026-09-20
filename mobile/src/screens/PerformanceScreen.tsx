@@ -64,7 +64,6 @@ export function PerformanceScreen() {
       summary={tracked.summary}
       trackedCount={tracked.trackedCount}
       stakeMode={tracked.stakeMode}
-      bankroll={tracked.bankroll}
       onStakeModeChange={tracked.setStakeMode}
       onEditStake={setStakeEdit}
       onRowPress={(row) => {
@@ -319,13 +318,10 @@ const TRACKED_ROW_CAP = 40;
 
 const STAKE_MODES: { value: StakeMode; label: string }[] = [
   { value: 'flat', label: '$100 flat' },
-  { value: 'kelly', label: 'Kelly' },
   { value: 'custom', label: 'Custom' },
 ];
 
-function stakeCaption(mode: StakeMode, bankroll: number): string {
-  if (mode === 'kelly')
-    return `Scored at each pick's Kelly stake (bankroll ${formatCurrency(bankroll)})`;
+function stakeCaption(mode: StakeMode): string {
   if (mode === 'custom') return 'Custom stakes - tap a stake to edit (default $100)';
   return 'Scored at $100 flat per bet';
 }
@@ -335,7 +331,6 @@ function TrackedBetsCard({
   summary,
   trackedCount,
   stakeMode,
-  bankroll,
   onStakeModeChange,
   onEditStake,
   onRowPress,
@@ -345,7 +340,6 @@ function TrackedBetsCard({
   summary: TrackedBetSummary;
   trackedCount: number;
   stakeMode: StakeMode;
-  bankroll: number;
   onStakeModeChange: (mode: StakeMode) => void;
   onEditStake: (row: TrackedBetRow) => void;
   onRowPress: (row: TrackedBetRow) => void;
@@ -390,7 +384,7 @@ function TrackedBetsCard({
               );
             })}
           </View>
-          <Text style={styles.trackedBasis}>{stakeCaption(stakeMode, bankroll)}</Text>
+          <Text style={styles.trackedBasis}>{stakeCaption(stakeMode)}</Text>
           {rows.slice(0, TRACKED_ROW_CAP).map((row) => (
             <Pressable
               key={row.pick.pick_id}
@@ -408,7 +402,6 @@ function TrackedBetsCard({
                     decisionOdds(row.pick) != null
                       ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
                       : null,
-                    stakeMode === 'kelly' ? `${formatCurrency(row.stake)} stake` : null,
                   ]
                     .filter(Boolean)
                     .join(' · ')}

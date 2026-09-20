@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, Settings: Bankroll and the Kelly sizing cards removed (both were already no-ops — conviction has been flat 1u since 08-29). Performance's Kelly dollar mode dropped with them; `useBankroll` / `useKellySettings` deleted. Fixed the daily exposure limit, which stored units/100 under a units label (10 → 0.1u). Stake math unchanged; app/Discord parity intact |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, the four master failures: backlog checkboxes + the parlay test re-pinned to #703 (#782), the stored-edge calibration assertion (#783), and the NFL weather cache imported to Supabase (117,192 stadium-hours into nfl_stadium_weather_hourly, #784) |
 | 2026-09-20 | [2026-09](./2026-09.md) | The team page off the Stats board (market read, form, splits, head-to-head, our record) and the player page's tonight-line / splits / Statcast / our-record sections |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, PickCard prop titles: bet on the bold line, player name on a caption. Game markets stay a single pick_label. UI-only; stored label unchanged |

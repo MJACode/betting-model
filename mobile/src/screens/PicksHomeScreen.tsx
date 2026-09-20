@@ -82,8 +82,6 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLivePicks, LIVE_POLL_MS, LIVE_IDLE_POLL_MS } from '@/hooks/useLivePicks';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
-import { useBankroll } from '@/hooks/useBankroll';
-import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
@@ -118,9 +116,6 @@ export function PicksHomeScreen() {
   const route = useRoute<RouteProp<TabParamList, 'Picks'>>();
   const { data: allData, loading, error, partial, refresh, date } = useTodayPicks();
   const { sport } = useSportFilter();
-  const { bankroll } = useBankroll();
-  const { multiplier, cap } = useKellySettings();
-  const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
   const { settings: rg } = useResponsibleGambling();
@@ -394,15 +389,15 @@ export function PicksHomeScreen() {
     if (rg.exposureCapUnits == null) return null;
     const total = allData
       .filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))
-      .reduce((s, d) => s + unitsFor(d.pick.kelly_fraction, kelly, decisionOdds(d.pick)), 0);
+      .reduce((s, d) => s + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick)), 0);
     return total > rg.exposureCapUnits ? { total, cap: rg.exposureCapUnits } : null;
-  }, [allData, rg.exposureCapUnits, kelly]);
+  }, [allData, rg.exposureCapUnits]);
 
   // Signals / Live views: exposure of the recommended stakes on screen.
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, kelly, decisionOdds(d.pick)), 0);
-  }, [filtered, view, kelly]);
+    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, decisionOdds(d.pick)), 0);
+  }, [filtered, view]);
 
   // FIRST LOAD ONLY on the live board. `refresh()` sets loading on every poll,
   // and the poll is 30s while this segment is open — so while the board was
@@ -611,8 +606,6 @@ export function PicksHomeScreen() {
         renderItem={({ item }) => (
           <PickCard
             item={item}
-            bankroll={bankroll}
-            kelly={kelly}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
             tracked={tracked.isTracked(item.pick)}
             onToggleTrack={() => tracked.toggle(item.pick)}

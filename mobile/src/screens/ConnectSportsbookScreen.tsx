@@ -154,8 +154,8 @@ export function ConnectSportsbookScreen() {
             linked book — no more marking picks by hand.
           </Bullet>
           <Bullet>
-            Connect as many books as you bet on. You can disconnect any time, and your bankroll
-            and Kelly settings stay as you configured them.
+            Connect as many books as you bet on. You can disconnect any time, and your book
+            preferences stay as you configured them.
           </Bullet>
         </View>
 

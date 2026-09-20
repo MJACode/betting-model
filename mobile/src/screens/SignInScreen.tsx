@@ -131,7 +131,7 @@ export function SignInScreen() {
           <Text style={styles.subtitle}>
             {/* No cross-device-sync promise here: auth is session-only today. */}
             {step === 'email'
-              ? 'Signing in is optional. Your bankroll, models and tracked bets stay on this device.'
+              ? 'Signing in is optional. Your models and tracked bets stay on this device.'
               : `Enter the ${EMAIL_OTP_LENGTH}-digit code we sent you.`}
           </Text>
 
