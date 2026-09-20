@@ -34,13 +34,13 @@ from __future__ import annotations
 
 import os
 
-BETTABLE_FALLBACK = ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
-                     "fanatics,betrivers,hardrockbet,ballybet,betparx,rebet,"
-                     # fliff: added 2026-09-07 with the nfl_prop_market soft-book
-                     # widening. This list is a COPY of config.BETTABLE_BOOKS for
-                     # the standalone path, and a copy that drifts is a copy that
+BETTABLE_FALLBACK = ("draftkings,fanduel,betmgm,williamhill_us,"
+                     # espnbet, ballybet, rebet and fliff left 2026-09-20
+                     # with the fourteen-to-ten cut (config.LINE_SHOP_BOOKMAKERS).
+                     # This list is a COPY of config.BETTABLE_BOOKS for the
+                     # standalone path, and a copy that drifts is a copy that
                      # lies -- the test pins them equal.
-                     "fliff")
+                     "fanatics,betrivers,hardrockbet,betparx")
 
 
 def bettable_books() -> set[str]:

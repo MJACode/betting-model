@@ -69,7 +69,10 @@ SOFT_BOOKS = (
     # Added 2026-09-07 (mike: "add another 2-3 soft books"). These are exactly
     # the three scripts/nfl_prop_book_sweep endorses -- each clears volume,
     # sign, coverage and non-dilution on its own.
-    "betrivers", "fliff", "hardrockbet",
+    # fliff left on 2026-09-20 (mike: "yes drop the 4 books"): the fetch went
+    # from fourteen named books to ten to halve the feed bill, and a soft book
+    # the pull never requests returns no quotes. It decided 3 live bets.
+    "betrivers", "hardrockbet",
 )
 
 # espnbet was HERE until 2026-09-08 and should not have been. mike, 2026-09-03:
