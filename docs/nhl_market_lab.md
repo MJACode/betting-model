@@ -374,3 +374,212 @@ blocked_shots   1.5  2026 42433      0.193 0.4156      0.4290   0.4469       561
   2023-05-03 (~672,000 credits for three seasons at open and close, measured
   formula) — or collecting DraftKings / Pinnacle NHL props live from opening
   night, which costs credits per game per market and is not switched on.
+
+---
+
+# Props and the regulation line, in units (2026-09-20, season 2025-26)
+
+Prices: `data/ingestors/nhl_prop_odds_history.py` — bought from the feed the
+same day (mike: "buy the prop history now"). One pre-game snapshot per game, an
+hour before the day's first puck drop; ten books; **measured 70 credits a game**
+(seven markets returned), 94,961 for the 1,394 games of 2025-26. One snapshot
+means no closing-line value here. Scripts: `scripts/nhl_prop_lab_priced.py`,
+`scripts/nhl_threeway_lab.py`. Models are trained only on seasons before the
+test season; a bet is one unit when the model's expected value at that book's
+line and price clears the cut; one bet per player-game-market.
+
+## Props (1,312 regular-season games, 722,328 price rows, 632,860 matched to a prediction)
+
+```
+priced rows 722,328; matched to a model prediction 632,860 (111,797 player-game-markets, 1,312 games)
+
+### player_shots_on_goal  (18,706 player-games priced; DraftKings 17,906 rows; Pinnacle same-line 125,146)
+
+                                           rule  EV>=  bets   units   roi           ci  over share  early  late
+                             MODEL @ DraftKings  0.03  4846    -6.8 -0.14   -2.9..+2.6        0.14   -1.8   1.6
+                             MODEL @ DraftKings  0.06  2883    31.5  1.09   -2.5..+4.7        0.09    0.6   1.6
+                             MODEL @ DraftKings  0.10  1308    45.5  3.48   -2.1..+9.0        0.06    2.2   4.8
+                             MODEL @ DraftKings  0.15   497    91.1 18.33  +9.2..+27.5        0.03   20.5  16.2
+                     MODEL @ best bettable book  0.03  6683    83.0  1.24   -1.1..+3.6        0.17    0.6   1.9
+                     MODEL @ best bettable book  0.06  4081   119.4  2.92   -0.2..+6.0        0.12    2.7   3.2
+                     MODEL @ best bettable book  0.10  1962    89.6  4.57   +0.0..+9.1        0.07    8.0   1.1
+                     MODEL @ best bettable book  0.15   758   102.1 13.47  +6.0..+21.0        0.05   21.5   5.5
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.03   258   -10.4 -4.01  -16.9..+8.8        0.65    0.5  -8.5
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.06    52    -5.1 -9.78 -38.9..+19.4        0.71   -3.4 -16.2
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10     8     NaN   NaN          NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.15     3     NaN   NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.03    73     8.7 11.88 -12.6..+36.3        0.22   23.9   0.2
+       MODEL AND Pinnacle agree @ best bettable  0.06    11     NaN   NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.10     0     NaN   NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.15     0     NaN   NaN          NaN         NaN    NaN   NaN
+                 BLIND always over @ DraftKings   NaN 17906 -1214.8 -6.78   -8.2..-5.4         NaN    NaN   NaN
+                BLIND always under @ DraftKings   NaN 17906  -942.7 -5.26   -6.7..-3.8         NaN    NaN   NaN
+
+### player_points  (20,924 player-games priced; DraftKings 20,572 rows; Pinnacle same-line 84,461)
+
+                                           rule  EV>=  bets   units   roi           ci  over share  early  late
+                             MODEL @ DraftKings  0.03  4327  -123.9 -2.86   -6.0..+0.3        0.31   -2.6  -3.2
+                             MODEL @ DraftKings  0.06  2241   -17.4 -0.78   -5.2..+3.7        0.28   -0.2  -1.3
+                             MODEL @ DraftKings  0.10   886    20.8  2.35   -4.9..+9.6        0.23    1.0   3.7
+                             MODEL @ DraftKings  0.15   292     3.2  1.11 -11.4..+13.6        0.25   -3.8   6.1
+                     MODEL @ best bettable book  0.03  4902  -155.6 -3.17   -6.1..-0.2        0.31   -2.8  -3.5
+                     MODEL @ best bettable book  0.06  2594   -35.1 -1.35   -5.5..+2.8        0.29   -0.6  -2.1
+                     MODEL @ best bettable book  0.10  1071    12.0  1.12   -5.5..+7.8        0.26    3.2  -0.9
+                     MODEL @ best bettable book  0.15   357    -2.3 -0.66 -12.0..+10.7        0.26   -3.3   2.0
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.03   375     7.8  2.09  -9.6..+13.8        0.80    0.4   3.8
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.06   102    14.5 14.22 -10.5..+39.0        0.81   23.7   4.7
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10     1     NaN   NaN          NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.15     0     NaN   NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.03    93    -3.1 -3.38 -27.2..+20.4        0.65  -20.0  12.9
+       MODEL AND Pinnacle agree @ best bettable  0.06    20     NaN   NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.10     0     NaN   NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.15     0     NaN   NaN          NaN         NaN    NaN   NaN
+                 BLIND always over @ DraftKings   NaN 20572 -1277.4 -6.21   -7.6..-4.8         NaN    NaN   NaN
+                BLIND always under @ DraftKings   NaN 20572 -1234.6 -6.00   -7.3..-4.7         NaN    NaN   NaN
+
+### player_assists  (20,930 player-games priced; DraftKings 20,591 rows; Pinnacle same-line 81,510)
+
+                                           rule  EV>=  bets   units    roi           ci  over share  early  late
+                             MODEL @ DraftKings  0.03  3280   -71.9  -2.19   -6.1..+1.8        0.35   -3.0  -1.4
+                             MODEL @ DraftKings  0.06  1535   -32.0  -2.08   -8.2..+4.1        0.40   -4.1  -0.0
+                             MODEL @ DraftKings  0.10   597    12.2   2.05  -8.3..+12.4        0.46   -5.2   9.3
+                             MODEL @ DraftKings  0.15   208    14.7   7.07  -9.8..+23.9        0.44    5.3   8.8
+                     MODEL @ best bettable book  0.03  3636   -76.9  -2.12   -5.8..+1.6        0.35   -2.9  -1.3
+                     MODEL @ best bettable book  0.06  1696   -25.6  -1.51   -7.3..+4.3        0.40   -2.4  -0.7
+                     MODEL @ best bettable book  0.10   660    21.5   3.26  -6.6..+13.1        0.45   -0.8   7.3
+                     MODEL @ best bettable book  0.15   232    20.4   8.78  -7.4..+24.9        0.43    8.5   9.0
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.03   361    12.1   3.34 -10.8..+17.5        0.85    4.6   2.1
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.06   169     9.0   5.33 -16.4..+27.1        0.94    9.2   1.5
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10    37    -7.3 -19.86 -66.2..+26.5        0.97    7.5 -45.8
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.15     3     NaN    NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.03    54     4.3   7.98 -27.4..+43.3        0.43   23.5  -7.6
+       MODEL AND Pinnacle agree @ best bettable  0.06     9     NaN    NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.10     0     NaN    NaN          NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.15     0     NaN    NaN          NaN         NaN    NaN   NaN
+                 BLIND always over @ DraftKings   NaN 20591 -1963.4  -9.54  -11.3..-7.7         NaN    NaN   NaN
+                BLIND always under @ DraftKings   NaN 20591  -828.0  -4.02   -5.0..-3.0         NaN    NaN   NaN
+
+### player_goal_scorer_anytime  (44,307 player-games priced; DraftKings 43,371 rows; Pinnacle same-line 131,604)
+
+                                           rule  EV>=  bets   units    roi            ci  over share  early  late
+                             MODEL @ DraftKings  0.03  3626    95.8   2.64   -7.6..+12.9         1.0    8.7  -3.4
+                             MODEL @ DraftKings  0.06  2538    76.5   3.01   -9.4..+15.4         1.0   11.7  -5.7
+                             MODEL @ DraftKings  0.10  1620   109.6   6.77   -9.9..+23.4         1.0   23.5 -10.0
+                             MODEL @ DraftKings  0.15   957   206.2  21.55   -2.4..+45.5         1.0   51.2  -8.0
+                     MODEL @ best bettable book  0.03  6313   368.0   5.83   -2.3..+14.0         1.0   13.0  -1.3
+                     MODEL @ best bettable book  0.06  4684   369.8   7.89   -1.9..+17.7         1.0   16.0  -0.2
+                     MODEL @ best bettable book  0.10  3197   332.9  10.41   -2.3..+23.1         1.0   21.1  -0.3
+                     MODEL @ best bettable book  0.15  2022   447.3  22.12   +4.9..+39.3         1.0   30.1  14.2
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.03  2765   168.1   6.08   -2.4..+14.6         1.0   18.2  -6.1
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.06  1447   139.4   9.63   -4.2..+23.5         1.0   27.7  -8.4
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10   587    35.7   6.09  -17.6..+29.7         1.0   18.7  -6.5
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.15   232   159.3  68.66 +10.9..+126.5         1.0   90.7  46.6
+       MODEL AND Pinnacle agree @ best bettable  0.03   730   220.8  30.24   +5.5..+55.0         1.0   52.2   8.3
+       MODEL AND Pinnacle agree @ best bettable  0.06   365   213.3  58.45 +13.4..+103.5         1.0   85.7  31.3
+       MODEL AND Pinnacle agree @ best bettable  0.10   164   226.9 138.35 +45.1..+231.6         1.0  187.6  89.1
+       MODEL AND Pinnacle agree @ best bettable  0.15    97   233.3 240.52 +89.8..+391.3         1.0  355.2 128.2
+                 BLIND always over @ DraftKings   NaN 43371 -5674.9 -13.08  -15.4..-10.8         NaN    NaN   NaN
+                BLIND always under @ DraftKings   NaN     0     NaN    NaN           NaN         NaN    NaN   NaN
+
+### player_blocked_shots  (5,239 player-games priced; DraftKings 4,699 rows; Pinnacle same-line 0)
+
+                                           rule  EV>=  bets  units    roi          ci  over share  early  late
+                             MODEL @ DraftKings  0.03  1729   58.3   3.37  -1.3..+8.1        0.05    3.5   3.2
+                             MODEL @ DraftKings  0.06  1065   74.0   6.95 +0.9..+13.0        0.02    7.7   6.2
+                             MODEL @ DraftKings  0.10   541   49.1   9.08 +0.4..+17.7        0.00    8.9   9.3
+                             MODEL @ DraftKings  0.15   192   31.1  16.17 +1.6..+30.8        0.01    8.6  23.7
+                     MODEL @ best bettable book  0.03  1953   44.0   2.25  -2.2..+6.7        0.05    2.8   1.7
+                     MODEL @ best bettable book  0.06  1199   67.5   5.63 -0.1..+11.4        0.02    6.7   4.5
+                     MODEL @ best bettable book  0.10   605   43.2   7.14 -1.0..+15.3        0.00    7.2   7.1
+                     MODEL @ best bettable book  0.15   218   30.0  13.77 +0.0..+27.5        0.00    7.6  19.9
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.03     0    NaN    NaN         NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.06     0    NaN    NaN         NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10     0    NaN    NaN         NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.15     0    NaN    NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.03     0    NaN    NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.06     0    NaN    NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.10     0    NaN    NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.15     0    NaN    NaN         NaN         NaN    NaN   NaN
+                 BLIND always over @ DraftKings   NaN  4699 -503.9 -10.72 -13.4..-8.1         NaN    NaN   NaN
+                BLIND always under @ DraftKings   NaN  4699  -45.0  -0.96  -3.8..+1.9         NaN    NaN   NaN
+
+### player_total_saves  (1,691 player-games priced; DraftKings 1,588 rows; Pinnacle same-line 8,194)
+
+                                           rule  EV>=  bets  units   roi          ci  over share  early  late
+                             MODEL @ DraftKings  0.03   984    2.7  0.27  -5.6..+6.2        0.11   -5.2   5.7
+                             MODEL @ DraftKings  0.06   801    8.4  1.04  -5.5..+7.6        0.09   -4.1   6.2
+                             MODEL @ DraftKings  0.10   601   15.1  2.51 -5.0..+10.1        0.07   -4.0   9.0
+                             MODEL @ DraftKings  0.15   382   11.1  2.89 -6.6..+12.4        0.05   -2.8   8.6
+                     MODEL @ best bettable book  0.03  1095    6.2  0.57  -5.0..+6.2        0.13   -4.7   5.8
+                     MODEL @ best bettable book  0.06   890    5.5  0.62  -5.6..+6.8        0.10   -3.6   4.9
+                     MODEL @ best bettable book  0.10   680   16.7  2.46  -4.7..+9.6        0.08   -1.5   6.4
+                     MODEL @ best bettable book  0.15   429   23.1  5.38 -3.6..+14.3        0.06    2.6   8.2
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.03    21    NaN   NaN         NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.06     1    NaN   NaN         NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10     0    NaN   NaN         NaN         NaN    NaN   NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.15     0    NaN   NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.03     9    NaN   NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.06     0    NaN   NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.10     0    NaN   NaN         NaN         NaN    NaN   NaN
+       MODEL AND Pinnacle agree @ best bettable  0.15     0    NaN   NaN         NaN         NaN    NaN   NaN
+                 BLIND always over @ DraftKings   NaN  1588 -134.3 -8.45 -13.0..-3.9         NaN    NaN   NaN
+                BLIND always under @ DraftKings   NaN  1588  -65.6 -4.13  -8.8..+0.5         NaN    NaN   NaN
+```
+
+## Regulation 3-way line (1,394 games incl. playoffs)
+
+```
+3-way prices: 8,808 rows, 1,394 games, books ['betmgm', 'bovada', 'draftkings', 'fanatics', 'fanduel', 'pinnacle', 'williamhill_us']; draws 0.250; model's mean draw probability 0.209
+Pinnacle's 3-way hold on these games: 5.05%; DraftKings': 8.20%
+                                           rule  EV>=  bets  units    roi           ci  early  late home/draw/away
+                             MODEL @ DraftKings  0.02   795  -59.2  -7.45  -16.8..+1.9   -5.5  -9.3  0.45/0.15/0.4
+                             MODEL @ DraftKings  0.04   646  -19.9  -3.08  -13.6..+7.4    2.1  -8.3 0.45/0.15/0.41
+                             MODEL @ DraftKings  0.06   510  -28.4  -5.57  -17.4..+6.3   -1.7  -9.4 0.44/0.14/0.42
+                             MODEL @ DraftKings  0.10   297  -26.1  -8.78  -23.7..+6.1   -5.6 -11.9  0.43/0.1/0.47
+                     MODEL @ best bettable book  0.02  1034  -37.2  -3.60  -12.0..+4.8    1.3  -8.5 0.49/0.12/0.39
+                     MODEL @ best bettable book  0.04   886  -31.5  -3.56  -12.6..+5.5    0.7  -7.8  0.5/0.11/0.39
+                     MODEL @ best bettable book  0.06   735  -44.6  -6.07  -16.0..+3.8   -0.4 -11.8  0.5/0.11/0.39
+                     MODEL @ best bettable book  0.10   454  -26.4  -5.82  -18.1..+6.4   -8.4  -3.3 0.51/0.08/0.41
+   SHARP-VS-SOFT (Pinnacle no-vig) @ DraftKings  0.02    58   14.4  24.91 -30.0..+79.9   51.2  -1.4    0/0.97/0.03
+   SHARP-VS-SOFT (Pinnacle no-vig) @ DraftKings  0.04    15    NaN    NaN          NaN    NaN   NaN            NaN
+   SHARP-VS-SOFT (Pinnacle no-vig) @ DraftKings  0.06     6    NaN    NaN          NaN    NaN   NaN            NaN
+   SHARP-VS-SOFT (Pinnacle no-vig) @ DraftKings  0.10     0    NaN    NaN          NaN    NaN   NaN            NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.02    96   10.2  10.62 -29.4..+50.7   30.3  -9.1  0.06/0.74/0.2
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.04    23    NaN    NaN          NaN    NaN   NaN            NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.06     9    NaN    NaN          NaN    NaN   NaN            NaN
+SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10     0    NaN    NaN          NaN    NaN   NaN            NaN
+                 BLIND always away @ DraftKings   NaN  1394 -108.6  -7.79  -14.5..-1.0    NaN   NaN            NaN
+                 BLIND always draw @ DraftKings   NaN  1394   95.9   6.88  -2.9..+16.6    NaN   NaN            NaN
+                 BLIND always home @ DraftKings   NaN  1394 -208.4 -14.95  -20.6..-9.3    NaN   NaN            NaN
+```
+
+## Read
+
+- **DraftKings' margin sits on the OVER.** Blind overs lose 6.2-13.1% in every
+  market; blind unders lose 1.0-6.0% (blocked shots -0.96%, interval spanning
+  zero). Selective unders are the structure.
+- **Blocked-shot unders: the strongest candidate in the NHL work so far.**
+  +6.9% / +9.1% / +16.2% at EV cuts 0.06 / 0.10 / 0.15 at DraftKings (1,065 /
+  541 / 192 bets), every interval clear of zero, rising with the cut, both
+  halves positive at every cut. 98% unders. Pinnacle does not quote the market,
+  so there is no sharp line to be wrong against — which is also why it can be
+  soft.
+- **Shots-on-goal unders at the high cut:** +18.3% on 497 bets at DraftKings
+  (+9.2..+27.5), +13.5% on 758 at the best bettable book, both halves positive.
+  Below EV 0.15 it is +1-4% with intervals touching zero.
+- **Saves: faded when October was added** (+1-3% at DraftKings, first half
+  negative). Not a candidate on this evidence.
+- **Points and assists: no edge from this model.** The Pinnacle-vs-soft rule is
+  positive on both but on 100-375 bets with intervals of +/-15 points.
+- **Anytime scorer: NOT trusted.** The model at the best bettable book reads
+  +5.8% to +22.1%, but the halves disagree (+13..+30 early, -1..+14 late), the
+  intervals are 17-35 points wide, and the result is carried by a few longshot
+  prices. DraftKings quotes only the Yes side (blind Yes: -13.1%).
+- **Regulation 3-way: nothing, and one trap.** The model loses 3-9%. Blind
+  DRAW shows +6.9% on 1,394 — but 25.0% of 2025-26 games were tied after 60
+  minutes against 20.5-23.5% in the eight seasons before (research doc §5);
+  at a normal rate that bet loses. DraftKings holds 8.2% on this line,
+  Pinnacle 5.05%.
+- **ONE SEASON, ONE SNAPSHOT.** Every positive above is a candidate. The 2023-24
+  and 2024-25 prices were bought the same evening (mike: "buy them now"); the
+  same scripts run on them decide which candidates survive.
