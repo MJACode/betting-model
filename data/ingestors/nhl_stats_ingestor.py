@@ -489,6 +489,14 @@ def _build_nhl_team_rows(season: int, as_of_date: str,
         a = advanced.get(team, {})
         s = standings.get(team, {})
 
+        # NO ROW UNTIL THE TEAM HAS PLAYED. Before its first game the summary
+        # is empty but the standings still list all 32 teams, so this wrote a
+        # hollow season row (every stat NULL) — and the feature engine, finding
+        # a current-season row, never fell back to last season's. Measured on
+        # a dry build for 2026-09-29: 32 rows, none with a number in it.
+        if not b.get("games_played"):
+            continue
+
         row = {
             "team":             team,
             "season":           season,
@@ -653,9 +661,10 @@ def _build_goalie_rows(season: int, as_of_date: str,
                    _same_goalie_name(g.get("goalieFullName"), goalie_name):
                     g_stats = g
                     break
-            if not g_stats:
+            if not g_stats and goalie_stats:
+                # (An EMPTY summary is opening night, not a missing goalie.)
                 logger.warning(f"NHL goalie {goalie_name!r} ({team_abbrev}) is not in the "
-                               f"season summary — rated as a league-average goalie")
+                               f"season summary — rated from the game log alone")
 
             # Match game_id from our DB
             game_db = conn.execute("""
