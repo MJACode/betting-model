@@ -1739,7 +1739,7 @@ too tight and the fix is a retrain across all of them — not a one-line change.
 
 ---
 
-## Player card bet bar — the price carries no age (2026-09-19)
+## [ ] Player card bet bar — the price carries no age (2026-09-19)
 
 `usePlayerPropQuote` keys its read on `(market, next two game ids)`, so the
 quote is fetched ONCE and only re-fetched when a game starts or the member
@@ -1761,7 +1761,7 @@ surfaces get it. Not urgent: the hand-off opens the book's own slip, which
 shows the live price before anyone confirms — the cost is a surprise, not a
 wrong bet.
 
-## Player card: is a live price entitlement-gated? (2026-09-19)
+## [ ] [needs-decision] Player card: is a live price entitlement-gated? (2026-09-19)
 
 The bet bar puts a live sportsbook price and a one-tap hand-off on a screen
 that calls neither `useEntitlement()` nor `useSubscription()`. Neither does the
