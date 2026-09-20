@@ -767,7 +767,7 @@ MODEL_MIN_EV: dict = {
     # lose least while keeping more than one bet. Re-sweep after ~3 more
     # Saturdays and expect these numbers to move.
     "ncaaf_live_total": 0.24,  # 2026-09-13 mike: 0.22 -> 0.24 with min_prob 0.73 (see ACTION_THRESHOLDS). EV 0.24 sits mid-plateau: 0.20-0.28 all positive in both halves at prob 0.73
-    "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: EV floor unchanged. It is now applied to the PREGAME-CORRECTED probability (ncaaf_live/serve.correct_for_pregame), and min_prob 0.65 was swept on that same scale -- the briefly-shipped pregame-dog cap is gone, superseded by the correction
+    "ncaaf_live_win_prob": 0.30,  # 2026-09-20 mike: 0.26 -> 0.30 so the move of GLOBAL_MIN_EV to 0.20 changes NOTHING here. The 0.50/0.16 cut was swept on 2026-09-19 with a 0.30 floor in force (ACTION_THRESHOLDS), so 0.30 is the floor that cut was measured under; 0.26 has not bound since the global floor landed. Previously (2026-09-12 mike): EV floor unchanged. It is now applied to the PREGAME-CORRECTED probability (ncaaf_live/serve.correct_for_pregame), and min_prob 0.65 was swept on that same scale -- the briefly-shipped pregame-dog cap is gone, superseded by the correction
 }
 
 # ── Live volume ceiling (bets per week) ──────────────────────────────────────
@@ -1729,7 +1729,15 @@ def min_odds_for(model_id: str) -> float:
 # at +10.1%. The floor ALONE (no prob/edge cut) is negative at every level
 # (-10% to -18%): it selects longshots. Env-overridable so the number moves
 # without a deploy; the docs and the replay are where the evidence lives.
-GLOBAL_MIN_EV: float = float(os.environ.get("GLOBAL_MIN_EV", "0.30"))
+#
+# 0.20 SINCE 2026-09-20 (mike: "30% is too aggressive then"). The first NFL
+# Sunday under 0.30 wrote zero NFL bets, and nfl_prop_market's largest EV
+# across all 90 bets it has ever written is 0.227. Replay re-run that day
+# (cut + floor, platform sum): 0.30 keeps 15 at +44.5%; 0.25 keeps 48 at
+# +28.2%; 0.20 keeps 118 at +9.8% (+11.52u); 0.15 keeps 174 at +6.4%; 0.10
+# keeps 269 at +7.1%. All in-sample. ncaaf_live_win_prob keeps 0.30 through
+# MODEL_MIN_EV: its cut was swept with 0.30 in force.
+GLOBAL_MIN_EV: float = float(os.environ.get("GLOBAL_MIN_EV", "0.20"))
 
 
 def min_ev_for(model_id: str) -> float:
