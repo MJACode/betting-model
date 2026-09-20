@@ -2781,7 +2781,23 @@ LINE_SHOP_BOOKMAKERS = [
               # the list the second region is paid for. So this is all-or-
               # nothing, not a dial. Set LINE_SHOP_BOOKMAKERS to the first eight
               # to revert.
-              or ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
+              #
+              # TEN BOOKS, NOT FOURTEEN (mike, 2026-09-20: "yes drop the 4
+              # books"). The paragraph above blames a second REGION and calls
+              # the extra books all-or-nothing. Measured 2026-09-20 on one NHL
+              # h2h call: all 14 names cost 2 credits, the first 10 — which
+              # include betrivers and hardrockbet, two of the "us2" books —
+              # cost 1. The feed bills every GROUP OF TEN named books as a
+              # region (its docs say so in those words), so ANY ten are half
+              # price. At 14 the platform burned ~140,829 credits a day
+              # (3,099,356 -> 3,944,330 used, 09-13 -> 09-19) against 944,252
+              # left and a reset on 10-01: dark by ~09-27, two days before the
+              # first NHL game. Dropped, by bets DECIDED at each since 09-03
+              # (of 734): espnbet 1 (shut down — mike, 2026-09-03), fliff 3,
+              # ballybet 7, rebet 9. KEEP THIS LIST AT TEN OR FEWER, and count
+              # any book a fetch appends on top of it (the NFL prop pull adds
+              # betonlineag — see its MARKET_BOOKS).
+              or ("draftkings,fanduel,betmgm,williamhill_us,"
                   "fanatics,bovada,pinnacle,"
                   # fliff added 2026-09-07 for models/nfl_prop_market: the
                   # largest marginal contribution of any book not already
@@ -2790,7 +2806,7 @@ LINE_SHOP_BOOKMAKERS = [
                   # pull never requests produces NO quotes rather than an
                   # error. It is us2 like the rest, so it is inside the region
                   # already paid for and costs nothing.
-                  "betrivers,hardrockbet,ballybet,betparx,rebet,fliff")).split(",")
+                  "betrivers,hardrockbet,betparx")).split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.

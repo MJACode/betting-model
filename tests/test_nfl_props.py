@@ -1580,9 +1580,14 @@ def test_the_soft_book_set_is_the_one_the_sweep_endorses():
     import config
     import models.nfl_prop_market as mkt
 
+    # fliff LEFT on 2026-09-20 (mike: "yes drop the 4 books"). Not a verdict on
+    # the book -- the sweep endorsed it -- but on the bill: the feed charges
+    # every ten named books as a region, fourteen had doubled every call, and
+    # fliff had decided 3 live bets. A soft book the pull does not request
+    # produces no quotes, so it cannot stay named here.
     assert set(mkt.SOFT_BOOKS) == {
         "draftkings", "fanduel", "betmgm", "williamhill_us",
-        "betrivers", "fliff", "hardrockbet",
+        "betrivers", "hardrockbet",
     }, mkt.SOFT_BOOKS
     assert mkt.SHARP_BOOK not in mkt.SOFT_BOOKS
     assert "espnbet" not in mkt.SOFT_BOOKS, (
@@ -1592,17 +1597,17 @@ def test_the_soft_book_set_is_the_one_the_sweep_endorses():
 
 
 def test_fliff_is_fetched_or_it_contributes_nothing():
-    """fliff was the only one of the three NOT already in the pull. A book in
-    SOFT_BOOKS that is never requested produces no quotes and silently shrinks
-    the board rather than erroring -- it would have looked like the widening
-    simply did not help. Pinned separately from the generic coverage test
-    because this one names the failure that was actually possible here."""
+    """A book in SOFT_BOOKS that is never requested produces no quotes and
+    silently shrinks the board rather than erroring. fliff was added to both on
+    2026-09-07 and left both on 2026-09-20 (the ten-book cut); what must never
+    happen is ONE without the other."""
     import config
     import models.nfl_prop_market as mkt
 
-    assert "fliff" in mkt.SOFT_BOOKS
-    assert "fliff" in config.LINE_SHOP_BOOKMAKERS
-    assert "fliff" in config.ODDS_API_BOOKMAKERS_PARAM
+    named = "fliff" in mkt.SOFT_BOOKS
+    fetched = ("fliff" in config.LINE_SHOP_BOOKMAKERS
+               and "fliff" in config.ODDS_API_BOOKMAKERS_PARAM)
+    assert named == fetched, "fliff is bet at but not fetched, or fetched and unused"
 
 
 def test_both_sharp_references_are_fetched():

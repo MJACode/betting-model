@@ -104,7 +104,16 @@ MARKET_REGIONS = "us,eu"
 # nfl_prop_market moved to two references -- and a reference the pull never
 # requests returns no quotes and silently shrinks the board rather than
 # erroring, which is the same trap fliff nearly walked into the day before.
-MARKET_BOOKS = f"{ODDS_API_BOOKMAKERS_PARAM},pinnacle,betonlineag"
+#
+# TEN NAMES OR FEWER. The feed bills every group of ten named books as a
+# region (measured 2026-09-20: 14 names = 2 credits, 10 = 1), and this pull is
+# per event and per market, so an eleventh name doubles the platform's largest
+# prop bill. bovada is dropped HERE only: it is not a book this model bets at
+# (SOFT_BOOKS) and not one of its two references, and betonlineag needs its
+# seat. tests/test_book_list_budget.py counts the names.
+MARKET_BOOKS = ",".join(dict.fromkeys(
+    [b for b in ODDS_API_BOOKMAKERS_PARAM.split(",") if b and b != "bovada"]
+    + ["pinnacle", "betonlineag"]))
 
 
 def _load_nfl_games(conn: DBConnection, start: str, end: str) -> dict:

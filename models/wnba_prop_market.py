@@ -54,7 +54,9 @@ SHARP_MARKETS = ("player_points", "player_rebounds", "player_assists")
 
 # The books we BET at. The blanket WNBA-prop -140 floor (config.MODEL_MIN_ODDS)
 # is applied by the card on top of these.
-SOFT_BOOKS = ("draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet")
+# espnbet left 2026-09-20: it shut down (mike, 2026-09-03) and the ten-book cut
+# stopped fetching it, and a soft book the pull never requests yields no quotes.
+SOFT_BOOKS = ("draftkings", "fanduel", "betmgm", "williamhill_us")
 
 # Settlement: picks carry model_id 'wnba_prop_market' and the market on
 # picks.prop_market; paper_tracker resolves the stat through this map (the
