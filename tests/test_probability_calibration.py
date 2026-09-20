@@ -263,8 +263,19 @@ def test_the_decision_path_reads_the_calibrated_number():
     assert "decision_prob >= prob_thresh" in rules, "the prob floor must too"
     body = inspect.getsource(scorer._make_pick)
     assert "_decide(" in body, "the game builder must route through _decide"
-    assert '"edge":              round(edge, 4)' in body, (
+    # The stored edge is the RAW DraftKings edge whenever DraftKings priced
+    # the game. Since 2026-09-15 a game DraftKings does not list (F5 totals /
+    # spreads, `line_book` set) stores 0.0 with dk_odds NULL and names the
+    # deciding book in decision_* -- the same shape as _make_prop_pick, and
+    # section 6's "these picks are a NEW population; report them separately".
+    # Neither branch stores the calibrated number: the map decides, it never
+    # writes.
+    assert "else round(edge, 4)" in body, (
         "the STORED edge must stay the raw number so history stays comparable")
+    assert "_calibrated(" not in body, (
+        "the calibrated probability decides in _decide; it must never reach a stored column")
+    assert "dk_implied_prob, edge)" in body, (
+        "decision_* is built from the raw edge, not the calibrated one")
 
 
 def test_an_unmapped_model_is_unchanged_by_phase_2():
