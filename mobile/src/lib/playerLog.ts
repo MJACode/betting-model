@@ -204,13 +204,163 @@ export function defaultChipForPlayer(
   return chipsForPlayer(sport, playerType)[0] ?? null;
 }
 
-/** Ordered stat groups present in a sport's chip set (the football leagues are the multi-group ones). */
-export function chipGroupsFor(sport: PlayerLogSport, playerType?: PlayerType | null): StatGroup[] {
+/** Ordered stat groups present in a chip list, in the order the chips run. */
+export function groupsOfChips(chips: StatDef[]): StatGroup[] {
   const seen: StatGroup[] = [];
-  for (const c of chipsForPlayer(sport, playerType)) {
+  for (const c of chips) {
     if (!seen.includes(c.group)) seen.push(c.group);
   }
   return seen;
+}
+
+// ── Which groups a player can actually fill ─────────────────────────────────
+//
+// Lamar Jackson's screen offered a Defense tab: Sacks 0.00 on every window, a
+// 0% badge in alarm red, ten charted zeroes (Matt, 2026-09-19). Nothing was
+// broken. `nfl_player_game_log` stores 0, never NULL, for a stat a position
+// does not produce — measured 2026-09-19, all 175,542 rows carry a value for
+// def_sacks — so the tab had ten real games to chart and charted them. It is
+// still a control that leads nowhere, and the same shape ran the other way: a
+// linebacker got Passing, Rushing and Receiving, all zeroes.
+//
+// So the screen asks what this player has actually PRODUCED: the log decides,
+// and the position is the safety net under it. The log is the stronger of the
+// two because it is the same evidence the chart draws — a tab is offered when
+// there is something in it, in either league, including the NCAAF logs that
+// carry no position at all. The position map exists for the player with
+// nothing on file yet, where "no tabs" and "every tab" are both wrong answers.
+
+const NFL_DEFENSIVE_POSITIONS = new Set([
+  'CB', 'DB', 'DE', 'DL', 'DT', 'FS', 'ILB', 'LB', 'MLB', 'NT', 'OLB', 'S', 'SAF',
+]);
+
+// Offense and special teams. A kicker or a long snapper produces none of these
+// either, but the tabs they get are the ones their side of the ball can fill —
+// never Defense.
+const NFL_NON_DEFENSIVE_POSITIONS = new Set([
+  'C', 'FB', 'G', 'K', 'LS', 'OL', 'OT', 'P', 'QB', 'RB', 'TE', 'WR',
+]);
+
+const DEFENSIVE_GROUPS: StatGroup[] = ['Defense'];
+const NON_DEFENSIVE_GROUPS: StatGroup[] = ['Passing', 'Rushing', 'Receiving'];
+
+/**
+ * The groups a football position is expected to fill. Empty for a position we
+ * do not recognise and for NCAAF (no position in the box score) — the log is
+ * then the only evidence, which is the conservative way round: an unknown
+ * position hides nothing on its own.
+ */
+export function positionGroups(pos: string | null | undefined): StatGroup[] {
+  if (!pos) return [];
+  const p = pos.toUpperCase();
+  if (NFL_DEFENSIVE_POSITIONS.has(p)) return DEFENSIVE_GROUPS;
+  if (NFL_NON_DEFENSIVE_POSITIONS.has(p)) return NON_DEFENSIVE_GROUPS;
+  return [];
+}
+
+/** The player's position from their log, newest game that names one. */
+function positionOf(games: PlayerLogEntry[]): string | null {
+  for (const g of games) {
+    if (g.pos) return String(g.pos);
+  }
+  return null;
+}
+
+/**
+ * The chips a loaded player's screen should actually offer: the groups they
+ * have put a real number in inside the loaded window, with their position as
+ * the safety net. Whole groups are kept or dropped together — a Passing tab
+ * still lists Pass TDs for a quarterback who has none this month.
+ *
+ * "A real number" is non-NULL and non-zero, because the NFL log stores 0 where
+ * NCAAF stores NULL and a tab of ten zeroes is the thing being fixed. A
+ * quarterback who ran a jet sweep keeps his Rushing tab; a linebacker who
+ * caught a lateral gets a Receiving one, because he did.
+ *
+ * Three fallbacks, each one wider than the last:
+ *  - no games loaded yet -> every chip, so the tab row does not shrink to a
+ *    guess and then grow back;
+ *  - nothing but zeroes on file (an inactive month, a rookie's debut) -> the
+ *    position's own groups, which is how a benched quarterback still gets
+ *    Passing rather than Defense;
+ *  - position unknown too (NCAAF, where CFBD names no position) -> every chip,
+ *    rather than a screen with no tabs at all.
+ */
+export function chipsForLoadedPlayer(chips: StatDef[], games: PlayerLogEntry[]): StatDef[] {
+  if (games.length === 0) return chips;
+  const filled = filledChipCounts(chips, games);
+  const played = new Set<StatGroup>();
+  for (const c of chips) {
+    if ((filled.get(chipKey(c)) ?? 0) > 0) played.add(c.group);
+  }
+  const allowed = played.size > 0 ? played : new Set<StatGroup>(positionGroups(positionOf(games)));
+  const kept = chips.filter((c) => allowed.has(c.group));
+  return kept.length > 0 ? kept : chips;
+}
+
+/** A chip's identity: two sports share stat keys, and football shares them across groups. */
+export function chipKey(c: StatDef): string {
+  return `${c.group}:${String(c.key)}`;
+}
+
+/**
+ * How many of the loaded games each chip has a real number in — non-NULL and
+ * non-zero. Chips missing from the map stay tappable: a running back with no
+ * receiving touchdown in twenty-five games can still be bet to score one, so
+ * the chip is offered; it is only never the chip a tab OPENS on.
+ */
+export function filledChipCounts(chips: StatDef[], games: PlayerLogEntry[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const c of chips) {
+    let n = 0;
+    for (const g of games) {
+      const v = logStatValue(g, c);
+      if (v != null && v !== 0) n += 1;
+    }
+    if (n > 0) counts.set(chipKey(c), n);
+  }
+  return counts;
+}
+
+/**
+ * The chip a screen (or one of its tabs) should open on: within a group, the
+ * stat this player fills most often; across groups, the most-filled chip of
+ * the group they fill most overall. Ties go to catalog order, and a player who
+ * fills nothing gets the first chip there is.
+ *
+ * Not simply "the first filled chip", because first is catalog order and
+ * catalog order is a position's: a receiver's chips run Rushing before
+ * Receiving, and Rush+Rec TDs sits in the Rushing group, so one receiving
+ * touchdown would open a tight end on the Rushing tab. Measured 2026-09-19:
+ * 82 of 252 wide receivers and 75 of 146 tight ends with a game since 2025
+ * hold their Rushing tab on that chip alone, every other chip in it flat zero.
+ * Weighing the whole group settles it on one game as well as on twenty-five.
+ */
+export function openingChip(
+  chips: StatDef[],
+  filled: Map<string, number>,
+  group?: StatGroup | null,
+): StatDef | null {
+  const inGroup = group ? chips.filter((c) => c.group === group) : chips;
+  if (inGroup.length === 0) return null;
+  const weight = new Map<StatGroup, number>();
+  for (const c of inGroup) {
+    weight.set(c.group, (weight.get(c.group) ?? 0) + (filled.get(chipKey(c)) ?? 0));
+  }
+  let best: StatDef | null = null;
+  let bestScore = 0;
+  let bestGroupWeight = 0;
+  for (const c of inGroup) {
+    const n = filled.get(chipKey(c)) ?? 0;
+    if (n === 0) continue;
+    const w = weight.get(c.group) ?? 0;
+    if (w > bestGroupWeight || (w === bestGroupWeight && n > bestScore)) {
+      best = c;
+      bestScore = n;
+      bestGroupWeight = w;
+    }
+  }
+  return best ?? inGroup[0] ?? null;
 }
 
 // ── Line stepper ────────────────────────────────────────────────────────────

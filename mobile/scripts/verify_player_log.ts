@@ -16,17 +16,22 @@
  */
 
 import {
-  chipGroupsFor,
+  chipKey,
+  chipsForLoadedPlayer,
   chipsForPlayer,
   defaultChipForPlayer,
   detailStatForPropModel,
+  filledChipCounts,
   gameContextLine,
+  groupsOfChips,
   ipToOuts,
   lineStepFor,
   logFetchLimit,
   logStatValue,
   normalizeLogRow,
+  openingChip,
   playerSubtitle,
+  positionGroups,
   roundLineToStep,
   supportsPlayerDetail,
   windowOptionsFor,
@@ -107,14 +112,14 @@ check('MLB pitcher chips exclude batting stats',
 check('MLB batter opens on Hits (unchanged)', defaultChipForPlayer('MLB', 'batter')?.label === 'Hits');
 check('WNBA opens on Points', defaultChipForPlayer('WNBA')?.label === 'Points');
 check('NFL opens on Pass Yards', defaultChipForPlayer('NFL')?.label === 'Pass Yards');
-check('NFL chips span four groups', chipGroupsFor('NFL').join() === 'Passing,Rushing,Receiving,Defense');
+check('NFL chips span four groups', groupsOfChips(chipsForPlayer('NFL')).join() === 'Passing,Rushing,Receiving,Defense');
 check('NCAAF opens on Pass Yards', defaultChipForPlayer('NCAAF')?.label === 'Pass Yards');
 check('NCAAF chips span the same four groups',
-  chipGroupsFor('NCAAF').join() === 'Passing,Rushing,Receiving,Defense');
+  groupsOfChips(chipsForPlayer('NCAAF')).join() === 'Passing,Rushing,Receiving,Defense');
 check('NCAAF offers no Targets chip (CFBD box scores do not report them)',
   !chipsForPlayer('NCAAF').some((c) => c.label === 'Targets'));
-check('WNBA has a single group, so no group tab row', chipGroupsFor('WNBA').length === 1);
-check('MLB has a single group per player type', chipGroupsFor('MLB', 'batter').length === 1);
+check('WNBA has a single group, so no group tab row', groupsOfChips(chipsForPlayer('WNBA')).length === 1);
+check('MLB has a single group per player type', groupsOfChips(chipsForPlayer('MLB', 'batter')).length === 1);
 check('every WNBA chip resolves against a WNBA log row',
   chipsForPlayer('WNBA').every((c) => logStatValue(wnbaRow, c) !== undefined));
 
@@ -179,6 +184,83 @@ check('the MLB outs prop swaps Innings for Outs',
 check('a game market has no player stat', detailStatForPropModel('mlb_moneyline') === null);
 check('the NFL market-relative rule has no single stat (one id spans eight markets)',
   detailStatForPropModel('nfl_prop_market') === null);
+
+// ── The tabs a player actually fills ────────────────────────────────────────
+// Matt, 2026-09-19: a quarterback was offered a Defense tab of ten zeroes.
+// nfl_player_game_log stores 0, never NULL, off-position, so only the numbers
+// can say what a player does — and for NCAAF, where CFBD names no position,
+// they are the ONLY evidence there is.
+const nflGame = (over: Partial<PlayerLogEntry>): PlayerLogEntry => ({
+  player_id: 'p', player_name: 'A Player', team: 'BAL', game_id: 'g', game_date: '2026-09-14',
+  season: 2026, pos: 'QB', passing_yards: 0, passing_tds: 0, completions: 0, attempts: 0,
+  interceptions: 0, rushing_yards: 0, rushing_tds: 0, carries: 0, receptions: 0, targets: 0,
+  receiving_yards: 0, receiving_tds: 0, def_sacks: 0, def_interceptions: 0,
+  ...over,
+} as PlayerLogEntry);
+
+const nflChips = chipsForPlayer('NFL');
+const qbLog = [
+  normalizeLogRow('NFL', nflGame({ passing_yards: 237, attempts: 30, completions: 21, passing_tds: 2, rushing_yards: 45, carries: 8 })),
+  normalizeLogRow('NFL', nflGame({ passing_yards: 180, attempts: 26, completions: 15, rushing_yards: 12, carries: 4 })),
+];
+const qbGroups = groupsOfChips(chipsForLoadedPlayer(nflChips, qbLog));
+check('a QB is offered no Defense tab (the reported bug)', !qbGroups.includes('Defense'));
+check('a QB keeps Passing and Rushing', qbGroups.includes('Passing') && qbGroups.includes('Rushing'));
+check('a QB with no catch is offered no Receiving tab', !qbGroups.includes('Receiving'));
+
+const lbLog = [
+  normalizeLogRow('NFL', nflGame({ pos: 'LB', def_sacks: 1.5 })),
+  normalizeLogRow('NFL', nflGame({ pos: 'LB', def_interceptions: 1 })),
+];
+const lbGroups = groupsOfChips(chipsForLoadedPlayer(nflChips, lbLog));
+check('a linebacker is offered Defense alone, not three empty offensive tabs',
+  lbGroups.join() === 'Defense');
+
+const teLog = [normalizeLogRow('NFL', nflGame({ pos: 'TE', receptions: 5, receiving_yards: 61, receiving_tds: 1, targets: 7 }))];
+const teChips = chipsForLoadedPlayer(nflChips, teLog);
+const teFilled = filledChipCounts(teChips, teLog);
+check('a receiving TD holds the Rushing tab (Rush+Rec TDs lives there)',
+  groupsOfChips(teChips).includes('Rushing'));
+check('...but that tab opens on the TD, not on Rush Yards 0.0',
+  openingChip(teChips, teFilled, 'Rushing')?.label === 'Rush+Rec TDs');
+check('a tight end opens on the stat he fills most, not on catalog order',
+  openingChip(teChips, teFilled)?.label === 'Receptions' ||
+  openingChip(teChips, teFilled)?.group === 'Receiving');
+check('a chip he has never filled is still offered inside a surviving tab',
+  teChips.some((c) => c.label === 'Rush Yards') && !teFilled.has(chipKey(teChips.find((c) => c.label === 'Rush Yards')!)));
+
+// A player with nothing on file at all: the position decides, and it never
+// says Defense for an offensive position (19 of 138 DEs are the mirror case).
+const benchedQb = [normalizeLogRow('NFL', nflGame({}))];
+check('a QB with a blank game sheet still gets no Defense tab',
+  !groupsOfChips(chipsForLoadedPlayer(nflChips, benchedQb)).includes('Defense'));
+check('a DE with no sack and no interception gets Defense alone',
+  groupsOfChips(chipsForLoadedPlayer(nflChips, [normalizeLogRow('NFL', nflGame({ pos: 'DE' }))])).join() === 'Defense');
+check('an unclassified position hides nothing on its own', positionGroups('XYZ').length === 0);
+check('every offensive position maps away from Defense',
+  ['QB', 'RB', 'WR', 'TE', 'FB', 'K', 'P', 'LS', 'C', 'G', 'OT', 'OL']
+    .every((p) => !positionGroups(p).includes('Defense')));
+check('every defensive position maps to Defense alone',
+  ['CB', 'DB', 'DE', 'DL', 'DT', 'FS', 'ILB', 'LB', 'MLB', 'NT', 'OLB', 'S', 'SAF']
+    .every((p) => positionGroups(p).join() === 'Defense'));
+
+// NCAAF: no position, and CFBD leaves a category NULL for a player who took
+// no part in it — so the nulls alone must carry the filtering.
+const ncaafChips = chipsForPlayer('NCAAF');
+const ncaafDefender = [normalizeLogRow('NCAAF', {
+  player_id: 'c', player_name: 'A Player', team: 'Georgia', game_id: 'g', game_date: '2026-09-13',
+  season: 2026, def_tackles: 7, def_solo: 4, def_sacks: 1, def_tfl: 2, def_pd: 1, def_interceptions: 0,
+} as unknown as Record<string, unknown>)];
+check('an NCAAF defender is offered Defense alone, with no position to go on',
+  groupsOfChips(chipsForLoadedPlayer(ncaafChips, ncaafDefender)).join() === 'Defense');
+
+check('no games loaded yet leaves every chip in place',
+  chipsForLoadedPlayer(nflChips, []).length === nflChips.length);
+check('a log of nothing but zeroes and no position keeps every chip',
+  chipsForLoadedPlayer(ncaafChips, [normalizeLogRow('NCAAF', {
+    player_id: 'c', player_name: 'A Player', team: 'Georgia', game_id: 'g', game_date: '2026-09-13', season: 2026,
+  } as unknown as Record<string, unknown>)]).length === ncaafChips.length);
+
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
