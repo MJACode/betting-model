@@ -81,8 +81,12 @@ def test_a_model_with_no_own_ev_floor_is_bound_by_the_global_one(monkeypatch):
     (config.min_ev_for); a model outside MODEL_MIN_EV is bounded by it, and
     by its edge floor only where that is tighter."""
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.30)
+    # Also skip MODEL_OWN_EV_FLOOR: since 2026-09-20 a model with an own floor
+    # is bound by THAT, not the global one, so it cannot exercise this path.
     model = next(m for m in ("mlb_moneyline", "nhl_moneyline", "ufc_moneyline")
-                 if m not in config.MODEL_MIN_EV and m not in config.MODEL_MIN_ODDS)
+                 if m not in config.MODEL_MIN_EV
+                 and m not in config.MODEL_MIN_ODDS
+                 and m not in config.MODEL_OWN_EV_FLOOR)
     prob, edge_floor = 0.62, 0.08
     got = price_bound(prob, model, edge_floor, None, 200)
     from_ev = 1.30 / prob

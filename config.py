@@ -767,7 +767,7 @@ MODEL_MIN_EV: dict = {
     # lose least while keeping more than one bet. Re-sweep after ~3 more
     # Saturdays and expect these numbers to move.
     "ncaaf_live_total": 0.24,  # 2026-09-13 mike: 0.22 -> 0.24 with min_prob 0.73 (see ACTION_THRESHOLDS). EV 0.24 sits mid-plateau: 0.20-0.28 all positive in both halves at prob 0.73
-    "ncaaf_live_win_prob": 0.26,  # 2026-09-12 mike: EV floor unchanged. It is now applied to the PREGAME-CORRECTED probability (ncaaf_live/serve.correct_for_pregame), and min_prob 0.65 was swept on that same scale -- the briefly-shipped pregame-dog cap is gone, superseded by the correction
+    "ncaaf_live_win_prob": 0.30,  # 2026-09-20 mike: 0.26 -> 0.30 so the move of GLOBAL_MIN_EV to 0.20 changes NOTHING here. The 0.50/0.16 cut was swept on 2026-09-19 with a 0.30 floor in force (ACTION_THRESHOLDS), so 0.30 is the floor that cut was measured under; 0.26 has not bound since the global floor landed. Previously (2026-09-12 mike): EV floor unchanged. It is now applied to the PREGAME-CORRECTED probability (ncaaf_live/serve.correct_for_pregame), and min_prob 0.65 was swept on that same scale -- the briefly-shipped pregame-dog cap is gone, superseded by the correction
 }
 
 # ── Live volume ceiling (bets per week) ──────────────────────────────────────
@@ -1729,14 +1729,161 @@ def min_odds_for(model_id: str) -> float:
 # at +10.1%. The floor ALONE (no prob/edge cut) is negative at every level
 # (-10% to -18%): it selects longshots. Env-overridable so the number moves
 # without a deploy; the docs and the replay are where the evidence lives.
-GLOBAL_MIN_EV: float = float(os.environ.get("GLOBAL_MIN_EV", "0.30"))
+#
+# 0.20 SINCE 2026-09-20 (mike: "30% is too aggressive then"). The first NFL
+# Sunday under 0.30 wrote zero NFL bets, and nfl_prop_market's largest EV
+# across all 90 bets it has ever written is 0.227. Replay re-run that day
+# (cut + floor, platform sum): 0.30 keeps 15 at +44.5%; 0.25 keeps 48 at
+# +28.2%; 0.20 keeps 118 at +9.8% (+11.52u); 0.15 keeps 174 at +6.4%; 0.10
+# keeps 269 at +7.1%. All in-sample. ncaaf_live_win_prob keeps 0.30 through
+# MODEL_MIN_EV: its cut was swept with 0.30 in force.
+GLOBAL_MIN_EV: float = float(os.environ.get("GLOBAL_MIN_EV", "0.20"))
+
+
+# ── EVERY MODEL CARRIES ITS OWN EV FLOOR (mike, 2026-09-20) ──────────────────
+# "never ask me, each model will need its own floor" (CLAUDE.md 1b). This dict
+# is checked FIRST by min_ev_for and returned outright, so an entry here may
+# sit BELOW GLOBAL_MIN_EV. That is the point: MODEL_MIN_EV can only TIGHTEN the
+# global floor, and a model whose whole edge distribution lives under it needs
+# the other direction.
+#
+# WHY IT IS NOW EVERY MODEL AND NOT TWO. One GLOBAL_MIN_EV is a single number
+# standing in for 40-odd different edge distributions, and it removes models
+# SILENTLY. Measured 2026-09-20: at 0.20 it deleted every bet mlb_spread_market
+# and mlb_total_public_fade have ever written -- 78 bets, EV -0.034 to +0.026,
+# not one above 0.03 -- and because neither writes a row when it finds nothing,
+# the platform recorded no trace of either model going dark. nfl_live_prop was
+# the same story on a constant 0.600 probability (EV 0.122 at -115).
+#
+# HOW EACH NUMBER WAS SET, AND WHAT IT IS NOT. Measured against every BET in
+# `picks`, EV on the calibrated probability at the deciding price: each floor
+# sits just under the SMALLEST bet that model has written, CAPPED at
+# GLOBAL_MIN_EV. So this only ever LOOSENS relative to 2026-09-19 and never
+# tightens one model -- each behaves as it did before the global floor landed,
+# while still refusing a quote the juice has eaten. A model whose smallest
+# written bet was already above 0.20 keeps 0.20 and is unchanged.
+#
+# THE NUMBERS ARE NOT SWEPT, AND THE SETTLED RECORD DOES NOT SUPPORT SWEEPING
+# THEM. The cumulative floor grid was run on every model with >= 30 settled
+# bets. Only mlb_live_total_runs (+14.6u at every floor) and
+# mlb_prop_pitcher_outs (+3.3u to +4.5u, flat 0.00-0.25) are positive across a
+# plateau. The rest are negative at every floor or show a single-cell peak on a
+# thinning sample -- mlb_prop_batter_runs runs -25.2u at 0.00, -3.6u at 0.20,
+# +11.7u at 0.25, +4.8u at 0.30 on 29 bets, which is a peak, not a plateau, and
+# §7's rule is that a peak is not a threshold. A model that loses at every
+# floor is an assessment to run (§1b), not a floor to tune.
+#
+# THE THREE SWEPT LIVE FLOORS ARE DELIBERATELY ABSENT. mlb_live_total_runs
+# (0.32), ncaaf_live_total (0.24) and ncaaf_live_win_prob (0.30) keep their
+# MODEL_MIN_EV entries, swept on their own settled records. An entry here would
+# silently override them, so the two dicts must stay DISJOINT -- pinned by
+# tests/test_config.py.
+#
+# The two NFL rules keep the numbers mike set in #794 rather than the ones this
+# method would produce (0.10 and 0.02); his explicit call outranks the formula.
+# A model that has never written a bet is not here: the global floor is the
+# fallback for a model nobody has measured yet, not the design. Nor are the
+# four RETIRED models that have a written record (mlb_live_runline,
+# mlb_live_win_prob, mlb_prop_batter_hr, mlb_prop_batter_rbi) -- a retired
+# model is gone from the registry and has nothing left to floor.
+MODEL_OWN_EV_FLOOR: dict = {
+    # The two NFL rules, set by mike in #794 and NOT recomputed here.
+    "nfl_wind_totals":           0.05,   # n=1 graded, +0.95u
+    "nfl_opener_spread":         0.01,   # n=2 graded, +1.74u
+    # Everything else: just under its own smallest written bet, capped at 0.20.
+    "mlb_f5_moneyline":          0.00,   # n=242, min written EV +0.007
+    "mlb_moneyline":             0.11,   # n=101, min written EV +0.112
+    "mlb_over_under":            0.07,   # n=172, min written EV +0.076
+    "mlb_prop_batter_hits":      0.06,   # n=475, min written EV +0.069
+    "mlb_prop_batter_runs":      0.06,   # n=472, min written EV +0.064
+    "mlb_prop_batter_sb":        0.05,   # n=18, min written EV +0.057
+    "mlb_prop_batter_tb":        0.10,   # n=153, min written EV +0.106
+    "mlb_prop_batter_walks":     0.06,   # n=372, min written EV +0.069
+    "mlb_prop_pitcher_er":       0.10,   # n=125, min written EV +0.100
+    "mlb_prop_pitcher_hits":     0.00,   # n=126, min written EV -0.123 -> 0.00
+    "mlb_prop_pitcher_k":        0.00,   # n=272, min written EV -0.014 -> 0.00
+    "mlb_prop_pitcher_outs":     0.08,   # n=134, min written EV +0.086
+    "mlb_prop_pitcher_walks":    0.10,   # n=94, min written EV +0.107
+    "mlb_runline":               0.15,   # n=44, min written EV +0.153
+    "mlb_spread_market":         0.00,   # n=25, min written EV -0.034 -> 0.00
+    # THE ONE NEGATIVE FLOOR, and it is not a licence to bet negative EV.
+    # mlb_total_public_fade's model probability IS the market's own implied
+    # probability -- its claimed edge is the fade signal, not a price
+    # disagreement -- so EV is zero BY CONSTRUCTION and its sign is floating
+    # point noise. Measured over all 37 bets: -0.0001 to +0.0001. At 0.00 the
+    # gate drops roughly half the card on rounding (`ev_below_floor:-0.000`),
+    # which is a coin toss deciding whether a pick exists. -0.01 cannot bind on
+    # noise and still refuses a real negative. Its own rule picks the card.
+    # SEPARATELY: this model is -7.19u over 37 settled and is owed §1b's
+    # assessment. That is a question about the model, not about its floor.
+    "mlb_total_public_fade":    -0.01,   # n=37, EV -0.0001..+0.0001 by design
+    "ncaaf_over_under":          0.20,   # n=20, min +0.218, never bet under 0.20
+    "ncaaf_spread":              0.06,   # n=1, min written EV +0.065
+    "nfl_live_prop":             0.06,   # n=12, min written EV +0.062
+    # DELIBERATELY AT THE GLOBAL NUMBER, not at its own +0.009. #794 left
+    # nfl_prop_market under the global floor on its record (19-20, -2.49u over
+    # 39) and that was a decision, not an oversight. Written out rather than
+    # left absent so the next session reads a choice instead of a gap; §1b's
+    # rule is that a losing model is an assessment to run, and until that runs
+    # the 0.20 stands. 0.05 keeps 12 bets at +2.4u, which is a single-cell peak
+    # on 12 bets, not a floor.
+    "nfl_prop_market":           0.20,   # n=41, min written EV +0.009
+    "nfl_prop_pass_completions": 0.20,   # n=1, min +0.329, never bet under 0.20
+    "nfl_prop_rec_yards":        0.20,   # n=3, min +0.302, never bet under 0.20
+    "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
+    "nfl_prop_rush_rec_yards":   0.20,   # n=1, min +0.354, never bet under 0.20
+    "nfl_prop_rush_yards":       0.20,   # n=1, min +0.354, never bet under 0.20
+    "ufc_moneyline":             0.13,   # n=5, min written EV +0.131
+    "ufc_total_rounds":          0.15,   # n=8, min written EV +0.150
+    "wnba_moneyline":            0.06,   # n=31, min written EV +0.069
+    "wnba_prop_market":          0.01,   # n=12, min written EV +0.013
+    "wnba_prop_player_assists":  0.08,   # n=122, min written EV +0.087
+    "wnba_prop_player_points":   0.13,   # n=226, min written EV +0.135
+    "wnba_prop_player_pra":      0.14,   # n=155, min written EV +0.141
+    "wnba_prop_player_rebounds": 0.04,   # n=234, min written EV +0.047
+    "wnba_prop_player_threes":   0.08,   # n=81, min written EV +0.088
+}
+
+# A NEGATIVE MIN BECOMES 0.00, NOT A NEGATIVE FLOOR. mlb_prop_pitcher_hits
+# (-0.123), mlb_prop_pitcher_k (-0.014) and mlb_spread_market (-0.034) have all
+# written bets the calibrated probability prices as LOSING before they settle.
+# Restoring that exactly would mean enshrining "bet a quote the juice has
+# eaten", which is the one thing every version of this floor has refused. They
+# get 0.00, which cuts roughly half of mlb_spread_market's historical volume
+# (median EV -0.009) and a handful of the other two's. That is a DELIBERATE
+# tightening against the restore-behaviour rule above, and the only one.
+
+# The same two decide on the rule's OWN probability, not the promoted map. A
+# floor alone would not have let them bet: with one and two graded bets their
+# map is the pooled offset borrowed from other models (~-0.24 logit), which
+# takes wind's 0.574 to 0.510 -- EV -0.043 at -114, under any floor. Their
+# probabilities are lookups calibrated on the rule's own backtest
+# (wind_totals.CALIBRATED_UNDER_RATE, opener_spread), which is what they were
+# approved on. Revisit at 50 graded bets each, when a map of their own exists.
+# Read through models.honest_ev.honest_probability, never directly.
+#
+# LISTED EXPLICITLY, NOT DERIVED FROM MODEL_OWN_EV_FLOOR (2026-09-20). It was
+# `frozenset(MODEL_OWN_EV_FLOOR)` while that dict held exactly these two, so
+# the two ideas -- "carries its own floor" and "decides on its own probability"
+# -- were indistinguishable. They are not the same idea: the first is about
+# where a model's edge distribution sits, the second about whether its
+# calibration map can be trusted yet. Widening the floor dict to every model
+# would have silently taken all 40 off the promoted map, which is a far larger
+# change than the floor and one nobody asked for.
+MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
+    "nfl_wind_totals",
+    "nfl_opener_spread",
+})
 
 
 def min_ev_for(model_id: str) -> float:
-    """The EV floor this model actually bets over: the global floor, or the
-    model's own MODEL_MIN_EV when that is higher. ONE accessor, for the same
-    reason min_odds_for is one: the scorer's gate, every card, both live
-    loops and the Discord "good to" bound have to agree on the number."""
+    """The EV floor this model actually bets over: its OWN floor when it
+    carries one (MODEL_OWN_EV_FLOOR, the two NFL rules), else the global
+    floor, or the model's MODEL_MIN_EV when that is higher. ONE accessor, for
+    the same reason min_odds_for is one: the scorer's gate, every card, both
+    live loops and the Discord "good to" bound have to agree on the number."""
+    if model_id in MODEL_OWN_EV_FLOOR:
+        return float(MODEL_OWN_EV_FLOOR[model_id])
     own = MODEL_MIN_EV.get(model_id)
     return GLOBAL_MIN_EV if own is None else max(GLOBAL_MIN_EV, float(own))
 

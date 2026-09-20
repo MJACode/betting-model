@@ -297,7 +297,7 @@ than a surviving one. **~63 bets/week at an unchanged cut.**
 | `ncaaf_live_win_prob` | 0.66 | 0.10 | 0.22 | 10/wk | **PAUSED 2026-09-11 (mike)** |
 
 **Since 2026-09-19 the platform's global EV floor binds over every EV in this
-table** (`config.GLOBAL_MIN_EV` 0.30 via `config.min_ev_for`; the table's EV
+table** (`config.GLOBAL_MIN_EV`, 0.20 since 2026-09-20 and 0.30 before, via `config.min_ev_for`; the table's EV
 column is the model's own `MODEL_MIN_EV`, which only matters where it is
 higher), and it is judged on the CALIBRATED probability — every live model now
 carries a promoted map (`docs/probability_calibration.md`, Phase 3), the NCAAF

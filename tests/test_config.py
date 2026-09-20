@@ -94,3 +94,131 @@ def test_return_ramp_stages_ordered():
     assert RETURN_RAMP["early"] < RETURN_RAMP["mid"] < RETURN_RAMP["full"]
     assert RETURN_RAMP["full"] == 1.0
     assert RETURN_RAMP["early"] > 0.0
+
+
+# ── Per-model EV floors (mike, 2026-09-20: "each model will need its own
+# floor"). These four pin the ways the widened MODEL_OWN_EV_FLOOR can go wrong.
+def test_own_ev_floor_and_model_min_ev_stay_disjoint():
+    """min_ev_for returns MODEL_OWN_EV_FLOOR OUTRIGHT, so an entry in both
+    dicts silently overrides a swept floor. The three live models whose floors
+    were swept on their own settled records must never appear in the first."""
+    import config
+
+    overlap = set(config.MODEL_OWN_EV_FLOOR) & set(config.MODEL_MIN_EV)
+    assert not overlap, (
+        f"{sorted(overlap)} carry both an own floor and a MODEL_MIN_EV entry; "
+        "the own floor wins and the swept number is discarded"
+    )
+    for model_id, swept in config.MODEL_MIN_EV.items():
+        assert config.min_ev_for(model_id) == max(config.GLOBAL_MIN_EV, swept)
+
+
+def test_no_own_floor_tightens_a_model_past_the_global_floor():
+    """The dict exists to let a model bet BELOW the global floor. An entry
+    above it would be a tightening smuggled in as a restoration.
+
+    Read from the environment rather than config.GLOBAL_MIN_EV: the autouse
+    _platform_gates_at_identity fixture patches that attribute to -1.0 for
+    every test in this directory, so the live number is not visible here.
+    """
+    import os
+
+    import config
+
+    live_floor = float(os.environ.get("GLOBAL_MIN_EV", "0.20"))
+    too_tight = {
+        m: ev for m, ev in config.MODEL_OWN_EV_FLOOR.items() if ev > live_floor
+    }
+    assert not too_tight, f"{too_tight} sit above the global floor {live_floor}"
+
+
+def test_only_a_market_priced_model_carries_a_negative_floor():
+    """A floor below zero would enshrine betting a quote the juice has eaten.
+    mlb_prop_pitcher_hits, mlb_prop_pitcher_k and mlb_spread_market have all
+    written negative-EV bets and are floored at 0.00 rather than at their own
+    minimum -- the one deliberate tightening in the dict.
+
+    mlb_total_public_fade is the single exception: its model probability is the
+    market's own implied probability, so EV is zero by construction (all 37
+    bets fall in -0.0001..+0.0001) and a 0.00 floor drops half its card on the
+    sign of a rounding error. Any OTHER negative entry is a bug.
+    """
+    import config
+
+    negative = {m: ev for m, ev in config.MODEL_OWN_EV_FLOOR.items() if ev < 0}
+    assert set(negative) <= {"mlb_total_public_fade"}, (
+        f"{negative} would permit negative-EV bets"
+    )
+    for model_id in ("mlb_prop_pitcher_hits", "mlb_prop_pitcher_k",
+                     "mlb_spread_market"):
+        assert config.MODEL_OWN_EV_FLOOR[model_id] == 0.00
+
+
+def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
+    """These were one expression while the floor dict held exactly these two.
+    Widening the floors must not take 36 more models off the calibration map."""
+    import config
+
+    assert config.MODELS_ON_OWN_PROBABILITY == frozenset(
+        {"nfl_wind_totals", "nfl_opener_spread"}
+    )
+
+
+def test_every_own_floor_names_a_live_model():
+    """A floor for a retired or misspelt model is dead config that reads as
+    cover. Retired models are gone from the registry and carry no floor."""
+    import config
+
+    unknown = [m for m in config.MODEL_OWN_EV_FLOOR if m not in config.ACTION_THRESHOLDS]
+    assert not unknown, f"{unknown} carry a floor but are not registered models"
+    retired = [m for m in config.MODEL_OWN_EV_FLOOR if m in config.RETIRED_MODELS]
+    assert not retired, f"{retired} are retired and should carry no floor"
+
+
+def test_the_models_the_global_floor_silently_removed_can_bet_again():
+    """The three models GLOBAL_MIN_EV=0.20 switched off on 2026-09-19.
+
+    Measured 2026-09-20 over every BET each has written: mlb_spread_market
+    -0.034..+0.026 (25), mlb_total_public_fade exactly 0.000 (37),
+    nfl_live_prop +0.062..+0.231 (12). Not one of the 74 clears 0.20, so under
+    the global floor alone each is permanently unable to place a bet -- and
+    none of the three writes a row when it finds nothing, so it goes dark
+    without a trace. Their own floors must sit at or under their own smallest
+    written bet.
+    """
+    import os
+
+    import config
+
+    # The autouse _platform_gates_at_identity fixture patches GLOBAL_MIN_EV to
+    # -1.0, which would make every model look unblocked. Put the live number
+    # back for the length of this test, or it proves nothing.
+    live_floor = float(os.environ.get("GLOBAL_MIN_EV", "0.20"))
+    original = config.GLOBAL_MIN_EV
+    config.GLOBAL_MIN_EV = live_floor
+    try:
+        for model_id, smallest_written in (
+            ("mlb_spread_market", 0.00),  # negative min, floored at zero
+            ("mlb_total_public_fade", 0.00),
+            ("nfl_live_prop", 0.062),
+        ):
+            assert config.min_ev_for(model_id) <= smallest_written, (
+                f"{model_id} cannot place the smallest bet it has ever written"
+            )
+    finally:
+        config.GLOBAL_MIN_EV = original
+
+
+def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
+    """Carrying an own EV floor and deciding on the model's OWN probability
+    were one expression until 2026-09-20. They are separate questions: where a
+    model's edges sit, versus whether its calibration map can be trusted. Every
+    model but the two NFL rules keeps the promoted map."""
+    import config
+
+    assert "mlb_moneyline" in config.MODEL_OWN_EV_FLOOR
+    assert "mlb_moneyline" not in config.MODELS_ON_OWN_PROBABILITY
+    on_own_but_not_a_rule = config.MODELS_ON_OWN_PROBABILITY - {
+        "nfl_wind_totals", "nfl_opener_spread"
+    }
+    assert not on_own_but_not_a_rule

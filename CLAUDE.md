@@ -87,12 +87,9 @@ Notes on each:
   deliberately NOT fixed belong here too, with the reason. "None" if none.
 - **Decisions needed from you** — anything blocked on the reader, and anything
   where a judgement call was made that they might want reversed. If nothing is
-  blocked, say so explicitly. **Second person, never first**: this said "from
-  me" until 2026-09-03 because the file is dictated in the user's voice, but a
-  REPLY is read the other way round, so "me" became Claude and the section
-  announcing what a person must decide looked like Claude's own decisions
-  (mike, 2026-09-03). A heading addresses the reader: "you" for the person, "I"
-  for Claude, in the headings and inside them.
+  blocked, say so explicitly. **Second person, never first** (mike,
+  2026-09-03): a heading addresses the reader, so "you" is the person and "I"
+  is Claude, in the headings and inside them. Why: `docs/rules_evidence.md`.
 - **Outstanding tasks** — what is left, including anything only Matt can do
   (Railway variables, local commands, App Store steps). "None" if nothing.
 
@@ -225,6 +222,14 @@ it?" is not.** `scripts/paused_model_assessment.py`,
 **NOTHING AUTOPAUSES.** (mike, 2026-09-14.) Real money is on every live model. A
 pause or unpause needs his explicit approval in `config.PAUSED_MODELS` with
 `Updated-By:`. The 250-bet review reports; it never writes `model_auto_pauses`.
+
+**EVERY MODEL CARRIES ITS OWN EV FLOOR. NEVER ASK WHETHER.** (mike,
+2026-09-20: *"never ask me, each model will need its own floor"*.) One
+`GLOBAL_MIN_EV` over 65 edge distributions removes models SILENTLY: at 0.20 it
+deleted every bet `mlb_spread_market` and `mlb_total_public_fade` had written,
+with no row to say so. No entry in `config.MODEL_OWN_EV_FLOOR` → **add one**,
+swept on its own record (§7), else just under its own written EV. Evidence:
+`docs/rules_evidence.md`.
 
 **EVERY MODEL UPDATE IS STAMPED WITH WHO ASKED FOR IT** — the git trailer
 `Updated-By: mike` (or `matt`) on the commit that lands it, and **if you do not
@@ -671,8 +676,3 @@ does: a cap on this file, a cap on this file PLUS the session-start hook (so
 moving prose between them cannot game it), a per-file cap on each rules file, and
 a check that every rules file is pointed at from here. It fails once, at merge
 time, for whoever grew it — which is why no session needs to spend a reply on it.
-
-*Layered 2026-09-12: three layers and a routing rule (§10) replaced "keep this
-file under ~30 KB", which was repeated in three places and re-read every
-session. `tests/test_context_budget.py` holds the budget now. Nothing was
-deleted — §10 says where each rule went.*

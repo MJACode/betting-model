@@ -46,7 +46,14 @@ class Gate:
 
 
 def honest_probability(model_id: str, prob: float) -> float:
-    """The promoted map applied; identity when there is none or it fails."""
+    """The promoted map applied; identity when there is none or it fails.
+
+    The two NFL rules in config.MODELS_ON_OWN_PROBABILITY decide on their own
+    number (mike, 2026-09-20): their map is the pooled offset borrowed from
+    other models, and it puts every bet they make under water.
+    """
+    if model_id in config.MODELS_ON_OWN_PROBABILITY:
+        return float(prob)
     from models.scorer import _calibrated
     cal = _calibrated(model_id, prob)
     return float(prob) if cal is None else float(cal)
