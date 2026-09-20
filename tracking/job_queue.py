@@ -425,6 +425,24 @@ def _validate_historical_odds(args: dict) -> dict:
             "ignore_ledger": bool(args.get("ignore_ledger", False))}
 
 
+def _job_nhl_odds_history(**kw):
+    """The NHL game-line purchase (scripts/nhl_odds_history_backfill.py): the
+    plan is built from stored start times and the script's own credit guard
+    decides whether it may start. Resumable — the pull ledger skips what is
+    already stored, so a re-queue after a restart costs nothing twice."""
+    argv = ["--apply", "--max-credits", str(kw["max_credits"])]
+    return _run_script_main("scripts.nhl_odds_history_backfill", argv)[-4000:]
+
+
+def _validate_nhl_odds_history(args: dict) -> dict:
+    # mike approved "about 200,000" on 2026-09-20; the plan prints 159,900.
+    # The ceiling is stated by the caller and cannot exceed what was approved.
+    cap = int(args.get("max_credits") or 0)
+    if not 0 < cap <= 200_000:
+        raise ValueError(f"max_credits must be 1..200000, got {cap}")
+    return {"max_credits": cap}
+
+
 def _job_relabel_in_play(**kw):
     from data.ingestors.odds_ingestor import relabel_in_play
     return relabel_in_play(sport=kw["sport"], since=kw["since"])
@@ -1454,6 +1472,7 @@ JOBS = {
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
+    "nhl_odds_history": (_job_nhl_odds_history, _validate_nhl_odds_history),
     "game_log_backfill": (_job_game_log_backfill, _validate_game_log_backfill),
     "ncaaf_player_backfill": (_job_ncaaf_player_backfill,
                               _validate_ncaaf_player_backfill),
