@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, the four master failures: backlog checkboxes + the parlay test re-pinned to #703 (#782), the stored-edge calibration assertion (#783), and the NFL weather cache imported to Supabase (117,192 stadium-hours into nfl_stadium_weather_hourly) |
+| 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, the four master failures: backlog checkboxes + the parlay test re-pinned to #703 (#782), the stored-edge calibration assertion (#783), and the NFL weather cache imported to Supabase (117,192 stadium-hours into nfl_stadium_weather_hourly, #784) |
 | 2026-09-20 | [2026-09](./2026-09.md) | The team page off the Stats board (market read, form, splits, head-to-head, our record) and the player page's tonight-line / splits / Statcast / our-record sections |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, PickCard prop titles: bet on the bold line, player name on a caption. Game markets stay a single pick_label. UI-only; stored label unchanged |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, player detail offers only the stat tabs a player fills: the NFL log stores 0 (not NULL) off-position, so a QB got a Defense tab of ten zeroes. Groups now come from the loaded log, position is the net; a tab opens on the most-filled chip (Rush+Rec TDs holds a Rushing tab for 82/252 WRs). 0 of 82 QBs keep Defense |
