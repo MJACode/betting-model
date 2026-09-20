@@ -126,9 +126,7 @@ export function ExplainerScreen() {
           <P>
             Every BET is a 1-unit play today, so at −110 you lay 1.1u to win 1u,
             and at +150 you lay 0.67u to win the same 1u. Risk is hard-capped at
-            3u on any one event. Kelly still <Strong>ranks</Strong> picks behind
-            the scenes — it just no longer sets the stake, because a flat scale
-            beat a Kelly-weighted one over our settled record.
+            3u on any one event.
           </P>
           <P>
             The app, the Discord channels and push all publish the identical
@@ -144,7 +142,7 @@ export function ExplainerScreen() {
             model HR probabilities top out around <Mono>25%</Mono>. Forcing an
             edge filter would mean we never fire HR picks even when the model
             is confident, so HR signals on model probability alone (≥20%) and
-            ignore edge. Bet sizing is informational only on those.
+            ignore edge. The stake shown is informational only on those.
           </P>
         </Section>
 

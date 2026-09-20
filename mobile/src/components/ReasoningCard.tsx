@@ -6,13 +6,10 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import {
-  KELLY_MULTIPLIER,
   isProbOnlyModel,
   stakeFor,
   formatUnits,
-  MAX_CONVICTION,
   MAX_RISK_UNITS,
-  UNIT_KELLY_FRACTION,
   isUnlockedPreview,
   passesActionFilter,
 } from '@/lib/thresholds';
@@ -104,7 +101,7 @@ export function ReasoningCard({ pick }: Props) {
             (stake.capped
               ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `
               : '') +
-            `Conviction runs 1u–${formatUnits(MAX_CONVICTION)} (${formatUnits(MAX_CONVICTION)} = highest), scaled from tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied)). 1 unit = ${formatPct(UNIT_KELLY_FRACTION)} of roll. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake everyone else sees — it is not sized to a bankroll.`
+            `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake the Discord channel and push publish; it is not sized to a bankroll.`
           }
         />
       ) : null}

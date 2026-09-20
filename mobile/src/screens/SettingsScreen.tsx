@@ -342,7 +342,7 @@ export function SettingsScreen() {
           }
         />
 
-        <SectionHeader title="Limits" />
+        <SectionHeader title="Staying in control" />
 
         <View style={styles.card}>
           <View style={styles.capHeader}>
@@ -376,7 +376,18 @@ export function SettingsScreen() {
               Off by default. Turn it on for a heads-up before a day’s picks over-extend you.
             </Text>
           )}
-          <Pressable onPress={openHelpline} style={styles.helplineRow}>
+        </View>
+
+        {/* Its own card, deliberately: this used to sit inside the exposure
+            card, which is OFF by default — so the one support resource in the
+            app rendered as a footnote on a feature the member had declined. */}
+        <View style={styles.card}>
+          <Pressable
+            onPress={openHelpline}
+            accessibilityRole="link"
+            accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
+            style={styles.helplineRow}
+          >
             <Ionicons name="call-outline" size={15} color={colors.tint} />
             <Text style={styles.helplineText}>
               Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
