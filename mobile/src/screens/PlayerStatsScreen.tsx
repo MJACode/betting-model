@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -65,12 +66,17 @@ import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
 import { decisionOdds } from '@/lib/decisionPrice';
-import { InfoTooltip } from '@/components/InfoTooltip';
+import { ReadRow } from '@/components/ReadRow';
+import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
 import { usePlayerDetail, type PlayerNextGame } from '@/hooks/usePlayerDetail';
 import { formatGameTimeET, formatPct, weekdayShortET } from '@/lib/format';
+import { STAT_CATALOG } from '@/lib/statCatalog';
 import {
+  bookLineFromThreshold,
   formatRecordLine,
+  HIT_RATE_GOOD,
+  HIT_RATE_WEAK,
   thresholdFromBookLine,
   type PlayerPickRecord,
   type PropLineMove,
@@ -248,15 +254,34 @@ export function PlayerStatsScreen() {
     }
   }, [line, median, step]);
 
-  // The book's number wins over the median whenever one is posted and the
-  // reader hasn't moved the ruler. Snapped onto the stepper's grid so an
-  // Outs line of 16.5 lands on 17+, not 16.5+.
+  // Where the ruler goes until the reader moves it: the MODEL'S PICK line when
+  // one exists for this player and stat (so the betslip card, gated on the
+  // ruler, stays on screen where the book has since moved), else the BOOK's
+  // posted line, else the median. Set EXACTLY — not through roundLineToStep —
+  // because a Rush Yards book line of 62.5 rounded to a 65+ ruler while the
+  // card beneath said 62.5 (UX review, 2026-09-20). The ± stepper still moves
+  // in `step` increments from wherever the ruler sits.
+  const pickThreshold = useMemo(() => {
+    if (!playerId) return null;
+    const ep = buildPickIndex(todayPicks, propModelForStat(stat)).get(playerId);
+    const sl = ep && ep.pick.result == null ? Number(ep.pick.scored_line) : NaN;
+    return Number.isFinite(sl) ? thresholdFromBookLine(sl) : null;
+  }, [todayPicks, stat, playerId]);
   const postedThreshold = detail.tonight ? thresholdFromBookLine(detail.tonight.line) : null;
+  const snapThreshold = pickThreshold ?? postedThreshold;
   useEffect(() => {
-    if (lineTouched || postedThreshold == null) return;
-    const snapped = roundLineToStep(postedThreshold, step);
-    setLine((prev) => (prev === snapped ? prev : snapped));
-  }, [postedThreshold, lineTouched, step]);
+    if (lineTouched || snapThreshold == null) return;
+    setLine((prev) => (prev === snapThreshold ? prev : snapThreshold));
+  }, [snapThreshold, lineTouched]);
+  // Named on the hit card, so nobody reads a 7+ hit rate without knowing the
+  // 7 came from a 6.5 posted line (UX review).
+  const lineProvenance = lineTouched
+    ? 'your line'
+    : pickThreshold != null && line === pickThreshold
+      ? `pick line ${bookLineFromThreshold(pickThreshold)}`
+      : postedThreshold != null && line === postedThreshold && detail.tonight
+        ? `book line ${detail.tonight.line}`
+        : null;
 
   const effLine = line ?? 0;
 
@@ -322,9 +347,9 @@ export function PlayerStatsScreen() {
   const noEvidenceText = `No ${statLabel.toLowerCase()} in ${hitTotal} games`;
   const hitColor = noEvidence
     ? colors.none
-    : hitPct >= 0.6
+    : hitPct >= HIT_RATE_GOOD
       ? colors.bet
-      : hitPct >= 0.45
+      : hitPct >= HIT_RATE_WEAK
         ? colors.med
         : colors.avoid;
 
@@ -340,9 +365,26 @@ export function PlayerStatsScreen() {
   const activeGroup = stat?.group ?? groups[0];
   const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
 
+  // The pull spinner shows for a PULL only; each section has its own.
+  const [pulled, setPulled] = useState(false);
+  useEffect(() => {
+    if (!detail.loading) setPulled(false);
+  }, [detail.loading]);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.list}>
+      <ScrollView
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl
+            refreshing={pulled && detail.loading}
+            onRefresh={() => {
+              setPulled(true);
+              detail.reload();
+            }}
+          />
+        }
+      >
         <View style={styles.header}>
           <View style={styles.headerText}>
             <Text style={styles.playerName}>{playerName}</Text>
@@ -507,6 +549,7 @@ export function PlayerStatsScreen() {
                 <View>
                   <Text style={styles.hitLabel}>
                     {headline} · {windowLabel}
+                    {lineProvenance ? ` · ${lineProvenance}` : ''}
                   </Text>
                   <Text style={styles.hitCount}>
                     {noEvidence ? noEvidenceText : `Hit ${hits} of ${hitTotal} games`}
@@ -699,6 +742,8 @@ export function PlayerStatsScreen() {
               record={detail.record}
               loading={detail.picksLoading}
               error={detail.picksError}
+              sportHasPropModel={STAT_CATALOG.some((d) => d.sport === sport && propModelForStat(d) != null)}
+              sport={sport}
             />
 
             <TrendStrip
@@ -816,27 +861,6 @@ function GameRow({
 
 // ── Added sections (2026-09-20) ─────────────────────────────────────────────
 
-function SectionTitle({ title, tooltip }: { title: string; tooltip?: { title: string; body: string } }) {
-  return (
-    <View style={styles.sectionRow}>
-      <Text style={styles.sectionHeader}>{title}</Text>
-      {tooltip ? <InfoTooltip title={tooltip.title} body={tooltip.body} accessibilityLabel={`About ${title}`} /> : null}
-    </View>
-  );
-}
-
-function ReadRow({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <View style={styles.readRow}>
-      <Text style={styles.readLabel}>{label}</Text>
-      <View style={styles.readRight}>
-        <Text style={styles.readValue}>{value}</Text>
-        {note ? <Text style={styles.readNote}>{note}</Text> : null}
-      </View>
-    </View>
-  );
-}
-
 function signedPp(n: number): string {
   const r = Math.round(n * 10) / 10;
   if (r === 0) return '0.0pp';
@@ -908,7 +932,7 @@ function TonightLineCard({
           body:
             'The line your sportsbooks have hung for this stat tonight, and the best over and under price ' +
             'among them. The chart above follows this number until you move the ruler.\n\n' +
-            'LINE MOVEMENT is DraftKings’ opening number against its latest — a line that has climbed is ' +
+            'SINCE OPEN is DraftKings’ opening number against its latest — a line that has climbed is ' +
             'money on the over. SHARP compares Pinnacle’s no-vig over with your book’s no-vig over at the ' +
             'same line; a positive gap means your book prices the over richer than Pinnacle does.',
         }}
@@ -945,14 +969,22 @@ function TonightLineCard({
                 </Text>
               </View>
               {booksReady && tonight.bestOver ? (
-                <View style={styles.priceCell}>
+                <View
+                  style={styles.priceCell}
+                  accessible
+                  accessibilityLabel={`Over, ${formatAmerican(tonight.bestOver.over)}, ${bookName(tonight.bestOver.book)}`}
+                >
                   <Text style={styles.priceLabel}>OVER</Text>
                   <Text style={styles.priceValue}>{formatAmerican(tonight.bestOver.over)}</Text>
                   <Text style={styles.priceBook}>{bookName(tonight.bestOver.book)}</Text>
                 </View>
               ) : null}
               {booksReady && tonight.bestUnder ? (
-                <View style={styles.priceCell}>
+                <View
+                  style={styles.priceCell}
+                  accessible
+                  accessibilityLabel={`Under, ${formatAmerican(tonight.bestUnder.under)}, ${bookName(tonight.bestUnder.book)}`}
+                >
                   <Text style={styles.priceLabel}>UNDER</Text>
                   <Text style={styles.priceValue}>{formatAmerican(tonight.bestUnder.under)}</Text>
                   <Text style={styles.priceBook}>{bookName(tonight.bestUnder.book)}</Text>
@@ -964,9 +996,11 @@ function TonightLineCard({
               <ReadRow
                 label="Since open"
                 value={
-                  move.openLine != null && move.nowLine != null
-                    ? `${move.openLine} → ${move.nowLine}`
-                    : `${formatPct(move.openOverProb, 0)} → ${formatPct(move.nowOverProb, 0)} over`
+                  move.direction === 'flat'
+                    ? (move.nowLine != null ? `${move.nowLine}` : `${formatPct(move.nowOverProb, 0)} over`)
+                    : move.openLine != null && move.nowLine != null
+                      ? `${move.openLine} → ${move.nowLine}`
+                      : `${formatPct(move.openOverProb, 0)} → ${formatPct(move.nowOverProb, 0)} over`
                 }
                 note={
                   move.direction === 'flat'
@@ -977,7 +1011,7 @@ function TonightLineCard({
                 }
               />
             ) : (
-              <ReadRow label="Since open" value="—" note="no DraftKings history stored yet" />
+              <ReadRow label="Since open" value="—" note="no opening line on record" />
             )}
 
             {tonight.sharpOverProb != null ? (
@@ -1038,7 +1072,9 @@ function SplitsCard({
         }}
       />
       {loading && buckets.every((b) => b.games === 0) ? (
-        <ActivityIndicator style={styles.loading} />
+        <View style={styles.card}>
+          <ActivityIndicator style={styles.loadingInline} />
+        </View>
       ) : (
         rows.map((r, i) => (
           <View key={i} style={styles.tileRow}>
@@ -1052,7 +1088,7 @@ function SplitsCard({
                     ? 'no games'
                     : `${b.hits} of ${b.games}${b.avg != null ? ` · avg ${b.avg.toFixed(1)}` : ''}`
                 }
-                tint={b.hitRate == null || b.games < 3 ? undefined : b.hitRate >= 0.6 ? colors.gradeGood : b.hitRate <= 0.4 ? colors.gradeBad : undefined}
+                tint={b.hitRate == null || b.games < 3 ? undefined : b.hitRate >= HIT_RATE_GOOD ? colors.gradeGood : b.hitRate < HIT_RATE_WEAK ? colors.gradeBad : undefined}
               />
             ))}
             {r.length < 3 ? Array.from({ length: 3 - r.length }).map((_, k) => <View key={`pad-${k}`} style={styles.tilePad} />) : null}
@@ -1113,11 +1149,17 @@ function PickRecordCard({
   record,
   loading,
   error,
+  sportHasPropModel,
+  sport,
 }: {
   playerName: string;
   record: PlayerPickRecord;
   loading: boolean;
   error: string | null;
+  /** False on a sport no live prop model prices (NCAAF): the empty state
+   *  must not imply picks are coming. */
+  sportHasPropModel: boolean;
+  sport: PlayerLogSport;
 }) {
   return (
     <>
@@ -1127,15 +1169,21 @@ function PickRecordCard({
           title: 'Settled bets only',
           body:
             `Every settled BET our prop models made on ${playerName}, by market. Results are in units: one unit is one ` +
-            'flat bet. A pick that carried no price counts in the record and not the units, so nothing is priced at an invented −110.',
+            'flat bet. A pick that carried no price counts in the record and not the units.',
         }}
       />
       {loading && record.settled === 0 ? (
-        <ActivityIndicator style={styles.loading} />
+        <View style={styles.card}>
+          <ActivityIndicator style={styles.loadingInline} />
+        </View>
       ) : record.settled === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>
-            {error ? `Couldn’t load our picks — ${error}` : `No settled picks on ${playerName} yet.`}
+            {error
+              ? `Couldn’t load our picks — ${error}`
+              : sportHasPropModel
+                ? `No settled picks on ${playerName}.`
+                : `No prop model prices ${sport} players yet.`}
           </Text>
         </View>
       ) : (
@@ -1167,11 +1215,12 @@ function PickRecordCard({
 
 const styles = StyleSheet.create({
   // ── Added sections (2026-09-20) ──
-  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  // spacing.md, as the hitCard beside these; a second card padding on one
+  // page reads as a second app (UX review).
   card: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
-    padding: spacing.lg,
+    padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
   },
@@ -1180,7 +1229,8 @@ const styles = StyleSheet.create({
   muted: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18 },
   gapTop: { marginTop: spacing.sm },
   loadingInline: { marginTop: spacing.sm },
-  source: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: spacing.sm, lineHeight: 16 },
+  // textSecondary: textTertiary is ~3.4:1 on bgCard at caption size (UX_REVIEW §5).
+  source: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
   fixture: { fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
   fixtureWhen: { fontSize: font.size.footnote, fontWeight: font.weight.regular, color: colors.textSecondary },
   slot: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2 },
@@ -1192,19 +1242,6 @@ const styles = StyleSheet.create({
   priceLabel: { fontSize: font.size.micro, fontWeight: font.weight.semibold, color: colors.textSecondary, letterSpacing: 0.3 },
   priceValue: { fontSize: font.size.body, fontWeight: font.weight.bold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   priceBook: { fontSize: font.size.caption, color: colors.textSecondary },
-  readRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-    gap: spacing.md,
-  },
-  readLabel: { fontSize: font.size.footnote, color: colors.textSecondary, width: 96 },
-  readRight: { flex: 1, alignItems: 'flex-end' },
-  readValue: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textPrimary, fontVariant: ['tabular-nums'], textAlign: 'right' },
-  readNote: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 1, textAlign: 'right' },
   recordTop: { marginBottom: spacing.xs },
   recordTotal: { fontSize: font.size.title3, fontWeight: font.weight.bold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   recordCount: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },

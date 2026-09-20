@@ -20,9 +20,8 @@
  * line is the half-point below it. `thresholdFromBookLine` / `bookLineFromThreshold`
  * are the only two places that conversion lives here.
  */
-import { americanImplied } from '@/lib/format';
+import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
-import { formatSignedUnits } from '@/lib/teamDetail';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropModel, type StatDef } from '@/lib/statCatalog';
 import { modelShort } from '@/lib/modelMeta';
@@ -203,6 +202,15 @@ export function propLineMove(
 }
 
 // ── Splits ───────────────────────────────────────────────────────────────────
+
+/**
+ * One pair of hit-rate cut-offs for every traffic light on the player page —
+ * the badge above the chart and the split tiles below it. Two lights with two
+ * cut-offs made a 42% split read neutral while the 42% badge read red (UX
+ * review, 2026-09-20). Display bands, not model thresholds.
+ */
+export const HIT_RATE_GOOD = 0.6;
+export const HIT_RATE_WEAK = 0.45;
 
 export interface SplitBucket {
   label: string;

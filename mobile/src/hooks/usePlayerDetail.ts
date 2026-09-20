@@ -104,6 +104,10 @@ export function usePlayerDetail(args: {
   const now = useNow();
   const team = games[0]?.team ?? null;
   const market = useMemo(() => propMarketForStat(stat), [stat]);
+  // Pull-to-refresh: every section keys on this, so one slow read still
+  // cannot hold the others back (UX review: an error with no retry).
+  const [nonce, setNonce] = useState(0);
+  const reload = () => setNonce((n) => n + 1);
 
   // ── Next game, from the player's current team ────────────────────────────
   // Same 7-day window as the team page. earliestUpcomingGame, not tonight's
@@ -112,7 +116,7 @@ export function usePlayerDetail(args: {
   const slate = useSection<GameRow[]>(
     [],
     () => fetchSlateGames(sport, today, addDays(today, 7)),
-    [sport, today],
+    [sport, today, nonce],
   );
   const nextGame: PlayerNextGame | null = useMemo(() => {
     if (!team) return null;
@@ -138,7 +142,7 @@ export function usePlayerDetail(args: {
           return { rows, history };
         }
       : null,
-    [gameId, market, playerName],
+    [gameId, market, playerName, nonce],
   );
   const tonight: TonightLine | null = useMemo(
     () => (market ? tonightLine(lines.data.rows, market, books, MODEL_BOOK) : null),
@@ -157,7 +161,7 @@ export function usePlayerDetail(args: {
   const logGames = useSection<GameRow[]>(
     [],
     logIds.length > 0 ? () => fetchGamesByIds(logIds) : null,
-    [logIds.join('|')],
+    [logIds.join('|'), nonce],
   );
   const gamesById = useMemo(() => new Map(logGames.data.map((g) => [g.game_id, g] as const)), [logGames.data]);
   const splits: StatSplits | null = useMemo(() => {
@@ -169,7 +173,7 @@ export function usePlayerDetail(args: {
   const picks = useSection(
     [] as Awaited<ReturnType<typeof fetchSettledPropPicksForPlayer>>,
     () => fetchSettledPropPicksForPlayer({ sport, playerId, playerName }),
-    [sport, playerId, playerName],
+    [sport, playerId, playerName, nonce],
   );
   const record: PlayerPickRecord = useMemo(() => playerPickRecord(picks.data), [picks.data]);
 
@@ -178,15 +182,17 @@ export function usePlayerDetail(args: {
   const savant = useSection<SavantStatsRow | null>(
     null,
     sport === 'MLB' && playerId && playerType ? () => fetchSavantStats(playerId, playerType, season) : null,
-    [sport, playerId, playerType, season],
+    [sport, playerId, playerType, season, nonce],
   );
   const lineup = useSection<LineupSlotRow | null>(
     null,
     sport === 'MLB' && playerId && gameId ? () => fetchLineupSlot(gameId, playerId) : null,
-    [sport, playerId, gameId],
+    [sport, playerId, gameId, nonce],
   );
 
   return {
+    reload,
+    loading: slate.loading || lines.loading || logGames.loading || picks.loading,
     books,
     booksReady,
     market,

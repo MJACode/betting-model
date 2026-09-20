@@ -26,6 +26,19 @@ export function expectedValue(
   return modelProbability * americanToDecimal(dkOdds) - 1;
 }
 
+/**
+ * "+2.4u" / "−0.5u" — a SIGNED result in units (CLAUDE.md §4: results are
+ * always units). Distinct from thresholds.ts's `formatUnits`, which prints an
+ * unsigned stake ("2.4u"). One home for both detail pages (UX review,
+ * 2026-09-20), in the formatter module so a player lib never imports from a
+ * team lib.
+ */
+export function formatSignedUnits(u: number): string {
+  const rounded = Math.round(u * 10) / 10;
+  if (rounded === 0) return '0.0u';
+  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}u`;
+}
+
 /** Percent formatting — 0.673 -> "67.3%". */
 export function formatPct(value: number | null | undefined, digits = 1): string {
   if (value == null || Number.isNaN(value)) return '—';
