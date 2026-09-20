@@ -26,8 +26,14 @@ weekly routine).
   on-disk size drift as the season accrues; do not treat a stale MB figure as
   current. Backup tarball: `nfl-model-odds-cache.tar.gz` (keep a copy outside
   this machine). See `nfl/data/odds_cache/README.md`.
-- `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
-  `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
+- `nfl/data/weather_cache/` is gitignored and is a CACHE of Supabase: every
+  file's hours are in `nfl_stadium_weather_hourly` (2026-09-20, 44 files /
+  117,192 stadium-hours imported by
+  `python -m data.ingestors.nfl_weather_cache_import --apply`, which resumes on
+  its `source` marker so a re-run writes nothing already stored). A fresh
+  pull -- `python nfl/scripts/validate_wind_forecast.py` rebuilds the files
+  in ~30 min -- is followed by that import, or the new hours exist on one
+  machine only.
 - Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
   plain historical series before that is near-analysis and LEAKS if used as a forecast.
 - The package keeps its own credit ledger: `nfl/data/credit_ledger.json`.

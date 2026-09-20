@@ -51,6 +51,11 @@ ALLOWED = {
     # what remains on disk is a cache of Supabase -- the sanctioned shape --
     # rather than the only copy. Declared with the importer, never on its own.
     "nfl/data/odds_cache": "imported to Supabase by nfl_odds_cache_import.py",
+    # 44 Open-Meteo issued-forecast files, 117,192 stadium-hours, that this
+    # test failed on from the day it was written until 2026-09-20. Every row
+    # is now in `nfl_stadium_weather_hourly` (tests/test_nfl_weather_cache_import.py
+    # pins the importer); what remains on disk is a cache of Supabase.
+    "nfl/data/weather_cache": "imported to Supabase by nfl_weather_cache_import.py",
     "tests": "test fixtures",
     "tests/fixtures": "test fixtures",
     "data/migrations": "schema",
