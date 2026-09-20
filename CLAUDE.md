@@ -298,10 +298,13 @@ was available and is part of the pick's meaning.
   destroys the evidence) — and **`config.RECORD_EXCLUSIONS`**, naming who
   asked. Sweep views DO re-cut (§7). Test:
   `tests/test_settled_record_is_immutable.py`.
-  **A paused model is LISTED, not hidden** (mike, same day: *"Don't hide detail
-  of paused models unless I say so"*) — labelled "Paused", record shown. Hiding
-  it left the Record tab counting a model the Models tab did not list. RETIRED
-  differs: nothing will score for it again.
+  **A paused model is LISTED, not hidden** on the Record tab (mike, same day:
+  *"Don't hide detail of paused models unless I say so"*) — its settled bets
+  stay in the published record. Matt, 2026-09-19: hide paused models from the
+  mobile *catalog* (Models list, bet-type builder, Stats add-pick, Today /
+  Signals / Live boards and their Market chips). Hiding the settled record is
+  still the bug; hiding an unactionable model from a follow-list is not.
+  RETIRED differs: nothing will score for it again.
 
 **The mechanics — the four lock flags, the remaining corollaries and the
 `picks_log` backstop — are in `.claude/rules/picks-and-publishing.md`**, which

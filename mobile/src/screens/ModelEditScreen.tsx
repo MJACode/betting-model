@@ -34,8 +34,8 @@ import {
   toggleChip,
 } from '@/lib/customModelFilters';
 import { formatPctSigned } from '@/lib/format';
-import { BET_TYPE_GROUPS, betTypeLabel, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
-import { isModelRetired } from '@/lib/thresholds';
+import { betTypeGroups, betTypeLabel, PAUSED_RULE_CAPTION, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
+import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
 
@@ -748,6 +748,9 @@ function RuleRow({
   // its floors do nothing — nothing will ever score another pick for it — so
   // they are shown disabled and removing the rule is the only action.
   const retired = isModelRetired(rule.model_id);
+  const paused = isModelPaused(rule.model_id);
+  // Floors stay editable on a paused rule: the backtest still grades its
+  // settled history. Retired floors do nothing (the rule is dropped).
 
   return (
     <View style={styles.ruleRow}>
@@ -756,6 +759,8 @@ function RuleRow({
           <Text style={styles.ruleModel}>{betTypeLabel(rule.model_id)}</Text>
           {retired ? (
             <Text style={styles.ruleRetired}>{RETIRED_RULE_CAPTION}</Text>
+          ) : paused ? (
+            <Text style={styles.ruleRetired}>{PAUSED_RULE_CAPTION}</Text>
           ) : null}
         </View>
         <Pressable
@@ -861,7 +866,7 @@ function ModelPickerModal({
           <View style={{ width: 50 }} />
         </View>
         <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          {BET_TYPE_GROUPS.map((group) => (
+          {betTypeGroups().map((group) => (
             <View key={group.sport} style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>{group.sport}</Text>
               {group.options.map((m) => {

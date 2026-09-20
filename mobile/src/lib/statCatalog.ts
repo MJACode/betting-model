@@ -1,7 +1,7 @@
 import { propMarketForModel } from './markets';
 import type { PlayerType, RecentGameRow, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
-import { isModelRetired } from './thresholds';
+import { isModelPaused, isModelRetired } from './thresholds';
 
 export type StatGroup =
   | 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC'
@@ -335,9 +335,10 @@ const STAT_KEY_TO_MARKET: Record<string, string> = {
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
   const id = rawPropModelForStat(def);
-  // Retirement is about the model tracker, not the stat: the leaderboard keeps
-  // the column, the Stats tab just never offers a retired model's pick on it.
-  return id != null && isModelRetired(id) ? null : id;
+  // Pause and retirement are about the model tracker, not the stat: the
+  // leaderboard keeps the column, the Stats tab just never offers a paused or
+  // retired model's pick on it (Matt, 2026-09-19: catalog hide).
+  return id != null && (isModelRetired(id) || isModelPaused(id)) ? null : id;
 }
 
 /**
