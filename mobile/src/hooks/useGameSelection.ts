@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
  * the same two teams and their bets.
  *
  * Same module-level store + listener pattern as `useSportFilter` and
- * `useKellySettings`, and for the same reason: two tabs mounted at once have to
+ * `useSportFilter`, and for the same reason: two tabs mounted at once have to
  * see one value, and a context provider for a Set of ids is more wiring than
  * the value is worth.
  *

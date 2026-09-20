@@ -43,7 +43,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 /** What a subscription actually buys. Kept honest — no ROI promises. */
 const INCLUDED = [
   'Every BET signal, all 8 sports',
-  'Recommended stake sized to your bankroll',
+  'Recommended stake in units, priced off the number we bet',
   'Live in-play signals as games move',
   'Player props, parlays and same-game builder',
   'The subscriber Discord, included',

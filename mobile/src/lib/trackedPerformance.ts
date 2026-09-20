@@ -13,8 +13,8 @@
  * P&L convention: the server's profit_flat is dollars at a $100 flat stake,
  * so a bet at any stake S grades as profit_flat x S/100 (WIN scales the
  * payout, LOSS -100 becomes -S, PUSH stays 0). The caller chooses the stake
- * per bet via `stakeFor` — $100 flat (default), the pick's Kelly-sized bet,
- * or a user-entered custom amount (see useStakeSettings).
+ * per bet via `stakeFor` — $100 flat (default) or a user-entered custom
+ * amount (see useStakeSettings).
  */
 import type { Pick } from '@/types';
 

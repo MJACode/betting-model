@@ -37,7 +37,7 @@ const SLIDES: Slide[] = [
     icon: 'wallet-outline',
     title: 'Bet to stay in the game',
     body:
-      'Sizes default to a fraction of Kelly so one cold run can’t wipe you out. Set a bankroll you can afford to lose, shop for the best price, skip the parlays the books push, and never chase. Tools here are built to help you last — not to promise you can’t lose.',
+      'Every pick is a flat 1-unit play, so no single call can run away with your roll. Pick a unit you can afford to lose, shop for the best price, skip the parlays the books push, and never chase. Tools here are built to help you last — not to promise you can’t lose.',
   },
 ];
 

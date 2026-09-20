@@ -20,8 +20,7 @@
  */
 
 import { americanToDecimal } from '@/lib/format';
-import { stakeFor, effectiveKellyFraction, KELLY_MULTIPLIER,
-         type KellySizingOpts, type UnitStake } from '@/lib/thresholds';
+import { stakeFor, KELLY_MULTIPLIER, type UnitStake } from '@/lib/thresholds';
 import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, storedQuoteBook, MODEL_BOOK, BETTABLE_BOOKS } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
@@ -352,29 +351,15 @@ export function isValidCombo(legs: ParlayLeg[]): boolean {
 }
 
 /**
- * (3) Parlay Kelly sizing. `metrics.kellyFraction` is FULL Kelly; we pre-scale
- * by KELLY_MULTIPLIER (0.10) so a parlay defaults to tenth-Kelly — matching the
- * single-pick path, where the server already stored tenth-Kelly in
- * pick.kelly_fraction. The user's multiplier + cap then apply identically on top
- * (multiplier 1.0 = tenth-Kelly; 2.5 ≈ quarter-Kelly; 10 = full Kelly).
+ * (3) Parlay stake in UNITS — same tenth-Kelly basis as a straight pick's stake.
+ * `metrics.kellyFraction` is FULL Kelly; we pre-scale by KELLY_MULTIPLIER (0.10)
+ * so a parlay matches the single-pick path, where the server already stored
+ * tenth-Kelly in pick.kelly_fraction.
  */
-export function parlayRecommendedBet(
-  metrics: ParlayMetrics,
-  bankroll: number,
-  opts: KellySizingOpts,
-): number {
-  const f = effectiveKellyFraction(metrics.kellyFraction * KELLY_MULTIPLIER, opts);
-  return Math.round(f * bankroll * 100) / 100;
-}
-
-/** Parlay stake in UNITS — same tenth-Kelly basis as a straight pick's stake. */
-export function parlayRecommendedUnits(
-  metrics: ParlayMetrics,
-  opts: KellySizingOpts,
-): UnitStake {
+export function parlayRecommendedUnits(metrics: ParlayMetrics): UnitStake {
   // Grossed up against the COMBINED parlay price, so a +600 slip correctly risks
   // a fraction of a unit to win its conviction rather than laying the full one.
-  return stakeFor(metrics.kellyFraction * KELLY_MULTIPLIER, metrics.americanOdds, opts);
+  return stakeFor(metrics.kellyFraction * KELLY_MULTIPLIER, metrics.americanOdds);
 }
 
 // ── Custom legs (user-entered) ───────────────────────────────────────────────

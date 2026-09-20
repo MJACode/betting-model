@@ -92,8 +92,8 @@ export function ExplainerScreen() {
         <Section heading="BET / AVOID / NONE">
           <Bullet>
             <Strong>BET</Strong> — model probability AND edge both clear that
-            model's threshold. Tenth-Kelly bet size attached. These are the
-            picks worth backing.
+            model's threshold. Unit stake attached. These are the picks worth
+            backing.
           </Bullet>
           <Bullet>
             <Strong>AVOID</Strong> — model strongly disagrees with DK (edge ≤
@@ -111,19 +111,29 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="Tenth-Kelly bet sizing">
+        <Section heading="Stakes are in units, not dollars">
           <P>
-            Full Kelly is the math-optimal staking fraction for a known edge.
-            It's also volatile — drawdowns are brutal. We use{' '}
-            <Strong>10% of full Kelly</Strong>:
+            Every stake we publish is in <Strong>units</Strong>. One unit is one
+            flat bet at whatever size you bet — we never ask for your bankroll
+            and never put a dollar figure on a pick, because the same "$50" means
+            something different to every reader.
           </P>
-          <Mono>{`fraction = 0.10 × (model_prob − implied_prob) / (1 − implied_prob)`}</Mono>
-          <Mono>bet = min(fraction × bankroll, 5% × bankroll)</Mono>
           <P>
-            The 5% cap keeps any single bet survivable. Tenth-Kelly typically
-            lands in the 2-4% range, letting edge differences differentiate
-            sizes (vs quarter-Kelly which always hit the cap and produced flat
-            bets). Change your bankroll in Settings — bet sizes recompute live.
+            A pick is quoted as units to <Strong>win</Strong>, then grossed up by
+            the price into what you actually lay:
+          </P>
+          <Mono>{`risk = conviction / (decimal_odds − 1)`}</Mono>
+          <P>
+            Every BET is a 1-unit play today, so at −110 you lay 1.1u to win 1u,
+            and at +150 you lay 0.67u to win the same 1u. Risk is hard-capped at
+            3u on any one event. Kelly still <Strong>ranks</Strong> picks behind
+            the scenes — it just no longer sets the stake, because a flat scale
+            beat a Kelly-weighted one over our settled record.
+          </P>
+          <P>
+            The app, the Discord channels and push all publish the identical
+            number. There is nothing per-user to configure, so nothing can drift
+            between them.
           </P>
         </Section>
 
@@ -264,7 +274,7 @@ export function ExplainerScreen() {
           <P>
             Below that, <Strong>Tracked picks</Strong> grades the picks you tap
             Track on. Those score automatically from our settled results at the
-            stake basis you choose ($100 flat, Kelly, or a custom amount), so
+            stake basis you choose ($100 flat or a custom amount), so
             you can see how the model's calls would have done for you without
             logging anything.
           </P>
@@ -305,9 +315,9 @@ export function ExplainerScreen() {
             bleed out.
           </Bullet>
           <Bullet>
-            <Strong>Size with fractional Kelly.</Strong> Bets default to a small
-            fraction of full Kelly so one cold stretch can't wipe you out. Set a
-            bankroll you can afford to lose in Settings.
+            <Strong>Keep your unit small.</Strong> Every pick is a 1-unit play,
+            so pick a unit size you can lose thirty times over without flinching
+            — that is what keeps a cold stretch survivable.
           </Bullet>
           <Bullet>
             <Strong>Shop for the best price.</Strong> Getting −105 instead of −110
