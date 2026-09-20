@@ -76,6 +76,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # for NCAAF games, the train/serve repair for the totals model's wx_*
     # features (it trained on reanalysis and is served a forecast).
     "add_game_weather_issued.sql",
+    # 2026-09-20: the hourly Open-Meteo ISSUED series per NFL stadium, the
+    # content of nfl/data/weather_cache (44 files on one laptop, the store
+    # tests/test_everything_in_supabase.py had failed on since 2026-09-12).
+    # Written by data/ingestors/nfl_weather_cache_import.py.
+    "add_nfl_stadium_weather_hourly.sql",
     # 2026-09-09 (mike: "remove DK only - we want best lines for us
     # regardless"): picks carry the price each pick was DECIDED at
     # (decision_*); the graded matview, the record views and the custom-model
