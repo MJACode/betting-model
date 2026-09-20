@@ -509,10 +509,10 @@ def step_bullpen(run_date: str) -> bool:
 def step_nhl_stats(run_date: str) -> bool:
     fn = _import_step("nhl_stats")
     try:
-        year  = int(run_date[:4])
-        month = int(run_date[5:7])
-        # NHL seasons run Oct–Jun, labeled by ENDING year (Nov 2026 → 2027).
-        season = year + 1 if month >= 10 else year
+        # Labeled by ENDING year; the season can open in September
+        # (2026-27 did, on 09-29) — data/season_labels.py.
+        from data.season_labels import nhl_season_label
+        season = nhl_season_label(run_date)
         result = fn(season=season, as_of_date=run_date)
         logger.success(f"✓ NHL stats: {result}")
         return True
