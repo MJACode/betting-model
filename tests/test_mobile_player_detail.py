@@ -20,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MOBILE = ROOT / "mobile"
 SCREEN = MOBILE / "src" / "screens" / "PlayerStatsScreen.tsx"
 HOOK = MOBILE / "src" / "hooks" / "usePlayerDetail.ts"
+TRENDS = MOBILE / "src" / "hooks" / "usePlayerTrends.ts"
+NEWS = MOBILE / "src" / "hooks" / "usePlayerNews.ts"
+QUOTE = MOBILE / "src" / "hooks" / "usePlayerPropQuote.ts"
 LIB = MOBILE / "src" / "lib" / "playerDetail.ts"
 QUERIES = MOBILE / "src" / "lib" / "queries.ts"
 
@@ -45,6 +48,59 @@ def test_the_book_line_to_threshold_conversion_is_the_boards():
     m = re.search(r"export function thresholdFromBookLine\(line: number\): number \{\n(.*?)\n\}", lib, re.S)
     assert m
     assert "Number.isInteger(line) ? line : Math.ceil(line)" in m.group(1)
+
+
+def test_pick_provenance_labels_the_raw_scored_line():
+    """Reviewer Medium on #781: bookLineFromThreshold(7) is 6.5, so an integer
+    scored_line must be labelled from the source number, not the inverse."""
+    screen = _read(SCREEN)
+    assert "bookLineFromThreshold(pickThreshold)" not in screen
+    assert "pick line ${pickLine}" in screen
+    assert "book line ${detail.tonight.line}" in screen
+    assert "const pickLine = useMemo(" in screen
+    assert "thresholdFromBookLine(pickLine)" in screen
+    # The inverse stays for half-point thresholds (6+ → 5.5); it is not the
+    # label path.
+    lib = _read(LIB)
+    inv = re.search(
+        r"export function bookLineFromThreshold\(threshold: number\): number \{\n(.*?)\n\}",
+        lib,
+        re.S,
+    )
+    assert inv
+    assert "threshold - 0.5" in inv.group(1)
+
+
+def test_ruler_snaps_exactly_not_through_round_line_to_step():
+    """A 62.5 book line must sit at 62.5's threshold, not a 65+ step."""
+    screen = _read(SCREEN)
+    assert "setLine((prev) => (prev === snapThreshold ? prev : snapThreshold))" in screen
+    assert "roundLineToStep(postedThreshold" not in screen
+    assert "roundLineToStep(pickThreshold" not in screen
+    assert "roundLineToStep(snapThreshold" not in screen
+
+
+def test_pull_to_refresh_reloads_trends_news_and_quote():
+    """Reviewer Medium on #781: RefreshControl must not only bump the detail
+    nonce — the chart, news and quote have their own hooks."""
+    screen = _read(SCREEN)
+    m = re.search(r"onRefresh=\{\(\) => \{(.+?)\}\}", screen, re.S)
+    assert m, "RefreshControl onRefresh is missing"
+    body = m.group(1)
+    assert "reloadTrends()" in body
+    assert "news.reload()" in body
+    assert "propQuote.reload()" in body
+    assert "detail.reload()" in body
+    assert "refreshBusy" in screen
+    assert "news.loading" in screen
+    assert "propQuote.loading" in screen
+    trends = _read(TRENDS)
+    assert "reload" in trends
+    assert "setNonce((n) => n + 1)" in trends
+    news = _read(NEWS)
+    assert "setLoading(true)" in news
+    quote = _read(QUOTE)
+    assert "setNonce((n) => n + 1)" in quote
 
 
 def test_the_player_record_read_is_the_record_filter_on_the_server():

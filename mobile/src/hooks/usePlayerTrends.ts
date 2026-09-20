@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchPlayerGameLog } from '@/lib/queries';
 import {
   logStatValue,
@@ -115,6 +115,14 @@ export function usePlayerTrends({
   // because it cannot know which tabs a player fills until the rows land.
   const [loaded, setLoaded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+  // Loading flips true here, not only in the effect: pull-to-refresh
+  // batches the nonce with this so the spinner does not clear on the
+  // one frame before the effect runs (Reviewer Medium on #781).
+  const reload = useCallback(() => {
+    setLoading(true);
+    setNonce((n) => n + 1);
+  }, []);
 
   const key = stat?.key ?? statKey ?? null;
   // Whether a stat is selected at all gates the fetch; WHICH stat does not.
@@ -157,7 +165,7 @@ export function usePlayerTrends({
     return () => {
       mounted = false;
     };
-  }, [playerId, playerName, beforeDate, hasStat, sport, playerType, limit]);
+  }, [playerId, playerName, beforeDate, hasStat, sport, playerType, limit, nonce]);
 
   // Newest-first, missing games dropped rather than counted as zero.
   const values = useMemo(() => {
@@ -166,5 +174,5 @@ export function usePlayerTrends({
     // `stat` is an object literal at some call sites — key it by its stat key.
   }, [games, key, sport, playerType]);
 
-  return { games, values, trends: bucketize(values), loading, loaded, error };
+  return { games, values, trends: bucketize(values), loading, loaded, error, reload };
 }
