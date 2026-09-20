@@ -21,12 +21,16 @@ import { usePlayerTrends } from '@/hooks/usePlayerTrends';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
-  chipGroupsFor,
+  chipKey,
+  chipsForLoadedPlayer,
   chipsForPlayer,
   defaultChipForPlayer,
+  filledChipCounts,
   gameContextLine,
+  groupsOfChips,
   lineStepFor,
   logStatValue,
+  openingChip,
   playerSubtitle,
   roundLineToStep,
   windowOptionsFor,
@@ -61,8 +65,7 @@ export function PlayerStatsScreen() {
   // went multi-sport) carries no sport — MLB was the only one that could open it.
   const sport: PlayerLogSport = route.params.sport ?? 'MLB';
 
-  const chips = useMemo(() => chipsForPlayer(sport, playerType), [sport, playerType]);
-  const groups = useMemo(() => chipGroupsFor(sport, playerType), [sport, playerType]);
+  const allChips = useMemo(() => chipsForPlayer(sport, playerType), [sport, playerType]);
   const [stat, setStat] = useState<StatDef | null>(() => defaultChipForPlayer(sport, playerType));
   const windows = useMemo(() => windowOptionsFor(sport), [sport]);
   const [gameWindow, setGameWindow] = useState<GameWindow>(10);
@@ -89,6 +92,24 @@ export function PlayerStatsScreen() {
     stat,
     playerType,
   });
+
+  // The tabs this player actually fills, read off the LOADED log: a quarterback
+  // offered a Defense tab is a control that leads nowhere — ten charted zeroes
+  // and a 0% badge in alarm red (Matt, 2026-09-19). Everything shows until the
+  // log arrives, so the row never shrinks to a guess and then grows back.
+  const chips = useMemo(() => chipsForLoadedPlayer(allChips, games), [allChips, games]);
+  const groups = useMemo(() => groupsOfChips(chips), [chips]);
+  // Which of those chips the player has a number in — what a tab opens on.
+  const filled = useMemo(() => filledChipCounts(chips, games), [chips, games]);
+
+  // The load can retire the group the screen opened on — an NFL screen opens
+  // on Pass Yards, which a linebacker will never fill. Fall back to the first
+  // stat this player DOES fill rather than charting one whose tab is gone.
+  useEffect(() => {
+    if (stat && !chips.some((c) => c.key === stat.key && c.group === stat.group)) {
+      setStat(openingChip(chips, filled));
+    }
+  }, [chips, filled, stat]);
 
   // Recent news for this player. Independent of the trend load: news failing
   // must never cost the chart, and vice versa.
@@ -226,7 +247,7 @@ export function PlayerStatsScreen() {
           groups={groups}
           active={activeGroup}
           onChange={(g) => {
-            const first = chips.find((c) => c.group === g);
+            const first = openingChip(chips, filled, g);
             if (first) setStat(first);
           }}
         />
@@ -241,7 +262,7 @@ export function PlayerStatsScreen() {
             const active = c.key === stat?.key && c.group === stat?.group;
             return (
               <Pressable
-                key={`${c.group}:${String(c.key)}`}
+                key={chipKey(c)}
                 onPress={() => setStat(c)}
                 style={[styles.windowChip, active && styles.windowChipActive]}
               >
