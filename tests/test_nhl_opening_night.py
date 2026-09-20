@@ -181,3 +181,18 @@ class TestThreeWayMarketKey:
         assert {r["market"] for r in rows} == {"h2h_3way"}
         assert rows[0]["draw_price"] == 330
         assert rows[0]["game_id"] == "NHL_2026-09-29_MTL_TOR"
+
+
+class TestNoHollowTeamRowBeforeTheFirstGame:
+    def test_a_team_that_has_not_played_gets_no_row(self, monkeypatch):
+        """On 2026-09-29 the summary is empty and the standings list 32 teams.
+        A row of NULLs for the new season blocks the fall-back to last season."""
+        from data.ingestors import nhl_stats_ingestor as ni
+        monkeypatch.setattr(ni, "_fetch_nhl_team_stats", lambda s: {
+            "BOS": {"games_played": 1, "goals_per_game": 3.0}})
+        monkeypatch.setattr(ni, "_fetch_nhl_advanced_stats", lambda s: {})
+        monkeypatch.setattr(ni, "_fetch_nhl_standings", lambda s: {"BOS": {}, "TOR": {}})
+        monkeypatch.setattr(ni, "_rolling_goals", lambda *a, **k: None)
+        monkeypatch.setattr(ni, "_home_away_goals", lambda *a, **k: None)
+        rows = ni._build_nhl_team_rows(2027, "2026-09-30", conn=None)
+        assert [r["team"] for r in rows] == ["BOS"]
