@@ -53,6 +53,19 @@ def test_the_floor_is_the_global_one_unless_the_model_carries_a_higher_one(monke
     assert config.min_ev_for("nobody") == 0.30
 
 
+def test_the_shipped_floor_is_020_and_the_ncaaf_moneyline_keeps_the_030_it_was_swept_under(monkeypatch):
+    # 2026-09-20 (mike: "30% is too aggressive then"). conftest pins the live
+    # value out of the way, so the shipped default is read from the source.
+    from pathlib import Path
+    src = (Path(config.__file__)).read_text(encoding="utf-8")
+    assert 'os.environ.get("GLOBAL_MIN_EV", "0.20")' in src
+    monkeypatch.setattr(config, "GLOBAL_MIN_EV", 0.20)
+    assert config.min_ev_for("nfl_prop_market") == 0.20
+    # its 0.50/0.16 cut was swept with a 0.30 floor in force (2026-09-19)
+    assert config.min_ev_for("ncaaf_live_win_prob") == 0.30
+    assert config.min_ev_for("mlb_live_total_runs") == 0.32
+
+
 def test_expected_value_is_on_the_quoted_price():
     assert config.expected_value(0.70, -110) == pytest.approx(0.70 * (1 + 100 / 110) - 1)
     assert config.expected_value(0.5, 100) == pytest.approx(0.0)
