@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, zero NFL bets on the first Sunday under the 0.30 EV floor (56 voided 09-19; the 13:25 UTC prop pass dropped 4 of 4; nfl_prop_market's largest EV ever is 0.227 across 90 bets); #791: a wind/opener card run with no bets now removes the earlier run's card file (MIN @ CHI re-evaluated every ten minutes off a 15:40 card) |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, NHL 2026-27 research (docs/nhl_market_research.md): season opens 09-29 at 84 games; zero NHL picks ever; six pipeline defects (CAN/BLU team ids, September season label, goalieId vs playerId, GSAA = GAA, h2h_3way key, 2025-26 missing); nhl_moneyline walk-forward AUC 0.605 leaked vs 0.563 clean; graded evidence on what has beaten NHL lines; odds-history and stats sources |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, Settings: Bankroll and the Kelly sizing cards removed (both were already no-ops — conviction has been flat 1u since 08-29). Performance's Kelly dollar mode dropped with them; `useBankroll` / `useKellySettings` deleted. Fixed the daily exposure limit, which stored units/100 under a units label (10 → 0.1u). Stake math unchanged; app/Discord parity intact |
 | 2026-09-20 | [2026-09](./2026-09.md) | 2026-09-20, multi-pick sportsbook hand-off: Open used only the first linked leg (`firstLink`). Combiner joins DK/FD/MGM/Caesars/ESPN BET; Hard Rock and BetRivers stay per-leg. `verify_betslip_combine.ts` + pytest pin |
