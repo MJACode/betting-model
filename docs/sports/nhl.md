@@ -4,12 +4,43 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
-> **Read `docs/nhl_market_research.md` first (2026-09-20).** The holdout
-> numbers in the table below were produced on season-final inputs: on clean
-> inputs `nhl_moneyline` walks forward at AUC 0.563, not 0.642. That doc also
-> lists six measured defects in this pipeline (team ids, the September season
-> label, the goalie lookup, "GSAA", the 3-way market key, the missing 2025-26
-> season) — several statements below are wrong until they are fixed.
+> **Read `docs/nhl_market_research.md` first (2026-09-20).** The 2026-06-21
+> holdout numbers in the table below were produced on season-final inputs. On
+> the rebuilt inputs `nhl_moneyline` walks forward at AUC 0.585 and a log loss
+> no better than quoting the home-win rate. The six defects that doc lists
+> (team ids, the September season label, the goalie lookup, "GSAA", the 3-way
+> market key, the missing 2025-26 season) were fixed the same day; the
+> sections below marked **(2026-09-20)** describe the pipeline as it is now.
+
+### Inputs as they are now (2026-09-20)
+
+- **Per-game logs**, from the NHL's free stats API (`?isGame=true`), in
+  Supabase: `nhl_team_game_log`, `nhl_goalie_game_log`, `nhl_skater_game_log`
+  (2017-18 → 2025-26 team and goalie; skaters 2018-19 →). Importer:
+  `data/ingestors/nhl_game_logs.py` (`--seasons A B --apply`, `--no-skaters`
+  for the fast pass, `--recent N` for the daily top-up). Skater reports are
+  capped at 10,000 rows a call, so they are pulled a week at a time and a
+  capped page is refused. `totalShotAttempts` is NULL before 2022-23; the 5v5
+  counts (`sat_for_5v5`) go back the whole way and are what Corsi uses.
+- **One function rates goalies and teams for training and for scoring**:
+  `data/nhl_asof.py`. Strictly before the date asked about. A goalie's save%
+  and GAA are taken over this season and last and regressed to the league
+  (500 shots / 600 minutes); `gsaa` is real goals saved above average, this
+  season only; the `_last5` columns are his last five starts. A team's shot
+  share, power play, penalty kill and shot rates are
+  `(n·current + 25·prior) / (n + 25)` on games played.
+  `python -m data.nhl_asof --seasons 2019 2026 --apply` rebuilds history;
+  `run_nhl_stats_ingestor` tops the logs up and calls the same functions.
+- `nhl_goalie_stats` now holds **one row per team per game — the starter's
+  line before that game** (20,770 rows 2019-2026), not one row per season.
+  The pre-rebuild rows are in `nhl_goalie_stats_pre_asof_20260920`; the live
+  2026 team rows the rebuild replaced are in `nhl_team_stats_live_2026_20260920`.
+- **Season label**: `data/season_labels.nhl_season_label` — the new season
+  starts in SEPTEMBER (2026-27 opened 09-29). The October rule is gone.
+- **A team's first game of a season is `is_early_season = 1`.** It used to read
+  last season's final row (`games_played 82`) and come out 0.
+- **Known gap:** `games` holds no 2020 bubble playoffs (it stops 2020-03-11);
+  the logs do (130 games).
 
 ## 24. NHL — Pipeline Operations
 ### Models (moneyline + regulation LIVE — trained 2026-06-21; O/U + puckline blocked)
@@ -36,9 +67,9 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 - **Regulation 3-class encoding** (`feature_engine._compute_target` for `h2h_3way`): `0 = away regulation win`, `1 = draw (game went to OT/SO)`, `2 = home regulation win`. Must match `NHL_3WAY_CLASSES = ["away","draw","home"]` in the scorer and the `_evaluate_result` / `_compute_result` settlement logic. A draw bet WINS iff `went_to_ot = 1`.
 - **games encoding** (`parse_nhl_game`): `went_to_ot = 1` for OT/SO; `home_win_reg = 1` only for a home regulation win (0 for away reg win OR any OT/SO game); `regulation_tie = went_to_ot`. `home_win` counts OT/SO (full-game moneyline).
 - **Franchise id:** Arizona Coyotes → Utah (Hockey Club → Mammoth) all map to the canonical **`UTA`** across every season — in `nhl_stats_ingestor.NHL_API_ABBREV_MAP`, `odds_ingestor.NHL_ODDS_API_MAP`, and `sbr_loader.NHL_NAME_MAP`. Historical ARI rows fold into UTA so the franchise has one identity.
-- **Goalie features:** SEASON save%/GAA/GSAA diffs only. The `_last5` goalie features are excluded from the model feature lists — no per-game goalie logs are backfilled, so they'd null-drop every training row. The daily ingestor still writes the columns for future use.
+- **Goalie features:** save%/GAA/GSAA diffs, built as-of from the per-game log (see "Inputs as they are now"). The `_last5` columns are populated for every game since 2026-09-20 but are NOT in the model feature lists — `build_training_dataset` keeps only listed features, and adding them is a feature-list change that needs its own walk-forward.
 - **Starting-goalie confirm:** NHL `/v1/schedule` has no `probableGoalie` (measured 2026-09-14). ESPN core `probableStartingGoalie` overlays the game-day `nhl_goalie_stats` row (`data/ingestors/espn_probables.py`). The game-model gate then vetoes a BET when that named goalie is Out/Doubtful with `status_ts` ≤ the quote (`docs/game_injury_gate.md`). No ASOF fallback to the season snapshot for the gate — that is last year's #1.
-- **Season label:** ending year (Nov 2026 games → season 2027). `step_nhl_stats` and the odds ingestor both roll Oct–Dec into next year's label.
+- **Season label:** ending year, rolling from SEPTEMBER (`data/season_labels.py`); the 2020 bubble playoffs are the one September that belongs to the season before.
 
 ### Pipeline
 

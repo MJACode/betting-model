@@ -81,6 +81,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # tests/test_everything_in_supabase.py had failed on since 2026-09-12).
     # Written by data/ingestors/nfl_weather_cache_import.py.
     "add_nfl_stadium_weather_hourly.sql",
+    # 2026-09-20: per-game NHL team / goalie / skater logs from the NHL's free
+    # stats API. The NHL models read one SEASON-FINAL row per goalie and
+    # carried-forward team rates; an as-of-date feature needs the games it is
+    # summed from. Written by data/ingestors/nhl_game_logs.py.
+    "add_nhl_game_logs.sql",
     # 2026-09-09 (mike: "remove DK only - we want best lines for us
     # regardless"): picks carry the price each pick was DECIDED at
     # (decision_*); the graded matview, the record views and the custom-model

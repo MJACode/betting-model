@@ -19,10 +19,13 @@
 2. **The NHL pipeline has never produced a pick** (`picks` where `sport='NHL'` or `model_id like 'nhl%'` or
    `game_id like 'NHL_%'` → 0 rows) and opening night is its first production run. Six
    defects found on the way (§1) would each corrupt that run.
-3. **The two existing models were trained on the future, and on clean inputs
-   the moneyline model shows no skill.** Walk-forward mean AUC 0.605 with the
-   leaked inputs, **0.563** without them; Brier 0.277 / 0.260 / 0.251 / 0.249
-   against ~0.249 for quoting the home-win rate every game (§2).
+3. **The two existing models were trained on the future, and on honest inputs
+   the moneyline model is about as good as quoting the home-win rate.**
+   Walk-forward mean AUC 0.605 with the leaked goalie inputs, 0.582 with them
+   removed, **0.585 on the rebuilt inputs** with log loss 0.692 against 0.691
+   for the home-win rate — and 0.655-0.674 for the market's close (§2, §5).
+   *Corrected 2026-09-20: an earlier version of this item said 0.563 and
+   called six inputs leaked. Three were; see §2.*
 4. **The best-evidenced fact about NHL betting is that the moneyline close is
    efficient** — four independent large-sample null results (§5). The best
    public models roughly *match* the Pinnacle close; none has a published
@@ -58,36 +61,67 @@ as things stand a BET from either NHL model publishes like any other.
 Both were trained 2026-06-21 (`model_registry` ids 77, 78), before the
 2026-09-03 team-stats rebuild, and have not been retrained.
 
-**What is still season-final in the training data** (so the model is told how
-the season ended):
+**CORRECTION (2026-09-20, same day).** The first version of this section said
+six inputs were leaked. **Three were.** The team rates were constant within a
+season, which I read as "the season's final number"; reading the rebuild code
+and checking Boston against the NHL API showed they were the PRIOR season's
+finals (table season 2025: PP .2222 / PK .8246 = the API's 2023-24 finals) —
+stale, but known before the season started, so not a leak. The 0.563 figure
+below came from removing those three honest inputs as well, and understates
+the model. The goalie finding stands, to the digit.
 
-- `corsi_for_pct`, `power_play_pct`, `penalty_kill_pct`, `shots_per_game`:
-  **at most one distinct value per team-season** for 2020-2025 (none at all in 2019) (query over
-  `nhl_team_stats`, grouped by team and season). The rebuild fixed the counting
-  stats (goal differential now has 29-45 distinct values a season) and carried
-  the rate stats forward unchanged.
+**What was season-final in the training data** (so the model was told how the
+season ended):
+
 - Goalie save%, GAA, "GSAA": one row per team-season dated `YYYY-10-01`. BOS
-  2025 reads Swayman .8921 / 3.1145 — his **final** 2024-25 line per the NHL
+  2025 read Swayman .8921 / 3.1145 — his **final** 2024-25 line per the NHL
   API, to the digit. The feature engine takes "latest row on or before game
-  date", which is that row for every game.
+  date", which was that row for every game.
 
-That is 6 of the model's 22 features. The other team inputs were checked the
+**What was stale but honest:** `corsi_for_pct`, `power_play_pct`,
+`penalty_kill_pct`, `shots_per_game` — at most one distinct value per
+team-season 2020-2025, the prior season's final (none at all in 2019).
+
+That is 3 leaked and 3 stale of the model's 22 features. The other team inputs were checked the
 same way and do vary: goals home / away, last-5, last-10, goals against and
 wins have at least 13 distinct values in every team-season 2019-2025.
 
 **Walk-forward, `scripts/walk_forward_eval.py`, fixed XGBoost params, same
 rows in both runs:**
 
-| Test season | n | AUC, all 22 features | AUC, 16 clean features | Brier, clean |
+| Test season | n | AUC, all 22 (goalie leak in) | AUC, 3 goalie inputs removed | AUC, 6 removed (over-strict) |
 |---|---|---|---|---|
-| 2021 | 834 | 0.594 | 0.536 | 0.277 |
-| 2022 | 1,197 | 0.588 | 0.554 | 0.260 |
-| 2023 | 1,277 | 0.622 | 0.585 | 0.251 |
-| 2024 | 1,275 | 0.618 | 0.578 | 0.249 |
-| mean | | **0.605** | **0.563** | |
+| 2021 | 834 | 0.594 | 0.556 | 0.536 |
+| 2022 | 1,197 | 0.588 | 0.581 | 0.554 |
+| 2023 | 1,277 | 0.622 | 0.601 | 0.585 |
+| 2024 | 1,275 | 0.618 | 0.591 | 0.578 |
+| mean | | **0.605** | **0.582** | 0.563 |
+
+**After the rebuild** (every goalie number and team rate summed from per-game
+logs strictly before the game date — `data/nhl_asof.py`; 2025-26 backfilled;
+same fixed params; `base ll` is the log loss of quoting the training-set
+home-win rate for every game):
+
+| Test season | n | AUC | Brier | log loss | base ll |
+|---|---|---|---|---|---|
+| 2021 | 909 | 0.547 | 0.261 | 0.721 | 0.692 |
+| 2022 | 1,351 | 0.605 | 0.244 | 0.686 | 0.690 |
+| 2023 | 1,356 | 0.602 | 0.247 | 0.690 | 0.693 |
+| 2024 | 1,355 | 0.615 | 0.242 | 0.678 | 0.691 |
+| 2025 | 1,353 | 0.595 | 0.243 | 0.680 | 0.687 |
+| 2026 | 1,352 | 0.548 | 0.252 | 0.699 | 0.693 |
+| mean | | **0.585** | | **0.692** | 0.691 |
+
+Dropping the three goalie inputs entirely scores 0.592 / log loss 0.690 — the
+honest goalie numbers add nothing measurable at fixed parameters. The
+published closes in §5 run 0.655-0.674 log loss. **A model at 0.69 does not
+know more than a market at 0.66**; whatever "edge" it shows against a posted
+line is the model's error, not the book's.
 
 For scale: Lopez, Matthews & Baumer measured the **market's** AUC on 12,990
-NHL games at 0.595. The registry's 60.4% / AUC 0.642 holdout was the leak.
+NHL games at 0.595. The registry's 60.4% / AUC 0.642 holdout was trained
+2026-06-21, before the team-stats rebuild, when every input was its own
+season's final (`docs/team_stats_leak.md`).
 What this does *not* measure: profit. There are no historical NHL prices in
 the database to grade against (the recorded "+22.6%" backtest assumed −110 on
 every game).

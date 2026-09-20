@@ -998,7 +998,10 @@ def _get_nhl_team_stats(conn: DBConnection,
     """, (team, season - 1)).fetchone()
 
     if row_prev:
-        return dict(zip(cols, row_prev))
+        # LAST season's final row stands in until this season has one. It is a
+        # legitimate baseline, but its `games_played` is last season's 82 — and
+        # `is_early_season` read that as a mid-season team on opening night.
+        return {**dict(zip(cols, row_prev)), "_prior_season": True}
     return {}
 
 
@@ -1043,7 +1046,8 @@ def build_nhl_game_features(conn: DBConnection,
     away_inj = injuries["away_injuries"]
 
     def _gp(s: dict) -> int:
-        return s.get("games_played") or 0
+        # A prior-season stand-in row has played 0 games THIS season.
+        return 0 if s.get("_prior_season") else (s.get("games_played") or 0)
 
     is_early = int(_gp(home_stats) < MIN_GAMES_BASELINE or
                    _gp(away_stats) < MIN_GAMES_BASELINE)
@@ -1289,7 +1293,7 @@ def _blk_nhl_asof(store: dict, team: str, season: int, game_date: str) -> dict:
             return entry[1][idx]
     prev = store.get((team, season - 1))
     if prev:
-        return prev[1][-1]
+        return {**prev[1][-1], "_prior_season": True}   # see _get_nhl_team_stats
     return {}
 
 
@@ -1342,7 +1346,8 @@ def _build_nhl_features_from_bulk(bulk: dict,
     away_stats["goals_away"] = _blk_nhl_loc_goals(bulk, away_team, game_date, season, "away")
 
     def _gp(s: dict) -> int:
-        return s.get("games_played") or 0
+        # A prior-season stand-in row has played 0 games THIS season.
+        return 0 if s.get("_prior_season") else (s.get("games_played") or 0)
 
     is_early = int(_gp(home_stats) < MIN_GAMES_BASELINE or
                    _gp(away_stats) < MIN_GAMES_BASELINE)
