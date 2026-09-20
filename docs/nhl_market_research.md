@@ -16,8 +16,8 @@
    games** a team, not 82 (`api-web.nhle.com/v1/schedule/2026-09-29`:
    `regularSeasonStartDate 2026-09-29`; `/club-schedule-season/{team}/20262027`
    returned 84 for 5 of 5 teams checked, 82 for 20252026).
-2. **The NHL pipeline has never produced a pick** (`select … from picks where
-   sport='NHL'` → 0 rows) and opening night is its first production run. Five
+2. **The NHL pipeline has never produced a pick** (`picks` where `sport='NHL'` or `model_id like 'nhl%'` or
+   `game_id like 'NHL_%'` → 0 rows) and opening night is its first production run. Six
    defects found on the way (§1) would each corrupt that run.
 3. **The two existing models were trained on the future, and on clean inputs
    the moneyline model shows no skill.** Walk-forward mean AUC 0.605 with the
@@ -41,7 +41,7 @@
 | # | What is wrong | Evidence | Consequence on 2026-09-29 |
 |---|---|---|---|
 | 1 | Two teams are stored under invented ids. The odds feed spells them `Montréal Canadiens` and `St Louis Blues`; `NHL_ODDS_API_MAP` has `Montreal Canadiens` and `St. Louis Blues`; the fallback takes the first three letters of the last word. | Worker log 2026-09-20 14:17Z: `Unknown NHL team name from Odds API: 'Montréal Canadiens' → using 'CAN'` / `'St Louis Blues' → using 'BLU'`. `games` holds `NHL_2026-09-29_CAN_TOR`, `NHL_2026-10-02_BLU_DAL` etc. Stats tables use `MTL` / `STL`. `data/ingestors/odds_ingestor.py:288-292`. | Those games join to no team stats; when the schedule ingestor writes `…_MTL_TOR` the game exists twice. |
-| 2 | The season label splits opening week in two. Four call sites use `month >= 10` to roll to the ending-year label. | `games`: 09-29 and 09-30 rows are `season 2026`, 10-01 onward `season 2027`. `run_pipeline.py:515`, `odds_ingestor.py:848`, `nhl_stats_ingestor.py:147, 824`. | September games look up last season's stats and this season's games land in two seasons. Wrong every year from now on — the new CBA starts the season in late September. |
+| 2 | The season label splits opening week in two. Four call sites use `month >= 10` to roll to the ending-year label. | `games`: 09-29 and 09-30 rows are `season 2026`, 10-01 onward `season 2027`. `run_pipeline.py:515`, `odds_ingestor.py:848`, `nhl_stats_ingestor.py:147, 824`. | This season's games land in two seasons. The 09-29/30 games join season-2026 stats rows, which today carry last season's finals (`games_played 82` for BOS and TOR at `as_of_date 2026-09-20`), so the early-season guard sees a mid-season team; 10-01 onward joins season-2027 rows that do not exist yet. The rule is wrong for this season and for any future September start. |
 | 3 | Every probable goalie gets the same goalie's numbers. The ingestor matches on `goalieId`; the NHL stats API sends `playerId` (and `goalieId: null`). With no id, `"" == ""` matches the first row for everyone. | All 28 season-2026 rows in `nhl_goalie_stats` read save% 0.7143 / GAA 8.8999 (Markstrom, Vasilevskiy, Sorokin, Saros…), `player_id` NULL. Live API call: keys include `playerId`, not `goalieId`. `nhl_stats_ingestor.py:612-632`. | The three goalie features are identical for both teams in every game. |
 | 4 | "GSAA" is a copy of goals-against average. | `nhl_stats_ingestor.py:671, 915` (`# placeholder`); table rows have `gsaa = gaa` to the digit. | `d_goalie_gsaa` (a top-5 feature of the trained model) duplicates `d_goalie_gaa`. |
 | 5 | The regulation 3-way line is requested under a key the feed does not document. We ask for `h2h_3way`; the documented key is `h2h_3_way`. | `odds_ingestor.py:128`; the-odds-api.com betting-markets page; the research probe got NHL 3-way prices back under `h2h_3_way` (DraftKings and Pinnacle, 2023-11-15 and 2025-01-15). `odds` holds **zero** non-h2h/spreads/totals NHL rows, ever. | `nhl_moneyline_regulation` has never had a price to score against and will not get one. Strong evidence, not yet proven end-to-end: one per-event call on an opening-night game settles it. |
@@ -62,7 +62,7 @@ Both were trained 2026-06-21 (`model_registry` ids 77, 78), before the
 the season ended):
 
 - `corsi_for_pct`, `power_play_pct`, `penalty_kill_pct`, `shots_per_game`:
-  exactly **1.0 distinct value per team-season** for 2020-2025 (query over
+  **at most one distinct value per team-season** for 2020-2025 (none at all in 2019) (query over
   `nhl_team_stats`, grouped by team and season). The rebuild fixed the counting
   stats (goal differential now has 29-45 distinct values a season) and carried
   the rate stats forward unchanged.
@@ -71,7 +71,9 @@ the season ended):
   API, to the digit. The feature engine takes "latest row on or before game
   date", which is that row for every game.
 
-That is 6 of the model's 22 features.
+That is 6 of the model's 22 features. The other team inputs were checked the
+same way and do vary: goals home / away, last-5, last-10, goals against and
+wins have at least 13 distinct values in every team-season 2019-2025.
 
 **Walk-forward, `scripts/walk_forward_eval.py`, fixed XGBoost params, same
 rows in both runs:**
