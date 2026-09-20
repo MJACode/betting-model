@@ -21,7 +21,7 @@ import {
   splitPickTitle,
   type Movement,
 } from '@/lib/markets';
-import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
+import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
@@ -35,8 +35,6 @@ import { SignalBadge } from './SignalBadge';
 
 interface Props {
   item: EnrichedPick;
-  bankroll: number;
-  kelly: KellySizingOpts;
   onPress: () => void;
   /** Whether this bet is tracked (Performance-tab scoring + line alerts). */
   tracked?: boolean;
@@ -58,7 +56,7 @@ interface Props {
 }
 
 export function PickCard({
-  item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
+  item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
   showSignalBadge = false,
 }: Props) {
   const { pick, game } = item;
@@ -124,7 +122,7 @@ export function PickCard({
         );
 
   // Stake stays on the deciding price, never the Now snapshot — §6.
-  const stake = stakeFor(pick.kelly_fraction, decisionOdds(pick), kelly);
+  const stake = stakeFor(pick.kelly_fraction, decisionOdds(pick));
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);

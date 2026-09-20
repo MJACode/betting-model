@@ -6,14 +6,10 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import {
-  KELLY_MULTIPLIER,
   isProbOnlyModel,
   stakeFor,
   formatUnits,
-  MAX_CONVICTION,
   MAX_RISK_UNITS,
-  UNIT_KELLY_FRACTION,
-  type KellySizingOpts,
   isUnlockedPreview,
   passesActionFilter,
 } from '@/lib/thresholds';
@@ -30,11 +26,9 @@ import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
 
 interface Props {
   pick: Pick;
-  bankroll: number;
-  kelly: KellySizingOpts;
 }
 
-export function ReasoningCard({ pick, bankroll, kelly }: Props) {
+export function ReasoningCard({ pick }: Props) {
   // Everything here is at the price the pick was DECIDED at (2026-09-09):
   // the best bettable price at the DraftKings line, DraftKings itself on
   // rows from before the flip.
@@ -48,13 +42,10 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
   // (2026-09-12). It shows the pick's own side, as the label does.
   const lineMarket = marketForPick(pick);
   const implied = pick.decision_implied_prob ?? pick.dk_implied_prob;
-  const stake = stakeFor(pick.kelly_fraction, odds, kelly);
+  const stake = stakeFor(pick.kelly_fraction, odds);
   // isProbOnlyModel, not the strict config mirror: a retired prob-only model's
   // pick must keep being explained the way it was made.
   const isProbOnly = isProbOnlyModel(pick.model_id);
-  const capLabel = kelly.cap != null ? `capped at ${formatPct(kelly.cap)}` : 'uncapped';
-  const multLabel =
-    kelly.multiplier === 1 ? '' : ` × ${kelly.multiplier.toFixed(2)}× aggressiveness`;
 
   return (
     <View style={styles.card}>
@@ -110,7 +101,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
             (stake.capped
               ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `
               : '') +
-            `Conviction runs 1u–${formatUnits(MAX_CONVICTION)} (${formatUnits(MAX_CONVICTION)} = highest), scaled from tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied))${multLabel}, ${capLabel}. 1 unit = ${formatPct(UNIT_KELLY_FRACTION)} of roll. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. Tap Settings to change aggressiveness.`
+            `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake the Discord channel and push publish; it is not sized to a bankroll.`
           }
         />
       ) : null}

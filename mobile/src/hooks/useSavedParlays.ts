@@ -6,7 +6,7 @@ import { toSavedParlay, updateSavedParlay, type ParlayLeg, type SavedParlay } fr
 /**
  * Saved parlays — self-contained snapshots the user keeps to revisit and bet
  * later. Persisted to AsyncStorage and shared across screens via a module-level
- * store + listeners (same pattern as useParlaySlip / useKellySettings). Newest
+ * store + listeners (same pattern as useParlaySlip / useSportFilter). Newest
  * first. Snapshots are denormalized (see SavedParlay) so they survive today's
  * picks changing.
  */

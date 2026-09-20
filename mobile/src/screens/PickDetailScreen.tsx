@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,8 +21,6 @@ import { TaleOfTheTapeCard } from '@/components/TaleOfTheTapeCard';
 import { TrackButton } from '@/components/TrackButton';
 import { TrendStrip } from '@/components/TrendStrip';
 import { TrendSparkline } from '@/components/TrendSparkline';
-import { useBankroll } from '@/hooks/useBankroll';
-import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useLiveGameState } from '@/hooks/useLiveGameStates';
@@ -52,7 +50,7 @@ import {
   propMarketForModel,
   MODEL_BOOK,
 } from '@/lib/markets';
-import { isModelRetired, isProbOnlyModel, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
+import { isModelRetired, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -64,9 +62,6 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function PickDetailScreen() {
   const route = useRoute<DetailRoute>();
   const { pickId } = route.params;
-  const { bankroll } = useBankroll();
-  const { multiplier, cap } = useKellySettings();
-  const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
 
   const [data, setData] = useState<EnrichedPick | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -131,18 +126,10 @@ export function PickDetailScreen() {
     );
   }
 
-  return <PickDetailContent enriched={data} bankroll={bankroll} kelly={kelly} />;
+  return <PickDetailContent enriched={data} />;
 }
 
-function PickDetailContent({
-  enriched,
-  bankroll,
-  kelly,
-}: {
-  enriched: EnrichedPick;
-  bankroll: number;
-  kelly: KellySizingOpts;
-}) {
+function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const navigation = useNavigation<Nav>();
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
@@ -312,7 +299,7 @@ function PickDetailContent({
           {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
 
-        <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
+        <ReasoningCard pick={pick} />
 
         <PickTimingCard pick={pick} />
 

@@ -25,8 +25,6 @@ import { BetslipBooksRow } from '@/components/BetslipBooksRow';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
-import { useBankroll } from '@/hooks/useBankroll';
-import { useKellySettings } from '@/hooks/useKellySettings';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { isLineLeg } from '@/lib/lineLegs';
 import {
@@ -100,9 +98,6 @@ export function ParlayScreen() {
     removed: removedCount,
     resolving,
   } = useResolvedSlip();
-  const { bankroll } = useBankroll();
-  const { multiplier, cap } = useKellySettings();
-  const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const savedParlays = useSavedParlays();
   const { pending: restorePending, consume: consumeRestore } = useParlayRestore();
   const rho = useParlayCorrelations();
@@ -342,8 +337,6 @@ export function ParlayScreen() {
             staleCount={staleKeys.length}
             removedCount={removedCount}
             sport={sport}
-            bankroll={bankroll}
-            kelly={kelly}
             onRemove={handleRemove}
             onAddCustom={openCustom}
             onFindPlayers={goFindPlayers}
@@ -707,8 +700,6 @@ function SlipBody({
   staleCount,
   removedCount,
   sport,
-  bankroll,
-  kelly,
   onRemove,
   onAddCustom,
   onFindPlayers,
@@ -723,8 +714,6 @@ function SlipBody({
   staleCount: number;
   removedCount: number;
   sport: string;
-  bankroll: number;
-  kelly: { multiplier: number; cap: number | null };
   onRemove: (pickId: number) => void;
   onAddCustom: () => void;
   onFindPlayers: () => void;
@@ -810,7 +799,7 @@ function SlipBody({
     );
   }
 
-  const stake = parlayRecommendedUnits(metrics, kelly);
+  const stake = parlayRecommendedUnits(metrics);
   const payout = stake.risk * metrics.decimalPayout;
 
   return (

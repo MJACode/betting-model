@@ -124,14 +124,10 @@ export function flatPnl(p: {
 }
 
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so
-// pick.kelly_fraction reflects tenth-Kelly with the server's old 5% cap. The
-// mobile client now lets the user scale this with a multiplier and apply an
-// optional cap (see useKellySettings).
-
-export interface KellySizingOpts {
-  multiplier: number;     // 1.0 = tenth-Kelly (server default)
-  cap: number | null;     // null = no cap; else max fraction of bankroll
-}
+// pick.kelly_fraction reflects tenth-Kelly. It is the RANKING signal only —
+// nothing in the app turns it into a stake any more. Sizing is flat units
+// (see convictionFor / stakeFor below), identical for every viewer, which is
+// why there is no bankroll and no per-user aggressiveness knob to thread.
 
 // ── Server-driven thresholds ───────────────────────────────────────────────
 // config.py is canonical; data/threshold_sync.py mirrors it into the
@@ -325,16 +321,6 @@ export function passesRecordFilter(p: RecordFilterable): boolean {
   return true;
 }
 
-/** Effective fraction of bankroll after applying multiplier + user cap. */
-export function effectiveKellyFraction(
-  serverKellyFraction: number,
-  opts: KellySizingOpts,
-): number {
-  const scaled = Math.max(0, serverKellyFraction * opts.multiplier);
-  if (opts.cap != null) return Math.min(scaled, opts.cap);
-  return scaled;
-}
-
 /**
  * Stake is expressed in UNITS, not dollars — and in TWO numbers, because one
  * cannot carry both conviction and price (Matt, 2026-08-28):
@@ -361,13 +347,14 @@ export function effectiveKellyFraction(
  * settlement uses, but that is a GRADING convention and is deliberately not
  * asserted as a price on the card.
  *
- * Mirrors stake_for()/conviction_for() in tracking/discord_notifier.py — at the
- * default 1.00x aggressiveness the app and the Discord channel show the SAME
- * numbers, which is the point of publishing in units at all.
+ * Mirrors stake_for()/conviction_for() in tracking/discord_notifier.py — the
+ * app and the Discord channel show the SAME numbers, which is the point of
+ * publishing in units at all. Nothing here is per-user, so they cannot drift.
  *
  * Deliberately derived from kelly, never from bankroll: the compounded paper
  * bankroll has decayed to ~$107, so a dollar stake off it says nothing about
- * conviction.
+ * conviction. The app holds no bankroll at all now (2026-09-20) — results are
+ * always in units (CLAUDE.md §4).
  */
 export const UNIT_KELLY_FRACTION = 0.01;  // legacy: 1u == 1% of roll
 export const MAX_CONVICTION = 3;          // ceiling of the (currently unused) tier scale
@@ -405,12 +392,11 @@ export function decimalOdds(american: number | null | undefined): number | null 
  * fitting a scale to 387 picks is the noise-fitting this repo has been burned
  * by before. Flat until a tier signal survives a time split.
  *
- * The user's aggressiveness multiplier still applies downstream in stakeFor,
- * so a bettor who wants to scale everything up or down still can.
+ * There is no per-user scaling: the app, Discord and push publish the SAME
+ * stake, so a knob that moved one of them would break that parity silently.
  */
 export function convictionFor(
   _serverKellyFraction: number | null | undefined,
-  _opts: KellySizingOpts = { multiplier: 1, cap: null },
 ): number {
   return FLAT_CONVICTION;
 }
@@ -419,9 +405,8 @@ export function convictionFor(
 export function stakeFor(
   serverKellyFraction: number | null | undefined,
   dkOdds: number | null | undefined,
-  opts: KellySizingOpts = { multiplier: 1, cap: null },
 ): UnitStake {
-  const conviction = convictionFor(serverKellyFraction, opts);
+  const conviction = convictionFor(serverKellyFraction);
   const dec = decimalOdds(dkOdds);
   if (dec == null || dec <= 1) {
     // No price to gross up against — publish the bare conviction.
@@ -447,10 +432,9 @@ export function stakeFor(
  */
 export function unitsFor(
   serverKellyFraction: number | null | undefined,
-  opts: KellySizingOpts = { multiplier: 1, cap: null },
   dkOdds: number | null | undefined = null,
 ): number {
-  return stakeFor(serverKellyFraction, dkOdds, opts).risk;
+  return stakeFor(serverKellyFraction, dkOdds).risk;
 }
 
 /** "1.1u to win 1u"; just "1u" when the pick carries no price. */
@@ -481,14 +465,4 @@ export function formatUnits(u: number): string {
   const [whole, frac] = n.toFixed(2).split('.');
   const trimmed = frac.replace(/0+$/, '');
   return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
-}
-
-/** Bet size in dollars. */
-export function recommendedBet(
-  serverKellyFraction: number,
-  bankroll: number,
-  opts: KellySizingOpts,
-): number {
-  const f = effectiveKellyFraction(serverKellyFraction, opts);
-  return Math.round(f * bankroll * 100) / 100;
 }
