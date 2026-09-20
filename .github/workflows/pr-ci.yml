@@ -79,4 +79,5 @@ jobs:
             ncaaf_live/tests/test_cfbd_yardline.py \
             tests/test_nfl_prop_market_kalshi.py \
             tests/test_mobile_team_detail.py \
-            tests/test_mobile_player_detail.py
+            tests/test_mobile_player_detail.py \
+            tests/test_mobile_betslip_combine.py
