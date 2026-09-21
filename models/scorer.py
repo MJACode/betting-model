@@ -3176,12 +3176,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 game_picks = []
                 try:
                     if not dry_run:
+                        # nfl_prop_% is excluded here, not only on the sweep
+                        # below. An NFL game on today's slate reaches this
+                        # DELETE (the NHL feature builder still returns a
+                        # dict; MODELS has no NFL game model) and is then
+                        # added to `rescored`, so the sweep never sees it.
+                        # refresh_pass does not re-run nfl-prop-scoring.
                         conn.execute("""
                             DELETE FROM picks
                             WHERE game_id = %s
                               AND result IS NULL
                               AND signal_type != 'BET'
                               AND is_live IS NOT TRUE
+                              AND model_id NOT LIKE 'nfl_prop_%'
                         """, (game_id,))
                     for model_id in relevant_models:
                         # Pick lock: this pair has already produced a BET, so it is
@@ -3276,6 +3283,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # each pass. That is the pre-lock behaviour for these rows, and an
         # AVOID is explicitly never settled and never bettable (§17), so
         # nothing that resolves money depends on its identity.
+        #
+        # nfl_prop_% is excluded (Model, 2026-09-21). Evening refresh runs
+        # this clear and does not re-run nfl-prop-scoring, so a pre-kick
+        # NONE wiped here stays wiped until the next hourly prop card.
+        # MNF NYG@LA that evening: 1697 NONE inserts, then this clear at
+        # 6:06 PM ET, then zero nfl_* rows. The per-game DELETE above
+        # carries the same exclusion: a game the loop reaches is added to
+        # `rescored` and this sweep then skips it.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -3290,6 +3305,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             WHERE result IS NULL
               AND signal_type != 'BET'
               AND is_live IS NOT TRUE
+              AND model_id NOT LIKE 'nfl_prop_%'
               AND game_id IN (
                   SELECT game_id FROM games
                   WHERE game_date >= %s AND game_date <= %s
