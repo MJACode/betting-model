@@ -145,6 +145,20 @@ were backups with almost no carries. **A miss is safe**: a player with no
 accrued count is declined, never priced, so a name-matching failure costs a bet
 and can never cause one at the wrong number.
 
+**The halftime population exists in production, measured rather than assumed.**
+The edge sits at a median of 30 minutes left, which is halftime and the start
+of the third quarter, and `fetch_live_events` keeps only games the core host
+reports as `state="in"`. Asked of the running system rather than a fixture: of
+the 29 live BETs the worker has actually written, **5 were placed within a
+minute of the halftime whistle** (game clock 1800s) and 6 fall in the 25-35
+minute band. Core reports halftime as live and the worker prices it.
+
+One difference worth knowing: production's pricing skews EARLIER than the
+archive's (median 44 minutes left against 30), because it polls from the first
+snap. Early quotes are mostly declined by the pace gate -- two minutes into a
+game a back's measured pace is one carry over a tiny window -- so the deployed
+bet count will be lower than the archive's per game.
+
 ---
 
 ## 5. What is not known
