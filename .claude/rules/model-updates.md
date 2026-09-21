@@ -82,7 +82,22 @@ from scratch and throw the pregame line away. Detail: `docs/live_betting.md`.
 **The settled live-prop record is ZERO BETS — there has never been a live
 player prop model in production, and the ~400 settled picks that look like one
 are not.** Do not read them as evidence in either direction
-(`docs/rules_evidence.md`).
+(`docs/rules_evidence.md`). `nfl_live_prop` has since written 29 BETs, 5 of
+them settled; five bets is not a record either.
+
+**AND THE BIAS `nfl_live_prop` TRADED DOES NOT EXIST.** (Re-measured
+2026-09-21, mike: *"when the ev threshold was tightened there were no picks,
+when it's slightly loosened you literally pick the over on pass attempts for
+every game."*) The lane shipped on "DK's live pass-attempt line sits 2.33
+attempts below the final"; on the same archive it is **−0.12, 95% CI (−0.42,
++0.18)** clustered on game. Worse, `over_prob()` returned a CONSTANT, so the EV
+threshold was a pure price filter — which is the whole of the behaviour above.
+Graded at real posted prices the rule returned **−8.47% over 3,794 bets** and
+got WORSE as the cut tightened, because the book's price is calibrated (slope
++1.22) so the cheapest overs are the least likely. The model now declines to
+price. **Before touching `EV_THRESHOLDS` for this model, read
+`docs/nfl_live_prop_assessment.md` — that dial cannot fix a constant**, and the
+one thing that would change the answer is a third live book, not a new cut.
 
 > **Not here on purpose:** *everything goes in Supabase* and *a losing
 > model is an assessment to run* stay in CLAUDE.md §1b. Both are reachable

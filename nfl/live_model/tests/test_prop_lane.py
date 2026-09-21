@@ -1,11 +1,18 @@
 """
-Guards on the one lane that survived validation.
+Guards on the pass-attempt lane, after the 2026-09-21 re-measurement.
 
-The measured edge is the BOOK's centring, not the model's accuracy, so the
-lane must price the bias and must refuse the states where the bias has no room
-to express itself. It must also never price a game off a defaulted pregame
-number, which is the shortcut that produced three wrong answers in the session
-that built this.
+THE LANE NO LONGER PRICES. The bias it existed to harvest was re-derived on the
+same archive and is -0.12 attempts, 95% CI (-0.42, +0.18) clustered on game --
+not the -2.33 it shipped on. Graded at real posted prices the old rule returned
+-8.47% over 3,794 bets and got WORSE as the threshold tightened, because a
+constant probability plus a price filter selects the cheapest overs and the
+book's price is calibrated (slope +1.22). See the module docstring and
+docs/nfl_live_prop_assessment.md.
+
+So these guards now pin two things: the sanity gates still classify unusable
+quotes correctly, and A DEPLOYED BIAS MUST LIE INSIDE ITS OWN MEASURED
+INTERVAL. That last one is the guard that would have caught this -- both 1.50
+and 2.33 sit outside (-0.42, +0.18).
 """
 from __future__ import annotations
 
@@ -15,35 +22,89 @@ from live_model.models import pass_attempt_bias as pab
 from live_model.workers.gameday import GamedayWorker, GameTracker
 
 
-def test_prices_the_haircut_not_the_measured_bias():
-    """Deploying the full measured bias leaves no room for it to tighten."""
+def test_a_deployed_bias_must_sit_inside_its_measured_interval():
+    """THE GUARD THAT WOULD HAVE CAUGHT THIS.
+
+    The lane shipped DEPLOY_BIAS = 1.50 as a "haircut" below a MEASURED_BIAS of
+    2.33. Re-measured, the interval is (-0.42, +0.18) and BOTH numbers sit
+    outside it. A bias the data does not support is not a conservative bet, it
+    is a fabricated one, and it is what produced an all-overs card.
+    """
+    lo, hi = pab.MEASURED_BIAS_CI
+    assert lo <= pab.MEASURED_BIAS <= hi, "point estimate outside its own CI"
+    assert lo <= pab.DEPLOY_BIAS <= hi, (
+        f"DEPLOY_BIAS={pab.DEPLOY_BIAS} is outside the measured interval "
+        f"({lo}, {hi}) -- it is not backed by the measurement")
+    for dead in (1.50, 2.33):
+        assert not (lo <= dead <= hi), (
+            f"{dead} was the shipped claim and must not be re-derivable")
+
+
+def test_the_interval_spans_zero_so_the_lane_declines_to_price():
+    """With no measured bias there is no edge, and asserting 0.50 into a priced
+    market just donates the hold. None means 'no opinion', and the caller
+    already writes no pick on it."""
+    lo, hi = pab.MEASURED_BIAS_CI
+    assert lo < 0 < hi
+    assert pab.DEPLOY_BIAS == 0.0
     r = pab.over_prob(32.5, 17.0, 1800)
-    full = pab.over_prob(32.5, 17.0, 1800, bias=pab.MEASURED_BIAS)
-    assert pab.DEPLOY_BIAS < pab.MEASURED_BIAS
-    assert r.over_prob < full.over_prob
-    # Still a real edge over a -115 breakeven of about 0.535.
-    assert 0.57 < r.over_prob < 0.63
+    assert r.over_prob is None
+    assert r.reason == "no_measured_bias"
 
 
-def test_refuses_the_end_of_the_game():
-    assert pab.over_prob(32.5, 30.0, 60).over_prob is None
-    assert pab.over_prob(32.5, 30.0, 239).over_prob is None
-    assert pab.over_prob(32.5, 30.0, 241).over_prob is not None
+def test_the_sanity_gates_still_classify_unusable_quotes():
+    """Each refusal keeps its OWN reason, so 'no opinion' stays distinguishable
+    from 'this quote was unusable'."""
+    assert pab.over_prob(32.5, 30.0, 60).reason.startswith("too_late")
+    assert pab.over_prob(32.5, 30.0, 239).reason.startswith("too_late")
+    assert pab.over_prob(0.0, 30.0, 1800).reason == "no_line"
+    assert pab.over_prob(30.0, 31.0, 1800).reason == "line_at_or_below_accrued"
+    assert pab.over_prob(30.0, 30.0, 1800).reason == "line_at_or_below_accrued"
+    assert pab.over_prob(32.5, 17.0, 1800, sigma=0).reason == "degenerate_sigma"
 
 
-def test_refuses_a_line_already_beaten():
-    """A number below what the player has thrown is a pulled market."""
-    assert pab.over_prob(30.0, 31.0, 1800).over_prob is None
-    assert pab.over_prob(30.0, 30.0, 1800).over_prob is None
+def test_the_gates_are_checked_before_the_no_bias_decline():
+    """A quote that is unusable AND unpriced reports why it was unusable."""
+    assert pab.over_prob(32.5, 30.0, 60).reason != "no_measured_bias"
 
 
-def test_missing_accrued_does_not_block_the_read():
-    """ESPN state carries no per player accrual; the guard degrades, not fails."""
-    assert pab.over_prob(32.5, None, 1800).over_prob is not None
+def test_the_constants_are_read_at_call_time_not_import_time():
+    """The old signature bound `bias=DEPLOY_BIAS` as a DEFAULT VALUE, so
+    rebinding the constant changed nothing and the function kept using the
+    number captured at import. A hotfix or a replay that set it would have
+    silently done nothing."""
+    import live_model.models.pass_attempt_bias as m
+    before = m.DEPLOY_BIAS
+    try:
+        m.DEPLOY_BIAS = 1.50
+        assert m.over_prob(32.5, 17.0, 1800).over_prob is not None
+    finally:
+        m.DEPLOY_BIAS = before
+    assert m.over_prob(32.5, 17.0, 1800).over_prob is None
 
 
-def test_blind_arm_is_the_measured_over_rate():
-    assert pab.blind_over_prob() == pytest.approx(0.642, abs=1e-3)
+def test_restoring_a_bias_is_one_constant():
+    """The decline is reversible, and this documents how -- mike's call, not
+    the model's. Passing a bias explicitly prices as it always did."""
+    r = pab.over_prob(32.5, 17.0, 1800, bias=1.50)
+    assert r.over_prob == pytest.approx(0.6017, abs=1e-3)
+    assert r.reason == "measured_bias"
+
+
+def test_the_old_rule_was_a_constant_not_a_model():
+    """Why the card was identical in every game: the output never depended on
+    the line, the accrued total or the clock. Pinned so nobody rebuilds it."""
+    probs = {pab.over_prob(line, acc, secs, bias=1.50).over_prob
+             for line, acc, secs in ((25.5, 5.0, 2700), (32.5, 17.0, 1800),
+                                     (44.5, 30.0, 600), (19.5, 1.0, 3500))}
+    assert len(probs) == 1, "the shipped construction had no discrimination"
+
+
+def test_blind_arm_no_longer_asserts_a_rate():
+    """Betting every over was the honest comparison arm and it has an answer:
+    -8.23% on 4,071 real quotes, 90% CI (-12.1, -4.4). 2025 went over 45.7% of
+    the time, not the 64.2% this used to return."""
+    assert pab.blind_over_prob() is None
 
 
 class _Q:
@@ -161,6 +222,7 @@ def test_core_path_reaches_a_priced_decision(monkeypatch):
     only ESPN host that answers the Railway worker, so that was the entire
     lane. The suite passed throughout.
     """
+    _with_a_restored_bias(monkeypatch)
     w = _core_worker(monkeypatch)
     w.tick()
     tr = w.trackers["e1"]
@@ -170,6 +232,7 @@ def test_core_path_reaches_a_priced_decision(monkeypatch):
 
 def test_core_decisions_carry_the_season_type(monkeypatch):
     """A preseason rep must not be readable later as a track record."""
+    _with_a_restored_bias(monkeypatch)
     w = _core_worker(monkeypatch)
     w.tick()
     assert {d.context.get("season_type") for d in w.executor.decisions} == {
@@ -188,6 +251,18 @@ def test_core_path_still_refuses_a_missing_anchor(monkeypatch):
     assert w.executor.decisions == []
 
 
+def _with_a_restored_bias(monkeypatch, bias: float = 1.50):
+    """Exercise the PLUMBING with a bias injected.
+
+    The lane declines to price at the measured bias of zero, so these
+    integration tests would otherwise assert on an empty card and quietly stop
+    testing the wiring they exist to test. Injecting a bias keeps them honest
+    about the path without re-asserting the disproven edge.
+    """
+    monkeypatch.setattr(pab, "DEPLOY_BIAS", bias)
+    monkeypatch.setattr(pab, "blind_over_prob", lambda: 0.642)
+
+
 # ------------------------------------------- continuous coverage, not halftime
 FIRST_QUARTER = {**CORE_EVENT, "period": 1, "clock_seconds": 780,
                  "home_score": 0, "away_score": 0, "state_name": "1st quarter"}
@@ -202,6 +277,7 @@ def test_props_poll_from_the_first_snap_not_only_at_halftime(monkeypatch):
     halftime tests a different population than the one that cleared the kill
     criterion.
     """
+    _with_a_restored_bias(monkeypatch)
     odds = _FakeOdds()
     w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
     summary = w.tick()
@@ -418,3 +494,14 @@ def test_the_hunt_gated_derivative_poll_uses_the_books_id_too(monkeypatch):
     summary = w.tick()
     assert summary["hunting"] == 1
     assert set(odds.event_ids) == {"bk_7f3a91c"}
+
+
+def test_at_the_measured_bias_the_wiring_reaches_no_decision(monkeypatch):
+    """The end-to-end consequence of the re-measurement: the card is empty and
+    every quote is recorded as skipped with a reason, rather than silently
+    vanishing."""
+    w = _core_worker(monkeypatch)
+    summary = w.tick()
+    assert w.executor.decisions == []
+    assert summary.get("prop_skips"), "skips must be recorded, not swallowed"
+    assert set(summary["prop_skips"]) == {"no_measured_bias"}

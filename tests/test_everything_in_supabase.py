@@ -56,6 +56,14 @@ ALLOWED = {
     # is now in `nfl_stadium_weather_hourly` (tests/test_nfl_weather_cache_import.py
     # pins the importer); what remains on disk is a cache of Supabase.
     "nfl/data/weather_cache": "imported to Supabase by nfl_weather_cache_import.py",
+    # 5,333 archived DraftKings/FanDuel in-play prop snapshots, 2023-25. Every
+    # file is in `nfl_live_prop_snapshots` keyed on its own sha256, and
+    # nfl/live_model/backtest/backup_snaps.py both backs them up and restores
+    # them (--restore refuses on a checksum mismatch, so a restore proves it
+    # reproduced the original file rather than merely a file). What sits on
+    # disk after `scripts/nfl_live_prop_assessment --restore` is therefore a
+    # cache of Supabase, the sanctioned shape, and is deleteable at any time.
+    "nfl/data/live_model/prop_snaps": "backed up to Supabase by backup_snaps.py",
     "tests": "test fixtures",
     "tests/fixtures": "test fixtures",
     "data/migrations": "schema",
