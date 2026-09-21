@@ -121,7 +121,10 @@ def test_the_free_card_query_reads_the_columns_it_renders():
 # ── the book list ────────────────────────────────────────────────────────────
 
 def test_the_extra_books_are_offered():
-    for book in ("betrivers", "hardrockbet", "ballybet", "betparx", "rebet"):
+    # ballybet and rebet left on 2026-09-20 with the fourteen-to-ten cut (mike):
+    # the feed bills every ten named books as a region
+    # (tests/test_book_list_budget.py). They decided 7 and 9 bets.
+    for book in ("betrivers", "hardrockbet", "betparx"):
         assert book in config.BEST_LINE_BOOKMAKERS, f"{book} is not shoppable"
         assert book in config.ODDS_API_BOOKMAKERS_PARAM, f"{book} is not fetched"
 

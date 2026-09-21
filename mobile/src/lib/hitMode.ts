@@ -50,6 +50,15 @@ export const HIT_MODES: readonly { mode: HitMode; label: string }[] = [
   { mode: 'under', label: 'Under' },
 ];
 
+/**
+ * A HitMode off a route param. Navigation state is serialised and restored, so
+ * what comes back is a string of unknown provenance — validated here rather
+ * than cast, and a value this build does not know simply falls back.
+ */
+export function asHitMode(v: string | null | undefined): HitMode | null {
+  return v === 'atLeast' || v === 'over' || v === 'under' ? v : null;
+}
+
 export function hitModeLabel(mode: HitMode): string {
   return HIT_MODES.find((m) => m.mode === mode)?.label ?? 'At Least';
 }

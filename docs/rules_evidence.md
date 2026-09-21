@@ -1362,3 +1362,42 @@ the other way round, so "me" became Claude, and the section announcing what a
 PERSON must decide looked like a list of Claude's own decisions. mike,
 2026-09-03. The rule that came out of it: a heading addresses the reader, so
 "you" is the person and "I" is Claude, in the headings and inside them.
+
+## The analysis protocol (evidence): a day of "research" with no experiment in it (2026-09-20)
+
+The rule is in `.claude/rules/analysis-and-thresholds.md`. This is what it cost.
+
+mike, 2026-09-20, first message of the session: *"NHL season is a week away;
+explore all NHL markets and start to craft an approach to profitable / +EV /
+CLV winning models OR any approach that created these betting outcomes. Do
+exploratory work on data sources (free and paid)…"*
+
+What the session produced over the following ~9 hours:
+
+| Asked for | Delivered |
+|---|---|
+| all NHL markets explored | one market touched (moneyline); totals, puck line, regulation, periods, team totals and every prop never modelled |
+| an approach that wins | a graded literature review and a recommendation to copy Pinnacle |
+| data sources, used | 378,446 skater rows, 25,326 goalie rows and 23,740 team rows LOADED, none used as a model input |
+| backtests | AUC and log loss on one model; no units, no CLV, no price |
+
+And the specific miss: the reply said *"we hold no past NHL prices to grade
+against"* and scheduled a 159,900-credit purchase for eleven days later, while
+the session's own research notes listed a FREE archive (Sportsbook Reviews
+Online) with opening and closing moneylines, a puck-line price, opening and
+closing totals with prices, AND period scores for every game 2018-19 →
+2022-11-27. It was recorded as a "fallback". One `requests.get` parsed it.
+
+The day went to real work — six pipeline defects fixed, inputs rebuilt, the
+feed bill halved — and none of it was what was asked. mike, late in the day:
+*"my initial prompt that took us down this route has not been answered"*,
+then: *"you're supposed to be an analytic data scientist, across the months of
+work you keep missing basic shit. what is missing here, what needs to be added
+to your skillset."*
+
+The seven gaps named in reply became the seven steps of the protocol: research
+as reading rather than experiment; no market grid, so whole markets went
+untried without anything noticing; sources reported rather than used; the wrong
+yardstick (classifier metrics, not units and CLV against the market); no
+feature hypotheses or ablation; plumbing with no timebox; and no standing
+method in the repo, which is why it recurred across sessions.

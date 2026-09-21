@@ -437,9 +437,20 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                   sport: propSport,
                   // MLB only — decides batter vs pitcher chips on the detail screen.
                   playerType: isPitcherProp ? 'pitcher' : isBatterProp ? 'batter' : undefined,
+                  // Open on THIS pick's stat. The chart directly above is the
+                  // prop's own stat, so the screen this button opens has to be
+                  // the same one — it was the model's most-filled stat instead.
+                  statKey: propStat ? String(propStat.key) : undefined,
+                  statGroup: propStat?.group,
                 })
               }
               style={({ pressed }) => [styles.viewStatsBtn, pressed && styles.viewStatsBtnPressed]}
+              // The row is three unlabelled children to VoiceOver, and the
+              // button now opens a SPECIFIC stat — the label is the only place
+              // that can say which (UX review, 2026-09-20). Visible copy stays
+              // "View all stats": every other tab is still there on arrival.
+              accessibilityRole="button"
+              accessibilityLabel={`View ${propStat?.label ?? 'all'} stats for ${playerName ?? 'player'}`}
             >
               <Ionicons name="bar-chart-outline" size={16} color={colors.tint} />
               <Text style={styles.viewStatsText}>View all stats for {playerName ?? 'player'}</Text>

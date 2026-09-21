@@ -505,8 +505,8 @@ your case; the rules below are complete as stated, the evidence is why.
   Full version: `docs/signal_timing.md`.
 - **The method rules — validate the grading before moving a cut, require a
   plateau and not a peak, split early/late, in-sample is in-sample** — are in
-  `.claude/rules/analysis-and-thresholds.md`, which loads on `models/**` and
-  `scripts/**`. They were duplicated here word-for-word until 2026-09-12.
+  `.claude/rules/analysis-and-thresholds.md` (`models/**`, `scripts/**`),
+  with **THE ANALYSIS PROTOCOL: market grid, prices, units — read it first.**
 ### Data integrity, and Operations
 
 **These moved to `.claude/rules/` on 2026-09-03** and load automatically when
