@@ -384,10 +384,13 @@ gate reproduced the worker's logged fade number, −0.129, exactly):
 - **What the blocked bets did** (settled, priced, not VOID; units, IN-SAMPLE —
   the maps were fit on these same records): across the models with any blocked
   bet, **blocked 915 bets −85.1u (−9.3%)**; **kept 1,557 bets −111.2u
-  (−7.1%)**. The floor is refusing losing bets and keeping losing bets. Only
-  three models lose anything positive to it: `wnba_prop_player_rebounds`
-  (+6.8u / 93), `wnba_prop_player_assists` (+6.8u / 11), `ncaaf_over_under`
-  (+2.5u / 5) — single cells on thin samples, not plateaus.
+  (−7.1%)**. The floor is refusing losing bets and keeping losing bets.
+- **One model runs the other way and it is not a thin sample:**
+  `wnba_prop_player_rebounds` — the 93 bets its floor blocks went +6.8u while
+  the 136 it keeps went −19.9u. One floor value, unswept, in-sample; it is a
+  reason to run that model's own sweep, not a reason to move the number. The
+  other two positive blocked cells ARE thin: `wnba_prop_player_assists`
+  (+6.8u / 11) and `ncaaf_over_under` (+2.5u / 5).
 
 **So there is nothing here to restore.** "Each behaves as it did before the
 global floor landed" (config.py) is false for every mapped model, but the
