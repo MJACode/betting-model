@@ -501,7 +501,9 @@ export type RootStackParamList = {
      * (lib/hitMode). The board renders every row in the active idiom, so
      * "Under 1.5 Receptions · 7 of 10" tapped through without this landed on
      * "2+ Receptions · 3 of 10" — the same ten games, the complementary bet,
-     * one tap apart (UX review, 2026-09-20). Validated on arrival by
+     * one tap apart (UX review, 2026-09-20). A prop pick's "View all stats"
+     * seeds the same way from `pick.pick_side` (`hitModeFromPickSide`), or
+     * an Under pick opens on the complement too. Validated on arrival by
      * `asHitMode`; absent, the screen opens in its own 'atLeast'.
      */
     hitMode?: string;
