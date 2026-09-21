@@ -3096,13 +3096,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
-            # config.MODELS has no NFL game model. Falling through to the
-            # NHL feature builder returns a dict, so the per-game DELETE
-            # below would run, the game would join `rescored`, and the
-            # housekeeping sweep would then skip it. Skipping here leaves
-            # the sweep — the clear the evening refresh runs without
-            # nfl-prop-scoring — as the one that sees these rows. That
-            # sweep excludes nfl_prop_% (2026-09-21, NYG @ LA).
+            # config.MODELS has no NFL game model. On master this game fell
+            # through to the NHL feature builder, which returns a dict, so
+            # the per-game DELETE below ran and the game joined `rescored`
+            # (the sweep then skipped it). Measured on NFL_2026_02_NYG_LA,
+            # 2026-09-21, picks_log: 93 NONE rows inserted 21:26:12–21:26:57
+            # UTC, deleted in one statement at 22:06:20.334297 while the
+            # 6:00pm ET refresh was still scoring other sports; the 6:25pm
+            # tick's 95 NONE rows (22:26:13–22:26:54) were deleted the same
+            # way at 22:27:24.959056 by the 6:20pm refresh still in its loop.
+            # Skipping here means that DELETE never sees the game. The sweep
+            # still runs for it, and also excludes nfl_prop_%.
             if sport == "NFL":
                 continue
 
@@ -3289,13 +3293,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # nothing that resolves money depends on its identity.
         #
         # nfl_prop_% is excluded. Evening refresh_pass runs this sweep and
-        # does not re-run nfl-prop-scoring, so a delete here is a wipe until
-        # the next hourly prop tick. Measured 2026-09-21 on NYG @ LA:
-        # 1,697 NONE inserts, then 1,697 deletes, and the pass logged
-        # "Cleared unsettled picks for games not yet started". LIKE '_' is
-        # one character, so the pattern is the nfl_prop_ prefix, including
-        # nfl_prop_market. Wind and opener are not in it. BET rows are
-        # already spared by signal_type.
+        # does not re-run nfl-prop-scoring. The deletes measured 2026-09-21
+        # on NYG @ LA were the per-game statement above (93 rows at
+        # 22:06:20.334297 UTC, 95 rows at 22:27:24.959056), not this sweep:
+        # the game had joined `rescored`. This clause is the second clear,
+        # for the case where the loop does not mark the game rescored.
+        # LIKE '_' is one character, so the pattern is the nfl_prop_ prefix,
+        # including nfl_prop_market. Wind and opener are not in it. BET rows
+        # are already spared by signal_type.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""

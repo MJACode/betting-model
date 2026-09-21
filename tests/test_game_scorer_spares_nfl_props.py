@@ -1,12 +1,13 @@
 """The game scorer's non-BET clear must not erase unsettled NFL props.
 
 Measured 2026-09-21, NYG @ LA (game_date 2026-09-21, kickoff 00:15 UTC
-on the 22nd). The NFL prop scorer wrote NONE rows all day. The evening
-refresh's game scorer then logged "Cleared unsettled picks for games not
-yet started" and picks_log showed 1,697 NFL NONE inserts followed by
-1,697 deletes. config.MODELS has no NFL game model, so this loop never
-re-inserts those rows. The next refresh deletes them again. Today goes
-empty while the game has not kicked.
+on the 22nd). picks_log: the 21:26 UTC wave inserted 93 NONE rows and one
+statement deleted them at 22:06:20.334297; the 22:26 UTC wave inserted 95
+and one statement deleted them at 22:27:24.959056. Both deletes are the
+per-game statement, while the evening refresh was still scoring other
+sports. config.MODELS has no NFL game model, so the loop never re-inserts
+those rows. The day total was 1,697 NONE inserts and 1,697 NONE deletes,
+and zero BET rows.
 
 Two clears, both live with the lock on:
   * the per-game DELETE inside the scoring loop (an NFL game used to fall
