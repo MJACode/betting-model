@@ -128,7 +128,7 @@ TOTAL_FEATS = ["s_gf_l", "s_ga_l", "s_gf_s", "s_sf", "s_sa", "s_pp_opp", "s_pk_o
                "h_g_sv", "a_g_sv", "h_b2b", "a_b2b", "total_open", "mkt_over"]
 
 
-def build(conn) -> pd.DataFrame:
+def build(conn, with_prices: bool = True) -> pd.DataFrame:
     t, gk = team_frame(conn), goalie_frame(conn)
     t = t.merge(gk, on=["game_id", "team"], how="left")
     keep = ["game_id", "gf_l", "ga_l", "gf_s", "ga_s", "sf", "sa", "sat_share", "sh_pct",
@@ -136,7 +136,10 @@ def build(conn) -> pd.DataFrame:
             "g_sv", "g_starts"]
     h = t[t.is_home == 1][keep].add_prefix("h_").rename(columns={"h_game_id": "game_id"})
     a = t[t.is_home == 0][keep].add_prefix("a_").rename(columns={"a_game_id": "game_id"})
-    px = load_prices(conn)
+    # The archive prices are found by `odds.source`, which has no index; on a busy
+    # day that scan hits the statement timeout. A caller that brings its own
+    # prices (the 3-way lab) skips it.
+    px = load_prices(conn) if with_prices else pd.DataFrame(columns=["game_id"])
     g = conn.execute("""SELECT game_id, game_date, season, home_team, away_team, home_score,
                                away_score FROM games WHERE sport='NHL' AND home_score IS NOT NULL
                      """).fetchall()
@@ -144,12 +147,15 @@ def build(conn) -> pd.DataFrame:
     games[["hs", "as_"]] = games[["hs", "as_"]].astype(float)
     games = add_rating(games)
     df = games.merge(h, on="game_id").merge(a, on="game_id").merge(
-        px.drop(columns=["hs", "as_", "game_date", "season"]), on="game_id", how="left")
+        px.drop(columns=["hs", "as_", "game_date", "season"], errors="ignore"),
+        on="game_id", how="left")
     for c in ("gf_l", "ga_l", "gf_s", "ga_s", "sf", "sa", "sat_share", "sh_pct", "pp_pct",
               "pk_pct", "pp_opp", "pk_opp", "fo", "g_sv"):
         df[f"d_{c}"] = df[f"h_{c}"] - df[f"a_{c}"]
         df[f"s_{c}"] = df[f"h_{c}"] + df[f"a_{c}"]
     df["d_rate"] = df.rate_h - df.rate_a
+    if not with_prices:
+        return df
     ok = df.ml_home_open.notna() & df.ml_away_open.notna()
     df.loc[ok, "mkt_home"] = [novig(x, y) for x, y in zip(df.ml_home_open[ok], df.ml_away_open[ok])]
     ok = df.over_open.notna() & df.under_open.notna()
