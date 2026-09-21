@@ -132,6 +132,53 @@ def test_pregame_avoid_is_untouched_by_the_floor(floor_030, identity_maps, open_
     assert _decide(M, 0.40, implied, 0.40 - implied, MINUS_110, is_prop=False) == "AVOID"
 
 
+# ── the floor says so on the row (2026-09-20) ────────────────────────────────
+# "PIT ML F5" cleared its cut, missed the floor at EV 0.191 and was stored as a
+# bare NONE: nothing in `picks` told a silenced model from one with no edge.
+
+def _built(p, odds=MINUS_110):
+    from models.scorer import _make_pick
+    implied = 110 / 210
+    return _make_pick("G1", M, "MLB", "2026-09-20", "home", "PIT ML", p, implied,
+                      p - implied, odds, 1000.0, {})
+
+
+def test_a_pick_the_floor_blocked_carries_the_reason(
+        floor_030, identity_maps, open_pregame_cut):
+    blocked = _built(0.66)
+    assert blocked["signal_type"] == "NONE"
+    assert blocked["downgrade_reason"].startswith("ev_below_floor:0.260<0.30")
+    # Below its own cut (edge 0.016 < 0.05): the model declined, not the floor.
+    assert _built(0.54)["downgrade_reason"] is None
+    assert _built(0.70)["downgrade_reason"] is None        # a BET
+
+
+def test_a_floor_note_does_not_stop_the_best_price_recheck(
+        floor_030, identity_maps, open_pregame_cut, monkeypatch):
+    # The floor is judged at a price, so a better price is what can clear it:
+    # 0.66 at -110 is EV 0.260, at +100 it is 0.320. The note must not read as
+    # "already declined" to _requalify_at_best, and it goes when the pick does.
+    import models.scorer as sc
+    monkeypatch.setattr(sc, "DECIDE_ON_BEST_PRICE", True)
+    p = _built(0.66)
+    sc._requalify_at_best(p, {"book": "fanduel", "odds": 100.0, "link": None},
+                          is_prop=False)
+    assert p["signal_type"] == "BET" and p["decision_odds"] == 100.0
+    assert p["downgrade_reason"] is None
+
+
+def test_the_floor_note_follows_the_deciding_price(
+        floor_030, identity_maps, open_pregame_cut, monkeypatch):
+    import models.scorer as sc
+    monkeypatch.setattr(sc, "DECIDE_ON_BEST_PRICE", True)
+    p = _built(0.66)
+    sc._requalify_at_best(p, {"book": "fanduel", "odds": -105.0, "link": None},
+                          is_prop=False)
+    assert p["signal_type"] == "NONE"
+    assert p["downgrade_reason"].startswith("ev_below_floor:0.289<0.30")
+    assert "at -105" in p["downgrade_reason"]
+
+
 # ── the MLB live loop ────────────────────────────────────────────────────────
 
 def test_live_signal_is_refused_under_the_global_floor(floor_030, identity_maps, monkeypatch):

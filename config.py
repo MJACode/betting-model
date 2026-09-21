@@ -1755,6 +1755,26 @@ GLOBAL_MIN_EV: float = float(os.environ.get("GLOBAL_MIN_EV", "0.20"))
 # the platform recorded no trace of either model going dark. nfl_live_prop was
 # the same story on a constant 0.600 probability (EV 0.122 at -115).
 #
+# CORRECTED THE SAME DAY, FROM THE WORKER'S LOGS -- two things above are wrong
+# for mlb_spread_market and mlb_total_public_fade, and the floors below do not
+# do for them what this block says:
+#   1. The floor is not what stopped them. Their Railway write switches
+#      (MLB_SPREAD_MARKET_PUBLISH / MLB_TOTAL_PUBLIC_FADE_PUBLISH) read True at
+#      2026-09-19 13:26 UTC and False at 14:25 UTC, on a redeploy of the SAME
+#      commit -- a variable edit, seven hours before the floor landed at 21:44.
+#      mike, 2026-09-20: "probably was one of us". Off on every pass since.
+#   2. The EVs quoted here are on the RAW probability. For all 78 of those bets
+#      picks.model_probability_cal EQUALS model_probability (written before
+#      the phase-3 maps existed), so "EV on the calibrated probability" read
+#      the raw number. The gate applies today's map: the fade's 0.500 becomes
+#      0.435 (EV -0.129 at +100, logged 2026-09-20 19:23 UTC against the -0.01
+#      floor) and that day's three spread flags come out -0.109, -0.148 and
+#      -0.111 against 0.00. With the switches on, both still write nothing.
+# The same caveat reaches every floor below that was set from a stored
+# model_probability_cal: where that column holds the raw number the floor is
+# tighter in practice than "just under its smallest written bet". Not re-set
+# here -- a floor is a model update and needs its owner (CLAUDE.md 1b).
+#
 # HOW EACH NUMBER WAS SET, AND WHAT IT IS NOT. Measured against every BET in
 # `picks`, EV on the calibrated probability at the deciding price: each floor
 # sits just under the SMALLEST bet that model has written, CAPPED at

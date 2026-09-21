@@ -1224,15 +1224,29 @@ def _missing_price(dk_odds: float | None) -> bool:
     return REQUIRE_DK_PRICE and dk_odds is None
 
 
+# The prefix of the reason the EV floor leaves on a pick it blocked. Shared
+# with models.honest_ev.Gate.reason, which the rule cards log.
+_EV_FLOOR_NOTE = "ev_below_floor"
+
+
 def _decide(model_id: str, model_prob: float, implied_prob: float | None,
-            edge: float | None, odds: float | None, *, is_prop: bool) -> str:
+            edge: float | None, odds: float | None, *, is_prop: bool,
+            why: dict | None = None) -> str:
     """BET / AVOID / NONE at ONE quote. The rules both pick builders apply, in
     one place, so the same rules run at the DraftKings price and again at the
     best bettable price (_requalify_at_best) without a second copy to drift.
 
     `implied_prob` / `edge` / `odds` may be None only for a prob-only prop
     model whose market the book does not list; a game pick always has a price.
+
+    `why`, when given, receives `why["floor"]`: the EV floor's reason if the
+    floor is what said no, else None. The floor turned BET into NONE and only
+    a DEBUG line said so: on 2026-09-20 "PIT ML F5" cleared its 0.58/0.02 cut,
+    missed the floor at EV 0.191, and was stored as a bare NONE -- nothing in
+    `picks` could tell a model with no edge from one the floor had silenced.
+    Same text as models.honest_ev.Gate.reason, which the rule cards log.
     """
+    floor_note = None
     no_price = implied_prob is None
     bet_thresh   = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
@@ -1281,6 +1295,8 @@ def _decide(model_id: str, model_prob: float, implied_prob: float | None,
                          f"(p {model_prob:.3f}->{decision_prob:.3f} at {odds:+.0f}) "
                          f"— BET → NONE")
             signal_type = "NONE"
+            floor_note = (f"{_EV_FLOOR_NOTE}:{ev:.3f}<{floor:.2f} "
+                          f"(p {model_prob:.3f}->{decision_prob:.3f} at {odds:+.0f})")
 
     # Price too juicy for this model (config.MODEL_MIN_ODDS) -- no bet. A NULL
     # price (prob-only fallback) is never blocked here; _missing_price is.
@@ -1295,6 +1311,8 @@ def _decide(model_id: str, model_prob: float, implied_prob: float | None,
 
     # A paused model is paused on BOTH sides -- see _paused_signal.
     signal_type, _ = _paused_signal(model_id, signal_type)
+    if why is not None:
+        why["floor"] = floor_note
     return signal_type
 
 
@@ -1359,8 +1377,13 @@ def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
     # keying there would have silently excluded exactly those picks from the
     # best-price re-check.
     current = pick.get("decision_odds", pick.get("dk_odds"))
+    # An EV-floor note is NOT a reason to skip: the floor is judged at a price,
+    # so a better price is exactly what can clear it. Every other reason stands.
+    declined = pick.get("downgrade_reason")
+    if declined and str(declined).startswith(_EV_FLOOR_NOTE):
+        declined = None
     if (not DECIDE_ON_BEST_PRICE or not best or best.get("odds") is None
-            or current is None or pick.get("downgrade_reason")
+            or current is None or declined
             or pick.get("is_live")):
         return pick
     odds = float(best["odds"])
@@ -1371,7 +1394,9 @@ def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
     edge = model_prob - implied
     model_id = pick["model_id"]
     was = pick["signal_type"]
-    signal_type = _decide(model_id, model_prob, implied, edge, odds, is_prop=is_prop)
+    why: dict = {}
+    signal_type = _decide(model_id, model_prob, implied, edge, odds,
+                          is_prop=is_prop, why=why)
     kelly_frac, rec_bet = _size(model_id, model_prob, implied,
                                 float(pick.get("bankroll_at_pick") or 0.0),
                                 signal_type, is_prop=is_prop)
@@ -1384,6 +1409,9 @@ def _requalify_at_best(pick: dict, best: dict | None, *, is_prop: bool) -> dict:
         "signal_type":     signal_type,
         "kelly_fraction":  kelly_frac,
         "recommended_bet": rec_bet,
+        # The note follows the DECIDING price: set when the floor says no at
+        # the best quote, cleared when the better price got the pick over it.
+        "downgrade_reason": why.get("floor"),
         **_decision_fields(best["book"], odds, implied, edge),
     })
     return pick
@@ -1416,8 +1444,9 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     # When the LINE came from another book (F5 totals/spreads DraftKings
     # does not list), those three columns stay NULL / 0.0 and decision_*
     # names the book, same as _make_prop_pick.
+    why: dict = {}
     signal_type = _decide(model_id, model_prob, dk_implied_prob, edge, dk_odds,
-                          is_prop=False)
+                          is_prop=False, why=why)
     kelly_frac, rec_bet = _size(model_id, model_prob, dk_implied_prob, bankroll,
                                 signal_type, is_prop=False)
 
@@ -1446,7 +1475,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "signal_type":       signal_type,
         "confidence_tier":   conf_tier,
         "game_time":         commence_time,
-        "downgrade_reason":  _pause_note(model_id),
+        "downgrade_reason":  _pause_note(model_id) or why.get("floor"),
         **_decision_fields(line_book or ODDS_API_BOOKMAKER, dk_odds,
                            dk_implied_prob, edge),
         "line_book":         line_book,
@@ -3856,8 +3885,9 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     # The RAW numbers are still what gets STORED, exactly as in classify_edge:
     # picks.edge and picks.model_probability keep their DraftKings meaning and
     # the calibrated number travels beside them in picks.model_probability_cal.
+    why: dict = {}
     signal_type = _decide(model_id, model_prob, dk_implied_prob, edge, dk_odds,
-                          is_prop=True)
+                          is_prop=True, why=why)
     if signal_type == "NONE" and _missing_price(dk_odds):
         logger.debug(f"  {player_name}: no book price — BET → NONE")
 
@@ -3924,7 +3954,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         # list would open an empty slip; the other book's link travels in
         # best_bet_link once the pick is shopped.
         "dk_bet_link":       None if line_book else dk_bet_link,
-        "downgrade_reason":  _pause_note(model_id),
+        "downgrade_reason":  _pause_note(model_id) or why.get("floor"),
     }
 
 
