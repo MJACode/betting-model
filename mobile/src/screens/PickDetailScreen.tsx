@@ -55,6 +55,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
+import { hitModeFromPickSide } from '@/lib/hitMode';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -442,6 +443,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                   // the same one — it was the model's most-filled stat instead.
                   statKey: propStat ? String(propStat.key) : undefined,
                   statGroup: propStat?.group,
+                  // ...and the SIDE, or an Under prop opens on atLeast —
+                  // complementary hits on the same games. The board already
+                  // sends this from a Hit Rate row (#807); this is the same
+                  // handover off the pick that was read.
+                  hitMode: hitModeFromPickSide(pick.pick_side),
                 })
               }
               style={({ pressed }) => [styles.viewStatsBtn, pressed && styles.viewStatsBtnPressed]}

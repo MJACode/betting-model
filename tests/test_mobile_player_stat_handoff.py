@@ -143,6 +143,19 @@ def test_the_side_travels_with_the_stat():
         "the board must send its side, and only where the row has one"
     )
 
+    # Pick Detail is the other caller, and #807 left it sending the stat
+    # without the side. An Under prop then opened PlayerStats on atLeast —
+    # complementary hits on the same games (Reviewer Medium on #807).
+    detail = _src(CALLERS[1])
+    detail_navs = _navigate_blocks(detail)
+    assert detail_navs, "PickDetail has no PlayerStats navigate"
+    assert any("hitMode:" in b for b in detail_navs), (
+        "PickDetail navigate('PlayerStats') sends no hitMode"
+    )
+    assert "hitModeFromPickSide(pick.pick_side)" in detail, (
+        "PickDetail must seed hitMode from the pick's own side"
+    )
+
     screen = _src(SCREEN)
     assert "asHitMode(route.params.hitMode) ?? 'atLeast'" in screen
     assert "useState<HitMode>(requestedMode)" in screen, "the side is not seeded at mount"
@@ -153,6 +166,14 @@ def test_the_side_travels_with_the_stat():
     fn = re.search(r"export function asHitMode\((.*?)\n\}", _src(HIT_MODE), re.S)
     assert fn, "asHitMode not found in hitMode.ts"
     assert "'atLeast'" in fn.group(1) and "'under'" in fn.group(1)
+
+    # The pick-side mapping is the producer half of the same handshake.
+    mapped = re.search(r"export function hitModeFromPickSide\((.*?)\n\}", _src(HIT_MODE), re.S)
+    assert mapped, "hitModeFromPickSide not found in hitMode.ts"
+    body = mapped.group(1)
+    assert "side === 'under' ? 'under'" in body
+    assert "side === 'over' ? 'over'" in body
+    assert "'atLeast'" in body
 
 
 def test_innings_resolves_to_the_outs_chip():

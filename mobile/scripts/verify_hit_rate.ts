@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { computeHitRate, hitFlags, isHit } from '../src/lib/hitRate';
 import {
   HIT_MODES,
+  hitModeFromPickSide,
   hitModeHeadline,
   hitModeLineLabel,
   modeLineLabel,
@@ -134,6 +135,21 @@ check(
   // most-bet prop there is — could not be reached in Over mode at all.
   check('Over starts at the line the book starts at',
     rulerValue(1, 'over') === 0.5 && hitModeHeadline(1, 'over', 'Hits') === 'Over 0.5 Hits');
+
+  // Pick Detail's "View all stats" seeds PlayerStats from the pick's own
+  // side. An Under prop used to open on atLeast — complementary hits on
+  // the same games (#807 Medium). Home/away/draw have no board side.
+  check('pick under → under', hitModeFromPickSide('under') === 'under');
+  check('pick over → over', hitModeFromPickSide('over') === 'over');
+  check('pick home → atLeast', hitModeFromPickSide('home') === 'atLeast');
+  check('pick away → atLeast', hitModeFromPickSide('away') === 'atLeast');
+  check('pick draw → atLeast', hitModeFromPickSide('draw') === 'atLeast');
+  check('pick empty → atLeast', hitModeFromPickSide(null) === 'atLeast'
+    && hitModeFromPickSide(undefined) === 'atLeast'
+    && hitModeFromPickSide('') === 'atLeast');
+  const detail = read('src/screens/PickDetailScreen.tsx');
+  check('Pick Detail sends hitMode from pick_side',
+    detail.includes('hitMode: hitModeFromPickSide(pick.pick_side)'));
 
   // Every line is a HALF point, so no game ever lands on it: a counting stat
   // is a whole number, and a push would make "hit rate" a lie.
