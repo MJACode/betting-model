@@ -206,7 +206,7 @@ def run_card(game_date: str | None = None, do_publish: bool = False) -> dict:
             logger.info(f"wnba-prop-market: no WNBA games {game_date}")
             return {"flags": 0, "published": 0}
 
-        quotes = mk.load_wnba_prop_quotes(conn, game_date)
+        quotes = mk.load_wnba_prop_quotes(conn, game_date, game_ids=list(games))
         bets, diag = mk.find_bets(quotes, min_edge=MIN_EDGE, soft_books=mk.SOFT_BOOKS)
         bets = apply_price_floor(mk.best_per_prop(bets))
         logger.info("\n" + render(bets, diag))

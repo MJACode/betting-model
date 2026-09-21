@@ -6,6 +6,7 @@ The drift tripwires matter most: selector vs settler stat maps, and the shared
 find_bets machinery staying shared.
 """
 
+import inspect
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from scripts.wnba_prop_market_card import (  # noqa: E402
     norm_name,
     pick_rows,
     publish,
+    run_card,
 )
 
 
@@ -174,6 +176,75 @@ def test_publish_is_insert_once():
     assert publish(conn, rows) == 1
     assert publish(conn, rows) == 0                # locked, never re-priced
     assert len(conn.inserted) == 1
+
+
+# ── quote-loader access pattern (2026-09-21 statement timeout) ────────────────
+
+class _QuoteConn:
+    """Records the loader SQL; returns canned rows (or none)."""
+
+    def __init__(self, rows=()):
+        self.rows, self.sql, self.params, self.calls = list(rows), "", None, 0
+
+    def execute(self, sql, params=None):
+        self.sql, self.params, self.calls = sql, params, self.calls + 1
+        return self
+
+    def fetchall(self):
+        return self.rows
+
+
+def test_loader_sql_pins_the_slate_not_the_wnba_catalog():
+    """The 2026-09-21 03:46Z refresh died at statement_timeout 120.785s.
+
+    `WHERE g.sport = 'WNBA' AND o.game_date = %s` nested-looped
+    idx_prop_odds_line_snap once per historical WNBA game (1,830 live) and
+    discarded them with the odds-table date filter. Pin games.game_date (or
+    game_id = ANY when the slate is already loaded). Same quotes; not a cut.
+    """
+    rec = _QuoteConn()
+    mk.load_wnba_prop_quotes(rec, "2026-09-21")
+    where = rec.sql.split("WHERE", 1)[1]
+    assert "g.game_date" in where, rec.sql
+    assert "g.sport" in where, rec.sql
+    assert "o.game_date" not in where, rec.sql
+    assert "ORDER BY o.snapshot_at" not in rec.sql, rec.sql
+    assert rec.params[0] == "2026-09-21"
+
+
+def test_loader_uses_the_slate_game_ids_when_handed_them():
+    rec = _QuoteConn()
+    ids = ["WNBA_2026-09-21_ATL_NY", "WNBA_2026-09-21_DAL_PHX"]
+    mk.load_wnba_prop_quotes(rec, "2026-09-21", game_ids=ids)
+    where = rec.sql.split("WHERE", 1)[1]
+    assert "o.game_id = ANY(%s)" in where, rec.sql
+    assert rec.params[0] == ids
+
+
+def test_loader_skips_the_database_on_an_empty_slate():
+    rec = _QuoteConn()
+    assert mk.load_wnba_prop_quotes(rec, "2026-09-21", game_ids=[]) == {}
+    assert rec.calls == 0
+
+
+def test_loader_still_keeps_the_latest_pre_tip_quote():
+    """Access-pattern change must not turn this into an opening-line reader
+    or admit a post-tip snapshot. Extra link columns vs the MLB loader."""
+    cut = "2026-09-21T00:00:00+00:00"
+    early = ("g1", "A Wilson", "player_points", "draftkings",
+             15.5, -110, -110, None, None, "2026-09-20T18:00:00+00:00", cut)
+    late = ("g1", "A Wilson", "player_points", "draftkings",
+            15.5, -105, -115, None, None, "2026-09-20T22:00:00+00:00", cut)
+    post = ("g1", "A Wilson", "player_points", "draftkings",
+            15.5, 400, -600, None, None, "2026-09-21T01:00:00+00:00", cut)
+    q = mk.load_wnba_prop_quotes(_QuoteConn([early, late, post]), "2026-09-21")
+    got = q[("g1", "A Wilson", "player_points", "draftkings")]
+    assert got["over_price"] == -105
+
+
+def test_card_hands_the_slate_ids_to_the_loader():
+    src = inspect.getsource(run_card)
+    assert "game_ids=list(games)" in src, src
 
 
 # ── NB-head wiring (item 1 of the same change) ────────────────────────────────
