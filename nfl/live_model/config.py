@@ -126,6 +126,13 @@ BOOK_MOVE_MAX = {
     "totals_h2": 3.0,
     "spreads_h2": 3.0,
     "player_pass_attempts": 8.0,
+    # THE RUSHING CAP IS SCALED FROM THE PASS ONE, NOT MEASURED. A rushing line
+    # is roughly a third the size of a passing one (median 8.5 carries against
+    # 32.5 attempts in the archive), so the injury-scale move it has to catch
+    # is proportionally smaller. 3.0 catches a starter leaving and not a long
+    # drive, which moves a rushing line by one or two. Every refusal is logged
+    # with this reason, so after one Sunday the cap moves on a query.
+    "player_rush_attempts": 3.0,
 }
 # THE SETTLED-STATE RULE (2026-09-19): no bet on a guarded market until the
 # book's number and our state have both been still for this long -- the
@@ -137,7 +144,12 @@ BOOK_MOVE_MAX = {
 # change. Refusals are recorded as `not_settled`, so the cost is a query.
 SETTLED_SEC = int(os.getenv("NFL_LIVE_SETTLED_SEC", "120"))
 SETTLED_TOL = {"h2h": 0.02, "spreads": 0.5, "totals": 0.5, "totals_h2": 0.5,
-               "spreads_h2": 0.5, "player_pass_attempts": 0.5}
+               "spreads_h2": 0.5, "player_pass_attempts": 0.5,
+               # Without an entry a market falls back to 0.0, where any juice
+               # wobble reads as the book moving and the settled-state rule
+               # never lets a bet through. Rushing lines move in halves like
+               # the rest, so it takes the same tolerance.
+               "player_rush_attempts": 0.5}
 
 # ------------------------------------------------------------------- credits
 # The live endpoint costs 1 credit per market per region per poll. A full
@@ -175,7 +187,15 @@ BACKTEST_CREDIT_BUDGET = int(os.getenv("NFL_LIVE_BACKTEST_BUDGET", "5000"))
 EV_THRESHOLDS = {
     "nfl_live_halftime": 0.04,
     "nfl_live_deriv": 0.04,
-    "nfl_live_prop": 0.06,
+    # LOWERED 0.06 -> 0.03 WITH THE MARKET SWITCH. The old number was swept on
+    # a model that emitted a constant, where the EV cut was a pure price filter
+    # and tightening it made the record WORSE (the price slope was +1.22 --
+    # adverse selection). The rushing model's gate is game state, not price, and
+    # its ROI RISES with the EV cut rather than falling: +11.2% at 0.03, +13.1%
+    # at 0.06, +15.4% at 0.10. 0.03 sits at the wide end of that plateau and
+    # keeps 871 of the 874 measured quotes; see
+    # nfl/live_model/models/rush_attempt_pace.py.
+    "nfl_live_prop": 0.03,
     "nfl_live_stale": 0.03,
 }
 MODEL_IDS = tuple(EV_THRESHOLDS)

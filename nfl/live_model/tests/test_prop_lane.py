@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from live_model.models import pass_attempt_bias as pab
+from live_model.models import rush_attempt_pace as rap
 from live_model.workers.gameday import GamedayWorker, GameTracker
 
 
@@ -114,9 +115,10 @@ class _Q:
     # production and is precisely what hid the bug where no game ever resolved
     # to a spread or a total.
     def __init__(self, market, side, line, game_id="bk_7f3a91c",
-                 home_team="Seattle Seahawks", away_team="New England Patriots"):
+                 home_team="Seattle Seahawks", away_team="New England Patriots",
+                 price=-115.0, player="Some Back"):
         self.game_id, self.market, self.side = game_id, market, side
-        self.line, self.price, self.player = line, -115.0, "Some QB"
+        self.line, self.price, self.player = line, price, player
         self.bookmaker, self.ts = "draftkings", None
         self.home_team, self.away_team = home_team, away_team
 
@@ -153,12 +155,12 @@ def test_pricing_skips_when_there_is_no_state():
     w = GamedayWorker(dry_run=True)
     tr = GameTracker("e1", "SEA", "NE")
     summary = {}
-    w._price_props([_Q(pab.MARKET, "over", 32.5)], tr, summary)
+    w._price_props([_Q(rap.MARKET, "over", 8.5)], tr, summary)
     assert summary == {}
     assert w.executor.decisions == []
 
 
-def test_pricing_ignores_other_markets_and_the_under():
+def test_pricing_ignores_markets_the_model_does_not_trade():
     w = GamedayWorker(dry_run=True)
     tr = GameTracker("e1", "SEA", "NE")
     tr.state = object()
@@ -166,6 +168,24 @@ def test_pricing_ignores_other_markets_and_the_under():
     w._price_props([_Q("player_rush_yds", "over", 40.5),
                     _Q(pab.MARKET, "under", 32.5)], tr, summary)
     assert w.executor.decisions == []
+
+
+def test_a_one_sided_quote_is_skipped_rather_than_priced_on_raw_juice():
+    """Both sides are needed to strip the hold.
+
+    The model prices against the book's DE-VIGGED under probability. With only
+    one side there is nothing to de-vig against, and pricing off the raw
+    implied number would hand the book's whole 6.6% margin to the model as
+    though it were edge -- every quote would clear the threshold.
+    """
+    w = GamedayWorker(dry_run=True)
+    tr = GameTracker("e1", "SEA", "NE")
+    tr.state = object()
+    tr.accrued = {"some back": 4}
+    summary = {}
+    w._price_props([_Q(rap.MARKET, "under", 12.5)], tr, summary)
+    assert w.executor.decisions == []
+    assert summary.get("prop_skips") == ["one_sided_quote"]
 
 
 # ------------------------------------------------- the core path end to end
@@ -182,11 +202,21 @@ CORE_EVENT = {
     "state": "in", "state_name": "halftime",
     "home_abbrev": "SEA", "away_abbrev": "NE", "home": "SEA", "away": "NE",
     "season_type": "preseason",
+    # Carries so far. `parse_core_event` builds this on the real core path; the
+    # fixture carries it because the rushing model refuses to price a player it
+    # has no accrued count for, so without it these wiring tests would assert
+    # on an empty card and quietly stop testing the wiring.
+    "rushing_accrued": {"some back": 4},
 }
 
 
 class _FakeOdds:
-    """Anchor carries both required numbers; the prop card carries one over."""
+    """Anchor carries both required numbers; the prop card carries BOTH sides.
+
+    Both sides deliberately: the rushing model de-vigs the book's own price, so
+    a card with only one side is skipped. A fake that served one side would
+    test nothing and look like it tested everything.
+    """
 
     def __init__(self):
         self.event_calls = []
@@ -196,8 +226,11 @@ class _FakeOdds:
 
     def fetch_event_markets(self, eid, markets):
         self.event_calls.append(tuple(markets))
-        if pab.MARKET in markets:
-            return [_Q(pab.MARKET, "over", 32.5)]
+        if rap.MARKET in markets:
+            # Line 12.5 against 4 carries with a half left: the over needs
+            # roughly four times his pace, so the feasibility gate opens.
+            return [_Q(rap.MARKET, "over", 12.5, price=-110),
+                    _Q(rap.MARKET, "under", 12.5, price=-110)]
         return []
 
 
@@ -252,15 +285,14 @@ def test_core_path_still_refuses_a_missing_anchor(monkeypatch):
 
 
 def _with_a_restored_bias(monkeypatch, bias: float = 1.50):
-    """Exercise the PLUMBING with a bias injected.
+    """Kept for the pass-attempt guards below, which still exercise that model.
 
-    The lane declines to price at the measured bias of zero, so these
-    integration tests would otherwise assert on an empty card and quietly stop
-    testing the wiring they exist to test. Injecting a bias keeps them honest
-    about the path without re-asserting the disproven edge.
+    The pass-attempt model declines to price at its measured bias of zero, so
+    tests about ITS plumbing inject one. The rushing model needs no equivalent:
+    it prices on its own merits given an accrued count, which the core fixture
+    supplies.
     """
     monkeypatch.setattr(pab, "DEPLOY_BIAS", bias)
-    monkeypatch.setattr(pab, "blind_over_prob", lambda: 0.642)
 
 
 # ------------------------------------------- continuous coverage, not halftime
@@ -284,7 +316,12 @@ def test_props_poll_from_the_first_snap_not_only_at_halftime(monkeypatch):
 
     assert summary["hunting"] == 0, "fixture must NOT be in a hunt state"
     assert summary["prop_polls"] == 1, "first quarter bought no prop card"
-    assert w.executor.decisions, "a first quarter quote reached no decision"
+    # The quote must REACH the model. It is declined here, and correctly so:
+    # two minutes into a game a back's measured pace is one carry over a tiny
+    # window, and the over is reachable at almost any of them. What this test
+    # exists for is that the card was bought and priced outside halftime, not
+    # that a first-quarter quote produces a bet.
+    assert summary.get("prop_skips"), "a first quarter quote reached no pricing"
 
 
 def test_only_the_deployed_market_is_bought(monkeypatch):
@@ -296,7 +333,7 @@ def test_only_the_deployed_market_is_bought(monkeypatch):
     odds = _FakeOdds()
     w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
     w.tick()
-    assert odds.event_calls == [(pab.MARKET,)]
+    assert odds.event_calls == [(rap.MARKET,)]
 
 
 def test_the_underived_lane_stays_hunt_gated(monkeypatch):
@@ -496,12 +533,26 @@ def test_the_hunt_gated_derivative_poll_uses_the_books_id_too(monkeypatch):
     assert set(odds.event_ids) == {"bk_7f3a91c"}
 
 
-def test_at_the_measured_bias_the_wiring_reaches_no_decision(monkeypatch):
-    """The end-to-end consequence of the re-measurement: the card is empty and
-    every quote is recorded as skipped with a reason, rather than silently
-    vanishing."""
-    w = _core_worker(monkeypatch)
+def test_the_pass_attempt_model_still_refuses_to_price(monkeypatch):
+    """The re-measurement stands, and nothing may quietly restore it.
+
+    The worker no longer buys this market at all, so its refusal is no longer
+    visible end to end -- which is exactly when a disproven edge creeps back.
+    Asserted directly on the model instead.
+    """
+    assert pab.over_prob(32.5, None, 1800).over_prob is None
+    assert pab.over_prob(32.5, None, 1800).reason == "no_measured_bias"
+    assert pab.blind_over_prob() is None
+
+
+def test_a_player_with_no_accrued_count_is_declined_end_to_end(monkeypatch):
+    """The whole point of the rewrite, at the wiring level.
+
+    An empty accrued map is what a feed outage or a name the book spells
+    differently looks like. Every quote must be recorded as skipped with a
+    reason rather than priced against an invented zero.
+    """
+    w = _core_worker(monkeypatch, event={**CORE_EVENT, "rushing_accrued": {}})
     summary = w.tick()
     assert w.executor.decisions == []
-    assert summary.get("prop_skips"), "skips must be recorded, not swallowed"
-    assert set(summary["prop_skips"]) == {"no_measured_bias"}
+    assert set(summary.get("prop_skips", [])) == {"no_accrued"}

@@ -18,9 +18,18 @@ TWO CORRECTIONS THIS MAKES TO THE EARLIER GRADING.
   and ignores the rest, which is both the honest unit of analysis and what the
   live worker would actually do.
 
-  THE RULE IS FIXED BEFORE THE SEASONS ARE READ. One threshold on one quantity,
-  applied identically to 2023, 2024 and 2025. Three seasons that agree are
-  evidence; three that disagree are the answer, and either is reportable.
+  ONE THRESHOLD, NO FITTED PARAMETERS. The rule is a single cut on a single
+  quantity, applied identically to 2023, 2024 and 2025.
+
+WHAT THIS IS NOT, STATED PLAINLY. **There is no holdout here.** The threshold
+of 1.25 does predate the archive -- it came from bucketing the 2026 production
+bets in `docs/nfl_live_prop_assessment.md` -- but the MARKET (carries) and the
+SIDE (under) were both chosen by reading the pooled table over all three
+seasons. So the per-season split below is a consistency check on data the rule
+has already seen, not an out-of-sample test, and the three seasons agreeing is
+weaker evidence than three independent seasons would be. The first genuine
+out-of-sample test is 2026, and it has not happened: the live worker has only
+ever bought `player_pass_attempts`, so no 2026 carries quote exists to grade.
 """
 from __future__ import annotations
 

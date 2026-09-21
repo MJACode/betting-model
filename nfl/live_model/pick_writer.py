@@ -44,10 +44,18 @@ log = logging.getLogger(__name__)
 
 MODEL_ID = "nfl_live_prop"
 
-# The market this lane trades, as the platform spells it. Settlement reads
+# The market this model trades, as the platform spells it. Settlement reads
 # picks.prop_market (tracking/paper_tracker._PROP_MARKET_STAT_BY_MODEL), the
 # same shape nfl_prop_market uses for one model id spanning many markets.
-LANE_MARKET = "player_pass_attempts"
+#
+# TAKEN FROM THE MODEL, NEVER WRITTEN OUT. This was the string
+# "player_pass_attempts" while the model traded pass attempts, and a market
+# switch that updated the model and not this line would have stamped every new
+# pick with the old market -- settling a rushing bet against passing attempts,
+# silently, and with no way to tell afterwards which stat a row was graded on.
+from .models import rush_attempt_pace as _model     # noqa: E402
+
+LANE_MARKET = _model.MARKET
 
 
 def _norm_player(name: str | None) -> str | None:
