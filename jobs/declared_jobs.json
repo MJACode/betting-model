@@ -859,5 +859,23 @@
       "max_credits": 170000
     },
     "run_after": "2026-10-01T12:00:00+00:00"
+  },
+  {
+    "key": "player-news-referer-fix-verify-2026-09-21",
+    "job_type": "player_news",
+    "requested_by": "matt",
+    "note": "VERIFY. Follow-up to player-news-diagnose-2026-09-19 (worker_jobs 161989), which got HTTP 403 on every ESPN news call -- league feed and all 12 MLB team feeds -- while injuries, which reads a DIFFERENT host (sports.core.api.espn.com), stayed fresh throughout. Not the sessions-112/115 IP-block: `site.api.espn.com`'s `/news` path specifically. Landed a candidate fix the same commit: ESPN_HEADERS in player_news_ingestor.py now sends Referer/Origin: https://www.espn.com, the publicly documented fix for this exact 403 (WebSearch, 2026-09-21) -- unverified from the dev sandbox, which 403s site.api.espn.com outright for both requests and WebFetch, so it could not be confirmed before landing. This job forces a real fetch across every configured sport (not just MLB) so a working fix populates real rows immediately rather than needing a second round trip. Read worker_jobs.result once this runs: rows>0 confirms the fix; a repeat 403 in the warnings means Referer was not it and the provider needs a different approach (or a licensed feed, per docs/player_news.md).",
+    "args": {
+      "sports": ["MLB", "NBA", "WNBA", "NFL"]
+    }
+  },
+  {
+    "key": "ncaaf-pbp-2026-refresh-2026-09-21",
+    "job_type": "ncaaf_pbp_pull",
+    "requested_by": "matt",
+    "note": "REFRESH. A scheduled staleness sweep found ncaaf_plays last ingested 2026-09-12 -- missing the 9/19-20 weekend's games. Populated by an on-demand worker job, not a recurring ingestor (see ncaaf-pbp-2025-for-the-inplay-replay), so nobody had queued a refresh since. Pulls the full 2026 season (regular weeks 1-16 + postseason) from CFBD, on the worker (CFBD_API_KEY is a Railway variable only). Idempotent on the play id -- a re-pull of already-stored weeks costs calls and writes nothing new -- so this is safe to run again later in the season.",
+    "args": {
+      "seasons": [2026]
+    }
   }
 ]
