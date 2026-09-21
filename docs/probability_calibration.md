@@ -359,6 +359,48 @@ number is swept: each sits just under the smallest bet that rule has written
 (`docs/nfl_rule_2026_track.md`). `scripts/ev_floor_replay.py` still shows the
 marked-down view for them, because it applies the fitted map directly.
 
+### The per-model floors (#796), measured on the number the gate uses (2026-09-21)
+
+#796 set each model's floor "just under its smallest written bet", reading EV
+from `picks.model_probability_cal`. **On 3,765 of the 3,945 priced BETs those
+models have written, that column equals `model_probability` or is empty** (written before
+the phase-3 maps, or by a model with no promoted map), so for every mapped
+model the floor was set on the RAW number while the gate judges the CALIBRATED
+one. Replayed through `models.honest_ev.gate` on production's maps (the local
+gate reproduced the worker's logged fade number, −0.129, exactly):
+
+- **1,008 of 3,945 written bets (26%) sit under their own model's floor.** The
+  models with no promoted map are untouched (0% blocked): `mlb_f5_moneyline`,
+  `mlb_moneyline`, `mlb_prop_batter_hits`, `mlb_prop_batter_walks`,
+  `wnba_moneyline`, `wnba_prop_player_threes`, and the two NFL rules, which
+  decide on their own probability.
+- **Where a map applies, the floor is far tighter than #796 says.** Share of
+  each model's written bets the gate now blocks: `wnba_prop_player_points` 99%,
+  `wnba_prop_player_pra` 94%, `nfl_prop_market` 93% (0.20 by choice, #794),
+  `mlb_total_public_fade` 88%, `mlb_prop_pitcher_walks` 84%, `wnba_prop_market`
+  75%, `mlb_runline` 64%, `mlb_spread_market` 62%, `mlb_prop_pitcher_er` 47%,
+  `mlb_prop_batter_tb` 46%, `wnba_prop_player_rebounds` 41%, `nfl_live_prop`
+  38%, `mlb_over_under` 35%; `ufc_total_rounds` 8 of 8, `ncaaf_spread` 1 of 1.
+- **What the blocked bets did** (settled, priced, not VOID; units, IN-SAMPLE —
+  the maps were fit on these same records): across the models with any blocked
+  bet, **blocked 915 bets −85.1u (−9.3%)**; **kept 1,557 bets −111.2u
+  (−7.1%)**. The floor is refusing losing bets and keeping losing bets. Only
+  three models lose anything positive to it: `wnba_prop_player_rebounds`
+  (+6.8u / 93), `wnba_prop_player_assists` (+6.8u / 11), `ncaaf_over_under`
+  (+2.5u / 5) — single cells on thin samples, not plateaus.
+
+**So there is nothing here to restore.** "Each behaves as it did before the
+global floor landed" (config.py) is false for every mapped model, but the
+behaviour it no longer has was −85 units. A floor is a model update and its
+owner's call (CLAUDE.md §1b); no floor was moved. The two that matter in
+practice are `mlb_total_public_fade` and `mlb_spread_market`: their
+probabilities are the market's own (fade) or a Pinnacle no-vig fair (spread),
+the pooled offset takes ~6 points off both, and every pick comes out at EV
+−0.11 to −0.15 — they cannot bet under ANY non-negative floor while they are
+judged on the pooled map. If they are wanted back, that is the question to
+decide (the two NFL rules were moved to `MODELS_ON_OWN_PROBABILITY` for the
+same reason), not the floor.
+
 ### Operating it
 
 - `python -m models.probability_calibration --promote` after the merge writes
