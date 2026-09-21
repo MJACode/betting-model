@@ -3096,6 +3096,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
+            # config.MODELS has no NFL game model. Falling through to the
+            # NHL feature builder returns a dict, so the per-game DELETE
+            # below would run, the game would join `rescored`, and the
+            # housekeeping sweep would then skip it. Skipping here leaves
+            # the sweep — the clear the evening refresh runs without
+            # nfl-prop-scoring — as the one that sees these rows. That
+            # sweep excludes nfl_prop_% (2026-09-21, NYG @ LA).
+            if sport == "NFL":
+                continue
+
             if game_id in ncaaf_unpriced or game_id in ahead_unpriced:
                 continue
 
@@ -3182,6 +3192,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                               AND result IS NULL
                               AND signal_type != 'BET'
                               AND is_live IS NOT TRUE
+                              AND model_id NOT LIKE 'nfl_prop_%'
                         """, (game_id,))
                     for model_id in relevant_models:
                         # Pick lock: this pair has already produced a BET, so it is
@@ -3276,6 +3287,15 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # each pass. That is the pre-lock behaviour for these rows, and an
         # AVOID is explicitly never settled and never bettable (§17), so
         # nothing that resolves money depends on its identity.
+        #
+        # nfl_prop_% is excluded. Evening refresh_pass runs this sweep and
+        # does not re-run nfl-prop-scoring, so a delete here is a wipe until
+        # the next hourly prop tick. Measured 2026-09-21 on NYG @ LA:
+        # 1,697 NONE inserts, then 1,697 deletes, and the pass logged
+        # "Cleared unsettled picks for games not yet started". LIKE '_' is
+        # one character, so the pattern is the nfl_prop_ prefix, including
+        # nfl_prop_market. Wind and opener are not in it. BET rows are
+        # already spared by signal_type.
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -3290,6 +3310,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             WHERE result IS NULL
               AND signal_type != 'BET'
               AND is_live IS NOT TRUE
+              AND model_id NOT LIKE 'nfl_prop_%'
               AND game_id IN (
                   SELECT game_id FROM games
                   WHERE game_date >= %s AND game_date <= %s
