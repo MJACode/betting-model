@@ -17,11 +17,12 @@ Two clears, both live with the lock on:
     re-score
 
 BET rows are already spared (signal_type != 'BET'). The locked
-exclusion is `model_id NOT LIKE 'nfl_prop_%'` on both clears (LIKE '_'
+exclusion is `model_id NOT LIKE 'nfl_prop_%%'` on both clears (LIKE '_'
 is one character, so this is the nfl_prop_ prefix, including
-nfl_prop_market). An NFL game must not enter the loop: the NHL feature
-builder returns a dict, the per-game DELETE would run, and `rescored`
-would then hide the game from the sweep.
+nfl_prop_market; the doubled %% is required so psycopg2 does not treat
+the wildcard as a format spec — see #243 / 2026-09-22). An NFL game must
+not enter the loop: the NHL feature builder returns a dict, the per-game
+DELETE would run, and `rescored` would then hide the game from the sweep.
 """
 from __future__ import annotations
 
@@ -56,6 +57,6 @@ def test_both_live_non_bet_clears_leave_nfl_rows():
     for name, block in (("per-game", per_game), ("sweep", sweep)):
         assert "DELETE FROM picks" in block, name
         assert "signal_type != 'BET'" in block, name
-        assert "model_id NOT LIKE 'nfl_prop_%'" in block, (
+        assert "model_id NOT LIKE 'nfl_prop_%%'" in block, (
             f"the {name} clear still deletes unsettled nfl_prop_% rows "
             f"on a game that has not kicked")

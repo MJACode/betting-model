@@ -13,8 +13,10 @@ NHL feature builder. Both have to exclude `nfl_prop_%`.
 Wind and opener are not `nfl_prop_%`, so their unsettled NONE rows are
 still cleared. A BET is already spared by `signal_type != 'BET'`.
 
-On SQL without `model_id NOT LIKE 'nfl_prop_%'` the nfl_prop NONE row is
-deleted and these tests fail.
+On SQL without `model_id NOT LIKE 'nfl_prop_%%'` the nfl_prop NONE row is
+deleted and these tests fail. The doubled %% is required: a bare % in a
+parameterised query is a psycopg2 format spec and raises
+`IndexError: tuple index out of range` (production 2026-09-22 after #813).
 """
 from __future__ import annotations
 
