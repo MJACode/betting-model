@@ -67,6 +67,16 @@ MODEL_ID = "nfl_live_prop"
 MARKET = "player_rush_attempts"
 SIDE = "under"
 
+# HOW THE STAT IS NAMED TO A PERSON, and it lives beside MARKET so the two can
+# never disagree. `pick_writer` built its label from the literal string "Pass
+# Attempts" while this model traded pass attempts; the market switch left that
+# string behind and published "Blake Corum Under 11.5 Pass Attempts" -- a
+# running back, on a passing line. The bet underneath was right and the label
+# was a lie, which is the exact failure CLAUDE.md section 00 exists for.
+# `tests/test_nfl_live_pick_writer.py` pins this against the platform's own
+# name for the market in models/scorer._NFL_PROP_CONFIG.
+STAT_LABEL = "Carries"
+
 # THE EDGE, AS A SHIFT IN LOG ODDS ON THE BOOK'S OWN NUMBER. Fitted as an
 # offset logit over all three seasons: logit P(under) = logit(book's de-vigged
 # under) + delta. One estimated quantity, deliberately -- inside this gate the

@@ -106,6 +106,45 @@ def test_the_settlement_columns_are_populated():
     assert row["signal_type"] == "BET"
 
 
+def test_the_label_names_the_stat_the_model_actually_trades():
+    """THE BUG THIS EXISTS FOR, 2026-09-21.
+
+    `build_pick` wrote the literal string "Pass Attempts" into every label. The
+    market switch updated the model, the writer's market and the settlement
+    map, and left that string behind -- so the first rushing pick published to
+    Discord as "Blake Corum Under 11.5 Pass Attempts". A running back, on a
+    passing line. The BET underneath was correct (under 11.5 carries) and the
+    sentence describing it was false, which is worse than a wrong bet: it is a
+    wrong bet as far as anyone reading it can tell.
+
+    Pinned against the PLATFORM's own name for the market, not against a
+    literal here, so the live model and the pre-game rush-attempts model cannot
+    drift into calling the same stat two different things.
+    """
+    from models.scorer import _NFL_PROP_CONFIG
+    from live_model.models import rush_attempt_pace as _rap
+
+    platform = {c["market"]: c["stat_label"] for c in _NFL_PROP_CONFIG.values()}
+    assert _rap.STAT_LABEL == platform[_rap.MARKET], (
+        f"the live model calls {_rap.MARKET} {_rap.STAT_LABEL!r}; the platform "
+        f"calls it {platform[_rap.MARKET]!r}")
+
+    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0,
+                     game_date="2026-09-13")
+    assert row["pick_label"].endswith(_rap.STAT_LABEL), row["pick_label"]
+    assert "Pass Attempts" not in row["pick_label"], (
+        "the label still names the market this model stopped trading")
+
+
+def test_the_label_agrees_with_the_side_and_the_line_it_carries():
+    """A label is read by a person and the fields are read by the settler, so
+    a disagreement between them is invisible until money has moved."""
+    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0,
+                     game_date="2026-09-13")
+    assert row["pick_side"].lower() in row["pick_label"].lower()
+    assert f"{row['scored_line']:g}" in row["pick_label"]
+
+
 def test_edge_is_the_platform_edge_not_the_lanes_ev():
     """The lane gates on EV (model_prob * decimal - 1); every other model in
     `picks` stores edge as model_prob - market_prob. Storing EV in the edge
