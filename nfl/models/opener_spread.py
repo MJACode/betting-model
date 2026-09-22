@@ -185,33 +185,54 @@ LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 # so a number sixty seconds old passed as "stale".
 #
 # Measured that day (docs/sessions/2026-09.md). The Odds API's own snapshots put
-# BetMGM on TEN @ NYG at -3.0 for hours, -2.5 from 21:24:26Z, then NYG -1 (-105)
-# / TEN +1 (-115) from 21:28:26Z -- a coherent two-sided quote -- while every
-# other book sat at -3 / -2.5. The 21:29Z tick fired "TEN @ NYG — NYG -1 (Opener
-# +2 vs Pinnacle, MGM) · 1.96u" and posted it to Discord; the next seven ticks
-# saw MGM at NYG +1, and by 22:00Z MGM was back at -3.0. Nobody could find that
-# number at the book. Two earlier 2026 picks have the same shape in the archive
-# (BUF@HOU: fanatics +1 -> -1 at the fire; CHI@CAR: betmgm +3 -> +1), and a
-# 14-day census of the feed counts 17-37 one-tick >=2-point blips per soft book
-# against ZERO at Pinnacle. A rule that selects on extremes harvests exactly
-# these, the same way the DEFECTIVE_BOOKS sign flips once supplied 15% of its
-# bets from 0.4% of rows.
+# BetMGM on TEN @ NYG at -3.0 for hours, -2.5 from 21:24:26Z, NYG -1 (-105) /
+# TEN +1 (-115) from 21:28:26Z, NYG +1 (-108) from 21:31:58Z and -3.0 again from
+# 21:45:11Z -- four distinct book updates in 21 minutes, each a coherent
+# two-sided quote, while every other book sat at -3. The 21:29Z tick fired
+# "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u" and posted it to
+# Discord. Nobody could find that number at the book, and whether MGM's own
+# site ever showed it is not measurable from here.
 #
-# The one-minute cadence (2026-09-06) is what made this certain. The backtest
-# ran on a 6-hourly grid, so any bet it selected had a soft point that was still
-# up six hours later by construction, and a fifteen-minute blip almost never
-# landed on a grid point. At one-minute resolution every blip lands. This gate
-# restores the property the backtest had implicitly.
+# HOW RARE, AND HOW LONG THE REAL ONES LAST -- because the cost of waiting is
+# the number vanishing while you wait, nothing else (waiting does not worsen a
+# number that is still there):
+#   * Pre-game (>= 48 h before kickoff), 14 days of minute-level archive, eight
+#     bettable books plus Pinnacle: ZERO one-tick >= 2-point blips at any book
+#     (an earlier census that said 17-37 per book was counting in-play ticks).
+#     The MGM episode is the only sub-hour deviation seen this season, and it
+#     sits in an archive gap.
+#   * Every other >= 2-point pre-game deviation this season lasted HOURS:
+#     CLE @ JAX 2026-09-07 (Pinnacle -7.5 -> -9.5, three soft books stayed at
+#     -7.5 for 4 h+ -- the classic stale case, fires instantly under this gate
+#     because the soft number is old); BUF @ HOU 2026-09-07 (Fanatics moved to
+#     HOU -1 against Pinnacle +1 and held it ~20 h with DK and MGM following --
+#     this gate would have fired it an hour later at the same number, and it
+#     won); ATL @ PIT 2026-09-10 (DK -5.5 vs -3.5 for hours).
+#   * Backtest, 2020-2025, bettable books, |dev| >= 2.0, first qualifying
+#     6-hourly snapshot: the soft number was still there at the NEXT snapshot
+#     (median 6 h later) for 75% of the 128 selected bets.
 #
-# 60 minutes is BELOW the six hours the backtest implies and was NOT measured:
-# chosen at the low end so a genuine stale number (days old) still fires on the
-# first tick after Pinnacle posts, exactly as before, and only a number that
-# appeared within the hour is held back. A soft book that posted less than an
-# hour before Pinnacle is outside the measured mechanism either way; leaving it
-# out is the conservative side (data_ingest/books.py: when in doubt, leave a
-# book out). `held_minutes` measures it; `select_opener_bets` and
-# `evaluate_board` both apply it when given the prior observations, and the
-# card always passes them -- an EMPTY history fires nothing, loudly.
+# WHAT THE BACKTEST CANNOT SAY. Splitting those 128 bets by whether the soft
+# point was already there at the previous 6-hourly snapshot: already-there
+# n=41 at -1.7%, new-since n=87 at +7.6%, both intervals spanning zero, every
+# sub-class n <= 51. At 6-hourly resolution a 17-minute episode is seen 5% of
+# the time, so the backtest contains essentially no glitches to grade and
+# cannot rank a filter for them. This gate rests on the measured glitch and on
+# the survival numbers above, not on a backtest return.
+#
+# WHO MOVED MATTERS FOR SPEED, NOT FOR THE RULE. The gate measures the age of
+# the SOFT number. When Pinnacle is the mover (the mechanism the rule was built
+# on) the soft number is hours or days old and the bet fires on the first tick
+# after Pinnacle moves, exactly as before. Only a deviation the soft book
+# created by moving itself waits, and it waits MIN_HELD_MINUTES from its own
+# move. 60 is a choice, not a measurement: the one glitch lasted 17 minutes
+# (n=1); 30 would have caught it with 13 minutes to spare, 60 with 43. In the
+# backtest the both-moved-at-once class (soft partially lagging a Pinnacle move
+# inside the same window) is n=9 at -16.9%, so the case a plain age gate slows
+# is small and not one the record argues for. `held_minutes` measures it;
+# `select_opener_bets` and `evaluate_board` both apply it when given the prior
+# observations, and the card always passes them -- an EMPTY history fires
+# nothing, loudly.
 MIN_HELD_MINUTES = 60.0
 
 # Pooled validated ATS at the deployment threshold. Kept for reference and as

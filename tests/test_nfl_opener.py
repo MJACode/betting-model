@@ -721,10 +721,12 @@ class TestStaleNumberGate:
         ev = opener_model.evaluate_board(board, _giants_sched(), prior=prior, now=now)
         assert int(ev[0]["qualifies"]) == 1 and ev[0]["current_book"] == "fanatics"
 
-    def test_the_two_earlier_2026_picks_would_have_been_held_back(self):
+    def test_the_two_earlier_2026_picks_would_have_waited(self):
         # BUF @ HOU, locked 2026-09-07 01:37Z: fanatics HOU -1 against Pinnacle
         # HOU +1 (dev -2 -> BUF +1). The archive has fanatics at HOU +1 through
-        # 01:00Z -- a sign flip at the fire. Never seen at -1: no bet.
+        # 01:00Z, then at -1 for the next ~20 hours with DK and MGM following.
+        # Not a glitch: the gate WAITS an hour and fires at the same number
+        # (the bet won). At the fire tick the number is new, so no bet yet.
         g = dict(home="HOU", away="BUF", event="buf_hou")
         board = _frame(_both_sides("pinnacle", 1.0, -110, -110, **g)
                        + _both_sides("fanatics", -1.0, -115, -105, **g))
@@ -738,7 +740,8 @@ class TestStaleNumberGate:
                                            now=_ts("2026-09-07 01:37"))) == 0
         # CHI @ CAR, locked 2026-09-08 03:25Z under the 1.0-pt rule of the day:
         # betmgm CAR +1 against Pinnacle CAR +2.5. The archive has betmgm at
-        # CAR +3 through 03:00Z.
+        # CAR +3 through 03:00Z and never records the +1 at all; how long it
+        # lasted cannot be established. New at the fire tick: no bet yet.
         g = dict(home="CAR", away="CHI", event="chi_car")
         board = _frame(_both_sides("pinnacle", 2.5, -110, -110, **g)
                        + _both_sides("betmgm", 1.0, -108, -112, **g))

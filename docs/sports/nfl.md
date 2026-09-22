@@ -163,9 +163,14 @@ in-week during the season.
   served BetMGM on TEN @ NYG at NYG -1 for one tick and NYG +1 for the next
   fourteen minutes, every other book at -3, and the 21:29Z tick locked
   `TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u` — a number nobody
-  found at the book. The feed does this constantly (17-37 one-tick ≥2-point
-  blips per soft book per fortnight, zero at Pinnacle) and the one-minute
-  cadence lands on every one; the backtest's 6-hourly grid never did. Now
+  found at the book. Pre-game the feed does NOT do this often (zero one-tick
+  ≥2-point moves at any bettable book in 14 days of minute data; an earlier
+  count of 17-37 per book was in-play ticks), but at one-minute cadence the
+  rare one always lands, where the backtest's 6-hourly grid saw 5% of it.
+  Every other ≥2-point pre-game deviation this season lasted hours, and 75%
+  of the backtest's selected numbers were still up 6 h later, so an hour's
+  wait costs no measured bet; when Pinnacle is the mover the soft number is
+  already old and the bet still fires on the first tick. Now
   `held_minutes` measures how long the book has quoted its current point from
   earlier observations, and both the selection and the audit-trail evaluation
   skip a number held under an hour (falling through to the next-largest
