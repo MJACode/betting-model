@@ -41,6 +41,7 @@ from data.ingestors.odds_ingestor import (
     SPORT_KEYS,
     _get_odds,
     _insert_odds,
+    _ncaaf_schedule_for_events,
     _process_events,
 )
 
@@ -91,7 +92,10 @@ def fetch_in_play_odds(conn: DBConnection,
 
     # The bulk feed also returns upcoming (pre-game) events; keep only the
     # games the orchestrator asked for (the ones currently live).
-    _, odds_rows = _process_events(events, sport, "in_play", snapshot_at)
+    ncaaf_schedule = (_ncaaf_schedule_for_events(conn, events)
+                      if sport == "NCAAF" else None)
+    _, odds_rows = _process_events(events, sport, "in_play", snapshot_at,
+                                   ncaaf_schedule=ncaaf_schedule)
     if game_ids is not None:
         odds_rows = [r for r in odds_rows if r["game_id"] in game_ids]
 

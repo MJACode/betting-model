@@ -153,6 +153,17 @@ def test_an_fbs_split_is_still_reported_after_the_bound():
     assert _run(c, "2026-09-08") == [("2026-09-10", "Miami", 2)]
 
 
+def test_the_william_and_mary_duke_split_is_the_check_going_red():
+    """The 2026-09-26 production pair. Duke is FBS; both rows share a date
+    and home, so the check must fire on the nickname as well as the school."""
+    c = _conn(fbs=("Duke",))
+    _add(c, "NCAAF_2026-09-26_william-mary_duke",
+         "2026-09-26", "Duke", "William & Mary")
+    _add(c, "NCAAF_2026-09-26_william-and-mary-tribe_duke",
+         "2026-09-26", "Duke", "William and Mary Tribe")
+    assert _run(c, "2026-09-22") == [("2026-09-26", "Duke", 2)]
+
+
 def test_the_se_louisiana_ul_monroe_split_is_the_check_going_red():
     """The 2026-09-19 production pair. UL Monroe is FBS; both rows share a
     date and home, so the check must fire — this is the signature, not the
@@ -185,6 +196,14 @@ def test_the_odds_api_map_bridges_names_no_rule_can():
     # The Odds API spells it out, and no automatic rule bridges them.
     assert m.get("Southeastern Louisiana Lions") == "SE Louisiana"
     assert m.get("Southeastern Louisiana") == "SE Louisiana"
+    # 2026-09-22: three FCS visitors on the 09-26 slate. The fold and the
+    # abbreviation rule also bridge the first two; Houston Baptist does not.
+    assert m.get("William and Mary Tribe") == "William & Mary"
+    assert m.get("William and Mary") == "William & Mary"
+    assert m.get("LIU Sharks") == "Long Island University"
+    assert m.get("LIU") == "Long Island University"
+    assert m.get("Houston Baptist Huskies") == "Houston Christian"
+    assert m.get("Houston Baptist") == "Houston Christian"
 
 
 def test_every_override_target_is_a_canonical_school_shape():
