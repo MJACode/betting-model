@@ -266,20 +266,22 @@ which is the dial that produced this complaint and cannot fix a constant.
 
 ## 8. Production follow-up (2026-09-22) — publish backstop, model stays live
 
-Ledger confirmation (Supabase `picks`, `model_id=nfl_live_prop`, queried 2026-09-22):
+Ledger confirmation (Supabase `picks`, `model_id=nfl_live_prop`, queried 2026-09-22).
+Dual-arm worker (pre-#811) evaluated **priced** then **blind** on every OVER:
 
-| raw `p` | `p_cal` | market / side | priced | W–L | kelly u | flat u |
-|---|---|---|---|---|---|---|
-| 0.600344 | 0.600344 | pass attempts / over | 5 | 2–3 | −6.80 | −1.36 |
-| 0.600344 | 0.5355 | pass attempts / over | 4 | 2–2 | 0.00 | 0.00 |
-| **0.642000** | **0.5792** | pass attempts / over | **13** | **2–11** | **−46.30** | −9.26 |
-| **Pass OVER total** | | | **22** | **6–16** | **−53.10** | −10.62 |
-| continuous (~0.50) | | rush attempts / under | 1 | 0–1 | −5.00 | −1.00 |
+| raw `p` | `p_cal` | n | BET | AVOID | W–L | kelly u (priced W/L) | arm |
+|---|---|---|---|---|---|---|---|
+| 0.600344 | ≈0.6003 | 35 | 12 | 23 | 2–3 (+7 NO_ACTION) | −6.80 on settled | priced |
+| 0.600344 | 0.5355 | 32 | 4 | 28 | 2–2 | 0.00 | priced |
+| **0.642000** | **0.5792** | **13** | **13** | **0** | **2–11** | **−46.30** | **blind** |
+| **Pass OVER W+L** | | | **22** | | **6–16** | **−53.10** | |
+| rush under (~0.50) | | 1 | 1 | 0 | 0–1 | −5.00 | #811+ |
 
-Exactly two raw probabilities on every pass-over BET. `0.600344 = Phi(1.50/5.90)`
-(priced arm); `0.642` was the blind arm. The 0.642 / 0.5792 bucket is all-BET
-because the higher constant cleared the EV price filter on every quote that
-arm saw.
+Why blind is all-BET: higher constant clears EV on nearly every quote above −140;
+priced often AVOIDs first, then blind BETs into the adverse-selected remainder.
+
+Also measured: `live_pick_features` n=0 for this model; all BET rows have null
+`game_time` / `run_time` / `clv_pct` (quality `clv_degradation` SKIPPED).
 
 **Kill switches (default safe):**
 
