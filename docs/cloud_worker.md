@@ -51,6 +51,17 @@ retry (two ledgered `run_kind='daily'` starts). In-process lock plus a successfu
 daily already today both no-op. Kill switch: `RUN_DAILY_RETRY=0`. See
 `tracking/daily_retry.py`.
 
+**The :17 refresh pass has the same catch-up (2026-09-21).** A merge to master
+stops the container whatever it is doing; 11 refresh passes ended `aborted`
+between 09-18 and 09-20, and on 09-20 no pass completed between 16:32 and 19:31
+UTC. `scheduler.py::catch_up_refresh_pass` runs as a one-off job 60 seconds
+after boot: if this hour's `hourly` pass is unfinished or `aborted`, the next
+:17 is at least ten minutes away, and no more than two passes were interrupted
+this hour, it runs `refresh_pass.sh` once. The evening pass is never replaced
+(its next tick is at most ten minutes away). **It buys odds — about 1,000
+credits a re-run** (1,018 measured on the 09-20 19:17 UTC pass). Kill switch:
+`RUN_REFRESH_RETRY=0`. See `tracking/refresh_retry.py`.
+
 ### NFL polling (changed 2026-08-22)
 
 The four fixed wind-card slots and the daily opener card were replaced by one poll

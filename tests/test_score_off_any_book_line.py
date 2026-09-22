@@ -255,20 +255,66 @@ def test_the_migration_is_one_guarded_idempotent_block():
     # guarded on the property each step establishes, never on its own shape
     assert "column_name = 'line_book'" in sql
     assert "position('line_book' in d) = 0" in sql
-    assert "IF position(new_profit in d) > 0 THEN" in sql
+    assert "IF position('decision_odds' in d) > 0 THEN" in sql
+
+
+# The two shapes pg_get_viewdef has printed for the published-units gate. The
+# second is production's since settled_record_survives_a_pause (2026-09-12)
+# took the join out of both views: a single-table view is printed WITHOUT the
+# `p.` prefix. Both files matched the first shape as one literal string, so
+# against the second both raise: "View migration FAILED" on every pass in every
+# worker log still held (2026-09-19 12:17 UTC onward), 31/33 applied, the step
+# green, and the record gating units on DraftKings' price alone (found
+# 2026-09-21; zero bets affected yet). These tests pinned the literal.
+_GATE_SHAPES = {
+    "joined view": "sum(p.profit_flat) FILTER (WHERE (p.result = ANY (ARRAY['WIN'::text])) "
+                   "AND p.dk_odds IS NOT NULL), 0::numeric) AS profit_flat, 100 * count(*) "
+                   "FILTER (WHERE (p.result = ANY (ARRAY['WIN'::text])) AND p.dk_odds IS NOT NULL)",
+    "single-table view": "sum(profit_flat) FILTER (WHERE (result = ANY (ARRAY['WIN'::text])) "
+                         "AND dk_odds IS NOT NULL), 0::numeric) AS profit_flat, 100 * count(*) "
+                         "FILTER (WHERE (result = ANY (ARRAY['WIN'::text])) AND dk_odds IS NOT NULL)",
+}
+
+
+def _sql_const(sql: str, name: str) -> str:
+    return sql.split(f"{name} CONSTANT text := '")[1].split("';")[0]
 
 
 def test_published_units_gate_on_the_deciding_price():
     """The gate exists because settlement fabricates -110 for an unpriced
     pick. A pick scored off FanDuel's line and settled at FanDuel's price is
-    priced -- leaving the gate on dk_odds would bet it and never count it."""
+    priced -- leaving the gate on dk_odds would bet it and never count it.
+
+    Run the file's OWN pattern over both shapes the view has been printed in:
+    the literal-string version of this test kept passing while the migration
+    it described failed on every pass."""
+    import re
     sql = _src(f"data/migrations/{MIG}")
-    assert "COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL" in sql
     assert "v_public_track_record" in sql and "v_public_track_record_daily" in sql
-    # and the file that owns that property must not fight this one
+    gate, new = _sql_const(sql, "dk_gate"), _sql_const(sql, "new_gate")
+    assert "regexp_replace(d, dk_gate, new_gate, 'g')" in sql
+    for shape, d in _GATE_SHAPES.items():
+        out, n = re.subn(gate, new, d)      # Postgres and Python both read \1
+        assert n == 2, f"{shape}: both the units sum and the stake count are gated"
+        assert "dk_odds IS NOT NULL" not in out.replace(
+            "decision_odds, dk_odds) IS NOT NULL", "").replace(
+            "decision_odds, p.dk_odds) IS NOT NULL", ""), shape
+    assert "COALESCE(p.decision_odds, p.dk_odds) IS NOT NULL" in re.sub(
+        gate, new, _GATE_SHAPES["joined view"])
+    assert "COALESCE(decision_odds, dk_odds) IS NOT NULL" in re.sub(
+        gate, new, _GATE_SHAPES["single-table view"])
+
+
+def test_the_file_that_owns_the_price_gate_does_not_fight_this_one():
+    """require_price_for_published_units skips a view that is gated in EITHER
+    column and in EITHER printed shape; it used to recognise one literal."""
+    import re
     marker = _src("data/migrations/require_price_for_published_units.sql")
-    assert "decision_profit CONSTANT text" in marker
-    assert "position(decision_profit in d) > 0" in marker
+    guard = marker.split("IF d ~ '")[1].split("'")[0]
+    assert "OR position('decision_odds' in d) > 0 THEN" in marker
+    for shape, d in _GATE_SHAPES.items():
+        assert re.search(guard, d), f"{shape}: a gated view must be skipped, not raised on"
+    assert not re.search(guard, "sum(profit_flat) FILTER (WHERE result = 'WIN')")
 
 
 def test_the_trigger_copies_line_book():

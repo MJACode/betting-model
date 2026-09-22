@@ -240,6 +240,15 @@ def step_apply_view_migrations(run_date: str) -> bool:
     try:
         from data.view_migrations import apply_view_migrations, ACTIVE_MIGRATIONS
         n = apply_view_migrations()
+        if n < len(ACTIVE_MIGRATIONS):
+            # The STEP fails; the pass does not (refresh_pass.sh and the daily
+            # both carry on past a failed step). Until 2026-09-21 this logged
+            # "✓ 31/33 applied" as a success on every pass the logs still hold while
+            # two migrations raised, so the ledger and the failure alerter saw
+            # nothing and the published-units gate they owned had lapsed.
+            logger.error(f"✗ View migrations: {n}/{len(ACTIVE_MIGRATIONS)} applied — "
+                         f"{len(ACTIVE_MIGRATIONS) - n} FAILED (see 'View migration FAILED' above)")
+            return False
         logger.success(f"✓ View migrations: {n}/{len(ACTIVE_MIGRATIONS)} applied")
         return True
     except Exception as exc:
