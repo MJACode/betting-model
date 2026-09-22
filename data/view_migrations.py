@@ -190,6 +190,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-19: daily model-quality findings (one-sided slates, fade
     # concentration, CLV/ROI, volume). Report only; never pauses.
     "add_model_quality_checks_2026_09_19.sql",
+    # 2026-09-22: three empty data_source=live NCAAF rows on the 09-26
+    # slate (William & Mary, LIU, Houston Christian) beside the CFBD ids.
+    # Deletes the live row when it still carries the measured nickname and
+    # no odds or picks. The resolver map in the same change stops a new one.
+    "ncaaf_fcs_opponent_alias_2026_09_22.sql",
 ]
 
 

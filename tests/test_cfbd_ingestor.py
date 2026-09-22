@@ -1054,3 +1054,161 @@ def test_odds_ingest_builds_the_cfbd_id_for_this_matchup(
     assert games[0]["home_team"] == "UL Monroe"
     assert {o["game_id"] for o in odds} == {
         "NCAAF_2026-09-19_se-louisiana_ul-monroe"}
+
+
+# ── William & Mary / LIU / Houston Christian (2026-09-22) ────────────────────
+#
+# ncaaf_game_identity STALE: three 2026-09-26 games each had a CFBD row and
+# a data_source=live row minted from the Odds API nickname. alt_names NULL.
+
+
+@pytest.fixture
+def fcs_alias_registry(monkeypatch):
+    from data.ingestors import cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_SCHOOL_CACHE", [
+        {"school": "William & Mary", "mascot": "Tribe", "abbreviation": "W&M", "alt": []},
+        {"school": "Duke", "mascot": "Blue Devils", "abbreviation": "DUKE", "alt": []},
+        {"school": "Long Island University", "mascot": "Sharks", "abbreviation": "LIU", "alt": []},
+        {"school": "Florida International", "mascot": "Panthers", "abbreviation": "FIU", "alt": []},
+        {"school": "Houston Christian", "mascot": "Huskies", "abbreviation": "HCU", "alt": []},
+        {"school": "Houston", "mascot": "Cougars", "abbreviation": "HOU", "alt": []},
+        {"school": "North Texas", "mascot": "Mean Green", "abbreviation": "UNT", "alt": []},
+        {"school": "Washington", "mascot": "Huskies", "abbreviation": "WASH", "alt": []},
+        {"school": "Washington and Lee", "mascot": "Generals", "abbreviation": "W&L", "alt": []},
+    ])
+    return cf
+
+
+def test_and_versus_ampersand_resolves_without_the_map(fcs_alias_registry, monkeypatch):
+    """Watched failing shape before the fold treated "and" as "&"."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "William and Mary Tribe") == "William & Mary"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "William and Mary") == "William & Mary"
+
+
+def test_abbreviation_plus_mascot_resolves_liu_without_the_map(
+        fcs_alias_registry, monkeypatch):
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school("LIU Sharks") == \
+        "Long Island University"
+    assert fcs_alias_registry.resolve_odds_api_school("LIU") == \
+        "Long Island University"
+
+
+def test_houston_baptist_does_not_resolve_without_the_map(
+        fcs_alias_registry, monkeypatch):
+    """Rename, not a fold. HCU is the abbreviation; "Houston" is a different
+    school and its mascot is not Huskies, so the prefix rule must not fire."""
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Houston Baptist Huskies") == "Houston Baptist Huskies"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Houston Baptist") == "Houston Baptist"
+
+
+def test_the_map_resolves_houston_baptist_to_houston_christian(fcs_alias_registry):
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Houston Baptist Huskies") == "Houston Christian"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Houston Baptist") == "Houston Christian"
+
+
+def test_dropping_and_does_not_hand_washington_and_lee_to_washington(
+        fcs_alias_registry, monkeypatch):
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Washington and Lee Generals") == "Washington and Lee"
+    assert fcs_alias_registry.resolve_odds_api_school(
+        "Washington Huskies") == "Washington"
+
+
+def test_the_resolved_ids_are_the_cfbd_rows(fcs_alias_registry):
+    assert build_ncaaf_game_id(
+        "2026-09-26",
+        fcs_alias_registry.resolve_odds_api_school("William and Mary Tribe"),
+        fcs_alias_registry.resolve_odds_api_school("Duke Blue Devils"),
+    ) == "NCAAF_2026-09-26_william-mary_duke"
+    assert build_ncaaf_game_id(
+        "2026-09-26",
+        fcs_alias_registry.resolve_odds_api_school("LIU Sharks"),
+        fcs_alias_registry.resolve_odds_api_school("Florida International Panthers"),
+    ) == "NCAAF_2026-09-26_long-island-university_florida-international"
+    assert build_ncaaf_game_id(
+        "2026-09-26",
+        fcs_alias_registry.resolve_odds_api_school("Houston Baptist Huskies"),
+        fcs_alias_registry.resolve_odds_api_school("North Texas Mean Green"),
+    ) == "NCAAF_2026-09-26_houston-christian_north-texas"
+
+
+def test_kickoff_and_home_attach_an_unmapped_nickname_to_the_cfbd_row(
+        fcs_alias_registry, monkeypatch):
+    """The backstop. Map emptied, so Houston Baptist stays unresolved, and
+    the schedule already holds both the CFBD row and the live duplicate.
+    Odds must land on the CFBD id, not mint a third and not keep the live one.
+    """
+    from data.ingestors.odds_ingestor import _process_events
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    schedule = [
+        {"game_id": "NCAAF_2026-09-26_houston-christian_north-texas",
+         "game_date": "2026-09-26", "home_team": "North Texas",
+         "away_team": "Houston Christian",
+         "commence_time": "2026-09-26T23:30:00.000Z", "data_source": "cfbd"},
+        {"game_id": "NCAAF_2026-09-26_houston-baptist-huskies_north-texas",
+         "game_date": "2026-09-26", "home_team": "North Texas",
+         "away_team": "Houston Baptist Huskies",
+         "commence_time": "2026-09-26T23:30:00+00:00", "data_source": "live"},
+    ]
+    event = {
+        "id": "hcu-unt",
+        "commence_time": "2026-09-26T23:30:00Z",
+        "home_team": "North Texas Mean Green",
+        "away_team": "Houston Baptist Huskies",
+        "bookmakers": [{
+            "key": "draftkings",
+            "markets": [{"key": "totals", "outcomes": [
+                {"name": "Over", "price": -110, "point": 61.5},
+                {"name": "Under", "price": -110, "point": 61.5},
+            ]}],
+        }],
+    }
+    games, odds = _process_events(
+        [event], "NCAAF", "open", "2026-09-22T05:59:20Z",
+        ncaaf_schedule=schedule)
+    assert [g["game_id"] for g in games] == [
+        "NCAAF_2026-09-26_houston-christian_north-texas"]
+    assert games[0]["away_team"] == "Houston Christian"
+    assert games[0]["home_team"] == "North Texas"
+    assert {o["game_id"] for o in odds} == {
+        "NCAAF_2026-09-26_houston-christian_north-texas"}
+
+
+def test_two_different_known_opponents_do_not_share_a_kickoff(
+        fcs_alias_registry, monkeypatch):
+    """Both sides canonical and they are not the scheduled pair: do not
+    attach to the home team's other game."""
+    from data.ingestors.cfbd_ingestor import adopt_ncaaf_game_id
+    monkeypatch.setattr(config, "NCAAF_ODDS_API_MAP", {})
+    schedule = [{
+        "game_id": "NCAAF_2026-09-26_houston-christian_north-texas",
+        "game_date": "2026-09-26", "home_team": "North Texas",
+        "away_team": "Houston Christian",
+        "commence_time": "2026-09-26T23:30:00.000Z", "data_source": "cfbd",
+    }]
+    assert adopt_ncaaf_game_id(
+        schedule,
+        candidate_id="NCAAF_2026-09-26_houston_north-texas",
+        home="North Texas",
+        away="Houston",
+        home_known=True,
+        away_known=True,
+        commence_time="2026-09-26T23:30:00Z",
+        game_date="2026-09-26",
+    ) is None
+
+
+def test_commence_z_and_offset_are_the_same_instant():
+    from data.ingestors.cfbd_ingestor import commence_instant
+    assert commence_instant("2026-09-26T19:30:00.000Z") == \
+        commence_instant("2026-09-26T19:30:00+00:00")

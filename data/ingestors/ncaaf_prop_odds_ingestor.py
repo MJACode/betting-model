@@ -43,7 +43,9 @@ spellings carry accents and punctuation this feed drops ("San José State",
 lines, so props reuse it rather than growing a second, differently-wrong copy.
 An event whose resolved id is not in `games` is SKIPPED, not written: an
 orphan prop row joins to nothing and would sit in the table forever looking
-like coverage.
+like coverage. When the feed name does not resolve, the same kickoff plus
+the one side that did resolve selects the stored row (the CFBD row, when a
+live duplicate is already sitting beside it) instead of the nickname's id.
 
 WHAT IS AND IS NOT ASSUMED ABOUT THE FEED
 ------------------------------------------
@@ -86,7 +88,10 @@ from config import (
     PROP_MARKETS_NCAAF,
 )
 from data.db import get_connection, DBConnection
-from data.ingestors.cfbd_ingestor import build_ncaaf_game_id, resolve_odds_api_school
+from data.ingestors.cfbd_ingestor import (
+    adopt_ncaaf_game_id, build_ncaaf_game_id, fetch_ncaaf_schedule,
+    resolve_odds_api_school, school_in_registry,
+)
 from data.ingestors.odds_quota import persist_quota, record_quota_headers
 from data.ingestors.prop_odds_ingestor import _insert_prop_odds, _parse_prop_markets
 
@@ -165,6 +170,31 @@ def _known_game_ids(conn: DBConnection, game_date: str) -> set[str]:
     return {r[0] for r in rows}
 
 
+def _schedule(conn: DBConnection, game_date: str) -> list[dict]:
+    """Games rows for adoption. A short row (the scope tests' id-only fake)
+    is not a schedule and is ignored."""
+    try:
+        return fetch_ncaaf_schedule(conn, game_date, game_date)
+    except Exception:                                  # noqa: BLE001
+        return []
+
+
+def _attach_existing(schedule: list[dict], home: str, away: str,
+                     commence, candidate: str, game_date: str) -> str | None:
+    if not schedule:
+        return None
+    return adopt_ncaaf_game_id(
+        schedule,
+        candidate_id=candidate,
+        home=home,
+        away=away,
+        home_known=school_in_registry(home),
+        away_known=school_in_registry(away),
+        commence_time=commence,
+        game_date=game_date,
+    )
+
+
 def scope_events(conn: DBConnection, events: list[dict], game_date: str,
                  require_dk_line: bool | None = None,
                  max_events: int | None = None) -> tuple[list[tuple[dict, str]], dict]:
@@ -182,6 +212,7 @@ def scope_events(conn: DBConnection, events: list[dict], game_date: str,
 
     known = _known_game_ids(conn, game_date)
     lined = _dk_lined_game_ids(conn, game_date) if require_dk_line else set()
+    schedule = _schedule(conn, game_date)
 
     kept: list[tuple[dict, str]] = []
     dropped = {"unresolved": 0, "no_dk_line": 0, "over_cap": 0}
@@ -189,6 +220,12 @@ def scope_events(conn: DBConnection, events: list[dict], game_date: str,
         home = resolve_odds_api_school(ev["home_team"], conn)
         away = resolve_odds_api_school(ev["away_team"], conn)
         game_id = build_ncaaf_game_id(game_date, away, home)
+        adopted = _attach_existing(
+            schedule, home, away, ev.get("commence_time"), game_id, game_date)
+        # Prefer the existing CFBD row when the feed nickname already minted
+        # a second id. An adopted id that is not in `games` is not writable.
+        if adopted in known:
+            game_id = adopted
         if game_id not in known:
             # An orphan prop row joins to nothing and looks like coverage
             # forever. Skipping is the same choice the game-line resolver makes.
@@ -548,6 +585,7 @@ def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
         return 0
 
     known = _known_game_ids(conn, d)
+    schedule = _schedule(conn, d)
     date_rows = 0
     seen = 0
     for ev in evs:
@@ -563,6 +601,11 @@ def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
         home = resolve_odds_api_school(ev.get("home_team", ""), conn)
         away = resolve_odds_api_school(ev.get("away_team", ""), conn)
         game_id = build_ncaaf_game_id(game_date, away, home)
+        if game_date == d:
+            adopted = _attach_existing(
+                schedule, home, away, commence, game_id, game_date)
+            if adopted and adopted in known:
+                game_id = adopted
         if game_id not in known:
             total["skipped"] += 1        # orphan rows join to nothing
             continue
