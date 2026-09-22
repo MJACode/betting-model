@@ -338,7 +338,8 @@ def test_the_live_producers_return_the_projected_key_not_a_rebuilt_one():
             "NFL", 0.6, 0.07, -115.0, 0.011, None, None, "SEA", "NE",
             "2026-09-10T00:20:00Z", "2026-09-10T01:00:00+00:00", 0.0, -140, key,
             None, None, None, -115.0, None,   # best_*, decision_odds/book (2026-09-10)
-            32.5)                             # scored_line (2026-09-12)
+            32.5,                             # scored_line (2026-09-12)
+            "player_pass_attempts")           # prop_market (2026-09-21)
     assert dn._new_live_signals(_KeyConn([drow]), "2026-09-09")[0]["lock_key"] == key
 
 

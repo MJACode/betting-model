@@ -422,3 +422,51 @@ def test_refuse_mismatched_actually_drops_the_pick_that_shipped():
             "label": "Blake Corum Under 11.5 Carries"}
     kept = refuse_mismatched([bad, good], "test")
     assert [s["lock_key"] for s in kept] == ["k2"]
+
+
+def test_the_live_query_selects_exactly_what_the_dict_reads():
+    """Positional row tuples break silently, three files away.
+
+    `_new_live_signals` reads its columns as `r[0]`..`r[N]` against a SELECT
+    written a hundred lines earlier. Adding `p.prop_market` to that SELECT --
+    one column, at the end -- raised `IndexError: tuple index out of range` in
+    test_discord_notifier, test_discord_live_field and test_publish_key_identity,
+    none of which mention the live query, because each builds a fixed-length
+    tuple standing in for the row.
+
+    So this compares the two halves directly and fails with a sentence instead
+    of an IndexError: the SELECT's column count against the highest index the
+    dict actually reads.
+    """
+    import re as _re
+
+    src = (ROOT / "tracking" / "discord_notifier.py").read_text(encoding="utf-8")
+    body = src[src.index("def _new_live_signals("):src.index("def notify_discord_live(")]
+
+    select = body[body.index("SELECT DISTINCT"):body.index("FROM picks")]
+    # SQL comments FIRST. The select list carries `-- ...` notes containing
+    # commas, and counting those as columns is how this guard first reported 27
+    # columns for a 25-column query -- a check that miscounts is worse than no
+    # check at all.
+    select = _re.sub(r"--.*", "", select)
+    # Split on commas that are not inside a call such as COALESCE(a, b).
+    depth, cols, cur = 0, [], ""
+    for ch in select[len("SELECT DISTINCT"):]:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            cols.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    cols.append(cur)
+    selected = len([c for c in cols if c.strip()])
+
+    highest = max(int(m) for m in _re.findall(r"\br\[(\d+)\]", body))
+    assert selected == highest + 1, (
+        f"the live SELECT projects {selected} columns and the dict reads up to "
+        f"r[{highest}]. Adding a column without reading it, or reading one that "
+        f"is not projected, breaks three test files with an IndexError that "
+        f"names none of them.")
