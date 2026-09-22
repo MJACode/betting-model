@@ -4,6 +4,7 @@ import {
   fetchUpcomingUfcPicks,
   fetchUpcomingNflPicks,
   fetchUpcomingNcaafPicks,
+  fetchUpcomingNhlPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
@@ -42,6 +43,16 @@ const NFL_AHEAD_DAYS = 11;
  * 107 games (924 `games` rows, 2,309 all-books rows), so every read is paged.
  */
 const NCAAF_AHEAD_DAYS = 150;
+/**
+ * Mirrors config.GAME_SCORE_AHEAD_DAYS for NHL. The scorer prices NHL (with
+ * MLB, NBA and WNBA) this far ahead of `game_date`; a DraftKings price is
+ * the real gate and this number is the outer bound. 7, not the NFL card's
+ * 11: NHL has no poll or prop horizon past this constant, and the board has
+ * to reach every date the scorer can write. A game exactly 7 days out is
+ * inside the window (`lte`), which is the 2026-09-29 opener read on
+ * 2026-09-22.
+ */
+const NHL_AHEAD_DAYS = 7;
 
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();
@@ -71,15 +82,18 @@ export function useTodayPicks(date?: string) {
       return [] as EnrichedPick[];
     };
     try {
-      // Today's picks (all sports) + the upcoming UFC card. UFC events are
-      // weekly, so the UFC tab shows the next card's picks ahead of fight day.
+      // Today's picks (all sports) plus each look-ahead card. UFC, NFL and
+      // NCAAF have had one; NHL joined the scorer's 7-day game window
+      // (config.GAME_SCORE_AHEAD_DAYS) and was still same-day here, so a
+      // slate dated inside that window never reached the chip or the board.
       // The look-ahead fetches are enrichment — don't fail the whole feed on
       // them, but record each failure in `partial`.
-      const [rows, ufcRows, nflRows, ncaafRows] = await Promise.all([
+      const [rows, ufcRows, nflRows, ncaafRows, nhlRows] = await Promise.all([
         fetchPicksForDate(target, (what, e) => note(what)(e)),
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(swallow('the upcoming UFC card')),
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(swallow('this week’s NFL card')),
         fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(swallow('the upcoming NCAAF card')),
+        fetchUpcomingNhlPicks(target, addDays(target, NHL_AHEAD_DAYS)).catch(swallow('the upcoming NHL card')),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
       // linger on the board for the rest of the day. A retired or paused
@@ -101,7 +115,7 @@ export function useTodayPicks(date?: string) {
       // header count above them excluded them. That is the retired-model bug
       // this comment already describes, one row down. Both guards stay: this
       // one for the board, passesActionFilter for the settled/server paths.
-      const all = [...rows, ...ufcRows, ...nflRows, ...ncaafRows].filter(
+      const all = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...nhlRows].filter(
         (d) => !isGameOver(d.game, d.pick.sport)
           && !isModelRetired(d.pick.model_id)
           && !isModelPaused(d.pick.model_id)
