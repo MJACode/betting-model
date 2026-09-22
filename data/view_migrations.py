@@ -86,6 +86,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # carried-forward team rates; an as-of-date feature needs the games it is
     # summed from. Written by data/ingestors/nhl_game_logs.py.
     "add_nhl_game_logs.sql",
+    # 2026-09-21: goals by period, one row per game, from the same archive the
+    # NHL opening/closing lines came from. The ingestor validated its parse on
+    # them and discarded them; they settle the first-period and regulation
+    # markets. Written by data/ingestors/nhl_sbr_archive.py.
+    "add_nhl_period_scores.sql",
     # 2026-09-09 (mike: "remove DK only - we want best lines for us
     # regardless"): picks carry the price each pick was DECIDED at
     # (decision_*); the graded matview, the record views and the custom-model

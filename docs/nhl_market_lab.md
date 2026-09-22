@@ -15,7 +15,7 @@
 | Total | goals vs the opening number | same | archive open + close, with prices | **backtested below** (first time this model has ever had a line) |
 | Puck line +/-1.5 | margin vs the HOME line | same | archive, ONE price, not labelled open or close | **backtested below**, no closing-line value possible |
 | Regulation 3-way | `home_win_reg` / `went_to_ot`; archive period scores agree 5,135 / 5,135 | same | none stored; the feed sells it from 2023-05-03 | parked: no price. Target ready |
-| 1st-period moneyline / total | archive `1st` column (not yet stored) | same | none; feed from 2023-05-03 | parked: no price |
+| 1st-period moneyline / total | `nhl_period_scores` (stored 2026-09-21: 5,134 games, 2018-19 -> 2022-11-27, from the archive) | same | none; feed from 2023-05-03 | parked: no price. Target ready |
 | Team totals, alternates, periods 2-3 | derivable from scores | same | none until the 2026-10-01 purchase (game lines only) | parked: no price, and the purchase does not cover them |
 | Shots on goal, points, goals, assists, blocks, hits | `nhl_skater_game_log`, 378,446 rows | per-game logs, ice time by strength | none before 2023-05-03; not in the 10-01 purchase | parked: no price. NEXT: model the distributions, score vs naive baselines |
 | Goalie saves | `nhl_goalie_game_log`, 25,326 rows | same | same | parked: no price |
@@ -583,3 +583,150 @@ SHARP-VS-SOFT (Pinnacle no-vig) @ best bettable  0.10     0    NaN    NaN       
 - **ONE SEASON, ONE SNAPSHOT.** Every positive above is a candidate. The 2023-24
   and 2024-25 prices were bought the same evening (mike: "buy them now"); the
   same scripts run on them decide which candidates survive.
+
+# Three seasons of priced props and the regulation line (2026-09-21)
+
+The 2023-24 and 2024-25 prop and 3-way prices were bought the evening of
+2026-09-20 (mike: "buy them now"): **2,799 games, 1,373,103 prop rows, 187,626
+credits**, 599,969 left on the feed when it finished (the purchase run's own
+closing line). Same scripts as above, one season at a time, the model trained
+only on seasons before the test season; then every bet pooled across the three
+seasons with `scripts/nhl_prop_pool.py` (`--dump` on the priced lab writes the
+bet-level rows). Full per-season tables: `scripts/nhl_prop_lab_priced.py
+--season 2024|2025|2026`, `scripts/nhl_threeway_lab.py --season ...`.
+
+**A parser defect, found and excluded first.** FanDuel (and in 2023-24
+BetRivers) list several lines per player; the shared prop parser keeps one row
+per player, so it paired an over from one line with an under from another. The
+tell is a two-way quote whose implied probabilities do not sum to a book's
+margin. `nhl_prop_lab_priced.coherent` drops any two-way row summing outside
+1.00..1.15 and prints what it dropped: **2023-24: 4,540 rows (FanDuel 2,556,
+BetRivers 1,977, Bovada 6, DraftKings 1); 2024-25: 4; 2025-26: 8.** Before the
+filter the 2023-24 "best bettable book" shots row read +31.1% on 2,293 bets;
+after it, -0.9% on 1,000, in line with the DraftKings-only row. The stored rows
+are not repaired (that is a re-buy); a mispaired quote whose sum happens to land
+inside the band is still there, so the DraftKings-only rows are the clean
+reference and the best-book rows carry that caveat.
+
+## Pooled, per bet, three seasons (2023-24 + 2024-25 + 2025-26)
+
+ROI with its 95% interval is over the POOLED bets; each season's ROI and bet
+count follow. `under share` is the fraction of bets that were unders.
+
+```
+### player_blocked_shots
+                      rule  EV>=  bets  units  roi          ci  under share       2023-24       2024-25       2025-26
+        MODEL @ DraftKings  0.03  4904  189.6 3.87  +1.1..+6.6         0.97 +3.4% (2,170) +5.8% (1,005) +3.4% (1,729)
+        MODEL @ DraftKings  0.06  3470  168.2 4.85  +1.5..+8.2         0.99 +3.3% (1,609)   +5.3% (796) +7.0% (1,065)
+        MODEL @ DraftKings  0.10  2056  126.3 6.14 +1.8..+10.5         1.00   +6.6% (973)   +2.4% (542)   +9.1% (541)
+        MODEL @ DraftKings  0.15   946   61.0 6.45 -0.1..+13.0         1.00   +4.1% (459)   +3.8% (295)  +16.2% (192)
+MODEL @ best bettable book  0.03  7399  266.4 3.60  +1.3..+5.9         0.98 +3.4% (2,254) +4.6% (3,192) +2.3% (1,953)
+MODEL @ best bettable book  0.06  5366  235.2 4.38  +1.7..+7.1         0.99 +3.3% (1,671) +4.5% (2,496) +5.6% (1,199)
+MODEL @ best bettable book  0.10  3231  177.2 5.48  +2.0..+9.0         1.00 +6.3% (1,016) +4.4% (1,610)   +7.1% (605)
+MODEL @ best bettable book  0.15  1480   79.6 5.38 +0.1..+10.6         1.00   +5.1% (485)   +3.2% (777)  +13.8% (218)
+
+### player_assists
+                      rule  EV>=  bets  units   roi          ci  under share       2023-24       2024-25       2025-26
+        MODEL @ DraftKings  0.03 10445  -67.5 -0.65  -2.8..+1.5         0.58 +0.3% (4,738) -0.4% (2,427) -2.2% (3,280)
+        MODEL @ DraftKings  0.06  5199   66.7  1.28  -2.0..+4.6         0.53 +2.7% (2,647) +2.7% (1,017) -2.1% (1,535)
+        MODEL @ DraftKings  0.10  2162  121.7  5.63 +0.2..+11.0         0.50 +7.3% (1,215)   +6.0% (350)   +2.0% (597)
+        MODEL @ DraftKings  0.15   784   68.0  8.67 -0.5..+17.8         0.53   +8.9% (472)  +11.1% (104)   +7.1% (208)
+MODEL @ best bettable book  0.10  2406  147.4  6.13 +1.0..+11.3         0.49 +8.1% (1,337)   +4.4% (409)   +3.3% (660)
+MODEL @ best bettable book  0.15   890   74.1  8.32 -0.3..+16.9         0.52   +7.2% (536)  +12.5% (122)   +8.8% (232)
+
+### player_total_saves
+                      rule  EV>=  bets  units  roi          ci  under share       2023-24       2024-25       2025-26
+        MODEL @ DraftKings  0.06  1793   39.4 2.20  -2.1..+6.5         0.86   +0.4% (779)  +13.0% (213)   +1.0% (801)
+        MODEL @ DraftKings  0.10  1366   58.2 4.26  -0.7..+9.2         0.87   +2.5% (579)  +15.5% (186)   +2.5% (601)
+        MODEL @ DraftKings  0.15   912   68.6 7.52 +1.5..+13.6         0.88   +8.8% (386)  +16.4% (144)   +2.9% (382)
+MODEL @ best bettable book  0.10  2229  111.3 4.99  +1.1..+8.9         0.88   +1.7% (670)   +9.5% (879)   +2.5% (680)
+MODEL @ best bettable book  0.15  1567  153.5 9.80 +5.2..+14.4         0.89   +8.7% (466)  +13.3% (672)   +5.4% (429)
+
+### player_shots_on_goal
+                      rule  EV>=  bets  units  roi          ci  under share       2023-24       2024-25       2025-26
+        MODEL @ DraftKings  0.06  9839  120.0 1.22  -0.7..+3.2         0.79 +0.4% (4,020) +2.5% (2,936) +1.1% (2,883)
+        MODEL @ DraftKings  0.10  4503   60.5 1.34  -1.6..+4.3         0.80 +0.3% (1,890) +0.7% (1,305) +3.5% (1,308)
+        MODEL @ DraftKings  0.15  1575   90.3 5.73 +0.6..+10.9         0.81   +0.8% (633)   -1.4% (445)  +18.3% (497)
+MODEL @ best bettable book  0.10  6827  274.9 4.03  +1.6..+6.5         0.79 +1.7% (2,678) +6.4% (2,187) +4.6% (1,962)
+MODEL @ best bettable book  0.15  2588  128.2 4.96  +0.8..+9.1         0.79 -0.9% (1,000)   +4.2% (830)  +13.5% (758)
+
+### player_points
+                      rule  EV>=  bets  units   roi          ci  under share       2023-24       2024-25       2025-26
+        MODEL @ DraftKings  0.06  6594  -92.2 -1.40  -4.0..+1.2         0.67 -0.4% (2,756) -3.9% (1,597) -0.8% (2,241)
+        MODEL @ DraftKings  0.10  2550   27.1  1.06  -3.2..+5.3         0.72 -0.0% (1,173)   +1.3% (491)   +2.4% (886)
+        MODEL @ DraftKings  0.15   830   58.8  7.09 -0.7..+14.9         0.75   +4.4% (408)  +28.9% (130)   +1.1% (292)
+MODEL @ best bettable book  0.10  3703 -119.6 -3.23  -7.4..+1.0         0.65 -5.8% (1,876)   -3.1% (756) +1.1% (1,071)
+
+### player_goal_scorer_anytime  (Yes only; "under share" is 0 by construction)
+                      rule  EV>=  bets  units   roi          ci        2023-24       2024-25        2025-26
+        MODEL @ DraftKings  0.06  3199  188.3  5.89 -5.1..+16.8   -0.1% (293)  +30.5% (368)  +3.0% (2,538)
+        MODEL @ DraftKings  0.10  1980  211.3 10.67 -4.4..+25.8   +4.5% (161)  +47.5% (199)  +6.8% (1,620)
+        MODEL @ DraftKings  0.15  1143  313.0 27.38 +5.1..+49.7   +21.8% (78)  +83.1% (108)  +21.5% (957)
+MODEL @ best bettable book  0.06 10232  701.6  6.86 +0.7..+13.0 +8.1% (2,819) +3.8% (2,729)  +7.9% (4,684)
+MODEL @ best bettable book  0.10  6656  668.1 10.04 +1.8..+18.3 +10.3% (1,801) +9.0% (1,658) +10.4% (3,197)
+MODEL @ best bettable book  0.15  3967  658.3 16.59 +5.2..+28.0 +14.1% (1,039)   +7.1% (906) +22.1% (2,022)
+```
+
+Blind betting at DraftKings, every market, every season: always-over loses
+6.2% to 25.8% (eighteen cells, all negative); always-under ranges -6.1% to
++11.8%, and the three positive cells are 2024-25 saves (+11.8% on 314 rows),
+2024-25 blocked shots (+3.2% on 1,631) and 2023-24 saves (+1.2% on 1,437).
+
+## Regulation 3-way line, three seasons
+
+| | 2023-24 | 2024-25 | 2025-26 |
+|---|---|---|---|
+| Games priced | 1,400 | 1,398 | 1,394 |
+| Tied after 60 minutes | 20.6% | 20.8% | 25.0% |
+| Model's mean draw probability | 21.7% | 21.4% | 20.9% |
+| DraftKings hold / Pinnacle hold | 7.23% / 4.35% | 8.18% / 4.38% | 8.20% / 5.05% |
+| Model at DraftKings, EV >= 0.02..0.10 | -3.1% to -5.8% | -1.7% to -3.3% | -3.1% to -8.8% |
+| Model at best bettable book | -2.2% to +3.0% | +0.2% to +7.4% (early +18.5, late -3.6 at 0.10) | -3.6% to -6.1% |
+| Blind draw at DraftKings | -6.3% (1,396) | -9.7% (1,396) | +6.9% (1,394) |
+| Pinnacle no-vig vs DraftKings, EV >= 0.02 | +6.8% (308), 94% draws | +13.2% (50), 90% draws | +24.9% (58), 97% draws |
+| Same, at the best bettable book | +7.9% (692) | +0.0% (325) | +10.6% (96) |
+
+## Read, three seasons
+
+- **Blocked-shot unders survive.** Twelve of twelve DraftKings cells positive,
+  pooled +3.9% / +4.8% / +6.1% / +6.5% at EV 0.03 / 0.06 / 0.10 / 0.15 on
+  4,904 / 3,470 / 2,056 / 946 bets, intervals clear of zero through 0.10 and
+  the return rising with the cut (a plateau, not a peak). 97-100% unders. The
+  best-bettable rows agree (+3.6% to +5.5%, all intervals clear of zero) on
+  more bets, because the other books quoted the market on more player-games in
+  2024-25 than DraftKings did (3,192 vs 1,005 at the 0.03 cut). Weakest
+  season 2024-25 at the higher cuts (+2.4% / +3.8%, the thin-DraftKings year).
+  Pinnacle still does not quote it.
+- **Assists at the 0.10 cut is a second candidate, new with the third season.**
+  It looked flat on 2025-26 alone. Pooled +5.6% on 2,162 (+0.2..+11.0), every
+  season positive at 0.10 and 0.15, about half overs — so this is not the
+  over-margin story, it is the model against the line. Only the pooled
+  interval and 2023-24's clear zero; 2025-26 is +2.0% on 597.
+- **Saves: no negative cell, and 2024-25 carries it.** Pooled +4.3% / +7.5% at
+  0.10 / 0.15 on 1,366 / 912, but 2024-25's +15.5% / +16.4% sit on 186 / 144
+  DraftKings bets and the two other seasons are +2.5-2.9% at 0.10. The
+  best-book row at 0.15 is +9.8% on 1,567 (+5.2..+14.4) with every season
+  above +5%. A candidate on the best-book evidence, thin at DraftKings.
+- **Shots on goal did not replicate at DraftKings** (+0.8%, -1.4%, +18.3% at
+  0.15; the 2025-26 number is one season of three). At the best bettable book
+  it is +4.0% on 6,827 at 0.10 with all three seasons positive (+1.7 / +6.4 /
+  +4.6), interval +1.6..+6.5 — real if the best-book rows are, which the
+  FanDuel caveat above qualifies.
+- **Points: nothing** (negative at 0.03 and 0.06; +7.1% at 0.15 on 830 rests
+  on 2024-25's +28.9% on 130).
+- **Anytime scorer: at DraftKings still not trusted** (-0.1% / +30.5% / +3.0%
+  across seasons at 0.06). **At the best bettable book it is the most
+  consistent row in the table:** +10.0% on 6,656 at 0.10, seasons +10.3 /
+  +9.0 / +10.4, interval +1.8..+18.3, +16.6% on 3,967 at 0.15 with every
+  season above +7%. Yes-only, so the mispairing defect cannot touch it, but
+  the payout variance is why the interval is 16 points wide. Worth a check
+  that the "best" book's Yes price is one a bettor is actually offered
+  (limits, and whether the parser is reading an alternate scorer market).
+- **Regulation 3-way: the model loses in all three seasons at DraftKings** and
+  is not a candidate. Blind draw was one overtime-heavy season. The
+  Pinnacle-no-vig-vs-DraftKings rule is positive in all three (+6.8 / +13.2 /
+  +24.9) and almost entirely draws, but on 308 / 50 / 58 bets with intervals
+  of 40-80 points; pooled +10% on 416. A structural note, not a model.
+- **Frozen game-line candidates (moneyline, puck line):** untested on
+  2023-24 -> 2025-26 until the game-line purchase lands (restarted
+  2026-09-21 on mike's word, resuming from 2022-03-10).

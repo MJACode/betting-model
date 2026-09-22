@@ -1853,6 +1853,19 @@ MODEL_OWN_EV_FLOOR: dict = {
     "nfl_prop_receptions":       0.20,   # n=3, min +0.290, never bet under 0.20
     "nfl_prop_rush_rec_yards":   0.20,   # n=1, min +0.354, never bet under 0.20
     "nfl_prop_rush_yards":       0.20,   # n=1, min +0.354, never bet under 0.20
+    # THE FOUR NHL MODELS HAVE NEVER WRITTEN A BET (zero picks, ever: the
+    # pipeline's six defects, docs/nhl_market_research.md), so there is no
+    # record to sweep and no written EV to sit under. Written out at the global
+    # number rather than left absent (mike, 2026-09-20: every model carries its
+    # own floor) so the next session reads a choice. Re-set from their own
+    # paper record once the 2026-27 season has produced one; the backtested
+    # candidates in docs/nhl_market_lab.md are a DIFFERENT model (regularised
+    # logistic on the per-game logs), not these artifacts, and were cut on a
+    # probability edge, not EV.
+    "nhl_moneyline":             0.20,   # n=0, no written bet
+    "nhl_moneyline_regulation":  0.20,   # n=0, no written bet
+    "nhl_over_under":            0.20,   # n=0, no written bet
+    "nhl_puckline":              0.20,   # n=0, no written bet
     "ufc_moneyline":             0.13,   # n=5, min written EV +0.131
     "ufc_total_rounds":          0.15,   # n=8, min written EV +0.150
     "wnba_moneyline":            0.06,   # n=31, min written EV +0.069
