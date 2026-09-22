@@ -56,6 +56,7 @@ MODEL_ID = "nfl_live_prop"
 from .models import rush_attempt_pace as _model     # noqa: E402
 
 LANE_MARKET = _model.MARKET
+LANE_STAT_LABEL = _model.STAT_LABEL
 
 
 def _norm_player(name: str | None) -> str | None:
@@ -143,7 +144,11 @@ def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> di
     side = str(decision.side or "").lower()
     player = decision.player or ctx.get("player")
     line = decision.line
-    label = (f"{player} {side.capitalize()} {line:g} Pass Attempts"
+    # FROM THE MODEL, never a literal. This read "Pass Attempts" until
+    # 2026-09-21 and stayed that way through the market switch, so the first
+    # rushing pick published as "Blake Corum Under 11.5 Pass Attempts" -- a
+    # running back on a passing line, with a correct bet underneath it.
+    label = (f"{player} {side.capitalize()} {line:g} {LANE_STAT_LABEL}"
              if player and line is not None else
              f"{player or decision.market} {side}")
     return {
