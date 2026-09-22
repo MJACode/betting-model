@@ -248,12 +248,16 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     # prop system has (the same join the snap counts use).
     "nfl_prop_pass_yards":          ("nfl_player", "passing_yards"),
     "nfl_prop_pass_attempts":       ("nfl_player", "attempts"),
-    # The LIVE pass-attempts lane (nfl/live_model, model_id nfl_live_prop). It
-    # trades the same market as nfl_prop_pass_attempts and settles against the
-    # same stat -- an in-play bet on attempts is graded by the full-game total,
-    # exactly like the pre-game one. Added 2026-09-05 when the lane went live;
-    # before that it recorded to a JSONL file and settled nowhere.
-    "nfl_live_prop":                ("nfl_player", "attempts"),
+    # The LIVE player-prop model (nfl/live_model, model_id nfl_live_prop).
+    # RESOLVED PER PICK, not from the model id. It settled as "attempts" from
+    # 2026-09-05, when it traded pass attempts and nothing else; it now trades
+    # rushing attempts (nfl/live_model/models/rush_attempt_pace.py). Hardcoding
+    # either stat would silently grade the other market's picks against the
+    # wrong column -- and re-pointing the id at "carries" would have re-graded
+    # the 22 already-settled pass-attempt picks, which CLAUDE.md section 1c
+    # forbids. Reading picks.prop_market grades every pick against the market
+    # it was actually written on, so the old record is untouched by the switch.
+    "nfl_live_prop":                ("nfl_player", "FROM_PROP_MARKET"),
     "nfl_prop_pass_completions":    ("nfl_player", "completions"),
     "nfl_prop_pass_tds":            ("nfl_player", "passing_tds"),
     "nfl_prop_rush_yards":          ("nfl_player", "rushing_yards"),
@@ -299,6 +303,7 @@ _WNBA_MARKET_STAT = {
 # is missing here settles nothing (loudly), which beats guessing a stat.
 _PROP_MARKET_STAT_BY_MODEL = {
     "nfl_prop_market":  _NFL_MARKET_STAT,
+    "nfl_live_prop":    _NFL_MARKET_STAT,
     "wnba_prop_market": _WNBA_MARKET_STAT,
 }
 
