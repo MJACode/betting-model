@@ -217,6 +217,41 @@ def load(conn, games: list[dict]) -> int:
     return len(payload)
 
 
+def load_period_scores(conn, games: list[dict]) -> int:
+    """Goals by period into `nhl_period_scores` (data/migrations/add_nhl_period_scores.sql).
+
+    Until 2026-09-21 the parse read them, validated on them and dropped them,
+    which left the first-period and regulation markets with no settlement
+    column. Only games whose period sums agree with the stored final are
+    written; a re-run skips what is stored."""
+    known = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT game_id, home_score, away_score FROM games "
+        "WHERE sport = 'NHL' AND season BETWEEN 2018 AND 2023").fetchall()}
+    stored = {r[0] for r in conn.execute(
+        "SELECT game_id FROM nhl_period_scores WHERE source = ?", (SOURCE,)).fetchall()}
+    payload, disagree = [], 0
+    for g in games:
+        hp, ap = g["home_periods"], g["away_periods"]
+        if g["game_id"] in stored or g["game_id"] not in known or None in hp + ap:
+            continue
+        hs, as_ = known[g["game_id"]]
+        # the final may exceed the regulation sum (overtime / shootout), never trail it
+        if hs is None or hs < sum(hp) or as_ < sum(ap) or (hs > sum(hp) and as_ > sum(ap)):
+            disagree += 1
+            continue
+        payload.append((g["game_id"], g["game_date"], g["season"],
+                        *(int(x) for x in hp), *(int(x) for x in ap), SOURCE))
+    if disagree:
+        logger.warning(f"{disagree} games whose period goals do not add up to the stored final, skipped")
+    sql = """INSERT INTO nhl_period_scores (game_id, game_date, season, home_p1, home_p2, home_p3,
+                 away_p1, away_p2, away_p3, source)
+             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING"""
+    for i in range(0, len(payload), 2000):
+        conn.executemany(sql, payload[i:i + 2000])
+        conn.commit()
+    return len(payload)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true")
@@ -238,5 +273,7 @@ if __name__ == "__main__":
             raise SystemExit(f"REFUSED — the archive does not line up with `games` closely "
                              f"enough to trust the parse (thin seasons: {thin})")
         print("rows written:", load(c, games) if a.apply else "dry run — nothing written")
+        print("period-score rows written:",
+              load_period_scores(c, games) if a.apply else "dry run — nothing written")
     finally:
         c.close()
