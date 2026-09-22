@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, Daily Scorer IndexError after #813: unescaped `LIKE 'nfl_prop_%'` → psycopg format-spec crash (`tuple index out of range`) on every pass after pick-lock; escape to `%%`, game-unit traceback logging, regression + tripwire on PR CI |
 | 2026-09-21 | [2026-09](./2026-09.md) | 2026-09-21, PR #813: SQLite execution of both unstarted clears (nfl_prop_% kept, opener/wind/MLB NONE cleared). Both pins listed on the PR CI pytest subset. NFL continue unchanged |
 | 2026-09-21 | [2026-09](./2026-09.md) | 2026-09-21, NFL Today empty on NYG@LA: 0 BETs (tackles missed 0.70/0.15; two paused rows cleared cut and the 0.20 floor). The 93 and 95 NONE inserts committed, then the per-game clear deleted them at 22:06:20 and 22:27:24 UTC |
 | 2026-09-21 | [2026-09](./2026-09.md) | 2026-09-21, NHL three priced seasons pooled per bet: blocked-shot unders hold (12/12 cells, +4.8% on 3,470 at EV 0.06), assists at 0.10 new (+5.6% on 2,162); FanDuel/BetRivers mispaired quotes filtered (4,540 rows in 2023-24); nhl_period_scores stored (5,134 games); NHL EV floors written out at 0.20; game-line purchase finished (159,930 credits, 5,331 snapshots); frozen moneyline candidate did NOT replicate on the unseen seasons (+3.0% on 1,268, one season negative); #815 |
