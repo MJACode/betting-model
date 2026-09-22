@@ -17,7 +17,7 @@ import {
   viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
+import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned, gameDayLabelET } from '@/lib/format';
 import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -414,16 +414,19 @@ function CustomModelRow({
           </Text>
         ) : (
           <>
-            {shown.map((ep) => (
-              <View key={ep.pick.pick_id} style={styles.betRow}>
-                <Text style={styles.betLabel} numberOfLines={1}>
-                  {ep.pick.pick_label}
-                </Text>
-                <Text style={styles.betOdds}>
-                  {decisionOdds(ep.pick) == null ? '—' : `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`}
-                </Text>
-              </View>
-            ))}
+            {shown.map((ep) => {
+              const day = gameDayLabelET(ep.pick.game_time);
+              return (
+                <View key={ep.pick.pick_id} style={styles.betRow}>
+                  <Text style={styles.betLabel} numberOfLines={1}>
+                    {day ? `${day} · ${ep.pick.pick_label}` : ep.pick.pick_label}
+                  </Text>
+                  <Text style={styles.betOdds}>
+                    {decisionOdds(ep.pick) == null ? '—' : `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`}
+                  </Text>
+                </View>
+              );
+            })}
             {live.length > shown.length ? (
               <Text style={styles.betsMore}>+{live.length - shown.length} more</Text>
             ) : null}

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, NHL opener missing from the app: picks exist for 2026-09-29 (BET "CAR ML") and Discord/push already sent it; useTodayPicks looked ahead for UFC/NFL/NCAAF only. fetchUpcomingNhlPicks through today+8. opening_signals still has no NHL look-ahead |
 | 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, Daily Scorer IndexError after #813: unescaped `LIKE 'nfl_prop_%'` → psycopg format-spec crash (`tuple index out of range`) on every pass after pick-lock; escape to `%%`, game-unit traceback logging, regression + tripwire on PR CI |
 | 2026-09-21 | [2026-09](./2026-09.md) | 2026-09-21, PR #813: SQLite execution of both unstarted clears (nfl_prop_% kept, opener/wind/MLB NONE cleared). Both pins listed on the PR CI pytest subset. NFL continue unchanged |
 | 2026-09-21 | [2026-09](./2026-09.md) | 2026-09-21, NFL Today empty on NYG@LA: 0 BETs (tackles missed 0.70/0.15; two paused rows cleared cut and the 0.20 floor). The 93 and 95 NONE inserts committed, then the per-game clear deleted them at 22:06:20 and 22:27:24 UTC |

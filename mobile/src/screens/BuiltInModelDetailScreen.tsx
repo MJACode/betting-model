@@ -17,6 +17,7 @@ import {
   formatAmerican,
   formatCurrencySigned,
   formatGameTimeET,
+  gameDayLabelET,
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
@@ -415,9 +416,21 @@ function TodayPickRow({
   onPress: () => void;
 }) {
   const { pick, game } = enriched;
-  const timeLabel = formatGameTimeET(game?.commence_time);
+  // gameDayLabelET is null on the Eastern date of the game, so a same-day
+  // row stays a bare time. A look-ahead (NHL opener, NFL, UFC) gets the
+  // weekday the board card already shows.
+  const whenLabel = [gameDayLabelET(game?.commence_time), formatGameTimeET(game?.commence_time)]
+    .filter(Boolean)
+    .join(' · ');
   return (
-    <Pressable style={styles.pickRow} onPress={onPress}>
+    <Pressable
+      style={styles.pickRow}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={[pick.pick_label, whenLabel || null, pick.signal_type]
+        .filter((p): p is string => Boolean(p))
+        .join('. ')}
+    >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
@@ -425,7 +438,7 @@ function TodayPickRow({
           </Text>
           <View style={styles.pickMeta}>
             <SignalBadge signal={pick.signal_type} small />
-            {timeLabel ? <Text style={styles.pickMetaText}>{timeLabel}</Text> : null}
+            {whenLabel ? <Text style={styles.pickMetaText}>{whenLabel}</Text> : null}
             <Text style={styles.pickMetaText}>· {bookLabelShort(storedQuoteBook(pick))} {formatAmerican(decisionOdds(pick))}</Text>
           </View>
         </View>

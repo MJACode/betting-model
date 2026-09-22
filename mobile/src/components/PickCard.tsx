@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { gameStatus } from '@/lib/format';
+import { gameDayLabelET, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
@@ -85,9 +85,17 @@ export function PickCard({
   const evColor =
     ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
+  const status = gameStatus(game, liveState);
   const movement =
-    gameStatus(game, liveState).kind === 'pre'
+    status.kind === 'pre'
       ? movementFromLatest(pick, item.latestOdds, item.bookRows)
+      : null;
+  // The visible pill prefixes a future day ("Tue 9/29 · 5:00 PM ET"). The
+  // card's accessibilityLabel replaces its children, so VoiceOver has to
+  // hear that same string or a next-Tuesday NHL bet sounds like tonight.
+  const preWhen =
+    status.kind === 'pre' && status.timeLabel
+      ? [gameDayLabelET(game?.commence_time), status.timeLabel].filter(Boolean).join(' · ')
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
   const showClv = pick.clv_pct != null;
@@ -185,6 +193,7 @@ export function PickCard({
       accessibilityRole="button"
       accessibilityLabel={[
         matchup,
+        preWhen,
         pick.pick_label,
         pick.signal_type,
         `Edge ${formatPctSigned(decisionEdge(pick))}`,

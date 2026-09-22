@@ -1117,6 +1117,92 @@ export async function fetchUpcomingNflPicks(
 }
 
 /**
+ * Upcoming NHL picks AFTER `afterDate` through `throughDate`.
+ *
+ * config.GAME_SCORE_AHEAD_DAYS prices NHL up to 7 days before puck drop, and
+ * the first cross locks (CLAUDE.md §1c). A same-day board is empty until
+ * opening night even though the BET already exists — measured 2026-09-22,
+ * the only NHL rows were game_date 2026-09-29. Same shape as the NFL
+ * look-ahead: sport-scoped, signals ordered first so a NONE row cannot push
+ * a BET off the cap, in-play rows left to the Live board.
+ */
+export async function fetchUpcomingNhlPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes, latestOddsRes, allBooksRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'NHL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .not('is_live', 'is', true)
+      .order('signal_type', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'NHL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    supabase
+      .from('v_latest_dk_odds')
+      .select(LATEST_ODDS_COLUMNS)
+      .like('game_id', 'NHL_%')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'NHL_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  const latestOdds = (
+    latestOddsRes.error ? [] : (latestOddsRes.data ?? [])
+  ) as unknown as LatestDkOddsRow[];
+  const booksByGameMarket = groupBooksByGameMarket(
+    (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as unknown as OddsByBookRow[],
+  );
+
+  const picks = (picksRes.data ?? []) as unknown as Pick[];
+  const games = (gamesRes.data ?? []) as unknown as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      ...bookEnrichment(pick, booksByGameMarket),
+    };
+  });
+}
+
+/**
  * NCAAF picks for the week ahead.
  *
  * College football plays one slate a week, so a same-day-only board is empty
