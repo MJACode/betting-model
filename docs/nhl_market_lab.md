@@ -727,6 +727,236 @@ Blind betting at DraftKings, every market, every season: always-over loses
   Pinnacle-no-vig-vs-DraftKings rule is positive in all three (+6.8 / +13.2 /
   +24.9) and almost entirely draws, but on 308 / 50 / 58 bets with intervals
   of 40-80 points; pooled +10% on 416. A structural note, not a model.
-- **Frozen game-line candidates (moneyline, puck line):** untested on
-  2023-24 -> 2025-26 until the game-line purchase lands (restarted
-  2026-09-21 on mike's word, resuming from 2022-03-10).
+- **Frozen game-line candidates (moneyline, puck line):** tested the same
+  night on 2023-24 -> 2025-26 — round three, below. The moneyline did not
+  replicate.
+
+# Round three (2026-09-21): the frozen candidates on seasons they never saw
+
+The game-line purchase landed the same night (mike: "im not waiting for oct
+for anything"): 1,367 dates, 5,331 snapshots, 1,200,267 rows, 159,930 credits
+across the two runs (37,680 on 2026-09-20 before the low-memory kill, 122,130
++ 60 for two timed-out snapshots on 2026-09-21). `scripts/nhl_market_lab3.py`:
+the round-two moneyline and puck-line models, unchanged, fit on every season
+before the test season, decided against DraftKings' (and separately
+Pinnacle's) first pre-game quote and graded at DraftKings' open price; CLV
+against Pinnacle's last pre-game quote, no-vig. 2022-23 is included for
+completeness but round two selected the candidate partly on it (the archive
+covered it to 2022-11-27); **2023-24 -> 2025-26 are the unseen seasons.**
+
+## Pooled over the three unseen seasons (bets, units, ROI; the interval is the
+## normal approximation with unit variance, so ± is approximate)
+
+```
+rule                              edge>=  bets    units    roi      +-     2022-23  2023-24  2024-25  2025-26
+moneyline vs DraftKings open       0.04   1,999   +26.1   +1.3%   4.4      +2.2     -0.4     +8.4     -3.7
+moneyline vs DraftKings open       0.06   1,268   +37.6   +3.0%   5.5      +2.0     +4.1    +10.3     -5.0
+moneyline vs DraftKings open       0.08     726   +11.6   +1.6%   7.3      +2.8     +4.8     +5.1     -4.7
+moneyline vs Pinnacle open         0.06   1,216    -0.7   -0.1%   5.6      +1.3     +5.1     +6.6    -11.2
+puck line vs DraftKings open       0.06   1,019   +36.2   +3.6%   6.1      -4.3     -2.0    +10.1     +2.7
+puck line vs DraftKings open       0.08     493   +58.0  +11.8%   8.8      -3.9     +1.2    +19.9    +15.5
+totals vs DraftKings open          0.04   1,739    -9.0   -0.5%   4.7      -1.8     -3.0     +5.1     -4.4
+```
+
+## Read, round three
+
+- **The moneyline candidate did not replicate.** Round two's +8.0% at edge
+  0.06 (interval +2.3..+13.6) is +3.0% on 1,268 unseen bets with an interval
+  of roughly -2.5..+8.5; one of three seasons is negative (2025-26, -5.0%),
+  and 2024-25 (+10.3%) carries the pool. At 0.04 it is +1.3%; at 0.08,
+  +1.6%. Decided against Pinnacle's open instead it is -0.1%. **What DID hold
+  is the closing-line value**: the bets beat Pinnacle's close 61-67% of the
+  time at 0.06 in every season, +0.5 to +0.9 points of no-vig probability.
+  The model reads something the opening price lacks; it is not enough to
+  beat the price. **Not a model to bet.** A paper-only run at DraftKings'
+  open at 0.06 would be the honest next measurement, if any.
+- **Puck line: a peak, not a plateau.** +11.8% at 0.08 on 493 is two seasons
+  (+19.9, +15.5) against two negative-or-flat, and 0.06 either side reads
+  +3.6% / +5.5% with intervals spanning zero. Round two's rule applies.
+- **Totals: nothing**, as in rounds one and two.
+- **DraftKings' open against Pinnacle's open, no model:** 216-295 bets a
+  season at a 2-point gap, -2.9% / +2.2% / +5.9% / +5.9%. Not a rule.
+
+## The full tables
+
+```
+===== test season 2023 (2022-23): 1,400 games with inputs, 1,400 with a DraftKings open, 1,399 with a Pinnacle open =====
+moneyline, ALL inputs, logistic: fit on 4,788 games
+
+### Moneyline 2023: bet at the DraftKings OPEN price
+
+                                      model  edge>=  bets  units   roi           ci  clv_pts  beat_close  fav share  early  late
+               moneyline vs DraftKings open    0.02  1104   13.9  1.26   -4.4..+7.0     0.37        59.7       0.55   -1.2   3.7
+               moneyline vs DraftKings open    0.04   808   18.0  2.23   -4.4..+8.9     0.43        60.9       0.56   -3.1   7.5
+               moneyline vs DraftKings open    0.06   570   11.5  2.02   -5.9..+9.9     0.54        63.3       0.56   -5.3   9.3
+               moneyline vs DraftKings open    0.08   380   10.6  2.78  -7.0..+12.5     0.60        64.2       0.54   -2.4   8.0
+               moneyline vs DraftKings open    0.10   229   24.1 10.52  -2.5..+23.5     0.62        63.8       0.52    5.8  15.1
+                 moneyline vs Pinnacle open    0.02  1088    2.7  0.24   -5.5..+6.0     0.35        59.4       0.54   -3.0   3.5
+                 moneyline vs Pinnacle open    0.04   777    9.9  1.27   -5.6..+8.1     0.43        60.5       0.53   -2.0   4.5
+                 moneyline vs Pinnacle open    0.06   541    7.0  1.30   -6.9..+9.5     0.50        62.1       0.52   -7.7  10.3
+                 moneyline vs Pinnacle open    0.08   349   21.1  6.05  -4.3..+16.4     0.61        63.6       0.51   -0.4  12.4
+                 moneyline vs Pinnacle open    0.10   207   30.1 14.52  +0.7..+28.3     0.56        63.8       0.48    6.1  22.9
+Pinnacle open vs DraftKings open (no model)    0.02   216   -6.4 -2.94  -15.0..+9.1     0.44        61.1       0.70   -1.9  -4.0
+Pinnacle open vs DraftKings open (no model)    0.04    46    6.2 13.58 -12.5..+39.7     0.62        60.9       0.83   15.9  11.2
+Pinnacle open vs DraftKings open (no model)    0.06     9    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.08     0    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.10     0    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+
+### Puck line 2023: bet at the DraftKings OPEN price
+
+                       model  edge>=  bets  units    roi           ci  early  late
+puck line vs DraftKings open    0.02  1057  -57.1  -5.40  -12.1..+1.3   -4.3  -6.5
+puck line vs DraftKings open    0.04   771  -50.4  -6.54  -14.5..+1.4   -5.9  -7.2
+puck line vs DraftKings open    0.06   509  -21.7  -4.27  -14.1..+5.6   -3.3  -5.2
+puck line vs DraftKings open    0.08   301  -11.8  -3.93  -16.8..+8.9    2.2 -10.0
+puck line vs DraftKings open    0.10   164   -8.3  -5.07 -22.9..+12.7   -0.8  -9.3
+  puck line vs Pinnacle open    0.02  1065  -58.6  -5.51  -12.1..+1.1   -6.2  -4.8
+  puck line vs Pinnacle open    0.04   783  -56.0  -7.15  -14.9..+0.6   -8.8  -5.5
+  puck line vs Pinnacle open    0.06   523  -37.3  -7.12  -16.5..+2.3   -6.5  -7.8
+  puck line vs Pinnacle open    0.08   336  -23.7  -7.04  -18.7..+4.6   -4.2  -9.8
+  puck line vs Pinnacle open    0.10   198  -25.3 -12.75  -27.4..+1.9  -10.7 -14.8
+
+### Totals 2023: inputs without the market's price, bet at the DraftKings OPEN
+
+                    model  edge>=  bets  units   roi           ci  over share
+totals vs DraftKings open    0.02   898   -7.2 -0.80   -7.1..+5.5        0.60
+totals vs DraftKings open    0.04   548   -9.8 -1.80   -9.9..+6.3        0.65
+totals vs DraftKings open    0.06   288   13.5  4.68  -6.5..+15.8        0.74
+totals vs DraftKings open    0.08   142   10.6  7.46  -8.4..+23.3        0.82
+totals vs DraftKings open    0.10    56   -3.4 -6.08 -31.9..+19.7        0.86
+
+===== test season 2024 (2023-24): 1,400 games with inputs, 1,400 with a DraftKings open, 1,400 with a Pinnacle open =====
+moneyline, ALL inputs, logistic: fit on 6,188 games
+
+### Moneyline 2024: bet at the DraftKings OPEN price
+
+                                      model  edge>=  bets  units   roi           ci  clv_pts  beat_close  fav share  early  late
+               moneyline vs DraftKings open    0.02  1039  -11.2 -1.08   -6.8..+4.6     0.50        60.4       0.60   -0.4  -1.8
+               moneyline vs DraftKings open    0.04   700   -2.6 -0.37   -7.2..+6.5     0.63        62.1       0.62   -0.2  -0.6
+               moneyline vs DraftKings open    0.06   442   18.3  4.14  -4.3..+12.6     0.79        67.0       0.62    5.5   2.8
+               moneyline vs DraftKings open    0.08   259   12.4  4.79  -6.2..+15.8     0.83        68.3       0.62    0.5   9.0
+               moneyline vs DraftKings open    0.10   136    0.5  0.40 -14.8..+15.6     0.77        65.4       0.66   -1.2   2.0
+                 moneyline vs Pinnacle open    0.02  1027  -31.6 -3.07   -8.8..+2.7     0.46        58.9       0.59   -1.3  -4.9
+                 moneyline vs Pinnacle open    0.04   665   -1.3 -0.20   -7.3..+6.9     0.63        62.0       0.61   -0.1  -0.2
+                 moneyline vs Pinnacle open    0.06   420   21.3  5.07  -3.7..+13.8     0.77        65.7       0.60    2.4   7.8
+                 moneyline vs Pinnacle open    0.08   241   12.3  5.08  -6.6..+16.7     0.78        66.8       0.58    1.6   8.5
+                 moneyline vs Pinnacle open    0.10   110   11.1 10.09  -7.3..+27.4     0.89        68.2       0.63    6.3  13.9
+Pinnacle open vs DraftKings open (no model)    0.02   218    4.8  2.21 -10.6..+15.0     0.28        59.6       0.58    0.2   4.2
+Pinnacle open vs DraftKings open (no model)    0.04    26    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.06     3    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.08     0    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.10     0    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+
+### Puck line 2024: bet at the DraftKings OPEN price
+
+                       model  edge>=  bets  units    roi           ci  early  late
+puck line vs DraftKings open    0.02   983  -36.1  -3.68  -10.6..+3.3   -3.2  -4.1
+puck line vs DraftKings open    0.04   627  -22.0  -3.51  -12.5..+5.4   -4.4  -2.6
+puck line vs DraftKings open    0.06   368   -7.5  -2.03  -13.8..+9.7   -0.5  -3.6
+puck line vs DraftKings open    0.08   185    2.3   1.27 -15.4..+17.9   -0.6   3.1
+puck line vs DraftKings open    0.10    81   -7.6  -9.38 -33.9..+15.2  -22.9   3.8
+  puck line vs Pinnacle open    0.02  1008  -41.0  -4.07  -11.0..+2.8   -0.0  -8.1
+  puck line vs Pinnacle open    0.04   678  -16.3  -2.40  -10.9..+6.1   -1.1  -3.7
+  puck line vs Pinnacle open    0.06   413   -0.2  -0.05 -11.0..+10.9    2.3  -2.4
+  puck line vs Pinnacle open    0.08   238  -24.6 -10.32  -24.1..+3.4   -7.7 -12.9
+  puck line vs Pinnacle open    0.10   131   -1.4  -1.07 -19.2..+17.1    2.1  -4.2
+
+### Totals 2024: inputs without the market's price, bet at the DraftKings OPEN
+
+                    model  edge>=  bets  units   roi           ci  over share
+totals vs DraftKings open    0.02   850   -7.9 -0.93   -7.5..+5.6        0.41
+totals vs DraftKings open    0.04   466  -14.2 -3.04  -11.9..+5.8        0.37
+totals vs DraftKings open    0.06   221   -6.2 -2.82 -15.6..+10.0        0.38
+totals vs DraftKings open    0.08    84   -6.2 -7.35 -28.3..+13.6        0.46
+totals vs DraftKings open    0.10    26    NaN   NaN          NaN         NaN
+
+===== test season 2025 (2024-25): 1,398 games with inputs, 1,398 with a DraftKings open, 1,398 with a Pinnacle open =====
+moneyline, ALL inputs, logistic: fit on 7,588 games
+
+### Moneyline 2025: bet at the DraftKings OPEN price
+
+                                      model  edge>=  bets  units   roi           ci  clv_pts  beat_close  fav share  early  late
+               moneyline vs DraftKings open    0.02  1003   75.7  7.55  +1.2..+13.9     0.59        60.0       0.46   11.0   4.1
+               moneyline vs DraftKings open    0.04   636   53.3  8.38  +0.4..+16.4     0.81        64.0       0.44   10.2   6.5
+               moneyline vs DraftKings open    0.06   394   40.7 10.33  +0.1..+20.5     0.94        65.7       0.46   14.2   6.4
+               moneyline vs DraftKings open    0.08   215   11.0  5.13  -8.8..+19.0     1.37        70.7       0.40    3.1   7.1
+               moneyline vs DraftKings open    0.10   111    2.8  2.52 -16.3..+21.3     1.29        73.0       0.41   -8.6  13.4
+                 moneyline vs Pinnacle open    0.02   991   40.6  4.10  -2.3..+10.5     0.47        57.2       0.44    7.8   0.4
+                 moneyline vs Pinnacle open    0.04   659   24.2  3.67  -4.2..+11.6     0.61        60.4       0.43    6.3   1.0
+                 moneyline vs Pinnacle open    0.06   376   24.9  6.63  -4.1..+17.4     0.75        62.0       0.40   11.9   1.4
+                 moneyline vs Pinnacle open    0.08   205    3.8  1.87 -12.6..+16.4     1.01        63.4       0.38    4.8  -1.0
+                 moneyline vs Pinnacle open    0.10   101   -9.8 -9.74 -29.9..+10.4     1.39        71.3       0.40   -3.8 -15.5
+Pinnacle open vs DraftKings open (no model)    0.02   295   17.4  5.89  -4.9..+16.7     0.71        65.4       0.59    1.8  10.0
+Pinnacle open vs DraftKings open (no model)    0.04    60    8.8 14.67  -9.6..+38.9     0.44        68.3       0.65   21.6   7.7
+Pinnacle open vs DraftKings open (no model)    0.06    12    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.08     4    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.10     1    NaN   NaN          NaN      NaN         NaN        NaN    NaN   NaN
+
+### Puck line 2025: bet at the DraftKings OPEN price
+
+                       model  edge>=  bets  units   roi          ci  early  late
+puck line vs DraftKings open    0.02   970   22.2  2.29  -4.9..+9.4    8.9  -4.4
+puck line vs DraftKings open    0.04   584   40.6  6.96 -2.5..+16.4   14.8  -0.9
+puck line vs DraftKings open    0.06   352   35.6 10.12 -2.1..+22.3   14.8   5.4
+puck line vs DraftKings open    0.08   179   35.7 19.94 +1.9..+38.0   19.8  20.1
+puck line vs DraftKings open    0.10    79   19.2 24.34 -4.8..+53.5   26.6  22.2
+  puck line vs Pinnacle open    0.02   996   -2.7 -0.27  -7.3..+6.7    7.4  -8.0
+  puck line vs Pinnacle open    0.04   629   15.3  2.43 -6.4..+11.3   10.0  -5.1
+  puck line vs Pinnacle open    0.06   373   47.9 12.84 +1.3..+24.4   15.4  10.3
+  puck line vs Pinnacle open    0.08   204   25.0 12.25 -3.3..+27.8   18.1   6.4
+  puck line vs Pinnacle open    0.10   121   19.5 16.15 -3.8..+36.1   25.1   7.3
+
+### Totals 2025: inputs without the market's price, bet at the DraftKings OPEN
+
+                    model  edge>=  bets  units   roi           ci  over share
+totals vs DraftKings open    0.02   987   51.8  5.25  -0.7..+11.3        0.09
+totals vs DraftKings open    0.04   644   32.6  5.06  -2.4..+12.5        0.06
+totals vs DraftKings open    0.06   331    3.7  1.11  -9.2..+11.4        0.02
+totals vs DraftKings open    0.08   144   -0.6 -0.45 -16.2..+15.3        0.01
+totals vs DraftKings open    0.10    50    5.2 10.32 -16.1..+36.7        0.02
+
+===== test season 2026 (2025-26): 1,394 games with inputs, 1,394 with a DraftKings open, 1,394 with a Pinnacle open =====
+moneyline, ALL inputs, logistic: fit on 8,986 games
+
+### Moneyline 2026: bet at the DraftKings OPEN price
+
+                                      model  edge>=  bets  units    roi           ci  clv_pts  beat_close  fav share  early  late
+               moneyline vs DraftKings open    0.02  1006  -58.8  -5.84  -12.0..+0.3     0.30        55.7       0.53   -8.3  -3.4
+               moneyline vs DraftKings open    0.04   663  -24.6  -3.70  -11.2..+3.8     0.47        59.0       0.52   -8.1   0.7
+               moneyline vs DraftKings open    0.06   432  -21.4  -4.96  -14.2..+4.3     0.63        60.9       0.51  -11.7   1.8
+               moneyline vs DraftKings open    0.08   252  -11.8  -4.69  -16.8..+7.4     0.69        62.3       0.48  -10.8   1.4
+               moneyline vs DraftKings open    0.10   126   -7.4  -5.86 -23.5..+11.8     0.94        69.8       0.44   -3.8  -7.9
+                 moneyline vs Pinnacle open    0.02  1006  -66.6  -6.62  -12.7..-0.5     0.21        54.2       0.52   -7.5  -5.8
+                 moneyline vs Pinnacle open    0.04   667  -46.5  -6.98  -14.4..+0.5     0.43        57.3       0.52   -8.7  -5.3
+                 moneyline vs Pinnacle open    0.06   420  -46.9 -11.17  -20.3..-2.0     0.50        57.4       0.52  -15.5  -6.8
+                 moneyline vs Pinnacle open    0.08   246   -3.3  -1.33 -13.5..+10.8     0.45        60.2       0.51   -5.5   2.8
+                 moneyline vs Pinnacle open    0.10   119   -5.6  -4.69 -22.9..+13.6     0.69        63.0       0.46   -9.7   0.3
+Pinnacle open vs DraftKings open (no model)    0.02   232   13.7   5.91  -7.3..+19.2     0.62        60.3       0.45   17.9  -6.1
+Pinnacle open vs DraftKings open (no model)    0.04    36    2.6   7.14 -27.6..+41.9     1.50        77.8       0.28  -12.5  26.8
+Pinnacle open vs DraftKings open (no model)    0.06     9    NaN    NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.08     4    NaN    NaN          NaN      NaN         NaN        NaN    NaN   NaN
+Pinnacle open vs DraftKings open (no model)    0.10     1    NaN    NaN          NaN      NaN         NaN        NaN    NaN   NaN
+
+### Puck line 2026: bet at the DraftKings OPEN price
+
+                       model  edge>=  bets  units    roi           ci  early  late
+puck line vs DraftKings open    0.02   939  -71.2  -7.58  -15.1..-0.0   -9.1  -6.0
+puck line vs DraftKings open    0.04   564  -25.7  -4.56  -14.7..+5.5   -6.2  -2.9
+puck line vs DraftKings open    0.06   299    8.1   2.72 -11.5..+16.9    2.1   3.3
+puck line vs DraftKings open    0.08   129   20.0  15.49  -7.4..+38.3    1.4  29.4
+puck line vs DraftKings open    0.10    51    0.0   0.06 -36.7..+36.8  -15.9  15.4
+  puck line vs Pinnacle open    0.02   978 -102.2 -10.45  -17.7..-3.2  -10.7 -10.2
+  puck line vs Pinnacle open    0.04   626  -52.6  -8.40  -17.6..+0.8  -10.6  -6.2
+  puck line vs Pinnacle open    0.06   357   -7.7  -2.14 -14.5..+10.2   -0.6  -3.7
+  puck line vs Pinnacle open    0.08   195  -16.0  -8.19  -23.7..+7.3   -9.5  -6.9
+  puck line vs Pinnacle open    0.10   111   -0.3  -0.31 -19.3..+18.6   -7.0   6.3
+
+### Totals 2026: inputs without the market's price, bet at the DraftKings OPEN
+
+                    model  edge>=  bets  units   roi           ci  over share
+totals vs DraftKings open    0.02  1004  -62.5 -6.22  -12.1..-0.3        0.09
+totals vs DraftKings open    0.04   629  -27.4 -4.35  -11.8..+3.1        0.04
+totals vs DraftKings open    0.06   332   -4.0 -1.20  -11.4..+9.0        0.02
+totals vs DraftKings open    0.08   125    0.4  0.31 -16.5..+17.1        0.02
+totals vs DraftKings open    0.10    36    7.3 20.30  -9.8..+50.4        0.03
+```
