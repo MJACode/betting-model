@@ -266,13 +266,20 @@ which is the dial that produced this complaint and cannot fix a constant.
 
 ## 8. Production follow-up (2026-09-22) — publish backstop, model stays live
 
-Ledger confirmation (Supabase `picks`, `model_id=nfl_live_prop`):
+Ledger confirmation (Supabase `picks`, `model_id=nfl_live_prop`, queried 2026-09-22):
 
-| raw `model_probability` | market / side | priced BETs | W–L | notes |
-|---|---|---|---|---|
-| 0.600344 | pass attempts / over | 16 | 4–5 | `Phi(1.50/5.90)` priced arm |
-| 0.642000 | pass attempts / over | 13 | 2–11 | former blind arm |
-| continuous (~0.50) | rush attempts / under | 1 | 0–1 | post-#811 lane |
+| raw `p` | `p_cal` | market / side | priced | W–L | kelly u | flat u |
+|---|---|---|---|---|---|---|
+| 0.600344 | 0.600344 | pass attempts / over | 5 | 2–3 | −6.80 | −1.36 |
+| 0.600344 | 0.5355 | pass attempts / over | 4 | 2–2 | 0.00 | 0.00 |
+| **0.642000** | **0.5792** | pass attempts / over | **13** | **2–11** | **−46.30** | −9.26 |
+| **Pass OVER total** | | | **22** | **6–16** | **−53.10** | −10.62 |
+| continuous (~0.50) | | rush attempts / under | 1 | 0–1 | −5.00 | −1.00 |
+
+Exactly two raw probabilities on every pass-over BET. `0.600344 = Phi(1.50/5.90)`
+(priced arm); `0.642` was the blind arm. The 0.642 / 0.5792 bucket is all-BET
+because the higher constant cleared the EV price filter on every quote that
+arm saw.
 
 **Kill switches (default safe):**
 
