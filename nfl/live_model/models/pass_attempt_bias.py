@@ -69,8 +69,11 @@ SO THIS MODULE DECLINES TO PRICE. Not a pause and not a retirement -- both are
 mike's call and the settled record is untouched either way (CLAUDE.md 1c). The
 model simply no longer asserts a number that measurement says is false, and the
 caller already treats a None read as "no opinion, no bet"
-(workers/gameday.py). Restoring the old behaviour is one constant: set
-DEPLOY_BIAS back to a non-zero value.
+(workers/gameday.py). Restoring the old behaviour needs TWO things on purpose:
+set DEPLOY_BIAS to a non-zero value AND NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS=1.
+Editing the constant alone cannot re-arm live overs. The publish path also
+refuses CONSTANT_OVER_PROBS and any non-rush market
+(nfl/live_model/pick_writer.refuse_publish_reason).
 
 Full assessment, every table and how to reproduce it:
 `docs/nfl_live_prop_assessment.md`.
@@ -78,6 +81,7 @@ Full assessment, every table and how to reproduce it:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 # Re-measured 2026-09-21 on 4,071 two-sided DraftKings quotes over 776 games,
@@ -103,6 +107,23 @@ MIN_SLACK = 0.0
 MODEL_ID = "nfl_live_prop"
 MARKET = "player_pass_attempts"
 
+# THE TWO RAW PROBABILITIES THAT WERE EVERY LIVE BET. Production ledger
+# (picks, model_id=nfl_live_prop, through 2026-09-20): every player_pass_attempts
+# OVER BET carried one of these and nothing else. 0.600344 = Phi(1.50/5.90)
+# from the priced arm; 0.642 was the blind arm's claimed 2025 over rate. A
+# publish gate fingerprints them so a wiring regression cannot re-post them.
+CONSTANT_OVER_PROBS = (0.600344, 0.642)
+
+# KILL SWITCH. Default OFF. Setting NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS=1 plus a
+# non-zero DEPLOY_BIAS restores the old constant-prob path for a controlled
+# replay only -- never for production without an Updated-By decision. The
+# deployed lane is rush_attempt_pace; this module must not silently re-arm.
+_ALLOW_ENV = "NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS"
+
+
+def _pass_attempt_bias_allowed() -> bool:
+    return os.getenv(_ALLOW_ENV, "0").strip() == "1"
+
 
 @dataclass(frozen=True)
 class Read:
@@ -127,9 +148,15 @@ def over_prob(line: float, accrued: float, seconds_remaining: float,
     bias there is no edge, and asserting 0.50 into a priced market would simply
     donate the hold. A caller that gets None writes no pick.
 
+    An explicit `bias=` still prices the historical formula (tests / assessment
+    replay). The MODULE constant path additionally requires
+    NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS=1, so editing DEPLOY_BIAS alone cannot
+    re-arm live overs.
+
     The sanity gates still run first, so a caller can tell "no opinion" from
     "this quote was unusable" by the reason string.
     """
+    explicit_bias = bias is not None
     bias = DEPLOY_BIAS if bias is None else bias
     sigma = SIGMA if sigma is None else sigma
     if seconds_remaining is None or seconds_remaining < MIN_SECONDS_REMAINING:
@@ -143,6 +170,11 @@ def over_prob(line: float, accrued: float, seconds_remaining: float,
     if bias == 0.0:
         # The measured state. See the module docstring for the tables.
         return Read(None, "no_measured_bias")
+    # A non-zero module DEPLOY_BIAS without the env flag is a wiring accident,
+    # not a decision. Explicit bias= is how the assessment scripts replay the
+    # old constant; they do not publish.
+    if not explicit_bias and not _pass_attempt_bias_allowed():
+        return Read(None, "pass_attempt_overs_disabled")
     # P(final > line) = P(final - line > 0), centred on the book's bias.
     z = bias / sigma
     return Read(0.5 * (1.0 + math.erf(z / math.sqrt(2.0))), "measured_bias")

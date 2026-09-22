@@ -261,3 +261,27 @@ Stated so this is a standing assessment and not a verdict.
 What is **not** worth redoing: the flow model (it ties the book on MAE and the
 repo has been down that road twice), and any further tuning of `EV_THRESHOLDS`,
 which is the dial that produced this complaint and cannot fix a constant.
+
+---
+
+## 8. Production follow-up (2026-09-22) — publish backstop, model stays live
+
+Ledger confirmation (Supabase `picks`, `model_id=nfl_live_prop`):
+
+| raw `model_probability` | market / side | priced BETs | W–L | notes |
+|---|---|---|---|---|
+| 0.600344 | pass attempts / over | 16 | 4–5 | `Phi(1.50/5.90)` priced arm |
+| 0.642000 | pass attempts / over | 13 | 2–11 | former blind arm |
+| continuous (~0.50) | rush attempts / under | 1 | 0–1 | post-#811 lane |
+
+**Kill switches (default safe):**
+
+- `DEPLOY_BIAS = 0.0` — module refuses with `no_measured_bias`
+- `NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS` unset/`0` — even a non-zero `DEPLOY_BIAS`
+  returns `pass_attempt_overs_disabled` on the module-constant path
+- `pick_writer.refuse_publish_reason` — refuses any decision whose market is not
+  `player_rush_attempts`, side is not `under`, or raw prob fingerprints
+  `CONSTANT_OVER_PROBS` (0.600344, 0.642)
+
+**Not done:** `PAUSED_MODELS` — product owner (Michael, 2026-09-22) requires the
+model stay live; pass overs are killed at selection/publish, not by pausing.

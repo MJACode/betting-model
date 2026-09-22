@@ -30,7 +30,6 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from ..models import pass_attempt_bias as pab
 from ..models import rush_attempt_pace as rap
 from ..recorder import JsonlRecorder
 from ..state import from_extract
