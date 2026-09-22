@@ -261,3 +261,36 @@ Stated so this is a standing assessment and not a verdict.
 What is **not** worth redoing: the flow model (it ties the book on MAE and the
 repo has been down that road twice), and any further tuning of `EV_THRESHOLDS`,
 which is the dial that produced this complaint and cannot fix a constant.
+
+---
+
+## 8. Production follow-up (2026-09-22) — publish backstop, model stays live
+
+Ledger confirmation (Supabase `picks`, `model_id=nfl_live_prop`, queried 2026-09-22).
+Dual-arm worker (pre-#811) evaluated **priced** then **blind** on every OVER:
+
+| raw `p` | `p_cal` | n | BET | AVOID | W–L | kelly u (priced W/L) | arm |
+|---|---|---|---|---|---|---|---|
+| 0.600344 | ≈0.6003 | 35 | 12 | 23 | 2–3 (+7 NO_ACTION) | −6.80 on settled | priced |
+| 0.600344 | 0.5355 | 32 | 4 | 28 | 2–2 | 0.00 | priced |
+| **0.642000** | **0.5792** | **13** | **13** | **0** | **2–11** | **−46.30** | **blind** |
+| **Pass OVER W+L** | | | **22** | | **6–16** | **−53.10** | |
+| rush under (~0.50) | | 1 | 1 | 0 | 0–1 | −5.00 | #811+ |
+
+Why blind is all-BET: higher constant clears EV on nearly every quote above −140;
+priced often AVOIDs first, then blind BETs into the adverse-selected remainder.
+
+Also measured: `live_pick_features` n=0 for this model; all BET rows have null
+`game_time` / `run_time` / `clv_pct` (quality `clv_degradation` SKIPPED).
+
+**Kill switches (default safe):**
+
+- `DEPLOY_BIAS = 0.0` — module refuses with `no_measured_bias`
+- `NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS` unset/`0` — even a non-zero `DEPLOY_BIAS`
+  returns `pass_attempt_overs_disabled` on the module-constant path
+- `pick_writer.refuse_publish_reason` — refuses any decision whose market is not
+  `player_rush_attempts`, side is not `under`, or raw prob fingerprints
+  `CONSTANT_OVER_PROBS` (0.600344, 0.642)
+
+**Not done:** `PAUSED_MODELS` — product owner (Michael, 2026-09-22) requires the
+model stay live; pass overs are killed at selection/publish, not by pausing.

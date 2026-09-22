@@ -612,12 +612,15 @@ ACTION_THRESHOLDS: dict = {
     # mlb_over_under stays paused. Not mlb_total_market (Pin-vs-soft).
     # docs/mlb_total_public_fade.md.
     "mlb_total_public_fade":      {"min_prob": 0.0, "min_edge": 0.0},
-    # NFL LIVE pass attempts (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
-    # 2026-09-05 (matt: "NFL should be live out of the gate, we should not do
-    # paper trading and delay this being an available feature") -- taken with
-    # the §2 go-live gate NOT met, deliberately and on his call. Settled record
-    # at that moment: ZERO bets. Do not "restore" the gate here without asking
-    # him; do re-sweep these numbers the moment ~50 settled bets exist.
+    # NFL LIVE props (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
+    # 2026-09-05 (matt: "NFL should be live out of the gate...") -- taken with
+    # the §2 go-live gate NOT met, deliberately. Market as of 2026-09-21 is
+    # player_rush_attempts UNDER (rush_attempt_pace); the previous
+    # player_pass_attempts OVER path was a CONSTANT probability (0.600344 /
+    # 0.642) that read neither line, accrued nor clock -- see
+    # docs/nfl_live_prop_assessment.md. Pass overs are kill-switched
+    # (NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS default off) and refused at publish.
+    # Do NOT add this model to PAUSED_MODELS to "fix" pass overs.
     #
     # Floors of 0.0 are not placeholders, they are the design: this lane's cut
     # is EV, enforced in nfl/live_model/config.EV_THRESHOLDS and applied by the
@@ -625,6 +628,9 @@ ACTION_THRESHOLDS: dict = {
     # cut here would silently re-filter bets the model already took -- picks
     # written and never shown, which is exactly the app/Discord divergence this
     # release removes. Same reasoning as ncaaf_spread's 0.0 edge floor.
+    # min_prob/min_edge 0.0 did NOT cause the pass-over card by themselves: the
+    # constant p made the EV cut a pure price filter. Raising these floors
+    # without fixing the probability would have hidden bets, not corrected them.
     "nfl_live_prop": {"min_prob": 0.0, "min_edge": 0.0},
     "nfl_prop_pass_yards": {"min_prob": 0.68, "min_edge": 0.15},
     "nfl_prop_pass_attempts": {"min_prob": 0.73, "min_edge": 0.19},
@@ -1964,7 +1970,7 @@ SCORING_METHODS: dict = {
     # Frozen rules — see each module's header for the measurement behind it.
     "nfl_wind_totals":     "rule",    # nfl/models/wind_totals.py — CALIBRATED_UNDER_RATE lookup
     "nfl_opener_spread":   "rule",    # nfl/models/opener_spread.py — soft-vs-Pinnacle deviation
-    "nfl_live_prop":       "rule",    # nfl/live_model/models/pass_attempt_bias.py — frozen bias
+    "nfl_live_prop":       "rule",    # nfl/live_model/models/rush_attempt_pace.py — pace-ratio under
     "nfl_prop_market":     "rule",    # models/nfl_prop_market.py — de-vig Pinnacle, bet the outlier
     "wnba_prop_market":    "rule",    # models/wnba_prop_market.py — the same rule, pointed at WNBA
     "mlb_spread_market":   "rule",    # models/mlb_game_market.py — the same rule, pointed at MLB run lines
