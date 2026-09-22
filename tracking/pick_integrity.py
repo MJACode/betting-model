@@ -21,12 +21,27 @@ Measured before this shipped (2026-09-12, every BET ever written): 83 spread
 labels, 4,042 over/under labels and 412 moneyline labels, zero disagreements.
 The check exists so the next one cannot reach a follower.
 
+THE STAT CHECK WAS ADDED 2026-09-21, after the one it would have caught. The
+live NFL prop model changed market from pass attempts to rushing attempts, one
+display string was left behind, and "Blake Corum Under 11.5 Pass Attempts" went
+to the live channel -- a running back on a passing line, with a correct bet
+underneath it. Side and line both agreed with the row, so everything above
+passed. What disagreed was the STAT, and nothing was looking at it.
+
+It is deliberately a NEGATIVE check: a pick is refused only when its label names
+a market that is not the one it stores. A label whose wording merely differs
+from the platform's own ("Rec" against "Recs") is NOT refused, because a
+publishing check that is stricter than it needs to be is an outage waiting for
+the first model that words a label differently.
+
 Checked:
   * spreads    -- the signed number in the label equals the SIDE's line
                   (the home number, negated for an away pick), and the label
                   names the side's team, not the other one.
   * over/under -- the label says the pick's side, at the stored line.
   * home/away  -- the label does not name the other team.
+  * the STAT   -- a player prop's label does not name a DIFFERENT market from
+                  the one the pick stores and settles on.
 
 A producer that does not supply `side` and `line` cannot be checked, so its
 picks are refused too. A check that dead code can satisfy is not a check (§1b).
@@ -44,6 +59,47 @@ _SPREAD_HINTS = ("spread", "runline", "puckline")
 _SIGNED = re.compile(r"(?<![\w.])([+-]\d+(?:\.\d+)?)")
 _OU_WORD = re.compile(r"\b(over|under)\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 _OU_LETTER = re.compile(r"(?<![\w.])([ou])\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+# The words a label may legitimately use for each NFL prop market. Aliases and
+# not a single name, because the platform, the app and the live model have each
+# spelled these differently and the point is to catch a WRONG market rather than
+# an unusual spelling. A market absent here is never checked.
+_NFL_STAT_ALIASES: dict[str, tuple[str, ...]] = {
+    "player_pass_attempts":      ("pass attempts", "pass att", "passing attempts"),
+    "player_pass_completions":   ("completions", "pass comp", "comp"),
+    "player_pass_yds":           ("pass yds", "pass yards", "passing yards"),
+    "player_pass_tds":           ("pass tds", "pass td", "passing tds"),
+    "player_rush_attempts":      ("carries", "rush attempts", "rush att",
+                                  "rushing attempts"),
+    "player_rush_yds":           ("rush yds", "rush yards", "rushing yards"),
+    "player_receptions":         ("receptions", "recs", "rec"),
+    "player_reception_yds":      ("rec yds", "receiving yards", "reception yards"),
+    "player_rush_reception_yds": ("ru+re yds", "rush+rec yds", "rush + rec yds"),
+    "player_anytime_td":         ("anytime td",),
+    "player_tackles_assists":    ("tkl+ast", "tackles+assists", "tackles + assists"),
+    "player_sacks":              ("sacks", "sack"),
+}
+# Longest first, so "receptions" is matched before the "rec" inside it and
+# "pass attempts" before a bare "attempts" could ever be considered.
+_STAT_BY_ALIAS: tuple[tuple[str, str], ...] = tuple(sorted(
+    ((alias, market) for market, aliases in _NFL_STAT_ALIASES.items()
+     for alias in aliases),
+    key=lambda pair: -len(pair[0])))
+
+
+def _stat_problem(label: str, prop_market: str | None) -> str | None:
+    """The market this label NAMES, when that is not the market it stores."""
+    if not prop_market or prop_market not in _NFL_STAT_ALIASES:
+        return None
+    text = label.lower()
+    for alias, market in _STAT_BY_ALIAS:
+        if re.search(rf"(?<![\w]){re.escape(alias)}(?![\w])", text):
+            if market != prop_market:
+                return (f"the label says {alias!r}, but the pick is on "
+                        f"{prop_market} and settles against it")
+            return None
+    return None
+
+
 _PICKEM = re.compile(r"\bPK\b|pick\s*'?\s*em|(?<![\w.+-])0(?:\.0)?(?![\w.])",
                      re.IGNORECASE)
 
@@ -68,7 +124,8 @@ def _names(text: str, team: str | None) -> bool:
     return bool(team) and (text == team or text.startswith(f"{team} "))
 
 
-def pick_problems(label, side, line, model_id, home=None, away=None) -> list[str]:
+def pick_problems(label, side, line, model_id, home=None, away=None,
+                  prop_market=None) -> list[str]:
     """Every way this pick's label disagrees with its side and line. Empty = OK."""
     if label is None or not str(label).strip():
         return ["the pick has no label"]
@@ -105,6 +162,10 @@ def pick_problems(label, side, line, model_id, home=None, away=None) -> list[str
             if abs(float(m.group(2)) - float(line)) > 1e-9:
                 problems.append(f"the label says {m.group(2)}, but the stored "
                                 f"line is {float(line):g}")
+
+    stat = _stat_problem(label, prop_market)
+    if stat:
+        problems.append(stat)
     return problems
 
 
@@ -121,7 +182,8 @@ def refuse_mismatched(signals: list[dict], surface: str) -> list[dict]:
                         "label cannot be checked"]
         else:
             problems = pick_problems(s.get("label"), s.get("side"), s.get("line"),
-                                     s.get("model_id"), s.get("home"), s.get("away"))
+                                     s.get("model_id"), s.get("home"), s.get("away"),
+                                     s.get("prop_market"))
         if problems:
             logger.error(f"{surface}: REFUSED to publish {s.get('lock_key')} "
                          f"{s.get('label')!r}: {'; '.join(problems)}")
