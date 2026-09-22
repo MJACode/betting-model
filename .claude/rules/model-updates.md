@@ -82,7 +82,42 @@ from scratch and throw the pregame line away. Detail: `docs/live_betting.md`.
 **The settled live-prop record is ZERO BETS — there has never been a live
 player prop model in production, and the ~400 settled picks that look like one
 are not.** Do not read them as evidence in either direction
-(`docs/rules_evidence.md`).
+(`docs/rules_evidence.md`). `nfl_live_prop` has since written 29 BETs, 5 of
+them settled; five bets is not a record either.
+
+**AND THE BIAS `nfl_live_prop` TRADED DOES NOT EXIST.** (Re-measured
+2026-09-21, mike: *"when the ev threshold was tightened there were no picks,
+when it's slightly loosened you literally pick the over on pass attempts for
+every game."*) The lane shipped on "DK's live pass-attempt line sits 2.33
+attempts below the final"; on the same archive it is **−0.12, 95% CI (−0.42,
++0.18)** clustered on game. Worse, `over_prob()` returned a CONSTANT, so the EV
+threshold was a pure price filter — which is the whole of the behaviour above.
+Graded at real posted prices the rule returned **−8.47% over 3,794 bets** and
+got WORSE as the cut tightened, because the book's price is calibrated (slope
++1.22) so the cheapest overs are the least likely. The model now declines to
+price. **Before touching `EV_THRESHOLDS` for this model, read
+`docs/nfl_live_prop_assessment.md` — that dial cannot fix a constant.**
+
+**SO IT CHANGED MARKET: `nfl_live_prop` NOW TRADES RUSHING ATTEMPTS, THE
+UNDER.** (2026-09-21, mike: *"fix the approach… let's improve the live props
+model."*) Pass attempts carry no edge in ANY season (−2.8% pooled), so no
+threshold rescues them. What the archive does show is that a book re-hanging a
+live line off its opener and the clock does not mark a RUSHING line down enough
+for the game script that caused the shortfall: betting the under when the over
+needs ≥1.25× the pace the back has been managing returned **+11.2% over 874
+DraftKings bets in 546 games**, 95% CI (+4.9%, +17.6%) resampling games, every
+season positive, every threshold from 1.0 to 2.0 positive, and no decay when
+the quote is taken five or ten minutes later. Detail, and what is NOT known
+about it: `docs/nfl_live_rush_attempts.md`.
+
+**Two things that switch carried, which any future market switch also must.**
+(1) **`picks.prop_market` decides which column settles a pick**, so the writer
+takes the market FROM the model (`pick_writer.LANE_MARKET = _model.MARKET`) and
+`paper_tracker` resolves `nfl_live_prop` per pick rather than per model id —
+hardcoding either stat grades the other market's picks against the wrong column,
+silently. (2) **A new market is a NEW POPULATION with zero settled bets**, so
+the go-live gate reopens; the old market's settled record stays exactly as it is
+(CLAUDE.md §1c) and still settles against attempts.
 
 > **Not here on purpose:** *everything goes in Supabase* and *a losing
 > model is an assessment to run* stay in CLAUDE.md §1b. Both are reachable

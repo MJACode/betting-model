@@ -95,7 +95,12 @@ def test_the_settlement_columns_are_populated():
     """`prop_market` + `player_key` are what tracking/paper_tracker resolves a
     market-spanning model id against. Empty here means graded never."""
     row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0, game_date="2026-09-13")
-    assert row["prop_market"] == LANE_MARKET == "player_pass_attempts"
+    # Taken from the MODEL, never written out here. The model traded
+    # `player_pass_attempts` until 2026-09-21 and now trades
+    # `player_rush_attempts`; a switch that updated one and not the other would
+    # settle a rushing bet against passing attempts and look normal doing it.
+    from live_model.models import rush_attempt_pace as _rap
+    assert row["prop_market"] == LANE_MARKET == _rap.MARKET
     assert row["player_key"] == "CJ STROUD"
     assert row["is_live"] is True
     assert row["signal_type"] == "BET"
@@ -389,13 +394,25 @@ def test_the_synced_row_is_what_the_app_will_actually_read():
 
 
 def test_the_lane_can_actually_settle():
-    """The whole point of writing to `picks`. Without this mapping the lane
+    """The whole point of writing to `picks`. Without this mapping the model
     accrues rows that are never graded, which is the paper record it already
-    had, with more moving parts."""
-    from tracking.paper_tracker import _PROP_STAT_MAP as M
-    assert M[MODEL_ID] == ("nfl_player", "attempts")
-    assert M["nfl_prop_pass_attempts"] == M[MODEL_ID], (
-        "the live lane grades against the same stat as the pre-game one")
+    had, with more moving parts.
+
+    RESOLVED PER PICK since 2026-09-21. This asserted ("nfl_player",
+    "attempts") while the model traded one market and could never trade
+    another. Re-pointing the model id at "carries" would have re-graded the 22
+    already-settled pass-attempt picks against the wrong stat, which CLAUDE.md
+    section 1c forbids -- so the stat comes from `picks.prop_market`, and every
+    pick grades against the market it was actually written on.
+    """
+    from tracking.paper_tracker import (_PROP_MARKET_STAT_BY_MODEL,
+                                        _PROP_STAT_MAP as M)
+    from live_model.models import rush_attempt_pace as _rap
+    assert M[MODEL_ID] == ("nfl_player", "FROM_PROP_MARKET")
+    by_market = _PROP_MARKET_STAT_BY_MODEL[MODEL_ID]
+    assert by_market[_rap.MARKET] == "carries", "today's market cannot settle"
+    assert by_market["player_pass_attempts"] == M["nfl_prop_pass_attempts"][1], (
+        "the already-settled pass-attempt picks must keep grading on attempts")
 
 
 # ── the juice ceiling ────────────────────────────────────────────────────────
