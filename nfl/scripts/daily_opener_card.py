@@ -117,6 +117,134 @@ def load_window_schedule(lo_days: float = LEAD_LO_DAYS,
     return g
 
 
+# How far back the stale-number gate looks. A day covers the longest hold the
+# gate needs to see many times over (MIN_HELD_MINUTES is one hour); the
+# Supabase side is compressed to change points, so the window's cost is a
+# server-side scan, not rows over the wire.
+PRIOR_HOURS = 24.0
+
+PRIOR_COLS = ["observed_at", "home", "away", "book", "point"]
+
+
+def load_prior_observations(sched: pd.DataFrame, now=None,
+                            hours: float = PRIOR_HOURS) -> pd.DataFrame:
+    """
+    Every spread quote seen on the watched games in the last `hours`, for the
+    stale-number gate (models/opener_spread.MIN_HELD_MINUTES).
+
+    Two sources, unioned, because neither is complete on its own:
+
+      1. This worker's own board dumps (`data/cards/board_<date>.csv`, today
+         and yesterday) -- minute resolution, free, but on the worker's
+         ephemeral disk, so a redeploy starts them from empty (eight deploys on
+         2026-09-22 alone).
+      2. Supabase: `nfl_odds_history` (the archive those dumps are flushed
+         into, hourly at best and with gaps) and `odds` (the platform's own
+         refresh passes, every bettable book, roughly hourly). Survives a
+         redeploy.
+
+    An EMPTY frame is a valid answer and means nothing can clear the gate this
+    tick; the caller says so loudly. A failing source is a warning, never a
+    crash -- but note the asymmetry: with no history at all the card fires
+    nothing, which is the conservative side. `odds.snapshot_at` is TEXT in two
+    ISO shapes ('...Z' and '...+00:00'); both share the 'YYYY-MM-DDTHH:MM:SS'
+    prefix, so the bound is compared as text and cast in the query.
+
+    Only the books the gate can ever be asked about are loaded (the bettable
+    set plus Pinnacle), and the Supabase side returns CHANGE POINTS -- each
+    (game, book)'s first row, every row whose number differs from the one
+    before, and its latest row -- which is all `held_minutes` needs. The first
+    version pulled every archived quote and came back with 508,217 rows for
+    one tick; this comes back with a few hundred.
+    """
+    now = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    since = now - pd.Timedelta(hours=hours)
+    books = sorted(opener_spread._bettable_books() | {opener_spread.REFERENCE})
+    parts: list[pd.DataFrame] = []
+    counts: dict[str, object] = {}
+
+    n_local = 0
+    for day in (now, now - pd.Timedelta(days=1)):
+        p = Path("data/cards") / f"board_{day:%Y-%m-%d}.csv"
+        if not p.exists():
+            continue
+        try:
+            b = pd.read_csv(p, usecols=["snapshot_at", "home", "away", "bookmaker",
+                                        "market", "point"])
+        except Exception as exc:                               # noqa: BLE001
+            print(f"WARNING: could not read {p}: {exc}", file=sys.stderr)
+            continue
+        b = b[(b.market == "spreads") & b.bookmaker.isin(books)]
+        parts.append(pd.DataFrame({
+            "observed_at": pd.to_datetime(b.snapshot_at, utc=True, format="mixed",
+                                          errors="coerce"),
+            "home": b.home, "away": b.away, "book": b.bookmaker,
+            "point": pd.to_numeric(b.point, errors="coerce")}))
+        n_local += len(b)
+    counts["local"] = n_local
+
+    if len(sched):
+        by_id = {f"NFL_{g.game_id}": (g.home_team, g.away_team)
+                 for g in sched.itertuples()}
+        try:
+            from data.db import get_connection
+            conn = get_connection()
+            try:
+                rows = conn.execute("""
+                    WITH u AS (
+                        SELECT snapshot_at, game_id, bookmaker, point::float AS point
+                        FROM nfl_odds_history
+                        WHERE market = 'spreads' AND game_id = ANY(%s)
+                          AND bookmaker = ANY(%s) AND snapshot_at >= %s
+                        UNION ALL
+                        SELECT snapshot_at::timestamptz, game_id, bookmaker,
+                               spread_home::float
+                        FROM odds
+                        WHERE sport = 'NFL' AND market = 'spreads' AND game_id = ANY(%s)
+                          AND bookmaker = ANY(%s) AND spread_home IS NOT NULL
+                          AND snapshot_at >= %s
+                    ), s AS (
+                        SELECT snapshot_at, game_id, bookmaker, point,
+                               lag(point) OVER w AS prev,
+                               row_number() OVER (PARTITION BY game_id, bookmaker
+                                                  ORDER BY snapshot_at DESC) AS rn
+                        FROM u
+                        WINDOW w AS (PARTITION BY game_id, bookmaker ORDER BY snapshot_at)
+                    )
+                    SELECT snapshot_at::text, game_id, bookmaker, point
+                    FROM s
+                    WHERE prev IS NULL OR prev <> point OR rn = 1
+                    ORDER BY game_id, bookmaker, snapshot_at
+                """, (list(by_id), books, since.to_pydatetime(),
+                      list(by_id), books, since.strftime("%Y-%m-%dT%H:%M:%S"))).fetchall()
+            finally:
+                conn.close()
+            if rows:
+                db = pd.DataFrame(rows, columns=["observed_at", "game_id", "book", "point"])
+                ha = db.game_id.map(by_id)
+                db["home"] = ha.map(lambda t: t[0] if isinstance(t, tuple) else None)
+                db["away"] = ha.map(lambda t: t[1] if isinstance(t, tuple) else None)
+                # format="mixed": the archive stamps microseconds and the
+                # refresh pass does not, and pandas otherwise infers the format
+                # from the first row and coerces every other shape to NaT --
+                # measured: the loader silently dropped every archive row.
+                db["observed_at"] = pd.to_datetime(db.observed_at, utc=True,
+                                                   format="mixed", errors="coerce")
+                parts.append(db[PRIOR_COLS])
+            counts["db"] = len(rows)
+        except Exception as exc:                               # noqa: BLE001
+            print(f"WARNING: prior observations from Supabase unavailable: {exc}",
+                  file=sys.stderr)
+            counts["db"] = "unavailable"
+
+    print(f"prior spread observations for the gate: {counts}", file=sys.stderr)
+    if not parts:
+        return pd.DataFrame(columns=PRIOR_COLS)
+    out = pd.concat(parts, ignore_index=True).dropna(subset=["observed_at", "point"])
+    out = out[(out.observed_at >= since) & (out.observed_at <= now)]
+    return out[PRIOR_COLS].reset_index(drop=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--threshold", type=float, default=DEPLOY_THRESHOLD)
@@ -177,16 +305,29 @@ def main() -> int:
     except Exception as exc:
         print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
 
+    # The stale-number gate's history. Loaded AFTER the board dump above so
+    # this tick is in it too, and passed to BOTH the evaluation and the
+    # selection so the audit trail and the card agree. Empty means nothing
+    # fires this tick -- said out loud rather than looking like a quiet board.
+    now = pd.Timestamp.now(tz="UTC")
+    prior = load_prior_observations(watch, now)
+    if prior.empty:
+        print("WARNING: no prior spread observations for the watched games -- "
+              f"nothing can clear the {opener_spread.MIN_HELD_MINUTES:.0f}-minute "
+              "stale-number gate this tick", file=sys.stderr)
+
     # Record the model's view of EVERY game on the board, qualifying or not.
     # This is what lets a locked pick be told "the deviation is gone" without
     # anything being able to retract the bet. Enrichment only, never fatal.
     try:
         from data_ingest.pick_eval import dump_eval_rows
-        dump_eval_rows(opener_spread.evaluate_board(frame, watch, a.threshold))
+        dump_eval_rows(opener_spread.evaluate_board(frame, watch, a.threshold,
+                                                    prior=prior, now=now))
     except Exception as exc:                                   # noqa: BLE001
         print(f"WARNING: opener pick-eval dump failed: {exc}", file=sys.stderr)
 
-    bets = select_opener_bets(frame, sched, threshold=a.threshold)
+    bets = select_opener_bets(frame, sched, threshold=a.threshold,
+                              prior=prior, now=now)
     if bets is None or len(bets) == 0:
         print(f"No qualifying opener bets at |dev| >= {a.threshold} "
               f"({len(watch)} game(s) watched, {len(sched)} inside T-7..T-2).")
@@ -199,7 +340,8 @@ def main() -> int:
     bets = bets.copy()
     bets["stake_amt"] = (bets.stake_pct / 100 * a.bankroll).round(2)
     cols = ["matchup", "kick_utc", "bet_team", "side_line", "book", "price",
-            "dev", "model_prob", "edge_pp", "edge_tier", "units", "stake_amt"]
+            "dev", "held_min", "model_prob", "edge_pp", "edge_tier", "units",
+            "stake_amt"]
     print(bets[cols].to_string(index=False))
     tiers = bets.edge_tier.value_counts().to_dict()
     print("edge size: " + ", ".join(f"{tiers.get(t, 0)} {t}"

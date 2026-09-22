@@ -156,6 +156,24 @@ in-week during the season.
   finishes ≤ flat. Wind: `MAX_FIRE_LEAD` stays 4; measure the deployed
   Open-Meteo population. Do not unpause paused XGB props off this track.
   `python -m scripts.nfl_rule_2026_track`. `docs/nfl_rule_2026_track.md`.
+
+  **The soft number must have been up for an hour (`MIN_HELD_MINUTES = 60`,
+  2026-09-22).** The rule's premise is a STALE number, and until this the card
+  only checked that the deviation existed NOW. On 2026-09-22 the Odds API
+  served BetMGM on TEN @ NYG at NYG -1 for one tick and NYG +1 for the next
+  fourteen minutes, every other book at -3, and the 21:29Z tick locked
+  `TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u` — a number nobody
+  found at the book. The feed does this constantly (17-37 one-tick ≥2-point
+  blips per soft book per fortnight, zero at Pinnacle) and the one-minute
+  cadence lands on every one; the backtest's 6-hourly grid never did. Now
+  `held_minutes` measures how long the book has quoted its current point from
+  earlier observations, and both the selection and the audit-trail evaluation
+  skip a number held under an hour (falling through to the next-largest
+  deviation). The card feeds it from its own board dumps ∪ Supabase
+  (`nfl_odds_history` ∪ `odds`, change points, 24h); an empty history fires
+  nothing and says so. `prior=None` is the backtest path, unchanged. 60 min is
+  below the six hours the backtest implies and is not a measured cut. Session
+  entry in `docs/sessions/2026-09.md`.
 - **DK line snapshots + pick-timing display (2026-08-19, session 121):** every
   LIVE card run also dumps DraftKings' totals/spreads for every game within 8
   days (`nfl/data_ingest/line_snapshots.py`, reusing the payload the card

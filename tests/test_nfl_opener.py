@@ -525,3 +525,296 @@ class TestFireWindow:
         # corrected and the backtest says nothing about that region.
         assert opener_model.LEAD_LO_DAYS == 2.0
         assert opener_model.LEAD_HI_DAYS >= 10.0
+
+
+# ---------------------------------------------------------------------------
+# THE STALE-NUMBER GATE (2026-09-22). The measured case, rebuilt from the Odds
+# API's own historical snapshot: BetMGM at NYG -1 (-105) / TEN +1 (-115) from
+# 21:28:26Z after hours at -3.0, every other book at -3.0. The 21:29Z tick
+# locked "TEN @ NYG — NYG -1 (Opener +2 vs Pinnacle, MGM) · 1.96u".
+# ---------------------------------------------------------------------------
+
+def _ts(s):
+    return pd.Timestamp(s, tz="UTC")
+
+
+def _obs(book, point, start, end, home="NYG", away="TEN", step_min=1):
+    """One observation per `step_min` minutes, [start, end]."""
+    times = pd.date_range(_ts(start), _ts(end), freq=f"{step_min}min")
+    return pd.DataFrame({"observed_at": times, "home": home, "away": away,
+                         "book": book, "point": float(point)})
+
+
+def _giants_sched():
+    return pd.DataFrame([{
+        "game_id": "2026_03_TEN_NYG", "home_team": "NYG", "away_team": "TEN",
+        "matchup": "TEN @ NYG", "kick_utc": "2026-09-27 17:00:00+00:00",
+        "lead_days": 4.8}])
+
+
+def _giants_board(mgm_point, mgm_px_home, mgm_px_away):
+    g = dict(home="NYG", away="TEN", event="ten_nyg")
+    return _frame(_both_sides("pinnacle", -3.0, 103, -115, **g)
+                  + _both_sides("draftkings", -3.0, -102, -118, **g)
+                  + _both_sides("fanduel", -3.0, -108, -112, **g)
+                  + _both_sides("betrivers", -3.0, -112, -109, **g)
+                  + _both_sides("fanatics", -3.0, -105, -115, **g)
+                  + _both_sides("betmgm", mgm_point, mgm_px_home, mgm_px_away, **g))
+
+
+def _giants_prior_at_2129():
+    """Every book at -3.0 since the 17:37Z deploy; MGM -2.5 from 21:24:26Z and
+    -1.0 on the 21:29 tick itself (the card dumps the board before selecting)."""
+    steady = pd.concat([_obs(b, -3.0, "2026-09-22 17:37", "2026-09-22 21:29")
+                        for b in ("pinnacle", "draftkings", "fanduel",
+                                  "betrivers", "fanatics")])
+    mgm = pd.concat([_obs("betmgm", -3.0, "2026-09-22 17:37", "2026-09-22 21:23"),
+                     _obs("betmgm", -2.5, "2026-09-22 21:24:26", "2026-09-22 21:28"),
+                     _obs("betmgm", -1.0, "2026-09-22 21:29:01", "2026-09-22 21:29:01")])
+    return pd.concat([steady, mgm], ignore_index=True)
+
+
+class TestHeldMinutes:
+    def test_never_seen_at_this_point_is_none(self):
+        prior = _obs("betmgm", -3.0, "2026-09-22 17:00", "2026-09-22 21:00")
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+
+    def test_no_history_for_the_book_is_none(self):
+        prior = _obs("fanduel", -1.0, "2026-09-22 17:00", "2026-09-22 21:00")
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+        assert opener_model.held_minutes(None, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+        empty = pd.DataFrame(columns=["observed_at", "home", "away", "book", "point"])
+        assert opener_model.held_minutes(empty, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+
+    def test_seen_at_this_point_but_last_seen_elsewhere_is_zero(self):
+        # Was -1.0 two hours ago, then -3.0 since: a -1.0 now is a NEW number.
+        prior = pd.concat([_obs("betmgm", -1.0, "2026-09-22 17:00", "2026-09-22 18:00"),
+                           _obs("betmgm", -3.0, "2026-09-22 18:01", "2026-09-22 21:28")])
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) == 0.0
+
+    def test_measures_from_the_last_move(self):
+        prior = pd.concat([_obs("betmgm", -3.0, "2026-09-22 17:00", "2026-09-22 19:59"),
+                           _obs("betmgm", -1.0, "2026-09-22 20:00", "2026-09-22 21:00")])
+        held = opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29"))
+        assert held == 89.0
+        # A different number in between resets the run.
+        prior = pd.concat([prior,
+                           _obs("betmgm", -2.5, "2026-09-22 21:10", "2026-09-22 21:10"),
+                           _obs("betmgm", -1.0, "2026-09-22 21:11", "2026-09-22 21:28")])
+        held = opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29"))
+        assert held == 18.0
+
+    def test_observations_after_now_and_other_games_are_ignored(self):
+        prior = pd.concat([_obs("betmgm", -1.0, "2026-09-22 21:30", "2026-09-22 23:00"),
+                           _obs("betmgm", -1.0, "2026-09-22 17:00", "2026-09-22 21:00",
+                                home="KC", away="DEN")])
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) is None
+
+    def test_mixed_timestamp_shapes_all_count(self):
+        # The archive stamps microseconds, the refresh pass does not, and the
+        # local dump writes isoformat. Inferring one format from the first row
+        # coerced every other shape to NaT -- measured on the first loader run,
+        # which dropped every archive row and left the gate seeing only the
+        # hourly refresh pass.
+        prior = pd.DataFrame({
+            "observed_at": ["2026-09-21T22:40:02+00:00",
+                            "2026-09-22 11:59:01.022234+00",
+                            "2026-09-22T13:00:01.447268+00:00",
+                            "2026-09-22T22:19:40Z"],
+            "home": "NYG", "away": "TEN", "book": "betmgm",
+            "point": [-6.0, -3.5, -3.0, -3.0]})
+        held = opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -3.0,
+                                         _ts("2026-09-22 22:29:01"))
+        assert held is not None and abs(held - (9 * 60 + 29)) < 0.1
+
+    def test_sparse_observations_are_fine(self):
+        # The archive is hourly at best; one quote three hours ago and nothing
+        # since is a number that has been up for three hours.
+        prior = _obs("betmgm", -1.0, "2026-09-22 18:29", "2026-09-22 18:29")
+        assert opener_model.held_minutes(prior, "NYG", "TEN", "betmgm", -1.0,
+                                         _ts("2026-09-22 21:29")) == 180.0
+
+
+class TestStaleNumberGate:
+    def test_the_giants_blip_reproduces_without_the_gate(self):
+        # The backtest path (no history) is the OLD behaviour, and it produces
+        # exactly the row that was published. This is the fixture's proof that
+        # it reproduces the bug; the next test is the fix.
+        bets = card.select_opener_bets(_giants_board(-1.0, -105, -115), _giants_sched())
+        assert len(bets) == 1
+        b = bets.iloc[0]
+        assert (b.bet_team, b.side_line, b.book, b.price, b.dev) == \
+            ("NYG", -1.0, "betmgm", -105, 2.0)
+        assert b.model_prob == 0.5557 and b.units == 1.958
+
+    def test_the_giants_blip_does_not_fire_with_the_gate(self):
+        bets = card.select_opener_bets(
+            _giants_board(-1.0, -105, -115), _giants_sched(),
+            prior=_giants_prior_at_2129(), now=_ts("2026-09-22 21:29:01"))
+        assert len(bets) == 0
+
+    def test_the_second_phase_does_not_fire_either(self):
+        # 21:31Z-21:43Z: MGM at NYG +1 (-108), dev 4.0, LARGE, 4.0 units. Twelve
+        # minutes of persistence is still not an hour. Without the gate the
+        # card would have locked this one instead had the first tick been
+        # missed -- worse, not better.
+        prior = pd.concat([_giants_prior_at_2129(),
+                           _obs("betmgm", 1.0, "2026-09-22 21:31", "2026-09-22 21:43")])
+        board = _giants_board(1.0, -108, -112)
+        ungated = card.select_opener_bets(board, _giants_sched())
+        assert len(ungated) == 1 and ungated.iloc[0].dev == 4.0
+        gated = card.select_opener_bets(board, _giants_sched(), prior=prior,
+                                        now=_ts("2026-09-22 21:43"))
+        assert len(gated) == 0
+
+    def test_a_number_held_for_a_day_fires_on_the_first_tick(self):
+        # The genuine mechanism: MGM hung NYG -1 yesterday and never moved.
+        # Pinnacle's -3.0 is the new thing; the bet fires at once, as before.
+        prior = pd.concat([_obs("betmgm", -1.0, "2026-09-21 21:00", "2026-09-22 21:29"),
+                           _obs("pinnacle", -3.0, "2026-09-22 21:20", "2026-09-22 21:29")])
+        bets = card.select_opener_bets(
+            _giants_board(-1.0, -105, -115), _giants_sched(),
+            prior=prior, now=_ts("2026-09-22 21:29:01"))
+        assert len(bets) == 1
+        b = bets.iloc[0]
+        assert (b.bet_team, b.side_line, b.book) == ("NYG", -1.0, "betmgm")
+        assert b.held_min >= 24 * 60
+
+    def test_exactly_the_floor_fires_and_a_minute_under_does_not(self):
+        prior = _obs("betmgm", -1.0, "2026-09-22 20:29:01", "2026-09-22 21:29:01")
+        now = _ts("2026-09-22 21:29:01")
+        assert len(card.select_opener_bets(_giants_board(-1.0, -105, -115),
+                                           _giants_sched(), prior=prior, now=now)) == 1
+        prior = _obs("betmgm", -1.0, "2026-09-22 20:30:01", "2026-09-22 21:29:01")
+        assert len(card.select_opener_bets(_giants_board(-1.0, -105, -115),
+                                           _giants_sched(), prior=prior, now=now)) == 0
+
+    def test_empty_history_fires_nothing(self):
+        empty = pd.DataFrame(columns=["observed_at", "home", "away", "book", "point"])
+        bets = card.select_opener_bets(_giants_board(-1.0, -105, -115), _giants_sched(),
+                                       prior=empty, now=_ts("2026-09-22 21:29:01"))
+        assert len(bets) == 0
+
+    def test_falls_through_to_a_held_number_at_another_book(self):
+        # MGM's fresh -1.0 is the largest deviation; Fanatics has held -1.5 for
+        # a day. The card takes Fanatics, the same way it skips a too-small
+        # stake and looks at the next book.
+        g = dict(home="NYG", away="TEN", event="ten_nyg")
+        board = _frame(_both_sides("pinnacle", -3.5, -110, -110, **g)
+                       + _both_sides("betmgm", -1.0, -105, -115, **g)
+                       + _both_sides("fanatics", -1.5, -108, -112, **g))
+        prior = pd.concat([_obs("betmgm", -3.5, "2026-09-21 21:00", "2026-09-22 21:28"),
+                           _obs("betmgm", -1.0, "2026-09-22 21:29", "2026-09-22 21:29"),
+                           _obs("fanatics", -1.5, "2026-09-21 21:00", "2026-09-22 21:29")])
+        now = _ts("2026-09-22 21:29:01")
+        bets = card.select_opener_bets(board, _giants_sched(), prior=prior, now=now)
+        assert len(bets) == 1 and bets.iloc[0].book == "fanatics"
+        assert bets.iloc[0].dev == 2.0
+        ev = opener_model.evaluate_board(board, _giants_sched(), prior=prior, now=now)
+        assert int(ev[0]["qualifies"]) == 1 and ev[0]["current_book"] == "fanatics"
+
+    def test_the_two_earlier_2026_picks_would_have_been_held_back(self):
+        # BUF @ HOU, locked 2026-09-07 01:37Z: fanatics HOU -1 against Pinnacle
+        # HOU +1 (dev -2 -> BUF +1). The archive has fanatics at HOU +1 through
+        # 01:00Z -- a sign flip at the fire. Never seen at -1: no bet.
+        g = dict(home="HOU", away="BUF", event="buf_hou")
+        board = _frame(_both_sides("pinnacle", 1.0, -110, -110, **g)
+                       + _both_sides("fanatics", -1.0, -115, -105, **g))
+        sched = pd.DataFrame([{"game_id": "2026_01_BUF_HOU", "home_team": "HOU",
+                               "away_team": "BUF", "matchup": "BUF @ HOU",
+                               "kick_utc": "2026-09-14 17:00:00+00:00", "lead_days": 7.6}])
+        prior = _obs("fanatics", 1.0, "2026-09-06 20:00", "2026-09-07 01:00",
+                     home="HOU", away="BUF", step_min=10)
+        assert len(card.select_opener_bets(board, sched)) == 1              # as locked
+        assert len(card.select_opener_bets(board, sched, prior=prior,
+                                           now=_ts("2026-09-07 01:37"))) == 0
+        # CHI @ CAR, locked 2026-09-08 03:25Z under the 1.0-pt rule of the day:
+        # betmgm CAR +1 against Pinnacle CAR +2.5. The archive has betmgm at
+        # CAR +3 through 03:00Z.
+        g = dict(home="CAR", away="CHI", event="chi_car")
+        board = _frame(_both_sides("pinnacle", 2.5, -110, -110, **g)
+                       + _both_sides("betmgm", 1.0, -108, -112, **g))
+        sched = pd.DataFrame([{"game_id": "2026_01_CHI_CAR", "home_team": "CAR",
+                               "away_team": "CHI", "matchup": "CHI @ CAR",
+                               "kick_utc": "2026-09-14 17:00:00+00:00", "lead_days": 6.6}])
+        prior = _obs("betmgm", 3.0, "2026-09-07 20:00", "2026-09-08 03:00",
+                     home="CAR", away="CHI", step_min=10)
+        assert len(card.select_opener_bets(board, sched, threshold=1.0)) == 1
+        assert len(card.select_opener_bets(board, sched, threshold=1.0, prior=prior,
+                                           now=_ts("2026-09-08 03:25"))) == 0
+
+    def test_evaluate_board_applies_the_same_gate(self):
+        board = _giants_board(-1.0, -105, -115)
+        sched = _giants_sched()
+        now = _ts("2026-09-22 21:29:01")
+        ungated = opener_model.evaluate_board(board, sched)
+        assert int(ungated[0]["qualifies"]) == 1
+        gated = opener_model.evaluate_board(board, sched, prior=_giants_prior_at_2129(),
+                                            now=now)
+        assert int(gated[0]["qualifies"]) == 0
+        assert gated[0]["reason"] == \
+            "deviation +2.00 pts but betmgm has shown -1.0 for 0 min (needs 60)"
+        assert gated[0]["current_book"] == "betmgm" and gated[0]["current_line"] == -1.0
+        held = pd.concat([_obs("betmgm", -1.0, "2026-09-21 21:00", "2026-09-22 21:29")])
+        ok = opener_model.evaluate_board(board, sched, prior=held, now=now)
+        assert int(ok[0]["qualifies"]) == 1
+
+    def test_the_card_passes_its_history_to_both_the_selection_and_the_evaluation(
+            self, tmp_path, monkeypatch):
+        # A gate the card does not feed is dead code. Run main() end to end
+        # with the feed faked and record what reaches the model.
+        from datetime import datetime, timedelta, timezone
+        from zoneinfo import ZoneInfo
+        import data_ingest.odds_api as odds_api
+
+        k = (datetime.now(timezone.utc) + timedelta(days=4)).astimezone(
+            ZoneInfo("America/New_York"))
+        d = tmp_path / "data"
+        d.mkdir()
+        (d / "games.csv").write_text(
+            "season,week,gameday,gametime,away_team,home_team\n"
+            f"2026,3,{k:%Y-%m-%d},{k:%H:%M},TEN,NYG\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("THE_ODDS_API_KEY", "test")
+
+        class _Res:
+            payload = {"timestamp": None, "data": []}
+            cost = 0
+
+        class _FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+
+            def live_odds(self, **kw):
+                return _Res()
+
+        monkeypatch.setattr(odds_api, "OddsAPIClient", _FakeClient)
+        monkeypatch.setattr(odds_api, "ledger_status", lambda: {})
+
+        history = _obs("betmgm", -1.0, "2026-09-22 17:00", "2026-09-22 21:00")
+        seen = {}
+        monkeypatch.setattr(card, "load_prior_observations",
+                            lambda sched, now=None, hours=None: history)
+
+        def _select(frame, sched, threshold, prior=None, now=None):
+            seen["select"] = (prior, now)
+            return pd.DataFrame()
+
+        def _evaluate(frame, sched, threshold, prior=None, now=None):
+            seen["evaluate"] = (prior, now)
+            return []
+
+        monkeypatch.setattr(card, "select_opener_bets", _select)
+        monkeypatch.setattr(card.opener_spread, "evaluate_board", _evaluate)
+        monkeypatch.setattr(sys, "argv", ["daily_opener_card.py"])
+        assert card.main() == 0
+        assert seen["select"][0] is history and seen["evaluate"][0] is history
+        assert seen["select"][1] is not None and seen["select"][1] == seen["evaluate"][1]
