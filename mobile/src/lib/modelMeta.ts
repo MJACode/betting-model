@@ -505,17 +505,27 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
-  // The in-play NFL prop lane (nfl/live_model — the frozen pass-attempt bias
-  // rule). LIVE since 2026-09-05 with the §2 go-live gate deliberately not met
-  // (Matt's call), and it has written zero picks so far — so its missing label
-  // has never been SEEN, which is the only reason it is not the same bug as the
-  // twelve below. Its first pick would have rendered "nfl_live_prop" on a card.
+  // The in-play NFL prop model (nfl/live_model). LIVE since 2026-09-05 with the
+  // §2 go-live gate deliberately not met (Matt's call).
+  //
+  // IT TRADES RUSHING ATTEMPTS, NOT PASSING, since 2026-09-21 — pass attempts
+  // carried no edge in any season, so the model changed market rather than
+  // threshold (docs/nfl_live_rush_attempts.md). These three strings said
+  // "Pass Attempts" for a day after that switch, which is how the first rushing
+  // pick reached Discord as "Blake Corum Under 11.5 Pass Attempts" — a running
+  // back on a passing line, with a correct bet underneath it. The stat is named
+  // "Carries" here to match the platform (models/scorer._NFL_PROP_CONFIG) and
+  // the pre-game nfl_prop_rush_attempts model, so one stat has one name.
   nfl_live_prop: {
-    shortLabel: 'LIVE Att',
-    longLabel: 'Live Pass Attempts',
+    // NOT 'LIVE Car'. On the Models list and the parlay leg card this chip sits
+    // beside a matchup line, and CAR is Carolina -- a stat abbreviation that
+    // reads as a team is worse than a long one. The chips carry no maxWidth and
+    // no numberOfLines, so the full word fits.
+    shortLabel: 'LIVE Carries',
+    longLabel: 'Live Rush Attempts',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Att',
+    statLabel: 'Carries',
   },
   // The twelve per-stat NFL prop models. They were unpaused server-side
   // (model_action_thresholds.paused = false for all thirteen NFL prop ids on
@@ -563,7 +573,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
     longLabel: 'Rush Attempts',
     type: 'player_prop',
     statKey: null,
-    statLabel: 'Rush Att',
+    statLabel: 'Carries',
   },
   nfl_prop_rec_yards: {
     shortLabel: 'Rec Yds',
