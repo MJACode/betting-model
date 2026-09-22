@@ -345,3 +345,80 @@ def test_the_rule_is_in_the_always_loaded_file():
     a path-scoped copy would not load for the session that makes this error."""
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     assert "QUOTE A PICK FROM ITS LABEL" in text
+
+
+# ── the stat a label names, against the market the pick settles on ───────────
+
+STAT_CASES = [
+    # (label, prop_market, refused?)  -- the first is the one that shipped.
+    ("Blake Corum Under 11.5 Pass Attempts", "player_rush_attempts", True),
+    ("Blake Corum Under 11.5 Carries",       "player_rush_attempts", False),
+    ("Blake Corum Under 11.5 Rush Att",      "player_rush_attempts", False),
+    ("Puka Nacua Over 5.5 Receptions",       "player_receptions",    False),
+    ("Puka Nacua Over 5.5 Rec",              "player_receptions",    False),
+    ("Puka Nacua Over 5.5 Rec Yds",          "player_receptions",    True),
+    ("Josh Allen Over 32.5 Pass Attempts",   "player_pass_attempts", False),
+    ("Josh Allen Over 32.5 Carries",         "player_pass_attempts", True),
+]
+
+
+@pytest.mark.parametrize("label,market,refused", STAT_CASES)
+def test_a_label_may_not_name_a_market_the_pick_does_not_settle_on(
+        label, market, refused):
+    """THE ONE THIS WAS ADDED FOR, 2026-09-21.
+
+    The live NFL prop model changed market from pass attempts to rushing
+    attempts and one display string was left behind, so "Blake Corum Under 11.5
+    Pass Attempts" went to the live channel: a running back on a passing line,
+    with an entirely correct bet underneath it. The side agreed with the row and
+    the line agreed with the row, so every check that existed passed. What
+    disagreed was the STAT, and nothing was looking at it.
+    """
+    side = "under" if " Under " in label else "over"
+    line = float(label.rsplit(side.capitalize() + " ", 1)[1].split()[0])
+    problems = pick_problems(label, side, line, "nfl_live_prop",
+                             prop_market=market)
+    assert bool(problems) is refused, problems
+
+
+def test_an_unusual_spelling_is_not_refused():
+    """Deliberately a NEGATIVE check. A publishing guard stricter than it needs
+    to be is an outage waiting for the first model that words a label its own
+    way, so only a label naming a DIFFERENT market is refused -- never one
+    whose wording merely differs from the platform's."""
+    for label in ("D. Henry Under 18.5 Carries", "D. Henry Under 18.5 Rush Att",
+                  "D. Henry Under 18.5 Rushing Attempts"):
+        assert pick_problems(label, "under", 18.5, "nfl_live_prop",
+                             prop_market="player_rush_attempts") == []
+
+
+def test_a_market_nobody_has_taught_it_is_never_refused():
+    """An unknown market must not block publishing."""
+    assert pick_problems("Someone Over 1.5 Widgets", "over", 1.5, "x",
+                         prop_market="player_widgets") == []
+    assert pick_problems("Someone Over 1.5 Widgets", "over", 1.5, "x") == []
+
+
+def test_the_live_publisher_supplies_the_market_so_the_check_is_not_dead():
+    """A guard dead code can satisfy is not a guard (CLAUDE.md section 1b).
+
+    `refuse_mismatched` reads `prop_market` off each signal dict. The live
+    Discord producer did not select it, so when this check was written the
+    model that had just published a wrong stat name would still have sailed
+    through it.
+    """
+    src = (ROOT / "tracking" / "discord_notifier.py").read_text(encoding="utf-8")
+    body = src[src.index("def _new_live_signals("):src.index("def notify_discord_live(")]
+    assert "p.prop_market" in body, "the live producer does not select the market"
+    assert '"prop_market":' in body, "the live producer does not pass it on"
+
+
+def test_refuse_mismatched_actually_drops_the_pick_that_shipped():
+    """End to end through the publishing gate, not just the predicate."""
+    bad = {"lock_key": "k1", "label": "Blake Corum Under 11.5 Pass Attempts",
+           "side": "under", "line": 11.5, "model_id": "nfl_live_prop",
+           "prop_market": "player_rush_attempts"}
+    good = {**bad, "lock_key": "k2",
+            "label": "Blake Corum Under 11.5 Carries"}
+    kept = refuse_mismatched([bad, good], "test")
+    assert [s["lock_key"] for s in kept] == ["k2"]
