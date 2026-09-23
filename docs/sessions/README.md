@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-23 | [2026-09](./2026-09.md) | 2026-09-23, Discord wins on display: a published VOID stays on Today/Signals/Live; an unpublished lock is not an active Discord-led bet; VOID does not delete the Discord message; opening lock is capture AND the discord_signal/discord_live ledger |
 | 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, the opener locked "NYG -1 at MGM", a number no book had: the Odds API served BetMGM at NYG -1 for one tick then +1 for fourteen minutes; the rule never checked how long a soft book had held its number. A 60-min gate was built, then rejected by mike ("you're trying to win bets and money"): a fresh number is now LABELLED (`· NEW 0m`) not blocked, Discord posts inside the tick, the poll runs every minute for real (incremental snapshot flush), `pick_placement_checks` + `scripts/mark_placeable.py` record whether fresh numbers were placeable. Pick voided. Second MGM episode found (CHI @ CAR 09-08). PR #823, Updated-By: mike |
 | 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, NHL Today look-ahead: `fetchUpcomingNhlPicks` merged into `useTodayPicks` at `GAME_SCORE_AHEAD_DAYS` (7), so a 2026-09-29 slate reaches the chip before game day. UI-only |
 | 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, Daily Scorer IndexError after #813: unescaped `LIKE 'nfl_prop_%'` → psycopg format-spec crash (`tuple index out of range`) on every pass after pick-lock; escape to `%%`, game-unit traceback logging, regression + tripwire on PR CI |

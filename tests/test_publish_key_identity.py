@@ -221,14 +221,24 @@ def _mobile(path: str) -> str:
 
 
 def test_the_app_refuses_a_voided_pick_too():
-    """The app is the other half. A server-side exclusion alone would just
-    reverse which surface shows the extra rows."""
+    """Signals follows the Discord ledger, not a blanket VOID hide.
+
+    A VOID the channel still has stays (Matt, 2026-09-23: Discord wins; do
+    not retract the post). A bet the channel does not have is not an active
+    Discord-led bet. The decision is discordLedVisible, called here, so a
+    later edit cannot drop the join and go back to hiding every VOID.
+    """
     body = _mobile("lib/thresholds.ts")
     body = body[body.index("export function passesActionFilter"):]
     body = body[:body.index("\n}")]
-    assert re.search(r"condition_status\s*===\s*'VOID'", body), (
-        "passesActionFilter must refuse a VOIDED row, or the app shows picks "
-        "Discord does not")
+    assert "discordLedVisible" in body, (
+        "passesActionFilter must follow Discord publish state")
+    visible = _mobile("lib/discordPublish.ts")
+    visible = visible[visible.index("export function discordLedVisible"):]
+    visible = visible[:visible.index("\n}")]
+    assert "publish === 'published'" in visible
+    assert "conditionStatus === 'VOID'" in visible
+    assert "publish === 'unpublished'" in visible
 
 
 def test_the_app_excludes_a_voided_pick_AT_THE_SOURCE():
@@ -247,12 +257,12 @@ def test_the_app_excludes_a_voided_pick_AT_THE_SOURCE():
     SOURCE filter — the one every consumer inherits — not just the helper.
     """
     hook = _mobile("hooks/useTodayPicks.ts")
-    body = hook[hook.index("const all = ["):]
+    body = hook[hook.index("const all = merged"):]
     body = body[:body.index(");")]
-    assert "condition_status !== 'VOID'" in body, (
+    assert "voidHiddenFromBoard" in body, (
         "the VOID exclusion must sit beside isModelRetired in useTodayPicks, "
         "or every consumer that does not call passesActionFilter still renders "
-        "a voided pick as a live BET")
+        "a voided pick the channel does not have as a live BET")
     assert "isModelRetired" in body, "the retired guard must survive beside it"
 
 
@@ -264,7 +274,9 @@ def test_the_live_board_excludes_a_voided_pick_too():
     q = _mobile("lib/queries.ts")
     body = q[q.index("export async function fetchLivePicks("):]
     body = body[:body.index("\n}")]
-    assert "condition_status.neq.VOID" in body
+    assert "discordLedVisible" in body, (
+        "the live board must join Discord publish state, not drop every VOID "
+        "in SQL — a posted live bet stays, an unposted one does not")
 
 
 # ── The LIVE key (mike, 2026-09-09: "Fix it now") ────────────────────────────

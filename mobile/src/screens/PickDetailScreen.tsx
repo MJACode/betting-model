@@ -145,12 +145,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const retired = isModelRetired(pick.model_id);
-  // WITHDRAWN. A VOIDED pick (CLAUDE.md §1c) is a row the model should never
-  // have produced. The board drops it, but this screen stays deep-linkable from
-  // a push already sent for it and from a tracked bet on Performance — so it
-  // must not go on offering the bet. Same shape as `retired` above: every
-  // number stays on screen (the row IS the record), the hand-off does not.
-  const voided = pick.condition_status === 'VOID';
+  // WITHDRAWN only when Discord does not still have the post. A VOID the
+  // channel shows is the same bet (Matt, 2026-09-23) — no withdrawn banner,
+  // the hand-off stays. A VOID with no Discord post, including a ledger read
+  // that failed, is not offered. The settled record excludes every VOID
+  // either way (passesRecordFilter).
+  const voided = pick.condition_status === 'VOID' && pick.discordPublish !== 'published';
   // One plain-English line saying whose price this screen is showing — always
   // the book the pick was modeled at. Renders in the header so the provenance
   // is never implicit.

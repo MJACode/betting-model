@@ -202,6 +202,16 @@ halves now exclude `condition_status = 'VOID'`: the publishers in SQL, the app
 in `passesActionFilter`. Only `'VOID'` — NCAAF's `'OK'` / `'GONE'` are ordinary
 live states on real picks.
 
+**Display follows the channel (2026-09-23, Matt).** Discord is the source of
+truth. A VOID after the post does not delete or edit the message, and
+`scripts/void_picks.py` does not call `_delete_message`. The app reads
+`v_discord_published` (`push_sent` kinds `discord_signal` and `discord_live`,
+lock key only) and keeps a published VOID on Today / Signals / Live / detail.
+A lock the channel does not have is not an active Discord-led bet.
+`opening_signals` stays the CLV shadow track; a capture is a live lock only
+when that same ledger has the key (`tracking/discord_publish.py`). The settled
+record still excludes every VOID.
+
 **3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
 beyond it on the day (0 rows), so this is closed before it costs a pick rather
 than after. `NFL_AHEAD_DAYS` is 11 = the 10-day poll/prop horizon
