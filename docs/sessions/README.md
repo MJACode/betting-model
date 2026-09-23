@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, the opener locked "NYG -1 at MGM", a number no book had: the Odds API served BetMGM at NYG -1 for one tick then +1 for fourteen minutes; the rule never checked how long a soft book had held its number. A 60-min gate was built, then rejected by mike ("you're trying to win bets and money"): a fresh number is now LABELLED (`· NEW 0m`) not blocked, Discord posts inside the tick, the poll runs every minute for real (incremental snapshot flush), `pick_placement_checks` + `scripts/mark_placeable.py` record whether fresh numbers were placeable. Pick voided. Second MGM episode found (CHI @ CAR 09-08). PR #823, Updated-By: mike |
 | 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, Daily Scorer IndexError after #813: unescaped `LIKE 'nfl_prop_%'` → psycopg format-spec crash (`tuple index out of range`) on every pass after pick-lock; escape to `%%`, game-unit traceback logging, regression + tripwire on PR CI |
 | 2026-09-21 | [2026-09](./2026-09.md) | 2026-09-21, PR #813: SQLite execution of both unstarted clears (nfl_prop_% kept, opener/wind/MLB NONE cleared). Both pins listed on the PR CI pytest subset. NFL continue unchanged |
 | 2026-09-21 | [2026-09](./2026-09.md) | 2026-09-21, NFL Today empty on NYG@LA: 0 BETs (tackles missed 0.70/0.15; two paused rows cleared cut and the 0.20 floor). The 93 and 95 NONE inserts committed, then the per-game clear deleted them at 22:06:20 and 22:27:24 UTC |
