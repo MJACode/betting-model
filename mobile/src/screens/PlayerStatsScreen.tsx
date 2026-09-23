@@ -208,6 +208,21 @@ export function PlayerStatsScreen() {
   // sharp read, splits at the same threshold, our record on the player, and
   // the MLB context (Matt, 2026-09-20: "do the same for player props, there
   // should be more helpful information there"). Each section fails alone.
+  const effLine = line ?? 0;
+
+  // ── The sportsbook line behind the number on screen ────────────────────────
+  // The card's threshold and the book's line are the same bet in two idioms:
+  // "2+ Hits" is Over 1.5. `selectionFor` is the one translation, shared with
+  // the board, so the price can never be fetched for a different bet than the
+  // chart is drawing. It holds at every step size — a 250-yard threshold is
+  // Over 249.5 exactly as a 2-hit one is Over 1.5.
+  //
+  // DECLARED HERE, above usePlayerDetail, because the splits and the
+  // head-to-head card read the resolved SIDE and not the "n+" threshold: with
+  // the threshold alone they counted the over in Under mode, on a screen whose
+  // game-log dots were painting those same games the other colour.
+  const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
+
   const detail = usePlayerDetail({
     sport,
     playerId: playerId || null,
@@ -216,6 +231,7 @@ export function PlayerStatsScreen() {
     games,
     stat,
     threshold: line,
+    selection,
   });
   // Has the reader stepped the line themselves? Until they do, the ruler
   // follows the BOOK's posted line once it arrives — a hit rate at 5.5 when
@@ -314,15 +330,6 @@ export function PlayerStatsScreen() {
         ? `book line ${detail.tonight.line}`
         : null;
 
-  const effLine = line ?? 0;
-
-  // ── The sportsbook line behind the number on screen ────────────────────────
-  // The card's threshold and the book's line are the same bet in two idioms:
-  // "2+ Hits" is Over 1.5. `selectionFor` is the one translation, shared with
-  // the board, so the price can never be fetched for a different bet than the
-  // chart is drawing. It holds at every step size — a 250-yard threshold is
-  // Over 249.5 exactly as a 2-hit one is Over 1.5.
-  const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
   const market = useMemo(() => propMarketForStat(stat), [stat]);
   const { books } = usePreferredBooks();
   // Threaded into the quote so "which games have not started" re-derives on
@@ -762,7 +769,12 @@ export function PlayerStatsScreen() {
 
             {/* ── The same threshold, split ─────────────────────────────── */}
             {detail.splits ? (
-              <SplitsCard splits={detail.splits} statLabel={statLabel} threshold={effLine} loading={detail.splitsLoading} />
+              <SplitsCard
+                splits={detail.splits}
+                statLabel={statLabel}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                loading={detail.splitsLoading}
+              />
             ) : null}
 
             {/* ── Head-to-head with the next opponent, last two seasons ─────── */}
@@ -770,7 +782,8 @@ export function PlayerStatsScreen() {
               <HeadToHeadCard
                 h2h={detail.h2h}
                 statLabel={statLabel}
-                threshold={effLine}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                selection={selection}
                 loading={detail.h2hLoading}
               />
             ) : null}
@@ -927,15 +940,26 @@ function GameRow({
 function HeadToHeadCard({
   h2h,
   statLabel,
-  threshold,
+  betLabel,
+  selection,
   loading,
 }: {
   h2h: PlayerHeadToHead;
   statLabel: string;
-  threshold: number;
+  /** The page's bet in its own idiom — "3+" or "Under 2.5". */
+  betLabel: string;
+  /** The RESOLVED bet. The dots below read this, exactly as the game log does,
+   *  so one meeting cannot be green in one list and red in the other. */
+  selection: { line: number; side: HitDirection };
   loading: boolean;
 }) {
   const b = h2h.bucket;
+  const [showAll, setShowAll] = useState(false);
+  // Two MLB seasons against a division rival is 13-22 meetings at ~56pt — a
+  // whole screen of scroll for a section whose headline numbers are the two
+  // tiles above it. Football's one to three rows never hit this.
+  const MEETINGS_SHOWN = 5;
+  const shown = showAll ? h2h.meetings : h2h.meetings.slice(0, MEETINGS_SHOWN);
   return (
     <>
       <SectionTitle
@@ -943,8 +967,8 @@ function HeadToHeadCard({
         tooltip={{
           title: 'Every meeting, not a recent-form window',
           body:
-            `Each game ${h2h.opponent} have been the opponent in, across this season and last, and how ` +
-            `often the player cleared ${threshold}+ ${statLabel} in them. In the weekly sports this is ` +
+            `Each game ${h2h.opponent} have been the opponent in, over the last two seasons on file, and ` +
+            `how often ${betLabel} ${statLabel} won in them. In the weekly sports this is ` +
             'usually one or two games: the count under the rate, and the list of meetings below it, are ' +
             'there so a 100% that rests on a single game reads as a single game.',
         }}
@@ -961,7 +985,7 @@ function HeadToHeadCard({
         <>
           <View style={styles.tileRow}>
             <StatTile
-              label={`${threshold}+ ${statLabel}`}
+              label={`${betLabel} ${statLabel}`}
               value={b.hitRate == null ? '—' : formatPct(b.hitRate, 0)}
               caption={`${b.hits} of ${b.games}`}
               tint={
@@ -981,19 +1005,26 @@ function HeadToHeadCard({
             />
             <View style={styles.tilePad} />
           </View>
-          {h2h.meetings.map((m) => (
-            <View key={m.date} style={styles.gameRow}>
+          {shown.map((m, i) => (
+            // `${date}:${i}` and not the date alone: an MLB doubleheader is two
+            // meetings on one date against one opponent, and the RPC returns no
+            // game id to tell them apart — a duplicate key drops a row from a
+            // list whose whole claim is that it shows every meeting.
+            <View key={`${m.date}:${i}`} style={styles.gameRow}>
               <View style={styles.gameDot}>
                 <View
                   style={[
                     styles.dot,
-                    { backgroundColor: m.value >= threshold ? colors.bet : colors.avoid },
+                    {
+                      backgroundColor: isHit(m.value, selection.line, selection.side)
+                        ? colors.bet
+                        : colors.avoid,
+                    },
                   ]}
                 />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.gameDate}>{m.date}</Text>
-                <Text style={styles.gameMeta}>vs {h2h.opponent}</Text>
               </View>
               <View style={styles.gameStat}>
                 <Text style={styles.gameStatValue}>{String(Math.round(m.value * 10) / 10)}</Text>
@@ -1001,6 +1032,22 @@ function HeadToHeadCard({
               </View>
             </View>
           ))}
+          {h2h.meetings.length > MEETINGS_SHOWN ? (
+            <Pressable
+              onPress={() => setShowAll((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                showAll
+                  ? 'Show fewer meetings'
+                  : `Show all ${h2h.meetings.length} meetings with ${h2h.opponent}`
+              }
+              style={({ pressed }) => [styles.gameRow, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.h2hMore}>
+                {showAll ? 'Show fewer' : `Show all ${h2h.meetings.length} meetings`}
+              </Text>
+            </Pressable>
+          ) : null}
         </>
       )}
     </>
@@ -1196,12 +1243,14 @@ function TonightLineCard({
 function SplitsCard({
   splits,
   statLabel,
-  threshold,
+  betLabel,
   loading,
 }: {
   splits: StatSplits;
   statLabel: string;
-  threshold: number;
+  /** The page's bet in its own idiom — "3+" or "Under 2.5". NOT a bare
+   *  threshold: in Under mode the two name opposite bets. */
+  betLabel: string;
   loading: boolean;
 }) {
   const buckets: SplitBucket[] = [splits.home, splits.away];
@@ -1212,7 +1261,7 @@ function SplitsCard({
   return (
     <>
       <SectionTitle
-        title={`${statLabel} ${threshold}+ by situation`}
+        title={`${statLabel} ${betLabel} by situation`}
         tooltip={{
           title: 'Same line, different spots',
           body:
@@ -1669,6 +1718,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  h2hMore: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   gameStatLabel: {
     fontSize: font.size.nano,

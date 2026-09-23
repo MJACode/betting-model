@@ -28,6 +28,7 @@ import { join } from 'node:path';
 
 import { h2hMatchups, nextGameByTeam } from '../src/lib/statsBoard';
 import { playerHeadToHead } from '../src/lib/playerDetail';
+import { isHit } from '../src/lib/hitRate';
 import type { GameRow } from '../src/types';
 
 let failures = 0;
@@ -119,38 +120,54 @@ check('a fixture with no opponent is dropped, not sent blank',
   !bogus.teams.includes('SF'), bogus.teams.join());
 
 // ── 6. playerHeadToHead ──
-const h = playerHeadToHead('KC', [112, 64, 90], ['2026-01-04', '2025-11-10', '2025-09-15'], 90);
+// It takes the page's RESOLVED (line, side), never the "n+" threshold. The page
+// resolves "3+ Rec" to {line: 2.5, side: 'over'} and "Under 3" to
+// {line: 2.5, side: 'under'} — the same line, opposite bets — so a function
+// handed the threshold alone reports the over in Under mode (UX review,
+// 2026-09-20; it did, while the game-log dots two cards up read the side).
+const h = playerHeadToHead('KC', [112, 64, 90], ['2026-01-04', '2025-11-10', '2025-09-15'], 89.5, 'over');
 check('meetings keep their dates, newest first',
   h.meetings.map((x) => `${x.date}:${x.value}`).join() === '2026-01-04:112,2025-11-10:64,2025-09-15:90',
   JSON.stringify(h.meetings));
-check('hits count values AT the threshold (>=, as the page does)', h.bucket.hits === 2,
-  String(h.bucket.hits));
+check('over: 2 of 3 cleared 89.5', h.bucket.hits === 2, String(h.bucket.hits));
+
+// THE UNDER CASE. Same three meetings, same line, the other side: the counts
+// must be the complement, and they must agree with `isHit` — which is what the
+// meeting dots and the recent-game log both call.
+const under = playerHeadToHead('KC', [112, 64, 90], ['2026-01-04', '2025-11-10', '2025-09-15'], 89.5, 'under');
+check('under: 1 of 3 stayed below 89.5', under.bucket.hits === 1 && under.bucket.games === 3,
+  JSON.stringify(under.bucket));
+check('over and under are complements, not the same number',
+  under.bucket.hits + h.bucket.hits === h.bucket.games, `${h.bucket.hits}/${under.bucket.hits}`);
+check('the card agrees with the dots it draws',
+  under.meetings.every((m) => isHit(m.value, 89.5, 'under') === (m.value < 89.5)),
+  'isHit and the bucket must resolve one meeting the same way');
 check('games and rate', h.bucket.games === 3 && Math.abs((h.bucket.hitRate ?? 0) - 2 / 3) < 1e-9);
 check('average over the meetings', Math.abs((h.bucket.avg ?? 0) - (112 + 64 + 90) / 3) < 1e-9);
 check('the bucket labels itself by opponent', h.bucket.label === 'vs KC', h.bucket.label);
 
 // A length mismatch must not pair a value with another game's date.
-const mismatch = playerHeadToHead('KC', [112, 64, 90], ['2026-01-04'], 50);
+const mismatch = playerHeadToHead('KC', [112, 64, 90], ['2026-01-04'], 50, 'over');
 check('a short dates array truncates rather than mispairing',
   mismatch.meetings.length === 1 && mismatch.meetings[0]!.date === '2026-01-04',
   JSON.stringify(mismatch.meetings));
 
 // The one-game case the NFL schedule produces for 85% of pairs: it renders,
 // and it renders as 1 of 1 rather than as a bare 100%.
-const single = playerHeadToHead('KC', [112], ['2026-01-04'], 90);
+const single = playerHeadToHead('KC', [112], ['2026-01-04'], 89.5, 'over');
 check('a single meeting is 1 of 1 at 100%',
   single.bucket.games === 1 && single.bucket.hits === 1 && single.bucket.hitRate === 1);
 
 // No meeting at all is still an ANSWER — the card names the opponent and says
 // they have not met, so the opponent has to survive an empty values array.
-const none = playerHeadToHead('KC', [], [], 90);
+const none = playerHeadToHead('KC', [], [], 89.5, 'over');
 check('no meetings → games 0, rate null, opponent kept',
   none.bucket.games === 0 && none.bucket.hitRate === null && none.opponent === 'KC',
   JSON.stringify(none.bucket));
 
 // A non-finite value (a NULL that slipped through as NaN) is dropped from both
 // the list and the denominator rather than counted as a zero-yard game.
-const nan = playerHeadToHead('KC', [112, NaN], ['2026-01-04', '2025-11-10'], 90);
+const nan = playerHeadToHead('KC', [112, NaN], ['2026-01-04', '2025-11-10'], 89.5, 'over');
 check('NaN is dropped from the denominator', nan.bucket.games === 1, JSON.stringify(nan.bucket));
 
 // ── 7. Every sport the H2H chip is offered on has an RPC behind it ──

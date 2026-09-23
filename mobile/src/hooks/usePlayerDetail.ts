@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useNow } from '@/hooks/useNow';
 import { errorText } from '@/lib/errors';
-import { addDays, todayET } from '@/lib/format';
+import { addDays, todayET, yearET } from '@/lib/format';
 import { MODEL_BOOK } from '@/lib/markets';
 import type { PlayerLogEntry, PlayerLogSport } from '@/lib/playerLog';
 import {
@@ -42,6 +42,7 @@ import {
   type StatSplits,
   type TonightLine,
 } from '@/lib/playerDetail';
+import type { HitDirection } from '@/lib/hitRate';
 import type {
   GameRow,
   H2HStatValuesRow,
@@ -97,7 +98,7 @@ export interface PlayerNextGame {
  * "the last 2 years" means. Football's start-year label falls back a season
  * inside fetchH2HStatValues, as every other football read does.
  */
-const SEASON = new Date().getUTCFullYear();
+const SEASON = yearET();
 
 export function usePlayerDetail(args: {
   sport: PlayerLogSport;
@@ -109,8 +110,15 @@ export function usePlayerDetail(args: {
   stat: StatDef | null;
   /** The page's "at least" threshold; the book's line is the half-point below. */
   threshold: number | null;
+  /**
+   * The page's RESOLVED bet \u2014 `selectionFor(threshold, mode)`. Separate from
+   * `threshold` because they are two idioms for one number and only this one
+   * carries the SIDE: in Under mode `threshold` alone counts the over
+   * (lib/hitMode, and playerDetail.bucket's note).
+   */
+  selection: { line: number; side: HitDirection };
 }) {
-  const { sport, playerId, playerName, playerType, games, stat, threshold } = args;
+  const { sport, playerId, playerName, playerType, games, stat, threshold, selection } = args;
   const { books, ready: booksReady } = usePreferredBooks();
   const today = todayET();
   const now = useNow();
@@ -178,8 +186,8 @@ export function usePlayerDetail(args: {
   const gamesById = useMemo(() => new Map(logGames.data.map((g) => [g.game_id, g] as const)), [logGames.data]);
   const splits: StatSplits | null = useMemo(() => {
     if (!stat || threshold == null || games.length === 0) return null;
-    return statSplits(games, gamesById, stat, threshold, sport === 'NBA' || sport === 'WNBA');
-  }, [games, gamesById, stat, threshold, sport]);
+    return statSplits(games, gamesById, stat, selection.line, selection.side, sport === 'NBA' || sport === 'WNBA');
+  }, [games, gamesById, stat, threshold, selection.line, selection.side, sport]);
 
   // ── Head-to-head with the next opponent, last two seasons ─────────────
   // Its own read rather than a slice of `games` above, and the difference is
@@ -214,8 +222,8 @@ export function usePlayerDetail(args: {
     // An opponent with no stored meeting is still an answer — "they have not
     // played" is what the card says, and it needs the opponent's name to say
     // it. A null row is therefore an EMPTY head-to-head, not a missing one.
-    return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], threshold);
-  }, [h2hRow.data, opponent, threshold]);
+    return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], selection.line, selection.side);
+  }, [h2hRow.data, opponent, threshold, selection.line, selection.side]);
 
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(

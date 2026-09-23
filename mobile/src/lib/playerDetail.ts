@@ -22,6 +22,7 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
+import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropModel, type StatDef } from '@/lib/statCatalog';
 import { modelShort } from '@/lib/modelMeta';
@@ -216,7 +217,7 @@ export interface SplitBucket {
   label: string;
   games: number;
   avg: number | null;
-  /** Share of games at or above the page's threshold; null with no games. */
+  /** Share of games that WON the page's bet; null with no games. */
   hitRate: number | null;
   hits: number;
 }
@@ -264,7 +265,8 @@ export function playerHeadToHead(
   opponent: string,
   values: readonly number[],
   dates: readonly string[],
-  threshold: number,
+  line: number,
+  side: HitDirection,
 ): PlayerHeadToHead {
   const n = Math.min(values.length, dates.length);
   const meetings: H2HMeeting[] = [];
@@ -274,28 +276,49 @@ export function playerHeadToHead(
     meetings.push({ date: dates[i]!, value: v });
   }
   const nums = meetings.map((m) => m.value);
-  const hits = nums.filter((v) => v >= threshold).length;
+  // `computeHitRate`, not `>=`: the board's H2H branch uses it, and two
+  // surfaces of one feature disagreeing about which side won is worse than
+  // either being wrong alone.
+  const { hits, total, pct } = computeHitRate(nums, line, side);
   return {
     opponent,
     meetings,
     bucket: {
       label: `vs ${opponent}`,
-      games: nums.length,
-      avg: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null,
-      hitRate: nums.length ? hits / nums.length : null,
+      games: total,
+      avg: total ? nums.reduce((a, b) => a + b, 0) / total : null,
+      hitRate: total ? pct : null,
       hits,
     },
   };
 }
 
-function bucket(label: string, entries: PlayerLogEntry[], stat: StatDef | null, threshold: number): SplitBucket {
+/**
+ * A split's numbers for the page's ACTUAL bet \u2014 `(line, side)`, never the
+ * "n+" threshold.
+ *
+ * It counted `v >= threshold` until 2026-09-20, which is the OVER rate, and in
+ * Under mode the page asks the opposite question: `selectionFor(n, 'under')`
+ * is `{line: n - 0.5, side: 'under'}`. A player who had gone under in all
+ * three meetings rendered 0%, on a screen whose game-log dots \u2014 which have
+ * always read `(line, side)` \u2014 were painting those same three games green a
+ * few rows above. `lib/hitMode` states the rule this now follows: everything
+ * downstream reads the resolved line and side and never the mode.
+ */
+function bucket(
+  label: string,
+  entries: PlayerLogEntry[],
+  stat: StatDef | null,
+  line: number,
+  side: HitDirection,
+): SplitBucket {
   const values = entries.map((e) => logStatValue(e, stat)).filter((v): v is number => v != null);
-  const hits = values.filter((v) => v >= threshold).length;
+  const { hits, total, pct } = computeHitRate(values, line, side);
   return {
     label,
-    games: values.length,
-    avg: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
-    hitRate: values.length ? hits / values.length : null,
+    games: total,
+    avg: total ? values.reduce((a, b) => a + b, 0) / total : null,
+    hitRate: total ? pct : null,
     hits,
   };
 }
@@ -316,7 +339,8 @@ export function statSplits(
   entries: PlayerLogEntry[],
   gamesById: ReadonlyMap<string, GameRow>,
   stat: StatDef | null,
-  threshold: number,
+  line: number,
+  side: HitDirection,
   hasStarterFlag: boolean,
 ): StatSplits {
   const home: PlayerLogEntry[] = [];
@@ -336,10 +360,10 @@ export function statSplits(
     }
   }
   return {
-    home: bucket('Home', home, stat, threshold),
-    away: bucket('Away', away, stat, threshold),
-    starting: hasStarterFlag ? bucket('Starting', starting, stat, threshold) : null,
-    bench: hasStarterFlag ? bucket('Off bench', bench, stat, threshold) : null,
+    home: bucket('Home', home, stat, line, side),
+    away: bucket('Away', away, stat, line, side),
+    starting: hasStarterFlag ? bucket('Starting', starting, stat, line, side) : null,
+    bench: hasStarterFlag ? bucket('Off bench', bench, stat, line, side) : null,
   };
 }
 

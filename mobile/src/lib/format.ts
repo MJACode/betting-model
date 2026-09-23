@@ -84,6 +84,20 @@ export function todayET(): string {
   return etDate(new Date());
 }
 
+/**
+ * The CALENDAR year in ET — the starting point for every "which season is it"
+ * derivation on the Stats surfaces.
+ *
+ * `new Date().getUTCFullYear()` is the next year from 19:00 ET on 31 December,
+ * which is prime time for an NBA board, and CLAUDE.md's data-integrity rule is
+ * explicit that "today" is ET and never UTC. It mattered little while the year
+ * only picked a leaderboard; it matters once a card LABELS itself "last 2
+ * seasons", because then the number on screen asserts what this resolves to.
+ */
+export function yearET(): number {
+  return Number(todayET().slice(0, 4));
+}
+
 const ET_HOUR = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
   hour: '2-digit',

@@ -458,6 +458,36 @@ export function h2hSeasons(season: number): number[] {
 }
 
 /**
+ * The newest season LABEL to try first for a sport, then the fallbacks.
+ *
+ * Because a season label is not a calendar year, and it is not the same kind of
+ * thing in every sport (CLAUDE.md §4). Measured on production 2026-09-20, by
+ * the dates each label actually spans:
+ *
+ *   MLB 2026   2026-04-05 → 2026-09-20   year of play
+ *   WNBA 2026  2026-05-08 → 2026-09-19   year of play
+ *   NBA 2026   2025-10-21 → 2026-04-12   ENDING year
+ *   NFL 2026   2026-09-09 → 2026-09-17   starting year
+ *   NCAAF 2026 2026-08-27 → 2026-09-20   starting year
+ *
+ * So for the NBA, from October to December the season in progress is labelled
+ * NEXT year, and a bare calendar year asks for the two seasons BEFORE the one
+ * it claims — for three months, silently, under a card that says "last 2
+ * seasons". Football has always had this fallback because its label is a year
+ * ahead of its January games; the NBA needs it in the other direction.
+ *
+ * The sports whose label IS the year of play get one candidate, because for
+ * them a fallback could only ever hide a genuinely empty read.
+ */
+function h2hSeasonCandidates(sport: string, season: number): number[] {
+  if (sport === 'NFL' || sport === 'NCAAF') return footballSeasonCandidates(season);
+  // Try the season the autumn belongs to first; fall back to the one that has
+  // just finished, which is the right answer all through the spring and summer.
+  if (sport === 'NBA') return [season + 1, season, season - 1];
+  return [season];
+}
+
+/**
  * Per-player per-game values for ONE stat, IN THE MEETINGS with the team that
  * player is about to play, over the last two seasons. Backs the Stats tab's
  * H2H window.
@@ -489,32 +519,27 @@ export async function fetchH2HStatValues(
   // the slate twice (an MLB doubleheader) still resolves to one opponent, but
   // the key must not collapse two different ones if that ever changes.
   const key = (r: H2HStatValuesRow) => `${r.player_id}:${r.opponent}:${r.player_type ?? ''}`;
-  const base = { p_stat: statKey, p_teams: matchups.teams, p_opponents: matchups.opponents };
-  if (sport === 'WNBA' || sport === 'NBA') {
-    const fn = sport === 'WNBA' ? 'player_h2h_stat_values_wnba' : 'player_h2h_stat_values_nba';
-    return pageRpc<H2HStatValuesRow>(fn, { ...base, p_seasons: h2hSeasons(season) }, null, key);
+  const fn =
+    sport === 'WNBA' ? 'player_h2h_stat_values_wnba'
+    : sport === 'NBA' ? 'player_h2h_stat_values_nba'
+    : sport === 'MLB' ? 'player_h2h_stat_values_mlb'
+    : sport === 'NFL' ? 'player_h2h_stat_values_nfl'
+    : sport === 'NCAAF' ? 'player_h2h_stat_values_ncaaf'
+    : null;
+  if (!fn) return []; // UFC / NHL / GOLF: no per-game player logs
+  const base: Record<string, unknown> = {
+    p_stat: statKey,
+    p_teams: matchups.teams,
+    p_opponents: matchups.opponents,
+  };
+  if (sport === 'MLB') base.p_player_type = playerType ?? 'batter';
+  // Candidates, newest label first: an empty read on the first one means that
+  // label has no games yet, not that the player has never met the opponent.
+  for (const s of h2hSeasonCandidates(sport, season)) {
+    const rows = await pageRpc<H2HStatValuesRow>(fn, { ...base, p_seasons: h2hSeasons(s) }, null, key);
+    if (rows.length) return rows;
   }
-  if (sport === 'MLB') {
-    return pageRpc<H2HStatValuesRow>(
-      'player_h2h_stat_values_mlb',
-      { ...base, p_seasons: h2hSeasons(season), p_player_type: playerType ?? 'batter' },
-      null,
-      key,
-    );
-  }
-  if (sport === 'NFL' || sport === 'NCAAF') {
-    const fn = sport === 'NFL' ? 'player_h2h_stat_values_nfl' : 'player_h2h_stat_values_ncaaf';
-    // Same season fallback every other football read does: the label is the
-    // year the season STARTS, so before week 1 the current label holds no rows
-    // at all and the board would print an empty H2H board rather than last
-    // season's meetings.
-    for (const s of footballSeasonCandidates(season)) {
-      const rows = await pageRpc<H2HStatValuesRow>(fn, { ...base, p_seasons: h2hSeasons(s) }, null, key);
-      if (rows.length) return rows;
-    }
-    return [];
-  }
-  return []; // UFC / NHL / GOLF: no per-game player logs
+  return [];
 }
 
 const PICK_COLUMNS =

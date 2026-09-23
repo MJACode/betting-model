@@ -97,7 +97,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
+import { addDays, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -181,7 +181,9 @@ type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season' | 'h2h';
 // design (Matt, 2026-09-03). Tapping it opens the sheet with that book's price
 // and its "Bet on …" button.
 
-const SEASON = new Date().getUTCFullYear();
+// ET, not UTC: from 19:00 ET on 31 December `getUTCFullYear()` is already
+// the next year (lib/format.yearET, and CLAUDE.md's "today is ET" rule).
+const SEASON = yearET();
 /**
  * The two right-hand column widths, shared by the header cell and the row cell
  * so the header rail cannot drift off its column — content-sized rows under a
@@ -641,10 +643,11 @@ export function StatsScreen() {
   // DATE, because the fixture a bettor is pricing in a weekly sport is usually
   // not today — see nextGameByTeam. Narrowed by `readTeams` so a board already
   // cut to one game asks about that one game.
-  const h2hFixtures = useMemo(
-    () => h2hMatchups(nextGameByTeam(slateGames, new Date(now).toISOString()), readTeams),
-    [slateGames, now, readTeams],
+  const h2hIndex = useMemo(
+    () => nextGameByTeam(slateGames, new Date(now).toISOString()),
+    [slateGames, now],
   );
+  const h2hFixtures = useMemo(() => h2hMatchups(h2hIndex, readTeams), [h2hIndex, readTeams]);
   // CONTENT, not identity — and this one is load-bearing rather than an
   // optimisation. `now` ticks every 60s (useNow), so the memo above rebuilds
   // once a minute forever; keyed on the array itself the board would re-read
@@ -1183,7 +1186,27 @@ export function StatsScreen() {
     [slateGames, slate, now],
   );
   const sublineFor = useCallback(
-    (row: { team?: string | null; player_name?: string | null }): string | null => {
+    (row: { team?: string | null; player_name?: string | null; opponent?: string | null }): string | null => {
+      // UNDER H2H THE SUBLINE IS PART OF THE NUMBER, not decoration beside it.
+      // `slateGameIndex` is bounded to ONE DATE (statsBoard.buildSlateGameIndex)
+      // while the H2H read pairs each team over the whole forward window, so
+      // the two disagree in two ways that both print a confident percentage
+      // against the wrong team: on an NFL Tuesday the slate date is Thursday,
+      // so thirty of thirty-two teams get no subline at all; and in MLB, once
+      // today's game has started the slate index stays on it while the fixture
+      // advances to tomorrow's opponent.
+      //
+      // So the row's OWN `opponent` wins here — it is the column header for the
+      // number beside it. The indexed game is used only to add the kickoff
+      // time, and only while it names the same team; anything else falls back
+      // to the bare fixture rather than borrowing a time from another game.
+      if (timeWindow === 'h2h' && row.opponent) {
+        const entry = row.team ? h2hIndex.get(row.team) ?? null : null;
+        if (entry && entry.opponent === row.opponent) {
+          return slateSubline(entry, showOdds ? null : startedTeams.get(row.team!) ?? null);
+        }
+        return `vs ${row.opponent}`;
+      }
       const match = slateGameFor(row, slateGameIndex);
       if (!match) return null;
       // Two rules, both learned the hard way (UX review, 2026-09-05):
@@ -1195,7 +1218,7 @@ export function StatsScreen() {
       const started = showOdds ? null : startedTeams.get(match.key) ?? null;
       return slateSubline(match.game, started);
     },
-    [slateGameIndex, startedTeams, showOdds],
+    [slateGameIndex, startedTeams, showOdds, timeWindow, h2hIndex],
   );
 
   /**
@@ -1694,7 +1717,7 @@ export function StatsScreen() {
       // — the normal case in a weekly sport, and not a fault to go hunting for.
       return h2hFixtures.teams.length === 0
         ? `No upcoming ${sport} games, so there is no opponent to compare against yet.`
-        : `No ${sport} ${stat?.label ?? ''} in the last 2 seasons against the opponents on this slate.`;
+        : `No ${sport} ${stat?.label ?? ''} in the last 2 seasons against each player's next opponent.`;
     }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
@@ -2034,6 +2057,13 @@ export function StatsScreen() {
             <FilterChip
               key={String(w.value)}
               label={w.label}
+              // "H2H" is the one chip on this strip that does not decode from
+              // the rest of the screen, and VoiceOver reads it "H two H".
+              accessibilityLabel={
+                w.value === 'h2h'
+                  ? 'Head to head — versus next opponent, last 2 seasons'
+                  : undefined
+              }
               active={w.value === timeWindow}
               onPress={() => pickWindow(w.value)}
             />
@@ -2134,6 +2164,21 @@ export function StatsScreen() {
         </ScrollView>
       ) : null}
 
+      {/* WHAT THE COLUMN IS COUNTING. The chip says it in three characters and
+          nothing else on the board expands them: under H2H the percentage is
+          against ONE opponent over two seasons, not a recent-form window, and a
+          reader who has not tapped through to a player has no way to know that.
+          Same quiet caption idiom as the no-lines note below it. */}
+      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitRatePlayers.length > 0 ? (
+        <View style={styles.noLinesRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>
+            H2H · each player against their next opponent, last 2 seasons. Many are a
+            single meeting — the count is under every rate.
+          </Text>
+        </View>
+      ) : null}
+
       {noLinesNote ? (
         <Pressable
           onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
@@ -2176,6 +2221,11 @@ export function StatsScreen() {
       {effectiveMode === 'hitRate' ? (
         <FlatList
           data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
+          // `slateChecking` counts as loading under H2H: the load gate skips
+          // the REQUEST until the slate lands but nothing held the RENDER, so
+          // the board printed "No upcoming games, so there is no opponent to
+          // compare against" — definite, wrong, and corrected a moment later
+          // — for up to SLATE_GATE_MS.
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
             const quote = quoteFor(item);
@@ -2193,6 +2243,7 @@ export function StatsScreen() {
                 statLabel={betLabel}
                 hitMode={hitMode}
                 colorful={colorful}
+                thinSample={timeWindow === 'h2h'}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
@@ -2201,7 +2252,7 @@ export function StatsScreen() {
             );
           }}
           ListEmptyComponent={
-            loading ? (
+            loading || (timeWindow === 'h2h' && slateChecking) ? (
               <BoardSkeleton />
             ) : (
               <EmptyState
@@ -3167,6 +3218,7 @@ function HitRateRow({
   statLabel,
   hitMode,
   colorful,
+  thinSample,
   oddsDay,
   onOddsPress,
   tappable,
@@ -3183,6 +3235,8 @@ function HitRateRow({
   quote: StatsOddsQuote | null;
   /** Does the hit-rate column span more than one band? Colour only if so. */
   colorful: boolean;
+  /** H2H: denominators vary per row, so a 1-of-1 must not be painted. */
+  thinSample?: boolean;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
   showOdds: boolean;
@@ -3195,7 +3249,11 @@ function HitRateRow({
   tappable: boolean;
   onPress: () => void;
 }) {
-  const pctColor = hitRateColor(player.pct, colorful);
+  // `games < 3` is the player page's rule (SplitsCard / HeadToHeadCard), and
+  // under H2H the board has to share it or the SAME 1-of-1 is grey on the
+  // detail screen and full green on the board. Scoped to H2H because every
+  // other window has a uniform denominator, where the rule would say nothing.
+  const pctColor = hitRateColor(player.pct, colorful && !(thinSample && player.total < 3));
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
