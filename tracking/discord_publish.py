@@ -8,9 +8,12 @@ A confirmed post is a `push_sent` row of kind `discord_signal` (pre-game) or
 message. VOID does not delete that message and does not delete the row, so
 the ledger IS the channel.
 
-`opening_signals` is the CLV shadow track, not the board. A capture row is a
-live lock only when this same ledger has the key — a VOID the channel never
-carried is not locked, and a VOID the channel still shows is.
+`opening_signals` is the CLV shadow track, not the board.
+`opening_lock_is_live` / `discord_published_exists_sql` are the join a
+reader should use (a capture is live only when this ledger has the key).
+Capture, system health, and the publisher do not call them yet — those
+readers still treat a capture row as locked. Wiring them is TBD. Nothing
+here deletes a capture.
 """
 
 from __future__ import annotations
@@ -77,11 +80,10 @@ def void_hidden_from_board(condition_status: str | None,
 
 
 def opening_lock_is_live(captured: bool, discord_published: bool) -> bool:
-    """An `opening_signals` row is a live lock only when Discord published it.
+    """Predicate for a reader that wants capture AND a Discord post.
 
-    The capture row is not deleted on VOID (ON CONFLICT would just re-lock
-    it, and the channel post is the bet of record). Readers that treated
-    "row exists" as locked=true were reporting captures the channel does
-    not have, and missing the fact that a posted VOID is still the board.
+    Not called by capture, system health, or the publisher yet. Those still
+    treat "row exists" as locked. The capture row is not deleted on VOID
+    (ON CONFLICT would just re-lock it). Wiring this in is TBD.
     """
     return bool(captured) and bool(discord_published)

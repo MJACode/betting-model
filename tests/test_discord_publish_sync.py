@@ -2,9 +2,9 @@
 the ledger.
 
 Matt, 2026-09-23: if the channel still has the bet, the app shows it. If the
-channel does not, it is not an active Discord-led bet. opening_signals is a
-live lock only when that same ledger has the key. Nothing here deletes a
-Discord message.
+channel does not, it is not an active Discord-led bet.
+`opening_lock_is_live` is the join a reader should use; capture and health
+do not call it yet. Nothing here deletes a Discord message.
 """
 
 from __future__ import annotations
@@ -207,3 +207,30 @@ def test_the_settled_record_still_excludes_every_void():
     assert "condition_status === 'VOID'" in body
     assert "discordPublish" not in body
     assert "discordLedVisible" not in body
+
+
+def test_the_discord_pins_are_on_the_pr_ci_subset():
+    """A local-only green is how the NHL pin stayed red. These three files
+    are the Discord display, the publish key, and the void contract."""
+    yml = (ROOT / ".github/workflows/pr-ci.yml").read_text(encoding="utf-8")
+    for name in (
+        "tests/test_discord_publish_sync.py",
+        "tests/test_publish_key_identity.py",
+        "tests/test_void_picks.py",
+    ):
+        assert name in yml
+    assert 'node-version: "22"' in yml
+
+
+def test_opening_lock_join_is_not_wired_into_readers_yet():
+    """The helper is the contract. Capture and health still treat a row as
+    locked. A reader that imports it has to update this pin and the docs."""
+    for rel in (
+        "tracking/opening_signals.py",
+        "tracking/system_health.py",
+        "tracking/signal_publisher.py",
+        "tracking/discord_notifier.py",
+    ):
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        assert "opening_lock_is_live" not in src, rel
+        assert "discord_published_exists_sql" not in src, rel

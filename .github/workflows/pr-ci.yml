@@ -40,6 +40,13 @@ jobs:
       - name: Mobile thresholds drift check
         run: python -m scripts.generate_mobile_thresholds --check
 
+      # test_discord_publish_sync runs the app predicate with
+      # node --experimental-strip-types. The runner image's node is not
+      # that, and a missing flag fails the subset.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Pytest non-integration subset
         env:
           # Ensure no accidental prod URL from a fork secret leak path.
@@ -85,4 +92,7 @@ jobs:
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
             tests/test_mobile_betslip_combine.py \
-            tests/test_mobile_nhl_lookahead.py
+            tests/test_mobile_nhl_lookahead.py \
+            tests/test_discord_publish_sync.py \
+            tests/test_publish_key_identity.py \
+            tests/test_void_picks.py

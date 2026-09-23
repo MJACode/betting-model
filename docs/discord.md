@@ -208,9 +208,14 @@ truth. A VOID after the post does not delete or edit the message, and
 `v_discord_published` (`push_sent` kinds `discord_signal` and `discord_live`,
 lock key only) and keeps a published VOID on Today / Signals / Live / detail.
 A lock the channel does not have is not an active Discord-led bet.
-`opening_signals` stays the CLV shadow track; a capture is a live lock only
-when that same ledger has the key (`tracking/discord_publish.py`). The settled
-record still excludes every VOID.
+`opening_signals` stays the CLV shadow track. `opening_lock_is_live` and
+`discord_published_exists_sql` (`tracking/discord_publish.py`) are the join
+a reader should use — capture AND a `discord_signal` / `discord_live` row —
+and `tests/test_discord_publish_sync.py` covers that helper. Capture,
+system health, and the publisher do not call it yet, so those readers still
+treat a capture row as locked. Wiring them is TBD. The void path does not
+delete captures or Discord messages. The settled record still excludes
+every VOID.
 
 **3. The app had an 8-day NFL horizon; the publishers have none.** Nothing was
 beyond it on the day (0 rows), so this is closed before it costs a pick rather
