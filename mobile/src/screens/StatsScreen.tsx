@@ -468,6 +468,13 @@ export function StatsScreen() {
     setHitLow(HIT_RATE_MIN);
     setHitHigh(HIT_RATE_MAX);
     setBasis('perGame');
+    // A SPORT WITH NO PER-GAME PLAYER LOG CANNOT ANSWER H2H AT ALL, and on it
+    // `effectiveMode` falls back to Averages (`canHitRate`) — which would have
+    // left the H2H chip lit above a board of SEASON TOTALS. The chip is hidden
+    // for those sports below; this is the other half, for a user who picked it
+    // on the NFL and then switched to the NHL. The window is the board's
+    // default, not the one carried over.
+    if (!supportsHitRate(sport)) setTimeWindow((w) => (w === 'h2h' ? 10 : w));
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
   }, [sport]);
@@ -2023,7 +2030,7 @@ export function StatsScreen() {
           contentContainerStyle={styles.windowRow}
           keyboardShouldPersistTaps="handled"
         >
-          {TIME_WINDOWS.map((w) => (
+          {TIME_WINDOWS.filter((w) => w.value !== 'h2h' || canHitRate).map((w) => (
             <FilterChip
               key={String(w.value)}
               label={w.label}

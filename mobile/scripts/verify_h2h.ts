@@ -23,6 +23,9 @@
  *     same comparison the rest of the player page makes.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { h2hMatchups, nextGameByTeam } from '../src/lib/statsBoard';
 import { playerHeadToHead } from '../src/lib/playerDetail';
 import type { GameRow } from '../src/types';
@@ -149,6 +152,29 @@ check('no meetings → games 0, rate null, opponent kept',
 // the list and the denominator rather than counted as a zero-yard game.
 const nan = playerHeadToHead('KC', [112, NaN], ['2026-01-04', '2025-11-10'], 90);
 check('NaN is dropped from the denominator', nan.bucket.games === 1, JSON.stringify(nan.bucket));
+
+// ── 7. Every sport the H2H chip is offered on has an RPC behind it ──
+// The chip is rendered for exactly the sports `supportsHitRate` allows
+// (StatsScreen filters it on `canHitRate`), and each of those needs a
+// player_h2h_stat_values_* branch in fetchH2HStatValues — otherwise the chip
+// appears, the read falls through to `return []`, and the board is empty with
+// no reason on screen. Read out of the two sources rather than restated here,
+// so adding a sport to one and not the other fails HERE rather than in the app.
+const catalog = readFileSync(join(import.meta.dirname, '..', 'src/lib/statCatalog.ts'), 'utf-8');
+const queries = readFileSync(join(import.meta.dirname, '..', 'src/lib/queries.ts'), 'utf-8');
+const hitRateSports = (catalog.match(/HIT_RATE_SPORTS = new Set<Sport>\(\[(.*?)\]\)/s)?.[1] ?? '')
+  .split(',')
+  .map((x) => x.trim().replace(/'/g, ''))
+  .filter(Boolean);
+check('the hit-rate sport list was found', hitRateSports.length === 5, hitRateSports.join());
+const h2hFn = queries.slice(queries.indexOf('export async function fetchH2HStatValues'));
+const h2hBody = h2hFn.slice(0, h2hFn.indexOf('\nconst PICK_COLUMNS'));
+for (const sport of hitRateSports) {
+  check(
+    `${sport} has a player_h2h_stat_values_ branch`,
+    h2hBody.includes(`player_h2h_stat_values_${sport.toLowerCase()}`),
+  );
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
