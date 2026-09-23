@@ -84,6 +84,7 @@ import {
   type PlayerPickRecord,
   type PropLineMove,
   type SplitBucket,
+  type PlayerHeadToHead,
   type StatSplits,
   type TonightLine,
 } from '@/lib/playerDetail';
@@ -764,6 +765,16 @@ export function PlayerStatsScreen() {
               <SplitsCard splits={detail.splits} statLabel={statLabel} threshold={effLine} loading={detail.splitsLoading} />
             ) : null}
 
+            {/* ── Head-to-head with the next opponent, last two seasons ─────── */}
+            {detail.h2h ? (
+              <HeadToHeadCard
+                h2h={detail.h2h}
+                statLabel={statLabel}
+                threshold={effLine}
+                loading={detail.h2hLoading}
+              />
+            ) : null}
+
             {/* ── MLB context the prop models train on ─────────────────── */}
             {sport === 'MLB' && detail.savant ? (
               <StatcastCard savant={detail.savant} playerType={playerType ?? null} />
@@ -891,6 +902,111 @@ function GameRow({
     </View>
   );
 }
+
+/**
+ * HEAD-TO-HEAD: every meeting with the next opponent, over the last two seasons.
+ *
+ * Matt, 2026-09-20 — "show how a player or team has done against an opponent
+ * ... the last 2 years". Two seasons is FIXED and said on the card rather than
+ * being a control, so the number always means the same thing.
+ *
+ * WHY THE SAMPLE IS SAID OUT LOUD, TWICE. In the weekly sports a two-season
+ * head-to-head is usually ONE game: measured on the NFL logs for seasons 2025
+ * and 2026, 13,373 of 15,664 player-opponent pairs (85%) have exactly one
+ * meeting, 2,052 have two and 239 have three or more. So "100%" here is very
+ * often "1 for 1", which is a fact about the schedule and not about the
+ * player. Matt's call (2026-09-20) is to show it plainly rather than hide or
+ * hedge it — so the rate is printed as it is, the game count sits under it,
+ * and every meeting is listed below, which is the honest version of the same
+ * number: a reader who can see the one game cannot mistake it for a trend.
+ *
+ * An opponent with NO stored meeting still renders. "They have not met in two
+ * seasons" is an answer to the question the card asks, and a card that
+ * vanishes instead reads as a page that failed to load.
+ */
+function HeadToHeadCard({
+  h2h,
+  statLabel,
+  threshold,
+  loading,
+}: {
+  h2h: PlayerHeadToHead;
+  statLabel: string;
+  threshold: number;
+  loading: boolean;
+}) {
+  const b = h2h.bucket;
+  return (
+    <>
+      <SectionTitle
+        title={`vs ${h2h.opponent} · last 2 seasons`}
+        tooltip={{
+          title: 'Every meeting, not a recent-form window',
+          body:
+            `Each game ${h2h.opponent} have been the opponent in, across this season and last, and how ` +
+            `often the player cleared ${threshold}+ ${statLabel} in them. In the weekly sports this is ` +
+            'usually one or two games: the count under the rate, and the list of meetings below it, are ' +
+            'there so a 100% that rests on a single game reads as a single game.',
+        }}
+      />
+      {loading && b.games === 0 ? (
+        <View style={styles.card}>
+          <ActivityIndicator style={styles.loadingInline} />
+        </View>
+      ) : b.games === 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.muted}>No meetings with {h2h.opponent} in the last 2 seasons.</Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.tileRow}>
+            <StatTile
+              label={`${threshold}+ ${statLabel}`}
+              value={b.hitRate == null ? '—' : formatPct(b.hitRate, 0)}
+              caption={`${b.hits} of ${b.games}`}
+              tint={
+                b.hitRate == null || b.games < 3
+                  ? undefined
+                  : b.hitRate >= HIT_RATE_GOOD
+                    ? colors.gradeGood
+                    : b.hitRate < HIT_RATE_WEAK
+                      ? colors.gradeBad
+                      : undefined
+              }
+            />
+            <StatTile
+              label={`Avg ${statLabel}`}
+              value={b.avg == null ? '—' : String(Math.round(b.avg * 10) / 10)}
+              caption={b.games === 1 ? '1 meeting' : `${b.games} meetings`}
+            />
+            <View style={styles.tilePad} />
+          </View>
+          {h2h.meetings.map((m) => (
+            <View key={m.date} style={styles.gameRow}>
+              <View style={styles.gameDot}>
+                <View
+                  style={[
+                    styles.dot,
+                    { backgroundColor: m.value >= threshold ? colors.bet : colors.avoid },
+                  ]}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.gameDate}>{m.date}</Text>
+                <Text style={styles.gameMeta}>vs {h2h.opponent}</Text>
+              </View>
+              <View style={styles.gameStat}>
+                <Text style={styles.gameStatValue}>{String(Math.round(m.value * 10) / 10)}</Text>
+                <Text style={styles.gameStatLabel}>{statLabel}</Text>
+              </View>
+            </View>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
 
 // ── Added sections (2026-09-20) ─────────────────────────────────────────────
 
@@ -1074,7 +1190,9 @@ function TonightLineCard({
   );
 }
 
-/** The chart's threshold, split by venue, opponent and (basketball) role. */
+/** The chart's threshold, split by venue and (basketball) role.
+ *  The opponent split moved to HeadToHeadCard below, which reads two SEASONS
+ *  rather than the loaded log — see playerDetail.playerHeadToHead. */
 function SplitsCard({
   splits,
   statLabel,
@@ -1087,7 +1205,6 @@ function SplitsCard({
   loading: boolean;
 }) {
   const buckets: SplitBucket[] = [splits.home, splits.away];
-  if (splits.vsOpponent) buckets.push(splits.vsOpponent);
   if (splits.starting && splits.starting.games > 0) buckets.push(splits.starting);
   if (splits.bench && splits.bench.games > 0) buckets.push(splits.bench);
   const rows: SplitBucket[][] = [];
@@ -1099,9 +1216,10 @@ function SplitsCard({
         tooltip={{
           title: 'Same line, different spots',
           body:
-            'How often the player has cleared the line above at home, on the road and against tonight’s ' +
-            'opponent, over the games loaded on this page. Small samples swing hard — the game count is ' +
-            'under every number for that reason. Home and away come from the game itself, not from the box score.',
+            'How often the player has cleared the line above at home and on the road, over the games ' +
+            'loaded on this page. Small samples swing hard — the game count is under every number for ' +
+            'that reason. Home and away come from the game itself, not from the box score. The opponent ' +
+            'has its own card below, because that one reads two whole seasons rather than this page’s log.',
         }}
       />
       {loading && buckets.every((b) => b.games === 0) ? (

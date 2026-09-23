@@ -371,6 +371,14 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     "player_season_stat_values_ncaaf",
     "player_season_stat_values_nfl",
     "player_season_stat_values_wnba",
+    # H2H window: one row per slate player, that player's values against the
+    # team he is about to play, over the last two seasons
+    # (data/migrations/add_player_h2h_stat_values_rpcs.sql).
+    "player_h2h_stat_values_mlb",
+    "player_h2h_stat_values_nba",
+    "player_h2h_stat_values_ncaaf",
+    "player_h2h_stat_values_nfl",
+    "player_h2h_stat_values_wnba",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",

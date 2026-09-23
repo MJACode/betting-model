@@ -224,11 +224,68 @@ export interface SplitBucket {
 export interface StatSplits {
   home: SplitBucket;
   away: SplitBucket;
-  /** Against tonight's opponent, within the loaded log; null with no opponent. */
-  vsOpponent: SplitBucket | null;
   /** Basketball only — the log carries is_starter. */
   starting: SplitBucket | null;
   bench: SplitBucket | null;
+}
+
+// ── Head-to-head with the next opponent ─────────────────────────────
+
+/** One previous meeting: when it was, and what the player did in it. */
+export interface H2HMeeting {
+  date: string;
+  value: number;
+}
+
+export interface PlayerHeadToHead {
+  opponent: string;
+  /** Newest first. */
+  meetings: H2HMeeting[];
+  /** The same numbers as a split, so it reads beside Home / Away unchanged. */
+  bucket: SplitBucket;
+}
+
+/**
+ * The H2H card's numbers, off one player_h2h_stat_values_* row.
+ *
+ * THIS REPLACED A `vsOpponent` SPLIT COMPUTED OVER THE LOADED LOG, and the
+ * reason is span, not shape. That log is 25 rows in football and 50 elsewhere
+ * (playerLog.logFetchLimit) — about a third of an MLB season — so "vs BAL"
+ * silently meant "vs BAL inside the last fifty games", which in September is a
+ * different question from the one the label asked. Two seasons is the span
+ * Matt asked for (2026-09-20), and the RPC is bounded to it server-side.
+ *
+ * `values` and `dates` arrive index-aligned from the RPC (it filters both on
+ * the same non-null condition); a length mismatch would pair a number with
+ * another game's date, so the pairing stops at the shorter of the two rather
+ * than trusting either length.
+ */
+export function playerHeadToHead(
+  opponent: string,
+  values: readonly number[],
+  dates: readonly string[],
+  threshold: number,
+): PlayerHeadToHead {
+  const n = Math.min(values.length, dates.length);
+  const meetings: H2HMeeting[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = Number(values[i]);
+    if (!Number.isFinite(v)) continue;
+    meetings.push({ date: dates[i]!, value: v });
+  }
+  const nums = meetings.map((m) => m.value);
+  const hits = nums.filter((v) => v >= threshold).length;
+  return {
+    opponent,
+    meetings,
+    bucket: {
+      label: `vs ${opponent}`,
+      games: nums.length,
+      avg: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null,
+      hitRate: nums.length ? hits / nums.length : null,
+      hits,
+    },
+  };
 }
 
 function bucket(label: string, entries: PlayerLogEntry[], stat: StatDef | null, threshold: number): SplitBucket {
@@ -260,19 +317,16 @@ export function statSplits(
   gamesById: ReadonlyMap<string, GameRow>,
   stat: StatDef | null,
   threshold: number,
-  opponent: string | null,
   hasStarterFlag: boolean,
 ): StatSplits {
   const home: PlayerLogEntry[] = [];
   const away: PlayerLogEntry[] = [];
-  const vsOpp: PlayerLogEntry[] = [];
   const starting: PlayerLogEntry[] = [];
   const bench: PlayerLogEntry[] = [];
   for (const e of entries) {
-    const { isHome, opponent: opp } = sideOf(e, gamesById.get(e.game_id));
+    const { isHome } = sideOf(e, gamesById.get(e.game_id));
     if (isHome === true) home.push(e);
     else if (isHome === false) away.push(e);
-    if (opponent && opp === opponent) vsOpp.push(e);
     if (hasStarterFlag) {
       // Stored as an integer column (measured: nba/wnba_player_game_log.is_starter
       // is `integer`); a NUMERIC-as-string arrives as '1' / '0'.
@@ -284,7 +338,6 @@ export function statSplits(
   return {
     home: bucket('Home', home, stat, threshold),
     away: bucket('Away', away, stat, threshold),
-    vsOpponent: opponent ? bucket(`vs ${opponent}`, vsOpp, stat, threshold) : null,
     starting: hasStarterFlag ? bucket('Starting', starting, stat, threshold) : null,
     bench: hasStarterFlag ? bucket('Off bench', bench, stat, threshold) : null,
   };

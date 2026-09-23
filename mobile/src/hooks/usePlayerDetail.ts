@@ -19,6 +19,7 @@ import { MODEL_BOOK } from '@/lib/markets';
 import type { PlayerLogEntry, PlayerLogSport } from '@/lib/playerLog';
 import {
   fetchGamesByIds,
+  fetchH2HStatValues,
   fetchLineupSlot,
   fetchPropLineRows,
   fetchPropOddsHistory,
@@ -30,10 +31,12 @@ import { propMarketForStat, type StatDef } from '@/lib/statCatalog';
 import { earliestUpcomingGame, type SlateGame } from '@/lib/statsBoard';
 import { unstartedGameIds } from '@/lib/statsOdds';
 import {
+  playerHeadToHead,
   playerPickRecord,
   propLineMove,
   statSplits,
   tonightLine,
+  type PlayerHeadToHead,
   type PlayerPickRecord,
   type PropLineMove,
   type StatSplits,
@@ -41,6 +44,7 @@ import {
 } from '@/lib/playerDetail';
 import type {
   GameRow,
+  H2HStatValuesRow,
   LineupSlotRow,
   PlayerType,
   PropOddsByBookRow,
@@ -86,6 +90,14 @@ export interface PlayerNextGame {
   entry: SlateGame;
   unstarted: boolean;
 }
+
+/**
+ * The season label the H2H read starts from — the same value the Stats
+ * board uses, so the two surfaces cannot disagree about which two seasons
+ * "the last 2 years" means. Football's start-year label falls back a season
+ * inside fetchH2HStatValues, as every other football read does.
+ */
+const SEASON = new Date().getUTCFullYear();
 
 export function usePlayerDetail(args: {
   sport: PlayerLogSport;
@@ -166,8 +178,44 @@ export function usePlayerDetail(args: {
   const gamesById = useMemo(() => new Map(logGames.data.map((g) => [g.game_id, g] as const)), [logGames.data]);
   const splits: StatSplits | null = useMemo(() => {
     if (!stat || threshold == null || games.length === 0) return null;
-    return statSplits(games, gamesById, stat, threshold, opponent, sport === 'NBA' || sport === 'WNBA');
-  }, [games, gamesById, stat, threshold, opponent, sport]);
+    return statSplits(games, gamesById, stat, threshold, sport === 'NBA' || sport === 'WNBA');
+  }, [games, gamesById, stat, threshold, sport]);
+
+  // ── Head-to-head with the next opponent, last two seasons ─────────────
+  // Its own read rather than a slice of `games` above, and the difference is
+  // SPAN: that log is 25 rows in football and 50 elsewhere, so a "vs KC" cut
+  // out of it answers "inside the last fifty games", not "in the last two
+  // seasons" (playerDetail.playerHeadToHead). The RPC is bounded to the two
+  // seasons server-side and returns one compact row.
+  //
+  // Keyed on the STAT as well as the opponent: the RPC returns one stat's
+  // values, so a chip tap refetches here where it does not for the chart.
+  const h2hRow = useSection<H2HStatValuesRow | null>(
+    null,
+    team && opponent && stat
+      ? async () => {
+          const rows = await fetchH2HStatValues(
+            sport,
+            SEASON,
+            String(stat.key),
+            { teams: [team], opponents: [opponent] },
+            playerType ?? undefined,
+          );
+          // The read is narrowed to one fixture, but a fixture is a TEAM pair:
+          // it comes back with every player on that team who has met them.
+          return rows.find((r) => r.player_id === playerId) ?? null;
+        }
+      : null,
+    [sport, team, opponent, playerId, stat?.key, playerType, nonce],
+  );
+  const h2h: PlayerHeadToHead | null = useMemo(() => {
+    if (!opponent || threshold == null) return null;
+    const row = h2hRow.data;
+    // An opponent with no stored meeting is still an answer — "they have not
+    // played" is what the card says, and it needs the opponent's name to say
+    // it. A null row is therefore an EMPTY head-to-head, not a missing one.
+    return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], threshold);
+  }, [h2hRow.data, opponent, threshold]);
 
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(
@@ -197,6 +245,8 @@ export function usePlayerDetail(args: {
     booksReady,
     market,
     nextGame,
+    h2h,
+    h2hLoading: h2hRow.loading,
     slateLoading: slate.loading,
     tonight,
     move,

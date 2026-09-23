@@ -59,6 +59,7 @@ import type {
   PropOddsSnapshotRow,
   RecentGameRow,
   SavantStatsRow,
+  H2HStatValuesRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
@@ -423,6 +424,92 @@ export async function fetchSeasonStatValues(
         teams,
         key,
       );
+      if (rows.length) return rows;
+    }
+    return [];
+  }
+  return []; // UFC / NHL / GOLF: no per-game player logs
+}
+
+/**
+ * A PAIR OF TEAMS, one per slate fixture, as the H2H RPCs take them.
+ *
+ * Two parallel arrays rather than 'TEAM|OPP' strings because an NCAAF team id
+ * is a school NAME (CLAUDE.md §4), so every separator is a character that can
+ * occur inside a key; the RPC pairs them with `unnest(...) WITH ORDINALITY`.
+ */
+export interface H2HMatchups {
+  teams: string[];
+  opponents: string[];
+}
+
+/**
+ * How many seasons back H2H looks: this one and the one before it.
+ *
+ * Matt, 2026-09-20 — "they should be able to see the last 2 years". FIXED, not
+ * a control: one definition of the window is one number on the row that always
+ * means the same thing. Widening it is a one-line change here.
+ */
+export const H2H_SEASONS = 2;
+
+/** [2026, 2025] for a season of 2026 — newest first, H2H_SEASONS long. */
+export function h2hSeasons(season: number): number[] {
+  return Array.from({ length: H2H_SEASONS }, (_, i) => season - i);
+}
+
+/**
+ * Per-player per-game values for ONE stat, IN THE MEETINGS with the team that
+ * player is about to play, over the last two seasons. Backs the Stats tab's
+ * H2H window.
+ *
+ * Deliberately the same row shape as fetchSeasonStatValues above (a `values`
+ * array per player), so the board computes the H2H hit rate for any line
+ * through the same client-side path the Season window already uses — plus
+ * `opponent` and `dates`, which are the two things only H2H can say.
+ *
+ * NARROWED BY THE FIXTURES, NOT BY THE TEAMS. `matchups` pairs each slate team
+ * with the one opponent it is about to face, so the read returns one row per
+ * player rather than every slate player against every slate opponent. Measured
+ * on the 30-game NFL slate of 2026-09-20: 1,406 rows for 1,157 players, out of
+ * 3,724 players on the slate — i.e. ~31% of them have met that opponent inside
+ * two seasons at all.
+ *
+ * Empty matchups return [] WITHOUT a request: no slate means no opponent to
+ * ask about, and an unnarrowed H2H read is the cross product.
+ */
+export async function fetchH2HStatValues(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  season: number,
+  statKey: string,
+  matchups: H2HMatchups,
+  playerType?: 'batter' | 'pitcher',
+): Promise<H2HStatValuesRow[]> {
+  if (matchups.teams.length === 0) return [];
+  // (player, opponent) is the row's identity: a player whose team appears in
+  // the slate twice (an MLB doubleheader) still resolves to one opponent, but
+  // the key must not collapse two different ones if that ever changes.
+  const key = (r: H2HStatValuesRow) => `${r.player_id}:${r.opponent}:${r.player_type ?? ''}`;
+  const base = { p_stat: statKey, p_teams: matchups.teams, p_opponents: matchups.opponents };
+  if (sport === 'WNBA' || sport === 'NBA') {
+    const fn = sport === 'WNBA' ? 'player_h2h_stat_values_wnba' : 'player_h2h_stat_values_nba';
+    return pageRpc<H2HStatValuesRow>(fn, { ...base, p_seasons: h2hSeasons(season) }, null, key);
+  }
+  if (sport === 'MLB') {
+    return pageRpc<H2HStatValuesRow>(
+      'player_h2h_stat_values_mlb',
+      { ...base, p_seasons: h2hSeasons(season), p_player_type: playerType ?? 'batter' },
+      null,
+      key,
+    );
+  }
+  if (sport === 'NFL' || sport === 'NCAAF') {
+    const fn = sport === 'NFL' ? 'player_h2h_stat_values_nfl' : 'player_h2h_stat_values_ncaaf';
+    // Same season fallback every other football read does: the label is the
+    // year the season STARTS, so before week 1 the current label holds no rows
+    // at all and the board would print an empty H2H board rather than last
+    // season's meetings.
+    for (const s of footballSeasonCandidates(season)) {
+      const rows = await pageRpc<H2HStatValuesRow>(fn, { ...base, p_seasons: h2hSeasons(s) }, null, key);
       if (rows.length) return rows;
     }
     return [];

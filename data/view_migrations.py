@@ -151,6 +151,15 @@ ACTIVE_MIGRATIONS: list[str] = [
     # player's window. Applied to production the same evening; this is the
     # recoverable copy, and it guards on its own property so it runs once.
     "player_recent_games_slate_teams.sql",
+    # 2026-09-20 (Matt): the Stats tab's H2H window and the player page's
+    # "vs OPP · last 2 seasons" card — five player_h2h_stat_values_* RPCs, one
+    # row per slate player carrying that player's values against the team he is
+    # about to play. MLB/NBA/WNBA derive the opponent by joining `games` (their
+    # logs have no opponent column); NFL/NCAAF read it off the log row. Guards
+    # on all five existing, so the DDL fires once and skips forever after —
+    # this file runs on every refresh pass and each DDL statement forces a
+    # PostgREST schema reload.
+    "add_player_h2h_stat_values_rpcs.sql",
     # 2026-09-14 (mike): leftover nfl_wind_totals opening_signals rows whose
     # picks were VOIDED 09-07 / DELETED 09-11 after MAX_FIRE_LEAD. Capture
     # stayed (ON CONFLICT DO NOTHING). Deletes captures with no standing
