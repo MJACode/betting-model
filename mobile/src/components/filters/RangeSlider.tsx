@@ -34,7 +34,7 @@
  */
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { PanResponder, StyleSheet, Text, View } from 'react-native';
+import { PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   applyBound,
   grabTarget,
@@ -66,6 +66,22 @@ interface Props {
   onChange: (low: number, high: number) => void;
   /** Renders a value for the read-out and for VoiceOver. */
   format?: (v: number) => string;
+  /**
+   * Replaces the default `Min ${format}` / `Max ${format}` captions under the
+   * track. The custom-model filters use it so an unbound end reads "Any"
+   * rather than "Min Any".
+   */
+  endCaption?: (value: number, which: 'low' | 'high') => string;
+  /**
+   * VoiceOver stride. Defaults to `step`. A scale with a stop every pixel
+   * passes a wider stride so one swipe is not one index.
+   */
+  a11yStep?: number;
+  /**
+   * When set, each end caption gets 44pt minus and plus buttons that move
+   * that end by one step. Scales a finger can already land on omit it.
+   */
+  onNudge?: (which: 'low' | 'high', direction: -1 | 1) => void;
   /** VoiceOver labels for the two thumbs. */
   lowLabel: string;
   highLabel: string;
@@ -79,6 +95,9 @@ export function RangeSlider({
   high,
   onChange,
   format = (v) => String(v),
+  endCaption,
+  a11yStep,
+  onNudge,
   lowLabel,
   highLabel,
 }: Props) {
@@ -210,7 +229,8 @@ export function RangeSlider({
     accessibilityActions: [{ name: 'increment' }, { name: 'decrement' }],
     onAccessibilityAction: (e: { nativeEvent: { actionName: string } }) => {
       const current = which === 'low' ? low : high;
-      const delta = e.nativeEvent.actionName === 'increment' ? step : -step;
+      const stride = a11yStep ?? step;
+      const delta = e.nativeEvent.actionName === 'increment' ? stride : -stride;
       apply(which, snapTo(current + delta, scaleRef.current));
     },
   });
@@ -254,12 +274,48 @@ export function RangeSlider({
       {/* The live bounds, PREFIXED. A bare number under the end of a track
           reads as a tick mark — true at rest, where it is "0%" and "100%", and
           a lie the moment a thumb moves away from the end it sits under
-          (UX review, 2026-09-12). "Min 60%" cannot be read as an axis. Hidden
-          from VoiceOver: each thumb already announces its own value, and a
-          screen reader hearing the same two numbers twice learns nothing. */}
-      <View style={styles.endRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Text style={styles.endLabel}>{`Min ${format(low)}`}</Text>
-        <Text style={styles.endLabel}>{`Max ${format(high)}`}</Text>
+          (UX review, 2026-09-12). "Min 60%" cannot be read as an axis. The
+          captions are hidden from VoiceOver: each thumb already announces its
+          value. Nudge buttons, when present, are the extra accessible control. */}
+      <View style={[styles.endRow, onNudge ? styles.endRowNudge : null]}>
+        {(['low', 'high'] as const).map((which) => {
+          const value = which === 'low' ? low : high;
+          const name = which === 'low' ? lowLabel : highLabel;
+          const caption = endCaption
+            ? endCaption(value, which)
+            : `${which === 'low' ? 'Min' : 'Max'} ${format(value)}`;
+          return (
+            <View key={which} style={styles.endGroup}>
+              {onNudge ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Lower ${name}`}
+                  onPress={() => onNudge(which, -1)}
+                  style={styles.nudge}
+                >
+                  <Text style={styles.nudgeText}>−</Text>
+                </Pressable>
+              ) : null}
+              <Text
+                style={styles.endLabel}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                {caption}
+              </Text>
+              {onNudge ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Raise ${name}`}
+                  onPress={() => onNudge(which, 1)}
+                  style={styles.nudge}
+                >
+                  <Text style={styles.nudgeText}>+</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -316,10 +372,31 @@ const styles = StyleSheet.create({
   endRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginTop: spacing.xs,
     // Same gutter as the track, so each number sits under the end it reports
     // rather than out at the card's edge.
     paddingHorizontal: TAP_W / 2,
+  },
+  // The 44pt nudge buttons already inset the caption; the track gutter would
+  // push them past the card edge.
+  endRowNudge: {
+    paddingHorizontal: 0,
+  },
+  endGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  nudge: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nudgeText: {
+    fontSize: font.size.title3,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   endLabel: {
     fontSize: font.size.caption,

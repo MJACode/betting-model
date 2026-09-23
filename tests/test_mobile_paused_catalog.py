@@ -59,6 +59,29 @@ def test_the_bet_type_picker_filters_paused_models():
     assert "isModelRetired(id)" in body
 
 
+def test_the_custom_model_picker_is_three_bet_types():
+    """The picker collapses model_ids into ML / line / player props.
+    betTypeGroups stays the per-model catalog so a pause still drops an id
+    before the collapse. The screen must not go back to one row per longLabel.
+    """
+    meta = _read(MOBILE / "src" / "lib" / "modelMeta.ts")
+    assert "{ label: 'ML', subtitle: 'Moneyline' }" in meta
+    assert "{ label: 'Run line', subtitle: '±1.5' }" in meta
+    assert "{ label: 'Puck line', subtitle: '±1.5' }" in meta
+    assert "{ label: 'Spread', subtitle: 'Spread line' }" in meta
+    assert "{ label: 'Player props', subtitle: 'All player markets' }" in meta
+    collapse = _block(meta, "export function betTypePickerGroups", "\n}")
+    assert "betTypeGroups()" in collapse
+
+    screen = _read(MOBILE / "src" / "screens" / "ModelEditScreen.tsx")
+    assert "betTypePickerGroups" in screen
+    assert "betTypeGroups(" not in screen
+    assert "function NumberField" not in screen
+    assert "function PickerField" not in screen
+    assert "RangeSlider" in screen
+    assert "onPick(choice.modelIds)" in screen
+
+
 def test_today_picks_drop_paused_models_at_the_source():
     """useTodayPicks feeds Today, Signals counts, Models cards, Market chips
     and Stats odds pills. A filter only on passesActionFilter left Today and

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -12,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -23,18 +22,35 @@ import {
   type CustomModelStats,
 } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { EmptyState } from '@/components/EmptyState';
+import { RangeSlider } from '@/components/filters/RangeSlider';
 import {
   CHIP_GROUPS,
   DEFAULT_FILTERS,
   LINE_VALUE_OPTIONS,
+  ODDS_STOPS,
   PUBLIC_PCT_OPTIONS,
+  SLIDER_LOW_SENTINEL,
+  boundIndex,
   chipSelection,
-  nearestOption,
+  formatAmericanLabel,
+  formatLineLabel,
+  formatPublicLabel,
+  formatRangeCaption,
+  indexToBound,
   setNumericFilter,
   toggleChip,
 } from '@/lib/customModelFilters';
 import { formatPctSigned } from '@/lib/format';
-import { betTypeGroups, betTypeLabel, PAUSED_RULE_CAPTION, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
+import { applyBound } from '@/lib/rangeSlider';
+import {
+  betTypeLabel,
+  betTypePickerGroups,
+  choiceAddedLabel,
+  PAUSED_RULE_CAPTION,
+  RETIRED_RULE_CAPTION,
+  type BetTypeChoice,
+} from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
@@ -161,8 +177,19 @@ export function ModelEditScreen() {
   // A new bet type starts with NO minimums. Seeding the in-house cut made the
   // model look like the user's choice when it was ours — every number a saved
   // model carries is now one they typed, and a blank field means "Any".
-  const addRule = (modelId: string) => {
-    setRules((prev) => [...prev, { uid: uid(), model_id: modelId }]);
+  // One picker row can cover several model_ids (every active player prop).
+  // Each becomes its own rule so the stored shape is unchanged.
+  const addRules = (modelIds: string[]) => {
+    setRules((prev) => {
+      const have = new Set(prev.map((r) => r.model_id));
+      const next = [...prev];
+      for (const modelId of modelIds) {
+        if (have.has(modelId)) continue;
+        next.push({ uid: uid(), model_id: modelId });
+        have.add(modelId);
+      }
+      return next;
+    });
     setPickerOpen(false);
   };
 
@@ -201,15 +228,18 @@ export function ModelEditScreen() {
               onPress={() => setPickerOpen(true)}
               style={({ pressed }) => [styles.addRuleBtn, pressed && styles.pressed]}
               hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Add bet type"
             >
               <Ionicons name="add" size={18} color={colors.textInverse} />
               <Text style={styles.addRuleText}>Add bet type</Text>
             </Pressable>
           </View>
           <Text style={styles.helper}>
-            Pick the markets your model bets — moneyline, totals, a specific player prop — and set
-            your own minimums for each. Every minimum starts blank: leave it that way for Any and
-            the bet type qualifies on its own. Add several bet types to combine them.
+            Pick a sport, then ML, the line (Run line in baseball, Spread in football and
+            basketball), or Player props. Player props adds every active player market for that
+            sport. Every minimum starts blank: leave it that way for Any and the bet type qualifies
+            on its own.
           </Text>
           <Text style={styles.helper}>
             Model % is our projected win probability. Edge is model % minus DraftKings' implied
@@ -250,75 +280,53 @@ export function ModelEditScreen() {
 
           <View style={styles.divider} />
 
-          <Text style={styles.groupTitle}>Price range</Text>
-          <Text style={styles.groupHelp}>
-            American odds on the price the pick was measured at. Leave blank for any price — a
-            floor of −140 skips the heavily juiced side, a ceiling of +200 skips longshots.
-          </Text>
-          <View style={styles.numRow}>
-            <NumberField
-              label="Lowest price"
-              placeholder="Any"
-              value={filters.minOdds}
-              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'minOdds', v))}
-            />
-            <NumberField
-              label="Highest price"
-              placeholder="Any"
-              value={filters.maxOdds}
-              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'maxOdds', v))}
-            />
-          </View>
+          <FilterRange
+            title="Price range"
+            help="American odds on the price the pick was measured at. Drag either end. An end left on Any does not limit that side — pull the low end in to skip heavy juice, the high end in to skip longshots."
+            stops={ODDS_STOPS}
+            minValue={filters.minOdds}
+            maxValue={filters.maxOdds}
+            formatValue={formatAmericanLabel}
+            lowLabel="Lowest price"
+            highLabel="Highest price"
+            onChange={(min, max) =>
+              setFilters((f) => setNumericFilter(setNumericFilter(f, 'minOdds', min), 'maxOdds', max))
+            }
+          />
 
           <View style={styles.divider} />
 
-          <Text style={styles.groupTitle}>Line value</Text>
-          <Text style={styles.groupHelp}>
-            The betting line the pick was priced at — a game total (e.g. 8.5 runs), a spread, or a
-            prop line (e.g. 5.5 Ks). Moneyline picks carry no line, so setting a range drops them.
-          </Text>
-          <View style={styles.numRow}>
-            <PickerField
-              label="Line at least"
-              title="Line at least"
-              options={LINE_VALUE_OPTIONS}
-              value={filters.minLine}
-              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'minLine', v))}
-            />
-            <PickerField
-              label="Line at most"
-              title="Line at most"
-              options={LINE_VALUE_OPTIONS}
-              value={filters.maxLine}
-              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'maxLine', v))}
-            />
-          </View>
+          <FilterRange
+            title="Line value"
+            help="The line the pick was priced at — a game total (e.g. 8.5 runs), a spread, or a prop line (e.g. 5.5 Ks). Moneyline picks carry no line, so pulling either end off Any drops them."
+            stops={LINE_VALUE_OPTIONS}
+            minValue={filters.minLine}
+            maxValue={filters.maxLine}
+            formatValue={formatLineLabel}
+            lowLabel="Lowest line"
+            highLabel="Highest line"
+            onChange={(min, max) =>
+              setFilters((f) => setNumericFilter(setNumericFilter(f, 'minLine', min), 'maxLine', max))
+            }
+          />
 
           <View style={styles.divider} />
 
-          <Text style={styles.groupTitle}>Public backing</Text>
-          <Text style={styles.groupHelp}>
-            Share of public bets on our side. Only full-game moneyline, spread and total picks
-            carry splits, so setting either of these drops all props and First-5 picks.
-          </Text>
-          <View style={styles.numRow}>
-            <PickerField
-              label="At most"
-              title="Public backing at most"
-              suffix="%"
-              options={PUBLIC_PCT_OPTIONS}
-              value={filters.maxPublicBetPct}
-              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'maxPublicBetPct', v))}
-            />
-            <PickerField
-              label="At least"
-              title="Public backing at least"
-              suffix="%"
-              options={PUBLIC_PCT_OPTIONS}
-              value={filters.minPublicBetPct}
-              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'minPublicBetPct', v))}
-            />
-          </View>
+          <FilterRange
+            title="Public backing"
+            help="Share of public bets on our side. Only full-game moneyline, spread and total picks carry splits, so pulling either end off Any drops every pick that has none."
+            stops={PUBLIC_PCT_OPTIONS}
+            minValue={filters.minPublicBetPct}
+            maxValue={filters.maxPublicBetPct}
+            formatValue={formatPublicLabel}
+            lowLabel="Lowest public backing"
+            highLabel="Highest public backing"
+            onChange={(min, max) =>
+              setFilters((f) =>
+                setNumericFilter(setNumericFilter(f, 'minPublicBetPct', min), 'maxPublicBetPct', max),
+              )
+            }
+          />
 
           <View style={styles.divider} />
 
@@ -344,7 +352,12 @@ export function ModelEditScreen() {
         </View>
 
         {editingId ? (
-          <Pressable onPress={onDelete} style={styles.deleteBtn}>
+          <Pressable
+            onPress={onDelete}
+            style={styles.deleteBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Delete model"
+          >
             <Text style={styles.deleteBtnText}>Delete model</Text>
           </Pressable>
         ) : null}
@@ -364,7 +377,7 @@ export function ModelEditScreen() {
       <ModelPickerModal
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onPick={addRule}
+        onPick={addRules}
         alreadyAdded={alreadyAdded}
       />
     </SafeAreaView>
@@ -456,6 +469,8 @@ function PreviewFooter({
       <Pressable
         onPress={onSave}
         disabled={!canSave}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: !canSave }}
         style={({ pressed }) => [
           styles.saveBtn,
           !canSave && styles.saveBtnDisabled,
@@ -519,6 +534,8 @@ function ChipRow({
             <Pressable
               key={o.value}
               onPress={() => onToggle(o.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
               style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.pressed]}
             >
               <Text style={[styles.chipText, on && styles.chipTextOn]}>{o.label}</Text>
@@ -530,171 +547,93 @@ function ChipRow({
   );
 }
 
-function NumberField({
-  label,
-  placeholder,
-  suffix,
-  value,
-  onCommit,
-}: {
-  label: string;
-  placeholder: string;
-  suffix?: string;
-  value: number | undefined;
-  onCommit: (value: number | null) => void;
-}) {
-  const [text, setText] = useState<string>(value == null ? '' : String(value));
-
-  // Keep the field in step when the value changes from outside (e.g. loading an
-  // existing model), without stomping what the user is mid-way through typing.
-  useEffect(() => {
-    setText(value == null ? '' : String(value));
-  }, [value]);
-
-  const commit = () => {
-    const trimmed = text.trim();
-    if (trimmed === '' || trimmed === '-' || trimmed === '+') {
-      onCommit(null);
-      setText('');
-      return;
-    }
-    const v = parseFloat(trimmed);
-    if (Number.isFinite(v)) onCommit(v);
-    else setText(value == null ? '' : String(value));
-  };
-
-  return (
-    <View style={styles.numField}>
-      <Text style={styles.ruleFieldLabel}>{label}</Text>
-      <View style={styles.inputWrap}>
-        <TextInput
-          style={styles.ruleInput}
-          value={text}
-          onChangeText={setText}
-          onBlur={commit}
-          placeholder={placeholder}
-          placeholderTextColor={colors.textTertiary}
-          keyboardType="numbers-and-punctuation"
-          maxLength={6}
-        />
-        {suffix ? <Text style={styles.inputSuffix}>{suffix}</Text> : null}
-      </View>
-    </View>
-  );
-}
-
-/** Fixed row height so the sheet can open scrolled to the current value. */
-const PICKER_ROW_HEIGHT = 44;
-
 /**
- * A numeric filter you scroll and tap rather than type.
- *
- * Line values and public-backing percentages come from fixed option sets
- * (customModelFilters.LINE_VALUE_OPTIONS / PUBLIC_PCT_OPTIONS), so there is
- * nothing to mistype and no invalid state to validate. Models saved when these
- * were free-text can hold an off-list number (8.25) — it still displays as
- * stored, and the list highlights the nearest option.
+ * Dual-handle range for one numeric filter pair. The outer stops are Any
+ * (the filter key is omitted). Dragging inward writes min and max. There is
+ * no text field.
  */
-function PickerField({
-  label,
+function FilterRange({
   title,
-  options,
-  suffix,
-  value,
-  onCommit,
+  help,
+  stops,
+  minValue,
+  maxValue,
+  formatValue,
+  lowLabel,
+  highLabel,
+  onChange,
 }: {
-  label: string;
   title: string;
-  options: number[];
-  suffix?: string;
-  value: number | undefined;
-  onCommit: (value: number | null) => void;
+  help: string;
+  stops: readonly number[];
+  minValue: number | undefined;
+  maxValue: number | undefined;
+  formatValue: (v: number) => string;
+  lowLabel: string;
+  highLabel: string;
+  onChange: (min: number | null, max: number | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const selected = nearestOption(options, value ?? null);
-  const initialIndex = selected == null ? 0 : Math.max(0, options.indexOf(selected));
+  const low = boundIndex(stops, minValue, 'low');
+  const high = boundIndex(stops, maxValue, 'high');
+  // A stored pair that crosses (legacy free text) still has to be a slider.
+  const sliderLow = Math.min(low, high);
+  const sliderHigh = Math.max(low, high);
+  // Sentinels read Any. A thumb parked on the nearest stop for a legacy
+  // off-list value shows that stored number, not the snapped stop, until
+  // the user moves it and the stored value is rewritten.
+  const formatIndex = (index: number) => {
+    const stop = indexToBound(stops, index);
+    if (stop == null) return 'Any';
+    if (minValue != null && index === boundIndex(stops, minValue, 'low')) return formatValue(minValue);
+    if (maxValue != null && index === boundIndex(stops, maxValue, 'high')) return formatValue(maxValue);
+    return formatValue(stop);
+  };
+  const caption = formatRangeCaption(minValue, maxValue, formatValue);
+  const constrained = minValue != null || maxValue != null;
+  // Public backing is 21 stops. Price and line are fine enough that a finger
+  // and a one-step VoiceOver swipe cannot land on a value.
+  const fine = stops.length > 30;
 
-  const choose = (v: number | null) => {
-    onCommit(v);
-    setOpen(false);
+  const nudge = (which: 'low' | 'high', direction: -1 | 1) => {
+    const current = which === 'low' ? sliderLow : sliderHigh;
+    const next = Math.min(stops.length, Math.max(SLIDER_LOW_SENTINEL, current + direction));
+    const pair = applyBound(which, next, sliderLow, sliderHigh);
+    if (pair.low === sliderLow && pair.high === sliderHigh) return;
+    onChange(indexToBound(stops, pair.low), indexToBound(stops, pair.high));
   };
 
   return (
-    <View style={styles.numField}>
-      <Text style={styles.ruleFieldLabel}>{label}</Text>
-      <Pressable
-        onPress={() => setOpen(true)}
-        style={({ pressed }) => [styles.pickerBox, pressed && styles.pressed]}
-      >
-        <Text style={value == null ? styles.pickerPlaceholder : styles.pickerValue}>
-          {value == null ? 'Any' : `${value}${suffix ?? ''}`}
-        </Text>
-        <Ionicons name="chevron-down" size={15} color={colors.textTertiary} />
-      </Pressable>
-
-      <Modal
-        visible={open}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setOpen(false)}
-      >
-        <Pressable style={styles.sheetBackdrop} onPress={() => setOpen(false)}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.sheetHead}>
-              <Text style={styles.sheetTitle}>{title}</Text>
-              {/* Icon-only, so it is silent for VoiceOver without a label.
-                  Pre-existing (a5079b5); fixed in passing because ux_scan
-                  reports it as a BLOCKER on any change that touches this file. */}
-              <Pressable
-                onPress={() => setOpen(false)}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel={`Close ${title.toLowerCase()} picker`}
-              >
-                <Ionicons name="close" size={22} color={colors.textSecondary} />
-              </Pressable>
-            </View>
-
+    <View>
+      <View style={styles.chipGroupHead}>
+        <Text style={styles.groupTitle}>{title}</Text>
+        <View style={styles.rangeHeadRight}>
+          <Text style={styles.rangeLive}>{caption}</Text>
+          {constrained ? (
             <Pressable
-              onPress={() => choose(null)}
-              style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}
+              onPress={() => onChange(null, null)}
+              accessibilityRole="button"
+              accessibilityLabel={`Clear ${title}`}
+              style={styles.rangeClear}
             >
-              <Text style={value == null ? styles.pickerRowTextOn : styles.pickerRowText}>
-                Any
-              </Text>
-              {value == null ? (
-                <Ionicons name="checkmark" size={18} color={colors.tint} />
-              ) : null}
+              <Text style={styles.rangeClearText}>Clear</Text>
             </Pressable>
-
-            <FlatList
-              data={options}
-              keyExtractor={(o) => String(o)}
-              initialScrollIndex={initialIndex}
-              getItemLayout={(_, index) => ({
-                length: PICKER_ROW_HEIGHT,
-                offset: PICKER_ROW_HEIGHT * index,
-                index,
-              })}
-              renderItem={({ item }) => {
-                const on = selected === item && value != null;
-                return (
-                  <Pressable
-                    onPress={() => choose(item)}
-                    style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}
-                  >
-                    <Text style={on ? styles.pickerRowTextOn : styles.pickerRowText}>
-                      {item}
-                      {suffix ?? ''}
-                    </Text>
-                    {on ? <Ionicons name="checkmark" size={18} color={colors.tint} /> : null}
-                  </Pressable>
-                );
-              }}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
+          ) : null}
+        </View>
+      </View>
+      <Text style={styles.groupHelp}>{help}</Text>
+      <RangeSlider
+        min={SLIDER_LOW_SENTINEL}
+        max={stops.length}
+        step={1}
+        low={sliderLow}
+        high={sliderHigh}
+        onChange={(lo, hi) => onChange(indexToBound(stops, lo), indexToBound(stops, hi))}
+        format={formatIndex}
+        a11yStep={fine ? 10 : 1}
+        onNudge={fine ? nudge : undefined}
+        lowLabel={lowLabel}
+        highLabel={highLabel}
+      />
     </View>
   );
 }
@@ -833,9 +772,9 @@ function RuleRow({
 }
 
 /**
- * The bet-type picker — every market the database grades, grouped by sport and
- * shown by its market name ("Moneyline", "Batter Hits"). Users build from bet
- * types plus the data points below; the in-house models never surface here.
+ * The bet-type picker. Each sport offers at most three rows — ML, the line,
+ * Player props — and a row writes every active model_id in that slot.
+ * Strategy names and long market labels stay off this list.
  */
 function ModelPickerModal({
   visible,
@@ -845,57 +784,90 @@ function ModelPickerModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onPick: (modelId: string) => void;
+  onPick: (modelIds: string[]) => void;
   alreadyAdded: Set<string>;
 }) {
-  const typeTag = (type: string): string | null => {
-    if (type === 'pitcher_prop') return 'Pitcher prop';
-    if (type === 'batter_prop') return 'Batter prop';
-    if (type === 'player_prop') return 'Player prop';
-    return null;
-  };
+  const groups = betTypePickerGroups();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.modalContainer}>
         <View style={styles.modalHeader}>
-          <Pressable onPress={onClose} hitSlop={8}>
+          <Text style={styles.modalTitle} numberOfLines={1}>
+            Pick a bet type
+          </Text>
+          <Pressable
+            onPress={onClose}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            style={styles.modalCancelBtn}
+          >
             <Text style={styles.modalCancel}>Cancel</Text>
           </Pressable>
-          <Text style={styles.modalTitle}>Pick a bet type</Text>
-          <View style={{ width: 50 }} />
         </View>
-        <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          {betTypeGroups().map((group) => (
-            <View key={group.sport} style={styles.modalSection}>
-              <Text style={styles.modalSectionTitle}>{group.sport}</Text>
-              {group.options.map((m) => {
-                const added = alreadyAdded.has(m.id);
-                const tag = typeTag(m.type);
-                return (
-                  <Pressable
-                    key={m.id}
-                    onPress={() => onPick(m.id)}
-                    disabled={added}
-                    style={({ pressed }) => [
-                      styles.modalRow,
-                      added && styles.modalRowDisabled,
-                      pressed && !added && styles.pressed,
-                    ]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.modalRowText}>{m.label}</Text>
-                      {tag ? <Text style={styles.modalRowSub}>{tag}</Text> : null}
-                    </View>
-                    {added ? <Text style={styles.modalAdded}>Added</Text> : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          ))}
+        <ScrollView
+          contentContainerStyle={[styles.modalList, { paddingBottom: spacing.lg + insets.bottom }]}
+        >
+          {groups.length === 0 ? (
+            <EmptyState
+              title="No bet types right now"
+              subtitle="Every market this builder offers is paused. A paused model still keeps the picks it already made."
+            />
+          ) : (
+            groups.map((group) => (
+              <View key={group.sport} style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>{group.sport}</Text>
+                {group.choices.map((choice) => {
+                  const present = choice.modelIds.filter((id) => alreadyAdded.has(id)).length;
+                  return (
+                    <BetTypeChoiceRow
+                      key={choice.key}
+                      choice={choice}
+                      present={present}
+                      onPick={onPick}
+                    />
+                  );
+                })}
+              </View>
+            ))
+          )}
         </ScrollView>
       </View>
     </Modal>
+  );
+}
+
+function BetTypeChoiceRow({
+  choice,
+  present,
+  onPick,
+}: {
+  choice: BetTypeChoice;
+  present: number;
+  onPick: (modelIds: string[]) => void;
+}) {
+  const status = choiceAddedLabel(present, choice.modelIds.length);
+  const complete = status === 'Added';
+  const label = status
+    ? `${choice.sport} ${choice.label}. ${choice.subtitle}. ${status}`
+    : `${choice.sport} ${choice.label}. ${choice.subtitle}`;
+  return (
+    <Pressable
+      onPress={() => onPick(choice.modelIds)}
+      disabled={complete}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: complete }}
+      style={({ pressed }) => [styles.modalRow, pressed && !complete && styles.pressed]}
+    >
+      <View style={[styles.modalRowBody, complete && styles.modalRowDisabled]}>
+        <Text style={styles.modalRowText}>{choice.label}</Text>
+        <Text style={styles.modalRowSub}>{choice.subtitle}</Text>
+      </View>
+      {status ? <Text style={styles.modalAdded}>{status}</Text> : null}
+    </Pressable>
   );
 }
 
@@ -1057,68 +1029,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.separator,
     marginVertical: spacing.md,
   },
-  numRow: { flexDirection: 'row', gap: spacing.md },
-  numField: { flex: 1 },
-
-  // Scroll pickers (line value, public backing)
-  pickerBox: {
+  rangeHeadRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
+    gap: spacing.sm,
   },
-  pickerValue: {
-    fontSize: font.size.body,
+  rangeLive: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
     fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
   },
-  pickerPlaceholder: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-  },
-  sheetBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  sheet: {
-    maxHeight: '65%',
-    backgroundColor: colors.bgElevated,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    paddingBottom: spacing.lg,
-  },
-  sheetHead: {
-    flexDirection: 'row',
+  rangeClear: {
+    minWidth: 44,
+    minHeight: 44,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.separator,
+    justifyContent: 'center',
   },
-  sheetTitle: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  pickerRow: {
-    height: PICKER_ROW_HEIGHT,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-  },
-  pickerRowText: {
-    fontSize: font.size.body,
-    color: colors.textPrimary,
-  },
-  pickerRowTextOn: {
-    fontSize: font.size.body,
+  rangeClearText: {
+    fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
@@ -1154,7 +1082,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   previewCaption: {
-    fontSize: 10,
+    fontSize: font.size.nano,
     color: colors.textTertiary,
     marginTop: 1,
   },
@@ -1192,28 +1120,40 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.7 },
   modalContainer: { flex: 1, backgroundColor: colors.bg },
   modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    minHeight: 52,
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
     backgroundColor: colors.bgCard,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
   modalTitle: {
+    textAlign: 'center',
+    // Clears the Cancel button. The title truncates inside this inset
+    // instead of sliding under it when Dynamic Type grows.
+    marginHorizontal: 100,
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  modalCancelBtn: {
+    position: 'absolute',
+    left: spacing.lg,
+    top: 0,
+    bottom: 0,
+    zIndex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   modalCancel: {
     fontSize: font.size.body,
     color: colors.textSecondary,
   },
   modalSection: { marginBottom: spacing.lg },
+  modalList: { padding: spacing.lg },
   modalSectionTitle: {
     fontSize: font.size.footnote,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     fontWeight: font.weight.semibold,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
@@ -1229,6 +1169,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   modalRowDisabled: { opacity: 0.45 },
+  modalRowBody: { flex: 1 },
   modalRowText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
@@ -1236,12 +1177,13 @@ const styles = StyleSheet.create({
   },
   modalRowSub: {
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   modalAdded: {
     fontSize: font.size.caption,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     fontWeight: font.weight.semibold,
+    marginLeft: spacing.sm,
   },
 });

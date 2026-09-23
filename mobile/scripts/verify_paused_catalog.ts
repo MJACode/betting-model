@@ -19,7 +19,9 @@ import {
   MODEL_META,
   BET_TYPE_GROUPS,
   betTypeGroups,
+  betTypePickerGroups,
   betTypeStatusSuffix,
+  choiceAddedLabel,
   withdrawnRulesEmpty,
 } from '../src/lib/modelMeta';
 import {
@@ -62,6 +64,48 @@ check('an active game model is still a bet type you can build on',
 check('an active batter prop is still a bet type you can build on',
   pickerIds.includes('mlb_prop_batter_runs'));
 
+{
+  const choiceLabels = betTypePickerGroups().flatMap((g) => g.choices.map((c) => c.label));
+  const allowed = new Set(['ML', 'Run line', 'Spread', 'Puck line', 'Player props']);
+  check('picker rows are the short bet types, never a model strategy name',
+    choiceLabels.length > 0 && choiceLabels.every((label) => allowed.has(label) && !label.includes('(')));
+  const ids = betTypePickerGroups().flatMap((g) => g.choices.flatMap((c) => c.modelIds));
+  check('a picker choice never carries a paused or retired model',
+    ids.every((id) => !isModelPaused(id) && !isModelRetired(id)));
+  check('totals, First-5 and live markets are not a picker row',
+    ids.every((id) => !id.includes('_f5_') && !id.includes('_live_') && !id.includes('over_under') && !id.includes('_total')));
+  const row = (sport: string) =>
+    betTypePickerGroups().find((g) => g.sport === sport)?.choices.map((c) => `${c.label}|${c.subtitle}`) ?? [];
+  check('MLB is ML, Run line, Player props',
+    row('MLB').join(',') === 'ML|Moneyline,Run line|±1.5,Player props|All player markets');
+  const mlbLine = betTypePickerGroups().find((g) => g.sport === 'MLB')?.choices.find((c) => c.slot === 'line');
+  check('MLB Run line maps to the active spread model, not the paused runline',
+    mlbLine?.modelIds.includes('mlb_spread_market') === true && !mlbLine?.modelIds.includes('mlb_runline'));
+  const mlbProps = betTypePickerGroups().find((g) => g.sport === 'MLB')?.choices.find((c) => c.slot === 'props');
+  check('MLB Player props maps to live prop models and not a retired one',
+    mlbProps?.modelIds.includes('mlb_prop_batter_runs') === true &&
+      mlbProps?.modelIds.includes('mlb_prop_batter_walks') === true &&
+      !mlbProps?.modelIds.includes('mlb_prop_batter_hr'));
+  check('NFL has no moneyline model, so it does not invent an ML row',
+    row('NFL').join(',') === 'Spread|Spread line,Player props|All player markets');
+  check('NBA keeps all three, with Spread rather than a strategy name',
+    row('NBA').join(',') === 'ML|Moneyline,Spread|Spread line,Player props|All player markets');
+  check('NCAAF is Spread only — its moneyline is paused and it has no prop model',
+    row('NCAAF').join(',') === 'Spread|Spread line');
+  check('WNBA omits Spread while that model is paused',
+    !row('WNBA').some((label) => label.startsWith('Spread')));
+  check('NHL line is Puck line, not Spread',
+    row('NHL').join(',') === 'ML|Moneyline,Puck line|±1.5');
+  check('UFC is moneyline only',
+    row('UFC').join(',') === 'ML|Moneyline');
+  check('golf is not a picker section',
+    !betTypePickerGroups().some((g) => g.sport === 'GOLF'));
+  check('a slot is Added only when every model is already a rule',
+    choiceAddedLabel(0, 9) === null &&
+      choiceAddedLabel(6, 9) === '6 of 9 added' &&
+      choiceAddedLabel(9, 9) === 'Added');
+}
+
 // ── Stats add-pick ──────────────────────────────────────────────────────────
 const hitsStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'hits') ?? null;
 const tbStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'total_bases') ?? null;
@@ -93,6 +137,12 @@ check('betTypeGroups re-reads isModelPaused (moneyline drops when the server pau
   !betTypeGroups().flatMap((g) => g.options.map((o) => o.id)).includes('mlb_moneyline'));
 check('a model the server leaves live still appears',
   betTypeGroups().flatMap((g) => g.options.map((o) => o.id)).includes('mlb_prop_batter_runs'));
+{
+  const mlb = betTypePickerGroups().find((g) => g.sport === 'MLB');
+  check('a server pause drops the ML row and keeps the live prop row',
+    !mlb?.choices.some((c) => c.slot === 'ml') &&
+      mlb?.choices.some((c) => c.slot === 'props' && c.modelIds.includes('mlb_prop_batter_runs')) === true);
+}
 setServerThresholds(null);
 check('clearing the server store restores the bundled pause set',
   !isModelPaused('mlb_moneyline') && isModelPaused('mlb_prop_batter_hits'));
