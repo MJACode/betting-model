@@ -1220,6 +1220,98 @@ export async function fetchUpcomingNcaafPicks(
   });
 }
 
+/**
+ * Upcoming NHL picks AFTER `afterDate` through `throughDate`.
+ *
+ * The scorer prices NHL up to config.GAME_SCORE_AHEAD_DAYS (7) — the same
+ * outer bound as MLB, NBA and WNBA — so a slate whose line has opened inside
+ * that window exists before game day. The Today board was same-day for NHL,
+ * which left the sport chip muted and those picks invisible until
+ * `game_date`. Same enrichment shape as fetchUpcomingNflPicks.
+ *
+ * Signals are ordered first: NONE rows must not be able to push a BET off
+ * the cap. Odds reads are scoped by the `NHL_{date}_{away}_{home}` game_id
+ * prefix because neither odds view carries a sport column.
+ */
+export async function fetchUpcomingNhlPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes, latestOddsRes, allBooksRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'NHL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('signal_type', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'NHL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    supabase
+      .from('v_latest_dk_odds')
+      .select(LATEST_ODDS_COLUMNS)
+      .like('game_id', 'NHL_%')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): a week of NHL across every book is over the
+    // 1,000-row response cap once the slate is full; wrapped so a failure
+    // stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'NHL_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  // Enrichment only — a failure shouldn't take down the NHL board.
+  const latestOdds = (
+    latestOddsRes.error ? [] : (latestOddsRes.data ?? [])
+  ) as unknown as LatestDkOddsRow[];
+  const booksByGameMarket = groupBooksByGameMarket(
+    (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as unknown as OddsByBookRow[],
+  );
+
+  const picks = (picksRes.data ?? []) as unknown as Pick[];
+  const games = (gamesRes.data ?? []) as unknown as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      ...bookEnrichment(pick, booksByGameMarket),
+    };
+  });
+}
+
 // Live (in-play) picks: is_live=true rows for games that are still in progress
 // (commence_time has passed, no final score yet).
 //
