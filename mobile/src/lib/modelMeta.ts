@@ -852,7 +852,6 @@ export function betTypePickerGroups(): Array<{ sport: BetTypeSport; choices: Bet
 export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOption[] }> =
   betTypeGroups();
 
-/** "MLB · Moneyline" — how a bet-type rule is titled everywhere it renders. */
 /** The one sentence every surface uses for a rule on a retired bet type — the
  *  Models card, the editor's RuleRow, the detail rule line and its empties —
  *  so they cannot drift into three phrasings of the same state. */
@@ -886,6 +885,15 @@ export function withdrawnRulesEmpty(
   return null;
 }
 
+/**
+ * How a custom-model rule is titled on the editor, the detail screen, and the
+ * Models list. A model the picker offers uses that row's short name
+ * ("MLB · Run line"), never MODEL_META.longLabel. A market the picker does
+ * not offer keeps its long name.
+ */
 export function betTypeLabel(modelId: string): string {
-  return `${sportOfModel(modelId)} · ${modelLong(modelId)}`;
+  const sport = sportOfModel(modelId);
+  const slot = betSlotForModel(modelId, modelCategory(modelId));
+  if (!slot) return `${sport} · ${modelLong(modelId)}`;
+  return `${sport} · ${choiceCopy(sport, slot).label}`;
 }

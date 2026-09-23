@@ -72,6 +72,11 @@ def test_the_custom_model_picker_is_three_bet_types():
     assert "{ label: 'Player props', subtitle: 'All player markets' }" in meta
     collapse = _block(meta, "export function betTypePickerGroups", "\n}")
     assert "betTypeGroups()" in collapse
+    # Rule chrome (editor, detail, Models list) all call betTypeLabel. A slot
+    # must title itself with the picker's short name, not longLabel.
+    titled = _block(meta, "export function betTypeLabel", "\n}")
+    assert "betSlotForModel" in titled
+    assert "choiceCopy" in titled
 
     screen = _read(MOBILE / "src" / "screens" / "ModelEditScreen.tsx")
     assert "betTypePickerGroups" in screen

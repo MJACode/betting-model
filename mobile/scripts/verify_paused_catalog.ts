@@ -19,6 +19,7 @@ import {
   MODEL_META,
   BET_TYPE_GROUPS,
   betTypeGroups,
+  betTypeLabel,
   betTypePickerGroups,
   betTypeStatusSuffix,
   choiceAddedLabel,
@@ -100,6 +101,22 @@ check('an active batter prop is still a bet type you can build on',
     row('UFC').join(',') === 'ML|Moneyline');
   check('golf is not a picker section',
     !betTypePickerGroups().some((g) => g.sport === 'GOLF'));
+  check('a slot rule is titled in picker language, with no strategy parenthetical',
+    betTypeLabel('mlb_spread_market') === 'MLB · Run line' &&
+      betTypeLabel('nfl_opener_spread') === 'NFL · Spread' &&
+      betTypeLabel('ncaaf_spread') === 'NCAAF · Spread' &&
+      betTypeLabel('ncaaf_spread_premium') === 'NCAAF · Spread' &&
+      betTypeLabel('nhl_puckline') === 'NHL · Puck line' &&
+      betTypeLabel('mlb_moneyline') === 'MLB · ML' &&
+      betTypeLabel('nba_spread') === 'NBA · Spread' &&
+      betTypeLabel('wnba_moneyline') === 'WNBA · ML' &&
+      betTypeLabel('mlb_prop_batter_runs') === 'MLB · Player props' &&
+      betTypeLabel('nfl_prop_market') === 'NFL · Player props' &&
+      !betTypeLabel('mlb_spread_market').includes('(') &&
+      !betTypeLabel('nfl_opener_spread').includes('('));
+  check('a market the picker does not offer keeps its long name',
+    betTypeLabel('mlb_f5_moneyline') === 'MLB · First 5 Moneyline' &&
+      betTypeLabel('mlb_total_market') === 'MLB · Total Runs (market-relative)');
   check('a slot is Added only when every model is already a rule',
     choiceAddedLabel(0, 9) === null &&
       choiceAddedLabel(6, 9) === '6 of 9 added' &&
