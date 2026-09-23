@@ -177,12 +177,22 @@ DEPLOY_THRESHOLD = 2.0
 LEAD_LO_DAYS = 2.0
 LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 
-# THE SOFT NUMBER MUST ACTUALLY BE STALE: HELD FOR AT LEAST THIS LONG.
+# A FRESH NUMBER IS LABELLED, NOT BLOCKED. (mike, 2026-09-22.)
 #
 # The rule's premise is a STALE number -- a soft book still carrying a spread it
 # hung days ago while Pinnacle has moved. Until 2026-09-22 the code measured only
-# the deviation NOW and never asked how long the soft book had held its point,
-# so a number sixty seconds old passed as "stale".
+# the deviation NOW and never asked how long the soft book had held its point.
+# The first fix on that day was a gate: wait an hour before taking a number that
+# had just appeared. mike rejected it -- "You do realize you're trying to win
+# bets and money right?" -- and he is right about what the gate did: a book
+# that hangs a wrong number for four minutes is the BEST case this model can
+# find, not noise, IF the number is placeable, and the gate guaranteed the model
+# never caught one. So: the age of the soft number is measured and put ON THE
+# PICK ("NEW 0m"), the pick goes out at once, and whether fresh numbers are
+# placeable is recorded per pick (scripts/mark_placeable.py) so that question
+# is answered by the record rather than by a filter. Speed is the other half:
+# the poll runs every minute for real and posts to Discord inside the tick
+# (scheduler.run_nfl_opener_card).
 #
 # Measured that day (docs/sessions/2026-09.md). The Odds API's own snapshots put
 # BetMGM on TEN @ NYG at -3.0 for hours, -2.5 from 21:24:26Z, NYG -1 (-105) /
@@ -205,11 +215,11 @@ LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 #     41% of pre-game minutes over those 14 days, so "zero" is a lower bound.
 #   * Every other >= 2-point pre-game deviation this season lasted HOURS:
 #     CLE @ JAX 2026-09-07 (Pinnacle -7.5 -> -9.5, three soft books stayed at
-#     -7.5 for 4 h+ -- the classic stale case, fires instantly under this gate
-#     because the soft number is old); BUF @ HOU 2026-09-07 (Fanatics moved to
-#     HOU -1 against Pinnacle +1 and held it ~20 h with DK and MGM following --
-#     this gate would have fired it an hour later at the same number, and it
-#     won); ATL @ PIT 2026-09-10 (DK -5.5 vs -3.5 for hours).
+#     -7.5 for 4 h+ -- the classic stale case; the soft number is old and the
+#     pick carries no tag); BUF @ HOU 2026-09-07 (Fanatics moved to HOU -1
+#     against Pinnacle +1 and held it ~20 h with DK and MGM following -- it
+#     would have read "NEW 0m" at the fire, and it won); ATL @ PIT 2026-09-10
+#     (DK -5.5 vs -3.5 for hours).
 #   * The one other sub-hour episode found is ALSO BetMGM: CHI @ CAR
 #     2026-09-08, CAR +1 from 03:24:43Z (feed snapshots) against +3 at every
 #     other book and Pinnacle +2.5, gone by 03:42Z -- 6 to 17 minutes, in an
@@ -224,23 +234,18 @@ LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 # n=41 at -1.7%, new-since n=87 at +7.6%, both intervals spanning zero, every
 # sub-class n <= 51. At 6-hourly resolution a 17-minute episode is seen 5% of
 # the time, so the backtest contains essentially no glitches to grade and
-# cannot rank a filter for them. This gate rests on the measured glitch and on
-# the survival numbers above, not on a backtest return.
+# cannot rank a filter for them -- which is the other reason the age is a
+# label and not a filter: the record of placeable-or-not on fresh numbers
+# (scripts/mark_placeable.py) is the only measurement that can settle it.
 #
-# WHO MOVED MATTERS FOR SPEED, NOT FOR THE RULE. The gate measures the age of
-# the SOFT number. When Pinnacle is the mover (the mechanism the rule was built
-# on) the soft number is hours or days old and the bet fires on the first tick
-# after Pinnacle moves, exactly as before. Only a deviation the soft book
-# created by moving itself waits, and it waits MIN_HELD_MINUTES from its own
-# move. 60 is a choice, not a measurement: the one glitch lasted 17 minutes
-# (n=1); 30 would have caught it with 13 minutes to spare, 60 with 43. In the
-# backtest the both-moved-at-once class (soft partially lagging a Pinnacle move
-# inside the same window) is n=9 at -16.9%, so the case a plain age gate slows
-# is small and not one the record argues for. `held_minutes` measures it;
-# `select_opener_bets` and `evaluate_board` both apply it when given the prior
-# observations, and the card always passes them -- an EMPTY history fires
-# nothing, loudly.
-MIN_HELD_MINUTES = 60.0
+# THE LABEL. `held_minutes` measures how long the soft book has quoted its
+# current point. A number under FRESH_MINUTES old is a possible book error and
+# the pick says so ("NEW 3m"); an unknown age (no history at all, e.g. the
+# first tick after a redeploy with Supabase unreachable) says "age unknown";
+# an old number carries no tag. Nothing is skipped. `select_opener_bets` and
+# `evaluate_board` both carry the age when given the prior observations, and
+# the card always passes them.
+FRESH_MINUTES = 60.0
 
 # Pooled validated ATS at the deployment threshold. Kept for reference and as
 # the fallback: this is what the card used for EVERY bet until 2026-08-22.
@@ -364,7 +369,7 @@ def held_minutes(prior, home: str, away: str, book: str, point: float,
                  now) -> float | None:
     """
     How long `book` has been quoting `point` as the HOME spread on this game,
-    in minutes, from earlier observations. See MIN_HELD_MINUTES for why.
+    in minutes, from earlier observations. See FRESH_MINUTES for why.
 
     `prior` is a long frame of observations: observed_at (UTC), home, away,
     book, point. Any source will do -- the card unions its own minute-level
@@ -375,8 +380,8 @@ def held_minutes(prior, home: str, away: str, book: str, point: float,
     Returns None when the book has never been seen at this point (no history
     for it at all, or only at other numbers), 0.0 when it has but was last
     seen elsewhere (the number is brand new), otherwise minutes since the
-    first observation of the current run at this point. None and 0.0 both
-    fail the gate; the distinction is for the audit trail.
+    first observation of the current run at this point. None reads as "age
+    unknown" on the pick and 0.0 as "NEW 0m"; nothing is decided on either.
     """
     if prior is None or len(prior) == 0:
         return None
@@ -406,6 +411,24 @@ def held_minutes(prior, home: str, away: str, book: str, point: float,
     return float((now - since).total_seconds() / 60.0)
 
 
+def age_tag(held_min) -> str:
+    """The words a pick carries for the age of its number.
+
+    "NEW 3m" under FRESH_MINUTES (a possible book error: move fast, and record
+    whether it was placeable), "age unknown" when there is no history, "up 5h"
+    otherwise. One function, because the pick label, the printed card and the
+    audit-trail reason must all say the same thing.
+    """
+    if held_min is None or (isinstance(held_min, float) and held_min != held_min):
+        return "age unknown"
+    m = float(held_min)
+    if m < FRESH_MINUTES:
+        return f"NEW {m:.0f}m"
+    if m < 48 * 60:
+        return f"up {m / 60:.0f}h"
+    return f"up {m / 1440:.0f}d"
+
+
 def clean_board(frame: pd.DataFrame) -> pd.DataFrame:
     """The spreads rows this rule is allowed to look at.
 
@@ -430,8 +453,7 @@ def clean_board(frame: pd.DataFrame) -> pd.DataFrame:
 
 def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
                        threshold: float = DEPLOY_THRESHOLD,
-                       prior: pd.DataFrame | None = None, now=None,
-                       min_held_minutes: float = MIN_HELD_MINUTES) -> pd.DataFrame:
+                       prior: pd.DataFrame | None = None, now=None) -> pd.DataFrame:
     """
     Pure selection: long snapshot frame (snapshot_to_frame shape: one row per
     event x book x market x side with home/away sides, price, point) + the
@@ -440,12 +462,10 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
     Mirrors backtest_opener's "first" variant at this snapshot: qualifying
     books ranked by |dev| descending, top one taken per game.
 
-    `prior` is the history the stale-number gate reads (held_minutes). None
-    means NO gate -- the backtest and replay path, whose 6-hourly grid carries
-    the property implicitly. The live card ALWAYS passes a frame; an empty one
-    fires nothing. A soft book whose number fails the gate is skipped and the
-    next-largest deviation at another book is considered, exactly as a
-    too-small stake is.
+    `prior` is the observation history `held_minutes` reads; with it every bet
+    carries `held_min` (minutes the book has shown this number, None when
+    unknown). Without it (the backtest and replay path) `held_min` is None.
+    The age never changes WHICH bet is taken -- see FRESH_MINUTES.
     """
     sp = clean_board(frame)
     if sp.empty:
@@ -484,11 +504,6 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
         held = None
         if prior is not None:
             held = held_minutes(prior, r.home, r.away, r.book, float(r.point), now)
-            if held is None or held < min_held_minutes:
-                # The number appeared within the hour. That is not a stale
-                # opener, it is a book (or the feed) mid-move -- or a blip.
-                # MIN_HELD_MINUTES has the measured case.
-                continue
         side_line = r.point if bet_home else -r.point
         market_prob = american_to_prob(float(price))
         model_prob = model_prob_for_dev(r.dev)
@@ -532,8 +547,7 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
 
 def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
                    threshold: float = DEPLOY_THRESHOLD,
-                   prior: pd.DataFrame | None = None, now=None,
-                   min_held_minutes: float = MIN_HELD_MINUTES) -> list[dict]:
+                   prior: pd.DataFrame | None = None, now=None) -> list[dict]:
     """
     Model's current view of EVERY scheduled game on the board, qualifying or
     not. Feeds the locked-pick history; it never selects anything.
@@ -544,9 +558,8 @@ def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
     "deviation gone" is a bet the market has since corrected — expected, and
     exactly what this is for.
 
-    Applies the same stale-number gate as the selection when given `prior`,
-    with the same fall-through to the next-largest deviation, so the audit
-    trail never reads "qualifies" for a number the card would not take.
+    Given `prior`, a qualifying row's reason also says how long the soft book
+    has shown its number, so the audit trail reads the same age the pick does.
     """
     from data_ingest.pick_eval import eval_row
 
@@ -593,38 +606,17 @@ def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
                 current_price=int(best.price), **common))
             continue
 
+        age = ""
         if prior is not None:
-            chosen = None
-            first_unheld = None
-            for _, cand in soft.iterrows():
-                if abs(float(cand.dev)) < threshold:
-                    break
-                held = held_minutes(prior, g.home_team, g.away_team, cand.book,
-                                    float(cand.point), now)
-                if held is not None and held >= min_held_minutes:
-                    chosen = cand
-                    break
-                if first_unheld is None:
-                    first_unheld = (cand, held)
-            if chosen is None:
-                cand, held = first_unheld
-                out.append(eval_row(
-                    qualifies=False,
-                    reason=(f"deviation {float(cand.dev):+.2f} pts but {cand.book} "
-                            f"has shown {float(cand.point):+.1f} for "
-                            f"{0.0 if held is None else held:.0f} min "
-                            f"(needs {min_held_minutes:.0f})"),
-                    current_line=float(cand.point), current_book=cand.book,
-                    current_price=int(cand.price), **common))
-                continue
-            best = chosen
-            dev = float(best.dev)
+            held = held_minutes(prior, g.home_team, g.away_team, best.book,
+                                float(best.point), now)
+            age = " · " + age_tag(held)
 
         prob = model_prob_for_dev(dev)
         edge = prob - american_to_prob(float(best.price))
         out.append(eval_row(
             qualifies=edge > 0,
-            reason=(f"deviation {dev:+.2f} pts vs Pinnacle {pin_line:+.1f}"
+            reason=(f"deviation {dev:+.2f} pts vs Pinnacle {pin_line:+.1f}{age}"
                     if edge > 0 else
                     f"deviation {dev:+.2f} pts but the juice eats it ({edge*100:+.2f}pp)"),
             current_line=float(best.point), current_book=best.book,

@@ -948,11 +948,40 @@ def run_nfl_opener_card() -> None:
     if key:
         _run([sys.executable, "-m", "scripts.nfl_wind_publisher", "--opener"],
              "nfl-opener-publish")
+        # DISCORD FIRST, ALONE (mike, 2026-09-22: "it needs to be more real
+        # time"). Measured on the TEN @ NYG pick: the number appeared at
+        # 21:28:26Z, the card saw it at 21:29:00, the row was written at
+        # 21:29:01.7, and Discord got it at 21:29:41 -- 40 s spent in the full
+        # publish chain (threshold sync, opening signals, push, then Discord,
+        # behind another job's publish lock) on a number that lived four
+        # minutes. The Discord post is the thing a reader can act on, so it is
+        # made directly, in-process, before anything else in the chain; the
+        # ledger it writes keeps the full publish below from posting twice.
+        _post_opener_discord()
         # The card + publisher write the pick; this is what carries it to
-        # Discord and push. Without it a minute-cadence lock would still wait
-        # for the next :17 refresh pass to be announced, which throws away
-        # exactly the latency this job was created to buy.
+        # push and the CLV shadow track. Without it a minute-cadence lock
+        # would still wait for the next :17 refresh pass to be announced,
+        # which throws away exactly the latency this job was created to buy.
         _publish_new_signals("nfl-opener-poll")
+
+
+def _post_opener_discord() -> None:
+    """Post any just-written BET to its Discord channel, and nothing else.
+
+    `notify_discord_signals` is the same function the full publish calls -- same
+    thresholds, same started-game guard, same `push_sent` ledger, same
+    publisher lock -- so this adds no surface and cannot post anything the
+    pass would not. It only moves the Discord post to the front of the tick.
+    Never raises: a Discord failure must not stop the publish chain below,
+    which will try Discord again itself.
+    """
+    try:
+        from tracking.discord_notifier import notify_discord_signals
+        n = notify_discord_signals()
+        if n:
+            log.info("opener: %d signal(s) to Discord inside the tick", n)
+    except Exception:  # noqa: BLE001
+        log.exception("opener: in-tick Discord post crashed")
 
 
 def run_nfl_opener_poll() -> None:

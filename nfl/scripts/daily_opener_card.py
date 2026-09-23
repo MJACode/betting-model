@@ -117,10 +117,9 @@ def load_window_schedule(lo_days: float = LEAD_LO_DAYS,
     return g
 
 
-# How far back the stale-number gate looks. A day covers the longest hold the
-# gate needs to see many times over (MIN_HELD_MINUTES is one hour); the
-# Supabase side is compressed to change points, so the window's cost is a
-# server-side scan, not rows over the wire.
+# How far back the number-age label looks. A day is enough to tell "NEW" from
+# "up 5h" from "up 1d"; the Supabase side is compressed to change points, so
+# the window's cost is a server-side scan, not rows over the wire.
 PRIOR_HOURS = 24.0
 
 PRIOR_COLS = ["observed_at", "home", "away", "book", "point"]
@@ -130,7 +129,7 @@ def load_prior_observations(sched: pd.DataFrame, now=None,
                             hours: float = PRIOR_HOURS) -> pd.DataFrame:
     """
     Every spread quote seen on the watched games in the last `hours`, for the
-    stale-number gate (models/opener_spread.MIN_HELD_MINUTES).
+    number-age label on each pick (models/opener_spread.FRESH_MINUTES).
 
     Two sources, unioned, because neither is complete on its own:
 
@@ -143,14 +142,13 @@ def load_prior_observations(sched: pd.DataFrame, now=None,
          refresh passes, every bettable book, roughly hourly). Survives a
          redeploy.
 
-    An EMPTY frame is a valid answer and means nothing can clear the gate this
-    tick; the caller says so loudly. A failing source is a warning, never a
-    crash -- but note the asymmetry: with no history at all the card fires
-    nothing, which is the conservative side. `odds.snapshot_at` is TEXT in two
+    An EMPTY frame is a valid answer and means every pick this tick reads
+    "age unknown"; the caller says so loudly. A failing source is a warning,
+    never a crash, and never a reason not to bet. `odds.snapshot_at` is TEXT in two
     ISO shapes ('...Z' and '...+00:00'); both share the 'YYYY-MM-DDTHH:MM:SS'
     prefix, so the bound is compared as text and cast in the query.
 
-    Only the books the gate can ever be asked about are loaded (the bettable
+    Only the books the label can ever be asked about are loaded (the bettable
     set plus Pinnacle), and the Supabase side returns CHANGE POINTS -- each
     (game, book)'s first row, every row whose number differs from the one
     before, and its latest row -- which is all `held_minutes` needs. The first
@@ -237,7 +235,8 @@ def load_prior_observations(sched: pd.DataFrame, now=None,
                   file=sys.stderr)
             counts["db"] = "unavailable"
 
-    print(f"prior spread observations for the gate: {counts}", file=sys.stderr)
+    print(f"prior spread observations for the number-age label: {counts}",
+          file=sys.stderr)
     if not parts:
         return pd.DataFrame(columns=PRIOR_COLS)
     out = pd.concat(parts, ignore_index=True).dropna(subset=["observed_at", "point"])
@@ -305,16 +304,15 @@ def main() -> int:
     except Exception as exc:
         print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
 
-    # The stale-number gate's history. Loaded AFTER the board dump above so
-    # this tick is in it too, and passed to BOTH the evaluation and the
-    # selection so the audit trail and the card agree. Empty means nothing
-    # fires this tick -- said out loud rather than looking like a quiet board.
+    # The history the number-age label reads. Loaded AFTER the board dump above
+    # so this tick is in it too, and passed to BOTH the evaluation and the
+    # selection so the audit trail and the card say the same age. Empty means
+    # every pick this tick reads "age unknown" -- said out loud.
     now = pd.Timestamp.now(tz="UTC")
     prior = load_prior_observations(watch, now)
     if prior.empty:
         print("WARNING: no prior spread observations for the watched games -- "
-              f"nothing can clear the {opener_spread.MIN_HELD_MINUTES:.0f}-minute "
-              "stale-number gate this tick", file=sys.stderr)
+              "any pick this tick will carry 'age unknown'", file=sys.stderr)
 
     # Record the model's view of EVERY game on the board, qualifying or not.
     # This is what lets a locked pick be told "the deviation is gone" without
@@ -339,8 +337,9 @@ def main() -> int:
     print(f"\n=== OPENER SPREAD CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")
     bets = bets.copy()
     bets["stake_amt"] = (bets.stake_pct / 100 * a.bankroll).round(2)
+    bets["line_age"] = [opener_spread.age_tag(h) for h in bets.held_min]
     cols = ["matchup", "kick_utc", "bet_team", "side_line", "book", "price",
-            "dev", "held_min", "model_prob", "edge_pp", "edge_tier", "units",
+            "dev", "line_age", "model_prob", "edge_pp", "edge_tier", "units",
             "stake_amt"]
     print(bets[cols].to_string(index=False))
     tiers = bets.edge_tier.value_counts().to_dict()
