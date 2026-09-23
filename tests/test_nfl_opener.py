@@ -739,9 +739,11 @@ class TestStaleNumberGate:
         assert len(card.select_opener_bets(board, sched, prior=prior,
                                            now=_ts("2026-09-07 01:37"))) == 0
         # CHI @ CAR, locked 2026-09-08 03:25Z under the 1.0-pt rule of the day:
-        # betmgm CAR +1 against Pinnacle CAR +2.5. The archive has betmgm at
-        # CAR +3 through 03:00Z and never records the +1 at all; how long it
-        # lasted cannot be established. New at the fire tick: no bet yet.
+        # betmgm CAR +1 against Pinnacle CAR +2.5. The feed's own snapshots
+        # (nfl/data/odds_cache) have MGM at +3 (-115) at 03:20:36Z, +1 (-112)
+        # from 03:24:43Z, +1 (-125) at 03:30:14Z, and the archive has +3 again
+        # from 03:42Z: a second MGM episode of the same shape as TEN @ NYG,
+        # 6-17 minutes long, in an archive gap. New at the fire tick: no bet.
         g = dict(home="CAR", away="CHI", event="chi_car")
         board = _frame(_both_sides("pinnacle", 2.5, -110, -110, **g)
                        + _both_sides("betmgm", 1.0, -108, -112, **g))

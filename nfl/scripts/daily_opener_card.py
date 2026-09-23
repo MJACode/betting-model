@@ -136,7 +136,7 @@ def load_prior_observations(sched: pd.DataFrame, now=None,
 
       1. This worker's own board dumps (`data/cards/board_<date>.csv`, today
          and yesterday) -- minute resolution, free, but on the worker's
-         ephemeral disk, so a redeploy starts them from empty (eight deploys on
+         ephemeral disk, so a redeploy starts them from empty (seven deploys on
          2026-09-22 alone).
       2. Supabase: `nfl_odds_history` (the archive those dumps are flushed
          into, hourly at best and with gaps) and `odds` (the platform's own

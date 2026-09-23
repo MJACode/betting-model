@@ -199,8 +199,10 @@ LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 #   * Pre-game (>= 48 h before kickoff), 14 days of minute-level archive, eight
 #     bettable books plus Pinnacle: ZERO one-tick >= 2-point blips at any book
 #     (an earlier census that said 17-37 per book was counting in-play ticks).
-#     The MGM episode is the only sub-hour deviation seen this season, and it
-#     sits in an archive gap.
+#     The MGM episode is the only sub-hour deviation seen this season (the
+#     archive received its ticks hours late: -2.5 to 21:27, -1.0 at 21:29 for
+#     one tick, +1.0 from 21:31 to 21:43, -3.0 from 21:45). The archive holds
+#     41% of pre-game minutes over those 14 days, so "zero" is a lower bound.
 #   * Every other >= 2-point pre-game deviation this season lasted HOURS:
 #     CLE @ JAX 2026-09-07 (Pinnacle -7.5 -> -9.5, three soft books stayed at
 #     -7.5 for 4 h+ -- the classic stale case, fires instantly under this gate
@@ -208,6 +210,11 @@ LEAD_HI_DAYS = float(os.environ.get("NFL_OPENER_MAX_LEAD_DAYS", "10"))
 #     HOU -1 against Pinnacle +1 and held it ~20 h with DK and MGM following --
 #     this gate would have fired it an hour later at the same number, and it
 #     won); ATL @ PIT 2026-09-10 (DK -5.5 vs -3.5 for hours).
+#   * The one other sub-hour episode found is ALSO BetMGM: CHI @ CAR
+#     2026-09-08, CAR +1 from 03:24:43Z (feed snapshots) against +3 at every
+#     other book and Pinnacle +2.5, gone by 03:42Z -- 6 to 17 minutes, in an
+#     archive gap, and it locked a pick under the 1.0-point rule of the day.
+#     Two MGM episodes in 15 days, both under 20 minutes, both a pick.
 #   * Backtest, 2020-2025, bettable books, |dev| >= 2.0, first qualifying
 #     6-hourly snapshot: the soft number was still there at the NEXT snapshot
 #     (median 6 h later) for 75% of the 128 selected bets.
