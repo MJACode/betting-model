@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-24 | [2026-09](./2026-09.md) | 2026-09-24, NCAAF Spread in the custom-model picker writes ncaaf_spread only. ncaaf_spread_premium is not added (Chief of Staff). PR #825 |
 | 2026-09-24 | [2026-09](./2026-09.md) | 2026-09-24, custom-model range slider: moving one thumb no longer snaps a legacy off-list value on the other end. NCAAF Spread mapping unchanged. PR #825 |
 | 2026-09-23 | [2026-09](./2026-09.md) | 2026-09-23, custom-model rule titles stay in picker language (ML / Run line / Puck line / Spread / Player props) instead of MODEL_META.longLabel. PR #825 |
 | 2026-09-23 | [2026-09](./2026-09.md) | 2026-09-23, custom-model builder: bet-type sheet is ML / Run line or Spread or Puck line / Player props per sport, mapped onto the active model_ids; price, line, and public backing are dual-handle sliders with Any at the unbound ends. UI only. PR #825 |

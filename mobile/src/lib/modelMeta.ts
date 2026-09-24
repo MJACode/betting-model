@@ -792,6 +792,10 @@ const BET_TYPE_SLOT_ORDER: BetTypeSlot[] = ['ml', 'line', 'props'];
  */
 export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | null {
   if (id.includes('_live_') || id.includes('_f5_')) return null;
+  // NCAAF Spread writes ncaaf_spread only. The premium band is the same
+  // market at a higher cut; adding it made a second rule with the same
+  // title. Chief of Staff, 2026-09-24.
+  if (id === 'ncaaf_spread_premium') return null;
   if (type !== 'game') return 'props';
   if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
   if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';

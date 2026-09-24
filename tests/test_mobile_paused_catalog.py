@@ -77,6 +77,10 @@ def test_the_custom_model_picker_is_three_bet_types():
     titled = _block(meta, "export function betTypeLabel", "\n}")
     assert "betSlotForModel" in titled
     assert "choiceCopy" in titled
+    # NCAAF Spread writes ncaaf_spread only. Premium stays out of the slot
+    # so the row cannot add a second rule with the same title.
+    slot = _block(meta, "export function betSlotForModel", "\n}")
+    assert "id === 'ncaaf_spread_premium'" in slot
 
     screen = _read(MOBILE / "src" / "screens" / "ModelEditScreen.tsx")
     assert "betTypePickerGroups" in screen

@@ -93,6 +93,9 @@ check('an active batter prop is still a bet type you can build on',
     row('NBA').join(',') === 'ML|Moneyline,Spread|Spread line,Player props|All player markets');
   check('NCAAF is Spread only — its moneyline is paused and it has no prop model',
     row('NCAAF').join(',') === 'Spread|Spread line');
+  const ncaafLine = betTypePickerGroups().find((g) => g.sport === 'NCAAF')?.choices.find((c) => c.slot === 'line');
+  check('NCAAF Spread maps to ncaaf_spread only, not the premium band',
+    ncaafLine?.modelIds.join(',') === 'ncaaf_spread');
   check('WNBA omits Spread while that model is paused',
     !row('WNBA').some((label) => label.startsWith('Spread')));
   check('NHL line is Puck line, not Spread',
@@ -105,7 +108,6 @@ check('an active batter prop is still a bet type you can build on',
     betTypeLabel('mlb_spread_market') === 'MLB · Run line' &&
       betTypeLabel('nfl_opener_spread') === 'NFL · Spread' &&
       betTypeLabel('ncaaf_spread') === 'NCAAF · Spread' &&
-      betTypeLabel('ncaaf_spread_premium') === 'NCAAF · Spread' &&
       betTypeLabel('nhl_puckline') === 'NHL · Puck line' &&
       betTypeLabel('mlb_moneyline') === 'MLB · ML' &&
       betTypeLabel('nba_spread') === 'NBA · Spread' &&
@@ -116,7 +118,8 @@ check('an active batter prop is still a bet type you can build on',
       !betTypeLabel('nfl_opener_spread').includes('('));
   check('a market the picker does not offer keeps its long name',
     betTypeLabel('mlb_f5_moneyline') === 'MLB · First 5 Moneyline' &&
-      betTypeLabel('mlb_total_market') === 'MLB · Total Runs (market-relative)');
+      betTypeLabel('mlb_total_market') === 'MLB · Total Runs (market-relative)' &&
+      betTypeLabel('ncaaf_spread_premium') === 'NCAAF · Spread (Opener, High Conviction)');
   check('a slot is Added only when every model is already a rule',
     choiceAddedLabel(0, 9) === null &&
       choiceAddedLabel(6, 9) === '6 of 9 added' &&
