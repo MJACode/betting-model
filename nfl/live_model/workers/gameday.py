@@ -30,7 +30,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from ..models import pass_attempt_bias as pab
+from ..models import rush_attempt_pace as rap
 from ..recorder import JsonlRecorder
 from ..state import from_extract
 from ..config import (
@@ -117,6 +117,10 @@ class GameTracker:
     # The EXTRACTED state dict this tick, from whichever host answered. Both
     # feed paths store the same shape here so _state_from has one input.
     payload: dict | None = None
+    # Carries so far this game, keyed by normalised player name. The model
+    # refuses to price a player who is missing from here, so an empty map
+    # costs bets and can never cause a wrong one.
+    accrued: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
 
     def due(self, kind: str, now: float, triggered: bool = False) -> bool:
@@ -126,6 +130,28 @@ class GameTracker:
             return now - self.last_deriv >= POLL_DERIVATIVE_SEC
         cadence = POLL_PROP_TRIGGERED_SEC if triggered else POLL_PROP_SEC
         return now - self.last_prop >= cadence
+
+
+def _devig_under(under_price: float, over_price: float) -> float | None:
+    """The book's own under probability with its margin removed.
+
+    Proportional de-vig: both sides' implied probabilities are scaled to sum to
+    one. On these markets the hold averages 6.6%, so pricing against the raw
+    implied number instead would credit the model with the book's entire margin
+    and every quote would look like an edge.
+    """
+    def implied(american: float) -> float | None:
+        if american is None:
+            return None
+        a = float(american)
+        if a == 0:
+            return None
+        return -a / (-a + 100.0) if a < 0 else 100.0 / (a + 100.0)
+
+    u, o = implied(under_price), implied(over_price)
+    if u is None or o is None or (u + o) <= 0:
+        return None
+    return u / (u + o)
 
 
 class GamedayWorker:
@@ -140,7 +166,7 @@ class GamedayWorker:
         # times over for eight markets nothing scores. Derived from the lane
         # rather than written out, so adding a second lane cannot forget to
         # buy its market and a cut lane cannot keep costing money.
-        self.prop_markets = tuple(dict.fromkeys([pab.MARKET]))
+        self.prop_markets = tuple(dict.fromkeys([rap.MARKET]))
         self._anchor_explained = False
         self._anchor_misses = 0
         self.odds = odds_client
@@ -233,6 +259,9 @@ class GamedayWorker:
                 # that answers the Railway worker, so this was the whole lane.
                 tr.payload = parsed
                 tr.state = self._state_from(tr, eid)
+                # Carries so far. `parse_core_event` builds this while the
+                # core fetcher is still in scope; the worker only reads it.
+                tr.accrued = parsed.get("rushing_accrued") or {}
                 hunting, why = self._hunt_decision(parsed)
                 if hunting:
                     summary["hunting"] += 1
@@ -262,6 +291,14 @@ class GamedayWorker:
                 summary["errors"].append(f"unparsed:{eid}")
                 continue
             tr.consecutive_state_failures = 0
+            # The boxscore is in the document already paid for, so this costs
+            # no extra call. Richer than the core leaders: every player who has
+            # carried the ball, not only the top few.
+            try:
+                tr.accrued = espn.rushing_accrued(summary_payload)
+            except Exception as e:                      # noqa: BLE001
+                log.debug("summary rushing accrual unavailable: %s", e)
+                tr.accrued = {}
             self._run_self_check(parsed, summary)
             # The EXTRACT, not the raw summary: _state_from takes one shape so
             # the two hosts cannot drift into needing different handling.
@@ -444,43 +481,68 @@ class GamedayWorker:
 
     def _price_props(self, quotes, tr: "GameTracker", summary: dict) -> None:
         """
-        Run the one validated lane over this event's prop quotes.
+        Price the rushing-attempt model over this event's prop quotes.
 
-        BOTH arms are recorded on every qualifying quote: the priced read and
-        the blind "take every over". The whole finding of the validation was
-        that a model free rule captured most of the edge, so a paper trade that
-        records only the model's arm cannot answer the question it exists to
-        answer.
+        THE UNDER IS THE ONLY SIDE THIS TAKES. The measured edge is that a book
+        re-hanging a live rushing line off its opener and the clock does not
+        mark it down enough for the game script that caused the shortfall. That
+        is a claim about overs being too cheap to sell, not about unders being
+        too cheap to buy, and the archive says the symmetric bet is not there.
+
+        BOTH SIDES OF THE QUOTE ARE NEEDED TO PRICE ONE. The model works off
+        the book's own de-vigged under probability, so it needs the over price
+        as well to strip the hold. A one-sided quote is skipped rather than
+        priced off the raw implied number, which would hand the book's whole
+        margin to the model as though it were edge.
         """
         state = tr.state
         if state is None:
             return
+
+        # Pair the two sides of each player's market before pricing anything.
+        pairs: dict[tuple, dict] = {}
         for q in quotes:
-            if q.market != pab.MARKET or q.side != "over":
+            if q.market != rap.MARKET or q.side not in ("over", "under"):
                 continue
-            # accrued is not on the ESPN state, so the stale line guard is
-            # skipped rather than faked. It fired on under 0.2% of measured
-            # quotes and the too_late gate covers the case that matters.
-            read = pab.over_prob(q.line, None, state.seconds_remaining)
-            if read.over_prob is None:
+            pairs.setdefault((q.player, q.line), {})[q.side] = q
+
+        for (player, line), sides in pairs.items():
+            under, over = sides.get("under"), sides.get("over")
+            if under is None or over is None:
+                summary.setdefault("prop_skips", []).append("one_sided_quote")
+                continue
+            accrued = self._accrued_for(tr, player)
+            read = rap.under_prob(
+                line, accrued, state.seconds_remaining,
+                _devig_under(under.price, over.price), under.price)
+            if read.under_prob is None:
                 summary.setdefault("prop_skips", []).append(read.reason)
                 continue
-            for model_prob, arm in ((read.over_prob, "priced"),
-                                    (pab.blind_over_prob(), "blind")):
-                d = self.executor.evaluate(
-                    state=state, quote=q, model_prob=model_prob,
-                    model_id=pab.MODEL_ID,
-                    context={"arm": arm, "lane": "pass_attempt_bias",
-                             "player": q.player,
-                             # PRESEASON REPS ARE NOT A TRACK RECORD. The lane
-                             # is a bias measured on regular season football,
-                             # and in preseason the starters play a quarter. A
-                             # log that cannot tell them apart is how a
-                             # plumbing test gets quoted as a result later.
-                             "season_type": (tr.payload or {}).get("season_type")})
-                summary["prop_decisions"] = summary.get("prop_decisions", 0) + 1
-                if d.bet:
-                    summary["prop_bets"] = summary.get("prop_bets", 0) + 1
+            d = self.executor.evaluate(
+                state=state, quote=under, model_prob=read.under_prob,
+                model_id=rap.MODEL_ID,
+                context={"lane": "rush_attempt_pace", "player": player,
+                         "accrued": accrued, "reason": read.reason,
+                         # PRESEASON REPS ARE NOT A TRACK RECORD. Starters play
+                         # a quarter, so a log that cannot tell them apart is
+                         # how a plumbing test gets quoted as a result later.
+                         "season_type": (tr.payload or {}).get("season_type")})
+            summary["prop_decisions"] = summary.get("prop_decisions", 0) + 1
+            if d.bet:
+                summary["prop_bets"] = summary.get("prop_bets", 0) + 1
+
+    def _accrued_for(self, tr: "GameTracker", player: str | None) -> float | None:
+        """Carries so far for this player, or None if the feed did not say.
+
+        None and zero are different answers and the model treats them
+        differently: zero means he has not carried yet, None means we could not
+        find out. Returning 0.0 for an unmatched name would make every line
+        look unreachable and turn a name-matching failure into a bet.
+        """
+        if not player or not tr.accrued:
+            return None
+        from ..backtest.flow_validate import norm_name
+        return tr.accrued.get(norm_name(player))
 
     # ------------------------------------------------------- feed self check
     def _run_self_check(self, parsed: dict, summary: dict) -> None:

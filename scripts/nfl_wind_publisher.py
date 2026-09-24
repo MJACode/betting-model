@@ -110,6 +110,25 @@ OPENER_MAX_UNITS = 4.0       # must scale with OPENER_STAKE_SCALE, not stay at 2
 OPENER_MIN_UNITS = 0.25
 CARDS_DIR = Path(__file__).resolve().parent.parent / "nfl" / "data" / "cards"
 
+
+def _opener_model():
+    """The nfl/ opener model, loaded by path.
+
+    `from models.opener_spread import ...` would resolve to the platform's own
+    top-level `models` package from here (nfl/_nfl_models.py explains), so the
+    file is loaded by absolute path, once, the way the tests and the card do.
+    """
+    import importlib.util
+    name = "nfl_model_opener_spread"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).resolve().parent.parent / "nfl" / "models" / "opener_spread.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
 _ET = ZoneInfo("America/New_York")
 
 # Short labels for the best-price book named in pick_label. Unknown keys fall
@@ -263,9 +282,18 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             edge = float(r["edge"])
             dev = float(r["dev"])
             book = (r.get("book") or "").strip()
+            held_raw = r.get("held_min")
+            held_min = (None if held_raw in (None, "", "nan")
+                        else float(held_raw))
         except (KeyError, ValueError, IndexError, AssertionError) as exc:
             print(f"skipping unparseable opener row ({exc}): {r}", file=sys.stderr)
             continue
+        # The age of the soft book's number, on the pick itself (mike,
+        # 2026-09-22: a fresh number is a possible book error -- move fast and
+        # record whether it was placeable -- not a reason to skip). One
+        # formatter, the model's, so the card, the audit trail and the label
+        # agree. A card written before the column existed carries no tag.
+        age = "" if "held_min" not in r else f" · {_opener_model().age_tag(held_min)}"
 
         game_id = f"NFL_{nflverse_id}"
         # Kelly-proportional stake (2026-08-23; was a flat 1u).
@@ -331,7 +359,7 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             "pick_label": (
                 f"{away} @ {home} — {bet_team} {side_line:+g} "
                 f"(Opener {dev:+g} vs Pinnacle, {BOOK_ABBREV.get(book, book or '?')}) "
-                f"· {kelly_fraction / OPENER_UNIT_PCT:.2f}u"
+                f"· {kelly_fraction / OPENER_UNIT_PCT:.2f}u{age}"
             ),
             "model_probability": model_prob,
             "model_probability_cal": round(ev.cal_prob, 4),
@@ -486,7 +514,25 @@ def publish_line_snapshots(run_date: str | None = None) -> int:
     path = CARDS_DIR / f"line_snapshots_{run_date}.csv"
     if not path.exists():
         return 0
-    rows = [p for p in (snapshot_row_params(r) for r in read_card(path)) if p]
+    # INCREMENTAL (2026-09-22). The CSV is appended on every tick and this
+    # flush re-read and re-inserted the WHOLE day every time it ran -- 3,024
+    # rows at 21:30Z, each a round trip guarded by NOT EXISTS -- so the
+    # opener's publish step took 75 s on a job scheduled every minute, and
+    # the scheduler skipped every other tick ("maximum number of running
+    # instances reached"). A one-minute poll that runs every two minutes is
+    # what put the Discord post 75 s behind a number that lived four minutes.
+    # The marker beside the CSV holds how many rows have already been flushed;
+    # only the rows after it go to the database. The NOT EXISTS guard stays,
+    # so a lost marker (redeploy) costs one full re-flush and nothing else.
+    all_rows = read_card(path)
+    marker = path.with_suffix(".flushed")
+    try:
+        done = int(marker.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        done = 0
+    if done > len(all_rows):          # a rewritten file: start over
+        done = 0
+    rows = [p for p in (snapshot_row_params(r) for r in all_rows[done:]) if p]
     if not rows:
         return 0
 
@@ -513,6 +559,10 @@ def publish_line_snapshots(run_date: str | None = None) -> int:
         conn.commit()
     finally:
         conn.close()
+    try:
+        marker.write_text(str(len(all_rows)), encoding="utf-8")
+    except OSError as exc:
+        print(f"WARNING: could not write {marker}: {exc}", file=sys.stderr)
 
     print(f"NFL line snapshots {run_date}: flushed {len(rows)} row(s) into odds")
     return len(rows)

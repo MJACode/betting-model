@@ -41,7 +41,12 @@ BEGIN
     -- could be scored off another book's line and so carry no dk_odds). The
     -- property this file owns is that UNPRICED settled picks contribute no
     -- units; which column names the price is the other file's business.
-    IF position(new_profit in d) > 0 OR position(decision_profit in d) > 0 THEN
+    --
+    -- Asked of the GATE, not of the whole expression (2026-09-21): once the
+    -- views lost their join, pg_get_viewdef dropped the `p.` prefix and the
+    -- three literals above matched nothing, so this raised on every pass --
+    -- on a view that was correctly gated.
+    IF d ~ '(p\.)?dk_odds IS NOT NULL' OR position('decision_odds' in d) > 0 THEN
       skipped := skipped || v || ' ';
       CONTINUE;                       -- already patched
     END IF;

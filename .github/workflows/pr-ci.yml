@@ -69,6 +69,10 @@ jobs:
             tests/test_cfbd_snapshot_leakage.py \
             tests/test_paused_and_no_signal_rows.py \
             tests/test_nfl_rule_2026_track.py \
+            tests/test_game_scorer_spares_nfl_props.py \
+            tests/test_nfl_prop_unstarted_clear.py \
+            tests/test_scorer_nfl_prop_like_escape.py \
+            tests/test_sql_percent_escaping.py \
             tests/test_nfl_prop_injury_veto.py \
             tests/test_nfl_injury_ingest.py \
             tests/test_injuries_status_ts_migration.py \
@@ -80,4 +84,5 @@ jobs:
             tests/test_nfl_prop_market_kalshi.py \
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
-            tests/test_mobile_betslip_combine.py
+            tests/test_mobile_betslip_combine.py \
+            tests/test_mobile_nhl_lookahead.py

@@ -24,9 +24,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "nfl"))
 
+from live_model.models import rush_attempt_pace as _rap  # noqa: E402
+from live_model.models import pass_attempt_bias as _pab  # noqa: E402
 from live_model.pick_writer import (  # noqa: E402
-    LANE_MARKET, MODEL_ID, PicksRecorder, TeeRecorder, _INSERT_SQL,
-    _norm_player, build_pick, resolve_game_id,
+    LANE_MARKET, LANE_SIDE, MODEL_ID, PicksRecorder, TeeRecorder, _INSERT_SQL,
+    _norm_player, build_pick, refuse_publish_reason, resolve_game_id,
 )
 
 
@@ -38,15 +40,18 @@ class _Decision:
         self.ts = over.get("ts", datetime(2026, 9, 13, 18, 30, tzinfo=timezone.utc))
         self.game_id = over.get("game_id", "espn-401547json")
         self.model_id = over.get("model_id", MODEL_ID)
-        self.market = over.get("market", "player_pass_attempts")
-        self.side = over.get("side", "over")
-        self.line = over.get("line", 32.5)
+        # Defaults match the DEPLOYED lane (rush under). Pass-attempt overs are
+        # the retired constant-prob path and must be constructed explicitly in
+        # the refuse-publish tests below.
+        self.market = over.get("market", _rap.MARKET)
+        self.side = over.get("side", _rap.SIDE)
+        self.line = over.get("line", 11.5)
         self.price = over.get("price", -115.0)
         self.model_prob = over.get("model_prob", 0.58)
         self.market_prob = over.get("market_prob", 0.5349)
         self.ev = over.get("ev", 0.0787)
         self.stake_fraction = over.get("stake_fraction", 0.011)
-        self.player = over.get("player", "C.J. Stroud")
+        self.player = over.get("player", "Blake Corum")
         self.context = over.get("context", {"home_team": "Houston Texans",
                                             "away_team": "Buffalo Bills"})
 
@@ -95,10 +100,96 @@ def test_the_settlement_columns_are_populated():
     """`prop_market` + `player_key` are what tracking/paper_tracker resolves a
     market-spanning model id against. Empty here means graded never."""
     row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0, game_date="2026-09-13")
-    assert row["prop_market"] == LANE_MARKET == "player_pass_attempts"
-    assert row["player_key"] == "CJ STROUD"
+    # Taken from the MODEL, never written out here. The model traded
+    # `player_pass_attempts` until 2026-09-21 and now trades
+    # `player_rush_attempts`; a switch that updated one and not the other would
+    # settle a rushing bet against passing attempts and look normal doing it.
+    assert row["prop_market"] == LANE_MARKET == _rap.MARKET
+    assert row["player_key"] == "BLAKE CORUM"
     assert row["is_live"] is True
     assert row["signal_type"] == "BET"
+
+
+def test_refuse_publish_blocks_pass_attempt_overs():
+    """THE BUG THIS EXISTS FOR, 2026-09-20 ledger.
+
+    Every priced nfl_live_prop BET through 2026-09-20 was player_pass_attempts
+    OVER at one of two raw probabilities (0.600344, 0.642). The worker no
+    longer scores that market; this gate is the publish backstop so a wiring
+    regression cannot put those rows on the board again while the model stays
+    live (no PAUSED_MODELS entry).
+    """
+    assert LANE_MARKET == "player_rush_attempts"
+    assert LANE_SIDE == "under"
+    for p in _pab.CONSTANT_OVER_PROBS:
+        d = _Decision(market="player_pass_attempts", side="over",
+                      model_prob=p, player="Dak Prescott", line=35.5)
+        reason = refuse_publish_reason(d)
+        assert reason is not None, p
+        assert "wrong_market" in reason or "retired_constant_prob" in reason
+
+
+def test_refuse_publish_blocks_the_constant_prob_fingerprint_even_on_rush():
+    """A rush-market quote stamped with the retired constant is still refuse."""
+    for p in _pab.CONSTANT_OVER_PROBS:
+        d = _Decision(model_prob=p)
+        assert refuse_publish_reason(d) == f"retired_constant_prob:{p}"
+
+
+def test_refuse_publish_allows_a_real_rush_under():
+    assert refuse_publish_reason(_Decision()) is None
+
+
+def test_picks_recorder_drops_a_pass_attempt_over_before_sql():
+    """End to end: PicksRecorder must not INSERT a retired-market BET."""
+    conn = _Conn()
+
+    rec = PicksRecorder(bankroll=1000.0, conn_factory=lambda: conn,
+                        announce=lambda *_: None)
+    d = _Decision(market="player_pass_attempts", side="over",
+                  model_prob=_pab.CONSTANT_OVER_PROBS[0])
+    rec(d)
+    assert conn.commits == 0
+    assert not any("INSERT INTO picks" in (sql or "") for sql, _ in conn.executed)
+
+
+def test_the_label_names_the_stat_the_model_actually_trades():
+    """THE BUG THIS EXISTS FOR, 2026-09-21.
+
+    `build_pick` wrote the literal string "Pass Attempts" into every label. The
+    market switch updated the model, the writer's market and the settlement
+    map, and left that string behind -- so the first rushing pick published to
+    Discord as "Blake Corum Under 11.5 Pass Attempts". A running back, on a
+    passing line. The BET underneath was correct (under 11.5 carries) and the
+    sentence describing it was false, which is worse than a wrong bet: it is a
+    wrong bet as far as anyone reading it can tell.
+
+    Pinned against the PLATFORM's own name for the market, not against a
+    literal here, so the live model and the pre-game rush-attempts model cannot
+    drift into calling the same stat two different things.
+    """
+    from models.scorer import _NFL_PROP_CONFIG
+    from live_model.models import rush_attempt_pace as _rap
+
+    platform = {c["market"]: c["stat_label"] for c in _NFL_PROP_CONFIG.values()}
+    assert _rap.STAT_LABEL == platform[_rap.MARKET], (
+        f"the live model calls {_rap.MARKET} {_rap.STAT_LABEL!r}; the platform "
+        f"calls it {platform[_rap.MARKET]!r}")
+
+    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0,
+                     game_date="2026-09-13")
+    assert row["pick_label"].endswith(_rap.STAT_LABEL), row["pick_label"]
+    assert "Pass Attempts" not in row["pick_label"], (
+        "the label still names the market this model stopped trading")
+
+
+def test_the_label_agrees_with_the_side_and_the_line_it_carries():
+    """A label is read by a person and the fields are read by the settler, so
+    a disagreement between them is invisible until money has moved."""
+    row = build_pick(_Decision(), "NFL_2026_01_BUF_HOU", 1000.0,
+                     game_date="2026-09-13")
+    assert row["pick_side"].lower() in row["pick_label"].lower()
+    assert f"{row['scored_line']:g}" in row["pick_label"]
 
 
 def test_edge_is_the_platform_edge_not_the_lanes_ev():
@@ -389,13 +480,25 @@ def test_the_synced_row_is_what_the_app_will_actually_read():
 
 
 def test_the_lane_can_actually_settle():
-    """The whole point of writing to `picks`. Without this mapping the lane
+    """The whole point of writing to `picks`. Without this mapping the model
     accrues rows that are never graded, which is the paper record it already
-    had, with more moving parts."""
-    from tracking.paper_tracker import _PROP_STAT_MAP as M
-    assert M[MODEL_ID] == ("nfl_player", "attempts")
-    assert M["nfl_prop_pass_attempts"] == M[MODEL_ID], (
-        "the live lane grades against the same stat as the pre-game one")
+    had, with more moving parts.
+
+    RESOLVED PER PICK since 2026-09-21. This asserted ("nfl_player",
+    "attempts") while the model traded one market and could never trade
+    another. Re-pointing the model id at "carries" would have re-graded the 22
+    already-settled pass-attempt picks against the wrong stat, which CLAUDE.md
+    section 1c forbids -- so the stat comes from `picks.prop_market`, and every
+    pick grades against the market it was actually written on.
+    """
+    from tracking.paper_tracker import (_PROP_MARKET_STAT_BY_MODEL,
+                                        _PROP_STAT_MAP as M)
+    from live_model.models import rush_attempt_pace as _rap
+    assert M[MODEL_ID] == ("nfl_player", "FROM_PROP_MARKET")
+    by_market = _PROP_MARKET_STAT_BY_MODEL[MODEL_ID]
+    assert by_market[_rap.MARKET] == "carries", "today's market cannot settle"
+    assert by_market["player_pass_attempts"] == M["nfl_prop_pass_attempts"][1], (
+        "the already-settled pass-attempt picks must keep grading on attempts")
 
 
 # ── the juice ceiling ────────────────────────────────────────────────────────

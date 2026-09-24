@@ -156,6 +156,31 @@ in-week during the season.
   finishes ≤ flat. Wind: `MAX_FIRE_LEAD` stays 4; measure the deployed
   Open-Meteo population. Do not unpause paused XGB props off this track.
   `python -m scripts.nfl_rule_2026_track`. `docs/nfl_rule_2026_track.md`.
+
+  **A fresh number is labelled, not blocked (`FRESH_MINUTES = 60`,
+  2026-09-22, mike).** On 2026-09-22 the Odds API served BetMGM on TEN @ NYG
+  at NYG -1 for one tick and NYG +1 for the next fourteen minutes, every
+  other book at -3, and the 21:29Z tick locked `TEN @ NYG — NYG -1 (Opener +2
+  vs Pinnacle, MGM) · 1.96u` — a number nobody found at the book (voided).
+  It was the second BetMGM episode of that shape in 15 days (CHI @ CAR
+  09-08, CAR +1 for 6-17 minutes). The first fix gated any number under an
+  hour old; mike rejected it: a book hanging a wrong number for minutes is
+  the BEST case this model can find IF it is placeable, and a gate guarantees
+  it is never caught. So `held_minutes` measures how long the book has quoted
+  its current point (from the card's own board dumps ∪ Supabase, change
+  points, 24h) and the pick SAYS it — `· NEW 0m`, `· up 5h`, `· age unknown`
+  — via `age_tag`, one formatter for the label, the printed card and the
+  audit-trail reason. Nothing is skipped; `prior=None` (backtest) changes no
+  selection. Whether fresh numbers are placeable is recorded per pick in
+  `pick_placement_checks` by `scripts/mark_placeable.py` (`--report` lists
+  every fresh-number pick and its answer); that record, not the feed or the
+  backtest, decides the question. Speed: the poll's publish step re-flushed
+  the whole day's DK snapshot CSV every minute (75 s at 21:30Z), so the
+  one-minute poll ran every two — it is incremental now (`.flushed` marker),
+  and the Discord post is made inside the tick, before the rest of the
+  publish chain (`scheduler._post_opener_discord`). Measured latency before:
+  number at 21:28:26Z, Discord at 21:29:41Z. Session entry in
+  `docs/sessions/2026-09.md`.
 - **DK line snapshots + pick-timing display (2026-08-19, session 121):** every
   LIVE card run also dumps DraftKings' totals/spreads for every game within 8
   days (`nfl/data_ingest/line_snapshots.py`, reusing the payload the card

@@ -11,14 +11,17 @@ record the platform can read: nothing joined it to `games`, nothing settled it,
 and no surface displayed it. The lane could run every Sunday of the season and
 still show a settled record of zero.
 
-SCOPE -- ONE LANE. `nfl_live_prop` (nfl/live_model/models/pass_attempt_bias.py)
-is the only lane with an implementation. `nfl_live_halftime`, `nfl_live_deriv`
-and `nfl_live_stale` exist as EV_THRESHOLDS keys with nothing assigning them, so
-nothing can write them. That matters beyond tidiness: `DERIVATIVE_MARKETS` is
-all half and quarter lines, and `games` stores full-game scores only (plus MLB's
-F5) -- a pick on `totals_q3` could not be settled by anything in this repo. If
-one of those lanes is ever implemented, it needs a scores source BEFORE it is
-allowed to write here.
+SCOPE -- ONE LANE. `nfl_live_prop` (nfl/live_model/models/rush_attempt_pace.py)
+is the only lane with an implementation. It trades `player_rush_attempts`
+UNDER. The previous pass-attempt OVER constant-prob path is retired in place
+(`pass_attempt_bias.py` returns None; see docs/nfl_live_prop_assessment.md).
+`nfl_live_halftime`, `nfl_live_deriv` and `nfl_live_stale` exist as
+EV_THRESHOLDS keys with nothing assigning them, so nothing can write them.
+That matters beyond tidiness: `DERIVATIVE_MARKETS` is all half and quarter
+lines, and `games` stores full-game scores only (plus MLB's F5) -- a pick on
+`totals_q3` could not be settled by anything in this repo. If one of those
+lanes is ever implemented, it needs a scores source BEFORE it is allowed to
+write here.
 
 BETS ONLY. The executor records every PASS too, and those stay in the JSONL log
 where they belong. Writing them to `picks` would be the "hundreds of dead rows a
@@ -44,10 +47,52 @@ log = logging.getLogger(__name__)
 
 MODEL_ID = "nfl_live_prop"
 
-# The market this lane trades, as the platform spells it. Settlement reads
+# The market this model trades, as the platform spells it. Settlement reads
 # picks.prop_market (tracking/paper_tracker._PROP_MARKET_STAT_BY_MODEL), the
 # same shape nfl_prop_market uses for one model id spanning many markets.
-LANE_MARKET = "player_pass_attempts"
+#
+# TAKEN FROM THE MODEL, NEVER WRITTEN OUT. This was the string
+# "player_pass_attempts" while the model traded pass attempts, and a market
+# switch that updated the model and not this line would have stamped every new
+# pick with the old market -- settling a rushing bet against passing attempts,
+# silently, and with no way to tell afterwards which stat a row was graded on.
+from .models import rush_attempt_pace as _model     # noqa: E402
+from .models import pass_attempt_bias as _pass_bias  # noqa: E402
+
+LANE_MARKET = _model.MARKET
+LANE_SIDE = _model.SIDE
+LANE_STAT_LABEL = _model.STAT_LABEL
+
+
+def refuse_publish_reason(decision) -> str | None:
+    """Why this decision must not reach `picks`, or None if it may.
+
+    Defence in depth on top of the worker only buying `LANE_MARKET`. The
+    2026-09-20 card was 100% `player_pass_attempts` OVER at two constant raw
+    probabilities (0.600344 and 0.642) because a bias model that read neither
+    line, accrued nor clock fed a pure price filter. That market is no longer
+    scored; this gate makes a wiring regression refuse to publish rather than
+    silently stamp the rush market label onto a pass-attempt bet.
+    """
+    market = getattr(decision, "market", None) or (decision.context or {}).get("market")
+    side = str(getattr(decision, "side", "") or "").lower()
+    try:
+        p = float(getattr(decision, "model_prob", None))
+    except (TypeError, ValueError):
+        p = None
+
+    if market != LANE_MARKET:
+        return f"wrong_market:{market}"
+    if side != LANE_SIDE:
+        return f"wrong_side:{side}"
+    # Fingerprint of the retired constant-prob path. Round to 6 dp to match the
+    # ledger values; a real rush under_prob is a continuous sigmoid and will
+    # not land on these two atoms.
+    if p is not None:
+        for banned in _pass_bias.CONSTANT_OVER_PROBS:
+            if abs(p - banned) < 5e-7:
+                return f"retired_constant_prob:{banned}"
+    return None
 
 
 def _norm_player(name: str | None) -> str | None:
@@ -135,7 +180,11 @@ def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> di
     side = str(decision.side or "").lower()
     player = decision.player or ctx.get("player")
     line = decision.line
-    label = (f"{player} {side.capitalize()} {line:g} Pass Attempts"
+    # FROM THE MODEL, never a literal. This read "Pass Attempts" until
+    # 2026-09-21 and stayed that way through the market switch, so the first
+    # rushing pick published as "Blake Corum Under 11.5 Pass Attempts" -- a
+    # running back on a passing line, with a correct bet underneath it.
+    label = (f"{player} {side.capitalize()} {line:g} {LANE_STAT_LABEL}"
              if player and line is not None else
              f"{player or decision.market} {side}")
     return {
@@ -317,6 +366,16 @@ class PicksRecorder:
         # AVOID path can delay, block or fail a bet: it is a separate branch,
         # separately guarded, and a decline that cannot be written costs a row
         # in a research table and nothing else.
+        refuse = refuse_publish_reason(decision)
+        if refuse:
+            # JSONL still holds the decision; picks must not. The retired
+            # pass-attempt constant-prob card published every over at two
+            # discrete raw probabilities -- this is the last gate that stops
+            # a wiring regression from doing it again while the model stays live.
+            log.warning("refusing to publish live %s/%s: %s",
+                        getattr(decision, "model_id", None),
+                        getattr(decision, "player", None), refuse)
+            return
         if getattr(decision, "bet", False):
             try:
                 self._write(decision)

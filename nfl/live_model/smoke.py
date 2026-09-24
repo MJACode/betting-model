@@ -23,10 +23,10 @@ from datetime import datetime, timezone
 
 from .feeds import espn
 from .feeds.odds_live import CreditMeter, LiveOddsClient
-from .models import pass_attempt_bias as pab
+from .models import rush_attempt_pace as rap
 from .recorder import JsonlRecorder
 
-LANE_MARKET = pab.MARKET
+LANE_MARKET = rap.MARKET
 
 # Games to probe for a posted prop board before giving up. One credit each.
 MAX_PROP_PROBES = 3
@@ -140,11 +140,15 @@ def check_odds(client: LiveOddsClient) -> bool:
 
 def check_lane_and_recorder() -> bool:
     print("Lane and recorder")
-    read = pab.over_prob(32.5, 17.0, 1800)
-    if read.over_prob is None:
+    # Deployed lane is rush-attempt UNDER when the over needs a pace surge.
+    # Mid-game: 4 carries, 30 min left, line 11.5 -> over needs ~0.25/min vs
+    # ~0.13/min so far (~1.9x) and clears RATIO_CUT.
+    read = rap.under_prob(11.5, 4.0, 1800, market_under_prob=0.52, price=-110.0)
+    if read.under_prob is None:
         return _fail("lane prices a mid game quote", read.reason)
-    _ok("lane prices a mid game quote", f"p={read.over_prob:.4f}")
-    if pab.over_prob(32.5, 30.0, 60).over_prob is not None:
+    _ok("lane prices a mid game quote", f"p={read.under_prob:.4f}")
+    if rap.under_prob(11.5, 4.0, 60, market_under_prob=0.52,
+                      price=-110.0).under_prob is not None:
         return _fail("lane refuses the end of the game")
     _ok("lane refuses the end of the game")
 

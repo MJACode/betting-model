@@ -50,7 +50,8 @@ PROP_MARKETS = ["player_shots_on_goal", "player_points", "player_assists",
                 "player_goal_scorer_anytime", "player_total_saves", "player_blocked_shots"]
 THREE_WAY = "h2h_3_way"
 BOOKS = ",".join(config.LINE_SHOP_BOOKMAKERS[:10])
-SOURCE = "odds_api_nhl_prop_history"
+SOURCE_PREFIX = "odds_api_nhl_prop_history"   # the marker a re-run reads back
+SOURCE = SOURCE_PREFIX
 SNAPSHOT_TYPE = "open"          # the pre-game series, as every other sport's history is filed
 ET = ZoneInfo("America/New_York")
 
@@ -107,6 +108,11 @@ def _done_dates(conn, by_date: dict[str, list[dict]]) -> set[str]:
             "SELECT DISTINCT game_id FROM player_prop_odds "
             "WHERE game_id = ANY(%s) AND market = 'player_shots_on_goal'",
             (ids[i:i + 500],)).fetchall()}
+    # `player_prop_odds` carries no `source`; the 3-way rows this run writes to
+    # `odds` do, so the marker is read back from there as the second key.
+    have |= {r[0] for r in conn.execute(
+        "SELECT DISTINCT game_id FROM odds WHERE sport = 'NHL' AND market = 'h2h_3way' "
+        "AND source LIKE %s", (SOURCE_PREFIX + "%",)).fetchall()}
     return {d for d, games in by_date.items() if any(g["game_id"] in have for g in games)}
 
 

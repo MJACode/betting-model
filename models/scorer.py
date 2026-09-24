@@ -21,6 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import os
 import sys
+import traceback
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -3096,6 +3097,20 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
+            # config.MODELS has no NFL game model. On master this game fell
+            # through to the NHL feature builder, which returns a dict, so
+            # the per-game DELETE below ran and the game joined `rescored`
+            # (the sweep then skipped it). Measured on NFL_2026_02_NYG_LA,
+            # 2026-09-21, picks_log: 93 NONE rows inserted 21:26:12–21:26:57
+            # UTC, deleted in one statement at 22:06:20.334297 while the
+            # 6:00pm ET refresh was still scoring other sports; the 6:25pm
+            # tick's 95 NONE rows (22:26:13–22:26:54) were deleted the same
+            # way at 22:27:24.959056 by the 6:20pm refresh still in its loop.
+            # Skipping here means that DELETE never sees the game. The sweep
+            # still runs for it, and also excludes nfl_prop_%.
+            if sport == "NFL":
+                continue
+
             if game_id in ncaaf_unpriced or game_id in ahead_unpriced:
                 continue
 
@@ -3176,12 +3191,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 game_picks = []
                 try:
                     if not dry_run:
+                        # '%%' not '%': psycopg2 %-interpolates the statement
+                        # against the params tuple. A bare LIKE '%…' is read as
+                        # a format spec and raises IndexError: tuple index out
+                        # of range (#243, and again on 2026-09-22 after #813
+                        # added this clause unescaped — every hourly scoring
+                        # step failed mid-loop after pick-lock).
                         conn.execute("""
                             DELETE FROM picks
                             WHERE game_id = %s
                               AND result IS NULL
                               AND signal_type != 'BET'
                               AND is_live IS NOT TRUE
+                              AND model_id NOT LIKE 'nfl_prop_%%'
                         """, (game_id,))
                     for model_id in relevant_models:
                         # Pick lock: this pair has already produced a BET, so it is
@@ -3245,6 +3267,23 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     if attempt == 2:
                         model_failures.append(f"{game_id}: {exc!r}")
                         logger.error(f"  {game_id} FAILED twice on a lost connection: {exc!r}")
+                except Exception as exc:
+                    # Same blast-radius rule as the per-model catch above: one
+                    # game's DELETE / feature-adjacent failure must not abort
+                    # every other sport. Stay loud — model_failures still
+                    # fails the step after survivors commit. 2026-09-22: an
+                    # unescaped LIKE '%' raised IndexError here and the outer
+                    # handler only logged the bare string, with no game_id.
+                    model_failures.append(f"{sport}/{game_id}: {exc!r}")
+                    logger.error(
+                        f"  {sport}/{game_id} FAILED (attempt {attempt}): "
+                        f"{exc!r}\n{traceback.format_exc()}"
+                    )
+                    try:
+                        conn.rollback()
+                    except Exception:  # noqa: BLE001 — best-effort
+                        pass
+                    break
 
         # Housekeeping for the pairs the lock deliberately leaves open.
         #
@@ -3276,6 +3315,21 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # each pass. That is the pre-lock behaviour for these rows, and an
         # AVOID is explicitly never settled and never bettable (§17), so
         # nothing that resolves money depends on its identity.
+        #
+        # nfl_prop_% is excluded. Evening refresh_pass runs this sweep and
+        # does not re-run nfl-prop-scoring. The deletes measured 2026-09-21
+        # on NYG @ LA were the per-game statement above (93 rows at
+        # 22:06:20.334297 UTC, 95 rows at 22:27:24.959056), not this sweep:
+        # the game had joined `rescored`. This clause is the second clear,
+        # for the case where the loop does not mark the game rescored.
+        # LIKE '_' is one character, so the pattern is the nfl_prop_ prefix,
+        # including nfl_prop_market. Wind and opener are not in it. BET rows
+        # are already spared by signal_type.
+        #
+        # '%%' not '%': DBConnection.execute rewrites ?→%s and psycopg2 then
+        # %-interpolates the whole statement. A bare % is a format spec and
+        # raises IndexError: tuple index out of range (same class as #243;
+        # produced every scoring pass after #813 until escaped).
         if not dry_run:
             _sc, _sp = _scope()
             _keep = ""
@@ -3290,6 +3344,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             WHERE result IS NULL
               AND signal_type != 'BET'
               AND is_live IS NOT TRUE
+              AND model_id NOT LIKE 'nfl_prop_%%'
               AND game_id IN (
                   SELECT game_id FROM games
                   WHERE game_date >= %s AND game_date <= %s
@@ -3364,7 +3419,10 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         duration = (datetime.now() - start).total_seconds()
         _log_pipeline(conn, target_date, "error", 0, 0, duration, str(exc))
         conn.commit()
-        logger.error(f"Scorer failed: {exc}")
+        # Traceback required: 2026-09-22 every hourly pass logged only
+        # "Scorer failed: tuple index out of range" with no file/line, which
+        # hid that #813's unescaped LIKE '%' was the format-spec crash.
+        logger.error(f"Scorer failed: {exc!r}\n{traceback.format_exc()}")
         raise
     finally:
         conn.close()

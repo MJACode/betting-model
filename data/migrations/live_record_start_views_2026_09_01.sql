@@ -56,7 +56,20 @@ DECLARE
 BEGIN
   -- ── v_public_track_record ────────────────────────────────────────────────
   d := pg_get_viewdef('public.v_public_track_record'::regclass, true);
-  IF position('2026-09-01' in d) > 0 AND position('decision_edge' in d) > 0 THEN
+  -- THE GUARD IS THE LIVE DATE AND NOTHING ELSE (2026-09-21). It also asked for
+  -- 'decision_edge' from 2026-09-09, so the decision-price CUT would re-apply
+  -- once. settled_record_survives_a_pause (2026-09-12) then took that cut out
+  -- of both views on purpose -- a pause was erasing settled bets -- and with it
+  -- the only mention of decision_edge, so against the views as they stand this
+  -- guard cannot be true. Measured 2026-09-21 in a rolled-back run against
+  -- production: this file rebuilt both views WITH the threshold join, the
+  -- pause file then stripped it, the CLV file rebuilt the first view a third
+  -- time, and the deciding-price units gate score_off_any_book_line had just
+  -- set was gone again by the end of the same pass. Every rebuild is a
+  -- PostgREST schema reload, and between the first and the second the
+  -- published record is cut on today's pauses -- the 2026-09-12 bug, briefly.
+  -- This file's own header says what a guard like that is: a lock.
+  IF position('2026-09-01' in d) > 0 THEN
     RAISE NOTICE 'v_public_track_record already starts at the live date and cuts at the decision price - skipping';
   ELSE
     EXECUTE $v$
@@ -104,7 +117,7 @@ BEGIN
   -- The same population, grouped by day instead of by model: the equity curve
   -- must total to the hero card, or the screen contradicts itself.
   d := pg_get_viewdef('public.v_public_track_record_daily'::regclass, true);
-  IF position('2026-09-01' in d) > 0 AND position('decision_edge' in d) > 0 THEN
+  IF position('2026-09-01' in d) > 0 THEN
     RAISE NOTICE 'v_public_track_record_daily already starts at the live date and cuts at the decision price - skipping';
   ELSE
     EXECUTE $v$

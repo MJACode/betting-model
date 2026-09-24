@@ -266,10 +266,24 @@ def run_daily_pipeline(*, retry_reason: str | None = None,
         _DAILY_LOCK.release()
 
 
+# One refresh pass at a time in this process. The three refresh crons are
+# separate job ids, so APScheduler's max_instances=1 never compared them with
+# each other or with the boot catch-up below; a :17 cron landing on a catch-up
+# that started at :10 would run the chain twice at once and buy odds twice.
+_REFRESH_LOCK = threading.Lock()
+
+
 def run_refresh_pass(mode: str = "hourly") -> None:
     # The single-source-of-truth refresh chain (odds + prop odds + lineups + scoring
     # for every sport, opening-signals, parlay record, push notifications).
-    _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
+    if not _REFRESH_LOCK.acquire(blocking=False):
+        log.info("refresh-pass[%s]: a pass is already running in this process — skip",
+                 mode)
+        return
+    try:
+        _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
+    finally:
+        _REFRESH_LOCK.release()
 
 
 def run_savant_refresh() -> None:
@@ -934,11 +948,40 @@ def run_nfl_opener_card() -> None:
     if key:
         _run([sys.executable, "-m", "scripts.nfl_wind_publisher", "--opener"],
              "nfl-opener-publish")
+        # DISCORD FIRST, ALONE (mike, 2026-09-22: "it needs to be more real
+        # time"). Measured on the TEN @ NYG pick: the number appeared at
+        # 21:28:26Z, the card saw it at 21:29:00, the row was written at
+        # 21:29:01.7, and Discord got it at 21:29:41 -- 40 s spent in the full
+        # publish chain (threshold sync, opening signals, push, then Discord,
+        # behind another job's publish lock) on a number that lived four
+        # minutes. The Discord post is the thing a reader can act on, so it is
+        # made directly, in-process, before anything else in the chain; the
+        # ledger it writes keeps the full publish below from posting twice.
+        _post_opener_discord()
         # The card + publisher write the pick; this is what carries it to
-        # Discord and push. Without it a minute-cadence lock would still wait
-        # for the next :17 refresh pass to be announced, which throws away
-        # exactly the latency this job was created to buy.
+        # push and the CLV shadow track. Without it a minute-cadence lock
+        # would still wait for the next :17 refresh pass to be announced,
+        # which throws away exactly the latency this job was created to buy.
         _publish_new_signals("nfl-opener-poll")
+
+
+def _post_opener_discord() -> None:
+    """Post any just-written BET to its Discord channel, and nothing else.
+
+    `notify_discord_signals` is the same function the full publish calls -- same
+    thresholds, same started-game guard, same `push_sent` ledger, same
+    publisher lock -- so this adds no surface and cannot post anything the
+    pass would not. It only moves the Discord post to the front of the tick.
+    Never raises: a Discord failure must not stop the publish chain below,
+    which will try Discord again itself.
+    """
+    try:
+        from tracking.discord_notifier import notify_discord_signals
+        n = notify_discord_signals()
+        if n:
+            log.info("opener: %d signal(s) to Discord inside the tick", n)
+    except Exception:  # noqa: BLE001
+        log.exception("opener: in-tick Discord post crashed")
 
 
 def run_nfl_opener_poll() -> None:
@@ -1186,6 +1229,50 @@ def catch_up_daily_pipeline(*, source: str = "boot") -> dict:
         return {"status": "run", "reason": decision.reason}
     except Exception:  # noqa: BLE001 — never block startup / the watch
         log.exception("daily catch-up [%s] failed (scheduler continues)", source)
+        return {"status": "error", "reason": "catch-up raised"}
+
+
+def catch_up_refresh_pass(*, source: str = "boot") -> dict:
+    """Re-run the :17 refresh pass a deploy killed, rather than lose the hour.
+
+    2026-09-20: every merge to master replaced the worker mid-pass, no pass
+    completed between 16:32 and 19:31 UTC, and MLB props had no rows until
+    19:23 on a slate that started at 17:11. The decision, its caps and what a
+    catch-up costs in Odds API credits are in tracking.refresh_retry.
+
+    Best-effort, like the daily catch-up: raising here must not stop the
+    scheduler.
+    """
+    if not owns("hourly_refresh"):
+        log.info("refresh catch-up: SERVICE_ROLE=%s does not own hourly_refresh",
+                 SERVICE_ROLE)
+        return {"status": "skipped", "reason": "not this service"}
+    try:
+        from datetime import timezone as _tz
+        from data.db import get_connection
+        from tracking.refresh_retry import (
+            decide_refresh_retry, load_recent_refreshes,
+        )
+        now = datetime.now(_tz.utc)
+        conn = get_connection()
+        try:
+            runs = load_recent_refreshes(conn, now)
+        finally:
+            conn.close()
+        if runs is None:
+            log.warning("refresh catch-up [%s]: ledger unreadable — not starting blind",
+                        source)
+            return {"status": "skipped", "reason": "ledger unreadable"}
+        decision = decide_refresh_retry(
+            now=now, runs=runs, in_process_running=_REFRESH_LOCK.locked())
+        if decision.action != "run":
+            log.info("refresh catch-up [%s]: skip — %s", source, decision.reason)
+            return {"status": "skipped", "reason": decision.reason}
+        log.info("refresh catch-up [%s]: run — %s", source, decision.reason)
+        run_refresh_pass()
+        return {"status": "run", "reason": decision.reason}
+    except Exception:  # noqa: BLE001 — never block the scheduler
+        log.exception("refresh catch-up [%s] failed (scheduler continues)", source)
         return {"status": "error", "reason": "catch-up raised"}
 
 
@@ -1656,6 +1743,17 @@ def main() -> None:
     catch_up_daily_pipeline(source="boot")
 
     now = datetime.now(sched.timezone)
+    # The refresh pass a deploy killed. A one-off JOB a minute after start, not
+    # a call here: a pass takes 12-15 minutes and everything below -- the live
+    # loops, the NFL polls -- would wait behind it.
+    from datetime import timedelta as _td
+    sched.add_job(
+        catch_up_refresh_pass,
+        "date",
+        run_date=now + _td(seconds=60),
+        id="refresh_catch_up",
+        name="Refresh catch-up (once, 60s after boot)",
+    )
     log.info("Betting scheduler starting (timezone=%s). Registered jobs:", TIMEZONE)
     for job in sched.get_jobs():
         # next_run_time isn't populated until the scheduler starts, so compute the

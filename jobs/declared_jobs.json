@@ -849,15 +849,5 @@
     "args": {
       "sports": ["MLB"]
     }
-  },
-  {
-    "key": "nhl-odds-history-2026-10-01",
-    "job_type": "nhl_odds_history",
-    "requested_by": "mike",
-    "note": "NHL historical game lines, approved by mike 2026-09-20 (about 200,000 credits; the plan is 159,900). DraftKings + Pinnacle + 8 books, moneyline / puck line / total, open + near-close per start hour, 2020-21 -> 2025-26. Held until after the monthly credit reset: on 2026-09-20 the credit guard refused it (961,284 left, 7-day reserve 1,190,196). The script's own guard still decides at run time.",
-    "args": {
-      "max_credits": 170000
-    },
-    "run_after": "2026-10-01T12:00:00+00:00"
   }
 ]

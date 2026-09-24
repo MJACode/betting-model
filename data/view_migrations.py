@@ -86,6 +86,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # carried-forward team rates; an as-of-date feature needs the games it is
     # summed from. Written by data/ingestors/nhl_game_logs.py.
     "add_nhl_game_logs.sql",
+    # 2026-09-21: goals by period, one row per game, from the same archive the
+    # NHL opening/closing lines came from. The ingestor validated its parse on
+    # them and discarded them; they settle the first-period and regulation
+    # markets. Written by data/ingestors/nhl_sbr_archive.py.
+    "add_nhl_period_scores.sql",
     # 2026-09-09 (mike: "remove DK only - we want best lines for us
     # regardless"): picks carry the price each pick was DECIDED at
     # (decision_*); the graded matview, the record views and the custom-model
@@ -177,6 +182,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Out/Doubtful veto compares this to the quote's snapshot_at; NULL
     # fails open. ADD COLUMN IF NOT EXISTS.
     "add_injuries_status_ts_2026_09_14.sql",
+    # 2026-09-22 (mike): was a pick actually placeable at the book? One row
+    # per pick, written by scripts/mark_placeable.py, for the opener's fresh
+    # numbers ("NEW 0m"): a book error is the model's best case if it can be
+    # placed, a feed ghost if not, and only a person at the book can say.
+    # CREATE TABLE IF NOT EXISTS + REVOKE anon/authenticated + RLS.
+    "pick_placement_checks_2026_09_22.sql",
     # 2026-09-14 (mike): NOTHING AUTOPAUSES. The 250-bet review wrote
     # mlb_prop_batter_runs and mlb_prop_pitcher_k into model_auto_pauses
     # on 2026-09-11 with no approval. Measured: those two were the only
