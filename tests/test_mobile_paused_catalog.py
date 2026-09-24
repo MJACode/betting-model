@@ -85,6 +85,11 @@ def test_the_custom_model_picker_is_three_bet_types():
     assert "function PickerField" not in screen
     assert "RangeSlider" in screen
     assert "onPick(choice.modelIds)" in screen
+    # One thumb moving must not snap the other end. The screen commits
+    # through commitSliderBounds; indexToBound on both indices was the bug.
+    assert "commitSliderBounds" in screen
+    assert "onChange(indexToBound(stops, lo), indexToBound(stops, hi))" not in screen
+    assert "onChange(indexToBound(stops, pair.low), indexToBound(stops, pair.high))" not in screen
 
 
 def test_today_picks_drop_paused_models_at_the_source():

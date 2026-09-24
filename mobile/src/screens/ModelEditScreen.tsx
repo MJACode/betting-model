@@ -33,6 +33,7 @@ import {
   SLIDER_LOW_SENTINEL,
   boundIndex,
   chipSelection,
+  commitSliderBounds,
   formatAmericanLabel,
   formatLineLabel,
   formatPublicLabel,
@@ -594,12 +595,17 @@ function FilterRange({
   // and a one-step VoiceOver swipe cannot land on a value.
   const fine = stops.length > 30;
 
+  const commit = (lo: number, hi: number) => {
+    const next = commitSliderBounds(stops, sliderLow, sliderHigh, lo, hi, minValue, maxValue);
+    onChange(next.min, next.max);
+  };
+
   const nudge = (which: 'low' | 'high', direction: -1 | 1) => {
     const current = which === 'low' ? sliderLow : sliderHigh;
     const next = Math.min(stops.length, Math.max(SLIDER_LOW_SENTINEL, current + direction));
     const pair = applyBound(which, next, sliderLow, sliderHigh);
     if (pair.low === sliderLow && pair.high === sliderHigh) return;
-    onChange(indexToBound(stops, pair.low), indexToBound(stops, pair.high));
+    commit(pair.low, pair.high);
   };
 
   return (
@@ -627,7 +633,7 @@ function FilterRange({
         step={1}
         low={sliderLow}
         high={sliderHigh}
-        onChange={(lo, hi) => onChange(indexToBound(stops, lo), indexToBound(stops, hi))}
+        onChange={(lo, hi) => commit(lo, hi)}
         format={formatIndex}
         a11yStep={fine ? 10 : 1}
         onNudge={fine ? nudge : undefined}

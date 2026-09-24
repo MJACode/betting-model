@@ -472,6 +472,29 @@ export function indexToBound(stops: readonly number[], index: number): number | 
 }
 
 /**
+ * Slider indices → the stored min/max pair.
+ *
+ * An end whose index did not move keeps its stored number. A legacy off-list
+ * value sits on the nearest stop for the thumb only; moving the other thumb
+ * must not snap it. An end that did move is rewritten to the stop under its
+ * new index. A sentinel rewrites to null (Any).
+ */
+export function commitSliderBounds(
+  stops: readonly number[],
+  prevLow: number,
+  prevHigh: number,
+  nextLow: number,
+  nextHigh: number,
+  storedMin: number | null | undefined,
+  storedMax: number | null | undefined,
+): { min: number | null; max: number | null } {
+  return {
+    min: nextLow === prevLow ? (storedMin ?? null) : indexToBound(stops, nextLow),
+    max: nextHigh === prevHigh ? (storedMax ?? null) : indexToBound(stops, nextHigh),
+  };
+}
+
+/**
  * American price for a caption. Same glyph as `formatAmerican` in format.ts
  * (ASCII hyphen, plus on the dog) so the editor and the model-detail chips
  * cannot drift into two minuses.

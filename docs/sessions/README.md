@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-24 | [2026-09](./2026-09.md) | 2026-09-24, custom-model range slider: moving one thumb no longer snaps a legacy off-list value on the other end. NCAAF Spread mapping unchanged. PR #825 |
 | 2026-09-23 | [2026-09](./2026-09.md) | 2026-09-23, custom-model rule titles stay in picker language (ML / Run line / Puck line / Spread / Player props) instead of MODEL_META.longLabel. PR #825 |
 | 2026-09-23 | [2026-09](./2026-09.md) | 2026-09-23, custom-model builder: bet-type sheet is ML / Run line or Spread or Puck line / Player props per sport, mapped onto the active model_ids; price, line, and public backing are dual-handle sliders with Any at the unbound ends. UI only. PR #825 |
 | 2026-09-22 | [2026-09](./2026-09.md) | 2026-09-22, the opener locked "NYG -1 at MGM", a number no book had: the Odds API served BetMGM at NYG -1 for one tick then +1 for fourteen minutes; the rule never checked how long a soft book had held its number. A 60-min gate was built, then rejected by mike ("you're trying to win bets and money"): a fresh number is now LABELLED (`· NEW 0m`) not blocked, Discord posts inside the tick, the poll runs every minute for real (incremental snapshot flush), `pick_placement_checks` + `scripts/mark_placeable.py` record whether fresh numbers were placeable. Pick voided. Second MGM episode found (CHI @ CAR 09-08). PR #823, Updated-By: mike |

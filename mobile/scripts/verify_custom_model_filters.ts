@@ -35,6 +35,7 @@ import {
   PUBLIC_PCT_OPTIONS,
   SLIDER_LOW_SENTINEL,
   boundIndex,
+  commitSliderBounds,
   formatAmericanLabel,
   formatPublicLabel,
   formatRangeCaption,
@@ -659,6 +660,38 @@ check(
     'an off-list legacy price sits on a real stop, not on Any',
     indexToBound(ODDS_STOPS, boundIndex(ODDS_STOPS, -165, 'low')) != null,
   );
+  {
+    const legacyMin = -165;
+    const storedMax = 200;
+    const prevLow = boundIndex(ODDS_STOPS, legacyMin, 'low');
+    const prevHigh = boundIndex(ODDS_STOPS, storedMax, 'high');
+    const movedHigh = commitSliderBounds(
+      ODDS_STOPS, prevLow, prevHigh, prevLow, prevHigh + 1, legacyMin, storedMax,
+    );
+    const snappedMin = indexToBound(ODDS_STOPS, prevLow);
+    check(
+      'off-list min + move high → min unchanged',
+      snappedMin != null &&
+        snappedMin !== legacyMin &&
+        movedHigh.min === legacyMin &&
+        movedHigh.max === indexToBound(ODDS_STOPS, prevHigh + 1),
+    );
+    const legacyMax = 163;
+    const storedMin = -150;
+    const lowIdx = boundIndex(ODDS_STOPS, storedMin, 'low');
+    const highIdx = boundIndex(ODDS_STOPS, legacyMax, 'high');
+    const movedLow = commitSliderBounds(
+      ODDS_STOPS, lowIdx, highIdx, lowIdx + 1, highIdx, storedMin, legacyMax,
+    );
+    const snappedMax = indexToBound(ODDS_STOPS, highIdx);
+    check(
+      'off-list max + move low → max unchanged',
+      snappedMax != null &&
+        snappedMax !== legacyMax &&
+        movedLow.max === legacyMax &&
+        movedLow.min === indexToBound(ODDS_STOPS, lowIdx + 1),
+    );
+  }
   check(
     '0% public is a real floor, distinct from the unbound end',
     boundIndex(PUBLIC_PCT_OPTIONS, 0, 'low') === 0 &&
