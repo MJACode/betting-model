@@ -323,6 +323,70 @@ export function buildSlateGameIndex(
   return out;
 }
 
+// ── 5. Head-to-head: who each team is about to play ──
+
+/**
+ * Every team in the forward window mapped to its NEXT game.
+ *
+ * NOT `buildSlateGameIndex`, and the difference is the whole point of the H2H
+ * window. That index is bounded to ONE date (`slate.date`) because it feeds the
+ * row subline on a board that is about tonight. H2H is about the fixture a
+ * bettor is pricing, and in a weekly sport that fixture is usually not today:
+ * bounded to the slate date, an NFL H2H board opened on a Tuesday would have
+ * covered the two teams playing Thursday and left the other thirty blank.
+ *
+ * So this spans whatever window it is handed (the board reads seven days) and
+ * resolves each team with the same rule the player page uses — soonest
+ * unstarted kickoff, falling back to the last game once they have all started,
+ * which keeps a doubleheader on the game that can still be bet.
+ *
+ * TEAM-KEYED ONLY. `buildSlateGameIndex` also keys UFC fighters by name; the
+ * H2H window is offered only for the sports with a per-game player log
+ * (`supportsHitRate`), none of which are teamless, and a fighter-name key here
+ * would pair a person with a person in a read that expects two teams.
+ */
+export function nextGameByTeam(games: GameRow[], nowIso: string): Map<string, SlateGame> {
+  const out = new Map<string, SlateGame>();
+  const teams = new Set<string>();
+  for (const g of games) {
+    if (g.home_team) teams.add(g.home_team);
+    if (g.away_team) teams.add(g.away_team);
+  }
+  for (const team of teams) {
+    const entry = earliestUpcomingGame(games, team, nowIso);
+    if (entry) out.set(team, entry);
+  }
+  return out;
+}
+
+/**
+ * The fixture list the H2H read is narrowed by — team i plays opponent i.
+ *
+ * TWO PARALLEL ARRAYS rather than one array of 'TEAM|OPP' strings: an NCAAF
+ * team id is a school NAME (CLAUDE.md §4), so any separator is a character
+ * that can occur inside a key. The RPC pairs them by ordinal.
+ *
+ * Sorted by team so the read key the board memoises on is stable — a Map's
+ * iteration order follows insertion, which follows whatever order the slate
+ * rows arrived in, and an unstable key re-reads the whole board for nothing.
+ */
+export function h2hMatchups(
+  index: Map<string, SlateGame>,
+  onlyTeams?: readonly string[] | null,
+): { teams: string[]; opponents: string[] } {
+  const allow = onlyTeams && onlyTeams.length > 0 ? new Set(onlyTeams) : null;
+  const teams: string[] = [];
+  const opponents: string[] = [];
+  for (const team of Array.from(index.keys()).sort()) {
+    if (allow && !allow.has(team)) continue;
+    const opponent = index.get(team)?.opponent;
+    if (!opponent) continue;
+    teams.push(team);
+    opponents.push(opponent);
+  }
+  return { teams, opponents };
+}
+
 /**
  * The key a leaderboard row matched on — team first, then name (UFC).
  *
