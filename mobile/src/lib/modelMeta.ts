@@ -759,12 +759,103 @@ export function betTypeGroups(): Array<{ sport: BetTypeSport; options: BetTypeOp
   })).filter((g) => g.options.length > 0);
 }
 
+/**
+ * The three bet types the custom-model picker offers. One row per slot, not
+ * one row per model_id — `betTypeGroups()` stays the per-model catalog (pause
+ * and retirement still drop ids there) and the picker collapses it.
+ *
+ * Totals, First-5, live, regulation 3-way and golf outrights are not a slot.
+ * A sport that has no active model for a slot omits that row (WNBA's spread
+ * is paused, so WNBA has no Spread row; NFL has no moneyline model at all).
+ */
+export type BetTypeSlot = 'ml' | 'line' | 'props';
+
+export interface BetTypeChoice {
+  /** Stable row key: sport + slot, not a model_id. */
+  key: string;
+  sport: BetTypeSport;
+  slot: BetTypeSlot;
+  /** Short label. Never MODEL_META.longLabel. */
+  label: string;
+  subtitle: string;
+  /** Active model_ids this choice writes as rules, in catalog order. */
+  modelIds: string[];
+}
+
+const BET_TYPE_SLOT_ORDER: BetTypeSlot[] = ['ml', 'line', 'props'];
+
+/**
+ * Which picker slot a model belongs to, or null when the picker does not
+ * offer it. `betTypeGroups` has already dropped paused, retired and live ids;
+ * the `_f5_` / `_live_` checks here are the second line so a caller that
+ * passes a raw id still cannot surface those markets.
+ */
+export function betSlotForModel(id: string, type: ModelCategory): BetTypeSlot | null {
+  if (id.includes('_live_') || id.includes('_f5_')) return null;
+  // NCAAF Spread writes ncaaf_spread only. The premium band is the same
+  // market at a higher cut; adding it made a second rule with the same
+  // title. Chief of Staff, 2026-09-24.
+  if (id === 'ncaaf_spread_premium') return null;
+  if (type !== 'game') return 'props';
+  if (id.includes('moneyline') && !id.includes('regulation')) return 'ml';
+  if (id.includes('runline') || id.includes('puckline') || id.includes('_spread')) return 'line';
+  return null;
+}
+
+function choiceCopy(sport: BetTypeSport, slot: BetTypeSlot): { label: string; subtitle: string } {
+  if (slot === 'ml') return { label: 'ML', subtitle: 'Moneyline' };
+  if (slot === 'props') return { label: 'Player props', subtitle: 'All player markets' };
+  if (sport === 'MLB') return { label: 'Run line', subtitle: '±1.5' };
+  if (sport === 'NHL') return { label: 'Puck line', subtitle: '±1.5' };
+  return { label: 'Spread', subtitle: 'Spread line' };
+}
+
+/**
+ * Status on a picker row. Null when none of the slot's models are rules yet.
+ * "Added" only when every one is. A partial slot stays tappable.
+ */
+export function choiceAddedLabel(present: number, total: number): string | null {
+  if (present <= 0 || total <= 0) return null;
+  if (present >= total) return 'Added';
+  return `${present} of ${total} added`;
+}
+
+/** Picker rows: at most ML, the sport's line, and Player props. */
+export function betTypePickerGroups(): Array<{ sport: BetTypeSport; choices: BetTypeChoice[] }> {
+  return betTypeGroups()
+    .map((group) => {
+      const bySlot = new Map<BetTypeSlot, string[]>();
+      for (const opt of group.options) {
+        const slot = betSlotForModel(opt.id, opt.type);
+        if (!slot) continue;
+        const list = bySlot.get(slot) ?? [];
+        list.push(opt.id);
+        bySlot.set(slot, list);
+      }
+      const choices: BetTypeChoice[] = [];
+      for (const slot of BET_TYPE_SLOT_ORDER) {
+        const modelIds = bySlot.get(slot);
+        if (!modelIds || modelIds.length === 0) continue;
+        const copy = choiceCopy(group.sport, slot);
+        choices.push({
+          key: `${group.sport}:${slot}`,
+          sport: group.sport,
+          slot,
+          label: copy.label,
+          subtitle: copy.subtitle,
+          modelIds,
+        });
+      }
+      return { sport: group.sport, choices };
+    })
+    .filter((g) => g.choices.length > 0);
+}
+
 /** Module-load snapshot of `betTypeGroups()` (bundled pause set). Prefer the
  *  function at a render site so a server-flag pause lands without a rebuild. */
 export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOption[] }> =
   betTypeGroups();
 
-/** "MLB · Moneyline" — how a bet-type rule is titled everywhere it renders. */
 /** The one sentence every surface uses for a rule on a retired bet type — the
  *  Models card, the editor's RuleRow, the detail rule line and its empties —
  *  so they cannot drift into three phrasings of the same state. */
@@ -798,6 +889,15 @@ export function withdrawnRulesEmpty(
   return null;
 }
 
+/**
+ * How a custom-model rule is titled on the editor, the detail screen, and the
+ * Models list. A model the picker offers uses that row's short name
+ * ("MLB · Run line"), never MODEL_META.longLabel. A market the picker does
+ * not offer keeps its long name.
+ */
 export function betTypeLabel(modelId: string): string {
-  return `${sportOfModel(modelId)} · ${modelLong(modelId)}`;
+  const sport = sportOfModel(modelId);
+  const slot = betSlotForModel(modelId, modelCategory(modelId));
+  if (!slot) return `${sport} · ${modelLong(modelId)}`;
+  return `${sport} · ${choiceCopy(sport, slot).label}`;
 }

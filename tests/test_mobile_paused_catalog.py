@@ -59,6 +59,43 @@ def test_the_bet_type_picker_filters_paused_models():
     assert "isModelRetired(id)" in body
 
 
+def test_the_custom_model_picker_is_three_bet_types():
+    """The picker collapses model_ids into ML / line / player props.
+    betTypeGroups stays the per-model catalog so a pause still drops an id
+    before the collapse. The screen must not go back to one row per longLabel.
+    """
+    meta = _read(MOBILE / "src" / "lib" / "modelMeta.ts")
+    assert "{ label: 'ML', subtitle: 'Moneyline' }" in meta
+    assert "{ label: 'Run line', subtitle: '±1.5' }" in meta
+    assert "{ label: 'Puck line', subtitle: '±1.5' }" in meta
+    assert "{ label: 'Spread', subtitle: 'Spread line' }" in meta
+    assert "{ label: 'Player props', subtitle: 'All player markets' }" in meta
+    collapse = _block(meta, "export function betTypePickerGroups", "\n}")
+    assert "betTypeGroups()" in collapse
+    # Rule chrome (editor, detail, Models list) all call betTypeLabel. A slot
+    # must title itself with the picker's short name, not longLabel.
+    titled = _block(meta, "export function betTypeLabel", "\n}")
+    assert "betSlotForModel" in titled
+    assert "choiceCopy" in titled
+    # NCAAF Spread writes ncaaf_spread only. Premium stays out of the slot
+    # so the row cannot add a second rule with the same title.
+    slot = _block(meta, "export function betSlotForModel", "\n}")
+    assert "id === 'ncaaf_spread_premium'" in slot
+
+    screen = _read(MOBILE / "src" / "screens" / "ModelEditScreen.tsx")
+    assert "betTypePickerGroups" in screen
+    assert "betTypeGroups(" not in screen
+    assert "function NumberField" not in screen
+    assert "function PickerField" not in screen
+    assert "RangeSlider" in screen
+    assert "onPick(choice.modelIds)" in screen
+    # One thumb moving must not snap the other end. The screen commits
+    # through commitSliderBounds; indexToBound on both indices was the bug.
+    assert "commitSliderBounds" in screen
+    assert "onChange(indexToBound(stops, lo), indexToBound(stops, hi))" not in screen
+    assert "onChange(indexToBound(stops, pair.low), indexToBound(stops, pair.high))" not in screen
+
+
 def test_today_picks_drop_paused_models_at_the_source():
     """useTodayPicks feeds Today, Signals counts, Models cards, Market chips
     and Stats odds pills. A filter only on passesActionFilter left Today and
