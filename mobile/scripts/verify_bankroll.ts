@@ -33,6 +33,7 @@ import {
   bankrollFieldText,
   canStepUnitPct,
   checkBankroll,
+  createBankrollStore,
   formatBankrollInput,
   formatDollars,
   formatPct,
@@ -186,6 +187,62 @@ async function storage() {
     [5, 2e7, -1, 0, '2000', null].every((a) => sanitizeBankroll({ amount: a, unitPct: 1 }).amount === null));
 }
 
+// ── 6b. Setters fired back to back both survive (Reviewer, #831) ──────────
+// A slow store (every read and write yields several ticks, writes finish out
+// of order when allowed to) so a setter that merged into a captured base, or a
+// write that raced another, would lose one of the two values.
+function slowStore(init: Record<string, string>) {
+  const data = { ...init };
+  const tick = (n: number) => new Promise<void>((r) => setTimeout(r, n));
+  const store: KeyValueStore = {
+    async getItem(k) { await tick(5); return data[k] ?? null; },
+    async setItem(k, v) { await tick(v.includes('"amount":null') ? 1 : 8); data[k] = v; },
+  };
+  return { store, data };
+}
+async function interleaving() {
+  const stored = (d: Record<string, string>) => JSON.parse(d[BANKROLL_KEY] ?? '{}');
+  const seed = { [BANKROLL_KEY]: JSON.stringify({ amount: 1000, unitPct: 1 }) };
+  {
+    const f = slowStore(seed);
+    const bs = createBankrollStore(f.store);
+    const seen: string[] = [];
+    bs.subscribe((x) => seen.push(`${x.amount}/${x.unitPct}`));
+    // Before the first load has finished — the hardest case.
+    await Promise.all([bs.update({ amount: 2500 }), bs.update({ unitPct: 2 })]);
+    const mem = bs.get();
+    check('setAmount then setUnitPct: both in memory', mem?.amount === 2500 && mem?.unitPct === 2, JSON.stringify(mem));
+    const disk = stored(f.data);
+    check('setAmount then setUnitPct: both in storage', disk.amount === 2500 && disk.unitPct === 2, JSON.stringify(disk));
+    check('listeners end on the merged state', seen[seen.length - 1] === '2500/2', seen.join(' '));
+  }
+  {
+    const f = slowStore(seed);
+    const bs = createBankrollStore(f.store);
+    await Promise.all([bs.update({ unitPct: 3.5 }), bs.update({ amount: 4000 })]);
+    check('setUnitPct then setAmount: both in memory', bs.get()?.amount === 4000 && bs.get()?.unitPct === 3.5);
+    const disk = stored(f.data);
+    check('setUnitPct then setAmount: both in storage', disk.amount === 4000 && disk.unitPct === 3.5, JSON.stringify(disk));
+  }
+  {
+    // After load, with a fast write (the clear) queued behind a slow one: the
+    // last value to reach storage is still the newest state.
+    const f = slowStore(seed);
+    const bs = createBankrollStore(f.store);
+    await bs.load();
+    await Promise.all([bs.update({ unitPct: 1.5 }), bs.update({ amount: null })]);
+    const disk = stored(f.data);
+    check('a quick clear after a % change: both in storage, in order', disk.amount === null && disk.unitPct === 1.5, JSON.stringify(disk));
+    check('…and in memory', bs.get()?.amount === null && bs.get()?.unitPct === 1.5);
+  }
+  {
+    const f = slowStore(seed);
+    const bs = createBankrollStore(f.store);
+    await bs.update({ amount: 5 });
+    check('an invalid amount never reaches the store (sanitized to none)', bs.get()?.amount === null);
+  }
+}
+
 // ── 7. Nothing is sized off it: picks stay a flat 1u ───────────────────────
 const SRC = join(import.meta.dirname, '..', 'src');
 const read = (p: string) => readFileSync(join(SRC, p), 'utf-8');
@@ -303,6 +360,16 @@ check('Picks: the exposure banner is unchanged and shows no dollars',
   check('avoidText is used for that text only', (settings.match(/colors\.avoidText/g) ?? []).length === 1);
 }
 
+// ── 8c. The keyboard never covers the field ────────────────────────────────
+check('Settings ScrollView: automaticallyAdjustKeyboardInsets + keyboardShouldPersistTaps="handled"',
+  /<ScrollView\s+contentContainerStyle=\{styles\.list\}\s+keyboardShouldPersistTaps="handled"\s+automaticallyAdjustKeyboardInsets\s*>/.test(settings));
+{
+  const hook = read('hooks/useBankroll.ts');
+  check('useBankroll goes through the one merging store, no captured-base writes',
+    /const store = createBankrollStore\(AsyncStorage\);/.test(hook) && /store\.update\(\{ amount \}\)/.test(hook) &&
+      /store\.update\(\{ unitPct: sanitizeUnitPct\(pct\) \}\)/.test(hook) && !/\.\.\.base/.test(hook));
+}
+
 // ── 9. Explainer ───────────────────────────────────────────────────────────
 const explainer = read('screens/ExplainerScreen.tsx').replace(/\s+/g, ' ');
 check('Explainer: no longer says we never ask for a bankroll', !explainer.includes('we never ask for your bankroll'));
@@ -310,7 +377,7 @@ check('Explainer: optional, on this device, converts only, never sizes',
   /bankroll in Settings/.test(explainer) && /optional/.test(explainer) && /stays on this device/.test(explainer) &&
     /only converts your units into dollars/.test(explainer) && /never sizes a bet/.test(explainer));
 
-storage().then(() => {
+storage().then(interleaving).then(() => {
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} check(s) FAILED.`);
   process.exit(failures === 0 ? 0 : 1);
 });

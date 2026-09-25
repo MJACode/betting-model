@@ -121,6 +121,25 @@ def test_error_text_uses_the_text_safe_red():
     assert "borderColor: colors.avoid," in settings
     assert '<Ionicons name="alert-circle" size={14} color={colors.avoid} />' in settings
 
+
+def test_keyboard_never_covers_the_field():
+    settings = _read(SETTINGS)
+    assert (
+        "<ScrollView\n        contentContainerStyle={styles.list}\n"
+        '        keyboardShouldPersistTaps="handled"\n'
+        "        automaticallyAdjustKeyboardInsets\n      >" in settings
+    )
+
+
+def test_setters_merge_into_the_latest_value():
+    # Reviewer, #831: two setters back to back must not drop either value.
+    hook = _read(HOOK)
+    assert "const store = createBankrollStore(AsyncStorage);" in hook
+    assert "...base" not in hook
+    lib = _read(LIB)
+    assert "export function createBankrollStore(kv: KeyValueStore)" in lib
+    assert "...(current ?? BANKROLL_DEFAULTS), ...patch" in lib
+
 def test_runs_in_pr_ci():
     assert "tests/test_mobile_bankroll.py" in _read(ROOT / ".github/workflows/pr-ci.yml")
 

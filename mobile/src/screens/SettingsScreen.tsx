@@ -331,7 +331,16 @@ export function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+      {/* automaticallyAdjustKeyboardInsets (iOS): the keyboard insets the list
+          and RN scrolls the focused field — the bankroll input, with its Done
+          bar — above it natively, so no measure/scrollTo is needed. Android
+          resizes the window. "handled" was already here: a tap on a switch or
+          row while the keyboard is up still lands. */}
+      <ScrollView
+        contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
 
         {/* Account + Subscription. Both are behind flags — while auth is dark
             this is the ONLY sign-in entry point in the app, so the whole

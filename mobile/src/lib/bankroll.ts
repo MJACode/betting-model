@@ -78,6 +78,53 @@ export async function writeBankroll(store: KeyValueStore, s: BankrollSettings): 
   await store.setItem(BANKROLL_KEY, JSON.stringify(clean));
 }
 
+/**
+ * The in-memory store behind hooks/useBankroll.ts. Every update applies its
+ * patch to the LATEST value, after the first load — never to a value captured
+ * when the setter was called — and writes go out through one promise chain, so
+ * an amount typed and a unit % tapped back to back both survive, in memory and
+ * in storage, whatever order they land in (Reviewer, #831).
+ */
+export function createBankrollStore(kv: KeyValueStore) {
+  let current: BankrollSettings | null = null;
+  let loading: Promise<BankrollSettings> | null = null;
+  let writes: Promise<void> = Promise.resolve();
+  const listeners = new Set<(s: BankrollSettings) => void>();
+
+  const load = (): Promise<BankrollSettings> => {
+    if (current) return Promise.resolve(current);
+    loading ??= readBankroll(kv).then((s) => {
+      // An update that raced the first read already set `current`; keep it.
+      current ??= s;
+      return current;
+    });
+    return loading;
+  };
+
+  const update = async (patch: Partial<BankrollSettings>): Promise<void> => {
+    await load();
+    const next = sanitizeBankroll({ ...(current ?? BANKROLL_DEFAULTS), ...patch });
+    current = next;
+    listeners.forEach((fn) => fn(next));
+    // Chained, and each write sends the value current AT WRITE TIME, so the
+    // last write to land is always the newest state.
+    writes = writes
+      .then(() => writeBankroll(kv, current ?? next))
+      .catch((err) => console.warn('[bankroll] save failed', err));
+    return writes;
+  };
+
+  return {
+    load,
+    update,
+    get: (): BankrollSettings | null => current,
+    subscribe(fn: (s: BankrollSettings) => void): () => void {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+  };
+}
+
 // ── The field ──────────────────────────────────────────────────────────────
 /** Integer digits kept while typing: 10M has 8, so 12 leaves room for the
  *  live over-the-limit error without letting a paste run to float noise. */

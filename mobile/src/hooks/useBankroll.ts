@@ -3,60 +3,44 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   BANKROLL_DEFAULTS,
-  readBankroll,
+  createBankrollStore,
   sanitizeUnitPct,
-  writeBankroll,
   type BankrollSettings,
 } from '@/lib/bankroll';
 
 /**
  * The optional, display-only bankroll (lib/bankroll.ts): the amount and the
- * unit %, on this device under `bankroll.v2`. Module store + AsyncStorage,
- * same pattern as useResponsibleGambling. Nothing sizes a bet off it.
+ * unit %, on this device under `bankroll.v2`. One module-level store, as in
+ * useResponsibleGambling; its updates merge into the latest value and write
+ * in order (createBankrollStore). Nothing sizes a bet off it.
  */
-const listeners = new Set<(s: BankrollSettings) => void>();
-let cached: BankrollSettings | null = null;
-
-async function load(): Promise<BankrollSettings> {
-  if (cached) return cached;
-  cached = await readBankroll(AsyncStorage);
-  return cached;
-}
-
-function persist(next: BankrollSettings) {
-  cached = next;
-  listeners.forEach((fn) => fn(next));
-  writeBankroll(AsyncStorage, next).catch((err) => console.warn('[bankroll] save failed', err));
-}
+const store = createBankrollStore(AsyncStorage);
 
 export function useBankroll() {
-  const [settings, setSettings] = useState<BankrollSettings>(cached ?? BANKROLL_DEFAULTS);
-  const [ready, setReady] = useState<boolean>(cached != null);
+  const [settings, setSettings] = useState<BankrollSettings>(store.get() ?? BANKROLL_DEFAULTS);
+  const [ready, setReady] = useState<boolean>(store.get() != null);
 
   useEffect(() => {
     let mounted = true;
-    load().then((s) => {
+    store.load().then((s) => {
       if (!mounted) return;
-      setSettings(s);
+      setSettings(store.get() ?? s);
       setReady(true);
     });
-    const listener = (s: BankrollSettings) => setSettings(s);
-    listeners.add(listener);
+    const unsubscribe = store.subscribe(setSettings);
     return () => {
       mounted = false;
-      listeners.delete(listener);
+      unsubscribe();
     };
   }, []);
 
   /** A validated amount, or null to clear it. The field never passes an invalid one. */
   const setAmount = useCallback((amount: number | null) => {
-    // After load, so an edit in the first frame cannot overwrite the stored
-    // unit % with the default.
-    void load().then((base) => persist({ ...base, amount }));
+    void store.update({ amount });
   }, []);
 
   const setUnitPct = useCallback((pct: number) => {
-    void load().then((base) => persist({ ...base, unitPct: sanitizeUnitPct(pct) }));
+    void store.update({ unitPct: sanitizeUnitPct(pct) });
   }, []);
 
   return { settings, ready, setAmount, setUnitPct };
