@@ -35,6 +35,7 @@ import {
   buildPickIndex,
   buildQuoteIndex,
   buildTeamLineIndex,
+  nearestLine,
   quoteForRow,
   sameLine,
   slipPickFor,
@@ -426,6 +427,22 @@ check(
     [{ ...SLATE[0]!, player_name: 'George Springer', line: 1.5, over_price: 230, under_price: null }],
     DK_OVER_0_5,
   );
+  // The NEAREST line, never the longest shot (Matt, 2026-09-25): with the
+  // alternate ladder folded in, "best price at any line" printed 180+ Rush
+  // Yards at +3400 under a 45+ board. Measured shape: Brian Robinson Jr. at
+  // DraftKings, ATL @ GB, 2026-09-24 — 59.5 (-205) up to 119.5 (+2800).
+  const ladder = buildQuoteIndex(
+    [59.5, 64.5, 69.5, 89.5, 119.5].map((line, i) => ({
+      ...SLATE[0]!, player_name: 'Brian Robinson Jr.', market: 'batter_hits', line,
+      over_price: [-205, -115, 145, 600, 2800][i]!, under_price: null,
+    })),
+    { ...DK_OVER_0_5, line: 44.5 },
+  );
+  const br = [...ladder.values()][0];
+  check('an off-line quote takes the line nearest the ruler, not the longest price',
+    br?.line === 59.5 && br?.price === -205 && br?.offLine === true, `${br?.line} ${br?.price}`);
+  check('a tie in distance goes to the easier side of the bet',
+    nearestLine([1.5, 3.5], 2.5, 'over') === 1.5 && nearestLine([1.5, 3.5], 2.5, 'under') === 3.5);
   check('an off-line row prices the side it posts even with the other side missing', under.get('george springer')?.price === 230);
   const stats = read('src/screens/StatsScreen.tsx');
   // The BOARD's idiom, whichever one that is (2026-09-06). Abbreviated and

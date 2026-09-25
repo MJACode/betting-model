@@ -222,9 +222,17 @@ _READ_PREFIXES = ("select", "show", "explain", "values", "table")
 
 
 def _is_write(sql: str) -> bool:
-    """Conservative: anything that is not plainly a read counts as a write."""
+    """Conservative: anything that is not plainly a read counts as a write.
+
+    SAVEPOINT / RELEASE SAVEPOINT / ROLLBACK [TO SAVEPOINT] are transaction
+    control, not writes. Marking them dirty would make the price pre-filter's
+    savepoint look like uncommitted work, so a later lost connection during a
+    read raises ConnectionLost instead of retrying that one statement.
+    """
     head = sql.lstrip().lower()
     if head.startswith(_READ_PREFIXES):
+        return False
+    if head.startswith(("savepoint ", "release savepoint ", "rollback")):
         return False
     if head.startswith("with"):
         return any(w in head for w in ("insert", "update", "delete"))

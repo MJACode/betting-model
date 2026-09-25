@@ -184,6 +184,32 @@ function nextGameRows(
 }
 
 /**
+ * The posted line closest to the one the board is asking about. A tie (one
+ * line equally far above and below) goes to the EASIER side of the bet — the
+ * lower line for an over, the higher for an under — so the fallback never
+ * quietly hands the reader a harder bet than the one on screen.
+ */
+export function nearestLine(
+  lines: readonly number[],
+  target: number,
+  side: StatsOddsSide,
+): number | null {
+  let best: number | null = null;
+  for (const l of lines) {
+    if (!Number.isFinite(l)) continue;
+    if (best == null) {
+      best = l;
+      continue;
+    }
+    const d = Math.abs(l - target);
+    const bd = Math.abs(best - target);
+    if (d < bd - 1e-9) best = l;
+    else if (Math.abs(d - bd) < 1e-9 && (side === 'under' ? l > best : l < best)) best = l;
+  }
+  return best;
+}
+
+/**
  * The selected book's quote per player for one market, at one line and side.
  *
  * `gameIds` bounds the rows to the sport's slate: the view has no sport column
@@ -246,12 +272,18 @@ export function buildQuoteIndex(
     let offLine = false;
     let list = atLine;
     if (best == null) {
-      // The book's own line: the member's books' rows at whatever line each
-      // posts, best price among them; the winner's line becomes the quote's.
-      const own = mine(all).filter((r) => num(r.line) != null);
-      best = bestOf(own, priceOf);
+      // The book's own line NEAREST the ruler's, then the best price among the
+      // member's books at that one line. Never the best price across lines:
+      // since alternate lines were folded in (lib/propLines.ts), "best price
+      // anywhere" is always the longest shot on the ladder, so a 45+ Rush
+      // Yards board printed 180+ at +3400 (Matt, 2026-09-25). A higher payout
+      // at a different number is not a better price, it is a different bet.
+      const own = mine(all).filter((r) => num(r.line) != null && priceOf(r) != null);
+      const near = nearestLine(own.map((r) => num(r.line) as number), opts.line, opts.side);
+      if (near == null) continue;
+      best = bestOf(own.filter((r) => sameLine(num(r.line), near)), priceOf);
       if (best == null) continue;
-      line = num(best.row.line) as number;
+      line = near;
       offLine = true;
       list = all.filter((r) => sameLine(num(r.line), line));
     }
