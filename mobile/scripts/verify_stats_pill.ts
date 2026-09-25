@@ -107,7 +107,8 @@ check(
 // ── 3. The stat groups are tabs, everywhere ─────────────────────────────────
 
 // StatsScreen is deliberately NOT in this list. Its group row collapsed into a
-// dropdown pill on 2026-09-12 (UX review): three underline-tab rows on one
+// dropdown pill on 2026-09-12, and the pill gave way to the position row on
+// 2026-09-25 (below). The 2026-09-12 reason still holds: three underline-tab rows on one
 // screen at two sizes left the eye unable to tell a board-level switch from a
 // filter, and the row was 33pt of a 446pt control stack. The boards that still
 // have the vertical room keep the tabs, so the component stays pinned there.
@@ -125,17 +126,25 @@ check(
   'StatsScreen: no hand-rolled floating group row survives',
   !stats.includes('styles.groupTab') && !stats.includes('groupTabText'),
 );
+// The group dropdown pill is GONE (Designer, Option A, Matt 2026-09-25): it
+// cost three taps to move from Passing to Receiving and read as one of the
+// chips. The position row (QB / RB / WR/TE / DEF / Teams) scopes the chips
+// instead — lib/statSegments.ts, pinned by verify_stat_segments.ts.
 check(
-  "StatsScreen: the group pill reuses the direction pill's style, not a second copy",
-  // Two chevron pills drawn from two style blocks is the duplicate the UX
-  // review flagged; a third caller means extracting a DropdownPill.
-  (stats.match(/styles\.dirPill,/g) ?? []).length === 2 &&
-    !/groupPill:\s*\{/.test(stats),
+  'StatsScreen: no group dropdown pill survives — the position row replaced it',
+  !/accessibilityLabel="Stat group"/.test(stats) &&
+    !stats.includes('StatGroupSheet') &&
+    !stats.includes('setGroupOpen'),
 );
 check(
-  'StatsScreen: the group pill says what it opens, and is a button not a tab',
-  /accessibilityLabel="Stat group"/.test(stats) &&
-    /accessibilityValue=\{\{ text: activeGroup \}\}/.test(stats),
+  "StatsScreen: the direction pill is the only chevron pill, so there is still one style block",
+  (stats.match(/styles\.dirPill,/g) ?? []).length === 1 && !/groupPill:\s*\{/.test(stats),
+);
+check(
+  'StatsScreen: the position row replaces Players | Teams rather than stacking under it',
+  /function StatSegmentRow/.test(stats) &&
+    !/function BoardModeToggle/.test(stats) &&
+    (stats.match(/<StatSegmentRow /g) ?? []).length === 3,
 );
 check(
   'Players | Teams and Hit Rates | Averages use the same component as the groups',

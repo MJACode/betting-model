@@ -16,7 +16,8 @@ import { colors, font, spacing } from '@/lib/theme';
  * stacks QB | WR/TE | RB under Players | Teams).
  *
  * Full width and evenly divided rather than scrolling: the widest set anywhere
- * is the NFL's four groups, which fits at 25% each.
+ * is the Stats tab's NFL position row, five tabs (QB / RB / WR/TE / DEF /
+ * Teams) at 20% each — 78.6pt on a 393pt screen.
  */
 export function SegmentTabs<T extends string>({
   items,
@@ -32,6 +33,14 @@ export function SegmentTabs<T extends string>({
    *  roles below travel with it, which is the whole reason it reuses this
    *  component rather than hand-rolling a segment (UX review, 2026-09-12). */
   compact = false,
+  /** What VoiceOver reads for a tab whose label is an abbreviation ("WR/TE"). */
+  accessibilityLabelFor,
+  /** Shrink a label to fit its tab at large Dynamic Type sizes instead of
+   *  truncating it, and cap it at 2x (UX_REVIEW §5 segmented-control
+   *  exception). Added 2026-09-25 for the Stats position row, whose NFL
+   *  segments (QB / RB / WR/TE / DEF / Teams) share one screen width
+   *  (Designer: "don't truncate"). */
+  fit = false,
 }: {
   items: readonly T[];
   active: T;
@@ -39,6 +48,8 @@ export function SegmentTabs<T extends string>({
   labelFor?: (item: T) => string;
   second?: boolean;
   compact?: boolean;
+  accessibilityLabelFor?: (item: T) => string;
+  fit?: boolean;
 }) {
   if (items.length < 2) return null;
   return (
@@ -53,6 +64,7 @@ export function SegmentTabs<T extends string>({
             key={item}
             onPress={() => onChange(item)}
             accessibilityRole="tab"
+            accessibilityLabel={accessibilityLabelFor ? accessibilityLabelFor(item) : undefined}
             accessibilityState={{ selected: isActive }}
             // The tabs are 33-38pt tall, under the 44pt HIG floor, and adding
             // height is the one thing this screen cannot spend (UX review,
@@ -73,6 +85,12 @@ export function SegmentTabs<T extends string>({
                 isActive && (second || compact ? styles.textActiveSecond : styles.textActive),
               ]}
               numberOfLines={1}
+              adjustsFontSizeToFit={fit}
+              minimumFontScale={fit ? 0.75 : undefined}
+              // Segmented-control labels cap at 2x, as iOS caps its native
+              // segmented control — Designer's scoped exception, UX_REVIEW §5.
+              // Only on `fit`: every other tab row scales without a cap.
+              maxFontSizeMultiplier={fit ? 2 : undefined}
             >
               {labelFor ? labelFor(item) : item}
             </Text>

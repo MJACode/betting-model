@@ -113,7 +113,12 @@ which is exactly when users open it.
   green-vs-red with no word or icon fails for ~8% of male users.
 - Text scales: no `allowFontScaling={false}`, no fixed-height containers
   around body text. Numbers in tiles may cap with `maxFontSizeMultiplier`,
-  and that is the one place it is fine.
+  and apart from the segmented-control exception below that is the one place
+  it is fine.
+- Segmented-control labels (`SegmentTabs` with `fit`, e.g. the Stats position
+  row) may cap at `maxFontSizeMultiplier={2}` with `minimumFontScale` 0.75 —
+  Designer's approved, scoped exception (2026-09-25, #830), matching how iOS
+  caps its native segmented control. Not for other text.
 - Contrast: `textTertiary` on `bg` is at the AA floor; do not put it on a
   coloured chip. On `bgCard` at 11pt it is ~3.4:1 and is BELOW the floor —
   size does not exempt it, 11pt is not "large text".
