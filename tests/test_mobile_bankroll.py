@@ -110,7 +110,6 @@ def test_explainer_no_longer_denies_a_bankroll():
     assert "never sizes a bet" in explainer
 
 
-
 def test_error_text_uses_the_text_safe_red():
     # `avoid` (#FF3B30) is 3.55:1 on white: fine for the icon and outline, not
     # for words. The message takes `avoidText` (#D70015, 5.38:1).
@@ -136,9 +135,36 @@ def test_setters_merge_into_the_latest_value():
     hook = _read(HOOK)
     assert "const store = createBankrollStore(AsyncStorage);" in hook
     assert "...base" not in hook
+    assert "store.update((latest) => ({ unitPct: stepUnitPct(latest.unitPct, dir) }))" in hook
     lib = _read(LIB)
     assert "export function createBankrollStore(kv: KeyValueStore)" in lib
-    assert "...(current ?? BANKROLL_DEFAULTS), ...patch" in lib
+    assert "const next = sanitizeBankroll({ ...latest, ...p });" in lib
+    # One read in flight on a cold start; a failed read is not cached.
+    assert "reading ??= tryReadBankroll(kv)" in lib
+    assert "if (r.ok) current ??= r.value;" in lib
+
+
+def test_locale_separators_decide_the_decimal():
+    # Reviewer, #831: "12,50" on a de-DE decimal pad is $12.50, not $1,250.
+    lib = _read(LIB)
+    assert "new Intl.NumberFormat(locale)" in lib
+    assert "fmt.formatToParts(1234.5)" in lib
+    assert "export const FALLBACK_SEPARATORS: NumberSeparators = { decimal: '.', group: ',' };" in lib
+    assert "text.replace(/,/g, '')" not in lib
+
+
+def test_nothing_saved_until_blur_or_done():
+    # Reviewer, #831: backspacing $25,000 to "2" must never store $25.
+    settings = _read(SETTINGS)
+    start = settings.index("const onChange = (raw: string) => {")
+    on_change = settings[start:settings.index("\n  };", start)]
+    assert "setText(editBankrollInput(text, raw));" in on_change
+    assert "setAmount" not in on_change
+    assert "const c = commitBankrollText(text, settings.amount);" in settings
+    assert "if (c.save !== undefined) setAmount(c.save);" in settings
+    assert "const shown = bankrollDraft(text, settings.unitPct);" in settings
+    assert "canLower={ready && canStepUnitPct(settings.unitPct, -1)}" in settings
+
 
 def test_runs_in_pr_ci():
     assert "tests/test_mobile_bankroll.py" in _read(ROOT / ".github/workflows/pr-ci.yml")

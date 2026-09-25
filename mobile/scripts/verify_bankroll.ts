@@ -12,7 +12,10 @@
  * #786 `bankroll` key never read, the empty state (no $ figure anywhere), that
  * nothing sizes a bet off the bankroll (picks stay a flat 1u), and that the
  * daily exposure card, `responsibleGambling.v2` and the Picks banner are
- * untouched.
+ * untouched. Also (Reviewer, #831): the device's decimal and group separators
+ * (en-US and de-DE), nothing saved until blur / Done, a shared cold-start
+ * read, steps from the latest %, no overwrite after a failed read, the
+ * near-$10 display flip, and backspace over a separator.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -25,28 +28,37 @@ import {
   BANKROLL_KEY,
   BANKROLL_MAX,
   BANKROLL_MIN,
+  DEVICE_SEPARATORS,
+  FALLBACK_SEPARATORS,
   LEGACY_BANKROLL_KEY,
   UNIT_PCT_DEFAULT,
   UNIT_PCT_MAX,
   UNIT_PCT_MIN,
   UNIT_PCT_STEP,
+  bankrollDraft,
   bankrollFieldText,
   canStepUnitPct,
   checkBankroll,
+  commitBankrollText,
   createBankrollStore,
+  deviceSeparators,
+  editBankrollInput,
   formatBankrollInput,
   formatDollars,
   formatPct,
   readBankroll,
   sanitizeBankroll,
   sanitizeUnitPct,
+  separatorsFromParts,
   stepUnitPct,
+  tryReadBankroll,
   unitDollars,
   unitRowSubtitle,
   unitRowTitle,
   visibleBankrollError,
   writeBankroll,
   type KeyValueStore,
+  type NumberSeparators,
 } from '../src/lib/bankroll';
 import { convictionFor, stakeFor } from '../src/lib/thresholds';
 
@@ -59,29 +71,33 @@ function eq(name: string, got: unknown, want: unknown) {
   check(name, got === want, `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 }
 
+// Sections 1–3 pin en-US explicitly, not whatever locale this machine runs in.
+const EN = deviceSeparators('en-US');
+const DE = deviceSeparators('de-DE');
+
 // ── 1. Typing and pasting ──────────────────────────────────────────────────
-eq('thousands separators as you type', formatBankrollInput('2000'), '2,000');
-eq('separators at 8 digits', formatBankrollInput('25000000'), '25,000,000');
-eq('re-typing over separators regroups', formatBankrollInput('2,0001'), '20,001');
-eq('decimals keep their separators', formatBankrollInput('1234567.8'), '1,234,567.8');
-eq('at most 2 decimals', formatBankrollInput('12.345'), '12.34');
-eq('a third decimal is dropped, not rounded', formatBankrollInput('0.999'), '0.99');
-eq('a lone point reads as 0.', formatBankrollInput('.'), '0.');
-eq('leading zeros go', formatBankrollInput('007'), '7');
-eq('paste: $, commas and letters stripped', formatBankrollInput('$2,000.50abc'), '2,000.50');
-eq('paste: spaces stripped', formatBankrollInput(' 1 234 '), '1,234');
-eq('paste: only one decimal point survives', formatBankrollInput('1.2.3'), '1.23');
-eq('paste: no digits at all is empty', formatBankrollInput('abc'), '');
-eq('paste: a leading minus is kept so the error can name it', formatBankrollInput('-500'), '-500');
-eq('paste: "$-1,000" is a negative', formatBankrollInput('$-1,000'), '-1,000');
-eq('paste: a trailing minus is just stripped', formatBankrollInput('500-'), '500');
-eq('a saved amount shows grouped, no ".00"', bankrollFieldText(2000), '2,000');
-eq('a saved amount keeps real cents', bankrollFieldText(1234.5), '1,234.50');
-eq('no saved amount shows the placeholder', bankrollFieldText(null), '');
+eq('thousands separators as you type', formatBankrollInput('2000', EN), '2,000');
+eq('separators at 8 digits', formatBankrollInput('25000000', EN), '25,000,000');
+eq('re-typing over separators regroups', formatBankrollInput('2,0001', EN), '20,001');
+eq('decimals keep their separators', formatBankrollInput('1234567.8', EN), '1,234,567.8');
+eq('at most 2 decimals', formatBankrollInput('12.345', EN), '12.34');
+eq('a third decimal is dropped, not rounded', formatBankrollInput('0.999', EN), '0.99');
+eq('a lone point reads as 0.', formatBankrollInput('.', EN), '0.');
+eq('leading zeros go', formatBankrollInput('007', EN), '7');
+eq('paste: $, commas and letters stripped', formatBankrollInput('$2,000.50abc', EN), '2,000.50');
+eq('paste: spaces stripped', formatBankrollInput(' 1 234 ', EN), '1,234');
+eq('paste: only one decimal point survives', formatBankrollInput('1.2.3', EN), '1.23');
+eq('paste: no digits at all is empty', formatBankrollInput('abc', EN), '');
+eq('paste: a leading minus is kept so the error can name it', formatBankrollInput('-500', EN), '-500');
+eq('paste: "$-1,000" is a negative', formatBankrollInput('$-1,000', EN), '-1,000');
+eq('paste: a trailing minus is just stripped', formatBankrollInput('500-', EN), '500');
+eq('a saved amount shows grouped, no ".00"', bankrollFieldText(2000, EN), '2,000');
+eq('a saved amount keeps real cents', bankrollFieldText(1234.5, EN), '1,234.50');
+eq('no saved amount shows the placeholder', bankrollFieldText(null, EN), '');
 
 // ── 2. Validation: messages and timing ─────────────────────────────────────
 const inv = (t: string) => {
-  const c = checkBankroll(formatBankrollInput(t));
+  const c = checkBankroll(formatBankrollInput(t, EN), EN);
   return c.state === 'invalid' ? c : null;
 };
 eq('0 → greater than $0', inv('0')?.message, 'Enter an amount greater than $0.');
@@ -91,25 +107,103 @@ eq('pasted negative → positive amount', inv('-500')?.message, 'Enter a positiv
 eq('under $10 → at least $10', inv('9.99')?.message, 'Enter at least $10.');
 eq('over $10M → cannot convert', inv('10000000.01')?.message,
   "That's more than we can convert. Enter $10,000,000 or less.");
-check('$10 exactly is valid', checkBankroll('10').state === 'valid');
-check('$10,000,000 exactly is valid', checkBankroll('10,000,000').state === 'valid');
+check('$10 exactly is valid', checkBankroll('10', EN).state === 'valid');
+check('$10,000,000 exactly is valid', checkBankroll('10,000,000', EN).state === 'valid');
 {
-  const c = checkBankroll('2,000.5');
+  const c = checkBankroll('2,000.5', EN);
   check('a valid entry parses through its separators', c.state === 'valid' && c.amount === 2000.5);
 }
 check('bounds are $10 and $10M', BANKROLL_MIN === 10 && BANKROLL_MAX === 10_000_000);
 check('only the over-$10M error is live', inv('25000000')?.live === true &&
   [inv('0'), inv('-5'), inv('5')].every((c) => c?.live === false));
-check('over $10M shows WHILE typing', visibleBankrollError(checkBankroll('25,000,000'), false) === BANKROLL_ERRORS.tooLarge);
-check('under $10 waits for blur / Done', visibleBankrollError(checkBankroll('5'), false) === null &&
-  visibleBankrollError(checkBankroll('5'), true) === BANKROLL_ERRORS.tooSmall);
-check('0 waits for blur / Done', visibleBankrollError(checkBankroll('0'), false) === null &&
-  visibleBankrollError(checkBankroll('0'), true) === BANKROLL_ERRORS.zero);
-check('a negative waits for blur / Done', visibleBankrollError(checkBankroll('-500'), false) === null &&
-  visibleBankrollError(checkBankroll('-500'), true) === BANKROLL_ERRORS.negative);
+check('over $10M shows WHILE typing', visibleBankrollError(checkBankroll('25,000,000', EN), false) === BANKROLL_ERRORS.tooLarge);
+check('under $10 waits for blur / Done', visibleBankrollError(checkBankroll('5', EN), false) === null &&
+  visibleBankrollError(checkBankroll('5', EN), true) === BANKROLL_ERRORS.tooSmall);
+check('0 waits for blur / Done', visibleBankrollError(checkBankroll('0', EN), false) === null &&
+  visibleBankrollError(checkBankroll('0', EN), true) === BANKROLL_ERRORS.zero);
+check('a negative waits for blur / Done', visibleBankrollError(checkBankroll('-500', EN), false) === null &&
+  visibleBankrollError(checkBankroll('-500', EN), true) === BANKROLL_ERRORS.negative);
 check('clearing the field is empty, never an error',
-  checkBankroll('').state === 'empty' && visibleBankrollError(checkBankroll(''), true) === null);
-check('a valid amount never shows an error', visibleBankrollError(checkBankroll('2,000'), true) === null);
+  checkBankroll('', EN).state === 'empty' && visibleBankrollError(checkBankroll('', EN), true) === null);
+check('a valid amount never shows an error', visibleBankrollError(checkBankroll('2,000', EN), true) === null);
+
+// ── 2b. The device's separators (Reviewer Medium A, #831) ─────────────────
+// The decimal pad types the region's decimal key, "," across much of Europe.
+check('en-US separators: "." decimal, "," group', EN.decimal === '.' && EN.group === ',');
+check('de-DE separators: "," decimal, "." group', DE.decimal === ',' && DE.group === '.');
+{
+  const es = deviceSeparators('es-ES');
+  check('es-ES: the group comes from a 7-digit number (1234.5 is ungrouped there)', es.decimal === ',' && es.group === '.');
+  const fr = deviceSeparators('fr-FR');
+  check('fr-FR: "," decimal, a space group', fr.decimal === ',' && /\s/.test(fr.group));
+  eq('fr-FR: a pasted "1 234,50" is 1234.5', (() => {
+    const c = checkBankroll(formatBankrollInput('1 234,50', fr), fr);
+    return c.state === 'valid' ? c.amount : c.state;
+  })(), 1234.5);
+}
+check('no Intl parts → "." and ","',
+  JSON.stringify(separatorsFromParts([], [])) === JSON.stringify(FALLBACK_SEPARATORS) &&
+    FALLBACK_SEPARATORS.decimal === '.' && FALLBACK_SEPARATORS.group === ',');
+check('a "," decimal with no group part gets "." as the group, never a clash',
+  separatorsFromParts([{ type: 'decimal', value: ',' }], []).group === '.');
+check('an Intl that throws falls back to "." and ","',
+  JSON.stringify(deviceSeparators('not a locale!!')) === JSON.stringify(FALLBACK_SEPARATORS));
+check('the device separators are read once, from Intl',
+  typeof DEVICE_SEPARATORS.decimal === 'string' && DEVICE_SEPARATORS.decimal !== DEVICE_SEPARATORS.group);
+{
+  const amt = (t: string, seps: NumberSeparators) => {
+    const c = checkBankroll(formatBankrollInput(t, seps), seps);
+    return c.state === 'valid' ? c.amount : c.state === 'invalid' ? c.message : c.state;
+  };
+  eq('en-US: "12.50" → $12.50', amt('12.50', EN), 12.5);
+  eq('en-US: "1,234.56" → $1,234.56', amt('1,234.56', EN), 1234.56);
+  eq('en-US: shows "1,234.56"', formatBankrollInput('1234.56', EN), '1,234.56');
+  eq('de-DE: "12,50" → $12.50, not $1,250', amt('12,50', DE), 12.5);
+  eq('de-DE: shows "12,50"', formatBankrollInput('12,50', DE), '12,50');
+  eq('de-DE: a pasted "12.500,00" → $12,500, not $12.50', amt('12.500,00', DE), 12500);
+  eq('de-DE: shows "12.500,00"', formatBankrollInput('12.500,00', DE), '12.500,00');
+  eq('de-DE: groups with "." as you type', formatBankrollInput('1234567,8', DE), '1.234.567,8');
+  eq('de-DE: at most 2 decimals', formatBankrollInput('12,345', DE), '12,34');
+  eq('de-DE: only one decimal comma survives', formatBankrollInput('1,2,3', DE), '1,23');
+  eq('de-DE: a saved amount shows in de form', bankrollFieldText(1234.5, DE), '1.234,50');
+  const inputs = ['2000', '1234567.8', '12.5', '0.', '1,234.56', '12,50', '12.500,00', '-500', '$2,000.50abc'];
+  check('round trip: the field re-reads its own text, both locales', [EN, DE].every((seps) =>
+    inputs.every((t) => formatBankrollInput(formatBankrollInput(t, seps), seps) === formatBankrollInput(t, seps))));
+  check('round trip: a saved amount reads back as itself, both locales', [EN, DE].every((seps) =>
+    [10, 1234.5, 2000, 9_999_999.99, 10_000_000].every((a) => amt(bankrollFieldText(a, seps), seps) === a)));
+  for (const [name, seps, neg, over, max] of [
+    ['en-US', EN, '-1,000', '10,000,000.01', '10,000,000'],
+    ['de-DE', DE, '-1.000', '10.000.000,01', '10.000.000'],
+  ] as const) {
+    eq(`${name}: a pasted negative → positive amount`, amt(neg, seps), BANKROLL_ERRORS.negative);
+    const c = checkBankroll(formatBankrollInput(over, seps), seps);
+    check(`${name}: over $10M → cannot convert, shown live`,
+      c.state === 'invalid' && c.message === BANKROLL_ERRORS.tooLarge && c.live);
+    eq(`${name}: $10M exactly is valid`, amt(max, seps), 10_000_000);
+  }
+}
+
+// ── 2c. Backspace over a separator (Reviewer Low 6, #831) ─────────────────
+// A backspace that only removed a separator would be re-added by the
+// formatter; it deletes the digit before it instead. Cursor placement after
+// the re-format needs a device check.
+eq('⌫ right after a separator deletes the digit before it', editBankrollInput('25,000', '25000', EN), '2,000');
+eq('…in de-DE too', editBankrollInput('25.000', '25000', DE), '2.000');
+eq('…mid-number', editBankrollInput('1,234,567', '1,234567', EN), '123,567');
+check('it never sticks: every separator, both locales', [EN, DE].every((seps) =>
+  ['2,000', '25,000', '1,234,567', '10,000,000.5'].map((t) => formatBankrollInput(t, EN)).map((en) =>
+    formatBankrollInput(en.replace(/,/g, '').replace('.', seps.decimal), seps)).every((prev) =>
+    [...prev].every((ch, i) => {
+      if (ch !== seps.group) return true;
+      const next = editBankrollInput(prev, prev.slice(0, i) + prev.slice(i + 1), seps);
+      // A digit went (leading zeros then collapse: "2,000" ⌫ after the comma is "0").
+      return next !== prev && next.replace(/\D/g, '').length < prev.replace(/\D/g, '').length;
+    }))));
+eq('a normal backspace at the end', editBankrollInput('2,000', '2,00', EN), '200');
+eq('deleting a digit is untouched', editBankrollInput('25,000', '2,000', EN), '2,000');
+eq('deleting the de-DE decimal comma is a real delete', editBankrollInput('12,50', '1250', DE), '1.250');
+eq('typing is untouched', editBankrollInput('2,000', '2,0001', EN), '20,001');
+eq('a paste is untouched', editBankrollInput('', '$2,000.50', EN), '2,000.50');
 
 // ── 3. Units → dollars ─────────────────────────────────────────────────────
 const s = (amount: number | null, unitPct = 1) => ({ amount, unitPct });
@@ -124,6 +218,10 @@ eq('the largest unit ($10M at 5%)', unitRowTitle(s(10_000_000, 5)), '1 unit = $5
 eq('whole dollars round, grouped', formatDollars(1234.5, 12.345), '$1,235');
 eq('cents keep two places', formatDollars(0.1, 0.1), '$0.10');
 eq('cents are grouped too', formatDollars(1234.5, 9), '$1,234.50');
+// Reviewer Low 3: the flip is decided in cents, as displayed.
+eq('a $9.999 unit shows as $10, whole dollars (not "$10.00")', unitRowTitle(s(999.9)), '1 unit = $10');
+eq('formatDollars(9.999) → $10', formatDollars(9.999, 9.999), '$10');
+eq('a $9.994 unit still shows cents', formatDollars(9.994, 9.994), '$9.99');
 check('unitDollars is null with no bankroll', unitDollars(s(null)) === null);
 check('unitDollars is bankroll × unit %', unitDollars(s(2500, 1.5)) === 37.5);
 
@@ -183,6 +281,12 @@ async function storage() {
   check('an empty device is the defaults', (await readBankroll(fakeStore({}).store)).amount === null);
   check('corrupt JSON falls back to the defaults',
     JSON.stringify(await readBankroll(fakeStore({ [BANKROLL_KEY]: '{oops' }).store)) === JSON.stringify(BANKROLL_DEFAULTS));
+  {
+    const broken: KeyValueStore = { async getItem() { throw new Error('disk'); }, async setItem() {} };
+    check('a storage failure reads as not-ok (nothing known to keep)', (await tryReadBankroll(broken)).ok === false);
+    const r = await tryReadBankroll(fakeStore({ [BANKROLL_KEY]: '{oops' }).store);
+    check('corrupt JSON reads ok, as the defaults', r.ok && r.value.amount === null);
+  }
   check('a stored amount that would fail validation is dropped',
     [5, 2e7, -1, 0, '2000', null].every((a) => sanitizeBankroll({ amount: a, unitPct: 1 }).amount === null));
 }
@@ -191,14 +295,20 @@ async function storage() {
 // A slow store (every read and write yields several ticks, writes finish out
 // of order when allowed to) so a setter that merged into a captured base, or a
 // write that raced another, would lose one of the two values.
-function slowStore(init: Record<string, string>) {
+function slowStore(init: Record<string, string>, failReads = 0) {
   const data = { ...init };
   const tick = (n: number) => new Promise<void>((r) => setTimeout(r, n));
+  const counts = { reads: 0, writes: 0 };
   const store: KeyValueStore = {
-    async getItem(k) { await tick(5); return data[k] ?? null; },
-    async setItem(k, v) { await tick(v.includes('"amount":null') ? 1 : 8); data[k] = v; },
+    async getItem(k) {
+      counts.reads++;
+      await tick(5);
+      if (failReads-- > 0) throw new Error('storage unavailable');
+      return data[k] ?? null;
+    },
+    async setItem(k, v) { counts.writes++; await tick(v.includes('"amount":null') ? 1 : 8); data[k] = v; },
   };
-  return { store, data };
+  return { store, data, counts };
 }
 async function interleaving() {
   const stored = (d: Record<string, string>) => JSON.parse(d[BANKROLL_KEY] ?? '{}');
@@ -241,6 +351,126 @@ async function interleaving() {
     await bs.update({ amount: 5 });
     check('an invalid amount never reaches the store (sanitized to none)', bs.get()?.amount === null);
   }
+
+  // Cold start (Reviewer): loads and updates racing the first read share it.
+  for (const order of ['load first', 'updates first'] as const) {
+    const f = slowStore(seed);
+    const bs = createBankrollStore(f.store);
+    const calls = order === 'load first'
+      ? [bs.load(), bs.update({ amount: 2500 }), bs.update({ unitPct: 2 }), bs.load()]
+      : [bs.update({ unitPct: 2 }), bs.update({ amount: 2500 }), bs.load(), bs.load()];
+    await Promise.all(calls);
+    const disk = stored(f.data);
+    check(`cold start, ${order}: storage is read once`, f.counts.reads === 1, `${f.counts.reads} reads`);
+    check(`cold start, ${order}: both values kept, in memory and storage`,
+      bs.get()?.amount === 2500 && bs.get()?.unitPct === 2 && disk.amount === 2500 && disk.unitPct === 2,
+      JSON.stringify(disk));
+  }
+
+  // Low 1: Raise before the first read lands steps from the STORED %, not 1%.
+  {
+    const f = slowStore({ [BANKROLL_KEY]: JSON.stringify({ amount: 1000, unitPct: 3 }) });
+    const bs = createBankrollStore(f.store);
+    await bs.update((latest) => ({ unitPct: stepUnitPct(latest.unitPct, 1) }));
+    check('Raise before load steps 3% → 3.5%, not 1% → 1.5%',
+      bs.get()?.unitPct === 3.5 && stored(f.data).unitPct === 3.5 && stored(f.data).amount === 1000,
+      JSON.stringify(stored(f.data)));
+    await Promise.all([1, 1].map(() => bs.update((latest) => ({ unitPct: stepUnitPct(latest.unitPct, 1) }))));
+    check('two quick Raises are two steps', bs.get()?.unitPct === 4.5 && stored(f.data).unitPct === 4.5);
+  }
+
+  // Low 2: a failed read is not cached, and nothing overwrites what's there.
+  {
+    const f = slowStore({ [BANKROLL_KEY]: JSON.stringify({ amount: 25000, unitPct: 1.5 }) }, 1);
+    const bs = createBankrollStore(f.store);
+    const shown = await bs.load();
+    check('a failed read shows the defaults…', shown.amount === null && shown.unitPct === 1);
+    check('…but does not cache them', bs.get() === null);
+    await bs.update({ unitPct: 2 });
+    const disk = stored(f.data);
+    check('the next edit re-reads and applies to the real data', f.counts.reads === 2 &&
+      disk.amount === 25000 && disk.unitPct === 2 && bs.get()?.amount === 25000, JSON.stringify(disk));
+  }
+  {
+    const f = slowStore({ [BANKROLL_KEY]: JSON.stringify({ amount: 25000, unitPct: 1.5 }) }, 99);
+    const bs = createBankrollStore(f.store);
+    await bs.load();
+    await bs.update({ amount: 3000 });
+    check('storage still unreadable: the edit is refused, nothing written over it',
+      f.counts.writes === 0 && stored(f.data).amount === 25000 && bs.get() === null);
+  }
+}
+
+// ── 6c. Nothing is saved until blur / Done (Reviewer Medium B, #831) ──────
+// The card's logic, driven the way SettingsScreen drives it: typing only
+// edits the text (editBankrollInput); blur / Done runs commitBankrollText.
+async function fieldFlow() {
+  const f = fakeStore({ [BANKROLL_KEY]: JSON.stringify({ amount: 25000, unitPct: 1 }) });
+  const bs = createBankrollStore(f.store);
+  await bs.load();
+  const saved = () => bs.get()?.amount ?? null;
+  let seps = EN;
+  let text = bankrollFieldText(saved(), seps);
+  let blurError: string | null = null;
+  const type = (raw: string) => { text = editBankrollInput(text, raw, seps); blurError = null; };
+  const blur = async () => {
+    const c = commitBankrollText(text, saved(), seps);
+    text = c.text;
+    blurError = c.error;
+    if (c.save !== undefined) await bs.update({ amount: c.save });
+  };
+  const row = () => unitRowTitle(bankrollDraft(text, bs.get()?.unitPct ?? 1, seps));
+  const error = () => visibleBankrollError(checkBankroll(text, seps), false) ?? blurError;
+  const disk = () => JSON.parse(f.data[BANKROLL_KEY]).amount;
+
+  eq('the saved $25,000 is in the field', text, '25,000');
+  const walk: string[] = [];
+  const current = (): string => text; // (a call, so tsc doesn't narrow `text` to "2" below)
+  while (current() !== '2') { type(current().slice(0, -1)); walk.push(current()); }
+  eq('backspacing walks 25,000 → 2', walk.join(' '), '2,500 250 25 2');
+  check('backspacing to "2": nothing written on the way ($25 never persists)',
+    f.writes.length === 0 && disk() === 25000 && saved() === 25000);
+  eq('at "2" the row is the units-only empty state', row(), '1 unit = 1%');
+  eq('…and "under $10" waits for blur', error(), null);
+  await blur();
+  eq('blur on "2": the field reverts to the saved amount', text, '25,000');
+  eq('…the error shows', error(), BANKROLL_ERRORS.tooSmall);
+  check('…and the saved $25,000 is kept', f.writes.length === 0 && disk() === 25000 && saved() === 25000);
+  eq('…the row shows the saved amount again', row(), '1 unit = $250');
+  eq('the next visit still reads $25,000', (await createBankrollStore(f.store).load()).amount, 25000);
+
+  type('250000000');
+  eq('over $10M: the error shows while typing', error(), BANKROLL_ERRORS.tooLarge);
+  eq('…the row is the empty state', row(), '1 unit = 1%');
+  check('…nothing written', f.writes.length === 0);
+  await blur();
+  check('over $10M on blur: reverts, keeps the error, not persisted',
+    text === '25,000' && error() === BANKROLL_ERRORS.tooLarge && f.writes.length === 0 && disk() === 25000);
+
+  type('3,000');
+  eq('a valid edit: the error clears as you type', error(), null);
+  eq('…the row follows the field', row(), '1 unit = $30');
+  check('…but nothing is written yet', f.writes.length === 0 && disk() === 25000);
+  type('3,000.');
+  await blur();
+  check('blur on a valid "3,000.": saved, shown in its saved form',
+    disk() === 3000 && saved() === 3000 && text === '3,000' && error() === null);
+  const writes = f.writes.length;
+  await blur();
+  check('blur again with nothing changed writes nothing', f.writes.length === writes);
+
+  type('');
+  eq('clearing: the row is the empty state', row(), '1 unit = 1%');
+  check('…not cleared until blur', disk() === 3000);
+  await blur();
+  check('clear to empty, then blur: the saved amount is cleared', disk() === null && saved() === null && text === '' &&
+    error() === null);
+
+  seps = DE;
+  type('1250,5');
+  eq('de-DE: shows "1.250,5"', text, '1.250,5');
+  await blur();
+  check('de-DE: blur saves $1,250.50 and shows "1.250,50"', disk() === 1250.5 && text === '1.250,50');
 }
 
 // ── 7. Nothing is sized off it: picks stay a flat 1u ───────────────────────
@@ -290,12 +520,23 @@ check('the field: decimal pad, Done bar, $ prefix, placeholder, label',
     /styles\.moneyPrefix[\s\S]{0,200}\$\s*<\/Text>/.test(settings) &&
     settings.includes('placeholder="Enter amount"') &&
     settings.includes('accessibilityLabel="Your bankroll in dollars, optional"'));
-check('the field formats every keystroke and saves only valid or empty',
-  /const next = formatBankrollInput\(raw\);/.test(settings) &&
-    /if \(c\.state === 'empty'\) setAmount\(null\);\s*else if \(c\.state === 'valid'\) setAmount\(c\.amount\);/.test(settings));
-check('errors: blur and Done commit, the live one does not wait',
-  /onBlur=\{commit\}/.test(settings) && /visibleBankrollError\(check, committed\)/.test(settings) &&
-    /setCommitted\(false\);/.test(settings));
+{
+  const onChange = settings.match(/const onChange = \(raw: string\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
+  check('typing only edits the field: onChange never saves',
+    onChange.includes('setText(editBankrollInput(text, raw));') && !/setAmount/.test(onChange));
+  check('blur / Done commits: save if valid, clear if empty, else revert + error',
+    /const c = commitBankrollText\(text, settings\.amount\);\s*setText\(c\.text\);\s*setBlurError\(c\.error\);\s*if \(c\.save !== undefined\) setAmount\(c\.save\);/.test(settings));
+  check('the unit row follows the field text, not the saved value',
+    settings.includes('const shown = bankrollDraft(text, settings.unitPct);') &&
+      settings.includes('{unitRowTitle(shown)}') && settings.includes('{unitRowSubtitle(shown)}'));
+  check('errors: blur and Done commit, the live one does not wait',
+    /onBlur=\{commit\}/.test(settings) &&
+      settings.includes('const error = visibleBankrollError(checkBankroll(text), false) ?? blurError;'));
+  check('Lower / Raise: disabled until loaded, stepped in the store',
+    settings.includes('canLower={ready && canStepUnitPct(settings.unitPct, -1)}') &&
+      settings.includes('canRaise={ready && canStepUnitPct(settings.unitPct, 1)}') &&
+      settings.includes('onStep={stepUnit}'));
+}
 check('Lower / Raise are labeled buttons', /accessibilityLabel=\{`\$\{word\} \$\{what\}`\}/.test(settings) &&
   settings.includes("const word = dir === -1 ? 'Lower' : 'Raise';") && /accessibilityRole="button"/.test(settings));
 check('Lower / Raise reach 44pt (32 + 6 + 6)', /minHeight: 32/.test(settings) && /hitSlop=\{\{ top: 6, bottom: 6 \}\}/.test(settings));
@@ -367,7 +608,8 @@ check('Settings ScrollView: automaticallyAdjustKeyboardInsets + keyboardShouldPe
   const hook = read('hooks/useBankroll.ts');
   check('useBankroll goes through the one merging store, no captured-base writes',
     /const store = createBankrollStore\(AsyncStorage\);/.test(hook) && /store\.update\(\{ amount \}\)/.test(hook) &&
-      /store\.update\(\{ unitPct: sanitizeUnitPct\(pct\) \}\)/.test(hook) && !/\.\.\.base/.test(hook));
+      hook.includes('store.update((latest) => ({ unitPct: stepUnitPct(latest.unitPct, dir) }))') &&
+      !/\.\.\.base/.test(hook));
 }
 
 // ── 9. Explainer ───────────────────────────────────────────────────────────
@@ -377,7 +619,7 @@ check('Explainer: optional, on this device, converts only, never sizes',
   /bankroll in Settings/.test(explainer) && /optional/.test(explainer) && /stays on this device/.test(explainer) &&
     /only converts your units into dollars/.test(explainer) && /never sizes a bet/.test(explainer));
 
-storage().then(interleaving).then(() => {
+storage().then(interleaving).then(fieldFlow).then(() => {
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} check(s) FAILED.`);
   process.exit(failures === 0 ? 0 : 1);
 });

@@ -63,14 +63,31 @@ export interface KeyValueStore {
   setItem(key: string, value: string): Promise<void>;
 }
 
-/** Reads `bankroll.v2` and only that key. */
-export async function readBankroll(store: KeyValueStore): Promise<BankrollSettings> {
+export type BankrollRead = { ok: true; value: BankrollSettings } | { ok: false };
+
+/**
+ * Reads `bankroll.v2` and only that key. `ok: false` means storage itself
+ * failed, so what is on the device is unknown and must not be written over.
+ * Corrupt JSON is `ok: true` with the defaults: there is nothing to keep.
+ */
+export async function tryReadBankroll(store: KeyValueStore): Promise<BankrollRead> {
+  let raw: string | null;
   try {
-    const raw = await store.getItem(BANKROLL_KEY);
-    return raw ? sanitizeBankroll(JSON.parse(raw)) : { ...BANKROLL_DEFAULTS };
+    raw = await store.getItem(BANKROLL_KEY);
   } catch {
-    return { ...BANKROLL_DEFAULTS };
+    return { ok: false };
   }
+  try {
+    return { ok: true, value: raw ? sanitizeBankroll(JSON.parse(raw)) : { ...BANKROLL_DEFAULTS } };
+  } catch {
+    return { ok: true, value: { ...BANKROLL_DEFAULTS } };
+  }
+}
+
+/** The settings to show: the defaults when storage could not be read. */
+export async function readBankroll(store: KeyValueStore): Promise<BankrollSettings> {
+  const r = await tryReadBankroll(store);
+  return r.ok ? r.value : { ...BANKROLL_DEFAULTS };
 }
 
 export async function writeBankroll(store: KeyValueStore, s: BankrollSettings): Promise<void> {
@@ -78,32 +95,52 @@ export async function writeBankroll(store: KeyValueStore, s: BankrollSettings): 
   await store.setItem(BANKROLL_KEY, JSON.stringify(clean));
 }
 
+export type BankrollPatch =
+  | Partial<BankrollSettings>
+  /** Computed from the latest value at apply time, e.g. a unit % step. */
+  | ((latest: BankrollSettings) => Partial<BankrollSettings>);
+
 /**
- * The in-memory store behind hooks/useBankroll.ts. Every update applies its
- * patch to the LATEST value, after the first load — never to a value captured
- * when the setter was called — and writes go out through one promise chain, so
- * an amount typed and a unit % tapped back to back both survive, in memory and
- * in storage, whatever order they land in (Reviewer, #831).
+ * The in-memory store behind hooks/useBankroll.ts (Reviewer, #831):
+ *  - Every update applies its patch to the LATEST value, after the first load —
+ *    never to a value captured when the setter was called — and writes go out
+ *    through one promise chain, so an amount and a unit % set back to back both
+ *    survive, in memory and in storage, whatever order they land in.
+ *  - The first read is shared: however many loads and updates arrive on a cold
+ *    start, storage is read once (`reading ??=`).
+ *  - A FAILED read is not cached. `load()` shows the defaults but leaves the
+ *    store unloaded; the next update reads again, and if storage still can't be
+ *    read the update is refused rather than writing defaults over real data.
  */
 export function createBankrollStore(kv: KeyValueStore) {
   let current: BankrollSettings | null = null;
-  let loading: Promise<BankrollSettings> | null = null;
+  let reading: Promise<void> | null = null;
   let writes: Promise<void> = Promise.resolve();
   const listeners = new Set<(s: BankrollSettings) => void>();
 
-  const load = (): Promise<BankrollSettings> => {
-    if (current) return Promise.resolve(current);
-    loading ??= readBankroll(kv).then((s) => {
-      // An update that raced the first read already set `current`; keep it.
-      current ??= s;
-      return current;
+  /** One read in flight at a time; sets `current` only when it succeeded. */
+  const readOnce = (): Promise<void> => {
+    reading ??= tryReadBankroll(kv).then((r) => {
+      reading = null;
+      if (r.ok) current ??= r.value;
     });
-    return loading;
+    return reading;
   };
 
-  const update = async (patch: Partial<BankrollSettings>): Promise<void> => {
-    await load();
-    const next = sanitizeBankroll({ ...(current ?? BANKROLL_DEFAULTS), ...patch });
+  const load = async (): Promise<BankrollSettings> => {
+    if (!current) await readOnce();
+    return current ?? { ...BANKROLL_DEFAULTS };
+  };
+
+  const update = async (patch: BankrollPatch): Promise<void> => {
+    if (!current) await readOnce();
+    const latest = current;
+    if (!latest) {
+      console.warn('[bankroll] storage could not be read; not saving over it');
+      return;
+    }
+    const p = typeof patch === 'function' ? patch(latest) : patch;
+    const next = sanitizeBankroll({ ...latest, ...p });
     current = next;
     listeners.forEach((fn) => fn(next));
     // Chained, and each write sends the value current AT WRITE TIME, so the
@@ -125,40 +162,119 @@ export function createBankrollStore(kv: KeyValueStore) {
   };
 }
 
+// ── Separators (Reviewer, #831) ────────────────────────────────────────────
+/**
+ * The device's decimal and group separators. The decimal pad types the
+ * region's decimal key — "," in much of Europe — so "12,50" must read as
+ * 12.50, not 1,250. The locale decides; where a comma sits never does.
+ */
+export interface NumberSeparators {
+  decimal: string;
+  group: string;
+}
+
+export const FALLBACK_SEPARATORS: NumberSeparators = { decimal: '.', group: ',' };
+
+type Part = { type: string; value: string };
+
+/** Separators from Intl parts: the decimal from 1234.5, the group from
+ *  1234567.5 (es-ES leaves four-digit numbers ungrouped). Falls back to '.' and
+ *  ','; a group that would collide with the decimal becomes the other one. */
+export function separatorsFromParts(decimalParts: Part[], groupParts: Part[]): NumberSeparators {
+  const decimal = decimalParts.find((p) => p.type === 'decimal')?.value || FALLBACK_SEPARATORS.decimal;
+  let group = groupParts.find((p) => p.type === 'group')?.value || FALLBACK_SEPARATORS.group;
+  if (group === decimal) group = decimal === ',' ? '.' : ',';
+  return { decimal, group };
+}
+
+/** `locale` undefined = the device's. Any Intl gap falls back to '.' and ','. */
+export function deviceSeparators(locale?: string): NumberSeparators {
+  try {
+    const fmt = new Intl.NumberFormat(locale);
+    if (typeof fmt.formatToParts !== 'function') return { ...FALLBACK_SEPARATORS };
+    return separatorsFromParts(fmt.formatToParts(1234.5), fmt.formatToParts(1234567.5));
+  } catch {
+    return { ...FALLBACK_SEPARATORS };
+  }
+}
+
+/** Read once; every field function takes separators as a parameter (injectable
+ *  for the verify script) and defaults to these. */
+export const DEVICE_SEPARATORS: NumberSeparators = deviceSeparators();
+
 // ── The field ──────────────────────────────────────────────────────────────
 /** Integer digits kept while typing: 10M has 8, so 12 leaves room for the
  *  live over-the-limit error without letting a paste run to float noise. */
 const MAX_INT_DIGITS = 12;
 
-function group(intDigits: string): string {
-  return intDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+function group(intDigits: string, sep = ','): string {
+  return intDigits.replace(/\B(?=(\d{3})+(?!\d))/g, sep);
+}
+
+/**
+ * Text → canonical "digits[.digits]" (plus whether a minus came before the
+ * first digit). The locale decimal separator becomes '.', and every other
+ * character — the group separator included — is dropped.
+ */
+function canonical(raw: string, seps: NumberSeparators): { negative: boolean; digits: string } {
+  let firstNumeric = -1;
+  let out = '';
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch >= '0' && ch <= '9') out += ch;
+    else if (ch === seps.decimal) out += '.';
+    else continue;
+    if (firstNumeric === -1) firstNumeric = i;
+  }
+  const minus = raw.indexOf('-');
+  const negative = minus !== -1 && (firstNumeric === -1 || minus < firstNumeric);
+  return { negative, digits: out };
 }
 
 /**
  * What the field shows for whatever was typed or pasted: digits and one
- * decimal point, thousands separators, at most two decimals. A minus sign
- * before the first digit (only a paste can produce one — the decimal pad has
- * no minus key) is kept, so the "positive amount" error has something to
- * point at; every other character goes.
+ * decimal separator (the device's), its group separators, at most two
+ * decimals. A minus sign before the first digit (only a paste can produce one
+ * — the decimal pad has no minus key) is kept, so the "positive amount" error
+ * has something to point at; every other character goes. Re-reading its own
+ * output gives the same text.
  */
-export function formatBankrollInput(raw: string): string {
-  const firstDigit = raw.search(/[0-9.]/);
-  const negative = raw.includes('-') && (firstDigit === -1 || raw.indexOf('-') < firstDigit);
-  const kept = raw.replace(/[^0-9.]/g, '');
+export function formatBankrollInput(raw: string, seps: NumberSeparators = DEVICE_SEPARATORS): string {
+  const { negative, digits: kept } = canonical(raw, seps);
   const dot = kept.indexOf('.');
   let intPart = dot === -1 ? kept : kept.slice(0, dot);
   const frac = dot === -1 ? null : kept.slice(dot + 1).replace(/\./g, '').slice(0, 2);
   intPart = intPart.replace(/^0+(?=\d)/, '').slice(0, MAX_INT_DIGITS);
   if (intPart === '' && frac !== null) intPart = '0';
-  const body = group(intPart) + (frac !== null ? `.${frac}` : '');
+  const body = group(intPart, seps.group) + (frac !== null ? `${seps.decimal}${frac}` : '');
   return negative && body !== '' ? `-${body}` : negative ? '-' : body;
 }
 
+/**
+ * One keystroke: `prev` is the field's text, `raw` what the input now holds.
+ * A backspace that only removed a group separator would be re-added by the
+ * formatter and the field would stick, so it deletes the digit before the
+ * separator instead ("25,000" ⌫ after the comma → "2,000").
+ */
+export function editBankrollInput(prev: string, raw: string, seps: NumberSeparators = DEVICE_SEPARATORS): string {
+  if (raw.length === prev.length - 1) {
+    let i = 0;
+    while (i < raw.length && raw[i] === prev[i]) i++;
+    if (prev[i] === seps.group && raw === prev.slice(0, i) + prev.slice(i + 1)) {
+      const before = prev.slice(0, i);
+      const j = before.search(/[0-9](?=[^0-9]*$)/);
+      if (j !== -1) raw = before.slice(0, j) + before.slice(j + 1) + prev.slice(i + 1);
+    }
+  }
+  return formatBankrollInput(raw, seps);
+}
+
 /** The field's text back to a number (NaN when there is no number in it). */
-export function parseBankrollInput(text: string): number {
-  const cleaned = text.replace(/,/g, '');
-  if (!/[0-9]/.test(cleaned)) return Number.NaN;
-  return Number(cleaned);
+export function parseBankrollInput(text: string, seps: NumberSeparators = DEVICE_SEPARATORS): number {
+  const { digits } = canonical(text, seps);
+  if (!/[0-9]/.test(digits)) return Number.NaN;
+  const dot = digits.indexOf('.');
+  return Number(dot === -1 ? digits : digits.slice(0, dot + 1) + digits.slice(dot + 1).replace(/\./g, ''));
 }
 
 export const BANKROLL_ERRORS = {
@@ -174,11 +290,11 @@ export type BankrollCheck =
   /** `live`: shown while typing. Every other error waits for blur or Done. */
   | { state: 'invalid'; message: string; live: boolean };
 
-export function checkBankroll(text: string): BankrollCheck {
+export function checkBankroll(text: string, seps: NumberSeparators = DEVICE_SEPARATORS): BankrollCheck {
   const t = text.trim();
   if (t === '') return { state: 'empty' };
   if (t.startsWith('-')) return { state: 'invalid', message: BANKROLL_ERRORS.negative, live: false };
-  const n = parseBankrollInput(t);
+  const n = parseBankrollInput(t, seps);
   if (!Number.isFinite(n) || n <= 0) return { state: 'invalid', message: BANKROLL_ERRORS.zero, live: false };
   if (n > BANKROLL_MAX) return { state: 'invalid', message: BANKROLL_ERRORS.tooLarge, live: true };
   if (n < BANKROLL_MIN) return { state: 'invalid', message: BANKROLL_ERRORS.tooSmall, live: false };
@@ -193,10 +309,52 @@ export function visibleBankrollError(check: BankrollCheck, committed: boolean): 
 }
 
 /** The text a saved amount is shown as when the field is not being edited. */
-export function bankrollFieldText(amount: number | null): string {
+export function bankrollFieldText(amount: number | null, seps: NumberSeparators = DEVICE_SEPARATORS): string {
   if (amount == null) return '';
   const [whole, cents] = (Math.round(amount * 100) / 100).toFixed(2).split('.');
-  return group(whole) + (cents === '00' ? '' : `.${cents}`);
+  return group(whole, seps.group) + (cents === '00' ? '' : `${seps.decimal}${cents}`);
+}
+
+/**
+ * What the unit row shows while the field is being edited: the amount in the
+ * field when it is valid, otherwise the units-only empty state. Nothing is
+ * saved until blur / Done (Reviewer, #831), so a half-edited "2" never becomes
+ * the member's $2.
+ */
+export function bankrollDraft(
+  text: string,
+  unitPct: number,
+  seps: NumberSeparators = DEVICE_SEPARATORS,
+): BankrollSettings {
+  const c = checkBankroll(text, seps);
+  return { amount: c.state === 'valid' ? c.amount : null, unitPct };
+}
+
+export interface BankrollCommit {
+  /** The field's text after blur / Done. */
+  text: string;
+  /** The blur-time error to keep showing (the text itself has reverted). */
+  error: string | null;
+  /** What to save: an amount, null to clear, or undefined to save nothing. */
+  save: number | null | undefined;
+}
+
+/**
+ * Blur or Done. Valid: save it and show it in its saved form. Empty: clear
+ * the saved amount. Invalid: save nothing, keep the saved amount, show the
+ * error, and put the saved amount back in the field.
+ */
+export function commitBankrollText(
+  text: string,
+  savedAmount: number | null,
+  seps: NumberSeparators = DEVICE_SEPARATORS,
+): BankrollCommit {
+  const c = checkBankroll(text, seps);
+  if (c.state === 'empty') return { text: '', error: null, save: savedAmount === null ? undefined : null };
+  if (c.state === 'valid') {
+    return { text: bankrollFieldText(c.amount, seps), error: null, save: c.amount === savedAmount ? undefined : c.amount };
+  }
+  return { text: bankrollFieldText(savedAmount, seps), error: c.message, save: undefined };
 }
 
 // ── Units → dollars (display only) ────────────────────────────────────────
@@ -210,7 +368,9 @@ export function unitDollars(s: BankrollSettings): number | null {
  * are noise at that size), cents below it (a $0.10 unit is not "$0").
  */
 export function formatDollars(value: number, unit: number): string {
-  if (unit >= 10) return `$${group(String(Math.round(value)))}`;
+  // Compared in cents, as shown: a $9.999 unit displays as $10, so it is a
+  // whole-dollar unit — never "$10.00".
+  if (Math.round(unit * 100) >= 1000) return `$${group(String(Math.round(value)))}`;
   const [whole, cents] = (Math.round(value * 100) / 100).toFixed(2).split('.');
   return `$${group(whole)}.${cents}`;
 }

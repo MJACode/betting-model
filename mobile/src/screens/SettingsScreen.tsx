@@ -31,12 +31,13 @@ import { useBankroll } from '@/hooks/useBankroll';
 import {
   BANKROLL_CARD_COPY,
   BANKROLL_FOOTER_COPY,
+  bankrollDraft,
   bankrollFieldText,
   canStepUnitPct,
   checkBankroll,
-  formatBankrollInput,
+  commitBankrollText,
+  editBankrollInput,
   formatPct,
-  stepUnitPct,
   unitRowSubtitle,
   unitRowTitle,
   visibleBankrollError,
@@ -158,15 +159,17 @@ function LowerRaise({
 
 /**
  * The optional bankroll — display only (lib/bankroll.ts). It converts the
- * app's flat units into the member's dollars and sizes nothing. Invalid text
- * never saves; clearing the field clears the bankroll. Every error waits for
- * blur or Done except the over-$10M one, which shows as you type.
+ * app's flat units into the member's dollars and sizes nothing. Typing only
+ * edits the field (the unit row follows it); blur or Done saves a valid amount,
+ * clears on empty, and on invalid keeps the saved amount, shows the error and
+ * puts the saved amount back. Every error waits for blur or Done except the
+ * over-$10M one, which shows as you type.
  */
 function BankrollCard() {
-  const { settings, setAmount, setUnitPct } = useBankroll();
+  const { settings, ready, setAmount, stepUnit } = useBankroll();
   const [text, setText] = useState(() => bankrollFieldText(settings.amount));
   const [focused, setFocused] = useState(false);
-  const [committed, setCommitted] = useState(false);
+  const [blurError, setBlurError] = useState<string | null>(null);
 
   // The stored amount arrives after the first render (AsyncStorage); show it
   // unless the member is mid-edit.
@@ -174,23 +177,20 @@ function BankrollCard() {
     if (!focused) setText(bankrollFieldText(settings.amount));
   }, [settings.amount]); // not `focused`: a blur must not undo the text just committed
 
-  const check = checkBankroll(text);
-  const error = visibleBankrollError(check, committed);
+  const error = visibleBankrollError(checkBankroll(text), false) ?? blurError;
+  const shown = bankrollDraft(text, settings.unitPct);
 
   const onChange = (raw: string) => {
-    const next = formatBankrollInput(raw);
-    setText(next);
-    setCommitted(false);
-    const c = checkBankroll(next);
-    if (c.state === 'empty') setAmount(null);
-    else if (c.state === 'valid') setAmount(c.amount);
+    setText(editBankrollInput(text, raw));
+    setBlurError(null);
   };
 
   const commit = () => {
     setFocused(false);
-    setCommitted(true);
-    // A valid entry re-renders in its saved form (a trailing "." goes).
-    if (check.state === 'valid') setText(bankrollFieldText(check.amount));
+    const c = commitBankrollText(text, settings.amount);
+    setText(c.text);
+    setBlurError(c.error);
+    if (c.save !== undefined) setAmount(c.save);
   };
 
   return (
@@ -234,14 +234,16 @@ function BankrollCard() {
 
       <View style={styles.unitRow}>
         <View style={styles.unitRowText}>
-          <Text style={styles.unitRowTitle}>{unitRowTitle(settings)}</Text>
-          <Text style={styles.unitRowSub}>{unitRowSubtitle(settings)}</Text>
+          <Text style={styles.unitRowTitle}>{unitRowTitle(shown)}</Text>
+          <Text style={styles.unitRowSub}>{unitRowSubtitle(shown)}</Text>
         </View>
+        {/* Disabled until the stored % has loaded, and stepped inside the
+            store from the latest value either way. */}
         <LowerRaise
           what={`unit size, now ${formatPct(settings.unitPct)} of bankroll`}
-          canLower={canStepUnitPct(settings.unitPct, -1)}
-          canRaise={canStepUnitPct(settings.unitPct, 1)}
-          onStep={(dir) => setUnitPct(stepUnitPct(settings.unitPct, dir))}
+          canLower={ready && canStepUnitPct(settings.unitPct, -1)}
+          canRaise={ready && canStepUnitPct(settings.unitPct, 1)}
+          onStep={stepUnit}
         />
       </View>
       <Text style={styles.bankrollFooter}>{BANKROLL_FOOTER_COPY}</Text>

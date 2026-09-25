@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   BANKROLL_DEFAULTS,
   createBankrollStore,
-  sanitizeUnitPct,
+  stepUnitPct,
   type BankrollSettings,
 } from '@/lib/bankroll';
 
@@ -39,9 +39,11 @@ export function useBankroll() {
     void store.update({ amount });
   }, []);
 
-  const setUnitPct = useCallback((pct: number) => {
-    void store.update({ unitPct: sanitizeUnitPct(pct) });
+  /** Lower (−1) / Raise (+1), stepped inside the store from the LATEST stored
+   *  %, so a tap before the first read lands can't step the 1% default over it. */
+  const stepUnit = useCallback((dir: -1 | 1) => {
+    void store.update((latest) => ({ unitPct: stepUnitPct(latest.unitPct, dir) }));
   }, []);
 
-  return { settings, ready, setAmount, setUnitPct };
+  return { settings, ready, setAmount, stepUnit };
 }
