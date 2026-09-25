@@ -40,13 +40,20 @@ export interface Pick {
    *  pick the model should never have PRODUCED — fired outside its validated
    *  window, or on a game that was never eligible — retired by
    *  scripts/void_picks.py (CLAUDE.md §1c). The row survives as the evidence
-   *  the bug happened, and must never be drawn as a standing bet.
+   *  the bug happened. It is not a settled-record bet. If Discord already
+   *  posted it, the board still shows it (`discordPublish`).
    *
    *  Also written by the NFL pick monitor (scripts/nfl_pick_monitor.py) as
    *  'OK' / 'DEGRADED' / 'GONE' — health states on real, STANDING picks, which
    *  is why only 'VOID' is filtered anywhere. NCAAF does not use this column at
    *  all; a downgraded NCAAF row carries `downgrade_reason` instead. */
   condition_status: string | null;
+  /** Client-only. Set by attachDiscordPublish from v_discord_published.
+   *  Not a column on `picks`. */
+  discordPublish?: 'published' | 'unpublished' | 'unknown';
+  /** Identity tail of the Discord lock key. NULL on every game-level row. */
+  player_key?: string | null;
+  prop_market?: string | null;
   result: PickResult;
   profit_flat: number | null;
   profit_kelly: number | null;
@@ -505,6 +512,16 @@ export type RootStackParamList = {
      * `asHitMode`; absent, the screen opens in its own 'atLeast'.
      */
     hitMode?: string;
+    /**
+     * ...and the LINE and the WINDOW, the other two halves of the question.
+     * A 45+ Rush Yards row on an L3 board opened the player on 69+ over L10
+     * (Matt, 2026-09-25: "it should take me to that exact prop type"). `line`
+     * is the board's whole-number ruler stop, the same "N+" threshold this
+     * screen's stepper holds (lib/hitMode selectionFor). `gameWindow` is used
+     * only when the screen offers that span; otherwise it keeps its default.
+     */
+    line?: number;
+    gameWindow?: number;
   };
   /**
    * One team's page off the Stats tab's Teams board: next-game market read,
@@ -856,20 +873,23 @@ export interface RecentGameRow {
   [key: string]: number | string | null | undefined; // sport's stat columns
 }
 
-/** A player's hit-rate over a window (last N or the whole season) for the
- * selected stat + line. In last-N mode `games` carries the raw rows; in Season
- * mode the rate comes from player_season_stat_values_* and `games` is empty. */
+/** A player's hit-rate over a window (last N, the whole season, or every
+ * meeting with the next opponent) for the selected stat + line. In last-N mode
+ * `games` carries the raw rows; in Season and H2H mode the rate comes from the
+ * player_{season,h2h}_stat_values_* RPCs and `games` is empty. */
 export interface HitRatePlayer {
   player_id: string;
   player_name: string;
   team: string | null;
   player_type?: PlayerType;
-  games: RecentGameRow[]; // newest-first, length ≤ N ([] in Season mode)
+  games: RecentGameRow[]; // newest-first, length ≤ N ([] in Season/H2H mode)
   values: number[]; // per-game stat values, newest-first (dot strip source)
   hits: number;
   total: number;
   pct: number;
   avg: number;
+  /** H2H window only: the team every game behind these numbers was against. */
+  opponent?: string | null;
 }
 
 /**
@@ -885,6 +905,29 @@ export interface SeasonStatValuesRow {
   player_type?: PlayerType; // MLB only
   games: number;
   values: number[];
+}
+
+/**
+ * One row from the player_h2h_stat_values_* RPCs — a player's per-game values
+ * for ONE stat IN THE MEETINGS with the team he is about to play, over the
+ * seasons the caller named (the app names two: this season and last).
+ *
+ * Same shape as SeasonStatValuesRow plus the two things only H2H has: WHO the
+ * meetings were against, and WHEN each one was. `dates` is index-aligned with
+ * `values` — the RPC filters both on the same non-null condition, so `dates[i]`
+ * is the date `values[i]` was recorded on.
+ */
+export interface H2HStatValuesRow {
+  player_id: string;
+  player_name: string;
+  team: string | null;
+  player_type?: PlayerType; // MLB only
+  /** The team these meetings were against — the player's NEXT opponent. */
+  opponent: string;
+  games: number;
+  values: number[];
+  /** ISO game dates, newest first, index-aligned with `values`. */
+  dates: string[];
 }
 
 /**

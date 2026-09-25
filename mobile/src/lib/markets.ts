@@ -83,7 +83,8 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
  *
  * Almost always they are the same thing: an "Over 5.5 Receptions" board row
  * buys Over 5.5 receptions. `player_anytime_td` is the exception — the board
- * asks it as "Rush+Rec TDs" with a 0.5 line, but no book sells that; they
+ * asked it as "Rush+Rec TDs" with a 0.5 line (the chip has been named
+ * "Anytime TD" since 2026-09-25), but no book sells that; they
  * sell "Anytime Touchdown Scorer", which also pays on a return touchdown the
  * board's rush+rec history never counted. A betslip leg reading "Over 0.5
  * Rush+Rec TDs" is a proposition the user cannot find at their sportsbook,

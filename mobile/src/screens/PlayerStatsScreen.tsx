@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -84,6 +84,7 @@ import {
   type PlayerPickRecord,
   type PropLineMove,
   type SplitBucket,
+  type PlayerHeadToHead,
   type StatSplits,
   type TonightLine,
 } from '@/lib/playerDetail';
@@ -149,8 +150,16 @@ export function PlayerStatsScreen() {
   useEffect(() => {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setMode(requestedMode);
-    setGameWindow(windows.some((w) => w.value === 10) ? 10 : windows[0]!.value);
-  }, [sport, playerType, playerId, windows, requested, requestedMode]);
+    // The board's window when this screen offers that span (Stats L3 → L3
+    // here); else this screen's own default. 'Season' and H2H have no
+    // equivalent span here, so they fall back rather than guess one.
+    const asked = route.params.gameWindow;
+    setGameWindow(
+      asked != null && windows.some((w) => w.value === asked)
+        ? (asked as GameWindow)
+        : windows.some((w) => w.value === 10) ? 10 : windows[0]!.value,
+    );
+  }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
   const beforeDate = todayET();
   const { games, loading, loaded, error } = usePlayerTrends({
@@ -207,6 +216,21 @@ export function PlayerStatsScreen() {
   // sharp read, splits at the same threshold, our record on the player, and
   // the MLB context (Matt, 2026-09-20: "do the same for player props, there
   // should be more helpful information there"). Each section fails alone.
+  const effLine = line ?? 0;
+
+  // ── The sportsbook line behind the number on screen ────────────────────────
+  // The card's threshold and the book's line are the same bet in two idioms:
+  // "2+ Hits" is Over 1.5. `selectionFor` is the one translation, shared with
+  // the board, so the price can never be fetched for a different bet than the
+  // chart is drawing. It holds at every step size — a 250-yard threshold is
+  // Over 249.5 exactly as a 2-hit one is Over 1.5.
+  //
+  // DECLARED HERE, above usePlayerDetail, because the splits and the
+  // head-to-head card read the resolved SIDE and not the "n+" threshold: with
+  // the threshold alone they counted the over in Under mode, on a screen whose
+  // game-log dots were painting those same games the other colour.
+  const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
+
   const detail = usePlayerDetail({
     sport,
     playerId: playerId || null,
@@ -215,11 +239,16 @@ export function PlayerStatsScreen() {
     games,
     stat,
     threshold: line,
+    selection,
   });
   // Has the reader stepped the line themselves? Until they do, the ruler
   // follows the BOOK's posted line once it arrives — a hit rate at 5.5 when
   // the book hangs 6.5 answers a question nobody is being asked.
   const [lineTouched, setLineTouched] = useState(false);
+  // The line was handed over by the Stats board rather than stepped here —
+  // held like a touched line (the book's line does not replace it) but NAMED
+  // for where it came from, not "your line" (UX review, 2026-09-25).
+  const [lineFromBoard, setLineFromBoard] = useState(false);
 
   // ── The betslip leg ────────────────────────────────────────────────────────
   // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
@@ -262,9 +291,35 @@ export function PlayerStatsScreen() {
 
   // Reset the line to auto whenever the stat changes — a points line makes no
   // sense for rebounds.
+  //
+  // EXCEPT the first time the screen lands on the stat it was asked for with a
+  // line: that line is the question the reader tapped ("45+ Rush Yards"), so
+  // it is held as their own and the book's posted line does not replace it
+  // (Matt, 2026-09-25). Once per player — stepping away and back to the stat
+  // resets as before.
+  const seededLineFor = useRef<string | null>(null);
+  const requestedLine = route.params.line;
   useEffect(() => {
+    const seedKey = `${sport}:${playerId}`;
+    if (
+      requestedLine != null &&
+      Number.isFinite(requestedLine) &&
+      seededLineFor.current !== seedKey &&
+      requested != null &&
+      stat != null &&
+      stat.key === requested.key &&
+      stat.group === requested.group
+    ) {
+      seededLineFor.current = seedKey;
+      setLine(requestedLine);
+      setLineTouched(true);
+      setLineFromBoard(true);
+      return;
+    }
     setLine(null);
     setLineTouched(false);
+    setLineFromBoard(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
   // Values come most-recent-first. Window slices the most recent N.
@@ -306,22 +361,13 @@ export function PlayerStatsScreen() {
   // Named on the hit card, so nobody reads a 7+ hit rate without knowing the
   // 7 came from a 6.5 posted line (UX review).
   const lineProvenance = lineTouched
-    ? 'your line'
+    ? lineFromBoard ? 'board line' : 'your line'
     : pickThreshold != null && line === pickThreshold
       ? `pick line ${bookLineFromThreshold(pickThreshold)}`
       : postedThreshold != null && line === postedThreshold && detail.tonight
         ? `book line ${detail.tonight.line}`
         : null;
 
-  const effLine = line ?? 0;
-
-  // ── The sportsbook line behind the number on screen ────────────────────────
-  // The card's threshold and the book's line are the same bet in two idioms:
-  // "2+ Hits" is Over 1.5. `selectionFor` is the one translation, shared with
-  // the board, so the price can never be fetched for a different bet than the
-  // chart is drawing. It holds at every step size — a 250-yard threshold is
-  // Over 249.5 exactly as a 2-hit one is Over 1.5.
-  const selection = useMemo(() => selectionFor(effLine, mode), [effLine, mode]);
   const market = useMemo(() => propMarketForStat(stat), [stat]);
   const { books } = usePreferredBooks();
   // Threaded into the quote so "which games have not started" re-derives on
@@ -388,6 +434,7 @@ export function PlayerStatsScreen() {
 
   const stepLine = (deltaSteps: number) => {
     setLineTouched(true);
+    setLineFromBoard(false);
     setLine((prev) => {
       const base = prev ?? roundLineToStep(median ?? step, step);
       return Math.min(Math.max(0, base + deltaSteps * step), Math.ceil(maxValue) + step * 5);
@@ -761,7 +808,23 @@ export function PlayerStatsScreen() {
 
             {/* ── The same threshold, split ─────────────────────────────── */}
             {detail.splits ? (
-              <SplitsCard splits={detail.splits} statLabel={statLabel} threshold={effLine} loading={detail.splitsLoading} />
+              <SplitsCard
+                splits={detail.splits}
+                statLabel={statLabel}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                loading={detail.splitsLoading}
+              />
+            ) : null}
+
+            {/* ── Head-to-head with the next opponent, last two seasons ─────── */}
+            {detail.h2h ? (
+              <HeadToHeadCard
+                h2h={detail.h2h}
+                statLabel={statLabel}
+                betLabel={modeLineLabel(selection.line, selection.side, mode)}
+                selection={selection}
+                loading={detail.h2hLoading}
+              />
             ) : null}
 
             {/* ── MLB context the prop models train on ─────────────────── */}
@@ -891,6 +954,145 @@ function GameRow({
     </View>
   );
 }
+
+/**
+ * HEAD-TO-HEAD: every meeting with the next opponent, over the last two seasons.
+ *
+ * Matt, 2026-09-20 — "show how a player or team has done against an opponent
+ * ... the last 2 years". Two seasons is FIXED and said on the card rather than
+ * being a control, so the number always means the same thing.
+ *
+ * WHY THE SAMPLE IS SAID OUT LOUD, TWICE. In the weekly sports a two-season
+ * head-to-head is usually ONE game: measured on the NFL logs for seasons 2025
+ * and 2026, 13,373 of 15,664 player-opponent pairs (85%) have exactly one
+ * meeting, 2,052 have two and 239 have three or more. So "100%" here is very
+ * often "1 for 1", which is a fact about the schedule and not about the
+ * player. Matt's call (2026-09-20) is to show it plainly rather than hide or
+ * hedge it — so the rate is printed as it is, the game count sits under it,
+ * and every meeting is listed below, which is the honest version of the same
+ * number: a reader who can see the one game cannot mistake it for a trend.
+ *
+ * An opponent with NO stored meeting still renders. "They have not met in two
+ * seasons" is an answer to the question the card asks, and a card that
+ * vanishes instead reads as a page that failed to load.
+ */
+function HeadToHeadCard({
+  h2h,
+  statLabel,
+  betLabel,
+  selection,
+  loading,
+}: {
+  h2h: PlayerHeadToHead;
+  statLabel: string;
+  /** The page's bet in its own idiom — "3+" or "Under 2.5". */
+  betLabel: string;
+  /** The RESOLVED bet. The dots below read this, exactly as the game log does,
+   *  so one meeting cannot be green in one list and red in the other. */
+  selection: { line: number; side: HitDirection };
+  loading: boolean;
+}) {
+  const b = h2h.bucket;
+  const [showAll, setShowAll] = useState(false);
+  // Two MLB seasons against a division rival is 13-22 meetings at ~56pt — a
+  // whole screen of scroll for a section whose headline numbers are the two
+  // tiles above it. Football's one to three rows never hit this.
+  const MEETINGS_SHOWN = 5;
+  const shown = showAll ? h2h.meetings : h2h.meetings.slice(0, MEETINGS_SHOWN);
+  return (
+    <>
+      <SectionTitle
+        title={`vs ${h2h.opponent} · last 2 seasons`}
+        tooltip={{
+          title: 'Every meeting, not a recent-form window',
+          body:
+            `Each game ${h2h.opponent} have been the opponent in, over the last two seasons on file, and ` +
+            `how often ${betLabel} ${statLabel} won in them. In the weekly sports this is ` +
+            'usually one or two games: the count under the rate, and the list of meetings below it, are ' +
+            'there so a 100% that rests on a single game reads as a single game.',
+        }}
+      />
+      {loading && b.games === 0 ? (
+        <View style={styles.card}>
+          <ActivityIndicator style={styles.loadingInline} />
+        </View>
+      ) : b.games === 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.muted}>No meetings with {h2h.opponent} in the last 2 seasons.</Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.tileRow}>
+            <StatTile
+              label={`${betLabel} ${statLabel}`}
+              value={b.hitRate == null ? '—' : formatPct(b.hitRate, 0)}
+              caption={`${b.hits} of ${b.games}`}
+              tint={
+                b.hitRate == null || b.games < 3
+                  ? undefined
+                  : b.hitRate >= HIT_RATE_GOOD
+                    ? colors.gradeGood
+                    : b.hitRate < HIT_RATE_WEAK
+                      ? colors.gradeBad
+                      : undefined
+              }
+            />
+            <StatTile
+              label={`Avg ${statLabel}`}
+              value={b.avg == null ? '—' : String(Math.round(b.avg * 10) / 10)}
+              caption={b.games === 1 ? '1 meeting' : `${b.games} meetings`}
+            />
+            <View style={styles.tilePad} />
+          </View>
+          {shown.map((m, i) => (
+            // `${date}:${i}` and not the date alone: an MLB doubleheader is two
+            // meetings on one date against one opponent, and the RPC returns no
+            // game id to tell them apart — a duplicate key drops a row from a
+            // list whose whole claim is that it shows every meeting.
+            <View key={`${m.date}:${i}`} style={styles.gameRow}>
+              <View style={styles.gameDot}>
+                <View
+                  style={[
+                    styles.dot,
+                    {
+                      backgroundColor: isHit(m.value, selection.line, selection.side)
+                        ? colors.bet
+                        : colors.avoid,
+                    },
+                  ]}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.gameDate}>{m.date}</Text>
+              </View>
+              <View style={styles.gameStat}>
+                <Text style={styles.gameStatValue}>{String(Math.round(m.value * 10) / 10)}</Text>
+                <Text style={styles.gameStatLabel}>{statLabel}</Text>
+              </View>
+            </View>
+          ))}
+          {h2h.meetings.length > MEETINGS_SHOWN ? (
+            <Pressable
+              onPress={() => setShowAll((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                showAll
+                  ? 'Show fewer meetings'
+                  : `Show all ${h2h.meetings.length} meetings with ${h2h.opponent}`
+              }
+              style={({ pressed }) => [styles.gameRow, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.h2hMore}>
+                {showAll ? 'Show fewer' : `Show all ${h2h.meetings.length} meetings`}
+              </Text>
+            </Pressable>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
 
 // ── Added sections (2026-09-20) ─────────────────────────────────────────────
 
@@ -1074,20 +1276,23 @@ function TonightLineCard({
   );
 }
 
-/** The chart's threshold, split by venue, opponent and (basketball) role. */
+/** The chart's threshold, split by venue and (basketball) role.
+ *  The opponent split moved to HeadToHeadCard below, which reads two SEASONS
+ *  rather than the loaded log — see playerDetail.playerHeadToHead. */
 function SplitsCard({
   splits,
   statLabel,
-  threshold,
+  betLabel,
   loading,
 }: {
   splits: StatSplits;
   statLabel: string;
-  threshold: number;
+  /** The page's bet in its own idiom — "3+" or "Under 2.5". NOT a bare
+   *  threshold: in Under mode the two name opposite bets. */
+  betLabel: string;
   loading: boolean;
 }) {
   const buckets: SplitBucket[] = [splits.home, splits.away];
-  if (splits.vsOpponent) buckets.push(splits.vsOpponent);
   if (splits.starting && splits.starting.games > 0) buckets.push(splits.starting);
   if (splits.bench && splits.bench.games > 0) buckets.push(splits.bench);
   const rows: SplitBucket[][] = [];
@@ -1095,13 +1300,14 @@ function SplitsCard({
   return (
     <>
       <SectionTitle
-        title={`${statLabel} ${threshold}+ by situation`}
+        title={`${statLabel} ${betLabel} by situation`}
         tooltip={{
           title: 'Same line, different spots',
           body:
-            'How often the player has cleared the line above at home, on the road and against tonight’s ' +
-            'opponent, over the games loaded on this page. Small samples swing hard — the game count is ' +
-            'under every number for that reason. Home and away come from the game itself, not from the box score.',
+            'How often the player has cleared the line above at home and on the road, over the games ' +
+            'loaded on this page. Small samples swing hard — the game count is under every number for ' +
+            'that reason. Home and away come from the game itself, not from the box score. The opponent ' +
+            'has its own card below, because that one reads two whole seasons rather than this page’s log.',
         }}
       />
       {loading && buckets.every((b) => b.games === 0) ? (
@@ -1551,6 +1757,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  h2hMore: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   gameStatLabel: {
     fontSize: font.size.nano,

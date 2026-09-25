@@ -46,6 +46,7 @@ import { usePreferredBooks, BOOKS } from '@/hooks/usePreferredBooks';
 import {
   fetchPropLinesForDates,
   fetchRecentGames,
+  fetchH2HStatValues,
   fetchSeasonStatValues,
   fetchSlateGames,
   fetchTeamStats,
@@ -96,7 +97,7 @@ import {
   type MatchupGrade,
   type MatchupInfo,
 } from '@/lib/matchup';
-import { addDays, formatAmerican, todayET, weekdayET, gameStatus } from '@/lib/format';
+import { addDays, formatAmerican, todayET, weekdayET, gameStatus, yearET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_MAX,
@@ -104,6 +105,8 @@ import {
   HIT_RATE_PRESETS,
   HIT_RATE_STEP,
   buildSlateGameIndex,
+  h2hMatchups,
+  nextGameByTeam,
   buildTonightSlate,
   compareRows,
   hitRateBand,
@@ -145,6 +148,7 @@ import type {
   PropOddsByBookRow,
   HitRatePlayer,
   RecentGameRow,
+  H2HStatValuesRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   TeamSeasonStats,
@@ -167,15 +171,19 @@ const BOARD_MODES: BoardMode[] = ['players', 'teams'];
 type Mode = 'totals' | 'hitRate';
 const MODES: Mode[] = ['hitRate', 'totals'];
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
-// the player_season_stat_values_* RPCs in Hit Rate mode).
-type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
+// the player_season_stat_values_* RPCs in Hit Rate mode). 'h2h' is not a
+// window over recent games at all — it is every meeting with the team the row
+// is ABOUT TO PLAY, over the last two seasons (player_h2h_stat_values_*).
+type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season' | 'h2h';
 
 // The LINE pill on a row is the user's own sportsbook's current number for the
 // line the board is showing — lib/statsOdds. Separate from the models by
 // design (Matt, 2026-09-03). Tapping it opens the sheet with that book's price
 // and its "Bet on …" button.
 
-const SEASON = new Date().getUTCFullYear();
+// ET, not UTC: from 19:00 ET on 31 December `getUTCFullYear()` is already
+// the next year (lib/format.yearET, and CLAUDE.md's "today is ET" rule).
+const SEASON = yearET();
 /**
  * The two right-hand column widths, shared by the header cell and the row cell
  * so the header rail cannot drift off its column — content-sized rows under a
@@ -254,6 +262,11 @@ function BoardSkeleton() {
 }
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
+  // H2H FIRST, which is where the competitor screenshot Matt sent puts it
+  // (2026-09-20). The strip scrolls and starts at the left, so first is the
+  // one position that needs no scroll to find — and a window nobody finds is a
+  // window nobody uses. The rest keep the recency order they had.
+  { value: 'h2h', label: 'H2H' },
   { value: 3, label: 'L3' },
   { value: 5, label: 'L5' },
   { value: 10, label: 'L10' },
@@ -380,6 +393,14 @@ export function StatsScreen() {
   const [seasonValues, setSeasonValues] = useState<{ statKey: string; rows: SeasonStatValuesRow[] }>(
     { statKey: '', rows: [] },
   );
+  // Hit-rate mode, H2H window — every meeting with the team the row is about
+  // to play, last two seasons. Carries its stat key for the same reason
+  // `seasonValues` does: the rows are ONE stat's arrays, so the memo below has
+  // to ignore them while a refetch for a newly picked stat is in flight, or
+  // the old stat's numbers render under the new stat's label.
+  const [h2hValues, setH2hValues] = useState<{ statKey: string; rows: H2HStatValuesRow[] }>(
+    { statKey: '', rows: [] },
+  );
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
@@ -427,7 +448,15 @@ export function StatsScreen() {
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
-  const effectiveMode: Mode = canHitRate ? mode : 'totals';
+  // H2H IS A HIT-RATE WINDOW AND NOTHING ELSE. The Averages board is built
+  // from player_window_totals_* — season totals over a last-N window — and
+  // there is no such read per opponent, so an Averages board under an H2H chip
+  // could only have shown the recent-form numbers with H2H lit up beside them:
+  // the wrong number under the right label, which is the one failure this
+  // screen never ships. Picking H2H moves the switch to Hit Rates (below) and
+  // picking Averages moves the window off H2H, so the two controls are always
+  // telling the truth about each other and either is one tap from undone.
+  const effectiveMode: Mode = canHitRate ? (timeWindow === 'h2h' ? 'hitRate' : mode) : 'totals';
 
   // Reset to the sport's default stat + clear filters whenever the sport changes.
   useEffect(() => {
@@ -441,6 +470,13 @@ export function StatsScreen() {
     setHitLow(HIT_RATE_MIN);
     setHitHigh(HIT_RATE_MAX);
     setBasis('perGame');
+    // A SPORT WITH NO PER-GAME PLAYER LOG CANNOT ANSWER H2H AT ALL, and on it
+    // `effectiveMode` falls back to Averages (`canHitRate`) — which would have
+    // left the H2H chip lit above a board of SEASON TOTALS. The chip is hidden
+    // for those sports below; this is the other half, for a user who picked it
+    // on the NFL and then switched to the NHL. The window is the board's
+    // default, not the one carried over.
+    if (!supportsHitRate(sport)) setTimeWindow((w) => (w === 'h2h' ? 10 : w));
     // UFC and golf have no teams — never strand the user on an empty board.
     if (!supportsTeamBoard(sport)) setBoardMode('players');
   }, [sport]);
@@ -581,7 +617,9 @@ export function StatsScreen() {
   // mode. Keying the dependency on this derived value keeps stat switching in
   // every other mode client-side (no refetch), as before.
   const seasonStatKey =
-    effectiveMode === 'hitRate' && timeWindow === 'season' ? String(stat?.key) : null;
+    effectiveMode === 'hitRate' && (timeWindow === 'season' || timeWindow === 'h2h')
+      ? String(stat?.key)
+      : null;
 
   // The teams the server should narrow the read to — null when the board is
   // showing the whole league, or when the sport's slate keys are not teams
@@ -600,6 +638,26 @@ export function StatsScreen() {
   // inside one collapses two different slates onto the same key.
   const readTeamsKey = readTeams ? JSON.stringify(readTeams.slice().sort()) : '';
 
+  // ── The H2H window's fixtures: who each team is about to play ─────────────
+  // Over the WHOLE forward window (`slateGames`, seven days) and not the slate
+  // DATE, because the fixture a bettor is pricing in a weekly sport is usually
+  // not today — see nextGameByTeam. Narrowed by `readTeams` so a board already
+  // cut to one game asks about that one game.
+  const h2hIndex = useMemo(
+    () => nextGameByTeam(slateGames, new Date(now).toISOString()),
+    [slateGames, now],
+  );
+  const h2hFixtures = useMemo(() => h2hMatchups(h2hIndex, readTeams), [h2hIndex, readTeams]);
+  // CONTENT, not identity — and this one is load-bearing rather than an
+  // optimisation. `now` ticks every 60s (useNow), so the memo above rebuilds
+  // once a minute forever; keyed on the array itself the board would re-read
+  // the whole H2H leaderboard every minute for an answer that had not changed.
+  // The content only moves when a game actually starts.
+  const h2hKey = useMemo(
+    () => h2hFixtures.teams.map((t, i) => JSON.stringify([t, h2hFixtures.opponents[i]])).join(),
+    [h2hFixtures],
+  );
+
   // WHAT THE ROWS ON SCREEN ARE AN ANSWER TO. A read is now up to several
   // sequential requests instead of one, so the window in which a stale response
   // can land on a board the user has already left is 10-50x wider than it was.
@@ -607,7 +665,9 @@ export function StatsScreen() {
   // current (so NCAAF rows cannot be painted under NFL stat labels, and an error
   // banner cannot appear for a sport the user left), and the list shows a
   // placeholder rather than rows it knows belong to a different question.
-  const readKey = `${sport}|${playerType ?? ''}|${timeWindow}|${effectiveMode}|${seasonStatKey ?? ''}|${readTeamsKey}`;
+  const readKey =
+    `${sport}|${playerType ?? ''}|${timeWindow}|${effectiveMode}|${seasonStatKey ?? ''}` +
+    `|${readTeamsKey}|${timeWindow === 'h2h' ? h2hKey : ''}`;
   const inFlight = useRef<string | null>(null);
   const [shownKey, setShownKey] = useState<string | null>(null);
   /** The rows on screen answer a question the user has since changed. */
@@ -623,11 +683,21 @@ export function StatsScreen() {
         setRows([]);
         setRecentRows([]);
         setSeasonValues({ statKey: '', rows: [] });
+        setH2hValues({ statKey: '', rows: [] });
         return;
       }
       const teams = readTeams;
       if (effectiveMode === 'hitRate') {
-        if (timeWindow === 'season') {
+        if (timeWindow === 'h2h') {
+          const key = String(stat.key);
+          // No fixtures means no opponent to ask about, so the read is skipped
+          // rather than sent unnarrowed (fetchH2HStatValues returns [] on an
+          // empty list either way — this keeps the board's empty state honest
+          // about WHY, see emptySubtitle).
+          const data = await fetchH2HStatValues(sport, SEASON, key, h2hFixtures, playerType);
+          if (inFlight.current !== stamp) return;
+          setH2hValues({ statKey: key, rows: data });
+        } else if (timeWindow === 'season') {
           const key = String(stat.key);
           const data = await fetchSeasonStatValues(sport, SEASON, key, playerType, teams);
           if (inFlight.current !== stamp) return;
@@ -638,7 +708,11 @@ export function StatsScreen() {
           setRecentRows(data);
         }
       } else {
-        const win = timeWindow === 'season' ? null : timeWindow;
+        // 'h2h' cannot reach here — `effectiveMode` forces Hit Rates under that
+        // window, because there is no per-opponent totals read. Narrowed rather
+        // than cast so that if that pairing is ever broken the board falls back
+        // to the whole season instead of sending 'h2h' as a game count.
+        const win = typeof timeWindow === 'number' ? timeWindow : null;
         const data = await fetchWindowTotals(sport, SEASON, win, playerType, teams);
         if (inFlight.current !== stamp) return;
         setRows(data);
@@ -650,9 +724,11 @@ export function StatsScreen() {
     } finally {
       if (inFlight.current === stamp) setLoading(false);
     }
-    // `readTeamsKey` and not `readTeams`: see above. `readKey` carries the rest.
+    // `readTeamsKey` / `h2hKey` and not the arrays: see above — and for the
+    // fixtures it is load-bearing, since a minute-ticking identity would
+    // refetch the board on a timer. `readKey` carries the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey]);
+  }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey, readTeamsKey, h2hKey]);
 
   useEffect(() => {
     // The gate exists so a read NARROWED by the slate's teams is not fired
@@ -662,11 +738,39 @@ export function StatsScreen() {
     // costing up to SLATE_GATE_MS on the tab bettors open most, in front of the
     // whole-league read that is now the default (UX review, 2026-09-12).
     // Wait only when something actually narrows.
-    if (slateFor !== sport && (tonightOnly || gamesPicked)) return;
+    //
+    // H2H ALWAYS NARROWS, so it always waits. Its read IS the fixture list:
+    // fired before the slate lands it asks about no opponents, gets nothing
+    // back, and the board prints "No upcoming games, so there is no opponent
+    // to compare against" — a sentence that is both wrong and specific, on a
+    // slate that arrives a moment later. The refetch would correct it (the
+    // fixtures are in `readKey`), which is exactly what makes it the kind of
+    // flash nobody notices in testing.
+    if (slateFor !== sport && (tonightOnly || gamesPicked || timeWindow === 'h2h')) return;
     void load();
-  }, [load, slateFor, sport, tonightOnly, gamesPicked]);
+  }, [load, slateFor, sport, tonightOnly, gamesPicked, timeWindow]);
 
   const toggleBasis = (next: Basis) => setBasis(next);
+
+  /**
+   * Hit Rates | Averages, with the H2H window kept truthful.
+   *
+   * There is no per-opponent Averages read (see `effectiveMode`), so asking
+   * for Averages while the window is H2H has to move one of the two controls.
+   * It moves the WINDOW, back to the board's default L10 — the alternative is
+   * refusing the tap, and a segment that does nothing when tapped reads as
+   * broken rather than as unavailable.
+   */
+  const pickMode = (next: Mode) => {
+    if (next === 'totals' && timeWindow === 'h2h') setTimeWindow(10);
+    setMode(next);
+  };
+
+  /** The window strip. Picking H2H moves the mode switch with it — same pair. */
+  const pickWindow = (next: TimeWindow) => {
+    if (next === 'h2h') setMode('hitRate');
+    setTimeWindow(next);
+  };
 
   // Each stat carries its own sensible line — snap the ruler back on switch.
   const pickStat = (s: StatDef) => {
@@ -909,11 +1013,15 @@ export function StatsScreen() {
   // Leaderboard names that two players share once folded. Neither gets a quote:
   // a wrong price on the wrong player is worse than a dash (data/name_match.py).
   const ambiguousLeaderboardKeys = useMemo(() => {
+    const hitRateRows =
+      timeWindow === 'h2h' ? h2hValues.rows
+      : timeWindow === 'season' ? seasonValues.rows
+      : recentRows;
     const names = effectiveMode === 'hitRate'
-      ? (timeWindow === 'season' ? seasonValues.rows : recentRows).map((r) => r.player_name)
+      ? hitRateRows.map((r) => r.player_name)
       : rows.map((r) => r.player_name);
     return ambiguousKeys(names);
-  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
+  }, [rows, recentRows, seasonValues, h2hValues, effectiveMode, timeWindow]);
 
   const quoteFor = useCallback(
     (row: { player_name?: string | null }): StatsOddsQuote | null =>
@@ -1078,7 +1186,27 @@ export function StatsScreen() {
     [slateGames, slate, now],
   );
   const sublineFor = useCallback(
-    (row: { team?: string | null; player_name?: string | null }): string | null => {
+    (row: { team?: string | null; player_name?: string | null; opponent?: string | null }): string | null => {
+      // UNDER H2H THE SUBLINE IS PART OF THE NUMBER, not decoration beside it.
+      // `slateGameIndex` is bounded to ONE DATE (statsBoard.buildSlateGameIndex)
+      // while the H2H read pairs each team over the whole forward window, so
+      // the two disagree in two ways that both print a confident percentage
+      // against the wrong team: on an NFL Tuesday the slate date is Thursday,
+      // so thirty of thirty-two teams get no subline at all; and in MLB, once
+      // today's game has started the slate index stays on it while the fixture
+      // advances to tomorrow's opponent.
+      //
+      // So the row's OWN `opponent` wins here — it is the column header for the
+      // number beside it. The indexed game is used only to add the kickoff
+      // time, and only while it names the same team; anything else falls back
+      // to the bare fixture rather than borrowing a time from another game.
+      if (timeWindow === 'h2h' && row.opponent) {
+        const entry = row.team ? h2hIndex.get(row.team) ?? null : null;
+        if (entry && entry.opponent === row.opponent) {
+          return slateSubline(entry, showOdds ? null : startedTeams.get(row.team!) ?? null);
+        }
+        return `vs ${row.opponent}`;
+      }
       const match = slateGameFor(row, slateGameIndex);
       if (!match) return null;
       // Two rules, both learned the hard way (UX review, 2026-09-05):
@@ -1090,7 +1218,7 @@ export function StatsScreen() {
       const started = showOdds ? null : startedTeams.get(match.key) ?? null;
       return slateSubline(match.game, started);
     },
-    [slateGameIndex, startedTeams, showOdds],
+    [slateGameIndex, startedTeams, showOdds, timeWindow, h2hIndex],
   );
 
   /**
@@ -1267,7 +1395,28 @@ export function StatsScreen() {
   const hitRateBase = useMemo<HitRatePlayer[]>(() => {
     if (!stat || effectiveMode !== 'hitRate') return [];
     const out: HitRatePlayer[] = [];
-    if (timeWindow === 'season') {
+    if (timeWindow === 'h2h') {
+      if (h2hValues.statKey !== String(stat.key)) return []; // fetch in flight
+      for (const r of h2hValues.rows) {
+        const values = (r.values ?? []).map(Number);
+        const { hits, total, pct } = computeHitRate(values, line, side);
+        if (total === 0) continue;
+        const avg = values.reduce((sum, v) => sum + v, 0) / total;
+        out.push({
+          player_id: r.player_id,
+          player_name: r.player_name,
+          team: r.team,
+          player_type: r.player_type,
+          games: [], // raw rows aren't fetched in H2H mode
+          values,
+          hits,
+          total,
+          pct,
+          avg,
+          opponent: r.opponent,
+        });
+      }
+    } else if (timeWindow === 'season') {
       if (seasonValues.statKey !== String(stat.key)) return []; // fetch in flight
       for (const r of seasonValues.rows) {
         const values = (r.values ?? []).map(Number);
@@ -1324,7 +1473,7 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [recentRows, seasonValues, h2hValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
 
   const hitRatePlayers = useMemo<HitRatePlayer[]>(
     () => hitRateBase.filter((p) => inHitRateBand(p.pct, band)),
@@ -1402,6 +1551,11 @@ export function StatsScreen() {
       // mode: an Averages row has no side to carry, and sending one would
       // flip the detail card to Under off a board that never mentioned it.
       hitMode: effectiveMode === 'hitRate' ? hitMode : undefined,
+      // ...and the LINE and WINDOW the row was read at, so "45+ over L3" does
+      // not open as "69+ over L10" (Matt, 2026-09-25). Hit Rate mode only,
+      // for the same reason as the side: an Averages row asked no line.
+      line: effectiveMode === 'hitRate' ? lineN : undefined,
+      gameWindow: typeof timeWindow === 'number' ? timeWindow : undefined,
     });
   };
 
@@ -1416,8 +1570,7 @@ export function StatsScreen() {
   const lineHeadline =
     hitModeHeadline(lineN, hitMode, stat?.label ?? '');
   // What a BET made from this column is called. Almost always the column's own
-  // name; "Anytime TD" where the board asks Rush+Rec TDs, because no book
-  // sells the column's version (markets.ts propDisplayLabel).
+  // name; the market's where the two differ (markets.ts propDisplayLabel).
   const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
 
   // What the tapped pill hands the add-to-betslip sheet: the proposition,
@@ -1561,9 +1714,18 @@ export function StatsScreen() {
     if (activeFilterCount > 0) {
       return 'No players match your filters. Tap a pill above to widen the board.';
     }
+    if (timeWindow === 'h2h') {
+      // Two DIFFERENT empties, and a bettor acts on them differently: nothing
+      // is scheduled (come back when a slate is up), versus a scheduled slate
+      // whose players have simply not met these opponents inside two seasons
+      // — the normal case in a weekly sport, and not a fault to go hunting for.
+      return h2hFixtures.teams.length === 0
+        ? `No upcoming ${sport} games, so there is no opponent to compare against yet.`
+        : `No ${sport} ${stat?.label ?? ''} in the last 2 seasons against each player's next opponent.`;
+    }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
-  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames]);
+  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures]);
 
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
@@ -1895,12 +2057,19 @@ export function StatsScreen() {
           contentContainerStyle={styles.windowRow}
           keyboardShouldPersistTaps="handled"
         >
-          {TIME_WINDOWS.map((w) => (
+          {TIME_WINDOWS.filter((w) => w.value !== 'h2h' || canHitRate).map((w) => (
             <FilterChip
               key={String(w.value)}
               label={w.label}
+              // "H2H" is the one chip on this strip that does not decode from
+              // the rest of the screen, and VoiceOver reads it "H two H".
+              accessibilityLabel={
+                w.value === 'h2h'
+                  ? 'Head to head — versus next opponent, last 2 seasons'
+                  : undefined
+              }
               active={w.value === timeWindow}
-              onPress={() => setTimeWindow(w.value)}
+              onPress={() => pickWindow(w.value)}
             />
           ))}
         </ScrollView>
@@ -1916,8 +2085,8 @@ export function StatsScreen() {
           <View style={styles.modeSeg}>
             <SegmentTabs
               items={MODES}
-              active={mode}
-              onChange={setMode}
+              active={effectiveMode}
+              onChange={pickMode}
               compact
               labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
             />
@@ -1933,8 +2102,8 @@ export function StatsScreen() {
       {canHitRate && stackModeTabs ? (
         <SegmentTabs
           items={MODES}
-          active={mode}
-          onChange={setMode}
+          active={effectiveMode}
+          onChange={pickMode}
           labelFor={(m) => (m === 'hitRate' ? 'Hit Rates' : 'Averages')}
         />
       ) : null}
@@ -1999,6 +2168,21 @@ export function StatsScreen() {
         </ScrollView>
       ) : null}
 
+      {/* WHAT THE COLUMN IS COUNTING. The chip says it in three characters and
+          nothing else on the board expands them: under H2H the percentage is
+          against ONE opponent over two seasons, not a recent-form window, and a
+          reader who has not tapped through to a player has no way to know that.
+          Same quiet caption idiom as the no-lines note below it. */}
+      {effectiveMode === 'hitRate' && timeWindow === 'h2h' && hitRatePlayers.length > 0 ? (
+        <View style={styles.noLinesRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>
+            H2H · each player against their next opponent, last 2 seasons. Many are a
+            single meeting — the count is under every rate.
+          </Text>
+        </View>
+      ) : null}
+
       {noLinesNote ? (
         <Pressable
           onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
@@ -2041,6 +2225,11 @@ export function StatsScreen() {
       {effectiveMode === 'hitRate' ? (
         <FlatList
           data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
+          // `slateChecking` counts as loading under H2H: the load gate skips
+          // the REQUEST until the slate lands but nothing held the RENDER, so
+          // the board printed "No upcoming games, so there is no opponent to
+          // compare against" — definite, wrong, and corrected a moment later
+          // — for up to SLATE_GATE_MS.
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
             const quote = quoteFor(item);
@@ -2058,6 +2247,7 @@ export function StatsScreen() {
                 statLabel={betLabel}
                 hitMode={hitMode}
                 colorful={colorful}
+                thinSample={timeWindow === 'h2h'}
                 oddsDay={quote ? oddsDayByGame.get(quote.gameId) ?? null : null}
                 onOddsPress={quote ? () => openBook(quote) : undefined}
                 tappable={playerDetail}
@@ -2066,7 +2256,7 @@ export function StatsScreen() {
             );
           }}
           ListEmptyComponent={
-            loading ? (
+            loading || (timeWindow === 'h2h' && slateChecking) ? (
               <BoardSkeleton />
             ) : (
               <EmptyState
@@ -3032,6 +3222,7 @@ function HitRateRow({
   statLabel,
   hitMode,
   colorful,
+  thinSample,
   oddsDay,
   onOddsPress,
   tappable,
@@ -3048,6 +3239,8 @@ function HitRateRow({
   quote: StatsOddsQuote | null;
   /** Does the hit-rate column span more than one band? Colour only if so. */
   colorful: boolean;
+  /** H2H: denominators vary per row, so a 1-of-1 must not be painted. */
+  thinSample?: boolean;
   /** The player's game is live or over: no line, and the cell says which. */
   started: 'Live' | 'Final' | null;
   showOdds: boolean;
@@ -3060,7 +3253,11 @@ function HitRateRow({
   tappable: boolean;
   onPress: () => void;
 }) {
-  const pctColor = hitRateColor(player.pct, colorful);
+  // `games < 3` is the player page's rule (SplitsCard / HeadToHeadCard), and
+  // under H2H the board has to share it or the SAME 1-of-1 is grey on the
+  // detail screen and full green on the board. Scoped to H2H because every
+  // other window has a uniform denominator, where the rule would say nothing.
+  const pctColor = hitRateColor(player.pct, colorful && !(thinSample && player.total < 3));
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>

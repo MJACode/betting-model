@@ -7,6 +7,7 @@ import {
   fetchUpcomingNhlPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
+import { attachDiscordPublish, voidHiddenFromBoard } from '@/lib/discordPublish';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
@@ -106,20 +107,23 @@ export function useTodayPicks(date?: string) {
       // count excluded it. The rows stay in the DB as the record of what was
       // published (§1c).
       //
-      // A VOIDED pick is dropped here for exactly the same reason, and it has
-      // to be HERE rather than only in passesActionFilter (2026-09-09). Five
-      // surfaces read this hook without ever calling that filter — the Today
-      // segment itself, the built-in and custom model screens, the Stats odds
-      // pill and the betslip hand-off — so a filter-only fix left all six
-      // voided wind picks rendering as green, stakeable BET cards while the
-      // header count above them excluded them. That is the retired-model bug
-      // this comment already describes, one row down. Both guards stay: this
-      // one for the board, passesActionFilter for the settled/server paths.
-      const all = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...nhlRows].filter(
+      // A VOID the channel does not still show is dropped here, not only in
+      // passesActionFilter (2026-09-09). Five surfaces read this hook without
+      // that filter — the Today segment, both model screens, the Stats odds
+      // pill and the betslip hand-off. A VOID Discord already posted stays:
+      // the message is the bet (Matt, 2026-09-23). voidHiddenFromBoard is
+      // that split. passesActionFilter is the Signals / green-bet half.
+      const merged = [...rows, ...ufcRows, ...nflRows, ...ncaafRows, ...nhlRows];
+      const stamped = await attachDiscordPublish(merged.map((d) => d.pick));
+      const byId = new Map(stamped.map((p) => [p.pick_id, p]));
+      const all = merged.map((d) => ({
+        ...d,
+        pick: byId.get(d.pick.pick_id) ?? d.pick,
+      })).filter(
         (d) => !isGameOver(d.game, d.pick.sport)
           && !isModelRetired(d.pick.model_id)
           && !isModelPaused(d.pick.model_id)
-          && d.pick.condition_status !== 'VOID',
+          && !voidHiddenFromBoard(d.pick),
       );
       setData(all);
       setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);

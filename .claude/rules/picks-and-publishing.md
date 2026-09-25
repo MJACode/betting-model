@@ -132,9 +132,14 @@ A surface with an extra GATE can only lose rows, and does it silently —
   publish key is a data migration, not a code change: re-ledger the
   already-published picks (`scripts/backfill_publish_keys.py`) BEFORE the
   code ships, or every one of them republishes.
-- **A VOIDED pick is not publishable and not displayable** (§1c). Excluded in
-  the publishers' SQL and in the app's `passesActionFilter`. Only `'VOID'` —
-  NCAAF's `'OK'` / `'GONE'` are live states on real picks.
+- **A VOIDED pick is not newly publishable.** The publishers' SQL still
+  excludes `'VOID'`, and VOID does not delete a Discord message. **Display
+  follows the Discord ledger** (`push_sent` kind `discord_signal` /
+  `discord_live`, read by the app through `v_discord_published`): a lock the
+  channel still has stays on Today / Signals, and a lock the channel does
+  not have is not an active Discord-led bet. The settled record still
+  excludes VOID (`passesRecordFilter`). Only `'VOID'` — NCAAF's `'OK'` /
+  `'GONE'` are live states on real picks.
 - **NOTHING IS SENT WHOSE LABEL DISAGREES WITH ITS SIDE AND LINE.** Every
   producer passes its rows through `tracking/pick_integrity.refuse_mismatched`
   and supplies `side` and `line`, or the pick is refused. A new surface adds

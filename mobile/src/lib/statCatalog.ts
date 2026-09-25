@@ -63,18 +63,25 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'turnovers', label: 'Turnovers', sport: 'NBA', group: 'NBA', defaultLine: 1.5 },
   { key: 'minutes', label: 'Minutes', sport: 'NBA', group: 'NBA', defaultLine: 27.5 },
   // ── NFL (nflverse weekly stats — rush_rec_tds = rushing + receiving TDs) ──
+  // Touchdowns are ONE chip, named for the bet a book actually sells: Anytime
+  // TD (rush + rec). Rush TDs and Rec TDs were separate chips, and no book
+  // posts either, so both boards read "No sportsbook posts … lines" under a
+  // stat nobody can bet (Matt, 2026-09-25: "Rushing TD is not a bet type.
+  // Should be any time TD"). The log columns stay; only the chips went.
+  // The chip sits in BOTH Rushing and Receiving, because the bet is a
+  // receiver's as much as a back's; chips are keyed group:key (chipKey), so
+  // one column in two groups is two distinct chips.
   { key: 'passing_yards', label: 'Pass Yards', sport: 'NFL', group: 'Passing', defaultLine: 224.5 },
   { key: 'passing_tds', label: 'Pass TDs', sport: 'NFL', group: 'Passing', defaultLine: 1.5 },
   { key: 'completions', label: 'Completions', sport: 'NFL', group: 'Passing', defaultLine: 19.5 },
   { key: 'attempts', label: 'Pass Attempts', sport: 'NFL', group: 'Passing', defaultLine: 29.5 },
   { key: 'interceptions', label: 'INTs Thrown', sport: 'NFL', group: 'Passing', defaultLine: 0.5 },
   { key: 'rushing_yards', label: 'Rush Yards', sport: 'NFL', group: 'Rushing', defaultLine: 49.5 },
-  { key: 'rushing_tds', label: 'Rush TDs', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
   { key: 'carries', label: 'Carries', sport: 'NFL', group: 'Rushing', defaultLine: 12.5 },
-  { key: 'rush_rec_tds', label: 'Rush+Rec TDs', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
   { key: 'receptions', label: 'Receptions', sport: 'NFL', group: 'Receiving', defaultLine: 3.5 },
   { key: 'receiving_yards', label: 'Rec Yards', sport: 'NFL', group: 'Receiving', defaultLine: 49.5 },
-  { key: 'receiving_tds', label: 'Rec TDs', sport: 'NFL', group: 'Receiving', defaultLine: 0.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NFL', group: 'Receiving', defaultLine: 0.5 },
   { key: 'targets', label: 'Targets', sport: 'NFL', group: 'Receiving', defaultLine: 5.5 },
   { key: 'def_sacks', label: 'Sacks', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_interceptions', label: 'Interceptions', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
@@ -87,12 +94,11 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'attempts', label: 'Pass Attempts', sport: 'NCAAF', group: 'Passing', defaultLine: 27.5 },
   { key: 'interceptions', label: 'INTs Thrown', sport: 'NCAAF', group: 'Passing', defaultLine: 0.5 },
   { key: 'rushing_yards', label: 'Rush Yards', sport: 'NCAAF', group: 'Rushing', defaultLine: 49.5 },
-  { key: 'rushing_tds', label: 'Rush TDs', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
   { key: 'carries', label: 'Carries', sport: 'NCAAF', group: 'Rushing', defaultLine: 10.5 },
-  { key: 'rush_rec_tds', label: 'Rush+Rec TDs', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
   { key: 'receptions', label: 'Receptions', sport: 'NCAAF', group: 'Receiving', defaultLine: 3.5 },
   { key: 'receiving_yards', label: 'Rec Yards', sport: 'NCAAF', group: 'Receiving', defaultLine: 44.5 },
-  { key: 'receiving_tds', label: 'Rec TDs', sport: 'NCAAF', group: 'Receiving', defaultLine: 0.5 },
+  { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NCAAF', group: 'Receiving', defaultLine: 0.5 },
   { key: 'def_tackles', label: 'Tackles', sport: 'NCAAF', group: 'Defense', defaultLine: 4.5 },
   { key: 'def_solo', label: 'Solo Tackles', sport: 'NCAAF', group: 'Defense', defaultLine: 2.5 },
   { key: 'def_sacks', label: 'Sacks', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },

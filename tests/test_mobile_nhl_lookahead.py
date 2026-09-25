@@ -71,7 +71,11 @@ def test_use_today_picks_fetches_nhl_across_that_window():
     )
     # A failed look-ahead is partial, the same as the other three cards.
     assert "swallow('the upcoming NHL card')" in src
-    merged = src[src.index("const all = ["):src.index(".filter(", src.index("const all = ["))]
+    # The hook stamps Discord publish on `merged`, then `const all = merged.map`.
+    # The five cards have to be in that array, or NHL never reaches Today.
+    start = src.index("const merged = [")
+    merged = src[start:src.index(".filter(", start)]
+    assert "const all = merged" in merged
     for name in ("rows", "ufcRows", "nflRows", "ncaafRows", "nhlRows"):
         assert f"...{name}" in merged, f"{name} dropped from the Today merge"
 

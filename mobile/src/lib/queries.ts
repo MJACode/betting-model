@@ -1,5 +1,6 @@
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
+import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
 import {
   LOG_COLUMNS,
@@ -59,6 +60,7 @@ import type {
   PropOddsSnapshotRow,
   RecentGameRow,
   SavantStatsRow,
+  H2HStatValuesRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
@@ -430,13 +432,124 @@ export async function fetchSeasonStatValues(
   return []; // UFC / NHL / GOLF: no per-game player logs
 }
 
+/**
+ * A PAIR OF TEAMS, one per slate fixture, as the H2H RPCs take them.
+ *
+ * Two parallel arrays rather than 'TEAM|OPP' strings because an NCAAF team id
+ * is a school NAME (CLAUDE.md §4), so every separator is a character that can
+ * occur inside a key; the RPC pairs them with `unnest(...) WITH ORDINALITY`.
+ */
+export interface H2HMatchups {
+  teams: string[];
+  opponents: string[];
+}
+
+/**
+ * How many seasons back H2H looks: this one and the one before it.
+ *
+ * Matt, 2026-09-20 — "they should be able to see the last 2 years". FIXED, not
+ * a control: one definition of the window is one number on the row that always
+ * means the same thing. Widening it is a one-line change here.
+ */
+export const H2H_SEASONS = 2;
+
+/** [2026, 2025] for a season of 2026 — newest first, H2H_SEASONS long. */
+export function h2hSeasons(season: number): number[] {
+  return Array.from({ length: H2H_SEASONS }, (_, i) => season - i);
+}
+
+/**
+ * The newest season LABEL to try first for a sport, then the fallbacks.
+ *
+ * Because a season label is not a calendar year, and it is not the same kind of
+ * thing in every sport (CLAUDE.md §4). Measured on production 2026-09-20, by
+ * the dates each label actually spans:
+ *
+ *   MLB 2026   2026-04-05 → 2026-09-20   year of play
+ *   WNBA 2026  2026-05-08 → 2026-09-19   year of play
+ *   NBA 2026   2025-10-21 → 2026-04-12   ENDING year
+ *   NFL 2026   2026-09-09 → 2026-09-17   starting year
+ *   NCAAF 2026 2026-08-27 → 2026-09-20   starting year
+ *
+ * So for the NBA, from October to December the season in progress is labelled
+ * NEXT year, and a bare calendar year asks for the two seasons BEFORE the one
+ * it claims — for three months, silently, under a card that says "last 2
+ * seasons". Football has always had this fallback because its label is a year
+ * ahead of its January games; the NBA needs it in the other direction.
+ *
+ * The sports whose label IS the year of play get one candidate, because for
+ * them a fallback could only ever hide a genuinely empty read.
+ */
+function h2hSeasonCandidates(sport: string, season: number): number[] {
+  if (sport === 'NFL' || sport === 'NCAAF') return footballSeasonCandidates(season);
+  // Try the season the autumn belongs to first; fall back to the one that has
+  // just finished, which is the right answer all through the spring and summer.
+  if (sport === 'NBA') return [season + 1, season, season - 1];
+  return [season];
+}
+
+/**
+ * Per-player per-game values for ONE stat, IN THE MEETINGS with the team that
+ * player is about to play, over the last two seasons. Backs the Stats tab's
+ * H2H window.
+ *
+ * Deliberately the same row shape as fetchSeasonStatValues above (a `values`
+ * array per player), so the board computes the H2H hit rate for any line
+ * through the same client-side path the Season window already uses — plus
+ * `opponent` and `dates`, which are the two things only H2H can say.
+ *
+ * NARROWED BY THE FIXTURES, NOT BY THE TEAMS. `matchups` pairs each slate team
+ * with the one opponent it is about to face, so the read returns one row per
+ * player rather than every slate player against every slate opponent. Measured
+ * on the 30-game NFL slate of 2026-09-20: 1,406 rows for 1,157 players, out of
+ * 3,724 players on the slate — i.e. ~31% of them have met that opponent inside
+ * two seasons at all.
+ *
+ * Empty matchups return [] WITHOUT a request: no slate means no opponent to
+ * ask about, and an unnarrowed H2H read is the cross product.
+ */
+export async function fetchH2HStatValues(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  season: number,
+  statKey: string,
+  matchups: H2HMatchups,
+  playerType?: 'batter' | 'pitcher',
+): Promise<H2HStatValuesRow[]> {
+  if (matchups.teams.length === 0) return [];
+  // (player, opponent) is the row's identity: a player whose team appears in
+  // the slate twice (an MLB doubleheader) still resolves to one opponent, but
+  // the key must not collapse two different ones if that ever changes.
+  const key = (r: H2HStatValuesRow) => `${r.player_id}:${r.opponent}:${r.player_type ?? ''}`;
+  const fn =
+    sport === 'WNBA' ? 'player_h2h_stat_values_wnba'
+    : sport === 'NBA' ? 'player_h2h_stat_values_nba'
+    : sport === 'MLB' ? 'player_h2h_stat_values_mlb'
+    : sport === 'NFL' ? 'player_h2h_stat_values_nfl'
+    : sport === 'NCAAF' ? 'player_h2h_stat_values_ncaaf'
+    : null;
+  if (!fn) return []; // UFC / NHL / GOLF: no per-game player logs
+  const base: Record<string, unknown> = {
+    p_stat: statKey,
+    p_teams: matchups.teams,
+    p_opponents: matchups.opponents,
+  };
+  if (sport === 'MLB') base.p_player_type = playerType ?? 'batter';
+  // Candidates, newest label first: an empty read on the first one means that
+  // label has no games yet, not that the player has never met the opponent.
+  for (const s of h2hSeasonCandidates(sport, season)) {
+    const rows = await pageRpc<H2HStatValuesRow>(fn, { ...base, p_seasons: h2hSeasons(s) }, null, key);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
 const PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
   'model_probability, model_probability_cal, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, condition_status, result, profit_flat, ' +
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
-  'is_live, inning_at_pick, score_diff_at_pick, ' +
+  'is_live, inning_at_pick, score_diff_at_pick, player_key, prop_market, ' +
   'public_bet_pct, public_money_pct, ' +
   'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
   'clv_captured_at, clv_method, clv_close_book, dk_bet_link, ' +
@@ -1346,11 +1459,9 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
       // Live tab shows only actionable, recommended bets — AVOID (fade) picks
       // are still written + settled for model tracking, just not surfaced here.
       .eq('signal_type', 'BET')
-      // A VOIDED pick is not displayable (§1c), on this board like every other.
-      // The publishers' exclusion is unconditional across sports and
-      // scripts/void_picks.py takes any --model, so a voided live pick would
-      // otherwise vanish from Discord and stay on the Live tab.
-      .or('condition_status.is.null,condition_status.neq.VOID')
+      // VOID is NOT dropped in SQL. A post Discord already made stays on this
+      // board; a lock the channel does not have is dropped after the ledger
+      // join (discordLedVisible). Publishers still refuse to announce a VOID.
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase
@@ -1388,8 +1499,11 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
 
-  return picks
-    .filter((p) => liveGameIds.has(p.game_id))
+  const onBoard = await attachDiscordPublish(
+    picks.filter((p) => liveGameIds.has(p.game_id)),
+  );
+  return onBoard
+    .filter((pick) => discordLedVisible(pick.condition_status, pick.discordPublish))
     .map((pick) => {
       const market = gameMarketForModel(pick.model_id);
       const rows = market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
@@ -1460,7 +1574,7 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
     .single();
   if (error) throw error;
   if (!data) return null;
-  const pick = data as Pick;
+  const [pick] = await attachDiscordPublish([data as Pick]);
   const market = gameMarketForModel(pick.model_id);
   const propMarket = market ? null : propMarketForModel(pick.model_id);
   const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
