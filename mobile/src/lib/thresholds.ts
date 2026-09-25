@@ -13,6 +13,7 @@
  */
 
 import { decisionEdge, decisionOdds } from './decisionPrice';
+import { discordLedVisible, type DiscordPublish } from './discordPublish';
 import { todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
@@ -49,6 +50,8 @@ export type ActionFilterable = Pick<
 > & {
   decision_odds?: number | null;
   decision_edge?: number | null;
+  /** Set by attachDiscordPublish. Omitted means the ledger was not read. */
+  discordPublish?: DiscordPublish;
 };
 
 export function isProbOnlyModel(modelId: string): boolean {
@@ -238,20 +241,20 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // on a game that was never eligible — kept deliberately, because deleting it
   // would destroy the evidence of the bug that is usually how it was found.
   //
-  // WHY THIS IS A PARITY FIX, not a display tweak (2026-09-09). The six Week 1
-  // `nfl_wind_totals` picks were voided on 09-07 and REMOVED FROM DISCORD by
-  // hand ("I deleted older wind picks from the discord and they should not be
-  // stored as official picks"). Nothing carried that to the app, which has no
-  // concept of condition_status at all, so all six were still drawing as green,
-  // stakeable BETs for the 09-13 slate — the app and Discord showing different
-  // picks, which is the one thing §1b says they must never do. The publishers
-  // now apply the same exclusion in SQL.
+  // DISPLAY FOLLOWS DISCORD (Matt, 2026-09-23). A VOID the channel still has
+  // stays a bet — the post is not retracted. A bet the channel does not have
+  // is not an active Discord-led bet. Publishers still refuse to ANNOUNCE a
+  // VOID; this is only what the board draws. The settled record is
+  // passesRecordFilter, which still excludes every VOID.
   //
-  // ONLY 'VOID'. The NFL pick monitor (scripts/nfl_pick_monitor.py) writes
-  // 'OK' / 'DEGRADED' / 'GONE' in this column — health states on real, standing
-  // picks, which stay bettable and stay counted. NCAAF does not write this
-  // column at all; a downgraded NCAAF row carries `downgrade_reason`.
-  if (p.condition_status === 'VOID') return false;
+  // ONLY 'VOID' is special. The NFL pick monitor writes 'OK' / 'DEGRADED' /
+  // 'GONE' as health states on real, standing picks. NCAAF does not write
+  // this column; a downgraded NCAAF row carries `downgrade_reason`.
+  //
+  // discordPublish omitted (`unknown`) keeps a non-VOID bet visible, so a
+  // ledger read that has not landed yet cannot blank the board. A VOID with
+  // no evidence it is on Discord stays hidden.
+  if (!discordLedVisible(p.condition_status, p.discordPublish)) return false;
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.
   if (RETIRED_MODELS.has(p.model_id)) return false;

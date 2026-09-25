@@ -68,6 +68,11 @@ ANON_READABLE: tuple[str, ...] = (
     "umpires",
     # ── views ───────────────────────────────────────────────────────────────
     "v_fighter_season_totals_ufc",
+    # Which locks Discord still has (discord_signal / discord_live). The
+    # app joins it so a VOID-after-post stays on the board and a pick the
+    # channel never got is not an active Discord bet. push_sent itself
+    # stays closed; the view is lock_key + kind only.
+    "v_discord_published",
     "v_latest_dk_odds",
     "v_latest_inplay_odds_all_books",
     "v_latest_odds_all_books",

@@ -40,13 +40,20 @@ export interface Pick {
    *  pick the model should never have PRODUCED — fired outside its validated
    *  window, or on a game that was never eligible — retired by
    *  scripts/void_picks.py (CLAUDE.md §1c). The row survives as the evidence
-   *  the bug happened, and must never be drawn as a standing bet.
+   *  the bug happened. It is not a settled-record bet. If Discord already
+   *  posted it, the board still shows it (`discordPublish`).
    *
    *  Also written by the NFL pick monitor (scripts/nfl_pick_monitor.py) as
    *  'OK' / 'DEGRADED' / 'GONE' — health states on real, STANDING picks, which
    *  is why only 'VOID' is filtered anywhere. NCAAF does not use this column at
    *  all; a downgraded NCAAF row carries `downgrade_reason` instead. */
   condition_status: string | null;
+  /** Client-only. Set by attachDiscordPublish from v_discord_published.
+   *  Not a column on `picks`. */
+  discordPublish?: 'published' | 'unpublished' | 'unknown';
+  /** Identity tail of the Discord lock key. NULL on every game-level row. */
+  player_key?: string | null;
+  prop_market?: string | null;
   result: PickResult;
   profit_flat: number | null;
   profit_kelly: number | null;

@@ -1,5 +1,6 @@
 import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
+import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
 import {
   LOG_COLUMNS,
@@ -548,7 +549,7 @@ const PICK_COLUMNS =
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, condition_status, result, profit_flat, ' +
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
-  'is_live, inning_at_pick, score_diff_at_pick, ' +
+  'is_live, inning_at_pick, score_diff_at_pick, player_key, prop_market, ' +
   'public_bet_pct, public_money_pct, ' +
   'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
   'clv_captured_at, clv_method, clv_close_book, dk_bet_link, ' +
@@ -1458,11 +1459,9 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
       // Live tab shows only actionable, recommended bets — AVOID (fade) picks
       // are still written + settled for model tracking, just not surfaced here.
       .eq('signal_type', 'BET')
-      // A VOIDED pick is not displayable (§1c), on this board like every other.
-      // The publishers' exclusion is unconditional across sports and
-      // scripts/void_picks.py takes any --model, so a voided live pick would
-      // otherwise vanish from Discord and stay on the Live tab.
-      .or('condition_status.is.null,condition_status.neq.VOID')
+      // VOID is NOT dropped in SQL. A post Discord already made stays on this
+      // board; a lock the channel does not have is dropped after the ledger
+      // join (discordLedVisible). Publishers still refuse to announce a VOID.
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase
@@ -1500,8 +1499,11 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
 
-  return picks
-    .filter((p) => liveGameIds.has(p.game_id))
+  const onBoard = await attachDiscordPublish(
+    picks.filter((p) => liveGameIds.has(p.game_id)),
+  );
+  return onBoard
+    .filter((pick) => discordLedVisible(pick.condition_status, pick.discordPublish))
     .map((pick) => {
       const market = gameMarketForModel(pick.model_id);
       const rows = market ? (inplayByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
@@ -1572,7 +1574,7 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
     .single();
   if (error) throw error;
   if (!data) return null;
-  const pick = data as Pick;
+  const [pick] = await attachDiscordPublish([data as Pick]);
   const market = gameMarketForModel(pick.model_id);
   const propMarket = market ? null : propMarketForModel(pick.model_id);
   const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;

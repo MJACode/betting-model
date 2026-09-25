@@ -138,8 +138,8 @@ def test_a_retired_model_is_not_announced(producer):
 @pytest.mark.parametrize("producer", PRODUCERS)
 def test_a_voided_live_pick_is_not_announced(producer):
     """Section 1c: a pick the model should never have PRODUCED is voided, not
-    deleted -- and a voided pick is not publishable. fetchLivePicks already
-    excludes it in the app's SQL."""
+    deleted -- and a voided pick is not newly publishable. The app may still
+    SHOW one Discord already posted; this producer must not announce it."""
     conn = _db()
     _threshold(conn, "ncaaf_live_total", paused=False)
     _pick(conn, 1, "ncaaf_live_total", condition_status="VOID")

@@ -205,6 +205,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-09-19: daily model-quality findings (one-sided slates, fade
     # concentration, CLV/ROI, volume). Report only; never pauses.
     "add_model_quality_checks_2026_09_19.sql",
+    # 2026-09-23 (Matt): Discord is the board. The app joins this view to
+    # decide which bets are still in the channel. VOID does not delete the
+    # post. push_sent stays closed except lock_key + kind on the two
+    # channel kinds. No Discord mutation.
+    "discord_publish_state_2026_09_23.sql",
 ]
 
 
