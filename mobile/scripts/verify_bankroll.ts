@@ -45,6 +45,7 @@ import {
   editBankrollInput,
   formatBankrollInput,
   formatDollars,
+  keptSentence,
   formatPct,
   readBankroll,
   sanitizeBankroll,
@@ -204,6 +205,32 @@ eq('deleting a digit is untouched', editBankrollInput('25,000', '2,000', EN), '2
 eq('deleting the de-DE decimal comma is a real delete', editBankrollInput('12,50', '1250', DE), '1.250');
 eq('typing is untouched', editBankrollInput('2,000', '2,0001', EN), '20,001');
 eq('a paste is untouched', editBankrollInput('', '$2,000.50', EN), '2,000.50');
+
+// ── 2d. "Kept $X." on a revert (Designer, #831) ───────────────────────────
+eq('kept sentence: grouped like the field', keptSentence(2000, EN), 'Kept $2,000.');
+eq('kept sentence: real cents stay', keptSentence(1234.5, EN), 'Kept $1,234.50.');
+eq('kept sentence: de-DE separators', keptSentence(2000, DE), 'Kept $2.000.');
+{
+  const c = commitBankrollText('5', 2000, EN);
+  check('invalid with a saved $2,000: reverts, "Enter at least $10. Kept $2,000.", saves nothing',
+    c.text === '2,000' && c.error === 'Enter at least $10. Kept $2,000.' && c.save === undefined);
+  const neg = commitBankrollText('-500', 2000, EN);
+  eq('a pasted negative reverts with "Kept"', neg.error, 'Enter a positive dollar amount. Kept $2,000.');
+  const big = commitBankrollText('25,000,000', 2000, EN);
+  eq('over $10M on blur with a saved amount gets "Kept"', big.error, `${BANKROLL_ERRORS.tooLarge} Kept $2,000.`);
+  check('…while typing it stays the plain live error',
+    visibleBankrollError(checkBankroll('25,000,000', EN), false) === BANKROLL_ERRORS.tooLarge);
+  const none = commitBankrollText('5', null, EN);
+  check('nothing saved: the error alone, no "Kept"', none.error === BANKROLL_ERRORS.tooSmall && none.text === '' &&
+    none.save === undefined);
+  const cleared = commitBankrollText('', 2000, EN);
+  check('clear to empty: no error, no "Kept", clears', cleared.error === null && cleared.save === null && cleared.text === '');
+  const valid = commitBankrollText('3,000', 2000, EN);
+  check('a valid entry: no error, no "Kept"', valid.error === null && valid.save === 3000);
+}
+check('the error, "Kept" included, is one Text in the alert live region',
+  /<View style=\{styles\.fieldErrorRow\} accessibilityRole="alert" accessibilityLiveRegion="polite">\s*<Ionicons[^>]*\/>\s*<Text style=\{styles\.fieldErrorText\}>\{error\}<\/Text>/.test(
+    readFileSync(join(import.meta.dirname, '..', 'src', 'screens', 'SettingsScreen.tsx'), 'utf-8')));
 
 // ── 3. Units → dollars ─────────────────────────────────────────────────────
 const s = (amount: number | null, unitPct = 1) => ({ amount, unitPct });
@@ -434,7 +461,7 @@ async function fieldFlow() {
   eq('…and "under $10" waits for blur', error(), null);
   await blur();
   eq('blur on "2": the field reverts to the saved amount', text, '25,000');
-  eq('…the error shows', error(), BANKROLL_ERRORS.tooSmall);
+  eq('…the error shows, naming the kept amount', error(), 'Enter at least $10. Kept $25,000.');
   check('…and the saved $25,000 is kept', f.writes.length === 0 && disk() === 25000 && saved() === 25000);
   eq('…the row shows the saved amount again', row(), '1 unit = $250');
   eq('the next visit still reads $25,000', (await createBankrollStore(f.store).load()).amount, 25000);
@@ -445,7 +472,8 @@ async function fieldFlow() {
   check('…nothing written', f.writes.length === 0);
   await blur();
   check('over $10M on blur: reverts, keeps the error, not persisted',
-    text === '25,000' && error() === BANKROLL_ERRORS.tooLarge && f.writes.length === 0 && disk() === 25000);
+    text === '25,000' && error() === `${BANKROLL_ERRORS.tooLarge} Kept $25,000.` && f.writes.length === 0 &&
+      disk() === 25000);
 
   type('3,000');
   eq('a valid edit: the error clears as you type', error(), null);
@@ -466,11 +494,26 @@ async function fieldFlow() {
   check('clear to empty, then blur: the saved amount is cleared', disk() === null && saved() === null && text === '' &&
     error() === null);
 
+  // Nothing saved: an invalid entry just shows the error — no "Kept".
+  type('5');
+  eq('nothing saved + invalid "5": no error while typing', error(), null);
+  await blur();
+  check('nothing saved + invalid on blur: the error alone, the field empties, nothing written',
+    error() === BANKROLL_ERRORS.tooSmall && text === '' && disk() === null && !/Kept/.test(error() ?? ''));
+  type('25000000');
+  eq('nothing saved + over $10M: the live error, no "Kept"', error(), BANKROLL_ERRORS.tooLarge);
+  await blur();
+  eq('…and on blur still no "Kept"', error(), BANKROLL_ERRORS.tooLarge);
+
   seps = DE;
   type('1250,5');
   eq('de-DE: shows "1.250,5"', text, '1.250,5');
   await blur();
   check('de-DE: blur saves $1,250.50 and shows "1.250,50"', disk() === 1250.5 && text === '1.250,50');
+  type('0');
+  await blur();
+  check('de-DE revert: "Kept" uses the field\'s own formatting',
+    error() === 'Enter an amount greater than $0. Kept $1.250,50.' && text === '1.250,50' && disk() === 1250.5);
 }
 
 // ── 7. Nothing is sized off it: picks stay a flat 1u ───────────────────────

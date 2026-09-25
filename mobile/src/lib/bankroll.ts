@@ -330,6 +330,11 @@ export function bankrollDraft(
   return { amount: c.state === 'valid' ? c.amount : null, unitPct };
 }
 
+/** "Kept $2,000." — the amount written exactly as the field shows it. */
+export function keptSentence(amount: number, seps: NumberSeparators = DEVICE_SEPARATORS): string {
+  return `Kept $${bankrollFieldText(amount, seps)}.`;
+}
+
 export interface BankrollCommit {
   /** The field's text after blur / Done. */
   text: string;
@@ -342,7 +347,8 @@ export interface BankrollCommit {
 /**
  * Blur or Done. Valid: save it and show it in its saved form. Empty: clear
  * the saved amount. Invalid: save nothing, keep the saved amount, show the
- * error, and put the saved amount back in the field.
+ * error, and put the saved amount back in the field; with a saved amount the
+ * error gains "Kept $X." so it doesn't read as a verdict on the restored value.
  */
 export function commitBankrollText(
   text: string,
@@ -354,7 +360,10 @@ export function commitBankrollText(
   if (c.state === 'valid') {
     return { text: bankrollFieldText(c.amount, seps), error: null, save: c.amount === savedAmount ? undefined : c.amount };
   }
-  return { text: bankrollFieldText(savedAmount, seps), error: c.message, save: undefined };
+  // Reverting puts the saved amount back beside the error, so the error says
+  // it was kept (Designer, #831). Nothing saved: the error alone.
+  const error = savedAmount == null ? c.message : `${c.message} ${keptSentence(savedAmount, seps)}`;
+  return { text: bankrollFieldText(savedAmount, seps), error, save: undefined };
 }
 
 // ── Units → dollars (display only) ────────────────────────────────────────

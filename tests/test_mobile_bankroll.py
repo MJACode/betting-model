@@ -64,6 +64,8 @@ def test_copy_is_word_for_word():
         "That's more than we can convert. Enter $10,000,000 or less.",
     ):
         assert msg in lib
+    # On a blur-time revert the error names the kept amount (Designer, #831).
+    assert "return `Kept $${bankrollFieldText(amount, seps)}.`;" in lib
 
 
 def test_section_placement_and_scope():
