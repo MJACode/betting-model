@@ -341,8 +341,8 @@ export function requestedChip(
  * exempt from it.
  *
  * One CHIP, not its group (UX review, 2026-09-20): readmitting the group would
- * hand a touchdown-less receiver a Rushing tab holding Rush Yards, Rush TDs
- * and Carries as well, all flat zero — the three controls 2026-09-19 removed,
+ * hand a touchdown-less receiver a Rushing tab holding Rush Yards and
+ * Carries as well, all flat zero — the three controls 2026-09-19 removed,
  * smuggled back in by the exemption. A one-chip tab reads honestly, and it is
  * the only chip in the tab anyone asked for.
  */

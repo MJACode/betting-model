@@ -505,6 +505,16 @@ export type RootStackParamList = {
      * `asHitMode`; absent, the screen opens in its own 'atLeast'.
      */
     hitMode?: string;
+    /**
+     * ...and the LINE and the WINDOW, the other two halves of the question.
+     * A 45+ Rush Yards row on an L3 board opened the player on 69+ over L10
+     * (Matt, 2026-09-25: "it should take me to that exact prop type"). `line`
+     * is the board's whole-number ruler stop, the same "N+" threshold this
+     * screen's stepper holds (lib/hitMode selectionFor). `gameWindow` is used
+     * only when the screen offers that span; otherwise it keeps its default.
+     */
+    line?: number;
+    gameWindow?: number;
   };
   /**
    * One team's page off the Stats tab's Teams board: next-game market read,

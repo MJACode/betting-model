@@ -72,7 +72,7 @@ const ONES: [StatDef['sport'], string][] = [
   // The football stats a blanket five would have destroyed: their whole ruler
   // is 1..10, so five leaves the stops {5, 10} and no way to say "2+ TDs".
   ['NFL', 'passing_tds'], ['NFL', 'receptions'], ['NFL', 'targets'], ['NFL', 'def_sacks'],
-  ['NCAAF', 'rushing_tds'], ['NCAAF', 'def_tackles'], ['NCAAF', 'carries'],
+  ['NCAAF', 'rush_rec_tds'], ['NCAAF', 'def_tackles'], ['NCAAF', 'carries'],
   // The volume stats, left at one deliberately: books price completions and
   // attempts by the single unit, so 20/21/22 is the question people ask.
   ['NFL', 'completions'], ['NFL', 'attempts'],
