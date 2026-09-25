@@ -212,6 +212,11 @@ def test_write_classification_is_conservative():
     assert db._is_write("DELETE FROM picks")
     assert db._is_write("SET LOCAL lock_timeout = '10s'")
     assert db._is_write("do $$ begin end $$")
+    # Transaction control around a read must not look like a write.
+    assert not db._is_write("SAVEPOINT ncaaf_price_prefilter")
+    assert not db._is_write("RELEASE SAVEPOINT ncaaf_price_prefilter")
+    assert not db._is_write("ROLLBACK TO SAVEPOINT ncaaf_price_prefilter")
+    assert not db._is_write("ROLLBACK")
 
 
 def test_the_factory_hands_the_wrapper_its_url(monkeypatch):
