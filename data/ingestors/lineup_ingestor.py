@@ -26,6 +26,7 @@ from loguru import logger
 
 from data.db import get_connection, DBConnection
 from data.ingestors.mlb_stats_ingestor import STATSAPI_TEAM_IDS
+from data.mlb_game_id import game_number, mlb_game_id
 
 # MLB Stats API base URLs
 _MLB_API     = "https://statsapi.mlb.com/api/v1"
@@ -163,7 +164,8 @@ def ingest_lineups_for_date(target_date: str = None) -> dict:
                 logger.warning(f"  Unknown team IDs: away={away_id}, home={home_id} — skipping")
                 continue
 
-            game_id = f"MLB_{target_date}_{away_abbrev}_{home_abbrev}"
+            game_id = mlb_game_id(target_date, away_abbrev, home_abbrev,
+                                  game_number(g))
 
             # Confirm game exists in our DB (skip if not yet ingested by odds ingestor)
             row = conn.execute(

@@ -361,8 +361,17 @@ def _nfl_resolver(conn, around_date: str):
 
 # ── Game ID Builder ───────────────────────────────────────────────────────────
 
-def _build_game_id(sport: str, game_date: str, away: str, home: str) -> str:
-    """Consistent with sbr_loader.py format. UFC uses fighter-name slugs."""
+def _build_game_id(sport: str, game_date: str, away: str, home: str,
+                   commence_time: str | None = None) -> str:
+    """Consistent with sbr_loader.py format. UFC uses fighter-name slugs.
+
+    MLB with a `commence_time` is doubleheader-aware: the event is matched to
+    the Stats API schedule and a second game gets `_G2` (data/mlb_game_id.py).
+    Without one -- or for game 1 / a single game -- the id is unchanged.
+    """
+    if sport == "MLB" and commence_time:
+        from data.mlb_game_id import mlb_event_game_id
+        return mlb_event_game_id(game_date, away, home, commence_time)
     if sport == "UFC":
         from data.ingestors.ufc_stats_ingestor import slugify_fighter
         return f"UFC_{game_date}_{slugify_fighter(away)}_{slugify_fighter(home)}"
@@ -900,7 +909,11 @@ def _process_events(events: list[dict], sport: str,
             game_id = resolved
             # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS.
         else:
-            game_id = _build_game_id(sport, game_date, away_team, home_team)
+            # MLB is doubleheader-aware: game 2 gets `_G2`, matched on this
+            # event's start time against the Stats API schedule
+            # (data/mlb_game_id.py). Game 1 and single games keep their id.
+            game_id = _build_game_id(sport, game_date, away_team, home_team,
+                                     commence_time=commence_ts)
 
             # Game row (upsert-safe — will not overwrite scores)
             game_rows.append({
@@ -933,11 +946,21 @@ def _process_events(events: list[dict], sport: str,
                 outcomes   = mkt.get("outcomes", [])
                 last_update = mkt.get("last_update", snapshot_at)
 
+                # MLB rows are labelled per SNAPSHOT against THIS event's
+                # start, not with the batch's label: the live fetch stamps
+                # every event in_play and the evening refresh stamps every
+                # event open (data/mlb_game_id.snapshot_type_for).
+                row_type = snapshot_type
+                if sport == "MLB":
+                    from data.mlb_game_id import snapshot_type_for
+                    row_type = snapshot_type_for(snapshot_type, last_update,
+                                                 commence_ts)
+
                 base_row = {
                     "game_id":       game_id,
                     "sport":         sport,
                     "bookmaker":     book_key,
-                    "snapshot_type": snapshot_type,
+                    "snapshot_type": row_type,
                     "snapshot_at":   last_update,
                     "home_price":    None,
                     "away_price":    None,

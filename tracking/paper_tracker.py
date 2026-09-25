@@ -37,6 +37,8 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import LIVE_MODELS, MODELS, RETIRED_MODELS, SHARP_BOOKMAKERS
 from data.db import get_connection, DBConnection
+from data.first_pitch import SUSPICIOUS_EARLY_MINUTES
+from data.mlb_game_id import game_number, mlb_game_id
 from models.scorer import american_to_decimal
 from tracking.clv_math import (
     CLV_METHOD_RAW_LEGACY,
@@ -100,6 +102,12 @@ def _fetch_and_store_scores(conn: DBConnection, game_date: str) -> int:
         away_score = int(away_score)
         home_win   = 1 if home_score > away_score else 0
 
+        # KEYED ON THE GAME, not the matchup. Date + teams matched both games
+        # of a doubleheader: game 1's final landed on the shared row, and game
+        # 2's was then dropped by `home_score IS NULL` (BAL@NYY 2026-09-25).
+        # Game 2 now has its own `_G2` row (data/mlb_game_id.py); the date/team
+        # predicate stays as a belt so this can only ever narrow what it hit.
+        game_id = mlb_game_id(game_date, away_abbr, home_abbr, game_number(game))
         conn.execute("""
             UPDATE games
             SET home_score = %s,
@@ -107,12 +115,13 @@ def _fetch_and_store_scores(conn: DBConnection, game_date: str) -> int:
                 home_win   = %s,
                 updated_at = NOW()::TEXT
             WHERE sport     = 'MLB'
+              AND game_id   = %s
               AND game_date = %s
               AND home_team = %s
               AND away_team = %s
               AND home_score IS NULL
         """, (home_score, away_score, home_win,
-              game_date, home_abbr, away_abbr))
+              game_id, game_date, home_abbr, away_abbr))
 
         updated += 1
 
@@ -194,7 +203,8 @@ def _fetch_and_store_f5_scores(conn: DBConnection, game_date: str) -> int:
         if not valid:
             continue
 
-        game_id = f"MLB_{game_date}_{away_abbrev}_{home_abbrev}"
+        game_id = mlb_game_id(game_date, away_abbrev, home_abbrev,
+                              game_number(api_game))
         conn.execute("""
             UPDATE games
             SET home_score_f5 = %s, away_score_f5 = %s
@@ -597,6 +607,7 @@ def _settle_prop_picks(
         return 0, 0, 0, 0, 0.0, 0.0
 
     logger.info(f"Found {len(prop_picks)} unsettled prop picks for {game_date}")
+    holds = _mlb_settle_holds(conn, game_date, settled_at)
 
     pitcher_by_id, pitcher_by_name, batter_actuals = _load_prop_actuals(conn, game_date)
     wnba_actuals = _load_wnba_prop_actuals(conn, game_date)
@@ -626,6 +637,9 @@ def _settle_prop_picks(
         (pick_id, game_id, model_id, pick_side,
          dk_odds, rec_bet, scored_line, player_id, pick_label,
          prop_market, player_key) = row
+
+        if pick_id in holds:
+            continue      # doubleheader guard: stays unsettled, reason logged
 
         mapping = _PROP_STAT_MAP.get(model_id)
         if mapping is None:
@@ -2041,9 +2055,9 @@ def _scored_mlb_dates_missing_game_log(conn: DBConnection,
     return [str(r[0]) for r in rows]
 
 
-def _postponed_mlb_games(game_date: str) -> list[tuple[str, str]]:
-    """(home_abbr, away_abbr) for every game the Stats API lists as postponed
-    or cancelled on game_date. Empty when the API is unavailable."""
+def _postponed_mlb_games(game_date: str) -> list[tuple[str, str, int]]:
+    """(home_abbr, away_abbr, game_number) for every game the Stats API lists
+    as postponed or cancelled on game_date. Empty when the API is unavailable."""
     if not STATSAPI_AVAILABLE:
         return []
     try:
@@ -2058,7 +2072,7 @@ def _postponed_mlb_games(game_date: str) -> list[tuple[str, str]]:
         home_abbr = _STATSAPI_TEAM_IDS.get(game.get("home_id"))
         away_abbr = _STATSAPI_TEAM_IDS.get(game.get("away_id"))
         if home_abbr and away_abbr:
-            out.append((home_abbr, away_abbr))
+            out.append((home_abbr, away_abbr, game_number(game)))
     return out
 
 
@@ -2077,8 +2091,8 @@ def _void_postponed_mlb_picks(conn: DBConnection, game_date: str,
     if age < _POSTPONED_MIN_AGE_DAYS:
         return 0
     voided = 0
-    for home_abbr, away_abbr in _postponed_mlb_games(game_date):
-        game_id = f"MLB_{game_date}_{away_abbr}_{home_abbr}"
+    for home_abbr, away_abbr, game_num in _postponed_mlb_games(game_date):
+        game_id = mlb_game_id(game_date, away_abbr, home_abbr, game_num)
         rows = conn.execute("""
             SELECT p.pick_id
               FROM picks p
@@ -2141,6 +2155,100 @@ def _heal_stranded_mlb(conn: DBConnection, game_date: str,
     return summary
 
 
+# ── Doubleheader settlement guard ────────────────────────────────────────────
+#
+# INTERIM, and deliberately independent of the id fix (data/mlb_game_id.py).
+# On 2026-09-25 BAL@NYY game 1 and game 2 shared one games row: game 1's final
+# landed on it and a game-2 BET settled LOSS at 7:12 PM ET, before game 2 had
+# thrown a pitch. The `_G2` id stops that going forward, but the id only helps
+# where every feed agreed on it; this guard refuses to grade a pick on a final
+# that cannot belong to its game, whatever the id says. A held pick stays
+# result IS NULL -- nothing is written -- and the reason is logged every pass,
+# so a hold is visible rather than silent.
+_DH_START_TOLERANCE = timedelta(minutes=SUSPICIOUS_EARLY_MINUTES)
+
+
+def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
+                        game_first_pitch_at, game_final_at, settled_at,
+                        doubleheader: bool = True) -> str | None:
+    """Why this pick must NOT be graded on this games row, or None.
+
+    Every check needs both of its timestamps and passes when either is missing
+    (rows from before a column existed must keep settling exactly as before).
+    Check 1 always applies. Checks 2-4 apply only on a DOUBLEHEADER day (the
+    Stats API lists two games for the matchup): measured 2026-09-25 over the
+    3,659 settled 2026 MLB BETs, check 2 alone would also have held picks on
+    9 single games whose commence_time moved 65-134 minutes (delays), and a
+    held pick never settles on its own.
+
+    1. The pick's game had not started when this pass ran -- a final cannot
+       exist yet, so the final on the row is another game's.
+    2. The pick was written for a start that is not the row's start (more than
+       SUSPICIOUS_EARLY_MINUTES apart): the row's commence_time was overwritten
+       by the other game of the day.
+    3. The row's actual first pitch is that far BEFORE the pick's start: the
+       live state feeding the row -- and its final -- is an earlier game's.
+       This is the signature data/first_pitch.py measured on six collapsed
+       doubleheaders.
+    4. The pick was created after the row's game had already ended (first
+       'Final' live state): a pick is written before or during its game, so it
+       belongs to a later one.
+    """
+    now = _as_utc(settled_at)
+    start = _as_utc(pick_game_time)
+    commence = _as_utc(game_commence_time)
+    first_pitch = _as_utc(game_first_pitch_at)
+    created = _as_utc(pick_created_at)
+    final_at = _as_utc(game_final_at)
+    if start and now and start > now:
+        return f"its game starts {pick_game_time}, after this pass ({settled_at})"
+    if not doubleheader:
+        return None
+    if start and commence and abs(start - commence) > _DH_START_TOLERANCE:
+        return (f"written for a {pick_game_time} start but the scored row "
+                f"starts {game_commence_time}")
+    if start and first_pitch and first_pitch < start - _DH_START_TOLERANCE:
+        return (f"the scored row went live at {game_first_pitch_at}, hours "
+                f"before this pick's {pick_game_time} start")
+    if created and final_at and created > final_at:
+        return (f"created {pick_created_at}, after the scored game ended "
+                f"({game_final_at})")
+    return None
+
+
+def _mlb_settle_holds(conn: DBConnection, game_date: str, settled_at: str) -> dict:
+    """{pick_id: reason} for every unsettled MLB BET on game_date that
+    _settle_hold_reason refuses. Logged here, once per pick per pass."""
+    rows = conn.execute("""
+        SELECT p.pick_id, p.game_id, p.created_at, p.game_time,
+               g.away_team, g.home_team, g.commence_time, g.first_pitch_at,
+               (SELECT MIN(s.snapshot_at) FROM live_game_state s
+                 WHERE s.game_id = p.game_id
+                   AND s.abstract_game_state = 'Final') AS final_at
+        FROM picks p
+        JOIN games g ON g.game_id = p.game_id
+        WHERE p.game_date = %s
+          AND p.sport = 'MLB'
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND g.home_score IS NOT NULL
+    """, (game_date,)).fetchall()
+    if not rows:
+        return {}
+    from data.mlb_game_id import schedule_starts
+    doubleheaders = {k for k, v in schedule_starts(game_date).items() if len(v) > 1}
+    holds = {}
+    for (pick_id, game_id, created, game_time, away, home, commence,
+         first_pitch, final_at) in rows:
+        reason = _settle_hold_reason(created, game_time, commence, first_pitch,
+                                     final_at, settled_at,
+                                     doubleheader=(away, home) in doubleheaders)
+        if reason:
+            holds[pick_id] = reason
+            logger.warning(f"settlement HELD pick {pick_id} ({game_id}): {reason}")
+    return holds
+
+
 def _settle_game_picks(
     conn: DBConnection,
     game_date: str,
@@ -2193,6 +2301,7 @@ def _settle_game_picks(
         return 0, 0, 0, 0, 0.0, 0.0
 
     logger.info(f"Found {len(picks)} unsettled game picks for {game_date}")
+    holds = _mlb_settle_holds(conn, game_date, settled_at)
 
     wins = losses = pushes = no_actions = 0
     total_profit_flat  = 0.0
@@ -2205,6 +2314,9 @@ def _settle_game_picks(
          home_win, home_win_reg, went_to_ot,
          scored_line,
          home_score_f5, away_score_f5) = row
+
+        if pick_id in holds:
+            continue      # doubleheader guard: stays unsettled, reason logged
 
         market = _market_for_pick(model_id)
         is_f5 = "1st_5_innings" in market

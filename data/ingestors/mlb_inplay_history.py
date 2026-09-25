@@ -162,7 +162,7 @@ def rows_for(events: list[dict], requested: str, served: datetime,
         game_date = _ts(ct).astimezone(_ET).strftime("%Y-%m-%d")
         home = _normalize_team(ev.get("home_team", ""), "MLB")
         away = _normalize_team(ev.get("away_team", ""), "MLB")
-        game_id = _build_game_id("MLB", game_date, away, home)
+        game_id = _build_game_id("MLB", game_date, away, home, commence_time=ct)
         if known_games is not None and game_id not in known_games:
             if skipped is not None:
                 skipped[game_id] = skipped.get(game_id, 0) + 1

@@ -565,7 +565,8 @@ def _backfill_one_date(conn: DBConnection, d: str, hours_before: int,
         game_date = kick.astimezone(_ET_ZONE).strftime("%Y-%m-%d")
         home = _normalize_team(ev.get("home_team", ""), "MLB")
         away = _normalize_team(ev.get("away_team", ""), "MLB")
-        game_id = _build_game_id("MLB", game_date, away, home)
+        game_id = _build_game_id("MLB", game_date, away, home,
+                                 commence_time=commence)
         if game_id not in _existing_game_ids(conn, [game_id]):
             # Same FK as the live pass: one unknown id aborts the date.
             _warn_unknown_prop_game(
@@ -827,7 +828,8 @@ def run_prop_odds_ingestor(target_date: str = None,
             away_name = event["away_team"]
             home_team = _normalize_team(home_name, sport)
             away_team = _normalize_team(away_name, sport)
-            game_id = _build_game_id(sport, event["game_date"], away_team, home_team)
+            game_id = _build_game_id(sport, event["game_date"], away_team, home_team,
+                                     commence_time=event.get("commence_time"))
             identities.append(
                 (event, game_id, away_team, home_team, away_name, home_name)
             )
