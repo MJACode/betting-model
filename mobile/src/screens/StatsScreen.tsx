@@ -23,7 +23,6 @@ import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { HitModeSheet } from '@/components/HitModeSheet';
-import { StatGroupSheet } from '@/components/StatGroupSheet';
 import { propLineSheetInput } from '@/lib/lineLegs';
 import type { StatsOddsSide } from '@/lib/statsOdds';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
@@ -120,7 +119,6 @@ import {
   type TonightSlate,
 } from '@/lib/statsBoard';
 import {
-  GROUP_ORDER,
   defaultStatFor,
   propMarketForStat,
   sportHasAnyPropMarket,
@@ -129,6 +127,18 @@ import {
   supportsHitRate,
   type StatDef,
 } from '@/lib/statCatalog';
+import {
+  chipsForSegment,
+  defaultSegmentFor,
+  matchesPosition,
+  positionsForSegment,
+  readCarriesPosition,
+  segmentAccessibilityLabel,
+  segmentLabel,
+  segmentsForSport,
+  statForSegment,
+  type StatSegment,
+} from '@/lib/statSegments';
 import {
   baseStopCount,
   defaultLineN,
@@ -167,7 +177,6 @@ type StatsRoute = RouteProp<TabParamList, 'Stats'>;
 type Basis = 'total' | 'perGame';
 /** Which half of the Stats tab is showing. */
 type BoardMode = 'players' | 'teams';
-const BOARD_MODES: BoardMode[] = ['players', 'teams'];
 type Mode = 'totals' | 'hitRate';
 const MODES: Mode[] = ['hitRate', 'totals'];
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
@@ -367,7 +376,6 @@ export function StatsScreen() {
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [hitMode, setHitMode] = useState<HitMode>('atLeast');
   const [modeOpen, setModeOpen] = useState<boolean>(false);
-  const [groupOpen, setGroupOpen] = useState<boolean>(false);
   // TOUGHNESS as a filter, which is the half of Matt's ask the grade alone did
   // not answer: the column is truthful on every sport now, but until this the
   // board could not be cut or ordered by it. A FLOOR, not a band — "B or
@@ -445,6 +453,18 @@ export function StatsScreen() {
   }>({ market: '', rows: [], status: 'ok' });
   // Players | Teams. Teams is a separate board with its own stats and data.
   const [boardMode, setBoardMode] = useState<BoardMode>('players');
+  // The position row's player segment (QB / RB / WR/TE / DEF, Hitters /
+  // Pitchers, or Players). Teams stays `boardMode`, so the Teams board and its
+  // sport-switch rule are untouched; the row shows Teams when that is on.
+  const [segmentPick, setSegmentPick] = useState<StatSegment>(() => defaultSegmentFor(sport));
+  // Read through the sport's own list: for the one render between a sport
+  // switch and the reset effect below, the stored pick can belong to the old
+  // sport (Hitters on the NFL), which would draw an empty chip row.
+  const segment: StatSegment = segmentsForSport(sport).includes(segmentPick)
+    ? segmentPick
+    : defaultSegmentFor(sport);
+  const activeSegment: StatSegment =
+    boardMode === 'teams' && supportsTeamBoard(sport) ? 'teams' : segment;
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -462,6 +482,7 @@ export function StatsScreen() {
   useEffect(() => {
     const next = defaultStatFor(sport);
     setStat(next);
+    setSegmentPick(defaultSegmentFor(sport)); // the segment the default stat lives in
     setQuery('');
     setTonightOnly(SLATE_ONLY_DEFAULT); // a different sport is a different slate
     setLineN(defaultLineN(next));
@@ -776,6 +797,26 @@ export function StatsScreen() {
   const pickStat = (s: StatDef) => {
     setStat(s);
     setLineN(defaultLineN(s));
+  };
+
+  /**
+   * The position row. Teams flips to the Teams board; a player segment keeps
+   * the selected stat when it has one (the same chip, or the same column
+   * filed under another group — Anytime TD is Rushing on RB and Receiving on
+   * WR/TE) and otherwise lands on its first chip (lib/statSegments.ts).
+   * Keeping the column keeps the line the user was reading, too.
+   */
+  const pickSegment = (next: StatSegment) => {
+    if (next === 'teams') {
+      setBoardMode('teams');
+      return;
+    }
+    setBoardMode('players');
+    setSegmentPick(next);
+    const keep = statForSegment(sport, next, stat);
+    if (!keep || (stat && keep.group === stat.group && keep.key === stat.key)) return;
+    if (stat && keep.key === stat.key) setStat(keep);
+    else pickStat(keep);
   };
 
   // The stops this stat's ruler can reach, in the mode it is drawn in. ONE
@@ -1362,10 +1403,19 @@ export function StatsScreen() {
   const band = useMemo(() => hitRateBand(hitLow, hitHigh), [hitLow, hitHigh]);
 
   // ── Averages / Totals mode ranking ──
+  // The segment's real positions, on the reads that return one (NFL Averages
+  // and last-N Hit Rates); null everywhere else, where the segment only picks
+  // the chips. Never inferred from a stat line (lib/statSegments.ts).
+  const segmentPositions = useMemo(
+    () => positionsForSegment(sport, segment, readCarriesPosition(sport, effectiveMode, timeWindow)),
+    [sport, segment, effectiveMode, timeWindow],
+  );
+
   const ranked = useMemo(() => {
     if (!stat || effectiveMode !== 'totals') return [];
     const q = query.trim().toLowerCase();
     return rows
+      .filter((r) => matchesPosition(r.pos, segmentPositions))
       .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
       .filter((r) => !tonightActive || gamesPicked || isOnSlate(r, slate))
       .filter((r) => !gameTeams || (!!r.team && gameTeams.includes(r.team)))
@@ -1380,7 +1430,7 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.value, games: a.gp }, { primary: b.value, games: b.gp }),
       );
-  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, segmentPositions]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -1454,6 +1504,7 @@ export function StatsScreen() {
           player_name: head.player_name,
           team: head.team,
           player_type: head.player_type,
+          pos: typeof head.pos === 'string' ? head.pos : null,
           games,
           values,
           hits,
@@ -1465,6 +1516,7 @@ export function StatsScreen() {
     }
     const q = query.trim().toLowerCase();
     return out
+      .filter((p) => matchesPosition(p.pos, segmentPositions))
       .filter((p) => isStatParticipant(sport, p.values))
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
@@ -1473,7 +1525,7 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, h2hValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+  }, [recentRows, seasonValues, h2hValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, segmentPositions]);
 
   const hitRatePlayers = useMemo<HitRatePlayer[]>(
     () => hitRateBase.filter((p) => inHitRateBand(p.pct, band)),
@@ -1559,7 +1611,6 @@ export function StatsScreen() {
     });
   };
 
-  const groups = GROUP_ORDER[sport];
   // Does Hit Rates | Averages still fit on the end of the window row? Read at
   // render rather than cached in state: a Dynamic Type change re-renders the
   // tree, and a stale flag here is a clipped control.
@@ -1741,7 +1792,7 @@ export function StatsScreen() {
           <SportsbookIndicator coverageNote={coverageNote} />
           <SportToggle />
         </View>
-        <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
+        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
         <TeamsBoard
           sport={sport}
           onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
@@ -1776,9 +1827,7 @@ export function StatsScreen() {
           </View>
           <SportToggle />
         </View>
-        {supportsTeamBoard(sport) ? (
-          <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
-        ) : null}
+        <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
         <EmptyState
           title="No player leaderboard"
           subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
@@ -1789,17 +1838,6 @@ export function StatsScreen() {
 
   const rightLabel =
     effectiveMode === 'hitRate' ? 'Hit Rate' : basis === 'perGame' ? 'Avg' : stat.label;
-
-  // The stat group being browsed is simply the selected stat's group — derived,
-  // never separate state, so the group tabs can't desync from the leaderboard.
-  const activeGroup = stat.group;
-  // Switching group selects that group's first stat (which also snaps the line
-  // ruler to its default). Re-tapping the active group is a no-op.
-  const pickGroup = (g: (typeof groups)[number]) => {
-    if (g === activeGroup) return;
-    const first = statsForSport(sport).find((s) => s.group === g);
-    if (first) pickStat(first);
-  };
 
   // Search lives below Games when there are fixtures. When there are none
   // (UFC), it moves above so the Games empty note can name a control that is
@@ -1893,45 +1931,19 @@ export function StatsScreen() {
         <SportToggle />
       </View>
 
-      {supportsTeamBoard(sport) ? (
-        <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
-      ) : null}
+      <StatSegmentRow sport={sport} active={activeSegment} onChange={pickSegment} />
 
-      {/* Stat selector — the primary control, straight under the sport row, and
-          the one row on this screen that is never allowed to cost less: it is
-          the board's subject, one tap, directly manipulated.
-          ONE row, not three. It was a chip row per group (4 for NFL), then a
-          group tab row above a chip row; both pushed the leaderboard below the
-          fold. The group is now a pill at the head of the chips it scopes, so
-          the two levels share a line (UX review, 2026-09-12).
-          Sports with a single group (WNBA/NBA/UFC) skip the pill. */}
+      {/* Stat selector — the primary control, straight under the position row,
+          and the one row on this screen that is never allowed to cost less: it
+          is the board's subject, one tap, directly manipulated.
+          ONE row. It was a chip row per group (4 for NFL), then a group tab row
+          above a chip row, then a group dropdown pill pinned at the head of the
+          chips (UX review, 2026-09-12). The pill cost three taps to get from
+          Passing to Receiving and read as one of the chips, so the position
+          row above now scopes the chips instead (Designer, Option A, Matt
+          2026-09-25) and this row is chips only. */}
       <View style={styles.statPicker}>
-        {/* The group is PINNED at the head of the row, outside the scroller:
-            it names what the chips beside it are a subset of, so scrolling it
-            off would leave "Pass Yards … Pass Attempts" with nothing saying
-            which of the NFL's four groups they came from. */}
         <View style={styles.statRow}>
-          {groups.length > 1 ? (
-            <Pressable
-              onPress={() => setGroupOpen(true)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel="Stat group"
-              accessibilityValue={{ text: activeGroup }}
-              accessibilityHint={`Opens the ${groups.join(', ')} options`}
-              // Shares the direction pill's style object rather than copying
-              // it: two chevron pills on one screen drawn from two style
-              // blocks is the duplicate UX_REVIEW §8 exists to catch. A THIRD
-              // caller means extracting a DropdownPill component.
-              style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
-            >
-              <Text style={styles.dirPillText} numberOfLines={1}>
-                {activeGroup}
-              </Text>
-              {/* chevron-expand, not chevron-down: it opens a menu in place. */}
-              <Ionicons name="chevron-expand" size={14} color={colors.textSecondary} />
-            </Pressable>
-          ) : null}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1939,16 +1951,14 @@ export function StatsScreen() {
             contentContainerStyle={styles.chipRowInline}
             keyboardShouldPersistTaps="handled"
           >
-            {statsForSport(sport)
-              .filter((s) => s.group === activeGroup)
-              .map((s) => (
-                <FilterChip
-                  key={`${s.group}:${String(s.key)}`}
-                  label={s.label}
-                  active={s.key === stat.key && s.group === stat.group}
-                  onPress={() => pickStat(s)}
-                />
-              ))}
+            {chipsForSegment(sport, segment).map((s) => (
+              <FilterChip
+                key={`${s.group}:${String(s.key)}`}
+                label={s.label}
+                active={s.key === stat.key && s.group === stat.group}
+                onPress={() => pickStat(s)}
+              />
+            ))}
           </ScrollView>
         </View>
       </View>
@@ -2341,14 +2351,6 @@ export function StatsScreen() {
         underAvailable={underAvailable}
         unavailableNote={dirLockNote}
         onClose={() => setModeOpen(false)}
-      />
-      <StatGroupSheet
-        visible={groupOpen}
-        groups={groups}
-        active={activeGroup}
-        countFor={(g) => statsForSport(sport).filter((st) => st.group === g).length}
-        onPick={pickGroup}
-        onClose={() => setGroupOpen(false)}
       />
       <AddLineSheet
         input={lineSheetInput}
@@ -2813,22 +2815,34 @@ function LineRuler({
 }
 
 /**
- * Players | Teams. Uses the same underline-tab look as Hit Rates | Averages so
- * the two levels of switching read as the same kind of control.
+ * The position row (Designer, Option A, Matt 2026-09-25): QB / RB / WR/TE /
+ * DEF / Teams on the football boards, Hitters / Pitchers / Teams on MLB, and
+ * the old Players | Teams everywhere else. It REPLACES Players | Teams rather
+ * than stacking under it, so the header gains no height, and it is the same
+ * first-level SegmentTabs (tint underline) the toggle was.
+ *
+ * Width: the row splits the screen evenly. On a 393pt phone the NFL's five
+ * segments get 78.6pt each, and the widest label ("WR/TE", "Teams") is about
+ * 45pt at font.size.body semibold. `fit` shrinks a label at the largest
+ * Dynamic Type sizes rather than truncating it.
  */
-function BoardModeToggle({
-  mode,
+function StatSegmentRow({
+  sport,
+  active,
   onChange,
 }: {
-  mode: BoardMode;
-  onChange: (m: BoardMode) => void;
+  sport: Sport;
+  active: StatSegment;
+  onChange: (s: StatSegment) => void;
 }) {
   return (
     <SegmentTabs
-      items={BOARD_MODES}
-      active={mode}
+      items={segmentsForSport(sport)}
+      active={active}
       onChange={onChange}
-      labelFor={(m) => (m === 'players' ? 'Players' : 'Teams')}
+      labelFor={segmentLabel}
+      accessibilityLabelFor={segmentAccessibilityLabel}
+      fit
     />
   );
 }
