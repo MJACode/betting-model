@@ -4233,6 +4233,10 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 """, (target_date, mid))
             conn.commit()
 
+        # One log load for the slate. Five models each used to re-scan
+        # player_game_log; the first of those scans is what statement_timeout
+        # cancelled on 2026-09-25 00:11Z.
+        bulk_cache: dict = {}
         for model_id, cfg in _BATTER_PROP_CONFIG.items():
             market     = cfg["market"]
             stat_label = cfg["stat_label"]
@@ -4250,7 +4254,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
             model_obj    = artifact["model"]
 
             # ── Build scoring rows from today's confirmed lineups ─────────────
-            df = build_batter_scoring_rows(target_date, model_id)
+            df = build_batter_scoring_rows(target_date, model_id,
+                                            bulk_cache=bulk_cache)
             if df.empty:
                 logger.info(f"  {model_id}: no lineup rows — lineups not posted yet")
                 continue
