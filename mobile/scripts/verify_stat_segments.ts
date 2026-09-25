@@ -9,18 +9,26 @@
  * that every chip is a real STAT_CATALOG entry (so no key or market is
  * invented), that no catalog stat becomes unreachable, the keep-or-reset
  * rule on a segment switch (rule 5), and the position filter — which is
- * NFL-only, only on the reads that return `pos`, and never a guess.
+ * NFL-only, only on the reads that return `pos`, and never a guess: a row
+ * whose position is missing or unknown stays on every board (#830 review).
+ * Also the fallback caption, the positional empty state, the search bypass,
+ * and the segmented-control text cap.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Sport } from '../src/hooks/useSportFilter';
 import { STAT_CATALOG, defaultStatFor, type StatDef } from '../src/lib/statCatalog';
+import { NFL_DEFENSIVE_POSITIONS } from '../src/lib/playerLog';
 import {
+  NFL_EXCLUDED_POSITIONS,
   chipsForSegment,
   defaultSegmentFor,
+  knownNflPositions,
   matchesPosition,
   omittedChips,
+  positionEmptyText,
+  positionFallbackNote,
   positionsForSegment,
   readCarriesPosition,
   segmentAccessibilityLabel,
@@ -237,16 +245,105 @@ check(
   const all = sets.flat();
   check('the four position sets are disjoint', new Set(all).size === all.length);
 }
-check('an unknown position is not guessed into a segment', !matchesPosition(null, qb) && !matchesPosition(undefined, dfn) && !matchesPosition('', wr));
+check(
+  'a missing or unknown position is never guessed OUT: it stays on every segment',
+  [qb, rb, wr, dfn].every((s) =>
+    matchesPosition(null, s) && matchesPosition(undefined, s) && matchesPosition('', s) && matchesPosition('XYZ', s)),
+);
+check(
+  'the excluded set is explicit: K, P, LS and the offensive line',
+  ['K', 'P', 'LS', 'C', 'G', 'OG', 'T', 'OT', 'OL'].every((p) => NFL_EXCLUDED_POSITIONS.has(p)) && NFL_EXCLUDED_POSITIONS.size === 9,
+);
+
+// Every `pos` in player_game_logs_nfl, 2025–2026 (SELECT DISTINCT pos, run
+// 2026-09-25; none NULL). Each maps to exactly one segment or is excluded —
+// a new code the feed starts sending fails here rather than leaking.
+const LOG_CODES = ['C', 'CB', 'DB', 'DE', 'DL', 'DT', 'FB', 'FS', 'G', 'ILB', 'K', 'LB', 'LS', 'MLB',
+  'NT', 'OL', 'OLB', 'OT', 'P', 'QB', 'RB', 'S', 'SAF', 'TE', 'WR'];
+{
+  const where = (p: string) => [
+    ...(['qb', 'rb', 'wrte', 'def'] as StatSegment[]).filter((s) => positionsForSegment('NFL', s, true)?.has(p)),
+    ...(NFL_EXCLUDED_POSITIONS.has(p) ? ['excluded'] : []),
+  ];
+  const bad = LOG_CODES.filter((p) => where(p).length !== 1);
+  check(`all ${LOG_CODES.length} logged position codes map to exactly one segment or the excluded set`, bad.length === 0, bad.join(','));
+  const known = knownNflPositions();
+  const overlap = [...known.segment].filter((p) => known.excluded.has(p));
+  check('segment and excluded sets are disjoint', overlap.length === 0, overlap.join(','));
+  const rejected = LOG_CODES.filter((p) => NFL_EXCLUDED_POSITIONS.has(p));
+  check('excluded codes are on no board', rejected.every((p) => ![qb, rb, wr, dfn].some((s) => matchesPosition(p, s))),
+    rejected.join(','));
+}
+
+// DEF and the player card share ONE defensive set (they had drifted: EDGE,
+// SS). The card's set only gains codes — every pre-merge code is still in.
+const OLD_PLAYERLOG_DEF = ['CB', 'DB', 'DE', 'DL', 'DT', 'FS', 'ILB', 'LB', 'MLB', 'NT', 'OLB', 'S', 'SAF'];
+check('DEF is the playerLog defensive set itself', dfn === NFL_DEFENSIVE_POSITIONS);
+check('the shared defensive set loses no playerLog code', OLD_PLAYERLOG_DEF.every((p) => NFL_DEFENSIVE_POSITIONS.has(p)));
+check('the shared defensive set gains EDGE and SS', NFL_DEFENSIVE_POSITIONS.has('EDGE') && NFL_DEFENSIVE_POSITIONS.has('SS'));
 check('with no filter every row passes, position or not', matchesPosition(null, null) && matchesPosition('K', null));
 check('position codes compare case- and space-insensitively', matchesPosition(' wr ', wr));
+
+// ── 4b. The fallback caption and the positional empty state ────────────────
+const NFL_NOTE = "All positions: Season and H2H don't carry positions yet. Recent-game windows and Averages filter by position.";
+const NCAAF_NOTE = "All positions: college box scores don't list positions.";
+const noteFor = (sport: Sport, seg: StatSegment, mode: 'totals' | 'hitRate', w: number | 'season' | 'h2h', board: 'players' | 'teams' = 'players') =>
+  positionFallbackNote(sport, seg, board, positionsForSegment(sport, seg, readCarriesPosition(sport, mode, w)));
+check('caption: NFL Season Hit Rates', noteFor('NFL', 'wrte', 'hitRate', 'season') === NFL_NOTE);
+check('caption: NFL H2H Hit Rates', noteFor('NFL', 'qb', 'hitRate', 'h2h') === NFL_NOTE);
+check('caption: NCAAF, every read', (['qb', 'rb', 'wrte', 'def'] as StatSegment[]).every((s) =>
+  noteFor('NCAAF', s, 'hitRate', 10) === NCAAF_NOTE && noteFor('NCAAF', s, 'totals', 'season') === NCAAF_NOTE));
+check('no caption: NFL Averages and last-N Hit Rates (they filter)',
+  noteFor('NFL', 'rb', 'totals', 'season') === null && noteFor('NFL', 'def', 'totals', 10) === null &&
+    noteFor('NFL', 'qb', 'hitRate', 3) === null && noteFor('NFL', 'wrte', 'hitRate', 20) === null);
+check('no caption: the Teams board', noteFor('NFL', 'teams', 'hitRate', 'season') === null &&
+  noteFor('NFL', 'qb', 'hitRate', 'season', 'teams') === null && noteFor('NCAAF', 'wrte', 'hitRate', 10, 'teams') === null);
+check('no caption: non-football', noteFor('MLB', 'hitters', 'hitRate', 'season') === null &&
+  noteFor('NBA', 'players', 'hitRate', 'h2h') === null && noteFor('NHL', 'players', 'totals', 'season') === null);
+check('empty text: WR/TE, last 10',
+  positionEmptyText('wrte', 'Targets', 10) === 'No receivers or tight ends with Targets in the last 10 games. Try another position.');
+check('empty text: QB, Averages season',
+  positionEmptyText('qb', 'Pass Yds', 'season') === 'No quarterbacks with Pass Yds this season. Try another position.');
+check('empty text: DEF, last 3',
+  positionEmptyText('def', 'Tackles', 3) === 'No defensive players with Tackles in the last 3 games. Try another position.');
 
 // ── 5. The screen uses the module, and the dropdown is gone ─────────────────
 const stats = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
 check('StatsScreen: the chip row reads chipsForSegment', /chipsForSegment\(sport, segment\)\.map/.test(stats));
 check('StatsScreen: no StatGroupSheet (the category dropdown is gone)', !stats.includes('StatGroupSheet'));
-check('StatsScreen: both boards apply the position filter',
-  (stats.match(/matchesPosition\((r|p)\.pos, segmentPositions\)/g) ?? []).length === 2);
+check('StatsScreen: both boards apply the position filter, last',
+  /rankedAll\.filter\(\(r\) => matchesPosition\(r\.row\.pos, activePositions\)\)/.test(stats) &&
+    /hitRateAll\.filter\(\(p\) => matchesPosition\(p\.pos, activePositions\)\)/.test(stats) &&
+    (stats.match(/matchesPosition\(/g) ?? []).length === 2);
+check('StatsScreen: a typed search bypasses the position filter',
+  /const activePositions = query\.trim\(\) \? null : segmentPositions;/.test(stats));
+check('StatsScreen: a position-emptied board gets the positional empty text',
+  /if \(positionEmptied && stat\) \{\s*return positionEmptyText\(segment, stat\.label, timeWindow\);/.test(stats));
+check('StatsScreen: positionEmptied needs rows before the cut',
+  /ranked\.length === 0 && rankedAll\.length > 0/.test(stats) &&
+    /hitRatePlayers\.length === 0 && hitRateAll\.some\(\(p\) => inHitRateBand\(p\.pct, band\)\)/.test(stats));
+check('StatsScreen: the fallback caption reuses the no-lines caption, and only renders when set',
+  /\{positionNote \? \(\s*<View style=\{styles\.noLinesRow\}>\s*<Ionicons name="information-circle-outline" size=\{13\} color=\{colors\.textTertiary\} \/>\s*<Text style=\{styles\.noLinesText\}>\{positionNote\}<\/Text>\s*<\/View>\s*\) : null\}/.test(stats));
+check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed set',
+  /positionFallbackNote\(sport, segment, boardMode, segmentPositions\)/.test(stats));
+{
+  const rowSrc = stats.slice(stats.indexOf('function StatSegmentRow'));
+  const tabs = rowSrc.slice(0, rowSrc.indexOf('/>') + 2);
+  check('StatSegmentRow: passes accessibilityLabelFor and fit to SegmentTabs',
+    /<SegmentTabs/.test(tabs) && /accessibilityLabelFor=\{segmentAccessibilityLabel\}/.test(tabs) && /\bfit\b/.test(tabs), tabs.replace(/\s+/g, ' '));
+}
+const groupTabs = readFileSync(join(import.meta.dirname, '..', 'src/components/GroupTabs.tsx'), 'utf-8');
+check('SegmentTabs: fit labels cap at 2x and floor at 0.75, nothing else is capped',
+  /maxFontSizeMultiplier=\{fit \? 2 : undefined\}/.test(groupTabs) &&
+    /minimumFontScale=\{fit \? 0\.75 : undefined\}/.test(groupTabs) &&
+    (groupTabs.match(/maxFontSizeMultiplier/g) ?? []).length === 1);
+{
+  // At the 2x cap and the 0.75 floor, the widest label still fits its tab:
+  // 393pt / 5 tabs = 78.6pt; "WR/TE" ≈ 5 glyphs × 0.66em × (15pt × 2 × 0.75).
+  const tab = 393 / 5;
+  const widest = 5 * 0.66 * 15 * 2 * 0.75;
+  check('the widest NFL label fits a 393pt screen at the cap', widest < tab, `${widest.toFixed(1)}pt < ${tab.toFixed(1)}pt`);
+}
 check('StatsScreen: a segment switch goes through statForSegment (rule 5)', /statForSegment\(sport, next, stat\)/.test(stats));
 check('StatsScreen: the sport switch resets the segment with the stat',
   /setStat\(next\);\s*\n\s*setSegmentPick\(defaultSegmentFor\(sport\)\)/.test(stats));

@@ -59,3 +59,36 @@ def test_the_behavioural_checks_pass():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_search_and_position_review_fixes():
+    # #830 review: a typed name bypasses the position cut, the cut runs last so
+    # the empty state can blame the position (not the data), and a position
+    # segment that cannot filter says so in one caption under the chips.
+    stats = _read(MOBILE / "src/screens/StatsScreen.tsx")
+    assert "const activePositions = query.trim() ? null : segmentPositions;" in stats
+    assert "rankedAll.filter((r) => matchesPosition(r.row.pos, activePositions))" in stats
+    assert "hitRateAll.filter((p) => matchesPosition(p.pos, activePositions))" in stats
+    assert "return positionEmptyText(segment, stat.label, timeWindow);" in stats
+    assert "positionFallbackNote(sport, segment, boardMode, segmentPositions)" in stats
+
+
+def test_one_shared_defensive_set():
+    # DEF and the player card read one set; statSegments must not redeclare it.
+    seg = _read(MOBILE / "src/lib/statSegments.ts")
+    log = _read(MOBILE / "src/lib/playerLog.ts")
+    assert "import { NFL_DEFENSIVE_POSITIONS } from './playerLog'" in seg
+    assert "def: NFL_DEFENSIVE_POSITIONS" in seg
+    assert "export const NFL_DEFENSIVE_POSITIONS" in log
+
+
+def test_segment_labels_cap_only_on_fit():
+    tabs = _read(MOBILE / "src/components/GroupTabs.tsx")
+    assert "maxFontSizeMultiplier={fit ? 2 : undefined}" in tabs
+    assert "minimumFontScale={fit ? 0.75 : undefined}" in tabs
+    assert tabs.count("maxFontSizeMultiplier") == 1
+
+
+def test_runs_in_pr_ci():
+    ci = _read(ROOT / ".github/workflows/pr-ci.yml")
+    assert "tests/test_mobile_stat_segments.py" in ci

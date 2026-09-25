@@ -131,6 +131,8 @@ import {
   chipsForSegment,
   defaultSegmentFor,
   matchesPosition,
+  positionEmptyText,
+  positionFallbackNote,
   positionsForSegment,
   readCarriesPosition,
   segmentAccessibilityLabel,
@@ -815,6 +817,8 @@ export function StatsScreen() {
     setSegmentPick(next);
     const keep = statForSegment(sport, next, stat);
     if (!keep || (stat && keep.group === stat.group && keep.key === stat.key)) return;
+    // Same column under another group (Anytime TD, RB ⇄ WR/TE): keep the line
+    // too — intentional, it is the same bet (Designer, #830 review).
     if (stat && keep.key === stat.key) setStat(keep);
     else pickStat(keep);
   };
@@ -1405,17 +1409,24 @@ export function StatsScreen() {
   // ── Averages / Totals mode ranking ──
   // The segment's real positions, on the reads that return one (NFL Averages
   // and last-N Hit Rates); null everywhere else, where the segment only picks
-  // the chips. Never inferred from a stat line (lib/statSegments.ts).
+  // the chips and the caption under them says so. Never inferred from a stat
+  // line (lib/statSegments.ts).
   const segmentPositions = useMemo(
     () => positionsForSegment(sport, segment, readCarriesPosition(sport, effectiveMode, timeWindow)),
     [sport, segment, effectiveMode, timeWindow],
   );
+  // A search is a NAME: "Kelce" on the QB tab must find Kelce, not print
+  // "Nothing matched" (Reviewer, #830). The position cut stands down while
+  // one is typed.
+  const activePositions = query.trim() ? null : segmentPositions;
 
-  const ranked = useMemo(() => {
+  // Everything but the position cut, sorted. The position cut runs last
+  // (below) so the empty state can tell "this position has nobody on this
+  // stat" from "there is no data".
+  const rankedAll = useMemo(() => {
     if (!stat || effectiveMode !== 'totals') return [];
     const q = query.trim().toLowerCase();
     return rows
-      .filter((r) => matchesPosition(r.pos, segmentPositions))
       .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
       .filter((r) => !tonightActive || gamesPicked || isOnSlate(r, slate))
       .filter((r) => !gameTeams || (!!r.team && gameTeams.includes(r.team)))
@@ -1430,7 +1441,13 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.value, games: a.gp }, { primary: b.value, games: b.gp }),
       );
-  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, segmentPositions]);
+  }, [rows, stat, sport, basis, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+
+  // A filter preserves order, so the cut costs one pass and no re-sort.
+  const ranked = useMemo(
+    () => rankedAll.filter((r) => matchesPosition(r.row.pos, activePositions)),
+    [rankedAll, activePositions],
+  );
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -1442,7 +1459,7 @@ export function StatsScreen() {
   // dragged: a single gesture steps it up to twenty times, and these boards
   // run to tens of thousands of rows. The band is a filter over the finished,
   // already-sorted list (a filter preserves order), so a drag costs one pass.
-  const hitRateBase = useMemo<HitRatePlayer[]>(() => {
+  const hitRateAll = useMemo<HitRatePlayer[]>(() => {
     if (!stat || effectiveMode !== 'hitRate') return [];
     const out: HitRatePlayer[] = [];
     if (timeWindow === 'h2h') {
@@ -1516,7 +1533,6 @@ export function StatsScreen() {
     }
     const q = query.trim().toLowerCase();
     return out
-      .filter((p) => matchesPosition(p.pos, segmentPositions))
       .filter((p) => isStatParticipant(sport, p.values))
       .filter((p) => !tonightActive || gamesPicked || isOnSlate(p, slate))
       .filter((p) => !gameTeams || (!!p.team && gameTeams.includes(p.team)))
@@ -1525,12 +1541,30 @@ export function StatsScreen() {
       .sort((a, b) =>
         compareRows({ primary: a.pct, games: a.total }, { primary: b.pct, games: b.total }),
       );
-  }, [recentRows, seasonValues, h2hValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor, segmentPositions]);
+  }, [recentRows, seasonValues, h2hValues, timeWindow, stat, sport, line, side, query, effectiveMode, tonightActive, gamesPicked, slate, gameTeams, minGrade, includeUngraded, matchupFor]);
+
+  // The position cut, last and separate for the same reason as `ranked`.
+  const hitRateBase = useMemo<HitRatePlayer[]>(
+    () => hitRateAll.filter((p) => matchesPosition(p.pos, activePositions)),
+    [hitRateAll, activePositions],
+  );
 
   const hitRatePlayers = useMemo<HitRatePlayer[]>(
     () => hitRateBase.filter((p) => inHitRateBand(p.pct, band)),
     [hitRateBase, band],
   );
+
+  // Did the position cut, and only it, empty the board? Checked only when the
+  // board is empty, so the extra band pass costs nothing on a full one.
+  const positionEmptied =
+    activePositions !== null &&
+    (effectiveMode === 'hitRate'
+      ? hitRatePlayers.length === 0 && hitRateAll.some((p) => inHitRateBand(p.pct, band))
+      : ranked.length === 0 && rankedAll.length > 0);
+
+  // The caption under the chips when a football position segment cannot
+  // filter (NFL Season/H2H, all NCAAF). Null adds no height.
+  const positionNote = positionFallbackNote(sport, segment, boardMode, segmentPositions);
 
   // Does the hit-rate column span more than one colour band? A rare-event
   // column (Doubles, Triples, Home Runs) does not — every player lands in the
@@ -1762,6 +1796,12 @@ export function StatsScreen() {
         ? `Nothing matched "${query.trim()}". Search matches player names — pick a game under Games to narrow by team.`
         : `Nothing matched "${query.trim()}".`;
     }
+    // The POSITION emptied a board that had players before the cut: the data
+    // is fine, this position just has nobody on this stat — say that, and
+    // point at the row that fixes it (Designer, #830 review).
+    if (positionEmptied && stat) {
+      return positionEmptyText(segment, stat.label, timeWindow);
+    }
     if (activeFilterCount > 0) {
       return 'No players match your filters. Tap a pill above to widen the board.';
     }
@@ -1776,7 +1816,7 @@ export function StatsScreen() {
     }
     const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
     return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
-  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures]);
+  }, [error, query, activeFilterCount, timeWindow, windowN, sport, stat, pickableGames, h2hFixtures, positionEmptied, segment]);
 
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
@@ -1962,6 +2002,16 @@ export function StatsScreen() {
           </ScrollView>
         </View>
       </View>
+
+      {/* The position row picked a position the board cannot filter by: say
+          so once, in the same quiet caption as the no-lines note, rather than
+          label a list of every position "QB" (Designer + Reviewer, #830). */}
+      {positionNote ? (
+        <View style={styles.noLinesRow}>
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>{positionNote}</Text>
+        </View>
+      ) : null}
 
       {/* Line picker: the mode, a tick ruler, then the headline. */}
       {effectiveMode === 'hitRate' ? (
@@ -3609,19 +3659,20 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
   },
-  // The pinned group pill plus the scrolling stat chips, on one line.
+  // The scrolling stat chips. The group pill that shared this line is gone
+  // (position row, 2026-09-25), so the row is only the scroller.
   statRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: spacing.lg,
-    gap: spacing.sm,
   },
-  // The chips' own row already starts after the pill, so it drops the left
-  // inset `chipRow` carries and keeps only the trailing one.
+  // Both insets live on the content, so at rest the first chip sits exactly
+  // where it did beside the pill's row inset, and a scrolled row runs to the
+  // screen edge instead of clipping 16pt in.
   chipRowInline: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    paddingLeft: spacing.lg,
     paddingRight: spacing.lg,
     paddingVertical: 2,
   },

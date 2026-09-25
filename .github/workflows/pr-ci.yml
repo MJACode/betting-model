@@ -95,4 +95,5 @@ jobs:
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
             tests/test_publish_key_identity.py \
-            tests/test_void_picks.py
+            tests/test_void_picks.py \
+            tests/test_mobile_stat_segments.py

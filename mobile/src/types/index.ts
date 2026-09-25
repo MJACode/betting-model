@@ -882,8 +882,9 @@ export interface HitRatePlayer {
   player_name: string;
   team: string | null;
   player_type?: PlayerType;
-  /** NFL last-N window only (player_recent_games_nfl returns it); null on the
-   *  Season and H2H reads, which carry no position. */
+  /** The row's position, set only from the last-N read: nflverse `pos` on
+   *  NFL, null on NCAAF (player_recent_games_ncaaf has no position). Unset
+   *  (absent) on the Season and H2H reads, which carry no position at all. */
   pos?: string | null;
   games: RecentGameRow[]; // newest-first, length ≤ N ([] in Season/H2H mode)
   values: number[]; // per-game stat values, newest-first (dot strip source)

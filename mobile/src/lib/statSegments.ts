@@ -21,6 +21,7 @@ import type { Sport } from '@/hooks/useSportFilter';
 import type { SeasonTotalsRow } from '@/types';
 import { STAT_CATALOG, type StatDef, type StatGroup } from './statCatalog';
 import { supportsTeamBoard } from './teamStatCatalog';
+import { NFL_DEFENSIVE_POSITIONS } from './playerLog';
 
 export type StatSegment =
   | 'players'
@@ -180,20 +181,39 @@ export function statForSegment(
 
 /**
  * Real positions, as nflverse writes them into `nfl_player_game_log.pos`.
- * Measured 2026-09-25 across the 2025 and 2026 seasons: every row carries
- * one. K, P, LS and the offensive line are in no segment — a kicker is not a
- * receiver because he once caught a fake.
+ * Measured 2026-09-25 (read-only, seasons 2025–2026): 25 codes, none NULL —
+ * pinned in scripts/verify_stat_segments.ts, which fails if a code maps to
+ * neither a segment nor the excluded set below.
+ *
+ * DEF is the ONE defensive set the app has: it is `NFL_DEFENSIVE_POSITIONS`
+ * from playerLog.ts (the player page's Defense-tab rule), not a copy of it.
  */
 const NFL_POSITIONS: Record<'qb' | 'rb' | 'wrte' | 'def', ReadonlySet<string>> = {
   qb: new Set(['QB']),
   rb: new Set(['RB', 'FB']),
   wrte: new Set(['WR', 'TE']),
-  def: new Set([
-    'DE', 'DT', 'DL', 'NT', 'EDGE',
-    'LB', 'OLB', 'ILB', 'MLB',
-    'CB', 'DB', 'S', 'SAF', 'FS', 'SS',
-  ]),
+  def: NFL_DEFENSIVE_POSITIONS,
 };
+
+/**
+ * Known positions that belong to NO segment: kickers, punters, long snappers
+ * and the offensive line. A kicker is not a receiver because he once caught a
+ * fake. Named on purpose — this is the only way a row with a position drops
+ * out of every segment; an unknown or missing position passes (below).
+ */
+export const NFL_EXCLUDED_POSITIONS: ReadonlySet<string> = new Set([
+  'K', 'P', 'LS',
+  'C', 'G', 'OG', 'T', 'OT', 'OL',
+]);
+
+const NFL_SEGMENT_POSITIONS: ReadonlySet<string> = new Set(
+  Object.values(NFL_POSITIONS).flatMap((set) => [...set]),
+);
+
+/** Every position code this module knows, segment or excluded — for the verify script. */
+export function knownNflPositions(): { segment: ReadonlySet<string>; excluded: ReadonlySet<string> } {
+  return { segment: NFL_SEGMENT_POSITIONS, excluded: NFL_EXCLUDED_POSITIONS };
+}
 
 /**
  * The positions a segment admits, or null when the board must not filter by
@@ -204,8 +224,8 @@ const NFL_POSITIONS: Record<'qb' | 'rb' | 'wrte' | 'def', ReadonlySet<string>> =
  * (player_recent_games_nfl). The Season and H2H Hit Rate reads
  * (player_{season,h2h}_stat_values_nfl) return no position, and NCAAF has
  * none anywhere (CFBD's box score names participants, not positions), so
- * there the segment scopes the chips and nothing else. A position is never
- * inferred from a stat line.
+ * there the segment scopes the chips and nothing else — and says so
+ * (positionFallbackNote). A position is never inferred from a stat line.
  */
 export function positionsForSegment(
   sport: Sport,
@@ -213,7 +233,7 @@ export function positionsForSegment(
   readCarriesPosition: boolean,
 ): ReadonlySet<string> | null {
   if (sport !== 'NFL' || !readCarriesPosition) return null;
-  return seg === 'qb' || seg === 'rb' || seg === 'wrte' || seg === 'def' ? NFL_POSITIONS[seg] : null;
+  return isPositionSegment(seg) ? NFL_POSITIONS[seg] : null;
 }
 
 /** Does the board's current NFL read carry a position per row? */
@@ -225,11 +245,76 @@ export function readCarriesPosition(
   return sport === 'NFL' && (mode === 'totals' || typeof window === 'number');
 }
 
-/** A row passes when there is no position filter, or its real position is in it. */
+/**
+ * Does a row belong on this segment's board?
+ *
+ * - no filter: everyone;
+ * - a known segment position: only its own segment;
+ * - a known non-skill position (NFL_EXCLUDED_POSITIONS): no segment;
+ * - no position, or one this module has never seen: EVERY segment. An
+ *   unknown is not evidence against the player, and dropping him silently
+ *   is the failure this rule replaced (Reviewer, #830).
+ */
 export function matchesPosition(
   pos: unknown,
   allowed: ReadonlySet<string> | null,
 ): boolean {
   if (!allowed) return true;
-  return typeof pos === 'string' && allowed.has(pos.trim().toUpperCase());
+  if (typeof pos !== 'string') return true;
+  const p = pos.trim().toUpperCase();
+  if (!p) return true;
+  if (NFL_EXCLUDED_POSITIONS.has(p)) return false;
+  if (!NFL_SEGMENT_POSITIONS.has(p)) return true;
+  return allowed.has(p);
+}
+
+export function isPositionSegment(seg: StatSegment): seg is 'qb' | 'rb' | 'wrte' | 'def' {
+  return seg === 'qb' || seg === 'rb' || seg === 'wrte' || seg === 'def';
+}
+
+/**
+ * The caption under the chips when a football position segment is on but the
+ * board cannot filter by position (Designer, #830 review; copy is Designer's
+ * with the real windows named). Null — and so zero height — everywhere else:
+ * Teams, the NFL reads that do filter, and every non-football sport.
+ */
+export function positionFallbackNote(
+  sport: Sport,
+  seg: StatSegment,
+  boardMode: 'players' | 'teams',
+  positions: ReadonlySet<string> | null,
+): string | null {
+  if (boardMode !== 'players' || positions !== null || !isPositionSegment(seg)) return null;
+  if (sport === 'NCAAF') return "All positions: college box scores don't list positions.";
+  if (sport === 'NFL') {
+    return "All positions: Season and H2H don't carry positions yet. Recent-game windows and Averages filter by position.";
+  }
+  return null;
+}
+
+/** The segment's players as a plural noun, for sentences — the VoiceOver
+ *  label, lower-cased. "No … and …" reads as both-at-once, so the WR/TE pair
+ *  becomes "or"; "No defense with Tackles" does not parse, so DEF says
+ *  "defensive players". */
+export function segmentPositionNoun(seg: StatSegment): string {
+  if (seg === 'def') return 'defensive players';
+  return segmentAccessibilityLabel(seg).toLowerCase().replace(' and ', ' or ');
+}
+
+/**
+ * The empty board when the POSITION filter emptied a list that had rows
+ * before it — the data is fine, the position simply has nobody on this stat
+ * (Designer, #830 review). e.g. "No receivers or tight ends with Targets in
+ * the last 10 games. Try another position."
+ */
+export function positionEmptyText(
+  seg: StatSegment,
+  statLabel: string,
+  window: number | 'season' | 'h2h',
+): string {
+  const when =
+    window === 'season' ? 'this season'
+    : window === 'h2h' ? 'against their next opponent'
+    : `in the last ${window} games`;
+  return `No ${segmentPositionNoun(seg)} with ${statLabel} ${when}. Try another position.`;
 }

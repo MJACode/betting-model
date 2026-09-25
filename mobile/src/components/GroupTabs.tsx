@@ -16,7 +16,8 @@ import { colors, font, spacing } from '@/lib/theme';
  * stacks QB | WR/TE | RB under Players | Teams).
  *
  * Full width and evenly divided rather than scrolling: the widest set anywhere
- * is the NFL's four groups, which fits at 25% each.
+ * is the Stats tab's NFL position row, five tabs (QB / RB / WR/TE / DEF /
+ * Teams) at 20% each — 78.6pt on a 393pt screen.
  */
 export function SegmentTabs<T extends string>({
   items,
@@ -35,7 +36,8 @@ export function SegmentTabs<T extends string>({
   /** What VoiceOver reads for a tab whose label is an abbreviation ("WR/TE"). */
   accessibilityLabelFor,
   /** Shrink a label to fit its tab at large Dynamic Type sizes instead of
-   *  truncating it. Added 2026-09-25 for the Stats position row, whose NFL
+   *  truncating it, and cap it at 2x (UX_REVIEW §5 segmented-control
+   *  exception). Added 2026-09-25 for the Stats position row, whose NFL
    *  segments (QB / RB / WR/TE / DEF / Teams) share one screen width
    *  (Designer: "don't truncate"). */
   fit = false,
@@ -85,6 +87,10 @@ export function SegmentTabs<T extends string>({
               numberOfLines={1}
               adjustsFontSizeToFit={fit}
               minimumFontScale={fit ? 0.75 : undefined}
+              // Segmented-control labels cap at 2x, as iOS caps its native
+              // segmented control — Designer's scoped exception, UX_REVIEW §5.
+              // Only on `fit`: every other tab row scales without a cap.
+              maxFontSizeMultiplier={fit ? 2 : undefined}
             >
               {labelFor ? labelFor(item) : item}
             </Text>

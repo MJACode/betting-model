@@ -230,8 +230,12 @@ export function groupsOfChips(chips: StatDef[]): StatGroup[] {
 // carry no position at all. The position map exists for the player with
 // nothing on file yet, where "no tabs" and "every tab" are both wrong answers.
 
-const NFL_DEFENSIVE_POSITIONS = new Set([
-  'CB', 'DB', 'DE', 'DL', 'DT', 'FS', 'ILB', 'LB', 'MLB', 'NT', 'OLB', 'S', 'SAF',
+// THE app's one defensive set: the Stats tab's DEF segment reads this same
+// object (lib/statSegments.ts). EDGE and SS joined on 2026-09-25 when the two
+// copies were merged — nflverse writes neither today, and a code in the set
+// that never arrives changes nothing. Nothing was removed.
+export const NFL_DEFENSIVE_POSITIONS: ReadonlySet<string> = new Set<string>([
+  'CB', 'DB', 'DE', 'DL', 'DT', 'EDGE', 'FS', 'ILB', 'LB', 'MLB', 'NT', 'OLB', 'S', 'SAF', 'SS',
 ]);
 
 // Offense and special teams. A kicker or a long snapper produces none of these
