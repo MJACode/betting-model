@@ -225,6 +225,20 @@ def test_no_warning_icon_left_in_bright_med():
     assert hits == []
 
 
+def test_tracking_and_in_slip_on_state_is_tint_not_green():
+    t = _tokens()
+    assert _ratio(t["tint"], t["bgCard"]) >= 4.5
+    track = "\n".join(_code_lines(SRC / "components" / "TrackButton.tsx"))
+    add = "\n".join(_code_lines(SRC / "components" / "AddToPlayButton.tsx"))
+    for src in (track, add):
+        assert not re.search(r"colors\.(bet|betInk|betSoft|positive)\b", src)
+    assert "tracked ? 'checkmark'" in track
+    assert "inPlay ? 'checkmark'" in add
+    player = _read(SRC / "screens" / "PlayerStatsScreen.tsx")
+    assert re.search(r"slipBtnIn: \{[^}]*borderColor: colors\.tint", player)
+    assert "slipBtnTextIn: { color: colors.tint }" in player
+
+
 def test_badge_glyph_tracks_dynamic_type():
     src = _read(SRC / "components" / "SignalBadge.tsx")
     assert "useWindowDimensions()" in src

@@ -425,7 +425,7 @@ export function PickCard({
           <Ionicons
             name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
             size={13}
-            color={timing.kind === 'live' ? colors.bet : colors.textTertiary}
+            color={timing.kind === 'live' ? colors.betInk : colors.textTertiary}
             style={styles.extraIcon}
           />
           <Text

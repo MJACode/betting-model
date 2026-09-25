@@ -782,7 +782,7 @@ export function PlayerStatsScreen() {
                   <Ionicons
                     name={inSlip ? 'checkmark' : 'add'}
                     size={16}
-                    color={inSlip ? colors.betInk : colors.textInverse}
+                    color={inSlip ? colors.tint : colors.textInverse}
                   />
                   <Text style={[styles.slipBtnText, inSlip && styles.slipBtnTextIn]}>
                     {inSlip ? 'In slip' : 'Add'}
@@ -1515,17 +1515,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  // ON: outlined in tint with a checkmark (same as AddToPlayButton), not green.
   slipBtnIn: {
-    backgroundColor: colors.betSoft,
+    backgroundColor: colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.bet,
+    borderColor: colors.tint,
   },
   slipBtnText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textInverse,
   },
-  slipBtnTextIn: { color: colors.betInk },
+  slipBtnTextIn: { color: colors.tint },
   container: { flex: 1, backgroundColor: colors.bg },
   // Clears BetslipBar, which is mounted at the app ROOT and sits over the
   // bottom of this screen whenever the slip has a leg — at 24pt the tail of

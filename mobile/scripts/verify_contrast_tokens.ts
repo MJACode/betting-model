@@ -119,9 +119,10 @@ const PAIRS: Pair[] = [
   ...['bgCard', 'bg', 'noneSoft', 'betSoft', 'avoidSoft', 'medSoft'].map((b) =>
     T('textTertiary', b, 'secondary text app-wide (H7), SportToggle muted (M17)'),
   ),
-  T('betInk', 'bgCard', 'P&L / ROI / EV / CLV / Tracking text (H2)'),
+  T('betInk', 'bgCard', 'P&L / ROI / EV / CLV text (H2)'),
   T('betInk', 'bg', 'Parlay stat row on the grouped ground (H2)'),
-  T('betInk', 'betSoft', 'BET badge, HIGH tier, sharp pill, In slip, W letter (H1/H2/M5/M6)'),
+  T('betInk', 'betSoft', 'BET badge, HIGH tier, sharp pill, W letter (H1/H2/M5/M6)'),
+  T('tint', 'bgCard', 'Tracking / In slip ON: tint outline, checkmark and label (Designer ruling)'),
   W('betInk', 'bet', 'parlay "Great" grade (H2)'),
   T('avoidInk', 'bgCard', 'loss text, error text, destructive labels (H2/H8/M1)'),
   T('avoidInk', 'bg', 'loss text on the grouped ground (H2)'),
@@ -138,9 +139,10 @@ const PAIRS: Pair[] = [
   T('textPrimary', 'avoid', 'player hit-rate badge on red'),
   T('textPrimary', 'none', 'player hit-rate badge on grey'),
   T('textInverse', 'tint', 'sportsbook sheet Apply (H6)'),
-  // Non-text (WCAG 1.4.11, 3:1): the badge glyph and the Tracking bell share
-  // the ink, so they clear this by construction; pinned anyway.
-  T('betInk', 'bgCard', 'Tracking / In slip icon (non-text)', 3),
+  // Non-text (WCAG 1.4.11, 3:1): the badge glyph shares the ink, so it clears
+  // this by construction; pinned anyway.
+  T('betInk', 'betSoft', 'BET badge glyph (non-text)', 3),
+  T('tint', 'bgCard', 'Tracking / In slip checkmark and outline (non-text)', 3),
   // Warning icons are medInk wherever they sit (Designer ruling on #833):
   // bright `med` is 1.9–2.2:1 on all three grounds.
   T('medInk', 'medSoft', 'warn-banner / reconnect / exposure icons (non-text)', 3),
@@ -295,6 +297,17 @@ check('SportToggle count badge: textPrimary on bet (H6)', /colors\.bet\b/.test(b
 check('SportToggle muted label has no extra opacity (M17)', !/labelMuted: \{[^}]*opacity/.test(toggle));
 const player = read('src/screens/PlayerStatsScreen.tsx');
 check('player hit-rate badge text is dark on its bright fill', /hitBadgeText: \{[^}]*color: colors\.textPrimary/.test(player));
+// Tracking / In slip ON state: outlined in tint + checkmark, never green
+// (UX_REVIEW §2: green means only "good for the user").
+const trackSrc = read('src/components/TrackButton.tsx');
+const addSrc = read('src/components/AddToPlayButton.tsx');
+const noGreen = (s: string) => !/colors\.(bet|betInk|betSoft|positive)\b/.test(code(s));
+check('TrackButton ON: checkmark, tint, no green', /tracked \? 'checkmark'/.test(trackSrc) && /on: \{\s*borderColor: colors\.tint/.test(trackSrc) && noGreen(trackSrc));
+check('AddToPlayButton ON: checkmark, tint outline, no green', /inPlay \? 'checkmark'/.test(addSrc) && /inPlay: \{\s*borderColor: colors\.tint/.test(addSrc) && noGreen(addSrc));
+check(
+  'PlayerStats "In slip": tint outline and label, no green',
+  /slipBtnIn: \{[^}]*borderColor: colors\.tint/.test(player) && /slipBtnTextIn: \{ color: colors\.tint \}/.test(player) && /inSlip \? colors\.tint/.test(player),
+);
 check('PickCard tier chip is BET-only (M6)', /showTier = [^;]*pick\.signal_type === 'BET'/.test(read('src/components/PickCard.tsx')));
 const scan = read('scripts/ux_scan.mts');
 check('ux_scan reads short hex, rgb() and App.tsx (L3)', /shortRe/.test(scan) && /rgbRe/.test(scan) && /APP_ROOT_FILE/.test(scan));
