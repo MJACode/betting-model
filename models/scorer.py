@@ -2752,6 +2752,64 @@ def _get_postponed_games(target_date: str) -> set[str]:
     return postponed_ids
 
 
+def _rollback_conn(conn) -> None:
+    """Full transaction reset. Best-effort: a rollback that itself raises
+    must not hide the pre-filter error the caller is about to log."""
+    rollback = getattr(conn, "rollback", None)
+    if rollback is None:
+        return
+    try:
+        rollback()
+    except Exception:                                      # noqa: BLE001
+        logger.exception("price pre-filter: rollback failed")
+
+
+def _reset_prefilter_savepoint(conn, savepoint: str) -> None:
+    """Undo a failed pre-filter statement and leave the transaction usable.
+
+    Postgres aborts the whole transaction on QueryCanceled (statement_timeout,
+    SQLSTATE 57014). ROLLBACK TO SAVEPOINT is allowed in that state; anything
+    else, including the next pre-filter, raises InFailedSqlTransaction.
+    """
+    try:
+        conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+    except Exception:                                      # noqa: BLE001
+        _rollback_conn(conn)
+        return
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+    except Exception:                                      # noqa: BLE001
+        _rollback_conn(conn)
+
+
+def _select_isolated(conn, savepoint: str, sql: str, params):
+    """fetchall() inside a savepoint. On failure, restore the transaction
+    and re-raise.
+
+    The caller's except logs "scoring all" and continues on this same
+    connection. Restoring here is what makes that fallback true: evening
+    refresh 82578720862b4c88990a974ff33ed81d (2026-09-25 01:59:53Z) caught
+    the NCAAF timeout, did not roll back, and the look-ahead pre-filter
+    plus the rest of scoring died with InFailedSqlTransaction.
+    """
+    try:
+        conn.execute(f"SAVEPOINT {savepoint}")
+    except Exception:
+        _rollback_conn(conn)
+        raise
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except Exception:
+        _reset_prefilter_savepoint(conn, savepoint)
+        raise
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+    except Exception:
+        _rollback_conn(conn)
+        raise
+    return rows
+
+
 def _log_pipeline(conn, run_date, status, records_in, records_out,
                   duration_s, error_msg=None):
     conn.execute("""
@@ -2888,18 +2946,31 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         # priced) but is deliberately NOT hoisted here: _is_fbs reads the team's
         # ASOF stats snapshot, so a pre-filter on ncaaf_teams could be STRICTER
         # than the real gate and silently drop a game the scorer would price.
+        #
+        # EXISTS, not SELECT DISTINCT. Measured 2026-09-25 on the live window
+        # (game_date 2026-09-25 .. 2027-02-22, 694 unplayed NCAAF games): the
+        # DISTINCT form read 66,997 odds rows / 23,992 heap fetches in 5.289s
+        # (planner cost 756, estimated 3 games). The semi-join returned the
+        # same 124 game ids in 0.725s (EXCEPT both ways was 0). Evening
+        # refresh 82578720862b4c88990a974ff33ed81d still cancelled the old
+        # form at statement_timeout; _select_isolated's savepoint is what
+        # keeps that from aborting the rest of scoring.
         ncaaf_unpriced: set = set()
         if any(g[1] == "NCAAF" for g in games):
             try:
-                priced = {r[0] for r in conn.execute("""
-                    SELECT DISTINCT o.game_id FROM odds o
-                    WHERE o.bookmaker = ?
-                      AND o.game_id IN (
-                          SELECT game_id FROM games
-                          WHERE sport = 'NCAAF' AND home_score IS NULL
-                            AND game_date >= ? AND game_date <= ?
+                priced = {r[0] for r in _select_isolated(conn, "ncaaf_price_prefilter", """
+                    SELECT g.game_id
+                    FROM games g
+                    WHERE g.sport = 'NCAAF'
+                      AND g.home_score IS NULL
+                      AND g.game_date >= ?
+                      AND g.game_date <= ?
+                      AND EXISTS (
+                          SELECT 1 FROM odds o
+                          WHERE o.game_id = g.game_id
+                            AND o.bookmaker = ?
                       )
-                """, (ODDS_API_BOOKMAKER, target_date, ncaaf_horizon)).fetchall()}
+                """, (target_date, ncaaf_horizon, ODDS_API_BOOKMAKER))}
                 ncaaf_unpriced = {g[0] for g in games
                                   if g[1] == "NCAAF" and g[0] not in priced}
                 if ncaaf_unpriced:
@@ -2907,8 +2978,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                                 f"{ODDS_API_BOOKMAKER} does not price")
             except Exception as exc:
                 # Fail OPEN — a filter that can't be built must never be able to
-                # empty the board. Worst case we pay the old cost.
+                # empty the board. Worst case we pay the old cost. The
+                # savepoint reset already ran inside _select_isolated; this
+                # connection can still score.
                 logger.warning(f"NCAAF price pre-filter failed ({exc}); scoring all")
+                logger.warning(
+                    "NCAAF price pre-filter traceback:\n" + traceback.format_exc())
                 ncaaf_unpriced = set()
 
         # THE SAME GATE FOR THE NEW LOOK-AHEAD SPORTS, and here it is not only
@@ -2932,11 +3007,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                   if g[1] in GAME_SCORE_AHEAD_SPORTS and g[3] > target_date]
         if _ahead:
             try:
-                priced = {r[0] for r in conn.execute(f"""
-                    SELECT DISTINCT o.game_id FROM odds o
-                    WHERE o.bookmaker = ?
-                      AND o.game_id IN ({",".join(["?"] * len(_ahead))})
-                """, (ODDS_API_BOOKMAKER, *[g[0] for g in _ahead])).fetchall()}
+                priced = {r[0] for r in _select_isolated(
+                    conn, "lookahead_price_prefilter", """
+                    SELECT g.game_id
+                    FROM games g
+                    WHERE g.game_id = ANY(?)
+                      AND EXISTS (
+                          SELECT 1 FROM odds o
+                          WHERE o.game_id = g.game_id
+                            AND o.bookmaker = ?
+                      )
+                """, ([g[0] for g in _ahead], ODDS_API_BOOKMAKER))}
                 ahead_unpriced = {g[0] for g in _ahead if g[0] not in priced}
                 if ahead_unpriced:
                     logger.info(
@@ -2946,6 +3027,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
             except Exception as exc:                          # noqa: BLE001
                 logger.warning(f"Look-ahead price pre-filter failed ({exc}); "
                                f"scoring all")
+                logger.warning(
+                    "Look-ahead price pre-filter traceback:\n"
+                    + traceback.format_exc())
                 ahead_unpriced = set()
 
         # Check for postponed MLB games via the official schedule API
