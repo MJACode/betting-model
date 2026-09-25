@@ -184,7 +184,7 @@ export function PerformanceScreen() {
             onPress={() => navigation.navigate('ConnectSportsbook')}
             style={({ pressed }) => [styles.reconnect, pressed && styles.btnPressed]}
           >
-            <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+            <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.reconnectText}>
               A linked account needs reconnecting — tap to fix.
             </Text>

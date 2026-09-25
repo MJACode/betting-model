@@ -42,3 +42,13 @@ export const SIGNAL_BADGE: Record<SignalType, SignalBadgeSpec> = {
   NONE: { label: 'NONE', glyph: 'remove', ink: 'textSecondary', fill: 'noneSoft' },
   AVOID: { label: 'AVOID', glyph: 'close', ink: 'avoidInk', fill: 'avoidSoft' },
 };
+
+/**
+ * Badge glyph size in points. Ionicons `size` is NOT scaled by Dynamic Type
+ * the way <Text> is, so the glyph is sized off the badge font times the
+ * system font scale, capped at 2x, and keeps pace with the word beside it.
+ */
+export function badgeGlyphSize(fontSize: number, fontScale: number): number {
+  const scale = Number.isFinite(fontScale) && fontScale > 0 ? fontScale : 1;
+  return Math.round(fontSize * Math.min(scale, 2));
+}

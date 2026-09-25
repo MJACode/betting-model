@@ -199,6 +199,41 @@ def test_pnl_color_and_signed_formatter_are_wired():
         assert not re.search(r"> 0 \? '\+' : ''\}\$\{[^}]*toFixed", _read(SRC / rel)), rel
 
 
+# Non-text (WCAG 1.4.11, 3:1). Warning icons are medInk on every ground;
+# red icons keep the bright hue only where it already clears 3:1.
+ICON_PAIRS = [
+    ("medInk", "medSoft"), ("medInk", "bgCard"), ("medInk", "bg"),
+    ("betInk", "bgCard"), ("avoidInk", "bgCard"),
+    ("avoid", "avoidSoft"), ("avoid", "bgCard"),
+]
+
+
+@pytest.mark.parametrize("fg,bg", ICON_PAIRS)
+def test_icons_clear_non_text_contrast(fg, bg):
+    t = _tokens()
+    assert _ratio(t[fg], t[bg]) >= 3.0, f"{fg} on {bg}: {_ratio(t[fg], t[bg]):.2f}"
+
+
+def test_no_warning_icon_left_in_bright_med():
+    t = _tokens()
+    assert _ratio(t["med"], t["medSoft"]) < 3  # the failure being fixed
+    hits = []
+    for path in [*SRC.rglob("*.tsx"), MOBILE / "App.tsx"]:
+        for i, line in enumerate(_code_lines(path), 1):
+            if re.search(r"<Ionicons\b[^>]*color=\{colors\.med\}", line) or re.match(r"^\s*color=\{colors\.med\}", line):
+                hits.append(f"{path.relative_to(ROOT)}:{i}")
+    assert hits == []
+
+
+def test_badge_glyph_tracks_dynamic_type():
+    src = _read(SRC / "components" / "SignalBadge.tsx")
+    assert "useWindowDimensions()" in src
+    assert "badgeGlyphSize(size, fontScale)" in src
+    assert "size={glyphSize}" in src
+    tone = _read(SRC / "lib" / "tone.ts")
+    assert "Math.round(fontSize * Math.min(scale, 2))" in tone
+
+
 def _node_strips_types() -> bool:
     if shutil.which("node") is None:
         return False
@@ -211,7 +246,7 @@ def _node_strips_types() -> bool:
 def test_signed_formatter_and_tone_behaviour():
     script = """
 import { formatCurrencySigned, formatPctSigned, formatSigned, formatSignedUnits } from './mobile/src/lib/format.ts';
-import { pnlTone } from './mobile/src/lib/tone.ts';
+import { badgeGlyphSize, pnlTone } from './mobile/src/lib/tone.ts';
 const M = '\\u2212';
 const cases = [
   [formatSigned(1.23), '+1.2'], [formatSigned(-0.5, 2), M + '0.50'], [formatSigned(-0.04), '0.0'],
@@ -221,6 +256,7 @@ const cases = [
   [formatSignedUnits(2.44), '+2.4u'], [formatSignedUnits(-0.5), M + '0.5u'], [formatSignedUnits(0.04), '0.0u'],
   [pnlTone(1), 'betInk'], [pnlTone(-1), 'avoidInk'], [pnlTone(0), 'textSecondary'],
   [pnlTone(null), 'textSecondary'], [pnlTone(0.0005, 0.001), 'textSecondary'],
+  [badgeGlyphSize(11, 1), 11], [badgeGlyphSize(11, 1.5), 17], [badgeGlyphSize(11, 3.1), 22], [badgeGlyphSize(11, NaN), 11],
 ];
 for (const [got, want] of cases) if (got !== want) throw new Error(`${got} !== ${want}`);
 """

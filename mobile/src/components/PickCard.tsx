@@ -296,7 +296,7 @@ export function PickCard({
               <Ionicons
                 name={movementSummary.icon}
                 size={13}
-                color={movementSummary.color}
+                color={inkFor(movementSummary.color)}
                 style={styles.extraIcon}
               />
               <Text
@@ -314,7 +314,7 @@ export function PickCard({
               <Ionicons
                 name={contra.tone === 'sharp' ? 'shield-checkmark-outline' : 'people-outline'}
                 size={13}
-                color={contra.tone === 'sharp' ? colors.bet : colors.med}
+                color={contra.tone === 'sharp' ? colors.betInk : colors.medInk}
                 style={styles.extraIcon}
               />
               <Text
@@ -348,7 +348,7 @@ export function PickCard({
               <Ionicons
                 name={pick.clv_pct! >= 0 ? 'trending-up-outline' : 'trending-down-outline'}
                 size={13}
-                color={clvColor}
+                color={inkFor(clvColor)}
                 style={styles.extraIcon}
               />
               <Text style={[styles.extraText, { color: inkFor(clvColor), fontWeight: font.weight.medium }]}>
@@ -372,7 +372,7 @@ export function PickCard({
               <Ionicons
                 name="medkit-outline"
                 size={13}
-                color={colors.med}
+                color={colors.medInk}
                 style={styles.extraIcon}
               />
               <Text style={[styles.extraText, styles.injuryText]} numberOfLines={1}>

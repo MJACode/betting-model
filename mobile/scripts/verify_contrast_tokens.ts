@@ -29,7 +29,7 @@ import {
   formatSignedUnits,
   MINUS,
 } from '../src/lib/format';
-import { pnlTone, SIGNAL_BADGE } from '../src/lib/tone';
+import { badgeGlyphSize, pnlTone, SIGNAL_BADGE } from '../src/lib/tone';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
@@ -141,6 +141,17 @@ const PAIRS: Pair[] = [
   // Non-text (WCAG 1.4.11, 3:1): the badge glyph and the Tracking bell share
   // the ink, so they clear this by construction; pinned anyway.
   T('betInk', 'bgCard', 'Tracking / In slip icon (non-text)', 3),
+  // Warning icons are medInk wherever they sit (Designer ruling on #833):
+  // bright `med` is 1.9–2.2:1 on all three grounds.
+  T('medInk', 'medSoft', 'warn-banner / reconnect / exposure icons (non-text)', 3),
+  T('medInk', 'bgCard', 'PickCard injury + public icons, partial-load banner icon (non-text)', 3),
+  T('medInk', 'bg', 'Live "prices up to ~45s old" / in-play leg note icons (non-text)', 3),
+  // PickCard extras-row icons take the same ink as their words.
+  T('betInk', 'bgCard', 'PickCard sharp / movement / CLV-up icons (non-text)', 3),
+  T('avoidInk', 'bgCard', 'PickCard steam / CLV-down icons (non-text)', 3),
+  // Red icons keep the bright hue where it already clears 3:1.
+  T('avoid', 'avoidSoft', 'SignIn error-banner icon (non-text)', 3),
+  T('avoid', 'bgCard', 'remove-leg / trash icons (non-text)', 3),
 ];
 console.log('\n  token          hex        ground              ratio  min');
 for (const p of PAIRS) {
@@ -174,6 +185,14 @@ check(
 const badgeSrc = read('src/components/SignalBadge.tsx');
 check('SignalBadge reads SIGNAL_BADGE', /SIGNAL_BADGE\[signal\]/.test(badgeSrc));
 check('SignalBadge draws the glyph (Ionicons name={spec.glyph})', /name=\{spec\.glyph\}/.test(badgeSrc));
+check('badge glyph = font size at 1x', badgeGlyphSize(11, 1) === 11 && badgeGlyphSize(13, 1) === 13);
+check('badge glyph scales with Dynamic Type', badgeGlyphSize(11, 1.5) === 17 && badgeGlyphSize(13, 1.35) === 18);
+check('badge glyph caps at 2x', badgeGlyphSize(11, 3.1) === 22);
+check('badge glyph tolerates a bad scale', badgeGlyphSize(11, NaN) === 11 && badgeGlyphSize(11, 0) === 11);
+check(
+  'SignalBadge sizes the glyph from the font scale',
+  /useWindowDimensions\(\)/.test(badgeSrc) && /badgeGlyphSize\(size, fontScale\)/.test(badgeSrc) && /size=\{glyphSize\}/.test(badgeSrc),
+);
 check('SignalBadge no longer colours text with bet/avoid/none', !/colors\.(bet|avoid|none)\b(?!Soft|Ink)/.test(badgeSrc));
 
 // ── signed results (H2 / L9) ────────────────────────────────────────────────
@@ -232,8 +251,9 @@ const code = (src: string) =>
 
 const whiteLits: string[] = [];
 const hueText: string[] = [];
+const medIcons: string[] = [];
 // `color:` / `tint` whose value is a bright SIGNAL hue. Ionicons' `color={…}`
-// prop is not matched (icons keep the hue by design, audit H8), nor are
+// prop is not matched here (icons are held to 3:1 separately below), nor are
 // objects that also carry an `icon:` (PickCard's movement summary drives the
 // icon from `color` and the words through inkFor()).
 const HUE_TEXT = /(?<![A-Za-z])(color:|tint:|tint=\{)[^,;\n}]*\bcolors\.(bet|avoid|med|positive|negative|high|none|low)\b(?!Soft|Ink)/;
@@ -246,8 +266,20 @@ for (const f of files) {
       // whites (Discord / FanDuel tiles) are the scan's hex-color findings.
       if (/(['"])#fff\1|(['"])white\2/i.test(line)) whiteLits.push(`${rel}:${i + 1}`);
       if (HUE_TEXT.test(line) && !/\bicon:/.test(line)) hueText.push(`${rel}:${i + 1}`);
+      if (/<Ionicons\b[^>]*color=\{colors\.med\}/.test(line) || /^\s*color=\{colors\.med\}/.test(line))
+        medIcons.push(`${rel}:${i + 1}`);
     });
 }
+check('the old icon failures really were failures', ratio(tok.med, tok.medSoft) < 3 && ratio(tok.med, tok.bgCard) < 3 && ratio(tok.bet, tok.bgCard) < 3);
+check('no Ionicons drawn in bright med (warning icons are medInk)', medIcons.length === 0, medIcons.join(', '));
+const redIconsOk = ratio(tok.avoid, tok.avoidSoft) >= 3 && ratio(tok.avoid, tok.bgCard) >= 3;
+check('bright avoid icons clear 3:1 on avoidSoft and bgCard (else → avoidInk)', redIconsOk);
+const pc = read('src/components/PickCard.tsx');
+const extras = /extrasRow\}>([\s\S]*?)\n      \) : null\}/.exec(pc)?.[1] ?? '';
+check(
+  'PickCard extras-row icons use the ink, not the bright hue',
+  extras.length > 0 && !/color=\{[^}]*colors\.(bet|med|avoid)\b(?!Ink)/.test(extras) && /color=\{inkFor\(clvColor\)\}/.test(extras) && /color=\{inkFor\(movementSummary\.color\)\}/.test(extras),
+);
 check("no literal '#fff' / 'white' left in the app (H6)", whiteLits.length === 0, whiteLits.join(', '));
 check('no bright bet/avoid/med/positive/negative hue used as a text colour', hueText.length === 0, hueText.join(', '));
 

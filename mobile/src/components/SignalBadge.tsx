@@ -1,8 +1,8 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii } from '@/lib/theme';
-import { SIGNAL_BADGE } from '@/lib/tone';
+import { badgeGlyphSize, SIGNAL_BADGE } from '@/lib/tone';
 import type { SignalType } from '@/types';
 
 interface Props {
@@ -16,11 +16,16 @@ interface Props {
  * 9.55:1 on noneSoft) with a leading ✓ / – / ✕ glyph, so the state survives
  * low vision, sunlight and red/green colour blindness (usability audit H1).
  * The bright `bet` / `avoid` hues were 2.02 / 3.10:1 here.
+ *
+ * The glyph tracks Dynamic Type (up to 2x) via the window font scale, which
+ * is PixelRatio.getFontScale() but re-renders when the setting changes.
  */
 export function SignalBadge({ signal, small }: Props) {
   const spec = SIGNAL_BADGE[signal];
   const fg = colors[spec.ink];
   const size = small ? font.size.nano : font.size.caption;
+  const { fontScale } = useWindowDimensions();
+  const glyphSize = badgeGlyphSize(size, fontScale);
   return (
     <View
       style={[
@@ -31,7 +36,7 @@ export function SignalBadge({ signal, small }: Props) {
       {/* Decorative for VoiceOver: the word already says it. */}
       <Ionicons
         name={spec.glyph}
-        size={size}
+        size={glyphSize}
         color={fg}
         accessibilityElementsHidden
         importantForAccessibility="no"

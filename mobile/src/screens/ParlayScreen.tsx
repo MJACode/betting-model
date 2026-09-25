@@ -816,7 +816,7 @@ function SlipBody({
     <View>
       {!valid ? (
         <View style={styles.warnBanner}>
-          <Ionicons name="warning-outline" size={16} color={colors.med} />
+          <Ionicons name="warning-outline" size={16} color={colors.medInk} />
           <Text style={styles.warnText}>
             Two game-line legs from the same game can't be parlayed together — remove one.
           </Text>
@@ -864,7 +864,7 @@ function SlipBody({
             only when a live leg is actually in the slip. */}
         {legs.some((l) => l.isLive) ? (
           <View style={styles.liveLegNote}>
-            <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+            <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.liveLegNoteText}>
               This slip has an in-play leg. Live prices are DraftKings’ and can be up to
               ~45s old — check the number at DK before you place it.
@@ -920,7 +920,7 @@ function SlipBody({
           banner as a fifth grid cell splits the two rows apart. */}
       {editingId && staleCount + removedCount > 0 ? (
         <View style={styles.warnBanner}>
-          <Ionicons name="warning-outline" size={16} color={colors.med} />
+          <Ionicons name="warning-outline" size={16} color={colors.medInk} />
           <Text style={styles.warnText}>
             {staleCount + removedCount} leg{staleCount + removedCount === 1 ? '' : 's'}{' '}
             {staleCount + removedCount === 1 ? 'is' : 'are'} no longer on the board —
