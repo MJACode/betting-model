@@ -70,6 +70,9 @@ def test_search_and_position_review_fixes():
     assert "rankedAll.filter((r) => matchesPosition(r.row.pos, activePositions))" in stats
     assert "hitRateAll.filter((p) => matchesPosition(p.pos, activePositions))" in stats
     assert "return positionEmptyText(segment, stat.label, timeWindow);" in stats
+    # Band-aware: measured across the position cut, never on the banded list.
+    assert "emptiedByPosition(activePositions !== null, hitRateAll.length, hitRateBase.length)" in stats
+    assert "emptiedByPosition(activePositions !== null, rankedAll.length, ranked.length)" in stats
     assert "positionFallbackNote(sport, segment, boardMode, segmentPositions)" in stats
 
 

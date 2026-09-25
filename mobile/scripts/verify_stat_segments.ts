@@ -19,11 +19,13 @@ import { join } from 'node:path';
 
 import type { Sport } from '../src/hooks/useSportFilter';
 import { STAT_CATALOG, defaultStatFor, type StatDef } from '../src/lib/statCatalog';
+import { hitRateBand, inHitRateBand } from '../src/lib/statsBoard';
 import { NFL_DEFENSIVE_POSITIONS } from '../src/lib/playerLog';
 import {
   NFL_EXCLUDED_POSITIONS,
   chipsForSegment,
   defaultSegmentFor,
+  emptiedByPosition,
   knownNflPositions,
   matchesPosition,
   omittedChips,
@@ -307,6 +309,38 @@ check('empty text: QB, Averages season',
 check('empty text: DEF, last 3',
   positionEmptyText('def', 'Tackles', 3) === 'No defensive players with Tackles in the last 3 games. Try another position.');
 
+// ── 4c. Which filter emptied the board ──────────────────────────────────────
+// Mirrors the screen's Hit Rate order: everything else → position cut → band.
+{
+  type P = { pos: string | null; pct: number };
+  const board = (all: P[], seg: StatSegment, band: { lo: number; hi: number }, query = '') => {
+    const positions = query.trim() ? null : positionsForSegment('NFL', seg, true);
+    const base = all.filter((p) => matchesPosition(p.pos, positions));
+    const shown = base.filter((p) => inHitRateBand(p.pct, band));
+    return { shown, positionMsg: emptiedByPosition(positions !== null, all.length, base.length) };
+  };
+  const all: P[] = [
+    { pos: 'WR', pct: 0.4 }, { pos: 'TE', pct: 0.55 }, { pos: 'RB', pct: 0.9 }, { pos: 'QB', pct: 0.95 },
+  ];
+  const high = hitRateBand(80, 100);
+  const wide = hitRateBand(0, 100);
+  const bandEmptied = board(all, 'wrte', high);
+  check('band empties a non-empty position list → NOT the position message (other positions are in band)',
+    bandEmptied.shown.length === 0 && !bandEmptied.positionMsg && all.some((p) => inHitRateBand(p.pct, high)));
+  const posEmptied = board([{ pos: 'WR', pct: 0.6 }, { pos: 'RB', pct: 0.7 }], 'qb', wide);
+  check('position cut empties a non-empty list → the position message', posEmptied.shown.length === 0 && posEmptied.positionMsg);
+  const posAndBand = board([{ pos: 'WR', pct: 0.1 }], 'qb', high);
+  check('position cut empties it before the band runs → the position message', posAndBand.positionMsg);
+  check('an empty board before the cut is a data gap, not a position one', !board([], 'qb', wide).positionMsg);
+  check('a non-empty board never shows the position message', !board(all, 'rb', wide).positionMsg);
+  check('no filter (search typed) → never the position message', !board(all, 'qb', high, 'Kelce').positionMsg);
+  // Averages: the position cut is the last filter, so after-cut is the board.
+  check('Averages: position cut empties a non-empty board → the position message', emptiedByPosition(true, 12, 0));
+  check('Averages: no rows before the cut → not the position message', !emptiedByPosition(true, 0, 0));
+  check('Averages: rows after the cut → not the position message', !emptiedByPosition(true, 12, 3));
+  check('Averages/Hit Rates: filter off → never the position message', !emptiedByPosition(false, 12, 0));
+}
+
 // ── 5. The screen uses the module, and the dropdown is gone ─────────────────
 const stats = readFileSync(join(import.meta.dirname, '..', 'src/screens/StatsScreen.tsx'), 'utf-8');
 check('StatsScreen: the chip row reads chipsForSegment', /chipsForSegment\(sport, segment\)\.map/.test(stats));
@@ -319,9 +353,14 @@ check('StatsScreen: a typed search bypasses the position filter',
   /const activePositions = query\.trim\(\) \? null : segmentPositions;/.test(stats));
 check('StatsScreen: a position-emptied board gets the positional empty text',
   /if \(positionEmptied && stat\) \{\s*return positionEmptyText\(segment, stat\.label, timeWindow\);/.test(stats));
-check('StatsScreen: positionEmptied needs rows before the cut',
-  /ranked\.length === 0 && rankedAll\.length > 0/.test(stats) &&
-    /hitRatePlayers\.length === 0 && hitRateAll\.some\(\(p\) => inHitRateBand\(p\.pct, band\)\)/.test(stats));
+check('StatsScreen: positionEmptied measures across the cut (before/after the position filter), both boards',
+  /emptiedByPosition\(activePositions !== null, hitRateAll\.length, hitRateBase\.length\)/.test(stats) &&
+    /emptiedByPosition\(activePositions !== null, rankedAll\.length, ranked\.length\)/.test(stats));
+{
+  // The banded list must not feed the position test (Reviewer Low, #830).
+  const m = stats.match(/const positionEmptied =[\s\S]*?;\n/);
+  check('StatsScreen: positionEmptied never reads the banded list', !!m && !/hitRatePlayers|inHitRateBand/.test(m[0]), m ? '' : 'not found');
+}
 check('StatsScreen: the fallback caption reuses the no-lines caption, and only renders when set',
   /\{positionNote \? \(\s*<View style=\{styles\.noLinesRow\}>\s*<Ionicons name="information-circle-outline" size=\{13\} color=\{colors\.textTertiary\} \/>\s*<Text style=\{styles\.noLinesText\}>\{positionNote\}<\/Text>\s*<\/View>\s*\) : null\}/.test(stats));
 check('StatsScreen: the caption reads positionFallbackNote on the unsuppressed set',

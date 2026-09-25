@@ -302,6 +302,17 @@ export function segmentPositionNoun(seg: StatSegment): string {
 }
 
 /**
+ * Did the position cut, and only it, empty the board? Compare the list just
+ * before the cut with the list just after it — never with the final list: on
+ * Hit Rates the band runs after the cut, and a band that empties a board the
+ * position left non-empty must not say "Try another position" (Reviewer,
+ * #830). `filterOn` is false while no position set applies.
+ */
+export function emptiedByPosition(filterOn: boolean, beforeCut: number, afterCut: number): boolean {
+  return filterOn && afterCut === 0 && beforeCut > 0;
+}
+
+/**
  * The empty board when the POSITION filter emptied a list that had rows
  * before it — the data is fine, the position simply has nobody on this stat
  * (Designer, #830 review). e.g. "No receivers or tight ends with Targets in

@@ -130,6 +130,7 @@ import {
 import {
   chipsForSegment,
   defaultSegmentFor,
+  emptiedByPosition,
   matchesPosition,
   positionEmptyText,
   positionFallbackNote,
@@ -1554,13 +1555,14 @@ export function StatsScreen() {
     [hitRateBase, band],
   );
 
-  // Did the position cut, and only it, empty the board? Checked only when the
-  // board is empty, so the extra band pass costs nothing on a full one.
+  // Did the position cut, and only it, empty the board? Measured across the
+  // cut itself: Hit Rates compare before/after the position filter, not the
+  // banded list, so a band that empties a non-empty position list keeps the
+  // band's own empty text. Averages has no filter after the cut.
   const positionEmptied =
-    activePositions !== null &&
-    (effectiveMode === 'hitRate'
-      ? hitRatePlayers.length === 0 && hitRateAll.some((p) => inHitRateBand(p.pct, band))
-      : ranked.length === 0 && rankedAll.length > 0);
+    effectiveMode === 'hitRate'
+      ? emptiedByPosition(activePositions !== null, hitRateAll.length, hitRateBase.length)
+      : emptiedByPosition(activePositions !== null, rankedAll.length, ranked.length);
 
   // The caption under the chips when a football position segment cannot
   // filter (NFL Season/H2H, all NCAAF). Null adds no height.
