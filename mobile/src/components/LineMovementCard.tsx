@@ -75,7 +75,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
         label:
           `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
           `${formatSideLine(movement.currentLine, pick.pick_side, market)} against your ${pick.pick_side}`,
-        color: colors.avoid,
+        color: colors.avoidInk,
       };
     }
     if (movement.lineOnly) {
@@ -83,19 +83,19 @@ export function LineMovementCard({ pick, playerName }: Props) {
         label:
           `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
           `${formatSideLine(movement.currentLine, pick.pick_side, market)} in your favor`,
-        color: colors.bet,
+        color: colors.betInk,
       };
     }
     const pp = movement.priceShiftPp ?? 0;
     if (movement.severity === 'caution') {
       return {
         label: `Steamed ${pp.toFixed(1)}pp against you since scoring`,
-        color: colors.avoid,
+        color: colors.avoidInk,
       };
     }
     return {
       label: `Moved ${Math.abs(pp).toFixed(1)}pp in your favor since scoring`,
-      color: colors.bet,
+      color: colors.betInk,
     };
   })();
 

@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { gameStatus } from '@/lib/format';
+import { formatSigned, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
@@ -23,7 +23,7 @@ import {
 } from '@/lib/markets';
 import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, inkFor, pnlColor, radii, spacing } from '@/lib/theme';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
@@ -82,8 +82,7 @@ export function PickCard({
       : colors.textSecondary;
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
   const ev = expectedValue(pick.model_probability, decisionOdds(pick));
-  const evColor =
-    ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
+  const evColor = pnlColor(ev);
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   const movement =
     gameStatus(game, liveState).kind === 'pre'
@@ -91,6 +90,7 @@ export function PickCard({
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
   const showClv = pick.clv_pct != null;
+  // The icon keeps the bright hue; the words take inkFor(clvColor) (audit H2).
   const clvColor =
     pick.clv_pct == null
       ? colors.textTertiary
@@ -159,7 +159,9 @@ export function PickCard({
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
   const showSharp = Boolean(sharp);
-  const showTier = Boolean(pick.confidence_tier) && !showSharp;
+  // The tier is the model's confidence in a BET. On a NONE / AVOID card a
+  // "HIGH" chip reads as a high-confidence non-pick, so it is BET-only (M6).
+  const showTier = Boolean(pick.confidence_tier) && !showSharp && pick.signal_type === 'BET';
   const stakeCaption =
     pick.signal_type !== 'BET' || preview
       ? null
@@ -300,7 +302,7 @@ export function PickCard({
               <Text
                 style={[
                   styles.extraText,
-                  { color: movementSummary.color, fontWeight: font.weight.medium },
+                  { color: inkFor(movementSummary.color), fontWeight: font.weight.medium },
                 ]}
               >
                 {movementSummary.label}
@@ -319,7 +321,7 @@ export function PickCard({
                 style={[
                   styles.extraText,
                   {
-                    color: contra.tone === 'sharp' ? colors.bet : colors.med,
+                    color: contra.tone === 'sharp' ? colors.betInk : colors.medInk,
                     fontWeight: font.weight.medium,
                   },
                 ]}
@@ -349,7 +351,7 @@ export function PickCard({
                 color={clvColor}
                 style={styles.extraIcon}
               />
-              <Text style={[styles.extraText, { color: clvColor, fontWeight: font.weight.medium }]}>
+              <Text style={[styles.extraText, { color: inkFor(clvColor), fontWeight: font.weight.medium }]}>
                 CLV {formatClv(pick.clv_pct!)}
               </Text>
             </View>
@@ -431,7 +433,7 @@ export function PickCard({
               styles.extraText,
               styles.timingText,
               timing.kind === 'live'
-                ? { color: colors.bet, fontWeight: font.weight.medium }
+                ? { color: colors.betInk, fontWeight: font.weight.medium }
                 : null,
             ]}
           >
@@ -475,8 +477,7 @@ function summarizeMovement(
 
 // CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).
 function formatClv(clvPct: number): string {
-  const sign = clvPct > 0 ? '+' : '';
-  return `${sign}${clvPct.toFixed(1)}pp`;
+  return formatSigned(clvPct, 1, 'pp');
 }
 
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
@@ -486,9 +487,10 @@ function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
 }
 
 function tierFg(tier: 'HIGH' | 'MED' | 'LOW') {
-  if (tier === 'HIGH') return { color: colors.high };
-  if (tier === 'MED') return { color: colors.med };
-  return { color: colors.low };
+  // Inks, not the bright confidence hues (2.02:1 at 10pt; audit M6).
+  if (tier === 'HIGH') return { color: colors.betInk };
+  if (tier === 'MED') return { color: colors.medInk };
+  return { color: colors.textSecondary };
 }
 
 const styles = StyleSheet.create({
@@ -676,10 +678,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.nano,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    color: colors.none,
+    color: colors.textSecondary, // was `none`, 2.84:1 on noneSoft — same fix as NONE (H1)
   },
   injuryText: {
-    color: colors.med,
+    // medInk, not med (2.20:1): the medkit icon keeps the amber (audit H8).
+    color: colors.medInk,
     fontWeight: font.weight.medium,
   },
   actionsRow: {

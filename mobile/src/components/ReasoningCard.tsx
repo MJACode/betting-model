@@ -75,7 +75,7 @@ export function ReasoningCard({ pick }: Props) {
         <Row
           label="Edge"
           value={formatPctSigned(edge)}
-          tint={passesActionFilter(pick) ? colors.bet : pick.signal_type === 'AVOID' ? colors.avoid : undefined}
+          tint={passesActionFilter(pick) ? colors.betInk : pick.signal_type === 'AVOID' ? colors.avoidInk : undefined}
           sub={`= model ${formatPct(pick.model_probability)} − ${book} ${formatPct(implied)}. Positive means we think the side is mispriced in our favor.`}
         />
       ) : (

@@ -53,7 +53,7 @@ import {
   type BetTypeChoice,
 } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'ModelEdit'>;
@@ -413,13 +413,7 @@ function PreviewFooter({
 }) {
   const roi = backtest?.roiFlat ?? 0;
   const roiColor =
-    !backtest || backtest.picks === 0
-      ? colors.textSecondary
-      : roi > 0
-        ? colors.bet
-        : roi < 0
-          ? colors.avoid
-          : colors.textSecondary;
+    !backtest || backtest.picks === 0 ? colors.textSecondary : pnlColor(roi);
   const decided = (backtest?.wins ?? 0) + (backtest?.losses ?? 0);
 
   return (
@@ -1119,7 +1113,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   deleteBtnText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.body,
     fontWeight: font.weight.medium,
   },

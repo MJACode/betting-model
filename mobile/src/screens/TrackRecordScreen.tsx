@@ -30,7 +30,7 @@ import {
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPct, formatPctSigned } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -40,10 +40,10 @@ import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MI
  *  stated and must match the server's own gate. */
 const RECORD_START = LIVE_RECORD_START;
 
+// Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
+// which are 2.22 / 3.55:1 as text (audit H2).
 function roiColor(roi: number): string {
-  if (roi > 0.001) return colors.positive;
-  if (roi < -0.001) return colors.negative;
-  return colors.textSecondary;
+  return pnlColor(roi, 0.001);
 }
 
 export function TrackRecordScreen() {
@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
   },
   error: {
     fontSize: font.size.footnote,
-    color: colors.avoid,
+    color: colors.avoidInk,
     marginBottom: spacing.md,
   },
   loading: { marginVertical: spacing.lg },

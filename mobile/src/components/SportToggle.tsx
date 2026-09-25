@@ -141,11 +141,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Dark on the green fill: white on `bet` was 2.22:1 on a 10pt count;
+  // textPrimary is 9.46:1 (audit H6). The fill stays green — the one green
+  // count badge PATTERNS §D8 allows, because it counts BETs.
   badgeText: {
     fontSize: font.size.nano,
     lineHeight: 13,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.textPrimary,
   },
   segment: {
     paddingHorizontal: spacing.md,
@@ -166,8 +169,9 @@ const styles = StyleSheet.create({
   labelActive: {
     color: colors.tint,
   },
+  // No extra opacity: tertiary at 0.7 was 2.16:1 and read as disabled, but
+  // the segment is tappable. textTertiary alone is 4.56:1 on noneSoft (M17).
   labelMuted: {
     color: colors.textTertiary,
-    opacity: 0.7,
   },
 });

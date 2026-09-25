@@ -11,7 +11,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { addDays, formatAmerican, formatCurrencySigned, formatPctSigned } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
 import { RECORD_ONLY_MODELS } from '@/lib/thresholds';
@@ -420,9 +420,11 @@ function ModelRow({ model }: { model: ModelDayStats }) {
 }
 
 const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = {
-  WIN: { label: 'W', color: colors.positive, bg: colors.betSoft },
-  LOSS: { label: 'L', color: colors.negative, bg: colors.avoidSoft },
-  PUSH: { label: 'P', color: colors.none, bg: colors.noneSoft },
+  // The letter carries the result; the ink makes it readable on its wash
+  // (4.61 / 5.01 / 9.55:1 — the bright hues were 2.0–3.1:1; audit H2).
+  WIN: { label: 'W', color: colors.betInk, bg: colors.betSoft },
+  LOSS: { label: 'L', color: colors.avoidInk, bg: colors.avoidSoft },
+  PUSH: { label: 'P', color: colors.textSecondary, bg: colors.noneSoft },
 };
 
 function PickRow({ pick }: { pick: Pick }) {
@@ -509,10 +511,10 @@ function recordLine(s: CustomModelStats): string {
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
 }
 
+// Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
+// which are 2.22 / 3.55:1 as text (audit H2).
 function roiColor(roi: number): string {
-  if (roi > 0.001) return colors.positive;
-  if (roi < -0.001) return colors.negative;
-  return colors.textSecondary;
+  return pnlColor(roi, 0.001);
 }
 
 function prettyDate(date: string): string {

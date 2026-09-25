@@ -879,7 +879,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   errorText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.footnote,
   },
   partialBanner: {

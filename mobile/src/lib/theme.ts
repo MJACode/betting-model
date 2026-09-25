@@ -6,6 +6,7 @@
 import { Platform } from 'react-native';
 
 import type { MatchupGrade } from './matchup';
+import { pnlTone } from './tone';
 
 const BRAND_INK = '#0B1320'; // the S itself; also `tint` (one literal, two names)
 
@@ -19,7 +20,11 @@ export const colors = {
   // Text
   textPrimary: '#000000',
   textSecondary: '#3C3C43',
-  textTertiary: '#3C3C4399',
+  // Was the iOS label-tertiary '#3C3C4399' (3.44:1 on bgCard, 3.29:1 on bg),
+  // under AA at the 11–13pt it is used at for times, provenance and footnotes.
+  // Opaque #6C6C70 is 5.23:1 on bgCard, 4.69:1 on bg and 4.56:1 on noneSoft —
+  // still lighter than textSecondary, so the hierarchy holds (audit H7).
+  textTertiary: '#6C6C70',
   textInverse: '#FFFFFF',
 
   // Separators
@@ -54,6 +59,21 @@ export const colors = {
   avoidSoft: '#FDECEB',
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
+
+  // ── Text-safe inks (usability audit H1 / H2 / H8, 2026-09-25) ────────────
+  // `bet` / `avoid` / `med` are FILLS, dots and icons. As text they measure
+  // 2.22 / 3.55 / 1.97:1 on bgCard — under the 4.5:1 AA floor on exactly the
+  // numbers people come to read (P&L, ROI, EV, CLV, warnings, BET/AVOID).
+  // Wherever green, red or amber is TEXT, use the ink; keep the bright hue for
+  // the fill or icon beside it. Every value also carries a sign or a word, so
+  // colour is never the only carrier (WCAG 1.4.1). Measured on their real
+  // grounds by scripts/verify_contrast_tokens.ts:
+  //   betInk   5.08 bgCard · 4.55 bg · 4.61 betSoft   (NOT on noneSoft/avoidSoft: 4.4)
+  //   avoidInk 5.73 bgCard · 5.13 bg · 5.01 avoidSoft
+  //   medInk   5.43 bgCard · 4.86 bg · 4.99 medSoft
+  betInk: '#1A7F37',
+  avoidInk: '#C4281C',
+  medInk: '#9A5B00',
 
   // ── The board's good / average / bad ramp ────────────────────────────────
   // Used by BOTH traffic lights on the Stats board: the matchup grade and the
@@ -155,6 +175,32 @@ export const font = {
     bold: '700' as const,
   },
 };
+
+/**
+ * The text colour for a signed result — P&L, ROI, EV, CLV, a line move. Gain
+ * reads `betInk`, loss `avoidInk`, and zero / a push / a missing value a
+ * neutral `textSecondary` (never a green "+0.00" or a red "−0.00"). `epsilon`
+ * treats |value| ≤ epsilon as zero, for ratios that round to 0.0%.
+ *
+ * The rule itself lives in `lib/tone.ts` so the verify scripts, which cannot
+ * import react-native, can pin it.
+ */
+export function pnlColor(value: number | null | undefined, epsilon = 0): string {
+  return colors[pnlTone(value, epsilon)];
+}
+
+/**
+ * The text-safe ink for a bright semantic hue: bet/positive/high → betInk,
+ * avoid/negative → avoidInk, med → medInk; anything else passes through.
+ * For rows where one colour drives an icon AND its words — the icon keeps
+ * the bright hue, the words take the ink (usability audit H8).
+ */
+export function inkFor(hue: string): string {
+  if (hue === colors.bet || hue === colors.positive || hue === colors.high) return colors.betInk;
+  if (hue === colors.avoid || hue === colors.negative) return colors.avoidInk;
+  if (hue === colors.med) return colors.medInk;
+  return hue;
+}
 
 /** Intensity 0..1 for heat-map cells. Returns hex with alpha. */
 export function heatColor(profit: number, max: number): string {

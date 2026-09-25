@@ -782,7 +782,7 @@ export function PlayerStatsScreen() {
                   <Ionicons
                     name={inSlip ? 'checkmark' : 'add'}
                     size={16}
-                    color={inSlip ? colors.bet : colors.textInverse}
+                    color={inSlip ? colors.betInk : colors.textInverse}
                   />
                   <Text style={[styles.slipBtnText, inSlip && styles.slipBtnTextIn]}>
                     {inSlip ? 'In slip' : 'Add'}
@@ -1525,7 +1525,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textInverse,
   },
-  slipBtnTextIn: { color: colors.bet },
+  slipBtnTextIn: { color: colors.betInk },
   container: { flex: 1, backgroundColor: colors.bg },
   // Clears BetslipBar, which is mounted at the app ROOT and sits over the
   // bottom of this screen whenever the slip has a leg — at 24pt the tail of
@@ -1630,10 +1630,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     alignItems: 'center',
   },
+  // Dark on every fill (5.9–9.6:1). White was 2.22:1 on the green and
+  // 2.20:1 on the amber — the same fault as audit H6.
   hitBadgeText: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.textPrimary,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1803,5 +1805,5 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     borderRadius: 8,
   },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
 });

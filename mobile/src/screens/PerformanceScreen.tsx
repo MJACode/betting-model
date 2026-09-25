@@ -23,7 +23,7 @@ import { ManualBetModal } from '@/components/ManualBetModal';
 import { formatAmerican, formatCurrency, formatCurrencySigned } from '@/lib/format';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
@@ -145,8 +145,8 @@ export function PerformanceScreen() {
   const bookLabel = formatBookList(
     Array.from(new Set(accounts.map((a) => a.book).filter(Boolean) as string[])),
   );
-  const profitColor =
-    summary.net_profit > 0 ? colors.bet : summary.net_profit < 0 ? colors.avoid : colors.textPrimary;
+  // Ink, not the bright bet/avoid hues (2.22 / 3.55:1 as text; audit H2).
+  const profitColor = pnlColor(summary.net_profit);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -309,9 +309,7 @@ function ManualBetsCard({
 
 function manualResultColor(result: ManualBetResult, profit: number): string {
   if (result === 'open') return colors.textSecondary;
-  if (profit > 0) return colors.bet;
-  if (profit < 0) return colors.avoid;
-  return colors.textSecondary;
+  return pnlColor(profit);
 }
 
 const TRACKED_ROW_CAP = 40;
@@ -446,8 +444,8 @@ function trackedResultLabel(row: TrackedBetRow): string {
 }
 
 function trackedResultColor(row: TrackedBetRow): string {
-  if (row.status === 'won') return colors.bet;
-  if (row.status === 'lost') return colors.avoid;
+  if (row.status === 'won') return colors.betInk;
+  if (row.status === 'lost') return colors.avoidInk;
   return colors.textSecondary;
 }
 
@@ -530,13 +528,7 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 function BetRow({ bet }: { bet: SyncedBet }) {
   const settled = bet.settled;
   const profit = Number(bet.profit ?? 0);
-  const resultColor = !settled
-    ? colors.textSecondary
-    : profit > 0
-      ? colors.bet
-      : profit < 0
-        ? colors.avoid
-        : colors.textSecondary;
+  const resultColor = !settled ? colors.textSecondary : pnlColor(profit);
   const right = settled
     ? formatCurrencySigned(profit)
     : bet.stake != null
@@ -694,16 +686,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     borderRadius: radii.md,
     padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
+  // medInk 4.99:1 on medSoft; `med` was 1.97:1. The icon keeps amber (M24).
   reconnectText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.med,
+    color: colors.medInk,
     fontWeight: font.weight.medium,
   },
   betRow: {

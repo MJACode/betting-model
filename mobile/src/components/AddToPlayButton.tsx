@@ -40,13 +40,13 @@ export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
         <Ionicons
           name={inPlay ? 'checkmark' : 'add'}
           size={compact ? 14 : 16}
-          color={inPlay ? colors.bet : colors.tint}
+          color={inPlay ? colors.betInk : colors.tint}
         />
         <Text
           style={[
             styles.text,
             compact && styles.textCompact,
-            { color: inPlay ? colors.bet : colors.tint },
+            { color: inPlay ? colors.betInk : colors.tint },
           ]}
         >
           {inPlay ? (compact ? 'In slip' : 'In betslip') : compact ? 'Slip' : 'Add to betslip'}

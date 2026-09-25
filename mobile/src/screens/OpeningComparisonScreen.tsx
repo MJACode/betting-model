@@ -11,7 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { fetchOpeningVsLive, fetchOpeningSlices } from '@/lib/queries';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatPct, formatPctSigned } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 import { SHADOW_TRACK_START } from '@/lib/recordStart';
@@ -23,10 +23,10 @@ import { SHADOW_TRACK_START } from '@/lib/recordStart';
 // (CLAUDE.md §2).
 const RECORD_START = SHADOW_TRACK_START;
 
+// Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
+// which are 2.22 / 3.55:1 as text (audit H2).
 function roiColor(roi: number): string {
-  if (roi > 0.001) return colors.positive;
-  if (roi < -0.001) return colors.negative;
-  return colors.textSecondary;
+  return pnlColor(roi, 0.001);
 }
 
 function roiOf(r: { profit_flat: number; staked_flat: number }): number {
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
-  error: { fontSize: font.size.footnote, color: colors.avoid, marginBottom: spacing.md },
+  error: { fontSize: font.size.footnote, color: colors.avoidInk, marginBottom: spacing.md },
   loading: { marginVertical: spacing.lg },
   row: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.md },
   trackCard: {

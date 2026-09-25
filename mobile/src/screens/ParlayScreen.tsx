@@ -60,7 +60,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 
 type ParlayNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -597,12 +597,22 @@ const GRADE_COLOR: Record<ParlayGrade, string> = {
   bad: colors.avoid,
 };
 
+// The WORD's colour. The hues above stay on the wash and the border; as text
+// they were 2.0 / 3.4 / 2.0 / 3.0:1 on their own wash (audit H2). `good` has
+// no blue ink, so its word is textPrimary and the blue wash carries the tone.
+const GRADE_INK: Record<ParlayGrade, string> = {
+  great: colors.betInk,
+  good: colors.textPrimary,
+  fair: colors.medInk,
+  bad: colors.avoidInk,
+};
+
 /** Great / Good / Fair / Bad pill, graded on the correlated EV. */
 function GradeBadge({ grade, small }: { grade: ParlayGrade; small?: boolean }) {
   const c = GRADE_COLOR[grade];
   return (
     <View style={[styles.gradeBadge, small && styles.gradeBadgeSmall, { backgroundColor: `${c}22`, borderColor: c }]}>
-      <Text style={[styles.gradeBadgeText, small && styles.gradeBadgeTextSmall, { color: c }]}>
+      <Text style={[styles.gradeBadgeText, small && styles.gradeBadgeTextSmall, { color: GRADE_INK[grade] }]}>
         {GRADE_LABEL[grade]}
       </Text>
     </View>
@@ -626,7 +636,7 @@ function CorrelatedExtras({ m, allDk }: { m: CorrelatedMetrics; allDk: boolean }
       </View>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>{holdPositive ? (allDk ? 'DK hold on this slip' : 'Hold on this slip') : 'Your edge on this slip'}</Text>
-        <Text style={[styles.corrValue, { color: holdPositive ? colors.avoid : colors.bet }]}>
+        <Text style={[styles.corrValue, { color: holdPositive ? colors.avoidInk : colors.betInk }]}>
           {formatPct(Math.abs(m.dkHoldPct))}
         </Text>
       </View>
@@ -663,13 +673,13 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
       </View>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>Best-book odds</Text>
-        <Text style={[styles.corrValue, { color: colors.bet }]}>
+        <Text style={[styles.corrValue, { color: colors.betInk }]}>
           {formatAmerican(lineShop.americanOdds)} vs DK {formatAmerican(dkAmerican)}
         </Text>
       </View>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>EV at best books</Text>
-        <Text style={[styles.corrValue, { color: lineShop.ev >= 0 ? colors.bet : colors.avoid }]}>
+        <Text style={[styles.corrValue, { color: pnlColor(lineShop.ev) }]}>
           {formatPctSigned(lineShop.ev)} ({formatPctSigned(lineShop.evDelta)})
         </Text>
       </View>
@@ -832,12 +842,12 @@ function SlipBody({
           <Stat
             label="EV"
             value={formatPctSigned(metrics.ev)}
-            color={metrics.ev >= 0 ? colors.bet : colors.avoid}
+            color={pnlColor(metrics.ev)}
           />
           <Stat
             label="Edge"
             value={formatPctSigned(metrics.edgeVsDk)}
-            color={metrics.edgeVsDk >= 0 ? colors.bet : colors.avoid}
+            color={pnlColor(metrics.edgeVsDk)}
           />
           <Stat label={allDk ? 'DK imp.' : 'Implied'} value={formatPct(metrics.dkImpliedProb)} />
         </View>
@@ -1077,7 +1087,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   errorText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.footnote,
   },
   panelTitle: {
@@ -1180,7 +1190,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   clearBtnText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
@@ -1196,15 +1206,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     borderRadius: radii.md,
     padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
   },
+  // medInk 4.99:1 on medSoft; `med` was 1.97:1. The icon keeps amber (M24).
   warnText: {
     flex: 1,
-    color: colors.med,
+    color: colors.medInk,
     fontSize: font.size.footnote,
     fontWeight: font.weight.medium,
   },
@@ -1325,7 +1336,7 @@ const styles = StyleSheet.create({
   lineShopTitle: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: colors.bet,
+    color: colors.betInk,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },

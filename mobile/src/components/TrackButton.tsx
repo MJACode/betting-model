@@ -40,13 +40,13 @@ export function TrackButton({ tracked, onPress, compact }: Props) {
         <Ionicons
           name={tracked ? 'notifications' : 'notifications-outline'}
           size={compact ? 14 : 16}
-          color={tracked ? colors.bet : colors.tint}
+          color={tracked ? colors.betInk : colors.tint}
         />
         <Text
           style={[
             styles.text,
             compact && styles.textCompact,
-            { color: tracked ? colors.bet : colors.tint },
+            { color: tracked ? colors.betInk : colors.tint },
           ]}
         >
           {tracked ? 'Tracking' : 'Track'}
