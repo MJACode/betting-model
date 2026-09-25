@@ -52,6 +52,12 @@ export const colors = {
   betSoft: '#E8F8EC',
   avoid: '#FF3B30', // red
   avoidSoft: '#FDECEB',
+  // Error TEXT. `avoid` is 3.55:1 on bgCard — fine for an icon or an outline
+  // (non-text needs 3:1), below the 4.5:1 floor for words. Apple's accessible
+  // system red, measured (2026-09-25, WCAG 2.x relative luminance):
+  //   L 0.1450 · 5.38:1 on bgCard (#FFFFFF) · 4.83:1 on bg / bgGrouped (#F2F2F7)
+  // First used by the Settings bankroll field's error message (#831).
+  avoidText: '#D70015',
   none: '#8E8E93', // gray
   noneSoft: '#EFEFF4',
 

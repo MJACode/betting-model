@@ -878,10 +878,12 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: spacing.sm,
   },
+  // Words take the text-safe red; the icon beside them and the field's
+  // outline keep `avoid` (non-text, 3:1 is enough there).
   fieldErrorText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.avoid,
+    color: colors.avoidText,
   },
   // The mockup's grouped inset, as the sportsbook row above it uses.
   unitRow: {

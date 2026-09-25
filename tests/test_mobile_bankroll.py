@@ -110,6 +110,17 @@ def test_explainer_no_longer_denies_a_bankroll():
     assert "never sizes a bet" in explainer
 
 
+
+def test_error_text_uses_the_text_safe_red():
+    # `avoid` (#FF3B30) is 3.55:1 on white: fine for the icon and outline, not
+    # for words. The message takes `avoidText` (#D70015, 5.38:1).
+    theme = _read(MOBILE / "src/lib/theme.ts")
+    assert "avoidText: '#D70015'," in theme
+    settings = _read(SETTINGS)
+    assert "color: colors.avoidText," in settings
+    assert "borderColor: colors.avoid," in settings
+    assert '<Ionicons name="alert-circle" size={14} color={colors.avoid} />' in settings
+
 def test_runs_in_pr_ci():
     assert "tests/test_mobile_bankroll.py" in _read(ROOT / ".github/workflows/pr-ci.yml")
 

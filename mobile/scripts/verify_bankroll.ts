@@ -266,6 +266,43 @@ check('Picks: the exposure banner is unchanged and shows no dollars',
             {formatUnits(exposure.cap)} daily limit. Consider sizing
             down or sitting some out.`) && !/bankroll|Bankroll|formatDollars/.test(picks));
 
+// ── 8b. Error colour: text-safe red for words, `avoid` for icon + outline ──
+{
+  const lum = (hex: string) => {
+    const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+      .map((x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const ratio = (a: string, b: string) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  // theme.ts imports react-native (Platform), which tsx cannot load, so the
+  // tokens are read from its source.
+  const theme = read('lib/theme.ts');
+  const token = (name: string) => theme.match(new RegExp(`\\n  ${name}: '(#[0-9A-Fa-f]{6})'`))?.[1] ?? '#000000';
+  const colors = {
+    avoid: token('avoid'), avoidText: token('avoidText'),
+    bg: token('bg'), bgCard: token('bgCard'), bgGrouped: token('bgGrouped'),
+  };
+  eq('avoidText is #D70015', colors.avoidText, '#D70015');
+  check('the backgrounds it sits on are the light tokens (the theme has no dark variant)',
+    colors.bgCard === '#FFFFFF' && colors.bgGrouped === '#F2F2F7' && colors.bg === '#F2F2F7');
+  const onCard = ratio(colors.avoidText, colors.bgCard);
+  const onGrouped = ratio(colors.avoidText, colors.bgGrouped);
+  check(`avoidText clears AA (4.5:1) on bgCard: ${onCard.toFixed(2)}:1`, onCard >= 4.5);
+  check(`avoidText clears AA (4.5:1) on bg / bgGrouped: ${onGrouped.toFixed(2)}:1`, onGrouped >= 4.5 &&
+    ratio(colors.avoidText, colors.bg) >= 4.5);
+  check(`avoid stays non-text only: ${ratio(colors.avoid, colors.bgCard).toFixed(2)}:1 ≥ 3:1, < 4.5:1`,
+    ratio(colors.avoid, colors.bgCard) >= 3 && ratio(colors.avoid, colors.bgCard) < 4.5);
+  const style = (name: string) => settings.match(new RegExp(`\\n  ${name}: \\{[^}]*\\}`))?.[0] ?? '';
+  check('the error TEXT uses avoidText', /color: colors\.avoidText/.test(style('fieldErrorText')));
+  check('the outline still uses avoid', /borderColor: colors\.avoid\b(?!Text)/.test(style('moneyFieldError')));
+  check('the icon still uses avoid',
+    /<Ionicons name="alert-circle" size=\{14\} color=\{colors\.avoid\} \/>\s*<Text style=\{styles\.fieldErrorText\}>\{error\}<\/Text>/.test(settings));
+  check('avoidText is used for that text only', (settings.match(/colors\.avoidText/g) ?? []).length === 1);
+}
+
 // ── 9. Explainer ───────────────────────────────────────────────────────────
 const explainer = read('screens/ExplainerScreen.tsx').replace(/\s+/g, ' ');
 check('Explainer: no longer says we never ask for a bankroll', !explainer.includes('we never ask for your bankroll'));
