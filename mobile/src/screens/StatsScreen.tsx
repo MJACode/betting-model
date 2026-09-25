@@ -1551,6 +1551,11 @@ export function StatsScreen() {
       // mode: an Averages row has no side to carry, and sending one would
       // flip the detail card to Under off a board that never mentioned it.
       hitMode: effectiveMode === 'hitRate' ? hitMode : undefined,
+      // ...and the LINE and WINDOW the row was read at, so "45+ over L3" does
+      // not open as "69+ over L10" (Matt, 2026-09-25). Hit Rate mode only,
+      // for the same reason as the side: an Averages row asked no line.
+      line: effectiveMode === 'hitRate' ? lineN : undefined,
+      gameWindow: typeof timeWindow === 'number' ? timeWindow : undefined,
     });
   };
 
@@ -1565,8 +1570,7 @@ export function StatsScreen() {
   const lineHeadline =
     hitModeHeadline(lineN, hitMode, stat?.label ?? '');
   // What a BET made from this column is called. Almost always the column's own
-  // name; "Anytime TD" where the board asks Rush+Rec TDs, because no book
-  // sells the column's version (markets.ts propDisplayLabel).
+  // name; the market's where the two differ (markets.ts propDisplayLabel).
   const betLabel = propDisplayLabel(propMarket, stat?.label ?? '');
 
   // What the tapped pill hands the add-to-betslip sheet: the proposition,

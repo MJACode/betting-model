@@ -219,10 +219,10 @@ check('a linebacker is offered Defense alone, not three empty offensive tabs',
 const teLog = [normalizeLogRow('NFL', nflGame({ pos: 'TE', receptions: 5, receiving_yards: 61, receiving_tds: 1, targets: 7 }))];
 const teChips = chipsForLoadedPlayer(nflChips, teLog);
 const teFilled = filledChipCounts(teChips, teLog);
-check('a receiving TD holds the Rushing tab (Rush+Rec TDs lives there)',
+check('a receiving TD holds the Rushing tab (Anytime TD lives there)',
   groupsOfChips(teChips).includes('Rushing'));
 check('...but that tab opens on the TD, not on Rush Yards 0.0',
-  openingChip(teChips, teFilled, 'Rushing')?.label === 'Rush+Rec TDs');
+  openingChip(teChips, teFilled, 'Rushing')?.label === 'Anytime TD');
 check('a tight end opens on the stat he fills most, not on catalog order',
   openingChip(teChips, teFilled)?.label === 'Receptions' ||
   openingChip(teChips, teFilled)?.group === 'Receiving');

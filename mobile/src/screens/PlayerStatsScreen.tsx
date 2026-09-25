@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -150,8 +150,16 @@ export function PlayerStatsScreen() {
   useEffect(() => {
     setPicked(requested ?? defaultChipForPlayer(sport, playerType));
     setMode(requestedMode);
-    setGameWindow(windows.some((w) => w.value === 10) ? 10 : windows[0]!.value);
-  }, [sport, playerType, playerId, windows, requested, requestedMode]);
+    // The board's window when this screen offers that span (Stats L3 → L3
+    // here); else this screen's own default. 'Season' and H2H have no
+    // equivalent span here, so they fall back rather than guess one.
+    const asked = route.params.gameWindow;
+    setGameWindow(
+      asked != null && windows.some((w) => w.value === asked)
+        ? (asked as GameWindow)
+        : windows.some((w) => w.value === 10) ? 10 : windows[0]!.value,
+    );
+  }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
   const beforeDate = todayET();
   const { games, loading, loaded, error } = usePlayerTrends({
@@ -237,6 +245,10 @@ export function PlayerStatsScreen() {
   // follows the BOOK's posted line once it arrives — a hit rate at 5.5 when
   // the book hangs 6.5 answers a question nobody is being asked.
   const [lineTouched, setLineTouched] = useState(false);
+  // The line was handed over by the Stats board rather than stepped here —
+  // held like a touched line (the book's line does not replace it) but NAMED
+  // for where it came from, not "your line" (UX review, 2026-09-25).
+  const [lineFromBoard, setLineFromBoard] = useState(false);
 
   // ── The betslip leg ────────────────────────────────────────────────────────
   // The Stats board's line pills open the sportsbook (Matt, 2026-09-04), so
@@ -279,9 +291,35 @@ export function PlayerStatsScreen() {
 
   // Reset the line to auto whenever the stat changes — a points line makes no
   // sense for rebounds.
+  //
+  // EXCEPT the first time the screen lands on the stat it was asked for with a
+  // line: that line is the question the reader tapped ("45+ Rush Yards"), so
+  // it is held as their own and the book's posted line does not replace it
+  // (Matt, 2026-09-25). Once per player — stepping away and back to the stat
+  // resets as before.
+  const seededLineFor = useRef<string | null>(null);
+  const requestedLine = route.params.line;
   useEffect(() => {
+    const seedKey = `${sport}:${playerId}`;
+    if (
+      requestedLine != null &&
+      Number.isFinite(requestedLine) &&
+      seededLineFor.current !== seedKey &&
+      requested != null &&
+      stat != null &&
+      stat.key === requested.key &&
+      stat.group === requested.group
+    ) {
+      seededLineFor.current = seedKey;
+      setLine(requestedLine);
+      setLineTouched(true);
+      setLineFromBoard(true);
+      return;
+    }
     setLine(null);
     setLineTouched(false);
+    setLineFromBoard(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stat?.key, sport, playerId]);
 
   // Values come most-recent-first. Window slices the most recent N.
@@ -323,7 +361,7 @@ export function PlayerStatsScreen() {
   // Named on the hit card, so nobody reads a 7+ hit rate without knowing the
   // 7 came from a 6.5 posted line (UX review).
   const lineProvenance = lineTouched
-    ? 'your line'
+    ? lineFromBoard ? 'board line' : 'your line'
     : pickThreshold != null && line === pickThreshold
       ? `pick line ${bookLineFromThreshold(pickThreshold)}`
       : postedThreshold != null && line === postedThreshold && detail.tonight
@@ -396,6 +434,7 @@ export function PlayerStatsScreen() {
 
   const stepLine = (deltaSteps: number) => {
     setLineTouched(true);
+    setLineFromBoard(false);
     setLine((prev) => {
       const base = prev ?? roundLineToStep(median ?? step, step);
       return Math.min(Math.max(0, base + deltaSteps * step), Math.ceil(maxValue) + step * 5);
