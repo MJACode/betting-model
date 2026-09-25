@@ -51,6 +51,7 @@ from loguru import logger
 
 from data.db import get_connection, DBConnection
 from data.ingestors.mlb_stats_ingestor import STATSAPI_TEAM_IDS
+from data.mlb_game_id import game_number, mlb_game_id
 
 _MLB_API_V11 = "https://statsapi.mlb.com/api/v1.1"
 _API_SLEEP_SEC = 0.15
@@ -416,7 +417,7 @@ def _game_id_from_schedule(g: dict, target_date: str) -> Optional[str]:
     home = STATSAPI_TEAM_IDS.get(g["home_id"])
     if not away or not home:
         return None
-    return f"MLB_{target_date}_{away}_{home}"
+    return mlb_game_id(target_date, away, home, game_number(g))
 
 
 def backfill_pbp(start_year: int, end_year: int, force: bool = False) -> dict:

@@ -157,7 +157,8 @@ def parse_public_betting(game: dict, book_ids: list[str],
     except Exception:
         game_date = snapshot_at[:10]
 
-    game_id = _build_game_id("MLB", game_date, away_abbr, home_abbr)
+    game_id = _build_game_id("MLB", game_date, away_abbr, home_abbr,
+                             commence_time=start or None)
 
     period = _select_book(game.get("markets", {}), book_ids)
     if not period:

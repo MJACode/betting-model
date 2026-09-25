@@ -82,6 +82,7 @@ from config import (
 from data.live_quote_guard import quote_predates_score
 from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
+from data.mlb_game_id import game_number, mlb_game_id
 from data.name_match import resolve_feed_name
 
 # Max minutes two books' opening snapshots may be apart and still count as
@@ -2745,7 +2746,8 @@ def _get_postponed_games(target_date: str) -> set[str]:
             home_abbr = _STATSAPI_TEAM_IDS.get(home_id, "")
             away_abbr = _STATSAPI_TEAM_IDS.get(away_id, "")
             if home_abbr and away_abbr:
-                game_id = f"MLB_{target_date}_{away_abbr}_{home_abbr}"
+                game_id = mlb_game_id(target_date, away_abbr, home_abbr,
+                                      game_number(game))
                 postponed_ids.add(game_id)
                 logger.info(f"  Postponed: {away_abbr} @ {home_abbr} ({status})")
 
@@ -3810,7 +3812,7 @@ def _get_probable_pitchers(target_date: str, conn: DBConnection) -> list[dict]:
         if not home_name or not away_name:
             continue
 
-        game_id = f"MLB_{target_date}_{away_name}_{home_name}"
+        game_id = mlb_game_id(target_date, away_name, home_name, game_number(game))
 
         for side, team_abbr in [("home_probable_pitcher", home_name),
                                   ("away_probable_pitcher", away_name)]:

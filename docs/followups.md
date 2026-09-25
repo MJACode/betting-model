@@ -1457,6 +1457,40 @@ all seasons, recompute 2026, re-sweep the thresholds, and stamp it
 
 ## [ ] Doubleheaders collide under one game_id, and their props land on top of each other
 
+**2026-09-25 -- fix in DRAFT PR (branch `coder/mlb-doubleheader-ingest`), not
+merged.** It happened again, and this time it settled a bet wrong: BAL@NYY
+2026-09-25 was a doubleheader, game 1's in-play prices (+3300 NYY, stamped
+`open`) and final landed on `MLB_2026-09-25_BAL_NYY` beside game 2's board, and
+a game-2 BET settled LOSS at 7:12 PM ET on game 1's box score before game 2
+started. The PR:
+- `data/mlb_game_id.py`: one id per physical game. Game 1 and single games keep
+  `MLB_<date>_<away>_<home>`; game 2 is `_G2`. Stats API sites read
+  `gameNumber`; sportsbook feeds (Odds API bulk/per-event/props/live, Action
+  Network, in-play history) match the event's start time to the Stats API
+  schedule. A traditional doubleheader's TBD game 2 placeholder (game 1 + 5
+  min) is pushed to game 1 + 3h before matching. Schedule unavailable = game 1
+  = the old id.
+- MLB odds rows are labelled per snapshot against their own event's start
+  (`snapshot_type_for`), not from the batch.
+- The finals writer keys on game_id (date+teams wrote game 1's final onto the
+  shared row and dropped game 2's), and box scores for game 2 now ingest under
+  `_G2` instead of being skipped as already-done.
+- An INTERIM settlement guard (`paper_tracker._settle_hold_reason`) holds a pick
+  whose game has not started, and on a doubleheader day one whose start does
+  not match the row's, whose row went live >60 min before its start, or that was
+  created after the row's game ended. Held picks stay unsettled and are logged.
+- `data/migrations/scored_outcomes_doubleheader_guard_2026_09_25.sql` (NOT
+  applied, NOT in ACTIVE_MIGRATIONS) applies the same ungrading to
+  `mv_scored_pick_outcomes` for rows already stored under a collapsed id.
+
+NOT done, and needs a decision: the 25 doubleheaders of 2026 already stored as
+one collapsed row each (Stats API gameNumber=2 list, read 2026-09-25; 19 carry
+picks, 1,730 picks, 32 settled BETs) are not repaired, and picks 2899429 /
+2911172 are untouched (Matt deciding). `sbr_loader.py` (historical SBR) and the
+dk_direct / bovada name resolver are unchanged -- the resolver refuses on
+ambiguity, so while both games are unscored those two in-play feeds drop
+BAL@NYY-style rows rather than guess.
+
 Found 2026-09-05 while designing the alternate-lines view. 1,546 (game,
 market, player, book) keys since 2026-08-29 carry TWO rows at the same
 `snapshot_at`, DraftKings included (163): `_build_game_id` is

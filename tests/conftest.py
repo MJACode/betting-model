@@ -51,3 +51,17 @@ def _platform_gates_at_identity(monkeypatch):
     #     monkeypatch.setattr(config, "MODEL_OWN_EV_FLOOR", {})
     monkeypatch.setattr(config, "GLOBAL_MIN_EV", -1.0)
     monkeypatch.setattr(sc, "_CAL_CACHE", {})
+
+
+@pytest.fixture(autouse=True)
+def _no_live_mlb_schedule(monkeypatch):
+    """data/mlb_game_id.py reads the MLB Stats API schedule to tell a
+    doubleheader's game 2 from game 1. No test may reach the network for it,
+    so it returns no games here -- every game is game 1, the pre-2026-09-25 id
+    -- and a test that means to exercise a doubleheader replaces
+    `_fetch_schedule` itself (tests/test_mlb_doubleheader_ids.py)."""
+    import data.mlb_game_id as mgi
+    mgi.clear_cache()
+    monkeypatch.setattr(mgi, "_fetch_schedule", lambda game_date: [])
+    yield
+    mgi.clear_cache()
