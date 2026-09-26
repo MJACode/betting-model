@@ -51,7 +51,7 @@ import {
   propMarketForModel,
   MODEL_BOOK,
 } from '@/lib/markets';
-import { isModelRetired, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
+import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -146,6 +146,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const retired = isModelRetired(pick.model_id);
+  // A paused model's pick that Discord never sent (Matt, 2026-09-26: they now
+  // show on the All board as PAUSED). This screen must say the same thing the
+  // card does — no BET badge, stake, Sharp Score, post time, hand-off or slip.
+  // The betslip resolves legs from active models only, so an added leg would
+  // be pruned straight back out.
+  const paused = !retired && isPausedForDisplay(pick);
   // WITHDRAWN only when Discord does not still have the post. A VOID the
   // channel shows is the same bet (Matt, 2026-09-23) — no withdrawn banner,
   // the hand-off stays. A VOID with no Discord post, including a ledger read
@@ -266,9 +272,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             />
           </View>
           <View style={styles.metaRow}>
-            {preview ? (
+            {preview || paused ? (
               <View style={styles.previewBadge}>
-                <Text style={styles.previewBadgeText}>PREVIEW</Text>
+                <Text style={styles.previewBadgeText}>{preview ? 'PREVIEW' : 'PAUSED'}</Text>
               </View>
             ) : (
               <SignalBadge signal={voided ? 'NONE' : pick.signal_type} />
@@ -284,6 +290,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           {pick.condition_status === 'VOID' && !voided ? (
             <Text style={styles.previewNote}>
               Posted to Discord · not counted in the model’s record.
+            </Text>
+          ) : null}
+          {paused ? (
+            <Text style={styles.previewNote}>
+              This model is paused. This is its number, not a signal — it is not on
+              Signals and is not sent to Discord or push.
             </Text>
           ) : null}
           {preview ? (
@@ -310,11 +322,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
 
-        <ReasoningCard pick={pick} />
+        <ReasoningCard pick={pick} paused={paused} />
 
-        <PickTimingCard pick={pick} />
+        {paused ? null : <PickTimingCard pick={pick} />}
 
-        <SharpScoreCard pick={pick} />
+        {paused ? null : <SharpScoreCard pick={pick} />}
 
         {isProbOnlyModel(pick.model_id) ? (
           <View style={styles.infoCard}>
@@ -334,7 +346,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             table below carries books at a different number and the reference
             books that cannot be bet. Not for live picks: they are DraftKings
             only, and the in-play rows are no longer fetched. */}
-        {pick.signal_type === 'BET' && !preview && !retired && !voided ? (
+        {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
           <View style={styles.linesCard}>
             <BookLinesRow pick={pick} bookRows={bookRows} />
           </View>
@@ -345,7 +357,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
-        {hasPricedLine(pick) && openHere && !preview && !retired
+        {hasPricedLine(pick) && openHere && !preview && !retired && !paused
           && !voided ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
@@ -693,7 +705,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    color: colors.none,
+    color: colors.textSecondary,
   },
   previewNote: {
     marginTop: spacing.xs,

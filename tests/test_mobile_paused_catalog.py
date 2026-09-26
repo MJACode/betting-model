@@ -183,7 +183,10 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
 
     screen = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
     assert "[...allData, ...pausedData].filter((d) => d.pick.sport === sport)" in screen
-    assert "paused={view === 'today' && isModelPaused(item.pick.model_id)}" in screen
+    assert "paused={view === 'today' && isPausedForDisplay(item.pick)}" in screen
+    # Paused rows sort after active ones, and drop out once Signal narrows.
+    assert "...all.filter((d) => !isPausedForDisplay(d.pick))," in screen
+    assert "displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)" in screen
     # Signals is derived through passesActionFilter, which refuses a paused
     # model -- the guard that keeps a paused row off the paid board.
     assert "todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))" in screen
@@ -198,3 +201,21 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     assert "!preview && !paused && pick.signal_type === 'BET'" in card
     assert "&& open && !preview && !paused;" in card
     assert "pick.signal_type !== 'BET' || preview || paused" in card
+    assert "const contra = paused ? null : contrarianTag(pick);" in card
+
+    # A pick Discord already sent stays the bet of record (§1c): the PAUSED
+    # treatment is for a paused model's UNPUBLISHED rows only.
+    body = _block(thresholds, "export function isPausedForDisplay", "\n}\n")
+    assert "isModelPaused(p.model_id) && p.discordPublish !== 'published'" in body
+
+    # The detail screen one tap away must agree with the card: no BET badge,
+    # stake, Sharp Score, post time, hand-off or betslip for a paused pick.
+    detail = _read(MOBILE / "src" / "screens" / "PickDetailScreen.tsx")
+    assert "const paused = !retired && isPausedForDisplay(pick);" in detail
+    assert "<ReasoningCard pick={pick} paused={paused} />" in detail
+    assert "{paused ? null : <SharpScoreCard pick={pick} />}" in detail
+    assert "{paused ? null : <PickTimingCard pick={pick} />}" in detail
+    assert "!preview && !retired && !paused && !voided ? (" in detail
+    assert "openHere && !preview && !retired && !paused" in detail
+    reasoning = _read(MOBILE / "src" / "components" / "ReasoningCard.tsx")
+    assert "!isUnlockedPreview(pick) && !paused ? (" in reasoning

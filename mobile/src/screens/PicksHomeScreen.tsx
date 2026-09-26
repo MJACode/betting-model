@@ -97,6 +97,7 @@ import { publicSortAvailable, searchPicks, sortPicks, type SortKey } from '@/lib
 import { colors, font, radii, spacing } from '@/lib/theme';
 import {
   isModelPaused,
+  isPausedForDisplay,
   isModelRetired,
   isUnlockedPreview,
   passesActionFilter,
@@ -359,8 +360,16 @@ export function PicksHomeScreen() {
   const filtered = useMemo(
     () =>
       searchPicks(
-        applyFilter(activeItems, displayFilter).filter((d) =>
-          isGameSelected(d.pick.game_id, gamePicker.selected),
+        applyFilter(activeItems, displayFilter).filter(
+          (d) =>
+            isGameSelected(d.pick.game_id, gamePicker.selected) &&
+            // A Signal filter asks what the MODEL called, and a paused model
+            // is making no calls: a paused row's stored BET is not a bet
+            // (passesActionFilter refuses it, and the header's "N bets" does
+            // not count it). So once Signal narrows, paused rows drop out —
+            // otherwise "BET only" listed PAUSED cards under a header that
+            // counted three bets (UX review, 2026-09-26).
+            (displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)),
         ),
         search,
       ),
@@ -370,7 +379,17 @@ export function PicksHomeScreen() {
   useEffect(() => {
     if (!publicSortLive && sortKey === 'public') setSortKey('edge');
   }, [publicSortLive, sortKey]);
-  const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
+  // Paused rows sort AFTER active ones on every key, the chosen sort holding
+  // inside each group: a paused model's noisy edges would otherwise take the
+  // top of an edge-sorted All board and push the real bets below the fold
+  // (UX review, 2026-09-26). A stable partition of the sorted list.
+  const sorted = useMemo(() => {
+    const all = sortPicks(filtered, sortKey);
+    return [
+      ...all.filter((d) => !isPausedForDisplay(d.pick)),
+      ...all.filter((d) => isPausedForDisplay(d.pick)),
+    ];
+  }, [filtered, sortKey]);
 
   // Games is shared with Stats. A game picked there (or here) can empty THIS
   // board while Today still has picks — the generic "widen signals / thresholds"
@@ -385,7 +404,8 @@ export function PicksHomeScreen() {
   // All: BET/AVOID/NONE counts.
   const todayStats = useMemo(() => {
     const bet = todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).length;
-    return { total: todayData.length, bet };
+    const paused = todayData.filter((d) => isPausedForDisplay(d.pick)).length;
+    return { total: todayData.length, bet, paused };
   }, [todayData]);
 
   // Signals / Live views: exposure of the recommended stakes on screen.
@@ -408,7 +428,9 @@ export function PicksHomeScreen() {
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
   const subtitle =
     view === 'today'
-      ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored`
+      ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored${
+          todayStats.paused > 0 ? ` · ${todayStats.paused} paused` : ''
+        }`
       // NO DATE on the live board, and that is not a tidy-up. The board can now
       // hold a game that kicked off before midnight ET, which the whole system
       // files under YESTERDAY -- Discord posted it under that date, the track
@@ -597,7 +619,7 @@ export function PicksHomeScreen() {
             onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
             liveState={liveStates.get(item.pick.game_id) ?? null}
             showSignalBadge={view === 'today'}
-            paused={view === 'today' && isModelPaused(item.pick.model_id)}
+            paused={view === 'today' && isPausedForDisplay(item.pick)}
           />
         )}
         ListEmptyComponent={

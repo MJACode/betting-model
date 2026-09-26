@@ -134,7 +134,9 @@ export function PickCard({
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const sharp = preview || paused ? null : sharpScore(pick);
-  const contra = contrarianTag(pick);
+  // A paused card must not carry the green "Sharp side" chip — it reads as a
+  // recommendation. The neutral crowd line below shows instead.
+  const contra = paused ? null : contrarianTag(pick);
   // Where the crowd is, for every pick that carries a split. contrarianTag only
   // speaks on a BET sitting in a decisive band, but nearly all captured splits
   // land on NONE/AVOID rows — and the Public sort orders the whole board by this
@@ -147,14 +149,15 @@ export function PickCard({
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c).
-  const timing = openForAction(pick) ? pickTimingInfo(pick) : null;
+  const timing = openForAction(pick) && !paused ? pickTimingInfo(pick) : null;
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
       : 'Preview — locks fight-day morning'
     : null;
+  const pausedLabel = paused ? 'Model paused — shown for reference, not a bet' : null;
   const hasExtras =
-    Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
+    Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
   const handoff = !preview && !paused && pick.signal_type === 'BET'
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
@@ -379,6 +382,17 @@ export function PickCard({
                 style={styles.extraIcon}
               />
               <Text style={styles.extraText}>{previewLabel}</Text>
+            </View>
+          ) : null}
+          {pausedLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="pause-circle-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{pausedLabel}</Text>
             </View>
           ) : null}
           {pick.injury_flag ? (
@@ -692,7 +706,9 @@ const styles = StyleSheet.create({
     fontSize: font.size.nano,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    color: colors.none,
+    // textSecondary, not colors.none: none on noneSoft is ~2.85:1 at 10pt
+    // (UX review, 2026-09-26), and PAUSED put this pill on far more cards.
+    color: colors.textSecondary,
   },
   injuryText: {
     color: colors.med,
