@@ -202,6 +202,42 @@ in-week during the season.
   for the opener the note says outright that the model only endorsed the
   locked number.
 
+## NONE rows: every game the wind and opener rules evaluated (2026-09-26)
+
+Matt, 2026-09-26: *"There are only 7 bets showing under NFL. All bet lines
+should be showing on the today tab."* Measured that morning: `picks` held 7 NFL
+rows for the 9/27 slate (6 wind BET, 1 opener BET) against 14 games with odds
+stored, and the app displayed all 7. The two rules only ever wrote BETs, so
+the rest of the slate never reached the board.
+
+`scripts/nfl_wind_publisher.py --scored` (`publish_scored`), run by
+`scheduler.run_nfl_poll` right after `nfl_pick_monitor`, now writes one
+`signal_type='NONE'` row per (game, model) from the newest row in
+`pick_eval_<date>.csv`, the per-tick dump both cards already wrote.
+
+- **What the row carries.** The quote the model looked at: wind is the best-book
+  UNDER at its total; the opener is the soft book's HOME spread at the home
+  price (DraftKings first while Pinnacle has not posted). The label uses the
+  BET rows' `(…, BOOK)` shape, e.g. `CIN @ PIT Under 42.5 (no bet, DK)`, because
+  the app reads the quote's book from it. The model's own words go in
+  `downgrade_reason`.
+- **Numbers.** Where the model priced the game (wind at or above threshold), its
+  model probability and edge are used. Where it did not (wind below threshold,
+  any opener row), the rule has no opinion, so model probability = the market's
+  and edge = 0. `kelly_fraction` and `recommended_bet` are 0.
+- **Never a lock.** Both BET locks are keyed on `signal_type='BET'`, and a BET
+  that lands deletes its game's unsettled NONE row first. No NONE row is ever
+  written beside a BET.
+- **Refreshed until kickoff, then frozen.** The row is updated in place only
+  when a number or the reason changes (with `created_at` set to the refresh
+  time). Started games are not touched, so the last pre-game view is what gets
+  graded (CLAUDE.md §7, the evaluation rule).
+- **Never priceless.** A game with no line or price gets no row.
+- **Not published anywhere.** Discord, push, opening signals and every record
+  query read `signal_type='BET'`. `nfl_pick_monitor` now reads BET rows only.
+- **Coverage.** Wind evaluates outdoor games only, so indoor games carry an
+  opener row and no wind row. The opener watches T-0..T-10 days.
+
 ## NFL player-prop injury veto
 
 Pre-game props (`nfl_prop_market`, and `run_nfl_prop_scorer` for any live

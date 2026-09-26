@@ -389,6 +389,16 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
     return out.sort_values("edge", ascending=False).reset_index(drop=True)
 
 
+def _under_quote(r) -> dict:
+    """The row's best UNDER quote as eval_row kwargs; empty when unquoted."""
+    px = getattr(r, "best_under_px", None)
+    total = getattr(r, "best_total", None)
+    if px is None or pd.isna(px) or total is None or pd.isna(total):
+        return {}
+    return dict(current_line=float(total), current_price=int(px),
+                current_book=getattr(r, "best_book", None))
+
+
 def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
                    min_edge: float = MIN_EDGE,
                    max_fire_lead: float = MAX_FIRE_LEAD) -> list[dict]:
@@ -410,10 +420,18 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
         lead_h = float(getattr(r, "lead_days", 0.0)) * 24.0
         common = dict(game_id=r.game_id, model_id="nfl_wind_totals",
                       kick_utc=r.kick_utc, lead_hours=lead_h)
+        # The best-book UNDER quote, carried on EVERY row that has one -- not
+        # only on the rows that clear the wind threshold. The platform writes a
+        # NONE row per evaluated game (scripts/nfl_wind_publisher.publish_scored,
+        # Matt 2026-09-26: "all bet lines should be showing on the today tab"),
+        # and a NONE row without the line it was scored at is not a line.
+        # The early branches below price nothing; they only say what the
+        # market is while the model has no opinion.
+        quote = _under_quote(r)
 
         roof = str(getattr(r, "roof", "") or "").strip()
         if roof in INDOOR_ROOFS:
-            out.append(eval_row(qualifies=False, reason="indoor", **common))
+            out.append(eval_row(qualifies=False, reason="indoor", **quote, **common))
             continue
         if not roof and getattr(r, "stadium_id", None) in RETRACTABLE_STADIUMS:
             # nflverse only records a roof state for a game that has been
@@ -424,12 +442,13 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
                 qualifies=False,
                 reason=(f"retractable roof at {getattr(r, 'stadium_id', '?')} "
                         "and the roof state is not known yet"),
-                **common))
+                **quote, **common))
             continue
 
         wind = getattr(r, "forecast_wind", None)
         if wind is None or pd.isna(wind):
-            out.append(eval_row(qualifies=False, reason="no forecast available", **common))
+            out.append(eval_row(qualifies=False, reason="no forecast available",
+                                **quote, **common))
             continue
         wind = float(wind)
 
@@ -437,7 +456,7 @@ def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
             out.append(eval_row(
                 qualifies=False,
                 reason=f"forecast wind {wind:.1f} mph below the {threshold:.0f} mph threshold",
-                **common))
+                **quote, **common))
             continue
 
         lead_days = float(getattr(r, "lead_days", 0.0))
