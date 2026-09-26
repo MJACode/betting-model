@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, a Discord-published VOID keeps Track and betslip (`openForAction`); PickDetail closes them when the game ends; tracked VOID reads "Not graded". Record still excludes every VOID. UI only |
 | 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, daily results modal: flat P&L in dollars → units won/lost (hero tile "Units", sport/model/pick rows, footer). Zero-rounding days colour neutral. Footer no longer claims settled picks meet current criteria. Other screens still show dollars (follow-up). UI-only |
 | 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, NFL wind/opener write a NONE row per evaluated game so Today shows the whole slate (Updated-By: matt). BET locks keyed on signal_type='BET'; a landing BET clears its NONE row; refreshed until kickoff; no row without a price; pick monitor BET-only |
 | 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, demote the ncaaf_over_under Platt map (Updated-By: mike, Michael Alksninis). The 2026-09-19 promotion (a=1, b=-0.281555) made a +8 over calibrate to ~0.584 while a −8.1 under still cleared 0.65. The worker migration clears that one promoted row. Decision is raw again at the ±8 gate. Floor, gate, and pause list unchanged |

@@ -29,6 +29,7 @@ import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
+import { openForAction } from '@/lib/discordPublish';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
@@ -146,7 +147,7 @@ export function PickCard({
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c).
-  const timing = pick.result == null ? pickTimingInfo(pick) : null;
+  const timing = openForAction(pick) ? pickTimingInfo(pick) : null;
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
@@ -158,10 +159,12 @@ export function PickCard({
   const handoff = !preview && !paused && pick.signal_type === 'BET'
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
     : null;
-  const canTrack = Boolean(onToggleTrack) && pick.result == null;
+  // Open = unsettled, or a VOID Discord still shows (openForAction).
+  const open = openForAction(pick);
+  const canTrack = Boolean(onToggleTrack) && open;
   // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && pick.result == null && !preview && !paused;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
   const showSharp = Boolean(sharp);

@@ -198,6 +198,67 @@ if (!voidHiddenFromBoard({ condition_status: "VOID" }))
     assert proc.returncode == 0, proc.stderr
 
 
+def test_a_published_void_keeps_track_and_betslip():
+    """2026-09-26: Ailin Perez ML (pick 2482412) was VOID + published. The
+    board drew it, but Track and betslip gated on `result == null`, and a VOID
+    carries result NO_ACTION, so the card had no actions. Both surfaces go
+    through openForAction."""
+    script = r"""
+import { openForAction } from "./mobile/src/lib/discordPublish.ts";
+const cases = [
+  [null, null, undefined, true],
+  [null, "OK", "unpublished", true],
+  ["NO_ACTION", "VOID", "published", true],
+  ["NO_ACTION", "VOID", "unpublished", false],
+  ["NO_ACTION", "VOID", undefined, false],
+  ["NO_ACTION", null, "published", false],
+  ["WIN", "VOID", "published", false],
+  ["LOSS", null, "published", false],
+];
+for (const [result, condition_status, discordPublish, want] of cases) {
+  const got = openForAction({ result, condition_status, discordPublish });
+  if (got !== want) throw new Error(JSON.stringify([result, condition_status, discordPublish, got]));
+}
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    card = (ROOT / "mobile/src/components/PickCard.tsx").read_text(encoding="utf-8")
+    detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
+    for src in (card, detail):
+        assert "openForAction(pick)" in src
+        assert "canTrack = pick.result == null" not in src
+        assert "Boolean(onToggleTrack) && pick.result == null" not in src
+        assert "hasPricedLine(pick) && pick.result == null" not in src
+
+
+def test_a_tracked_void_reads_not_graded_and_detail_closes_when_over():
+    """A VOID keeps result NO_ACTION for good. Tracked, it must not read as
+    "No action" (a scratched fight) before the event, and PickDetail must
+    switch its actions off once the game ends, since the result never will."""
+    script = r"""
+import { trackedBetStatus } from "./mobile/src/lib/trackedPerformance.ts";
+const void_ = trackedBetStatus({ result: "NO_ACTION", condition_status: "VOID" });
+if (void_ !== "not_graded") throw new Error("void " + void_);
+const dnp = trackedBetStatus({ result: "NO_ACTION", condition_status: null });
+if (dnp !== "no_action") throw new Error("dnp " + dnp);
+const win = trackedBetStatus({ result: "WIN", condition_status: null });
+if (win !== "won") throw new Error("win " + win);
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    perf = (ROOT / "mobile/src/screens/PerformanceScreen.tsx").read_text(encoding="utf-8")
+    assert "case 'not_graded':" in perf
+    detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
+    assert "openForAction(pick) && (pick.result == null || !over)" in detail
+    assert "hasPricedLine(pick) && openHere" in detail
+
+
 def test_the_settled_record_still_excludes_every_void():
     """Display follows Discord. The record does not. A published VOID is
     still not a settled bet."""
