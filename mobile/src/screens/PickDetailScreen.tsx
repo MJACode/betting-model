@@ -37,7 +37,7 @@ import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { EmptyState } from '@/components/EmptyState';
 import { fetchPickById } from '@/lib/queries';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookName,
@@ -500,8 +500,8 @@ function ClvCard({ pick }: { pick: Pick }) {
     : beat == null
       ? colors.textSecondary
       : beat
-        ? colors.bet
-        : colors.avoid;
+        ? colors.betInk
+        : colors.avoidInk;
   const verdict = flat
     ? 'Matched the close'
     : beat == null
@@ -513,9 +513,9 @@ function ClvCard({ pick }: { pick: Pick }) {
   // The number moved → quote the move in points, the unit the bet is actually
   // in. It held → quote the price move in pp, as before.
   const headline = lineMoved
-    ? `${lineCLV > 0 ? '+' : ''}${lineCLV.toFixed(1)} pts`
+    ? formatSigned(lineCLV, 1, ' pts')
     : pick.clv_pct != null
-      ? `${pick.clv_pct > 0 ? '+' : ''}${pick.clv_pct.toFixed(1)}pp`
+      ? formatSigned(pick.clv_pct, 1, 'pp')
       : '—';
 
   const closeBook = (pick.clv_close_book || 'draftkings').toLowerCase();
@@ -677,10 +677,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   previewBadgeText: {
-    fontSize: 12,
+    fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    color: colors.none,
+    color: colors.textSecondary, // was `none`, 2.84:1 on noneSoft (H1 / L4)
   },
   previewNote: {
     marginTop: spacing.xs,
@@ -695,7 +695,7 @@ const styles = StyleSheet.create({
   bestLine: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: colors.bet,
+    color: colors.betInk,
     marginTop: 2,
   },
   quoteProvenance: {

@@ -42,19 +42,39 @@ const SRC = join(REPO, 'mobile', 'src');
 
 const THEME_FILE = join('mobile', 'src', 'lib', 'theme.ts');
 
-/** Hex literals belong in theme.ts. Alpha-only backdrops are tolerated. */
+/**
+ * Hex literals belong in theme.ts. Alpha-only backdrops are tolerated.
+ *
+ * Also the SHORT forms and rgb()/rgba(): `'#fff'` on bet green (2.22:1, the
+ * sportsbook sheet's Apply button) shipped past the 6-digit pattern alone
+ * (usability audit 2026-09-25, H6 / L3). Short hex must be a quoted string so
+ * "#830" in copy is not read as a colour. Black shadows and black-alpha
+ * backdrops are the tolerated cases, as for 8-digit #000000xx.
+ */
 function hexColors(file: string, lines: string[], out: Finding[]): void {
   if (file.endsWith(THEME_FILE)) return;
   const re = /#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?\b/g;
+  const shortRe = /(['"`])(#[0-9A-Fa-f]{3,4})\1/g;
+  const rgbRe = /\brgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)[^)]*\)/g;
+  const push = (i: number, lit: string) =>
+    out.push({
+      file, line: i + 1, rule: 'hex-color', severity: 'should-fix',
+      message: `hard-coded colour ${lit} — use a token from @/lib/theme (UX_REVIEW §2)`,
+    });
   lines.forEach((text, i) => {
     if (/^\s*(\/\/|\*)/.test(text)) return; // comments
     for (const m of text.matchAll(re)) {
       const hex = m[0].toUpperCase();
       if (hex.startsWith('#000000') && hex.length === 9) continue; // modal backdrop alpha
-      out.push({
-        file, line: i + 1, rule: 'hex-color', severity: 'should-fix',
-        message: `hard-coded colour ${m[0]} — use a token from @/lib/theme (UX_REVIEW §2)`,
-      });
+      push(i, m[0]);
+    }
+    for (const m of text.matchAll(shortRe)) {
+      if (/^#000$/i.test(m[2]) && /shadowColor/.test(text)) continue; // a shadow, not ink
+      push(i, m[2]);
+    }
+    for (const m of text.matchAll(rgbRe)) {
+      if (m[1] === '0' && m[2] === '0' && m[3] === '0') continue; // black-alpha backdrop
+      push(i, m[0]);
     }
   });
 }
@@ -192,6 +212,9 @@ function scanFile(abs: string): Finding[] {
   return out.sort((a, b) => a.line - b.line);
 }
 
+// The app root sits beside src/, not in it; --all and --changed read it too.
+const APP_ROOT_FILE = join('mobile', 'App.tsx');
+
 function walk(dir: string, acc: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
@@ -212,9 +235,9 @@ function changedFiles(): string[] {
   };
   const base = run('git merge-base origin/master HEAD')[0] ?? 'origin/master';
   const set = new Set<string>([
-    ...run(`git diff --name-only ${base} -- mobile/src`),
-    ...run('git diff --name-only -- mobile/src'),
-    ...run('git ls-files --others --exclude-standard -- mobile/src'),
+    ...run(`git diff --name-only ${base} -- mobile/src ${APP_ROOT_FILE}`),
+    ...run(`git diff --name-only -- mobile/src ${APP_ROOT_FILE}`),
+    ...run(`git ls-files --others --exclude-standard -- mobile/src ${APP_ROOT_FILE}`),
   ]);
   return [...set].filter((f) => /\.tsx?$/.test(f)).map((f) => join(REPO, f));
 }
@@ -226,7 +249,7 @@ function main(): void {
   const explicit = args.filter((a) => !a.startsWith('--')).map((a) => resolve(a));
 
   let files: string[];
-  if (mode === '--all') files = walk(SRC);
+  if (mode === '--all') files = [...walk(SRC), join(REPO, APP_ROOT_FILE)];
   else if (mode === '--changed' || explicit.length === 0) files = changedFiles();
   else files = explicit;
   files = files.filter((f) => {

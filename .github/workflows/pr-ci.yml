@@ -92,6 +92,7 @@ jobs:
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
             tests/test_mobile_betslip_combine.py \
+            tests/test_mobile_contrast_tokens.py \
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
             tests/test_publish_key_identity.py \

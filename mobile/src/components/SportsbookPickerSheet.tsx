@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   badgeTextDk: {
-    color: '#000',
+    color: colors.textPrimary,
   },
   rowBody: {
     flex: 1,
@@ -332,9 +332,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
+  // tint + textInverse, as FilterSheet's "Show N picks" (18.6:1). Selected
+  // and confirm are tint, never green; white on `bet` was 2.22:1 (audit H6).
   applyBtn: {
     marginTop: spacing.md,
-    backgroundColor: colors.bet,
+    backgroundColor: colors.tint,
     borderRadius: radii.pill,
     paddingVertical: 14,
     alignItems: 'center',
@@ -345,7 +347,7 @@ const styles = StyleSheet.create({
   applyText: {
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
-    color: '#fff',
+    color: colors.textInverse,
   },
   pressed: {
     opacity: 0.7,

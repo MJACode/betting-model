@@ -34,9 +34,33 @@ export function expectedValue(
  * team lib.
  */
 export function formatSignedUnits(u: number): string {
-  const rounded = Math.round(u * 10) / 10;
-  if (rounded === 0) return '0.0u';
-  return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}u`;
+  // Round half-up first, as this always has, then apply the one sign rule.
+  return formatSigned(Math.round(u * 10) / 10, 1, 'u');
+}
+
+/** U+2212, the minus every signed result uses — width-matched to "+". */
+export const MINUS = '\u2212';
+
+/**
+ * The one signed-number rule (usability audit H2 / L9, PATTERNS §F5): a gain
+ * carries "+", a loss carries U+2212 "−", and anything that ROUNDS to zero at
+ * the shown precision is unsigned ("0.0", never "+0.0" or "−0.0") so a push
+ * never reads as a win or a loss. Missing → '—'.
+ *
+ *   formatSigned(1.23)       → "+1.2"
+ *   formatSigned(-0.5, 2)    → "−0.50"
+ *   formatSigned(0.04, 1)    → "0.0"
+ *   formatSigned(2.3, 1, 'pp') → "+2.3pp"
+ */
+export function formatSigned(
+  value: number | null | undefined,
+  digits = 1,
+  suffix = '',
+): string {
+  if (value == null || Number.isNaN(value)) return '—';
+  const abs = Math.abs(value).toFixed(digits);
+  if (Number(abs) === 0) return `${abs}${suffix}`;
+  return `${value > 0 ? '+' : MINUS}${abs}${suffix}`;
 }
 
 /** Percent formatting — 0.673 -> "67.3%". */
@@ -45,12 +69,10 @@ export function formatPct(value: number | null | undefined, digits = 1): string 
   return `${(value * 100).toFixed(digits)}%`;
 }
 
-/** Signed percent — 0.125 -> "+12.5%". */
+/** Signed percent — 0.125 -> "+12.5%", -0.03 -> "−3.0%", 0.0001 -> "0.0%". */
 export function formatPctSigned(value: number | null | undefined, digits = 1): string {
   if (value == null || Number.isNaN(value)) return '—';
-  const v = value * 100;
-  const sign = v > 0 ? '+' : '';
-  return `${sign}${v.toFixed(digits)}%`;
+  return formatSigned(value * 100, digits, '%');
 }
 
 /** Dollars — 30.5 -> "$30.50". */
@@ -63,8 +85,9 @@ export function formatCurrency(value: number | null | undefined): string {
 /** Signed dollars — -25 -> "−$25.00", +30 -> "+$30.00". */
 export function formatCurrencySigned(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return '—';
-  if (value === 0) return '$0.00';
-  const sign = value > 0 ? '+' : '−';
+  // A result that rounds to zero is a push: unsigned, never "+$0.00".
+  if (Number(Math.abs(value).toFixed(2)) === 0) return '$0.00';
+  const sign = value > 0 ? '+' : MINUS;
   return `${sign}$${Math.abs(value).toFixed(2)}`;
 }
 

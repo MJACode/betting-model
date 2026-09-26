@@ -3895,7 +3895,7 @@ const styles = StyleSheet.create({
   retryText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: colors.avoid,
+    color: colors.avoidInk,
   },
   errorBanner: {
     flexDirection: 'row',
@@ -3909,5 +3909,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     borderRadius: 8,
   },
-  errorText: { flex: 1, color: colors.avoid, fontSize: font.size.footnote },
+  errorText: { flex: 1, color: colors.avoidInk, fontSize: font.size.footnote },
 });

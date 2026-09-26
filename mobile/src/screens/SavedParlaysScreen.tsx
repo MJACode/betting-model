@@ -21,7 +21,7 @@ import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { betOnBookLabel, bookButtonColors } from '@/lib/sportsbookLinks';
 import { modelShort } from '@/lib/modelMeta';
 import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'SavedParlays'>;
@@ -257,12 +257,12 @@ function SavedParlayCard({
         <Stat
           label="EV"
           value={formatPctSigned(metrics.ev)}
-          color={metrics.ev >= 0 ? colors.bet : colors.avoid}
+          color={pnlColor(metrics.ev)}
         />
         <Stat
           label="Edge"
           value={formatPctSigned(metrics.edgeVsDk)}
-          color={metrics.edgeVsDk >= 0 ? colors.bet : colors.avoid}
+          color={pnlColor(metrics.edgeVsDk)}
         />
         <Stat label="DK imp." value={formatPct(metrics.dkImpliedProb)} />
       </View>
@@ -375,7 +375,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   clearAllText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
   },
@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   deleteBtnText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
   },

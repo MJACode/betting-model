@@ -20,9 +20,10 @@ export function SharpScorePill({ score, band }: { score: number; band: SharpBand
 }
 
 const TONE: Record<SharpBand, { bg: string; fg: string }> = {
-  high: { bg: colors.betSoft, fg: colors.bet },
-  med: { bg: colors.medSoft, fg: colors.med },
-  low: { bg: colors.noneSoft, fg: colors.low },
+  // Inks on the washes (4.61 / 4.99 / 9.55:1); the bright hues were ~2:1 (M5).
+  high: { bg: colors.betSoft, fg: colors.betInk },
+  med: { bg: colors.medSoft, fg: colors.medInk },
+  low: { bg: colors.noneSoft, fg: colors.textSecondary },
 };
 
 const styles = StyleSheet.create({
