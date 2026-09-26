@@ -63,6 +63,27 @@ export function voidHiddenFromBoard(p: {
   return p.condition_status === 'VOID' && p.discordPublish !== 'published';
 }
 
+/**
+ * Still open for the user to act on — Track and betslip render.
+ *
+ * `result == null` is an unsettled pick. A VOID writes `result = 'NO_ACTION'`
+ * as its marker, not as a settlement, so a VOID the channel still shows is
+ * the same open bet (Matt, 2026-09-23) and keeps its actions. Without this a
+ * published VOID drew on the board with no Track and no betslip — the
+ * 2026-09-26 UFC card. The settled record still excludes it
+ * (passesRecordFilter).
+ */
+export function openForAction(p: {
+  result: string | null;
+  condition_status: string | null;
+  discordPublish?: DiscordPublish;
+}): boolean {
+  if (p.result == null) return true;
+  return p.result === 'NO_ACTION'
+    && p.condition_status === 'VOID'
+    && p.discordPublish === 'published';
+}
+
 const CHUNK = 80;
 
 /**
