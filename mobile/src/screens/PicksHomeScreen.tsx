@@ -384,7 +384,6 @@ export function PicksHomeScreen() {
     return { total: todayData.length, bet };
   }, [todayData]);
 
-
   // Signals / Live views: exposure of the recommended stakes on screen.
   const signalExposure = useMemo(() => {
     if (view === 'today') return 0;
@@ -548,7 +547,6 @@ export function PicksHomeScreen() {
         </Pressable>
       ) : null}
 
-
       {activeItems.length > 0 && !signalsLocked ? (
         <PickFilters
           state={displayFilter}
@@ -662,7 +660,7 @@ function EmptyForView({
   if (hasAny && emptiedByGames) {
     return (
       <EmptyState
-        title={`No picks for ${gameSummary} on ${boardLabel(view)}`}
+        title={`No picks for ${gameSummary} on the ${boardLabel(view)} board`}
         actionLabel="Clear games"
         onAction={onClearGames}
       />
@@ -688,7 +686,7 @@ function EmptyForView({
     return (
       <EmptyState
         title="No signal bets right now"
-        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check All to see everything the model scored, or check back after the next refresh."
+        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Open the All board to see everything the model scored, or check back after the next refresh."
       />
     );
   }
@@ -704,7 +702,7 @@ function EmptyForView({
       return (
         <EmptyState
           title={`No live model for ${sport} yet`}
-          subtitle={`In-play models run on ${liveModelSportsSentence()} today, so this board stays empty for ${sport}. All and Signals carry ${sport}’s pre-game picks.`}
+          subtitle={`In-play models run on ${liveModelSportsSentence()} today, so this board stays empty for ${sport}. The All and Signals boards carry ${sport}’s pre-game picks.`}
         />
       );
     }
