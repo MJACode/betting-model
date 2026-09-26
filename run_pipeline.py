@@ -91,30 +91,136 @@ def _import_step(step_name: str):
 
 # ── Pipeline Steps ────────────────────────────────────────────────────────────
 
+# Session-only cap for the concurrent refresh below. The database
+# statement_timeout stays 120000 ms for every other statement.
+#
+# Measured 2026-09-26, read-only:
+#   pg_settings.statement_timeout = 120000 (configuration file)
+#   pg_stat_statements, stats_reset 2026-04-04: 978 completed calls of
+#     REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_scored_pick_outcomes,
+#     mean 5602.5 ms, min 3577.0 ms, max 57715.8 ms
+#   pipeline_log dispatch:refresh-outcomes, status=success, created_at
+#     >= 2026-09-01: n=927, p50 6.160 s, p95 7.243 s, max 63.948 s.
+#     One error in the table: log 99603, 121.237 s, evening run
+#     ce9699a2719847338d7328398098421a
+#   postgres log: that statement started 2026-09-26T00:24:46.914Z and was
+#     cancelled 2026-09-26T00:26:46.914Z ("canceling statement due to
+#     statement timeout"). log_lock_waits is on, deadlock_timeout is 1s,
+#     and no lock-wait line was logged for it.
+#   EXPLAIN of the live view: seq scan of picks (cost 14277.32, est 139708
+#     rows) plus index scans on games_pkey and the two player-log unique
+#     indexes. Top cost 464651.23. Not a missing-index plan.
+#   mv size at the same read: 49 MB, 151448 live rows. Unique index
+#     mv_scored_pick_outcomes_pick_id_idx is valid.
+#
+# 300000 ms is a cap on this connection, above the 57715.8 ms longest
+# completed refresh and above the 120000 ms cancel. It is not a
+# measurement of how long the cancelled statement still had to run.
+_OUTCOMES_REFRESH_TIMEOUT_MS = 300_000
+_OUTCOMES_REFRESH_ATTEMPTS = 2
+_OUTCOMES_REFRESH_SQL = (
+    "REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_scored_pick_outcomes"
+)
+_OUTCOMES_ANALYZE_SQL = "ANALYZE public.mv_scored_pick_outcomes"
+
+
+def _is_statement_timeout(exc: BaseException) -> bool:
+    """The production cancel string. 57014 is also a user cancel; the
+    message is what pipeline_log 99603 recorded."""
+    return "statement timeout" in str(exc).lower()
+
+
+def _ready_outcomes_session(conn) -> None:
+    """Autocommit plus a statement_timeout that dies with this connection.
+
+    REFRESH CONCURRENTLY refuses to run inside a transaction block, so
+    SET LOCAL cannot cover it. get_connection() without session_mode
+    rewrites the session pooler to the transaction pooler, and a session
+    GUC there sticks to whichever backend drew the SET — the next
+    statement can be a different backend still at 120s, and the one that
+    took the SET is returned to the pool with the longer timeout. A
+    session-mode connection keeps one backend until close().
+    """
+    conn._conn.autocommit = True
+    conn.execute(f"SET statement_timeout = {_OUTCOMES_REFRESH_TIMEOUT_MS}")
+
+
+def _recover_outcomes_session(conn) -> None:
+    """Make the same connection usable after a cancelled statement.
+
+    psycopg2 rollback() is a no-op when autocommit left no transaction
+    open, and it is the ROLLBACK that clears an aborted transaction when
+    autocommit was not in effect. Evening scoring on 2026-09-25 kept
+    going after a statement_timeout without one and died on
+    InFailedSqlTransaction (#828). Then put autocommit back: the retry's
+    REFRESH CONCURRENTLY cannot run inside a transaction block.
+    """
+    try:
+        conn.rollback()
+    except Exception:                                      # noqa: BLE001
+        logger.exception("scored-pick outcomes refresh: rollback failed")
+    try:
+        conn._conn.autocommit = True
+    except Exception:                                      # noqa: BLE001
+        logger.exception(
+            "scored-pick outcomes refresh: could not restore autocommit")
+
+
+def _release_outcomes_session(conn) -> None:
+    """Drop the raised timeout before the session backend goes away."""
+    try:
+        _recover_outcomes_session(conn)
+        conn.execute("RESET statement_timeout")
+    except Exception:                                      # noqa: BLE001
+        logger.exception("scored-pick outcomes refresh: timeout reset failed")
+    try:
+        conn.close()
+    except Exception:                                      # noqa: BLE001
+        pass
+
+
 def step_refresh_outcomes(run_date: str) -> bool:
     """Refresh mv_scored_pick_outcomes — the graded every-pick universe the
     mobile custom-model builder backtests against (custom_model_backtest /
     custom_model_picks RPCs). Runs right after settle so the day's finals are
     graded; CONCURRENTLY so readers never block (needs autocommit — REFRESH
     CONCURRENTLY refuses to run inside a transaction). Non-fatal: a failed
-    refresh just leaves backtests one day stale."""
+    refresh just leaves backtests one day stale.
+
+    The database statement_timeout is 120s. Completed runs of this statement
+    have mean 5602.5 ms (pg_stat_statements, 978 calls). One execution was
+    cancelled at exactly 120s while still running (pipeline_log 99603,
+    2026-09-26). The longer cap is this session connection only. One retry
+    after rollback: the first attempt can still be the one that hits the cap.
+    """
+    conn = None
     try:
         from data.db import get_connection
-        conn = get_connection()
-        try:
-            conn._conn.autocommit = True
-            conn.execute(
-                "REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_scored_pick_outcomes"
-            )
-            # Keep planner stats current so the RPCs hold their ~50ms plans.
-            conn.execute("ANALYZE public.mv_scored_pick_outcomes")
-        finally:
-            conn.close()
+        conn = get_connection(session_mode=True)
+        _ready_outcomes_session(conn)
+        for attempt in range(1, _OUTCOMES_REFRESH_ATTEMPTS + 1):
+            try:
+                conn.execute(_OUTCOMES_REFRESH_SQL)
+                # Keep planner stats current so the RPCs hold their ~50ms plans.
+                conn.execute(_OUTCOMES_ANALYZE_SQL)
+                break
+            except Exception as exc:
+                if (attempt >= _OUTCOMES_REFRESH_ATTEMPTS
+                        or not _is_statement_timeout(exc)):
+                    raise
+                logger.warning(
+                    "Scored-pick outcomes refresh hit statement timeout; "
+                    f"retrying once: {exc}")
+                _recover_outcomes_session(conn)
+                _ready_outcomes_session(conn)
         logger.success("✓ Scored-pick outcomes refreshed")
         return True
     except Exception as exc:
         logger.error(f"✗ Scored-pick outcomes refresh failed: {exc}")
         return False
+    finally:
+        if conn is not None:
+            _release_outcomes_session(conn)
 
 
 def step_refresh_team_board(run_date: str) -> bool:

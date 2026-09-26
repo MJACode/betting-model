@@ -398,9 +398,9 @@ def run_job_queue() -> None:
     # claiming a job AND executing it -- which is what stops two workers
     # running the queue at once -- and a session-scoped lock cannot survive
     # transaction pooling, where consecutive statements may land on different
-    # backends. Everything else moved to the transaction pooler on 2026-09-06
-    # to escape the session pool's 15-client ceiling; this is the one caller
-    # that must not.
+    # backends. The session pool's 15-client ceiling is why other steps use
+    # the transaction pooler (2026-09-06). This caller must not: the lock
+    # dies if the next statement lands on a different backend.
     try:
         from data.db import get_connection
         from tracking.job_queue import run_one
