@@ -455,8 +455,21 @@ stored NONE. That is one blocked over. It does not create the ten unders.
 Demoting the map, or deciding this rule on the raw ECDF, is a model update
 (the calibration CLI says so). It is not done here.
 
-**Not done, and why.** Nothing was paused. The artifact was not refit. The
-EV floor was not moved. The next measurement is one CFBD read, not a new
+**Open book, rechecked the same day.** Result-null BETs with
+`game_date >= 2026-08-01`: **16 under, 0 over**. Raw `model_probability`
+on those 16 is **0.7111–0.7280** (games 2026-09-26 through 2026-11-28).
+That cluster is P(under) just past the −8 gate (the ECDF gives 0.7098 at
+exactly −8). It is the left tail of a low predicted total.
+
+**`ncaaf_live_total` does not share this path.** A search of `ncaaf_live/`
+for `NCAAF_TOTALS_FEATURES`, `total_regression`, `epa_per_play`, and
+`ncaaf_over_under` is empty. Its engine is LightGBM remaining points
+(`ncaaf_live/engine/remaining.py`); the features are clock, score, the
+posted pregame line, pace, and wind. Config kind is `"engine"`. Its record
+stays with the Model Quality inventory.
+
+**Not done, and why.** Nothing was paused. No side was flipped. The artifact
+was not refit. The EV floor was not moved. The next measurement is one CFBD read, not a new
 model: `/stats/season/advanced?year=2025` (no week bounds — that is what
 `_prior_season_context` stores as the 2026 prior) and
 `?year=2026&startWeek=1&endWeek=4`, and compare `offense.ppa` /
