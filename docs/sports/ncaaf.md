@@ -12,6 +12,10 @@ nothing over the closing line in this market.
 
 ### Models live (2026 season, PAPER-FIRST despite being active)
 
+2026-09-26 inventory, ledger, and the ranked leave-alone list:
+`docs/ncaaf_live_quality_assessment.md`. It does not change a cut or a pause.
+The low-total investigation on `ncaaf_over_under` stays with Model Performance.
+
 | Model ID | Kind | Rule | Status |
 |---|---|---|---|
 | `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF | LIVE — walk-forward 55.9% / +6.7% at the gate, best in all 4 test seasons; CI does not clear breakeven, sized small |
