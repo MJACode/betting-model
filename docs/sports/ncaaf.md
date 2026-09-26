@@ -450,7 +450,7 @@ whichever side is ≥ 0.5. Picks locked before that stamp still have
 A −8 under is raw 0.710, which the map sends to about 0.65, and it still
 clears `MODEL_PROB_THRESHOLDS` 0.65 and the 0.20 EV floor. A +8 over is raw
 0.650, which the map sends to about 0.58, and it does not. Measured on this
-Saturday: Rice @ Fresno State over 44.5, raw 0.6593, calibrated 0.5935,
+Saturday: `Fresno State vs Rice Over 44.5`, raw 0.6593, calibrated 0.5935,
 stored NONE. That is one blocked over. It does not create the ten unders.
 Demoting the map, or deciding this rule on the raw ECDF, is a model update
 (the calibration CLI says so). It is not done here.
