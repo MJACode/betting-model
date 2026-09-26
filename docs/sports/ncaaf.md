@@ -485,9 +485,20 @@ an over row. The next scoring pass deletes `signal_type != 'BET'` and the
 lock does not rewrite that side, so the complement (about 0.27–0.29) is
 gone. Season settled record is unchanged: 22 priced bets, over 4-2
 **+1.54 units**, under 5-11 **−6.50 units** (together **−4.96 units**;
-the kelly sum of those 22 is −212.1). Demoting the map is still a model
-update. It is not done here. A side-only cut is not the fix: the over arm
-is the one the validated +8 gate was written for.
+the kelly sum of those 22 is −212.1).
+
+**Demoted 2026-09-26.** Michael Alksninis approved taking that map out of
+the decision path ("Demote ncaaf_over_under Platt map"). Updated-By:
+mike. `data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql`
+clears `promoted` on the row whose `promoted_at` is
+`2026-09-19T17:45:14.751731-04:00` and whose `promoted_b` is −0.281555.
+`load_calibrations` then misses the model, and `apply_calibration`
+returns the raw probability. Both arms are back at the ±8 gate: raw
+P(over) at +8 is 0.6503 and raw P(under) at −8 is 0.7098, and the point
+gate is what still stops an under near −5. The 0.65 floor and the ±8
+gate are unchanged. No side-only floor. Already-locked BETs are not
+rewritten. A later promotion with a different `promoted_at` is a new
+model update; this migration will not clear it.
 
 **Open book, rechecked the same day.** Result-null BETs with
 `game_date >= 2026-08-01`: **16 under, 0 over**. Raw `model_probability`
@@ -503,8 +514,9 @@ posted pregame line, pace, and wind. Config kind is `"engine"`. Its record
 stays with the Model Quality inventory.
 
 **Not done, and why.** Nothing was paused. No side was flipped. The artifact
-was not refit. The EV floor was not moved. The next measurement is one CFBD read, not a new
-model: `/stats/season/advanced?year=2025` (no week bounds — that is what
+was not refit. The EV floor was not moved. The 0.65 floor was not moved.
+Predicted totals are still low because 2026 PPA is. The next measurement
+on that bias is one CFBD read: `/stats/season/advanced?year=2025` (no week bounds — that is what
 `_prior_season_context` stores as the 2026 prior) and
 `?year=2026&startWeek=1&endWeek=4`, and compare `offense.ppa` /
 `defense.ppa` for one FBS school to the 2026-08-01 prior and the 2025-12-12
