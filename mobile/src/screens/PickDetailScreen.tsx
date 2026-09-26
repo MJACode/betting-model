@@ -294,8 +294,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           ) : null}
           {paused ? (
             <Text style={styles.previewNote}>
-              This model is paused. This is its number, not a signal — it is not on
-              Signals and is not sent to Discord or push.
+              This model is paused. Paused models’ picks are shown for reference
+              only — they are not signals, and paused models don’t post to Discord
+              or push.
             </Text>
           ) : null}
           {preview ? (

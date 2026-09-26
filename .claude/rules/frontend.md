@@ -127,4 +127,6 @@ board.) `useTodayPicks` returns them as `pausedData`, apart from `data`; only
 PicksHomeScreen's All segment merges them, and `PickCard paused` swaps the
 signal badge for PAUSED and drops stake, Sharp Score, book hand-off and the
 betslip button. Signals, sport badges, Models, Stats and the slip still read
-`data`. Pinned by `tests/test_mobile_paused_catalog.py`.
+`data`. The test is `isPausedForDisplay`: a SETTLED pick, or one Discord
+already posted, is still a bet (§1c) and never draws as PAUSED. Pinned by
+`tests/test_mobile_paused_catalog.py`.

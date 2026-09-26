@@ -102,7 +102,9 @@ def test_today_picks_drop_paused_models_at_the_source():
     the pills showing a paused model's leftover BET (the retired-model bug
     one row down)."""
     src = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
-    assert "!isModelPaused(d.pick.model_id)" in src
+    # Split through isPausedForDisplay (which asks isModelPaused), so a
+    # posted or settled pick of a paused model stays in `data` (2026-09-26).
+    assert "!isPausedForDisplay(d.pick)" in src
     assert "!isModelRetired(d.pick.model_id)" in src
 
 
@@ -142,7 +144,9 @@ def test_the_pause_source_is_isModelPaused_not_a_hand_copied_set():
         code = "\n".join(
             line for line in src.splitlines() if not line.strip().startswith("//")
         )
-        assert "isModelPaused" in src, f"{path.name} never calls isModelPaused"
+        assert "isModelPaused" in src or "isPausedForDisplay" in src, (
+            f"{path.name} never calls isModelPaused"
+        )
         assert not re.search(r"PAUSED_MODELS\.has", code), (
             f"{path.name} reads PAUSED_MODELS directly — that skips the "
             "server flag isModelPaused exists to prefer"
@@ -178,8 +182,8 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
       Score, book hand-off, betslip) when `paused`.
     """
     hook = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
-    assert "setData(all.filter((d) => !isModelPaused(d.pick.model_id)))" in hook
-    assert "setPausedData(all.filter((d) => isModelPaused(d.pick.model_id)))" in hook
+    assert "setData(all.filter((d) => !isPausedForDisplay(d.pick)))" in hook
+    assert "setPausedData(all.filter((d) => isPausedForDisplay(d.pick)))" in hook
 
     screen = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
     assert "[...allData, ...pausedData].filter((d) => d.pick.sport === sport)" in screen
@@ -206,7 +210,9 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     # A pick Discord already sent stays the bet of record (§1c): the PAUSED
     # treatment is for a paused model's UNPUBLISHED rows only.
     body = _block(thresholds, "export function isPausedForDisplay", "\n}\n")
-    assert "isModelPaused(p.model_id) && p.discordPublish !== 'published'" in body
+    # ...and a SETTLED pick is never drawn as paused: record screens open
+    # PickDetail too, and a pause never unsays a settled bet (§1c).
+    assert "isModelPaused(p.model_id) && p.result == null && p.discordPublish !== 'published'" in body
 
     # The detail screen one tap away must agree with the card: no BET badge,
     # stake, Sharp Score, post time, hand-off or betslip for a paused pick.

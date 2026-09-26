@@ -173,15 +173,17 @@ export function isModelPaused(modelId: string): boolean {
 /**
  * Whether a pick is DRAWN as paused — the PAUSED pill, no stake, no hand-off
  * (Matt, 2026-09-26: paused models' picks show on the All board). Its model
- * is paused AND Discord never posted it: a pick the channel already sent is
- * the bet of record (CLAUDE.md §1c; display follows Discord, 2026-09-23), and
- * a pause afterwards must not relabel it "not a bet" under the reader.
+ * is paused, the pick is UNSETTLED, and Discord never posted it. Both
+ * exemptions are CLAUDE.md §1c: a settled bet stays a bet whatever the model
+ * does next (record screens open this pick too), and a pick the channel
+ * already sent is the bet of record (display follows Discord, 2026-09-23).
  */
 export function isPausedForDisplay(p: {
   model_id: string;
+  result?: string | null;
   discordPublish?: DiscordPublish;
 }): boolean {
-  return isModelPaused(p.model_id) && p.discordPublish !== 'published';
+  return isModelPaused(p.model_id) && p.result == null && p.discordPublish !== 'published';
 }
 
 /** Resolved per-model action thresholds, preferring the server store; null for
