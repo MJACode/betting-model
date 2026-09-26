@@ -2,7 +2,10 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  InputAccessoryView,
+  Keyboard,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +27,21 @@ import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
+import { useBankroll } from '@/hooks/useBankroll';
+import {
+  BANKROLL_CARD_COPY,
+  BANKROLL_FOOTER_COPY,
+  bankrollDraft,
+  bankrollFieldText,
+  canStepUnitPct,
+  checkBankroll,
+  commitBankrollText,
+  editBankrollInput,
+  formatPct,
+  unitRowSubtitle,
+  unitRowTitle,
+  visibleBankrollError,
+} from '@/lib/bankroll';
 import { NotificationsCard } from '@/components/NotificationsCard';
 import { useFeedbackUnread } from '@/hooks/useFeedback';
 import { useAuth } from '@/hooks/useAuth';
@@ -95,6 +113,160 @@ function LinkRow({
   );
 }
 
+/** The iOS decimal pad has no return key; this bar is its Done. */
+const BANKROLL_ACCESSORY_ID = 'bankrollDone';
+
+/** A labeled Lower | Raise pair — words, not icon steppers, so VoiceOver reads
+ *  the action (#786 removed the icon-only ones for exactly that). */
+function LowerRaise({
+  what,
+  canLower,
+  canRaise,
+  onStep,
+}: {
+  what: string;
+  canLower: boolean;
+  canRaise: boolean;
+  onStep: (dir: -1 | 1) => void;
+}) {
+  return (
+    <View style={styles.stepPill}>
+      {([-1, 1] as const).map((dir) => {
+        const enabled = dir === -1 ? canLower : canRaise;
+        const word = dir === -1 ? 'Lower' : 'Raise';
+        return (
+          <Pressable
+            key={dir}
+            onPress={() => onStep(dir)}
+            disabled={!enabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${word} ${what}`}
+            accessibilityState={{ disabled: !enabled }}
+            hitSlop={{ top: 6, bottom: 6 }}
+            style={({ pressed }) => [
+              styles.stepBtn,
+              dir === 1 && styles.stepBtnRight,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={[styles.stepText, !enabled && styles.stepTextOff]}>{word}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * The optional bankroll — display only (lib/bankroll.ts). It converts the
+ * app's flat units into the member's dollars and sizes nothing. Typing only
+ * edits the field (the unit row follows it); blur or Done saves a valid amount,
+ * clears on empty, and on invalid keeps the saved amount, shows the error and
+ * puts the saved amount back. Every error waits for blur or Done except the
+ * over-$10M one, which shows as you type.
+ */
+function BankrollCard() {
+  const { settings, ready, setAmount, stepUnit } = useBankroll();
+  const [text, setText] = useState(() => bankrollFieldText(settings.amount));
+  const [focused, setFocused] = useState(false);
+  const [blurError, setBlurError] = useState<string | null>(null);
+
+  // The stored amount arrives after the first render (AsyncStorage); show it
+  // unless the member is mid-edit.
+  useEffect(() => {
+    if (!focused) setText(bankrollFieldText(settings.amount));
+  }, [settings.amount]); // not `focused`: a blur must not undo the text just committed
+
+  const error = visibleBankrollError(checkBankroll(text), false) ?? blurError;
+  const shown = bankrollDraft(text, settings.unitPct);
+
+  const onChange = (raw: string) => {
+    setText(editBankrollInput(text, raw));
+    setBlurError(null);
+  };
+
+  const commit = () => {
+    setFocused(false);
+    const c = commitBankrollText(text, settings.amount);
+    setText(c.text);
+    setBlurError(c.error);
+    if (c.save !== undefined) setAmount(c.save);
+  };
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.bookRow}>
+        <Text style={[styles.cardLabel, styles.noMargin]}>Your bankroll</Text>
+        <Text style={styles.bookPillMuted}>Optional</Text>
+      </View>
+      <Text style={styles.bookHint}>{BANKROLL_CARD_COPY}</Text>
+      <View style={[styles.moneyField, error ? styles.moneyFieldError : null]}>
+        <Text
+          style={[styles.moneyPrefix, text === '' && styles.moneyPrefixEmpty]}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+        >
+          $
+        </Text>
+        <TextInput
+          style={styles.moneyInput}
+          value={text}
+          onChangeText={onChange}
+          onFocus={() => setFocused(true)}
+          onBlur={commit}
+          onSubmitEditing={() => Keyboard.dismiss()}
+          keyboardType="decimal-pad"
+          returnKeyType="done"
+          clearButtonMode="while-editing"
+          placeholder="Enter amount"
+          placeholderTextColor={colors.textTertiary}
+          inputAccessoryViewID={Platform.OS === 'ios' ? BANKROLL_ACCESSORY_ID : undefined}
+          accessibilityLabel="Your bankroll in dollars, optional"
+          accessibilityHint="Only used to show your units in dollars. Stays on this device."
+        />
+      </View>
+      {error ? (
+        <View style={styles.fieldErrorRow} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          <Ionicons name="alert-circle" size={14} color={colors.avoid} />
+          <Text style={styles.fieldErrorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.unitRow}>
+        <View style={styles.unitRowText}>
+          <Text style={styles.unitRowTitle}>{unitRowTitle(shown)}</Text>
+          <Text style={styles.unitRowSub}>{unitRowSubtitle(shown)}</Text>
+        </View>
+        {/* Disabled until the stored % has loaded, and stepped inside the
+            store from the latest value either way. */}
+        <LowerRaise
+          what={`unit size, now ${formatPct(settings.unitPct)} of bankroll`}
+          canLower={ready && canStepUnitPct(settings.unitPct, -1)}
+          canRaise={ready && canStepUnitPct(settings.unitPct, 1)}
+          onStep={stepUnit}
+        />
+      </View>
+      <Text style={styles.bankrollFooter}>{BANKROLL_FOOTER_COPY}</Text>
+
+      {Platform.OS === 'ios' ? (
+        <InputAccessoryView nativeID={BANKROLL_ACCESSORY_ID}>
+          <View style={styles.doneBar}>
+            <Pressable
+              onPress={() => Keyboard.dismiss()}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.doneText}>Done</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
+    </View>
+  );
+}
+
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { books } = usePreferredBooks();
@@ -161,7 +333,16 @@ export function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+      {/* automaticallyAdjustKeyboardInsets (iOS): the keyboard insets the list
+          and RN scrolls the focused field — the bankroll input, with its Done
+          bar — above it natively, so no measure/scrollTo is needed. Android
+          resizes the window. "handled" was already here: a tap on a switch or
+          row while the keyboard is up still lands. */}
+      <ScrollView
+        contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
 
         {/* Account + Subscription. Both are behind flags — while auth is dark
             this is the ONLY sign-in entry point in the app, so the whole
@@ -341,6 +522,12 @@ export function SettingsScreen() {
             )
           }
         />
+
+        {/* Display only: units in the member's dollars. The daily exposure
+            limit below is unchanged and does not read it. */}
+        <SectionHeader title="Bankroll" />
+
+        <BankrollCard />
 
         <SectionHeader title="Staying in control" />
 
@@ -664,6 +851,120 @@ const styles = StyleSheet.create({
   capUnit: {
     fontSize: font.size.body,
     color: colors.textSecondary,
+  },
+  noMargin: {
+    marginBottom: 0,
+  },
+  moneyField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.bgGrouped,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    paddingHorizontal: spacing.md,
+  },
+  moneyFieldError: {
+    borderColor: colors.avoid,
+  },
+  moneyPrefix: {
+    fontSize: font.size.title3,
+    fontWeight: font.weight.medium,
+    color: colors.textSecondary,
+  },
+  moneyPrefixEmpty: {
+    color: colors.textTertiary,
+  },
+  moneyInput: {
+    flex: 1,
+    minHeight: 48,
+    fontSize: font.size.title3,
+    fontWeight: font.weight.medium,
+    color: colors.textPrimary,
+  },
+  fieldErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: spacing.sm,
+  },
+  // Words take the text-safe red; the icon beside them and the field's
+  // outline keep `avoid` (non-text, 3:1 is enough there).
+  fieldErrorText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.avoidText,
+  },
+  // The mockup's grouped inset, as the sportsbook row above it uses.
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    backgroundColor: colors.bgGrouped,
+    borderRadius: radii.md,
+    padding: spacing.md,
+  },
+  unitRowText: {
+    flex: 1,
+  },
+  unitRowTitle: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  unitRowSub: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  stepPill: {
+    flexDirection: 'row',
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separatorOpaque,
+    borderRadius: radii.pill,
+    overflow: 'hidden',
+  },
+  stepBtn: {
+    minHeight: 32,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+  },
+  stepBtnRight: {
+    borderLeftWidth: 1,
+    borderLeftColor: colors.separatorOpaque,
+  },
+  stepText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  stepTextOff: {
+    color: colors.textTertiary,
+  },
+  bankrollFooter: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
+  },
+  doneBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    backgroundColor: colors.bgGrouped,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  doneBtn: {
+    paddingVertical: spacing.xs,
+  },
+  doneText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   helplineRow: {
     flexDirection: 'row',
