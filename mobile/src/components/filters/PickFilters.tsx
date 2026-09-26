@@ -203,6 +203,16 @@ export function PickFilters({
   const dateSummary = dateFilterSummary(selectedDates, dateOptions);
   // One day on the board is nothing to cut — hide the section, as Market does.
   const dateCutBites = !!onToggleDate && (dateOptions.length > 1 || datesNarrowed);
+  const dateChips = dateOptions.map((o) => (
+    <FilterChip
+      key={o.date}
+      label={o.label}
+      count={o.count}
+      active={selectedDates.has(o.date)}
+      onPress={() => onToggleDate!(o.date)}
+      accessibilityLabel={`${o.spoken}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
+    />
+  ));
   const searchActive = search.trim().length > 0;
   const pills = useMemo(() => {
     const out = buildPills(state, onChange, presentCategories);
@@ -321,23 +331,12 @@ export function PickFilters({
         {dateCutBites ? (
           <FilterSection
             title="Date"
-            subtitle="Games on this board fall on different days."
+            subtitle="Kickoff date, ET. Pick one or more."
             summary={dateSummary}
             defaultOpen={datesNarrowed}
             onClear={datesNarrowed ? onClearDates : undefined}
           >
-            <View style={styles.chipWrap}>
-              {dateOptions.map((o) => (
-                <FilterChip
-                  key={o.date}
-                  label={o.label}
-                  count={o.count}
-                  active={selectedDates.has(o.date)}
-                  onPress={() => onToggleDate!(o.date)}
-                  accessibilityLabel={`${o.label}, ${o.count} ${itemNoun}${o.count === 1 ? '' : 's'}`}
-                />
-              ))}
-            </View>
+            <View style={styles.chipWrap}>{dateChips}</View>
           </FilterSection>
         ) : null}
 

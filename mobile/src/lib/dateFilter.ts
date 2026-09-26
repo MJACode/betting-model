@@ -21,47 +21,22 @@
  * "Sat" would be filtering next Saturday's board to nothing.
  */
 
-import { todayET } from './format';
+import { dayLabelET, dayLabelSpokenET, todayET } from './format';
 
 export interface DateOption {
   /** YYYY-MM-DD, the pick's `game_date`. */
   date: string;
-  /** "Today" / "Tomorrow" / "Sat Nov 28". */
+  /** "Today" / "Tomorrow" / "Sat 11/28". */
   label: string;
+  /** The same day for VoiceOver: "Saturday, November 28". */
+  spoken: string;
   /** Picks on the board for that date. */
   count: number;
 }
 
-/** '2026-09-26' + 1 day → '2026-09-27', in plain calendar arithmetic. */
-function nextDate(date: string): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-/**
- * 'Today' / 'Tomorrow' / 'Yesterday' / 'Sat Nov 28'.
- *
- * "Yesterday" is reachable and real: a game keeps its KICKOFF's date, so a
- * late start still in play after midnight ET is filed under yesterday — and
- * the Live board holds it (CLAUDE.md §1b, `liveSlateDatesET`).
- */
+/** 'Today' / 'Tomorrow' / 'Yesterday' / 'Sat 11/28' — the app's one day label. */
 export function dateLabel(date: string, today: string = todayET()): string {
-  if (date === today) return 'Today';
-  if (date === nextDate(today)) return 'Tomorrow';
-  if (nextDate(date) === today) return 'Yesterday';
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'UTC',
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    })
-      .format(new Date(`${date}T12:00:00Z`))
-      .replace(',', '');
-  } catch {
-    return date;
-  }
+  return dayLabelET(date, today);
 }
 
 /**
@@ -76,7 +51,12 @@ export function dateOptionsFor(
   for (const d of dates) if (d) counts.set(d, (counts.get(d) ?? 0) + 1);
   return Array.from(counts.keys())
     .sort()
-    .map((date) => ({ date, label: dateLabel(date, today), count: counts.get(date)! }));
+    .map((date) => ({
+      date,
+      label: dateLabel(date, today),
+      spoken: dayLabelSpokenET(date, today),
+      count: counts.get(date)!,
+    }));
 }
 
 /** Is a pick on this date in the selection? Empty selection = every date. */
@@ -86,15 +66,17 @@ export function isDateSelected(date: string | null | undefined, selected: Set<st
 }
 
 /**
- * The selection this board can honour.
+ * The selection this board can honour — DISPLAY ONLY, never written back.
  *
  * The same selection follows the reader across Today / Signals / Live, which
  * hold different picks, so a day picked on Today can be absent from Signals.
  * If NONE of the chosen days is on this board the cut would empty it while the
  * chips (which only list present days) showed nothing selected — the exact
  * "board looks broken, no control says why" failure. So an impossible
- * selection falls back to every date, the harmless direction; a partly present
- * one is kept as the real filter it still is.
+ * selection READS as every date here; a partly present one is kept as the
+ * real filter it still is. The caller keeps the user's own choice untouched,
+ * so Today → Live → Today comes back to the day they picked (UX review,
+ * 2026-09-26: the first version saved the fallback and erased it).
  */
 export function effectiveDateSelection(selected: Set<string>, options: DateOption[]): Set<string> {
   if (selected.size === 0) return selected;
@@ -110,7 +92,7 @@ export function datesAreNarrowed(selected: Set<string>, options: DateOption[]): 
   return shown > 0 && shown < options.length;
 }
 
-/** "All dates" / "Today" / "Sat Nov 28" / "2 dates" — summary and pill label. */
+/** "All dates" / "Today" / "Sat 11/28" / "2 dates" — summary and pill label. */
 export function dateFilterSummary(selected: Set<string>, options: DateOption[]): string {
   const shown = options.filter((o) => selected.has(o.date));
   if (selected.size === 0 || shown.length === 0 || shown.length === options.length) {

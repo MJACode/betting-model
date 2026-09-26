@@ -60,7 +60,8 @@ check('counts per date', opts.map((o) => o.count).join(',') === '3,1,1', opts.ma
 check('today labelled Today', dateLabel(TODAY, TODAY) === 'Today');
 check('tomorrow labelled Tomorrow', dateLabel('2026-09-27', TODAY) === 'Tomorrow');
 check('yesterday labelled Yesterday (a late game past midnight)', dateLabel('2026-09-25', TODAY) === 'Yesterday');
-check('a far day names weekday + date', dateLabel('2026-11-28', TODAY) === 'Sat Nov 28', dateLabel('2026-11-28', TODAY));
+check('a far day matches the card (Sat 11/28)', dateLabel('2026-11-28', TODAY) === 'Sat 11/28', dateLabel('2026-11-28', TODAY));
+check('VoiceOver gets the day in words', opts[2]!.spoken === 'Saturday, November 28', opts[2]!.spoken);
 check('tomorrow across a month end', dateLabel('2026-10-01', '2026-09-30') === 'Tomorrow');
 
 // Narrowing.
@@ -69,7 +70,7 @@ check('a selected date keeps its picks', isDateSelected('2026-11-28', sat));
 check('an unselected date is cut', !isDateSelected(TODAY, sat));
 check('a dateless pick is cut while narrowed', !isDateSelected(null, sat));
 check('one day is narrowed', datesAreNarrowed(sat, opts));
-check('one day summarises by its label', dateFilterSummary(sat, opts) === 'Sat Nov 28');
+check('one day summarises by its label', dateFilterSummary(sat, opts) === 'Sat 11/28');
 check('two days summarise as a count', dateFilterSummary(new Set([TODAY, '2026-11-28']), opts) === '2 dates');
 const every = new Set(opts.map((o) => o.date));
 check('selecting every day is not narrowing', !datesAreNarrowed(every, opts));
@@ -95,6 +96,10 @@ check('the screen hands the date cut to the filter bar', /onToggleDate=\{toggleD
 check('the date selection resets on sport change', /setPickedDates\(new Set\(\)\);\s*\}, \[sport\]\)/.test(screen));
 check('the sheet renders a Date section', /title="Date"/.test(filters));
 check('a narrowed date shows as a removable pill', /key: 'dates'/.test(filters));
+check('the fallback is display-only (the user\'s choice is never overwritten)', !/setPickedDates\(selectedDates\)/.test(screen));
+check('a checked game stays listed whatever the Date cut', /gamePicker\.selected\.has\(d\.game\.game_id\)/.test(screen));
+const gfs = read('src/components/filters/GameFilterSection.tsx');
+check('Games day headers use the same day label', /dayLabelET\(date\)\.toUpperCase\(\)/.test(gfs));
 check('Clear all clears the dates', /onClearDates\?\.\(\);/.test(filters));
 check('a narrowed date counts on the Filters badge', /\(datesNarrowed \? 1 : 0\)/.test(filters));
 

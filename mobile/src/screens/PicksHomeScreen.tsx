@@ -327,16 +327,14 @@ export function PicksHomeScreen() {
     () => dateOptionsFor(activeItems.map((d) => d.pick.game_date)),
     [activeItems],
   );
-  // Resolved against THIS board on the first paint, like displayFilter below:
-  // a day picked on Today that Signals does not hold falls back to all dates
-  // rather than emptying Signals behind chips that show nothing selected.
+  // Resolved against THIS board, for display only: a day picked on Today that
+  // Signals does not hold reads as all dates there rather than emptying Signals
+  // behind chips that show nothing selected. NOT written back — `pickedDates`
+  // stays what the user chose, so Today → Live → Today returns to their day.
   const selectedDates = useMemo(
     () => effectiveDateSelection(pickedDates, dateOptions),
     [pickedDates, dateOptions],
   );
-  useEffect(() => {
-    if (selectedDates !== pickedDates) setPickedDates(selectedDates);
-  }, [selectedDates, pickedDates]);
   const toggleDate = useCallback((date: string) => {
     setPickedDates((prev) => {
       const next = new Set(prev);
@@ -352,16 +350,21 @@ export function PicksHomeScreen() {
   );
 
   // The Games list follows the Date cut, so picking Saturday lists Saturday's
-  // fixtures instead of every game in the window.
-  const pickableGames = useMemo(
-    () =>
-      selectableGames(
-        datedItems.map((d) => d.game).filter((g): g is NonNullable<typeof g> => !!g),
-        sport,
-        todayET(),
-      ),
-    [datedItems, sport],
-  );
+  // fixtures instead of every game in the window — EXCEPT a game already
+  // checked. The Games selection is shared with Stats, so it can hold a game on
+  // another day; dropping it from the list left a "1 game" pill, an empty board
+  // and no checkbox to undo it (UX review, 2026-09-26). A checked game always
+  // stays listed, under its own day header.
+  const pickableGames = useMemo(() => {
+    const byId = new Map<string, NonNullable<EnrichedPick['game']>>();
+    for (const d of activeItems) {
+      if (!d.game) continue;
+      const keep =
+        isDateSelected(d.pick.game_date, selectedDates) || gamePicker.selected.has(d.game.game_id);
+      if (keep) byId.set(d.game.game_id, d.game);
+    }
+    return selectableGames(Array.from(byId.values()), sport, todayET());
+  }, [activeItems, selectedDates, gamePicker.selected, sport]);
   // THIS SCREEN DOES NOT PRUNE, AND MUST NOT. Pruning belongs to the one read
   // that sees the whole forward window — the Stats tab's slate read. The list
   // here is only the games with picks IN THIS VIEW (`activeItems` swaps with
