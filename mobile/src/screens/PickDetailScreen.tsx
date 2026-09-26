@@ -36,6 +36,7 @@ import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { EmptyState } from '@/components/EmptyState';
 import { fetchPickById } from '@/lib/queries';
+import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
@@ -186,7 +187,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Live picks track by a stable proposition key so the delete+rescore
   // churn can't drop them (useTrackedBets).
-  const canTrack = pick.result == null;
+  // A VOID Discord still shows is open too (openForAction).
+  // A VOID never settles, so its actions switch off when the game ends
+  // instead (the board already drops finished games; this screen does not).
+  const over = ['final', 'ended'].includes(gameStatus(game, liveState).kind);
+  const openHere = openForAction(pick) && (pick.result == null || !over);
+  const canTrack = openHere;
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
@@ -275,6 +281,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
               toward the record.
             </Text>
           ) : null}
+          {pick.condition_status === 'VOID' && !voided ? (
+            <Text style={styles.previewNote}>
+              Posted to Discord · not counted in the model’s record.
+            </Text>
+          ) : null}
           {preview ? (
             <Text style={styles.previewNote}>
               {pick.sport === 'GOLF'
@@ -334,7 +345,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
-        {hasPricedLine(pick) && pick.result == null && !preview && !retired
+        {hasPricedLine(pick) && openHere && !preview && !retired
           && !voided ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
@@ -360,7 +371,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                 {tracked.isTracked(pick) ? 'Tracking this bet' : 'Track this bet'}
               </Text>
               <Text style={styles.trackSub}>
-                {pick.is_live
+                {pick.condition_status === 'VOID'
+                  ? `${trackAlertsEligible ? 'We’ll send you a notification if the DK line moves a lot before game time. ' : ''}This pick doesn’t count in the model’s record, so the app won’t grade it — tracking keeps it with your bets.`
+                  : pick.is_live
                   ? 'Live signals lock at the first BET — this line and price are the bet of record. Tracked live bets score on the Performance tab once the game ends.'
                   : trackAlertsEligible
                     ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
