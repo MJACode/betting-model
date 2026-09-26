@@ -420,8 +420,10 @@ def get_connection(session_mode: bool = False) -> DBConnection:
     Reads DATABASE_URL from the environment (loaded via .env by config.py).
     Raises ValueError if DATABASE_URL is not set.
 
-    `session_mode=True` asks for DATABASE_URL_SESSION instead, and there is
-    exactly one caller: tracking/job_queue.py.
+    `session_mode=True` asks for DATABASE_URL_SESSION instead. Two callers:
+    scheduler.run_job_queue (a session advisory lock) and
+    run_pipeline.step_refresh_outcomes (a session statement_timeout around
+    REFRESH CONCURRENTLY). Every other caller uses the transaction pooler.
 
     WHY THE SPLIT EXISTS. Supavisor's pool size is SHARED between the session
     port (5432) and the transaction port (6543), and in SESSION mode every
@@ -439,9 +441,13 @@ def get_connection(session_mode: bool = False) -> DBConnection:
     consecutive statements in transaction mode may land on different backends.
     `tracking/job_queue.py` holds `pg_advisory_lock` across claiming a job AND
     running it, which is what stops two workers running the queue at once, so
-    it keeps a session-mode connection. Audited 2026-09-06: it is the only such
-    caller -- no LISTEN/NOTIFY, no session GUCs, no named cursors, no temp
-    tables, no prepared statements anywhere else in the repo.
+    it keeps a session-mode connection. `step_refresh_outcomes` is the other
+    session-mode caller: REFRESH CONCURRENTLY cannot run inside a transaction,
+    so SET LOCAL cannot cover it, and a session GUC issued on the transaction
+    pooler sticks to the backend that drew the SET rather than to the refresh.
+    Audited 2026-09-06 for the lock; the refresh joined this list 2026-09-26.
+    No LISTEN/NOTIFY, no named cursors, no temp tables, no prepared statements
+    elsewhere in the repo.
 
     Falls back to DATABASE_URL when DATABASE_URL_SESSION is unset, so a
     deployment that has not set it yet behaves exactly as before.
