@@ -2161,7 +2161,15 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
     "ncaaf_live_win_prob": 0.50,  # 2026-09-19 mike: aligned to ACTION_THRESHOLDS (honest re-sweep under the floor); the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
     "ncaaf_live_total":    0.73,  # 2026-09-13 mike: aligned to ACTION_THRESHOLDS (0.73 x EV 0.24); the NCAAF loop reads ACTION_THRESHOLDS via serve._cut, not this dict
-    "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
+    # = P(over) at the +/-8.0 gate, on the RAW residual ECDF. 2026-09-26
+    # mike (Michael Alksninis, "Demote ncaaf_over_under Platt map"): the
+    # Platt map promoted 2026-09-19 17:45 ET (a=1, b=-0.281555) made a +8
+    # over calibrate to ~0.584 and fail this floor, while a -8.1 under
+    # still cleared. That map is demoted
+    # (data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql). This
+    # floor and the +/-8 gate are unchanged. Do not re-promote without a
+    # new Updated-By.
+    "ncaaf_over_under": 0.65,
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23, LIVE since 2026-09-06) ──────────────
     # STILL PLACEHOLDERS. These were set before any NFL prop price existed
