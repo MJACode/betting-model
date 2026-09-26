@@ -442,18 +442,52 @@ not a rescore of the live vectors. Every current under BET is only 0 to 1.3
 points past the gate, so a shift of that size is what fills the under tail
 and empties the over tail.
 
-**A second, smaller asymmetry started when the Platt map was promoted.**
-`model_calibration` for `ncaaf_over_under`: promoted 2026-09-19 17:45 ET,
-Platt `a=1`, `b=−0.2816`, `n=22`. `apply_calibration` shifts the logit of
-whichever side is ≥ 0.5. Picks locked before that stamp still have
-`model_probability_cal = model_probability`. Picks scored after it do not.
-A −8 under is raw 0.710, which the map sends to about 0.65, and it still
-clears `MODEL_PROB_THRESHOLDS` 0.65 and the 0.20 EV floor. A +8 over is raw
-0.650, which the map sends to about 0.58, and it does not. Measured on this
-Saturday: `Fresno State vs Rice Over 44.5`, raw 0.6593, calibrated 0.5935,
-stored NONE. That is one blocked over. It does not create the ten unders.
-Demoting the map, or deciding this rule on the raw ECDF, is a model update
-(the calibration CLI says so). It is not done here.
+**The 0.65 floor does not treat the two arms the same, once the Platt map
+is on.** The point gate is still symmetric (`abs(disagreement) >= 8`). The
+decision is not, because `_decide` uses the calibrated probability and the
+residual ECDF is not centred (772 residuals, mean −0.618). Read off that
+ECDF and the promoted map (`a=1`, `b=−0.2816`):
+
+| Disagreement | Raw P(side) | Calibrated | Clears 0.65? |
+|---|---|---|---|
+| +8.0 over | 0.6503 | 0.5838 | no |
+| −8.0 under | 0.7098 | 0.6486 | no |
+| +10.72 over | 0.7111 | 0.6501 | yes |
+| −8.09 under | 0.7111 | 0.6501 | yes |
+
+A large positive disagreement does produce a high P(over). It does not
+produce one that clears 0.65 at the same point gap that a large negative
+disagreement does. After the map, both sides need raw probability about
+0.711. That is −8.1 points for an under (the gate already requires 8) and
++10.7 points for an over. Before the map, raw 0.65 is +7.95 for an over
+and −5.13 for an under; the point gate is what stops the under arm firing
+at −5. The map undoes that protection on the over arm only.
+
+**What the rows do, split at the promotion.** Map promoted 2026-09-19
+17:45 ET. Over BETs, all 11, were locked by 2026-09-18 13:36 UTC with
+calibrated = raw (0.6516–0.7137). No over BET has been written since.
+Under BETs written from 2026-09-20 on: 18, raw 0.7111–0.7280, calibrated
+0.6500–0.6688, of which 16 are still open. The one post-map over that
+cleared raw 0.65 is `Fresno State vs Rice Over 44.5` (raw 0.6593,
+calibrated 0.5935, stored NONE). The under-BET probability knots are the
+ECDF itself: 0.7150 (13 bets), 0.7176 (7), 0.7098 (4). 0.7098 is P(under)
+at exactly −8.
+
+**The 0.35–0.50 over rows are not large positive disagreements the floor
+rejected.** 180 over-side `NONE` rows have median raw probability 0.4378.
+They are games that have not locked a BET. 142 of them have P(over) below
+0.50 (the model is not high versus the line); 109 of those carry the
+inside-the-gate reason. Six more sit at raw 0.608–0.648, five of them
+inside the gate, including `Boston College vs Virginia Tech Over 46.5`
+(raw 0.6477) and `Georgia vs Oklahoma Over 43.5` (raw 0.6386). The over
+side of an under BET is not in the table: 0 of 40 under BETs still have
+an over row. The next scoring pass deletes `signal_type != 'BET'` and the
+lock does not rewrite that side, so the complement (about 0.27–0.29) is
+gone. Season settled record is unchanged: 22 priced bets, over 4-2
+**+1.54 units**, under 5-11 **−6.50 units** (together **−4.96 units**;
+the kelly sum of those 22 is −212.1). Demoting the map is still a model
+update. It is not done here. A side-only cut is not the fix: the over arm
+is the one the validated +8 gate was written for.
 
 **Open book, rechecked the same day.** Result-null BETs with
 `game_date >= 2026-08-01`: **16 under, 0 over**. Raw `model_probability`
