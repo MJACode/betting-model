@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, NCAAF quality assessment (docs only): six lanes inventoried, live vs paused vs dormant, file map, ranked leave-alone list. No pause, no cut. Under-slate root cause left with Model Performance. `docs/ncaaf_live_quality_assessment.md` |
 | 2026-09-25 | [2026-09](./2026-09.md) | 2026-09-25, Stats page: off-line quote takes the NEAREST line (was the longest alt shot, 180+ at +3400 under a 45+ board); PlayerBetBar flattened into the hit card, Bet full width; Rush TDs / Rec TDs chips → one Anytime TD chip in Rushing and Receiving; board line + window carry into player detail; two Robinsons are two players. UI-only |
 | 2026-09-25 | [2026-09](./2026-09.md) | 2026-09-25, NCAAF price pre-filter statement_timeout aborted scoring: evening run 82578720862b4c88990a974ff33ed81d logged "scoring all" then InFailedSqlTransaction. Both pre-filters now roll back their savepoint before continuing. EXISTS semi-join, same 124 game ids, 0.725s vs 5.289s. #828 |
 | 2026-09-25 | [2026-09](./2026-09.md) | 2026-09-25, prop-scoring statement timeout: the unbounded batter `player_game_log` scan (321,134 rows) was the statement Postgres cancelled at 00:11:02Z. Both log reads in the batter loader are pinned to `game_date >=` Jan 1 of the prior season; five batter models share one load. Timeout not raised. Pitcher strikeout scan left full-history because `ump_k_plus_minus` is live |
