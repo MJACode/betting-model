@@ -54,11 +54,17 @@ interface Props {
   /** Today board only: BET/AVOID/NONE sits immediately before the label.
    * Signals and Live are already BET-only, so the small badge is omitted. */
   showSignalBadge?: boolean;
+  /** All board only: this pick's model is PAUSED (Matt, 2026-09-26). The card
+   * shows the model's number but nothing that reads as a bet — a PAUSED chip in
+   * place of the signal badge, no stake, no Sharp Score, no book hand-off and no
+   * betslip button (the slip resolves legs from active models only). */
+  paused?: boolean;
 }
 
 export function PickCard({
   item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
   showSignalBadge = false,
+  paused = false,
 }: Props) {
   const { pick, game } = item;
   // Golf picks are per-player on one tournament row (home_team = event name,
@@ -127,7 +133,7 @@ export function PickCard({
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
-  const sharp = preview ? null : sharpScore(pick);
+  const sharp = preview || paused ? null : sharpScore(pick);
   const contra = contrarianTag(pick);
   // Where the crowd is, for every pick that carries a split. contrarianTag only
   // speaks on a BET sitting in a decisive band, but nearly all captured splits
@@ -150,7 +156,7 @@ export function PickCard({
   const hasExtras =
     Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
-  const handoff = !preview && pick.signal_type === 'BET'
+  const handoff = !preview && !paused && pick.signal_type === 'BET'
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
     : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
@@ -158,13 +164,13 @@ export function PickCard({
   const canTrack = Boolean(onToggleTrack) && open;
   // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
   const showSharp = Boolean(sharp);
   const showTier = Boolean(pick.confidence_tier) && !showSharp;
   const stakeCaption =
-    pick.signal_type !== 'BET' || preview
+    pick.signal_type !== 'BET' || preview || paused
       ? null
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
@@ -189,7 +195,7 @@ export function PickCard({
       accessibilityLabel={[
         matchup,
         pick.pick_label,
-        pick.signal_type,
+        paused ? 'Paused model, not a bet' : pick.signal_type,
         `Edge ${formatPctSigned(decisionEdge(pick))}`,
         heroPrice
           ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
@@ -214,6 +220,13 @@ export function PickCard({
           {preview ? (
             <View style={[styles.labelChip, styles.previewBadge]}>
               <Text style={styles.previewBadgeText}>PREVIEW</Text>
+            </View>
+          ) : paused ? (
+            // Same neutral pill as PREVIEW, and for the same reason: this is a
+            // number, not a bet. Replaces BET/AVOID/NONE rather than sitting
+            // beside it, so a paused BET never draws a green badge.
+            <View style={[styles.labelChip, styles.previewBadge]}>
+              <Text style={styles.previewBadgeText}>PAUSED</Text>
             </View>
           ) : showSignalBadge ? (
             <View style={styles.labelChip}>

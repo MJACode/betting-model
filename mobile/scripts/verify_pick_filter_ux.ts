@@ -91,7 +91,7 @@ check('any segment change resets an impossible Market',
 check('Public share is measured on on-screen rows',
   /publicSortAvailable\(filtered\)/.test(screen));
 check('Games-empty copy names the board',
-  /No picks for \$\{gameSummary\} on \$\{boardLabel\(view\)\}/.test(screen));
+  /No picks for \$\{gameSummary\} on the \$\{boardLabel\(view\)\} board/.test(screen));
 check('and offers Clear games',
   /actionLabel="Clear games"/.test(screen) && /actionLabel\?:/.test(empty));
 

@@ -207,7 +207,7 @@ def test_the_live_sports_constant_matches_the_python_registry():
 def test_all_three_segments_are_unconditional():
     """Since 2026-09-12 none of the three is allowed a render guard."""
     src = _read(PICKS)
-    for label in ("Today", "Signals"):
+    for label in ("All", "Signals"):
         m = re.search(rf'<SubTabBtn label="{label}"', src)
         assert m, f"the {label} segment disappeared"
         preceding = src[max(0, m.start() - 120) : m.start()]
