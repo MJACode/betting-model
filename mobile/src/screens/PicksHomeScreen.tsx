@@ -114,7 +114,7 @@ export type { PicksView };
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<TabParamList, 'Picks'>>();
-  const { data: allData, loading, error, partial, refresh, date } = useTodayPicks();
+  const { data: allData, pausedData, loading, error, partial, refresh, date } = useTodayPicks();
   const { sport } = useSportFilter();
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
@@ -141,9 +141,13 @@ export function PicksHomeScreen() {
   // instead of freezing at the rollover (liveSlateDatesET).
   const { byGame: liveStates } = useLiveGameStates(liveDates);
 
+  // The All board is every scored pick, INCLUDING a paused model's (Matt,
+  // 2026-09-26), each card labelled PAUSED. Signals is derived from this list
+  // through passesActionFilter, which refuses a paused model, so a paused row
+  // never becomes a signal, a stake, or a count in a sport badge.
   const todayData = useMemo(
-    () => allData.filter((d) => d.pick.sport === sport),
-    [allData, sport],
+    () => [...allData, ...pausedData].filter((d) => d.pick.sport === sport),
+    [allData, pausedData, sport],
   );
   // fetchLivePicks decides "in progress" as `commence_time <= now AND
   // home_score IS NULL`, and games.home_score stays NULL until next-morning
@@ -187,8 +191,8 @@ export function PicksHomeScreen() {
   // Sports with anything on today's board — the rest are muted in the toggle so
   // the eye lands on the ones that actually have picks.
   const sportsWithPicks = useMemo(
-    () => new Set(allData.map((d) => d.pick.sport)),
-    [allData],
+    () => new Set([...allData, ...pausedData].map((d) => d.pick.sport)),
+    [allData, pausedData],
   );
   // A sport whose ONLY rows today are in-play picks must not read as "nothing
   // here": fetchPicksForDate excludes is_live rows, so without this union the
@@ -442,7 +446,7 @@ export function PicksHomeScreen() {
               // and the empty state are the two places a reader is told which
               // sports have an in-play model, and a hand-written list here would
               // be the one that goes stale when a lane ships (lib/liveSports.ts).
-              `All = every pick the model scored today.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
+              `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
             }
             accessibilityLabel="About the three boards"
           />
@@ -593,6 +597,7 @@ export function PicksHomeScreen() {
             onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
             liveState={liveStates.get(item.pick.game_id) ?? null}
             showSignalBadge={view === 'today'}
+            paused={view === 'today' && isModelPaused(item.pick.model_id)}
           />
         )}
         ListEmptyComponent={

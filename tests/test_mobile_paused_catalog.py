@@ -163,3 +163,38 @@ def test_the_behavioural_checks_pass():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_paused_picks_reach_the_all_board_only_and_labelled():
+    """Matt, 2026-09-26: "NFL is only showing tackle bets. It should be all
+    bets" -- 11 of 12 NFL prop models were paused and hidden. A paused model's
+    rows now appear on the All segment, labelled PAUSED, and nowhere else.
+
+    Three halves, each one a way to get this wrong:
+    - the hook keeps paused rows OUT of `data` (every other consumer: Signals,
+      sport badges, Models cards, Stats pills, the betslip);
+    - the Picks screen merges `pausedData` into the All list only;
+    - the card drops everything that reads as a bet (badge, stake, Sharp
+      Score, book hand-off, betslip) when `paused`.
+    """
+    hook = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
+    assert "setData(all.filter((d) => !isModelPaused(d.pick.model_id)))" in hook
+    assert "setPausedData(all.filter((d) => isModelPaused(d.pick.model_id)))" in hook
+
+    screen = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
+    assert "[...allData, ...pausedData].filter((d) => d.pick.sport === sport)" in screen
+    assert "paused={view === 'today' && isModelPaused(item.pick.model_id)}" in screen
+    # Signals is derived through passesActionFilter, which refuses a paused
+    # model -- the guard that keeps a paused row off the paid board.
+    assert "todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))" in screen
+    thresholds = _read(MOBILE / "src" / "lib" / "thresholds.ts")
+    body = _block(thresholds, "export function passesActionFilter", "\n}")
+    assert "if (sv.paused) return false;" in body
+    assert "if (PAUSED_MODELS.has(p.model_id)) return false;" in body
+
+    card = _read(MOBILE / "src" / "components" / "PickCard.tsx")
+    assert ">PAUSED<" in card
+    assert "const sharp = preview || paused ? null" in card
+    assert "!preview && !paused && pick.signal_type === 'BET'" in card
+    assert "&& !preview && !paused;" in card
+    assert "pick.signal_type !== 'BET' || preview || paused" in card

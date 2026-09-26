@@ -119,3 +119,12 @@ ternary is one it cannot see: `v_player_season_totals_nfl` and `_ncaaf` sat
 outside the manifest from the day they shipped and would have lost anon SELECT
 the moment the default grant is revoked — silently, as an empty screen, which
 is the failure mode that manifest exists to end.
+
+**A PAUSED MODEL'S PICKS SHOW ON THE ALL BOARD, AND ONLY THERE.** (Matt,
+2026-09-26: *"NFL is only showing tackle bets. It should be all bets"* — 11 of
+12 NFL prop models were paused, so the 2026-09-19 hide left NFL a tackles
+board.) `useTodayPicks` returns them as `pausedData`, apart from `data`; only
+PicksHomeScreen's All segment merges them, and `PickCard paused` swaps the
+signal badge for PAUSED and drops stake, Sharp Score, book hand-off and the
+betslip button. Signals, sport badges, Models, Stats and the slip still read
+`data`. Pinned by `tests/test_mobile_paused_catalog.py`.
