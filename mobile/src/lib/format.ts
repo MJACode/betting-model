@@ -585,6 +585,42 @@ export function toIsoDate(value: string): string {
 }
 
 /** Add `days` to a YYYY-MM-DD string. Returns YYYY-MM-DD. */
+/**
+ * A slate DAY (YYYY-MM-DD, ET kickoff date) as the app writes it:
+ * 'Today' / 'Tomorrow' / 'Yesterday' / 'Sat 11/28'.
+ *
+ * The one spelling for a day the filters name — the Date chips and the Games
+ * section's day headers (upper-cased) — and it matches the card's own
+ * "Sat, 11/28" (gameDayLabelET) digit for digit, so a chip can be matched to
+ * a card at a glance. Three hand-rolled spellings of one day on one screen was
+ * the UX review's finding on 2026-09-26. "Yesterday" is real: a game keeps its
+ * kickoff's date, so a late start in play after midnight ET is filed there.
+ */
+export function dayLabelET(date: string, today: string = todayET()): string {
+  if (date === today) return 'Today';
+  if (date === addDays(today, 1)) return 'Tomorrow';
+  if (date === addDays(today, -1)) return 'Yesterday';
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(d);
+  return `${wd} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+/** The same day for VoiceOver: 'Today', or 'Saturday, November 28' — never
+ *  the abbreviated 'Sat 11/28' read aloud as "Sat eleven slash twenty-eight". */
+export function dayLabelSpokenET(date: string, today: string = todayET()): string {
+  const short = dayLabelET(date, today);
+  if (short === 'Today' || short === 'Tomorrow' || short === 'Yesterday') return short;
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  }).format(d);
+}
+
 export function addDays(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
