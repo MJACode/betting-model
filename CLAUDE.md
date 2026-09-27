@@ -306,8 +306,8 @@ was available and is part of the pick's meaning.
   **A paused model is LISTED, not hidden** on the Record tab (mike, same day:
   *"Don't hide detail of paused models unless I say so"*) — its settled bets
   stay in the published record. Matt, 2026-09-19: hide paused models from the
-  mobile *catalog* (Models list, bet-type builder, Stats add-pick, Today /
-  Signals / Live boards and their Market chips). Hiding the settled record is
+  mobile *catalog* (Models list, bet-type builder, Stats add-pick, Signals /
+  Live boards; All marks them PAUSED, Matt 09-26). Hiding the settled record is
   still the bug; hiding an unactionable model from a follow-list is not.
   RETIRED differs: nothing will score for it again.
 

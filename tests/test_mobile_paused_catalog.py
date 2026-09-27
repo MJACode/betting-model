@@ -102,7 +102,9 @@ def test_today_picks_drop_paused_models_at_the_source():
     the pills showing a paused model's leftover BET (the retired-model bug
     one row down)."""
     src = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
-    assert "!isModelPaused(d.pick.model_id)" in src
+    # Split through isPausedForDisplay (which asks isModelPaused), so a
+    # posted or settled pick of a paused model stays in `data` (2026-09-26).
+    assert "!isPausedForDisplay(d.pick)" in src
     assert "!isModelRetired(d.pick.model_id)" in src
 
 
@@ -142,7 +144,9 @@ def test_the_pause_source_is_isModelPaused_not_a_hand_copied_set():
         code = "\n".join(
             line for line in src.splitlines() if not line.strip().startswith("//")
         )
-        assert "isModelPaused" in src, f"{path.name} never calls isModelPaused"
+        assert "isModelPaused" in src or "isPausedForDisplay" in src, (
+            f"{path.name} never calls isModelPaused"
+        )
         assert not re.search(r"PAUSED_MODELS\.has", code), (
             f"{path.name} reads PAUSED_MODELS directly — that skips the "
             "server flag isModelPaused exists to prefer"
@@ -163,3 +167,61 @@ def test_the_behavioural_checks_pass():
         timeout=300,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_paused_picks_reach_the_all_board_only_and_labelled():
+    """Matt, 2026-09-26: "NFL is only showing tackle bets. It should be all
+    bets" -- 11 of 12 NFL prop models were paused and hidden. A paused model's
+    rows now appear on the All segment, labelled PAUSED, and nowhere else.
+
+    Three halves, each one a way to get this wrong:
+    - the hook keeps paused rows OUT of `data` (every other consumer: Signals,
+      sport badges, Models cards, Stats pills, the betslip);
+    - the Picks screen merges `pausedData` into the All list only;
+    - the card drops everything that reads as a bet (badge, stake, Sharp
+      Score, book hand-off, betslip) when `paused`.
+    """
+    hook = _read(MOBILE / "src" / "hooks" / "useTodayPicks.ts")
+    assert "setData(all.filter((d) => !isPausedForDisplay(d.pick)))" in hook
+    assert "setPausedData(all.filter((d) => isPausedForDisplay(d.pick)))" in hook
+
+    screen = _read(MOBILE / "src" / "screens" / "PicksHomeScreen.tsx")
+    assert "[...allData, ...pausedData].filter((d) => d.pick.sport === sport)" in screen
+    assert "paused={view === 'today' && isPausedForDisplay(item.pick)}" in screen
+    # Paused rows sort after active ones, and drop out once Signal narrows.
+    assert "...all.filter((d) => !isPausedForDisplay(d.pick))," in screen
+    assert "displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)" in screen
+    # Signals is derived through passesActionFilter, which refuses a paused
+    # model -- the guard that keeps a paused row off the paid board.
+    assert "todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))" in screen
+    thresholds = _read(MOBILE / "src" / "lib" / "thresholds.ts")
+    body = _block(thresholds, "export function passesActionFilter", "\n}")
+    assert "if (sv.paused) return false;" in body
+    assert "if (PAUSED_MODELS.has(p.model_id)) return false;" in body
+
+    card = _read(MOBILE / "src" / "components" / "PickCard.tsx")
+    assert ">PAUSED<" in card
+    assert "const sharp = preview || paused ? null" in card
+    assert "!preview && !paused && pick.signal_type === 'BET'" in card
+    assert "&& open && !preview && !paused;" in card
+    assert "pick.signal_type !== 'BET' || preview || paused" in card
+    assert "const contra = paused ? null : contrarianTag(pick);" in card
+
+    # A pick Discord already sent stays the bet of record (§1c): the PAUSED
+    # treatment is for a paused model's UNPUBLISHED rows only.
+    body = _block(thresholds, "export function isPausedForDisplay", "\n}\n")
+    # ...and a SETTLED pick is never drawn as paused: record screens open
+    # PickDetail too, and a pause never unsays a settled bet (§1c).
+    assert "isModelPaused(p.model_id) && p.result == null && p.discordPublish !== 'published'" in body
+
+    # The detail screen one tap away must agree with the card: no BET badge,
+    # stake, Sharp Score, post time, hand-off or betslip for a paused pick.
+    detail = _read(MOBILE / "src" / "screens" / "PickDetailScreen.tsx")
+    assert "const paused = !retired && isPausedForDisplay(pick);" in detail
+    assert "<ReasoningCard pick={pick} paused={paused} />" in detail
+    assert "{paused ? null : <SharpScoreCard pick={pick} />}" in detail
+    assert "{paused ? null : <PickTimingCard pick={pick} />}" in detail
+    assert "!preview && !retired && !paused && !voided ? (" in detail
+    assert "openHere && !preview && !retired && !paused" in detail
+    reasoning = _read(MOBILE / "src" / "components" / "ReasoningCard.tsx")
+    assert "!isUnlockedPreview(pick) && !paused ? (" in reasoning
