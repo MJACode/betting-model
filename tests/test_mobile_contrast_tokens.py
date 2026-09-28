@@ -229,17 +229,8 @@ def test_no_warning_icon_left_in_bright_med():
     assert hits == []
 
 
-# Reviewer Low 2: no Ionicons in bright green/amber, ternaries included. The
-# allowlist is the green-as-selected checkmarks that move to tint in PR 5.
-BRIGHT_ICON_ALLOW = {
-    "src/components/SportsbookPickerSheet.tsx:127",
-    "src/components/SportsbookPickerSheet.tsx:190",
-    "src/components/StatePickerSheet.tsx:46",
-    "src/components/StatePickerSheet.tsx:61",
-    "src/components/StatGroupSheet.tsx:99",
-    "src/components/HitModeSheet.tsx:118",
-    "src/screens/PaywallScreen.tsx:183",
-}
+# Reviewer Low 2: no Ionicons in bright green/amber, ternaries included. No
+# allowlist: the green-as-selected checkmarks moved to tint (Designer verdict).
 BRIGHT_ICON = re.compile(r"\bcolors\.(med|bet|positive|high)\b(?!Soft|Ink)")
 
 
@@ -273,21 +264,45 @@ def test_bright_icon_scan_sees_ternaries():
 
 
 def test_no_ionicon_in_bright_green_or_amber():
-    hits, seen = [], set()
+    hits = []
     for path in [*SRC.rglob("*.tsx"), *SRC.rglob("*.ts"), MOBILE / "App.tsx"]:
         src = "\n".join(_code_lines(path))
         for line, expr in _ionicon_colors(src):
             if not BRIGHT_ICON.search(expr):
                 continue
-            key = f"{path.relative_to(MOBILE).as_posix()}:{line}"
-            if key in BRIGHT_ICON_ALLOW:
-                seen.add(key)
-            else:
-                hits.append(f"{key} {' '.join(expr.split())}")
+            hits.append(f"{path.relative_to(MOBILE).as_posix()}:{line} {' '.join(expr.split())}")
     assert hits == []
-    assert seen == BRIGHT_ICON_ALLOW, f"stale allowlist: {BRIGHT_ICON_ALLOW - seen}"
     parlay = _read(SRC / "screens" / "ParlayScreen.tsx")
-    assert 'name="pricetag-outline" size={13} color={colors.betInk}' in parlay
+    # Designer: tint (overrides Reviewer MEDIUM B's betInk).
+    assert 'name="pricetag-outline" size={13} color={colors.tint}' in parlay
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "components/SportsbookPickerSheet.tsx",
+        "components/StatGroupSheet.tsx",
+        "components/HitModeSheet.tsx",
+        "components/StatePickerSheet.tsx",
+        "screens/PaywallScreen.tsx",
+    ],
+)
+def test_selection_is_tint_not_green(rel):
+    src = _read(SRC / rel)
+    marks = re.findall(r'name="checkmark-circle" size=\{\d+\} color=\{colors\.(\w+)\}', src)
+    assert marks and set(marks) == {"tint"}
+    assert not re.search(r"rowActive:\s*\{\s*borderColor: colors\.bet\b", src)
+
+
+def test_equity_total_share_text_and_no_picks_rows():
+    eq = _read(SRC / "components" / "EquityCurve.tsx")
+    assert "<Text style={[styles.units, { color: pnlColor(last, 1) }]}>{formatSignedUnits(last)}</Text>" in eq
+    assert "toFixed(1)}u" not in eq
+    share = _read(SRC / "lib" / "shareRecord.ts")
+    assert "formatPctSigned(s.roiFlat)" in share and "formatSignedUnits(opts.endUnits)" in share
+    assert "? '+' : ''" not in share
+    daily = _read(SRC / "components" / "DailyResultsModal.tsx")
+    assert "sportCardEmpty: { paddingVertical: spacing.sm }," in daily
 
 
 def test_every_pnl_color_call_names_its_precision():

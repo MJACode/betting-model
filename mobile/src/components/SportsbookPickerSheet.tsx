@@ -124,7 +124,7 @@ export function SportsbookPickerSheet({
           >
             <Text style={styles.selectAllText}>{allOn ? 'Keep DraftKings only' : 'Select all'}</Text>
             {allOn ? (
-              <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
+              <Ionicons name="checkmark-circle" size={22} color={colors.tint} />
             ) : (
               <View style={styles.emptyCircleSm} />
             )}
@@ -187,7 +187,7 @@ export function SportsbookPickerSheet({
                     // selected, and greying the one book that is definitively
                     // on made it look the most off (UX review). The lock icon
                     // beside the sub-line carries the state instead.
-                    <Ionicons name="checkmark-circle" size={24} color={colors.bet} />
+                    <Ionicons name="checkmark-circle" size={24} color={colors.tint} />
                   ) : (
                     <View style={styles.emptyCircle} />
                   )}
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   rowActive: {
-    borderColor: colors.bet,
+    borderColor: colors.tint,
   },
   badge: {
     width: 44,
