@@ -63,5 +63,8 @@ def _no_live_mlb_schedule(monkeypatch):
     import data.mlb_game_id as mgi
     mgi.clear_cache()
     monkeypatch.setattr(mgi, "_fetch_schedule", lambda game_date: [])
+    # The event -> game_id map is memory-only in tests (no DATABASE_URL); a
+    # test that exercises the DB side hands in its own connection.
+    monkeypatch.setattr(mgi, "_EVENT_MAP_DB", False)
     yield
     mgi.clear_cache()

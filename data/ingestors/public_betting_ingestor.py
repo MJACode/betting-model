@@ -126,8 +126,41 @@ def _select_book(markets: dict, book_ids: list[str]) -> dict | None:
     return None
 
 
+def _game_identity(game: dict, snapshot_at: str):
+    """(game_date, away, home, start) of one Action Network game, or None."""
+    teams = {t.get("id"): t for t in game.get("teams", []) if isinstance(t, dict)}
+    home = teams.get(game.get("home_team_id"))
+    away = teams.get(game.get("away_team_id"))
+    if not home or not away:
+        return None
+    home_name = home.get("full_name") or home.get("display_name") or ""
+    away_name = away.get("full_name") or away.get("display_name") or ""
+    if not home_name or not away_name:
+        return None
+    start = game.get("start_time", "")
+    try:
+        game_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        game_date = game_dt.astimezone(_ET).strftime("%Y-%m-%d")
+    except Exception:
+        game_date = snapshot_at[:10]
+    return (game_date, _normalize_team(away_name, "MLB"),
+            _normalize_team(home_name, "MLB"), start)
+
+
+def mlb_batch_for(games: list[dict], snapshot_at: str):
+    """One MlbEventBatch over every game of a scoreboard pull, so a
+    doubleheader's two games are assigned together (data/mlb_game_id.py)."""
+    from data.mlb_game_id import MlbEventBatch
+    batch = MlbEventBatch("action_network")
+    for g in games:
+        ident = _game_identity(g, snapshot_at)
+        if ident and ident[3]:
+            batch.add(ident[0], ident[1], ident[2], g.get("id"), ident[3])
+    return batch
+
+
 def parse_public_betting(game: dict, book_ids: list[str],
-                         snapshot_at: str) -> list[dict]:
+                         snapshot_at: str, batch=None) -> list[dict]:
     """
     Parse one Action Network game dict into public_betting rows.
 
@@ -158,7 +191,10 @@ def parse_public_betting(game: dict, book_ids: list[str],
         game_date = snapshot_at[:10]
 
     game_id = _build_game_id("MLB", game_date, away_abbr, home_abbr,
-                             commence_time=start or None)
+                             commence_time=start or None, event_id=game.get("id"),
+                             batch=batch, source="action_network")
+    if game_id is None:
+        return []         # doubleheader game that cannot be placed (logged)
 
     period = _select_book(game.get("markets", {}), book_ids)
     if not period:
@@ -274,10 +310,11 @@ def run_public_betting_ingestor(target_date: str = None) -> dict:
     games_with_splits = 0
     skipped_started = 0
     from features.feature_engine import _is_pregame_snapshot
+    batch = mlb_batch_for(games, snapshot_at)
     try:
         for game in games:
             try:
-                rows = parse_public_betting(game, book_ids, snapshot_at)
+                rows = parse_public_betting(game, book_ids, snapshot_at, batch=batch)
             except Exception as exc:
                 logger.debug(f"  Skipping a game (parse error): {exc}")
                 continue

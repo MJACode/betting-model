@@ -71,29 +71,46 @@ def split_matchup(event_name: str) -> tuple[str | None, str | None]:
     return abbr_from_team_string(away), abbr_from_team_string(home)
 
 
+# A resolution is re-read after this long. Per event NAME for the whole run
+# was wrong on a doubleheader day: both games share the name, so the first
+# answer (game 1, or None while both rows were unscored) stuck after game 1
+# ended and game 2 went live.
+_CACHE_TTL_S = 10 * 60
+
+
 def resolve_game_id(conn, sport: str, event_name: str, slate_dates: list[str],
                     cache: dict) -> str | None:
-    """Our game_id for a book's event name, or None when it is not unique.
+    """Our game_id for a book's LIVE event name, or None when it is not unique.
 
     Refuses on ambiguity by design. MLB only: NCAAF ids are CFBD school names
     and would need their own map, so this returns None rather than pretending.
+
+    A doubleheader has two unscored rows for one name (base and `_G2`). These
+    feeds are in-play only, so the game meant is the one that is LIVE: the
+    unscored row whose first pitch has happened. Exactly one such row
+    resolves; anything else is None. Only a single-row answer is cached, and
+    only for _CACHE_TTL_S; a doubleheader answer, or a refusal, is re-read
+    every time.
     """
-    if event_name in cache:
-        return cache[event_name]
+    import time
+    hit = cache.get(event_name)
+    if isinstance(hit, tuple) and time.monotonic() - hit[1] < _CACHE_TTL_S:
+        return hit[0]
     if sport != "MLB":
-        cache[event_name] = None
         return None
 
     away_abbr, home_abbr = split_matchup(event_name)
     if not away_abbr or not home_abbr:
-        cache[event_name] = None
         return None
 
     rows = conn.execute("""
-        SELECT game_id, away_team, home_team FROM games
+        SELECT game_id, away_team, home_team, first_pitch_at FROM games
         WHERE sport = %s AND game_date = ANY(%s) AND home_score IS NULL
     """, (sport, slate_dates)).fetchall()
-    hits = [g for g, a, h in rows
-            if (a or "").upper() == away_abbr and (h or "").upper() == home_abbr]
-    cache[event_name] = hits[0] if len(hits) == 1 else None
-    return cache[event_name]
+    hits = [(r[0], r[3] if len(r) > 3 else None) for r in rows
+            if (r[1] or "").upper() == away_abbr and (r[2] or "").upper() == home_abbr]
+    if len(hits) == 1:
+        cache[event_name] = (hits[0][0], time.monotonic())
+        return hits[0][0]
+    live = [g for g, fp in hits if fp]
+    return live[0] if len(hits) > 1 and len(live) == 1 else None

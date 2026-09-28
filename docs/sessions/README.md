@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-09-28 | [2026-09](./2026-09.md) | 2026-09-28, Picks Time sort grouped by day (SectionTitle headers, spoken form, paused last within each day); #840 ux_scan items fixed (Settings roles without silencing status pills, 44pt Sign out, badge font token). UI only |
+| 2026-09-28 | [2026-09](./2026-09.md) | 2026-09-28, #832 second pass: not-started sweeps key on the pick's own game_time; SELECT-only doubleheader re-grade report; CIN@CWS verdict (start re-stamp); Night Watch (timestamptz restatement, ET voids); review H1-H3 (event map, last-good schedule, check 2 on collapsed rows). Draft PR, no stored rows touched |
 | 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, a Date filter on the Picks board (sheet section, multi-select days with counts, empty = all). One day label (`dayLabelET`, "Sat 11/28") for chips and Games headers. UI only |
 | 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, a Discord-published VOID keeps Track and betslip (`openForAction`); PickDetail closes them when the game ends; tracked VOID reads "Not graded". Record still excludes every VOID. UI only |
 | 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, daily results modal: flat P&L in dollars → units won/lost (hero tile "Units", sport/model/pick rows, footer). Zero-rounding days colour neutral. Footer no longer claims settled picks meet current criteria. Other screens still show dollars (follow-up). UI-only |

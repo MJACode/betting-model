@@ -36,46 +36,88 @@
 -- pick's start) is deliberately NOT mirrored here: on the current matview it
 -- would move exactly one row, BET 2899429, whose disposition Matt is deciding.
 --
+-- REVIEW FIXES (2026-09-28).
+-- M1: checks 3 and 4 applied to EVERY game here while the settler limits them
+--   to doubleheader days -- that, not only the 60-minute threshold, is why
+--   CIN_CWS (a single game) lost 91 rows. They now apply only to a
+--   doubleheader row: the 25 collapsed 2026 base ids (Stats API gameNumber=2,
+--   read 2026-09-28; listed in `dh_rows`) or any base id that has a `_G2`
+--   row. The 120-minute gap stays as a second line.
+-- M2: every recreated object (the matview and both dependents) gets REVOKE
+--   ALL FROM PUBLIC, anon, authenticated before its captured grants are
+--   re-applied -- Supabase's default privileges grant anon/authenticated on a
+--   new object by name -- and grants keep WITH GRANT OPTION; COMMENTs on the
+--   objects and their columns are captured and restored.
+-- Idempotency marker: pg_get_viewdef strips comments, so the old in-body
+--   marker never matched. The matview's COMMENT carries dh_guard_2026_09_25.
+-- Index: a partial index on live_game_state for the `finals` CTE.
+--
 -- WHAT IT DOES. The matview body is decide_on_best_price_2026_09_09.sql's,
 -- unchanged but for the `finals` CTE, one join and two WHEN lines. Its two
 -- dependents (v_model_full_outcome_picks, v_model_full_outcome_record -- read
 -- from pg_depend on 2026-09-25) are captured with pg_get_viewdef and their
 -- grants with aclexplode, dropped, and recreated verbatim. Plain DROP, never
 -- CASCADE: an unexpected further dependent makes this RAISE rather than
--- silently lose a view. Idempotent on the dh_guard_2026_09_25 marker.
+-- silently lose a view. Idempotent on the dh_guard_2026_09_25 COMMENT marker.
 --
 -- It does not UPDATE, DELETE or re-settle any stored pick; picks.result is
 -- untouched. CREATE MATERIALIZED VIEW populates the view, so no REFRESH.
 
+-- The `finals` CTE reads only played 'Final' states; without this it scans
+-- every live_game_state row per refresh.
+CREATE INDEX IF NOT EXISTS live_game_state_final_idx
+  ON public.live_game_state (game_id, snapshot_at)
+  WHERE abstract_game_state = 'Final';
+
 DO $mig$
 DECLARE
-  d text;
   v record;
   saved jsonb := '[]'::jsonb;
+  mv jsonb;
+  obj jsonb;
   g record;
+  c record;
 BEGIN
-  SELECT pg_get_viewdef('public.mv_scored_pick_outcomes'::regclass, true) INTO d;
-  IF position('dh_guard_2026_09_25' in d) > 0 OR position('final_at' in d) > 0 THEN
+  IF COALESCE(obj_description('public.mv_scored_pick_outcomes'::regclass, 'pg_class'), '')
+       LIKE '%dh_guard_2026_09_25%' THEN
     RETURN;
   END IF;
 
-  -- Capture the dependents (definition + options + grants) before dropping.
+  -- Definition, options, grants (with grant option), object comment and
+  -- column comments of each object, so it comes back exactly as it was.
   FOR v IN
-    SELECT c.oid, c.relname, pg_get_viewdef(c.oid, true) AS def, c.reloptions
+    SELECT c.oid, c.relname, c.relowner, c.relacl,
+           pg_get_viewdef(c.oid, true) AS def, c.reloptions
       FROM pg_class c
-     WHERE c.relname IN ('v_model_full_outcome_picks', 'v_model_full_outcome_record')
+     WHERE c.relname IN ('v_model_full_outcome_picks', 'v_model_full_outcome_record',
+                         'mv_scored_pick_outcomes')
        AND c.relnamespace = 'public'::regnamespace
+     ORDER BY c.relname
   LOOP
-    saved := saved || jsonb_build_object(
+    obj := jsonb_build_object(
       'name', v.relname, 'def', v.def,
       'opts', COALESCE(array_to_string(v.reloptions, ', '), ''),
+      'comment', obj_description(v.oid, 'pg_class'),
+      'colcomments', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                         'col', a.attname, 'comment', col_description(v.oid, a.attnum))), '[]'::jsonb)
+                        FROM pg_attribute a
+                       WHERE a.attrelid = v.oid AND a.attnum > 0 AND NOT a.attisdropped
+                         AND col_description(v.oid, a.attnum) IS NOT NULL),
       'grants', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
                    'grantee', CASE WHEN a.grantee = 0 THEN 'PUBLIC'
                                    ELSE quote_ident(a.grantee::regrole::text) END,
-                   'priv', a.privilege_type)), '[]'::jsonb)
-                   FROM pg_class c2, aclexplode(c2.relacl) a
-                  WHERE c2.oid = v.oid AND a.grantee <> c2.relowner));
-    EXECUTE format('DROP VIEW public.%I', v.relname);
+                   'priv', a.privilege_type, 'opt', a.is_grantable)), '[]'::jsonb)
+                   FROM aclexplode(COALESCE(v.relacl, '{}'::aclitem[])) a
+                  WHERE a.grantee <> v.relowner));
+    IF v.relname = 'mv_scored_pick_outcomes' THEN
+      mv := obj;
+    ELSE
+      saved := saved || obj;
+    END IF;
+  END LOOP;
+
+  FOR v IN SELECT * FROM jsonb_array_elements(saved) AS e(x) LOOP
+    EXECUTE format('DROP VIEW public.%I', v.x->>'name');
   END LOOP;
 
   DROP MATERIALIZED VIEW public.mv_scored_pick_outcomes;
@@ -84,7 +126,42 @@ BEGIN
       CREATE MATERIALIZED VIEW public.mv_scored_pick_outcomes AS
       -- dh_guard_2026_09_25: the first 'Final' live state per game, so a pick
       -- created after its scored game had ended is not graded on it.
-      WITH finals AS (
+      WITH dh_rows AS (
+        -- M1: checks 3-4 apply to doubleheader rows only. The 25 base ids
+        -- 2026 stored collapsed (Stats API gameNumber=2, read 2026-09-28),
+        -- plus any base id that has its own `_G2` row.
+        SELECT v.game_id FROM (VALUES
+          ('MLB_2026-04-04_MIL_KC'),
+          ('MLB_2026-04-05_CHC_CLE'),
+          ('MLB_2026-04-26_COL_NYM'),
+          ('MLB_2026-04-30_HOU_BAL'),
+          ('MLB_2026-04-30_SF_PHI'),
+          ('MLB_2026-05-23_STL_CIN'),
+          ('MLB_2026-05-24_DET_BAL'),
+          ('MLB_2026-06-24_CHC_NYM'),
+          ('MLB_2026-07-07_MIL_STL'),
+          ('MLB_2026-07-11_MIL_PIT'),
+          ('MLB_2026-07-17_TB_BOS'),
+          ('MLB_2026-07-18_PIT_CLE'),
+          ('MLB_2026-07-19_LAD_NYY'),
+          ('MLB_2026-07-22_BAL_BOS'),
+          ('MLB_2026-07-22_PIT_NYY'),
+          ('MLB_2026-07-28_CLE_CIN'),
+          ('MLB_2026-07-29_ATL_NYM'),
+          ('MLB_2026-08-17_STL_CIN'),
+          ('MLB_2026-08-29_ARI_SF'),
+          ('MLB_2026-08-29_BOS_NYY'),
+          ('MLB_2026-09-04_DET_CLE'),
+          ('MLB_2026-09-22_TB_NYY'),
+          ('MLB_2026-09-23_TOR_BAL'),
+          ('MLB_2026-09-25_BAL_NYY'),
+          ('MLB_2026-09-25_CHC_BOS')
+        ) AS v(game_id)
+        UNION
+        SELECT left(g2.game_id, length(g2.game_id) - 3)
+          FROM games g2 WHERE g2.sport = 'MLB' AND g2.game_id LIKE '%\_G2'
+      ),
+      finals AS (
         SELECT s.game_id, MIN(s.snapshot_at::timestamptz) AS final_at
           FROM live_game_state s
          WHERE s.abstract_game_state = 'Final'
@@ -111,11 +188,14 @@ BEGIN
             -- began 120+ minutes before the pick's own start (a book start
             -- re-stamped an hour, MLB_2026-08-13_CIN_CWS, is not a game 2), or
             -- when the pick was created after the row's game ended. The same
-            -- rule as tracking/paper_tracker._settle_hold_reason checks 3-4.
-            WHEN g.first_pitch_at IS NOT NULL AND p.game_time IS NOT NULL
+            -- rule as tracking/paper_tracker._settle_hold_reason checks 3-4,
+            -- and like the settler only on a doubleheader row (dh_rows).
+            WHEN dh.game_id IS NOT NULL
+                 AND g.first_pitch_at IS NOT NULL AND p.game_time IS NOT NULL
                  AND g.first_pitch_at::timestamptz
                      < p.game_time::timestamptz - interval '120 minutes' THEN 'U'
-            WHEN f.final_at IS NOT NULL AND p.created_at IS NOT NULL
+            WHEN dh.game_id IS NOT NULL
+                 AND f.final_at IS NOT NULL AND p.created_at IS NOT NULL
                  AND p.created_at::timestamptz > f.final_at THEN 'U'
             WHEN p.model_id = 'mlb_moneyline' THEN CASE
               WHEN g.home_win IS NULL THEN 'U'
@@ -156,6 +236,7 @@ BEGIN
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         LEFT JOIN finals f ON f.game_id = p.game_id
+        LEFT JOIN dh_rows dh ON dh.game_id = p.game_id
         LEFT JOIN LATERAL (
           SELECT max(CASE p.model_id
             WHEN 'mlb_prop_pitcher_k'     THEN l.p_strikeouts
@@ -221,21 +302,41 @@ BEGIN
     ON public.mv_scored_pick_outcomes (pick_id);
   CREATE INDEX mv_scored_pick_outcomes_model_idx
     ON public.mv_scored_pick_outcomes (model_id, model_probability, decision_edge);
-  REVOKE ALL ON public.mv_scored_pick_outcomes FROM anon, authenticated;
-  GRANT SELECT ON public.mv_scored_pick_outcomes TO anon, authenticated;
 
-  -- Recreate the dependents exactly as captured, with their grants.
+  -- M2: every recreated object starts from NO grants (Supabase's default
+  -- privileges would otherwise hand anon/authenticated everything), then gets
+  -- back exactly what it had, WITH GRANT OPTION kept, and its comments.
+  saved := jsonb_build_array(mv) || saved;
   FOR v IN SELECT * FROM jsonb_array_elements(saved) AS e(x) LOOP
-    EXECUTE format('CREATE VIEW public.%I %s AS %s',
-                   v.x->>'name',
-                   CASE WHEN v.x->>'opts' = '' THEN ''
-                        ELSE 'WITH (' || (v.x->>'opts') || ')' END,
-                   v.x->>'def');
+    IF v.x->>'name' <> 'mv_scored_pick_outcomes' THEN
+      EXECUTE format('CREATE VIEW public.%I %s AS %s',
+                     v.x->>'name',
+                     CASE WHEN v.x->>'opts' = '' THEN ''
+                          ELSE 'WITH (' || (v.x->>'opts') || ')' END,
+                     v.x->>'def');
+    END IF;
+    EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon, authenticated',
+                   v.x->>'name');
     FOR g IN SELECT * FROM jsonb_array_elements(v.x->'grants') AS e(y) LOOP
-      EXECUTE format('GRANT %s ON public.%I TO %s',
-                     g.y->>'priv', v.x->>'name', g.y->>'grantee');
+      EXECUTE format('GRANT %s ON public.%I TO %s%s',
+                     g.y->>'priv', v.x->>'name', g.y->>'grantee',
+                     CASE WHEN (g.y->>'opt')::boolean THEN ' WITH GRANT OPTION' ELSE '' END);
+    END LOOP;
+    IF v.x->>'name' <> 'mv_scored_pick_outcomes' AND v.x->>'comment' IS NOT NULL THEN
+      EXECUTE format('COMMENT ON VIEW public.%I IS %L', v.x->>'name', v.x->>'comment');
+    END IF;
+    FOR c IN SELECT * FROM jsonb_array_elements(v.x->'colcomments') AS e(z) LOOP
+      EXECUTE format('COMMENT ON COLUMN public.%I.%I IS %L',
+                     v.x->>'name', c.z->>'col', c.z->>'comment');
     END LOOP;
   END LOOP;
+
+  -- The idempotency marker (pg_get_viewdef strips comments in the body).
+  EXECUTE format('COMMENT ON MATERIALIZED VIEW public.mv_scored_pick_outcomes IS %L',
+                 concat_ws(E'\n', NULLIF(mv->>'comment', ''),
+                           'dh_guard_2026_09_25: doubleheader rows ungraded when their '
+                           'row went live 120+ min before the pick or ended before it '
+                           'was written (data/migrations/scored_outcomes_doubleheader_guard_2026_09_25.sql)'));
 
   RAISE NOTICE 'mv_scored_pick_outcomes rebuilt with the doubleheader guard';
 END

@@ -1506,6 +1506,22 @@ BAL@NYY-style rows rather than guess.
   doubleheaders.
 - Night Watch: `recaps_needing_restatement` compares instants; `void()` writes
   ET; a pin test keeps voids in `scripts/void_picks.py`.
+- Review (REQUEST CHANGES at 9eb06c3e), same PR:
+  - H1: `MlbEventBatch` assigns a doubleheader's events by start order and
+    records event id -> game_id (`mlb_event_game_map`, migration UNAPPLIED;
+    memory-only until then). An ambiguous lone event, a second event on a
+    claimed game, or two events at one start are DROPPED at ERROR. Single
+    games never touch the map.
+  - H2: a failed schedule read keeps the last good one (retry after 60 s); a
+    cold failure matches existing base/_G2 rows or drops a two-event matchup;
+    settlement holds a matchup with a _G2 row when the schedule is missing.
+  - H3: check 2 compares schedule game numbers on a COLLAPSED row only (no
+    commence_time); a hold older than 2 days is raised once on ops.
+  - M3: `book_team_map.resolve_game_id` picks the LIVE row of a doubleheader
+    and does not cache ambiguous or doubleheader answers.
+  - OPEN: `_game_settle_window_days` still widens for any held pick; a lone
+    game-1 event on a traditional doubleheader is refused until game 2 is
+    listed beside it (placeholder ambiguity).
 
 Found 2026-09-05 while designing the alternate-lines view. 1,546 (game,
 market, player, book) keys since 2026-08-29 carry TWO rows at the same

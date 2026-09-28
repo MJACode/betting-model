@@ -362,16 +362,23 @@ def _nfl_resolver(conn, around_date: str):
 # ── Game ID Builder ───────────────────────────────────────────────────────────
 
 def _build_game_id(sport: str, game_date: str, away: str, home: str,
-                   commence_time: str | None = None) -> str:
+                   commence_time: str | None = None, event_id=None,
+                   batch=None, source: str = "odds_api") -> str | None:
     """Consistent with sbr_loader.py format. UFC uses fighter-name slugs.
 
     MLB with a `commence_time` is doubleheader-aware: the event is matched to
     the Stats API schedule and a second game gets `_G2` (data/mlb_game_id.py).
     Without one -- or for game 1 / a single game -- the id is unchanged.
+    `batch` (an MlbEventBatch holding every event of the pass) assigns a
+    doubleheader's events by start order, and `event_id` keeps an event on the
+    game it was first assigned. MLB may return None: drop that event's rows.
     """
     if sport == "MLB" and commence_time:
+        if batch is not None:
+            return batch.game_id(game_date, away, home, event_id, commence_time)
         from data.mlb_game_id import mlb_event_game_id
-        return mlb_event_game_id(game_date, away, home, commence_time)
+        return mlb_event_game_id(game_date, away, home, commence_time,
+                                 event_id=event_id, source=source)
     if sport == "UFC":
         from data.ingestors.ufc_stats_ingestor import slugify_fighter
         return f"UFC_{game_date}_{slugify_fighter(away)}_{slugify_fighter(home)}"
@@ -849,6 +856,23 @@ def _process_events(events: list[dict], sport: str,
     odds_rows = []
 
     _ET = ZoneInfo("America/New_York")
+    # MLB: every event of this pass goes into one batch first, so a
+    # doubleheader's two events are assigned together, by start order, and an
+    # event already assigned keeps its game (data/mlb_game_id.MlbEventBatch).
+    mlb_batch = None
+    if sport == "MLB" and resolve_game_id is None:
+        from data.mlb_game_id import MlbEventBatch
+        mlb_batch = MlbEventBatch("odds_api")
+        for event in events:
+            ct = event.get("commence_time", "")
+            try:
+                d = datetime.fromisoformat(ct.replace("Z", "+00:00")) \
+                    .astimezone(_ET).strftime("%Y-%m-%d")
+            except Exception:
+                continue
+            mlb_batch.add(d, _normalize_team(event.get("away_team", ""), sport),
+                          _normalize_team(event.get("home_team", ""), sport),
+                          event.get("id"), ct)
     for event in events:
         commence_ts = event.get("commence_time", "")
         game_dt = None
@@ -913,7 +937,10 @@ def _process_events(events: list[dict], sport: str,
             # event's start time against the Stats API schedule
             # (data/mlb_game_id.py). Game 1 and single games keep their id.
             game_id = _build_game_id(sport, game_date, away_team, home_team,
-                                     commence_time=commence_ts)
+                                     commence_time=commence_ts,
+                                     event_id=event.get("id"), batch=mlb_batch)
+            if game_id is None:
+                continue          # doubleheader event that cannot be placed (logged)
 
             # Game row (upsert-safe — will not overwrite scores)
             game_rows.append({

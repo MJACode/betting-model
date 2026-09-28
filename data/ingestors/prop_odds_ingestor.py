@@ -554,6 +554,17 @@ def _backfill_one_date(conn: DBConnection, d: str, hours_before: int,
         evs = evs[:limit_events]
 
     date_rows = 0
+    from data.mlb_game_id import MlbEventBatch
+    mlb_batch = MlbEventBatch("odds_api")
+    for ev in evs:
+        try:
+            _k = datetime.fromisoformat(ev.get("commence_time", "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        mlb_batch.add(_k.astimezone(_ET_ZONE).strftime("%Y-%m-%d"),
+                      _normalize_team(ev.get("away_team", ""), "MLB"),
+                      _normalize_team(ev.get("home_team", ""), "MLB"),
+                      ev.get("id"), ev.get("commence_time"))
     for ev in evs:
         commence = ev.get("commence_time", "")
         try:
@@ -566,7 +577,11 @@ def _backfill_one_date(conn: DBConnection, d: str, hours_before: int,
         home = _normalize_team(ev.get("home_team", ""), "MLB")
         away = _normalize_team(ev.get("away_team", ""), "MLB")
         game_id = _build_game_id("MLB", game_date, away, home,
-                                 commence_time=commence)
+                                 commence_time=commence, event_id=ev.get("id"),
+                                 batch=mlb_batch)
+        if game_id is None:
+            total["skipped"] += 1
+            continue
         if game_id not in _existing_game_ids(conn, [game_id]):
             # Same FK as the live pass: one unknown id aborts the date.
             _warn_unknown_prop_game(
@@ -823,13 +838,27 @@ def run_prop_odds_ingestor(target_date: str = None,
         # whose id is missing is skipped BEFORE the paid per-event call — the
         # row cannot be stored (FK) and spending the credit would buy nothing.
         identities: list[tuple] = []
+        mlb_batch = None
+        if sport == "MLB":
+            # A doubleheader's two events are assigned together, and an event
+            # keeps the game it was first given (data/mlb_game_id.py).
+            from data.mlb_game_id import MlbEventBatch
+            mlb_batch = MlbEventBatch("odds_api")
+            for event in events:
+                mlb_batch.add(event["game_date"],
+                              _normalize_team(event["away_team"], sport),
+                              _normalize_team(event["home_team"], sport),
+                              event.get("id"), event.get("commence_time"))
         for event in events:
             home_name = event["home_team"]
             away_name = event["away_team"]
             home_team = _normalize_team(home_name, sport)
             away_team = _normalize_team(away_name, sport)
             game_id = _build_game_id(sport, event["game_date"], away_team, home_team,
-                                     commence_time=event.get("commence_time"))
+                                     commence_time=event.get("commence_time"),
+                                     event_id=event.get("id"), batch=mlb_batch)
+            if game_id is None:
+                continue          # doubleheader event that cannot be placed (logged)
             identities.append(
                 (event, game_id, away_team, home_team, away_name, home_name)
             )

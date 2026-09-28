@@ -2165,7 +2165,6 @@ def _heal_stranded_mlb(conn: DBConnection, game_date: str,
 # that cannot belong to its game, whatever the id says. A held pick stays
 # result IS NULL -- nothing is written -- and the reason is logged every pass,
 # so a hold is visible rather than silent.
-_DH_START_TOLERANCE = timedelta(minutes=SUSPICIOUS_EARLY_MINUTES)
 # Check 3's gap. A traditional game 2 starts 20-30 minutes after game 1 ends,
 # so at least ~2h10m after game 1's first pitch; every collapsed 2026 row
 # measured 340-386 minutes. A single game whose book start was re-stamped an
@@ -2178,7 +2177,9 @@ _MIN_GAME_LENGTH = timedelta(minutes=30)
 
 def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
                         game_first_pitch_at, game_final_at, settled_at,
-                        doubleheader: bool = True) -> str | None:
+                        doubleheader: bool = True,
+                        pick_game_number: int | None = None,
+                        row_game_number: int | None = None) -> str | None:
     """Why this pick must NOT be graded on this games row, or None.
 
     Every check needs both of its timestamps and passes when either is missing
@@ -2196,9 +2197,15 @@ def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
        one that holds pick 2899429 (game_time 23:05Z, settled 23:12Z on the
        22:54:55Z final of game 1); checks 1-4 all pass it. Measured over all
        settled 2026 MLB BETs it matches only collapsed doubleheaders.
-    2. The pick was written for a start that is not the row's start (more than
-       SUSPICIOUS_EARLY_MINUTES apart): the row's commence_time was overwritten
-       by the other game of the day.
+    2. On a COLLAPSED row (doubleheader day, no `_G2` row yet), the pick's
+       start is unambiguously near the OTHER game of the day on the Stats API
+       schedule (`pick_game_number`) than the game this row is
+       (`row_game_number`). Until 2026-09-28 this compared the
+       pick's game_time with the row's commence_time, but commence_time is
+       rewritten on every upsert while game_time is written once, so a game 2
+       delayed 60+ minutes after the pick held a real bet forever. The
+       schedule is fixed per game; a delay does not move a pick to the other
+       game. Without both numbers the check passes.
     3. The row's actual first pitch is 2+ hours BEFORE the pick's start: the
        live state feeding the row -- and its final -- is an earlier game's.
        This is the signature data/first_pitch.py measured on six collapsed
@@ -2209,7 +2216,6 @@ def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
     """
     now = _as_utc(settled_at)
     start = _as_utc(pick_game_time)
-    commence = _as_utc(game_commence_time)
     first_pitch = _as_utc(game_first_pitch_at)
     created = _as_utc(pick_created_at)
     final_at = _as_utc(game_final_at)
@@ -2220,9 +2226,10 @@ def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
                 f"this pick's {pick_game_time} start to be its game")
     if not doubleheader:
         return None
-    if start and commence and abs(start - commence) > _DH_START_TOLERANCE:
-        return (f"written for a {pick_game_time} start but the scored row "
-                f"starts {game_commence_time}")
+    if (pick_game_number and row_game_number
+            and pick_game_number != row_game_number):
+        return (f"its {pick_game_time} start is game {pick_game_number} of the "
+                f"doubleheader, but the scored row is game {row_game_number}")
     if start and first_pitch and first_pitch < start - _DH_FIRST_PITCH_GAP:
         return (f"the scored row went live at {game_first_pitch_at}, hours "
                 f"before this pick's {pick_game_time} start")
@@ -2232,9 +2239,21 @@ def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
     return None
 
 
+# A hold that outlives this is not going to clear on its own: after it, the
+# pick is raised ONCE on the ops channel for review and the per-pass warning
+# drops to debug, instead of the same line every pass for months.
+_HOLD_REVIEW_AFTER = timedelta(days=2)
+_HOLD_ALERT_STATE = "settle_hold_review.json"
+
+
 def _mlb_settle_holds(conn: DBConnection, game_date: str, settled_at: str) -> dict:
     """{pick_id: reason} for every unsettled MLB BET on game_date that
-    _settle_hold_reason refuses. Logged here, once per pick per pass."""
+    _settle_hold_reason refuses.
+
+    Doubleheader day = the Stats API lists 2+ games for the matchup, or a
+    `_G2` row exists for it. FAILS CLOSED: if the schedule cannot be read
+    and a `_G2` row exists, every BET on that matchup is held this pass (the
+    schedule is what tells the two games apart)."""
     rows = conn.execute("""
         SELECT p.pick_id, p.game_id, p.created_at, p.game_time,
                g.away_team, g.home_team, g.commence_time, g.first_pitch_at,
@@ -2254,18 +2273,75 @@ def _mlb_settle_holds(conn: DBConnection, game_date: str, settled_at: str) -> di
     """, (game_date,)).fetchall()
     if not rows:
         return {}
-    from data.mlb_game_id import schedule_starts
-    doubleheaders = {k for k, v in schedule_starts(game_date).items() if len(v) > 1}
-    holds = {}
+    from data.mlb_game_id import (parse_mlb_game_id, schedule_state,
+                                  unambiguous_game_number)
+    sched = schedule_state(game_date)
+    try:
+        g2_rows = {r[0] for r in conn.execute(
+            "SELECT game_id FROM games WHERE game_date = %s AND sport = 'MLB'",
+            (game_date,)).fetchall()
+            if (parse_mlb_game_id(r[0]) or (0, 0, 0, 1))[3] > 1}
+    except Exception as exc:                                # noqa: BLE001
+        logger.warning(f"settle holds: _G2 lookup failed ({exc})")
+        g2_rows = set()
+    g2_matchups = {parse_mlb_game_id(g)[1:3] for g in g2_rows if parse_mlb_game_id(g)}
+    now = _as_utc(settled_at)
+    holds, stale = {}, {}
     for (pick_id, game_id, created, game_time, away, home, commence,
          first_pitch, final_at) in rows:
-        reason = _settle_hold_reason(created, game_time, commence, first_pitch,
-                                     final_at, settled_at,
-                                     doubleheader=(away, home) in doubleheaders)
-        if reason:
-            holds[pick_id] = reason
+        cands = (sched or {}).get((away, home)) or []
+        dh = len(cands) > 1 or (away, home) in g2_matchups
+        if sched is None and (away, home) in g2_matchups:
+            reason = ("the MLB schedule is unavailable and this matchup has a "
+                      "game 2 row; held until the games can be told apart")
+        else:
+            parsed = parse_mlb_game_id(game_id)
+            # Check 2 is for a COLLAPSED row only: once the matchup has its
+            # `_G2` row the ids came from the event map and are trusted, and a
+            # pick written while a book had its game delayed must not be moved
+            # to the other game by its game_time. On a collapsed row the pick's
+            # game is the one its start is unambiguously near, or unknown.
+            pick_n = (unambiguous_game_number(game_date, away, home, cands, game_time)
+                      if len(cands) > 1 and (away, home) not in g2_matchups
+                      else None)
+            reason = _settle_hold_reason(
+                created, game_time, commence, first_pitch, final_at, settled_at,
+                doubleheader=dh, pick_game_number=pick_n,
+                row_game_number=parsed[3] if parsed else None)
+        if not reason:
+            continue
+        holds[pick_id] = reason
+        start = _as_utc(game_time)
+        if now and start and now - start > _HOLD_REVIEW_AFTER:
+            stale[pick_id] = (game_id, reason)
+            logger.debug(f"settlement HELD pick {pick_id} ({game_id}): {reason}")
+        else:
             logger.warning(f"settlement HELD pick {pick_id} ({game_id}): {reason}")
+    if stale:
+        _raise_hold_review(stale)
     return holds
+
+
+def _raise_hold_review(stale: dict) -> None:
+    """One ops alert per pick held past _HOLD_REVIEW_AFTER, ever. The ledger
+    is the watch alert-state file; a pick already alerted is not re-sent."""
+    from tracking.watch_util import (post_ops_alert, read_alert_state,
+                                     write_alert_state)
+    state = read_alert_state(_HOLD_ALERT_STATE)
+    new = {pid: v for pid, v in stale.items() if str(pid) not in state}
+    if not new:
+        return
+    detail = "\n".join(f"pick {pid} ({gid}): {why}" for pid, (gid, why) in
+                       sorted(new.items()))
+    logger.error(f"settlement holds need review ({len(new)}):\n{detail}")
+    if post_ops_alert(f"{len(new)} settlement hold(s) need review",
+                      detail + "\n\nHeld 2+ days by the doubleheader guard "
+                      "(tracking/paper_tracker._settle_hold_reason). Nothing "
+                      "was settled; decide each by hand."):
+        stamp = datetime.now(timezone.utc).isoformat()
+        for pid in new:
+            state[str(pid)] = {"last": stamp}
+        write_alert_state(_HOLD_ALERT_STATE, state)
 
 
 def _settle_game_picks(
