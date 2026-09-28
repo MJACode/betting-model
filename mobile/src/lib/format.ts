@@ -34,7 +34,10 @@ export function expectedValue(
  * team lib.
  */
 export function formatSignedUnits(u: number): string {
-  const rounded = Math.round(u * 10) / 10;
+  // Symmetric: half AWAY from zero on both sides. Math.round alone rounds
+  // halves UP, so -0.05 printed "0.0u" while +0.05 printed "+0.1u"
+  // (Reviewer, #837 post-merge). Same expression as draft #833.
+  const rounded = Math.sign(u) * Math.round(Math.abs(u) * 10) / 10;
   if (rounded === 0) return '0.0u';
   return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(1)}u`;
 }
@@ -507,6 +510,16 @@ export function gameStatus(
   return { kind: 'pre', timeLabel: formatGameTimeET(game.commence_time) };
 }
 
+/** Is the game over — FINAL, or ENDED with no score yet? The one test every
+ *  "switch the actions off once it's done" rule uses (openForActionNow). */
+export function gameIsOver(
+  game: GameLike | null | undefined,
+  live?: LiveStateLike | null,
+): boolean {
+  const kind = gameStatus(game, live).kind;
+  return kind === 'final' || kind === 'ended';
+}
+
 /** "T5" / "B9" — the compact inning chip for a pick card. */
 export function inningShort(inning: number | null, half: InningHalf | null): string | null {
   if (inning == null) return null;
@@ -584,7 +597,6 @@ export function toIsoDate(value: string): string {
   return value.slice(0, 10);
 }
 
-/** Add `days` to a YYYY-MM-DD string. Returns YYYY-MM-DD. */
 /**
  * A slate DAY (YYYY-MM-DD, ET kickoff date) as the app writes it:
  * 'Today' / 'Tomorrow' / 'Yesterday' / 'Sat 11/28'.
@@ -621,6 +633,7 @@ export function dayLabelSpokenET(date: string, today: string = todayET()): strin
   }).format(d);
 }
 
+/** Add `days` to a YYYY-MM-DD string. Returns YYYY-MM-DD. */
 export function addDays(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);

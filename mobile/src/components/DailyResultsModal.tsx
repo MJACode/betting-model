@@ -518,7 +518,9 @@ function roiColor(roi: number): string {
 /** Colour a units figure by what formatSignedUnits prints, so a day that
  *  rounds to "0.0u" never reads as a win or a loss. */
 function unitsColor(units: number): string {
-  const rounded = Math.round(units * 10) / 10;
+  // formatSignedUnits' exact rounding (half away from zero), so -0.05 prints
+  // "−0.1u" AND reads red; half-up made it grey (Reviewer, #837 post-merge).
+  const rounded = Math.sign(units) * Math.round(Math.abs(units) * 10) / 10;
   if (rounded > 0) return colors.positive;
   if (rounded < 0) return colors.negative;
   return colors.textSecondary;

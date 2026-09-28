@@ -9,6 +9,7 @@ do not call it yet. Nothing here deletes a Discord message.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import subprocess
 import sys
@@ -228,7 +229,7 @@ for (const [result, condition_status, discordPublish, want] of cases) {
     card = (ROOT / "mobile/src/components/PickCard.tsx").read_text(encoding="utf-8")
     detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
     for src in (card, detail):
-        assert "openForAction(pick)" in src
+        assert re.search(r"openForAction(?:Now)?\(pick\b", src)
         assert "canTrack = pick.result == null" not in src
         assert "Boolean(onToggleTrack) && pick.result == null" not in src
         assert "hasPricedLine(pick) && pick.result == null" not in src
@@ -255,8 +256,45 @@ if (win !== "won") throw new Error("win " + win);
     perf = (ROOT / "mobile/src/screens/PerformanceScreen.tsx").read_text(encoding="utf-8")
     assert "case 'not_graded':" in perf
     detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
-    assert "openForAction(pick) && (pick.result == null || !over)" in detail
+    assert "openForActionNow(pick, over)" in detail
+    assert "gameIsOver(game, liveState)" in detail
     assert "hasPricedLine(pick) && openHere" in detail
+
+
+def test_the_card_closes_a_void_when_the_game_is_over_like_the_detail():
+    """Reviewer, #839 post-merge: PickCard kept Track and betslip on a
+    finished VOID. It now uses the detail screen's rule, from one helper."""
+    script = r"""
+import { openForActionNow } from "./mobile/src/lib/discordPublish.ts";
+const cases = [
+  // result, condition_status, discordPublish, over, want
+  [null, null, undefined, false, true],
+  [null, null, undefined, true, true],          // unsettled: open until graded
+  ["NO_ACTION", "VOID", "published", false, true],
+  ["NO_ACTION", "VOID", "published", true, false],  // the finding
+  ["NO_ACTION", "VOID", "unpublished", false, false],
+  ["WIN", null, "published", false, false],
+];
+for (const [result, condition_status, discordPublish, over, want] of cases) {
+  const got = openForActionNow({ result, condition_status, discordPublish }, over);
+  if (got !== want) throw new Error(JSON.stringify([result, condition_status, discordPublish, over, got]));
+}
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lib = (ROOT / "mobile/src/lib/discordPublish.ts").read_text(encoding="utf-8")
+    assert "return openForAction(p) && (p.result == null || !over);" in lib
+    card = (ROOT / "mobile/src/components/PickCard.tsx").read_text(encoding="utf-8")
+    assert "const open = openForActionNow(pick, gameIsOver(game, liveState));" in card
+    assert "const canTrack = Boolean(onToggleTrack) && open;" in card
+    assert "hasPricedLine(pick) && open &&" in card
+    # One definition of "over": neither screen spells the status list itself.
+    detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
+    for src in (card, detail):
+        assert "['final', 'ended'].includes" not in src
 
 
 def test_the_settled_record_still_excludes_every_void():

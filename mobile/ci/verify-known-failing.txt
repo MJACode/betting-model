@@ -1,0 +1,15 @@
+# Verify scripts that already fail on master (scripts/mobile_ci_gate.py).
+# Shrink this file; never grow it silently.
+verify_book_lines.ts
+verify_book_links.ts
+verify_custom_model_filters.ts
+verify_daily_results.ts
+verify_game_filter.ts
+verify_leaderboard_reads.ts
+verify_line_legs.ts
+verify_live_record_start.ts
+verify_preferred_book.ts
+verify_row_cap.ts
+verify_stats_odds.ts
+verify_stats_pill.ts
+verify_units.ts
