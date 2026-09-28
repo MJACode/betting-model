@@ -60,6 +60,7 @@ jobs:
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
             tests/test_mobile_threshold_parity.py \
+            tests/test_mobile_bankroll.py \
             tests/test_nfl_prop_thresholds.py \
             tests/test_pick_lock_is_on_picks.py \
             tests/test_pick_lock_survives_settlement.py \
