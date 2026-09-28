@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
   Pressable,
   RefreshControl,
@@ -20,6 +19,8 @@ import { SPORTS } from '@/hooks/useSportFilter';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import { SettingsButton } from '@/components/SettingsButton';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
+import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import {
   EMPTY_SUMMARY,
   groupBySport,
@@ -120,6 +121,8 @@ export function TrackRecordScreen() {
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
   const canShare = rows.length > 0 && overall.picks > 0;
+  // Nothing has loaded (still loading, or the load failed): unknown, not zero.
+  const notLoaded = rows.length === 0 && (loading || Boolean(error));
   const onShare = useCallback(() => {
     void Share.share({
       message: buildShareMessage(overall, {
@@ -190,21 +193,53 @@ export function TrackRecordScreen() {
           </View>
         ) : null}
 
-        {error ? <Text style={styles.error}>Couldn’t load the record: {error}</Text> : null}
-        {loading && rows.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
+        {/* A failed first load says so, with Retry, and the hero below reads
+            "—" rather than a 0–0 record at 0% (usability audit H3). A failed
+            refresh over a record already on screen is a banner instead. */}
+        {error && rows.length === 0 ? (
+          <View style={styles.errCard}>
+            <ErrorState compact what="the track record" error={error} onRetry={() => void load()} retrying={loading} />
+          </View>
+        ) : error ? (
+          <ErrorBanner
+            what="the latest record"
+            error={error}
+            onRetry={() => void load()}
+            retrying={loading}
+            style={styles.errBanner}
+          />
+        ) : null}
 
-        {/* Overall hero */}
+        {/* Overall hero. First load: placeholders, never a flash of 0–0. */}
+        {loading && rows.length === 0 && !error ? (
+          <Skeleton label="the track record" style={styles.heroCard}>
+            <SkeletonBlock width={90} height={10} />
+            <SkeletonBlock width={120} height={34} style={styles.skelGap} />
+            <SkeletonBlock width={160} height={12} style={styles.skelGap} />
+            <View style={[styles.heroStatsRow, styles.skelStats]}>
+              <SkeletonBlock width={56} height={28} />
+              <SkeletonBlock width={56} height={28} />
+              <SkeletonBlock width={56} height={28} />
+            </View>
+          </Skeleton>
+        ) : (
         <View style={styles.heroCard}>
           <Text style={styles.heroLabel}>Flat-bet ROI</Text>
           <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
             {overall.stakedFlat > 0 ? formatPctSigned(overall.roiFlat) : '—'}
           </Text>
           <Text style={styles.heroRecord}>
-            {overall.wins}–{overall.losses}
-            {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
+            {notLoaded ? (
+              '— settled picks'
+            ) : (
+              <>
+                {overall.wins}–{overall.losses}
+                {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
+              </>
+            )}
           </Text>
           <View style={styles.heroStatsRow}>
-            <HeroStat label="Win rate" value={formatPct(overall.winRate, 0)} />
+            <HeroStat label="Win rate" value={notLoaded ? '—' : formatPct(overall.winRate, 0)} />
             <HeroStat
               label="Beat the close"
               value={overall.clvBeatRate != null ? formatPct(overall.clvBeatRate, 0) : '—'}
@@ -212,12 +247,13 @@ export function TrackRecordScreen() {
             <HeroStat label="Since" value={LIVE_RECORD_START_SHORT} />
           </View>
         </View>
+        )}
 
         {/* Unconditional once loaded: EquityCurve carries its own "not enough
             settled days" copy, and it is the only thing between the hero and the
             prose now. Held back on the first load so it cannot assert there are
             too few settled days while the data is still in flight. */}
-        {loading && rows.length === 0 ? null : (
+        {rows.length === 0 && (loading || error) ? null : (
           <EquityCurve points={equity} width={chartWidth} />
         )}
 
@@ -372,12 +408,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
-  error: {
-    fontSize: font.size.footnote,
-    color: colors.avoidInk,
-    marginBottom: spacing.md,
-  },
-  loading: { marginVertical: spacing.lg },
+  errCard: { backgroundColor: colors.bgCard, borderRadius: radii.md, marginBottom: spacing.md },
+  errBanner: { marginHorizontal: 0, marginTop: 0, marginBottom: spacing.md },
+  skelGap: { marginTop: spacing.sm },
+  skelStats: { marginTop: spacing.md },
   heroCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,

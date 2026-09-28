@@ -45,7 +45,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   type LayoutChangeEvent,
   Pressable,
@@ -62,6 +61,8 @@ import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
+import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import {
   applyFilter,
@@ -107,6 +108,7 @@ import { formatCurrency, formatPct, gameStatus, todayET } from '@/lib/format';
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
+import { friendlyCause } from '@/lib/errors';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 export type { PicksView };
@@ -132,6 +134,7 @@ export function PicksHomeScreen() {
     data: allLiveData,
     loading: liveLoading,
     error: liveError,
+    pricesUnavailable: livePricesUnavailable,
     refresh: refreshLive,
     dates: liveDates,
   } = useLivePicks({ pollMs: view === 'live' ? LIVE_POLL_MS : LIVE_IDLE_POLL_MS });
@@ -379,6 +382,16 @@ export function PicksHomeScreen() {
     return searchPicks(applyFilter(activeItems, displayFilter), search).length > 0;
   }, [activeItems, filtered.length, displayFilter, search, gamePicker.selected]);
 
+  // Search alone emptied the board: the filters and Games still leave picks,
+  // the query matched none of them. The generic "widen signals / thresholds"
+  // copy blamed settings the user never touched (usability audit M12).
+  const emptiedBySearch = useMemo(() => {
+    if (activeItems.length === 0 || filtered.length > 0 || !search.trim()) return false;
+    return applyFilter(activeItems, displayFilter).some((d) =>
+      isGameSelected(d.pick.game_id, gamePicker.selected),
+    );
+  }, [activeItems, filtered.length, displayFilter, search, gamePicker.selected]);
+
   // Today: BET/AVOID/NONE counts. Daily exposure guardrail (over the opt-in cap).
   const todayStats = useMemo(() => {
     const bet = todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).length;
@@ -407,12 +420,24 @@ export function PicksHomeScreen() {
   // is null until the first settled fetch, which is exactly "never loaded".
   const liveFirstLoad = liveLoading && prevLiveCount.current === null;
   const busy = view === 'live' ? liveFirstLoad : loading;
+  // A FAILED load with nothing to show for this view. It replaces the empty
+  // state rather than sitting above it: "No MLB picks today" under a timeout
+  // told the user the opposite of what happened (usability audit H3). With
+  // rows still on screen from an earlier load, the banner carries the failure.
+  const viewError = view === 'live' ? liveError : error;
+  const failed = Boolean(viewError) && (view === 'live' ? liveData.length === 0 : activeItems.length === 0);
+  // Counts that were never loaded are unknown, not zero ("—", PATTERNS §F5).
+  const todayUnknown = Boolean(error) && allData.length === 0;
+  const liveUnknown = Boolean(liveError) && allLiveData.length === 0;
   // Pull-to-refresh still has to spin, and it cannot read `busy` any more for the
   // same reason. Local, because the hook cannot tell a poll from a pull.
   const [pulling, setPulling] = useState(false);
   const stakedSuffix = signalExposure > 0 ? ` · ${formatUnits(signalExposure)} staked` : '';
-  const subtitle =
-    view === 'today'
+  const subtitle = failed
+    ? view === 'live'
+      ? 'Live signals unavailable'
+      : `${date} · — bets · — scored`
+    : view === 'today'
       ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored`
       // NO DATE on the live board, and that is not a tidy-up. The board can now
       // hold a game that kicked off before midnight ET, which the whole system
@@ -486,8 +511,8 @@ export function PicksHomeScreen() {
           contentContainerStyle={styles.subTabsScroll}
         >
           <View style={styles.subTabs}>
-            <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} onLayout={onSegmentLayout('today')} />
-            <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} onLayout={onSegmentLayout('signals')} />
+            <SubTabBtn label="Today" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => setView('today')} onLayout={onSegmentLayout('today')} />
+            <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} active={view === 'signals'} onPress={() => setView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
                 header. The count and the dot carry what the conditional render
                 used to: `(0)` with no dot is the "nothing in play" answer, in a
@@ -496,7 +521,7 @@ export function PicksHomeScreen() {
                 dot the sport chips and the LIVE pill on a card use. */}
             <SubTabBtn
               label="Live Signals"
-              count={liveData.length}
+              count={liveUnknown ? null : liveData.length}
               active={view === 'live'}
               onPress={() => setView('live')}
               live
@@ -527,12 +552,16 @@ export function PicksHomeScreen() {
         </View>
       ) : null}
 
-      {error || (view === 'live' && liveError) ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>
-            Connection error: {view === 'live' ? (liveError ?? error) : error}
-          </Text>
-        </View>
+      {/* Rows from an earlier load are still up: keep them, say the refresh
+          failed, offer Retry (PATTERNS §E3). A whole-view failure is the
+          ErrorState in the list instead, so the two never stack. */}
+      {viewError && !failed ? (
+        <ErrorBanner
+          what={view === 'live' ? `the latest ${sport} live signals` : `the latest ${sport} picks`}
+          error={viewError}
+          onRetry={() => void (view === 'live' ? refreshLive() : refresh())}
+          retrying={view === 'live' ? liveLoading : loading}
+        />
       ) : null}
 
       {/* The picks loaded but something behind them did not — the odds views
@@ -552,6 +581,25 @@ export function PicksHomeScreen() {
           <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
           <Text style={styles.partialText} numberOfLines={3}>
             {partialSentence(partial)} <Text style={styles.partialLink}>Retry</Text>
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {/* Picks came back, DraftKings' in-play prices did not: every card would
+          quietly lose its Now price. Say so, with the same retry as the Today
+          partial banner (usability audit M2). */}
+      {view === 'live' && !liveError && livePricesUnavailable && liveData.length > 0 ? (
+        <Pressable
+          onPress={() => void refreshLive()}
+          accessibilityRole="button"
+          accessibilityLabel="Live prices unavailable. Cards show the locked price only."
+          accessibilityHint="Reloads live prices"
+          style={({ pressed }) => [styles.partialBanner, pressed && styles.partialPressed]}
+        >
+          <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
+          <Text style={styles.partialText} numberOfLines={3}>
+            Live prices unavailable. Cards show the locked price only.{' '}
+            <Text style={styles.partialLink}>Retry</Text>
           </Text>
         </Pressable>
       ) : null}
@@ -617,15 +665,22 @@ export function PicksHomeScreen() {
         )}
         ListEmptyComponent={
           busy ? (
-            <View style={styles.loadingWrap}>
-              <ActivityIndicator />
-            </View>
+            <PicksSkeleton sport={sport} />
+          ) : failed ? (
+            <ErrorState
+              what={view === 'live' ? `${sport} live signals` : `today’s ${sport} picks`}
+              error={viewError}
+              onRetry={() => void (view === 'live' ? refreshLive() : refresh())}
+              retrying={view === 'live' ? liveLoading : loading}
+            />
           ) : (
             <EmptyForView
               view={view}
               sport={sport}
               date={date}
               hasAny={activeItems.length > 0}
+              search={emptiedBySearch ? search.trim() : ''}
+              onClearSearch={() => setSearch('')}
               emptiedByGames={emptiedByGames}
               gameSummary={gameFilterSummary(pickableGames, gamePicker.selected)}
               onClearGames={gamePicker.clear}
@@ -660,11 +715,35 @@ function boardLabel(view: PicksView): string {
   return 'Live';
 }
 
+/**
+ * First load of the board: card-shaped placeholders under the real header,
+ * segments and filters, never a flash of "No picks today" (PATTERNS §E2).
+ */
+function PicksSkeleton({ sport }: { sport: string }) {
+  return (
+    <Skeleton label={`${sport} picks`} style={styles.skeletonWrap}>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={styles.skeletonCard}>
+          <SkeletonBlock width="30%" height={8} />
+          <SkeletonBlock width="70%" height={14} />
+          <SkeletonBlock width="40%" height={8} />
+          <View style={styles.skeletonFoot}>
+            <SkeletonBlock width={64} height={20} />
+            <SkeletonBlock width={56} height={16} />
+          </View>
+        </View>
+      ))}
+    </Skeleton>
+  );
+}
+
 function EmptyForView({
   view,
   sport,
   date,
   hasAny,
+  search,
+  onClearSearch,
   emptiedByGames,
   gameSummary,
   onClearGames,
@@ -673,10 +752,23 @@ function EmptyForView({
   sport: string;
   date: string;
   hasAny: boolean;
+  /** Non-empty only when the search query alone emptied the board (M12). */
+  search: string;
+  onClearSearch: () => void;
   emptiedByGames: boolean;
   gameSummary: string;
   onClearGames: () => void;
 }) {
+  if (hasAny && search) {
+    return (
+      <EmptyState
+        title={`No picks match “${search}”`}
+        subtitle={`Search looks at player and team names on ${boardLabel(view)}. Check the spelling, or clear the search to see every pick here.`}
+        actionLabel="Clear search"
+        onAction={onClearSearch}
+      />
+    );
+  }
   if (hasAny && emptiedByGames) {
     return (
       <EmptyState
@@ -751,7 +843,8 @@ function SubTabBtn({
   onLayout,
 }: {
   label: string;
-  count: number;
+  /** null = never loaded (a failed first load): shown as "—", not 0. */
+  count: number | null;
   active: boolean;
   onPress: () => void;
   /** Reports where this segment sits, so the selected one can be scrolled to. */
@@ -774,26 +867,27 @@ function SubTabBtn({
       hitSlop={{ top: 8, bottom: 8 }}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={`${label}, ${count} ${noun}`}
+      accessibilityLabel={count == null ? `${label}, count not available` : `${label}, ${count} ${noun}`}
       style={({ pressed }) => [styles.subTab, active && styles.subTabActive, pressed && styles.pressed]}
     >
       <View style={styles.subTabInner}>
         {dot ? <LiveDot /> : null}
         <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
-          {label} ({count})
+          {label} ({count ?? '—'})
         </Text>
       </View>
     </Pressable>
   );
 }
 
-/** "Couldn’t load today’s lines, the line shop and the prop line shop —
- *  statement timeout (57014). Today’s picks are unaffected." One sentence,
- *  one reason, for the partial-load banner. */
+/** "Couldn’t load today’s lines and the line shop. Signalbase is slow to
+ *  respond right now. Try again in a moment. Today’s picks are unaffected."
+ *  One sentence per part, for the partial-load banner. The raw reason is
+ *  sorted into a plain cause and never shown (usability audit M1). */
 export function partialSentence(p: { whats: string[]; reason: string }): string {
   const w = p.whats;
   const list = w.length <= 1 ? w.join('') : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`;
-  return `Couldn’t load ${list} — ${p.reason}. Today’s picks are unaffected.`;
+  return `Couldn’t load ${list}. ${friendlyCause(p.reason)} Today’s picks are unaffected.`;
 }
 
 const styles = StyleSheet.create({
@@ -866,22 +960,17 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.xl,
   },
-  loadingWrap: {
-    paddingVertical: spacing.xxl,
-    alignItems: 'center',
-  },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+  skeletonWrap: { gap: spacing.xs },
+  // Same box as PickCard's card, so the list does not jump when rows land.
+  skeletonCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
+    gap: spacing.sm,
   },
-  errorText: {
-    color: colors.avoidInk,
-    fontSize: font.size.footnote,
-  },
+  skeletonFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs },
   partialBanner: {
     flexDirection: 'row',
     alignItems: 'center',

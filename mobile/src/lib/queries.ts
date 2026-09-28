@@ -1448,7 +1448,10 @@ export async function fetchUpcomingNhlPicks(
 // while the board strip says the feed is ~45s old — so we re-read the in-play
 // view, DK rows only, for the slate dates. All-books shopping stays off
 // (pickLineQuotes still returns the record chip on live; detail is unchanged).
-export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
+export async function fetchLivePicks(
+  dates: string[],
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
   const nowIso = new Date().toISOString();
   const [picksRes, gamesRes, weatherRes, inplayRes] = await Promise.all([
     supabase
@@ -1482,7 +1485,11 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
   // In-play odds are enrichment: a miss leaves Now empty and the card labels
-  // the lock Locked. Do not fail the board for it.
+  // the lock Locked. Do not fail the board for it -- but REPORT it, so the
+  // board can say "Live prices unavailable" instead of silently dropping every
+  // Now price (v_latest_inplay_odds_all_books 500'd repeatedly on 2026-09-25;
+  // usability audit M2). Same contract as fetchPicksForDate.
+  if (inplayRes.error) onEnrichmentError?.('live prices', inplayRes.error);
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];

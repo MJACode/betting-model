@@ -43,6 +43,11 @@ export type LivePicksState = {
   data: EnrichedPick[];
   loading: boolean;
   error: string | null;
+  /**
+   * The picks loaded but DraftKings' in-play prices did not, so no card has a
+   * Now price (usability audit M2). Cleared by the next fetch that gets them.
+   */
+  pricesUnavailable: boolean;
   refresh: () => Promise<void>;
   /** Today ET — dates[0]. What a header should say. */
   date: string;
@@ -55,6 +60,7 @@ function useLivePicksCore(pollMs: number) {
   const [data, setData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pricesUnavailable, setPricesUnavailable] = useState(false);
   // The slate window is RECOMPUTED per fetch, never captured. It used to be a
   // single ET date held in useState, which was wrong twice over: an app left
   // warm across midnight polled yesterday's slate for as long as it stayed in
@@ -75,8 +81,13 @@ function useLivePicksCore(pollMs: number) {
     setLoading(true);
     try {
       setError(null);
-      const picks = await fetchLivePicks(target);
+      let missed = false;
+      const picks = await fetchLivePicks(target, (what, e) => {
+        missed = true;
+        console.warn(`[useLivePicks] ${what} failed`, e);
+      });
       setData(picks);
+      setPricesUnavailable(missed);
     } catch (e) {
       // errorText, not err.message: raw Postgres ("canceling statement due to
       // statement timeout") is not a sentence to hand a bettor, and this string
@@ -105,7 +116,7 @@ function useLivePicksCore(pollMs: number) {
     [],
   );
 
-  return { data, loading, error, refresh, date: dates[0]!, dates, startPolling };
+  return { data, loading, error, pricesUnavailable, refresh, date: dates[0]!, dates, startPolling };
 }
 
 /**
