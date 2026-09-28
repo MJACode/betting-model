@@ -1,0 +1,69 @@
+# FAIL lines of the verify scripts that already fail on master
+# (scripts/mobile_ci_gate.py). Shrink this file; never grow it silently.
+verify_book_lines.ts: FAIL 10 bettable books — 11
+verify_book_lines.ts: FAIL 13 books fetched — 14
+verify_book_links.ts: [FAIL] fliff: App Store page carried, with Apple's own id
+verify_book_links.ts: [FAIL] fliff: asks whether its app is installed (a verified scheme or candidates)
+verify_custom_model_filters.ts: [FAIL] an empty refresh keeps out-of-window history intact
+verify_custom_model_filters.ts: [FAIL] merge does not duplicate in-window rows — got 3
+verify_custom_model_filters.ts: [FAIL] merge keeps history older than the window
+verify_custom_model_filters.ts: [FAIL] merge sorts newest first
+verify_daily_results.ts: [FAIL] ALL_SPORTS is the full canonical order — MLB,WNBA,NBA,NFL,NCAAF,UFC,NHL
+verify_daily_results.ts: [FAIL] MLB has 3 models (in-play row included, retired HR absent) — got 4
+verify_daily_results.ts: [FAIL] MLB pending = 1 — got 0
+verify_daily_results.ts: [FAIL] MLB profitFlat ≈ 263.64 — got 445.4599999999999
+verify_daily_results.ts: [FAIL] MLB roiFlat ≈ 0.5273 — got 0.6363714285714285
+verify_daily_results.ts: [FAIL] MLB total 4-1-0 — 6-1-0
+verify_daily_results.ts: [FAIL] fixture model mlb_prop_pitcher_k is still live (swap it if it gets paused)
+verify_daily_results.ts: [FAIL] gradedPicks MLB before WNBA — MLB,MLB,MLB,MLB,MLB,MLB,MLB,WNBA,WNBA
+verify_daily_results.ts: [FAIL] gradedPicks has 7 picks (the counted ones, nothing else) — got 9
+verify_daily_results.ts: [FAIL] mlb_moneyline profit ≈ -9.09 — got 81.82
+verify_daily_results.ts: [FAIL] overall picks = 7 (6 pre-game + 1 in-play, HR excluded) — got 9
+verify_daily_results.ts: [FAIL] overall profitFlat ≈ 163.64 — got 345.46
+verify_daily_results.ts: [FAIL] overall record 4-2-1 — 6-2-1
+verify_daily_results.ts: [FAIL] overall roiFlat ≈ 0.2338 — got 0.38384444444444443
+verify_daily_results.ts: [FAIL] overall winRate ≈ 0.6667 — got 0.75
+verify_daily_results.ts: [FAIL] paused model absent from gradedPicks
+verify_daily_results.ts: [FAIL] paused model excluded from MLB
+verify_daily_results.ts: [FAIL] pending = 2 — got 1
+verify_daily_results.ts: [FAIL] pending excluded from graded picks — got 9
+verify_daily_results.ts: [FAIL] pendingPicks lists both, MLB before WNBA — WNBA
+verify_daily_results.ts: [FAIL] scope ALL passes everything through (the retired HR pick in neither)
+verify_game_filter.ts: [FAIL] the slate chip stands down while a specific game is picked
+verify_leaderboard_reads.ts: [FAIL] the board waits for THIS sport's slate before a read the slate NARROWS
+verify_line_legs.ts: [FAIL] a partial hand-off says how many legs the book prices
+verify_line_legs.ts: [FAIL] the Teams board bounces back to the betslip like Players
+verify_live_record_start.ts: [FAIL] no user-facing screen describes the platform as paper — components/NotificationsCard.tsx
+verify_preferred_book.ts: FAIL every ingested book is carried
+verify_row_cap.ts: [FAIL] four per-game reads (the pick detail x2, the prop and game line-leg re-prices) — 5
+verify_row_cap.ts: [FAIL] seven slate all-books reads (Stats props, Teams lines, Picks x2, UFC / NFL / NCAAF windows) — 9
+verify_row_cap.ts: [FAIL] the Picks screen bounds both reads to signal games — 3
+verify_row_cap.ts: [FAIL] v_latest_prop_odds_all_books @<offset>: pages with .range(from, to)
+verify_row_cap.ts: [FAIL] v_latest_prop_odds_all_books @<offset>: pages with .range(from, to)
+verify_stats_odds.ts: [FAIL] and it is not hidden behind a disclosure row
+verify_stats_odds.ts: [FAIL] the Filters button is a labelled button, badge count and all
+verify_stats_odds.ts: [FAIL] the toggle renders even when it cannot act, and says why
+verify_stats_pill.ts: [FAIL] one clock feeds every time-derived cell, so the board ages together
+verify_stats_pill.ts: [FAIL] with no licensed glyph it renders NOTHING — no text stand-in for a logo
+verify_units.ts: [FAIL] +150 max-conviction play: got 1, expected 3
+verify_units.ts: [FAIL] absurd kelly cannot exceed 3u: got 1, expected 3
+verify_units.ts: [FAIL] conviction is still 3u: got 1, expected 3
+verify_units.ts: [FAIL] conviction still computed from kelly: got 1, expected 3
+verify_units.ts: [FAIL] flagged as capped: got false, expected true
+verify_units.ts: [FAIL] half the cap -> 1.5u: got 1, expected 1.5
+verify_units.ts: [FAIL] kelly at the server cap -> 3u (max conviction): got 1, expected 3
+verify_units.ts: [FAIL] kelly far above the cap still tops out at 3u: got 1, expected 3
+verify_units.ts: [FAIL] median live kelly 3.28% -> 2u: got 1, expected 2
+verify_units.ts: [FAIL] median-price play is 2u conviction: got 1, expected 2
+verify_units.ts: [FAIL] p25 live kelly 2.62% -> 1.5u: got 1, expected 1.5
+verify_units.ts: [FAIL] p75 live kelly 3.9% -> 2.5u: got 1, expected 2.5
+verify_units.ts: [FAIL] renders as a bare conviction, claiming no payout: got 1u, expected 3u
+verify_units.ts: [FAIL] risk 2.7u at -135 to win 2u: got 1.35, expected ~2.7
+verify_units.ts: [FAIL] risk 2u at +150 to win 3u: got 0.6666666666666666, expected 2
+verify_units.ts: [FAIL] risk cut to the 3u cap: got 1.4700000000000002, expected 3
+verify_units.ts: [FAIL] risk falls back to the bare conviction: got 1, expected 3
+verify_units.ts: [FAIL] still wins the full 2u — under the cap: got 1, expected 2
+verify_units.ts: [FAIL] unitsFor at +150: got 0.6666666666666666, expected 2
+verify_units.ts: [FAIL] unitsFor with no price falls back to conviction: got 1, expected 3
+verify_units.ts: [FAIL] win RECOMPUTED from the capped risk, not left at 3u: got 1, expected ~2.041
+verify_units.ts: [FAIL] wins the full conviction: got 1, expected 3

@@ -36,9 +36,9 @@ import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { EmptyState } from '@/components/EmptyState';
 import { fetchPickById } from '@/lib/queries';
-import { openForAction } from '@/lib/discordPublish';
+import { openForActionNow } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, gameIsOver, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookName,
@@ -196,8 +196,8 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // A VOID Discord still shows is open too (openForAction).
   // A VOID never settles, so its actions switch off when the game ends
   // instead (the board already drops finished games; this screen does not).
-  const over = ['final', 'ended'].includes(gameStatus(game, liveState).kind);
-  const openHere = openForAction(pick) && (pick.result == null || !over);
+  const over = gameIsOver(game, liveState, pick);
+  const openHere = openForActionNow(pick, over);
   const canTrack = openHere;
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we

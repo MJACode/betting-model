@@ -84,6 +84,23 @@ export function openForAction(p: {
     && p.discordPublish === 'published';
 }
 
+/**
+ * openForAction, on a screen that knows whether the game is over — Track and
+ * betslip on BOTH PickDetail and the board's PickCard.
+ *
+ * A VOID never settles (result stays NO_ACTION), so openForAction alone keeps
+ * its actions on forever; once the game is over they switch off instead. An
+ * unsettled pick stays open until it grades, over or not. One definition, so
+ * the card cannot drift from the detail screen again (Reviewer, #839
+ * post-merge: the card kept Track and betslip on a finished VOID).
+ */
+export function openForActionNow(
+  p: Parameters<typeof openForAction>[0],
+  over: boolean,
+): boolean {
+  return openForAction(p) && (p.result == null || !over);
+}
+
 const CHUNK = 80;
 
 /**

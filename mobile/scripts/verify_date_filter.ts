@@ -29,6 +29,7 @@ import {
   effectiveDateSelection,
   isDateSelected,
   rowsByDay,
+  toggleDateSelection,
 } from '../src/lib/dateFilter';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -85,6 +86,29 @@ check('a possible selection keeps identity (no render loop)', effectiveDateSelec
 const empty = new Set<string>();
 check('empty selection keeps identity (no render loop)', effectiveDateSelection(empty, opts) === empty);
 
+// 3b. A chip tap toggles what the chips SHOW (Reviewer, #841 post-merge).
+const tomorrowOpts = dateOptionsFor([TODAY, '2026-09-27'], TODAY);
+const fellBack = toggleDateSelection(sat, '2026-09-27', tomorrowOpts);
+check('a tap on a fallen-back board selects just that day',
+  fellBack.size === 1 && fellBack.has('2026-09-27'), [...fellBack].join(','));
+check('the invisible stored day does not ride along', !fellBack.has('2026-11-28'));
+const partly = toggleDateSelection(new Set([TODAY, '2026-11-28']), '2026-09-27', tomorrowOpts);
+check('a partly present selection toggles as stored (keeps its other days)',
+  [...partly].sort().join(',') === `${TODAY},2026-09-27,2026-11-28`, [...partly].sort().join(','));
+const off = toggleDateSelection(new Set([TODAY]), TODAY, tomorrowOpts);
+check('tapping the only selected day clears back to every date', off.size === 0);
+const input = new Set([TODAY]);
+toggleDateSelection(input, '2026-09-27', tomorrowOpts);
+check('the toggle never mutates the stored selection', input.size === 1 && input.has(TODAY));
+
+// The addDays JSDoc sits on addDays again, not orphaned above dayLabelET
+// (Reviewer, #841 post-merge).
+const fmtSrc = read('src/lib/format.ts');
+check('addDays carries its own JSDoc',
+  /\/\*\* Add `days` to a YYYY-MM-DD string\. Returns YYYY-MM-DD\. \*\/\nexport function addDays\(/.test(fmtSrc));
+check('the addDays JSDoc is no longer stacked on dayLabelET\'s',
+  !/Returns YYYY-MM-DD\. \*\/\n\/\*\*/.test(fmtSrc));
+
 // 4. Wiring.
 const screen = read('src/screens/PicksHomeScreen.tsx');
 const filters = read('src/components/filters/PickFilters.tsx');
@@ -94,6 +118,8 @@ check(
 );
 check('the filtered list is built from the date-cut items', /applyFilter\(datedItems, displayFilter\)/.test(screen));
 check('the screen hands the date cut to the filter bar', /onToggleDate=\{toggleDate\}/.test(screen));
+check('the chip toggle is built from the shown selection',
+  /setPickedDates\(\(prev\) => toggleDateSelection\(prev, date, dateOptions\)\)/.test(screen));
 check('the date selection resets on sport change', /setPickedDates\(new Set\(\)\);\s*\}, \[sport\]\)/.test(screen));
 check('the sheet renders a Date section', /title="Date"/.test(filters));
 check('a narrowed date shows as a removable pill', /key: 'dates'/.test(filters));
@@ -122,6 +148,16 @@ check('a single-day board gets no header', oneDay.every((r) => r.kind === 'item'
 check('day headers carry the spoken form', rows[0]!.kind === 'day' && rows[0]!.spoken === 'Today' && rows.some((r) => r.kind === 'day' && r.spoken === 'Saturday, November 28'));
 const tbd = rowsByDay([{ id: 'x', date: null }, { id: 'y', date: TODAY }] as P[], (p) => p.date, (p) => p.id, () => false, TODAY);
 check('a dateless row sorts after the dated days', tbd[0]!.kind === 'day' && (tbd[0] as { label: string }).label === 'Today', JSON.stringify(tbd.map((r) => r.key)));
+// Reviewer, #842 post-merge: assert the null-date rows are LAST, not only that
+// Today leads — a null group landing between two days passed the check above.
+const tbdShape = (rs: typeof tbd) => rs.map((r) => (r.kind === 'day' ? `[${r.label}]` : r.item.id)).join(' ');
+check('null-date rows sort last, under their own header',
+  tbdShape(tbd) === '[Today] y [Date TBD] x', tbdShape(tbd));
+const mixed = rowsByDay(
+  [{ id: 'n1', date: null }, { id: 'sat', date: '2026-11-28' }, { id: 'n2', date: null }, { id: 't', date: TODAY }] as P[],
+  (p) => p.date, (p) => p.id, () => false, TODAY);
+check('null-date rows sort after EVERY dated day, in their given order',
+  tbdShape(mixed) === '[Today] t [Sat 11/28] sat [Date TBD] n1 n2', tbdShape(mixed));
 const title = read('src/components/SectionTitle.tsx');
 check('section titles are headings for VoiceOver', /accessibilityRole="header"/.test(title));
 check('the first day header sits at the list top', /index === 0 \? styles\.firstDayHeader/.test(screen));
@@ -140,6 +176,12 @@ check('Sign out meets the 44pt target', /signOutBtn: \{[\s\S]{0,60}minHeight: 44
 check('Sign out announces as a button', /onPress=\{confirmSignOut\}\s*accessibilityRole="button"/.test(settings));
 check('the version line announces as a link', /openLink\(WEBSITE_URL, 'the website'\)\}\s*accessibilityRole="link"/.test(settings));
 check('the preview badge uses the type scale', /previewBadgeText: \{\s*fontSize: font\.size\.caption/.test(detail));
+// Matt, 2026-09-28: paused models' picks show fully on the All tab. A pick
+// tracked from its card must be untrackable from detail, so detail's Track
+// card is gated on the open state only -- never on `paused`.
+check('a paused pick keeps its Track card on detail',
+  /const canTrack = openHere;/.test(detail) && /\{canTrack \? \(/.test(detail)
+  && !/canTrack[^;\n]*paused/.test(detail));
 
 console.log(failures === 0 ? '\nAll date-filter checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

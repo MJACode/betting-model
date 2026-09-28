@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { gameStatus } from '@/lib/format';
+import { gameIsOver, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
@@ -29,7 +29,7 @@ import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
-import { openForAction } from '@/lib/discordPublish';
+import { openForAction, openForActionNow } from '@/lib/discordPublish';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
@@ -162,8 +162,10 @@ export function PickCard({
   const handoff = !preview && !paused && pick.signal_type === 'BET'
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
     : null;
-  // Open = unsettled, or a VOID Discord still shows (openForAction).
-  const open = openForAction(pick);
+  // Open = unsettled, or a VOID Discord still shows (openForAction) — and,
+  // for that VOID, only until the game is over: PickDetail's rule, shared
+  // (openForActionNow; Reviewer, #839 post-merge).
+  const open = openForActionNow(pick, gameIsOver(game, liveState, pick));
   const canTrack = Boolean(onToggleTrack) && open;
   // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
   const canSlip =

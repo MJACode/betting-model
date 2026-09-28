@@ -92,7 +92,46 @@ jobs:
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
             tests/test_mobile_betslip_combine.py \
+            tests/test_mobile_ci_gate.py \
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py
+
+  # tsc --noEmit + mobile/scripts/verify_*.ts, gated on NOTHING NEW and NOTHING
+  # GONE against the committed baselines in mobile/ci/ (master already has known
+  # tsc errors and known-failing verify scripts). See scripts/mobile_ci_gate.py.
+  mobile-typecheck-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      # Full history: the gate compares mobile/ci/ against origin/master and
+      # reads the PR's commit messages for the baseline-growth ack.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mobile deps
+        run: npm ci --no-audit --no-fund
+
+      - name: tsc --noEmit (no new errors vs mobile/ci/tsc-baseline.txt)
+        working-directory: .
+        run: python -m scripts.mobile_ci_gate tsc
+
+      - name: Verify scripts (no new failures vs mobile/ci/verify-known-failing.txt)
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: python -m scripts.mobile_ci_gate verify

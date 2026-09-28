@@ -85,6 +85,29 @@ export function effectiveDateSelection(selected: Set<string>, options: DateOptio
   return new Set<string>();
 }
 
+/**
+ * Tap a date chip. The toggle starts from the selection the chips SHOW, not
+ * the stored one, whenever that stored one has fallen back to every date.
+ *
+ * Reviewer, #841 post-merge: toggling the stored set meant a day picked on
+ * Today (absent here, so this board shows "All dates") rode along invisibly —
+ * tap Tomorrow on Signals and the stored set became {that day, Tomorrow}, so
+ * going back to Today narrowed it to two days the user never chose together.
+ * From the effective set, the tap does exactly what the chips say: select
+ * Tomorrow alone. A partly present selection is not a fallback and toggles as
+ * stored, keeping its other days.
+ */
+export function toggleDateSelection(
+  selected: Set<string>,
+  date: string,
+  options: DateOption[],
+): Set<string> {
+  const next = new Set(effectiveDateSelection(selected, options));
+  if (next.has(date)) next.delete(date);
+  else next.add(date);
+  return next;
+}
+
 /** Is the Date cut narrowing THIS board? */
 export function datesAreNarrowed(selected: Set<string>, options: DateOption[]): boolean {
   if (selected.size === 0) return false;
