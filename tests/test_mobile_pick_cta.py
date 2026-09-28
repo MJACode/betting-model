@@ -63,8 +63,8 @@ const eq = (got, want, what) => {
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_game_started_cta_behaviour(tmp_path):
     script = PRELUDE + """
-import { gameHasStarted } from './format.ts';
-import { gameStartedLine, pickCta, reasoningHeading } from './pickCta.ts';
+import { gameHasStarted, gameStartState } from './format.ts';
+import { gameStartedLine, pickCta, pickCtaFor, reasoningHeading } from './pickCta.ts';
 const future = new Date(Date.now() + 3 * 3600000).toISOString();
 const past = new Date(Date.now() - 3600000).toISOString();
 eq(gameHasStarted({ sport: 'MLB', commence_time: future }), false, 'pre');
@@ -72,8 +72,22 @@ eq(gameHasStarted({ sport: 'MLB', commence_time: future }, { abstract_game_state
 eq(gameHasStarted({ sport: 'MLB', commence_time: past }), true, 'past first pitch');
 eq(gameHasStarted({ sport: 'MLB', commence_time: past }, { abstract_game_state: 'Preview' }), false, 'delayed');
 eq(pickCta({ isLive: false, started: false }), { handoff: true, startedLine: false, slip: true, track: true, priceTag: 'Now' }, 'before');
-eq(pickCta({ isLive: false, started: true }), { handoff: false, startedLine: true, slip: false, track: true, priceTag: 'Live price' }, 'after');
-eq(pickCta({ isLive: true, started: true }), { handoff: true, startedLine: false, slip: true, track: true, priceTag: 'Live price' }, 'live signal');
+eq(pickCta({ isLive: false, started: true, inPlay: true }), { handoff: false, startedLine: true, slip: false, track: true, priceTag: 'Live price' }, 'after');
+eq(pickCta({ isLive: true, started: true, inPlay: true }), { handoff: true, startedLine: false, slip: true, track: true, priceTag: 'Live price' }, 'live signal');
+// Reviewer #847: "Live price" only in play; a final game reads "Now".
+eq(pickCta({ isLive: false, started: true, inPlay: false }).priceTag, 'Now', 'final tag');
+// M6: fail closed on a missing games row / commence_time via pick.game_time.
+eq(gameHasStarted(null, null, past), true, 'no games row, game_time past');
+eq(gameHasStarted({ sport: 'MLB', commence_time: null }, null, past), true, 'no commence_time');
+eq(gameHasStarted(null, null, future), false, 'game_time ahead');
+eq(gameHasStarted(null, null, null), false, 'nothing known');
+// Low: called off before first pitch is not "started".
+const fin = { abstract_game_state: 'Final', home_score: null, away_score: null };
+eq(gameStartState({ sport: 'MLB', commence_time: future }, fin), 'postponed', 'postponed');
+eq(gameStartState({ sport: 'MLB', commence_time: past }, fin), 'over', 'ended');
+eq(pickCta({ isLive: false, started: false, postponed: true }), { handoff: false, startedLine: false, slip: false, track: true, priceTag: 'Now' }, 'postponed cta');
+eq(pickCtaFor({ is_live: false, game_time: past }, null, null).startedLine, true, 'pickCtaFor fallback');
+eq(pickCtaFor({ is_live: false, game_time: future }, { sport: 'MLB', commence_time: future }, fin).startedLine, false, 'pickCtaFor postponed');
 eq(gameStartedLine(-125, 'DK'), 'Game started · picked at -125 DK', 'line');
 eq(gameStartedLine(215, 'FAN'), 'Game started · picked at +215 FAN', 'line +');
 eq(gameStartedLine(null, 'DK'), 'Game started', 'no price');
@@ -101,6 +115,10 @@ eq(f(0.05, -600, -100), false, '500 cents');
 eq(f(0.05, -601, -100), true, '501 cents');
 eq(f(0.05, 3300, null), false, 'no current price');
 eq(priceCheck({ edge: 0.548, locked: 3300, current: -110 }).reasons, ['edge', 'moved'], 'reasons');
+// Reviewer #847 M2: after the start the hero Now is the in-play price.
+eq(f(0.05, -150, 700), true, 'pre-game moved');
+eq(priceCheck({ edge: 0.05, locked: -150, current: 700, started: true }).flagged, false, 'in-play: moved rule skipped');
+eq(priceCheck({ edge: 0.3, locked: -150, current: 700, started: true }).flagged, true, 'in-play: edge rule kept');
 eq(flaggedLast([1, 2, 3, 4, 5], (n) => n % 2 === 0), [1, 3, 5, 2, 4], 'stable partition');
 """
     proc = _run(tmp_path, ["priceCheck.ts"], script)
@@ -123,7 +141,17 @@ const flick = collapseLineHistory([
 ]);
 if (!flick.every((r) => /^3:50:\\d\\d PM ET$/.test(r.label))) throw new Error(flick.map((r) => r.label).join('|'));
 const rc = recentChanges(Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
-eq([rc.rows.length, rc.changes], [8, 20], 'recent');
+eq([rc.rows.length, rc.changes, rc.shownChanges, rc.hidden], [8, 19, 8, 12], 'recent');
+// Reviewer #847 lows: the opening row is not a change; a mid-run null joins
+// the run; same-timestamp rows get unique keys.
+eq(recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 8.5, price: -115 }]).changes, 1, 'opening not a change');
+const gap = collapseLineHistory([
+  { at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: 8.5, price: null },
+  { at: t(18, 10), line: null, price: -110 }, { at: t(18, 15), line: 8.5, price: -110 },
+]);
+eq(gap.map((r) => r.count), [4], 'mid-run null');
+const same = collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 0), line: null, price: -115 }]);
+eq(new Set(same.map((r) => r.key)).size, 2, 'unique keys');
 """
     proc = _run(tmp_path, ["lineHistory.ts"], script)
     assert proc.returncode == 0, proc.stderr
@@ -131,10 +159,15 @@ eq([rc.rows.length, rc.changes], [8, 20], 'recent');
 
 def test_pick_card_wiring():
     card = _read(SRC / "components" / "PickCard.tsx")
-    assert "gameHasStarted(game, liveState)" in card
-    assert "pickCta({ isLive: pick.is_live === true, started })" in card
+    assert "const cta = pickCtaFor(pick, game, liveState);" in card
+    assert "priceCheckForItem(item, liveState)" in card
     assert re.search(r"offersBook && cta\.handoff\s*\?\s*bestHandoffForPick", card)
-    assert "&& cta.slip;" in card and "&& open && cta.track;" in card
+    assert re.search(r"const canSlip =[^;]*&& cta\.slip;", card)
+    assert re.search(r"const canTrack = [^;]*&& open && cta\.track;", card)
+    # The started line is not gated on paused: no NEW paused gating (#847).
+    started_def = re.search(r"const startedText =[^;]*;", card)
+    assert started_def and "pick.signal_type === 'BET' && !preview && open && cta.startedLine" in started_def.group(0)
+    assert "paused" not in started_def.group(0) and "offersBook" not in started_def.group(0)
     started = re.search(r"<View style=\{styles\.startedLine\}.*?</View>", card, re.S)
     assert started, "no Game started line"
     block = started.group(0)
@@ -154,12 +187,17 @@ def test_pick_detail_board_and_copy_wiring():
     assert "cta.startedLine && openHere" in detail
     assert "gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))" in detail
     assert "&& !voided && cta.slip ?" in detail and "const canTrack = openHere;" in detail
+    assert "const cta = pickCtaFor(pick, game, liveState);" in detail
+    # H5: AllBooksCard's rows open betslips, so it goes with the hand-off.
+    assert "{live || !cta.handoff ? null : <AllBooksCard" in detail and detail.count("<AllBooksCard") == 1
+    assert "{pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (" in detail
     reasoning = _read(SRC / "components" / "ReasoningCard.tsx")
     assert "reasoningHeading(pick.signal_type" in reasoning and ">Why this bet?<" not in reasoning
     movement = _read(SRC / "components" / "LineMovementCard.tsx")
     assert "recentChanges(" in movement and "snaps.slice(-8)" not in movement
+    assert "key={r.key}" in movement and "key={r.at}" not in movement
     home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
-    assert "sortPicks(filtered, sortKey, { priceCheck: (d) => priceCheckForItem(d).flagged })" in home
+    assert "priceCheck: (d) => priceCheckForItem(d, liveStates.get(d.pick.game_id) ?? null).flagged" in home
 
 
 def test_price_check_is_display_only():

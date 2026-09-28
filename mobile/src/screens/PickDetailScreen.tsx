@@ -39,8 +39,8 @@ import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameHasStarted, gameStatus } from '@/lib/format';
-import { gameStartedLine, pickCta } from '@/lib/pickCta';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
+import { gameStartedLine, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookLabel,
@@ -220,8 +220,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const canTrack = openHere;
   // H5 (lib/pickCta.ts): once a PRE-GAME pick's game has started, no hand-off
   // at the in-play price and no betslip — "Game started · picked at …" says
-  // what the pick was. Track stays. Live in-play signals are unchanged.
-  const cta = pickCta({ isLive: live, started: gameHasStarted(game, liveState) });
+  // what the pick was. Track stays. Live in-play signals are unchanged. The
+  // pick's game_time stands in for a missing games row (fails closed).
+  const cta = pickCtaFor(pick, game, liveState);
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
@@ -375,22 +376,28 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             <View style={styles.linesCard}>
               <BookLinesRow pick={pick} bookRows={bookRows} />
             </View>
-          ) : cta.startedLine && openHere ? (
-            <View style={styles.startedCard} accessibilityRole="text" accessible>
-              <Ionicons
-                name="lock-closed"
-                size={14}
-                color={colors.textSecondary}
-                accessibilityElementsHidden
-                importantForAccessibility="no"
-              />
-              <Text style={styles.startedText}>
-                {gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))}
-              </Text>
-            </View>
           ) : null
         ) : null}
-        {live ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
+        {/* "Game started · picked at …" — not gated on paused: it states a fact
+            about the pick, and this PR adds no paused gating (the existing
+            !paused gates flip in the paused-on-All PR). */}
+        {pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (
+          <View style={styles.startedCard} accessibilityRole="text" accessible>
+            <Ionicons
+              name="lock-closed"
+              size={14}
+              color={colors.textSecondary}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+            <Text style={styles.startedText}>
+              {gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))}
+            </Text>
+          </View>
+        ) : null}
+        {/* Every row of AllBooksCard opens that book's betslip, so after the
+            start it goes with the hand-off and the Slip (H5, Reviewer #847). */}
+        {live || !cta.handoff ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
 
         {/* A retired model's pick (reachable from a tracked bet on Performance)
             is history, not something to slip or hand off — the board it would

@@ -103,7 +103,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
   const showLineCol = market.startsWith('totals') || market.startsWith('spreads') || isProp;
   // M13: a row is a CHANGE, not a raw snapshot — runs at the same line and
   // price collapse, and rows sharing a minute get seconds (lib/lineHistory).
-  const { rows: recent, changes } = recentChanges(
+  const { rows: recent, changes, shownChanges, hidden } = recentChanges(
     snaps.map((s) => ({
       at: s.snapshot_at,
       line: showLineCol ? lineForSide(lineFromSnapshot(s, market), pick.pick_side, market) : null,
@@ -134,15 +134,15 @@ export function LineMovementCard({ pick, playerName }: Props) {
         <Text style={[styles.cell, styles.headText]}>Price</Text>
       </View>
       {recent.map((r) => (
-        <View key={r.at} style={styles.row}>
+        <View key={r.key} style={styles.row}>
           <Text style={[styles.cell, styles.cellTime]}>{r.label}</Text>
           {showLineCol ? <Text style={styles.cell}>{r.line ?? '—'}</Text> : null}
           <Text style={styles.cell}>{formatAmerican(r.price)}</Text>
         </View>
       ))}
-      {changes > recent.length || snaps.length > changes ? (
+      {hidden > 0 || snaps.length > recent.length ? (
         <Text style={styles.more}>
-          {changes > recent.length ? `Last ${recent.length} of ${changes} changes` : `${changes} ${changes === 1 ? 'change' : 'changes'}`}
+          {hidden > 0 ? `Last ${shownChanges} of ${changes} changes` : `${changes} ${changes === 1 ? 'change' : 'changes'}`}
           {` · ${snaps.length} snapshots`}
         </Text>
       ) : null}

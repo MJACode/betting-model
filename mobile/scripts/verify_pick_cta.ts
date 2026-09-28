@@ -15,15 +15,26 @@
  *   - M13: repeated line/price runs collapse, same-minute rows get seconds;
  *   - M14: "Why this bet?" only on a bet.
  * Plus wiring pins for the card, Pick Detail, the board sort and the card copy.
+ *
+ * Reviewer REQUEST CHANGES at 7f3f573d (#847), pinned below:
+ *   - H5 on Pick Detail: AllBooksCard (every row opens a betslip) goes with
+ *     the hand-off after the start;
+ *   - the moved-price rule is skipped in-play (the hero Now is the live price);
+ *   - the started line is not gated on paused (no NEW paused gating);
+ *   - the best-book CTA re-ranks by the record book's CURRENT price;
+ *   - gameHasStarted falls back to pick.game_time (fails closed);
+ *   - a game called off before first pitch is not "Game started"; "Live
+ *     price" only while in play; line history counts moves only, joins
+ *     mid-run nulls, and keys rows uniquely.
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { gameHasStarted } from '../src/lib/format';
+import { gameHasStarted, gameStartState } from '../src/lib/format';
 import { collapseLineHistory, recentChanges } from '../src/lib/lineHistory';
-import { bestHandoffForPick, MODEL_BOOK } from '../src/lib/markets';
-import { gameStartedLine, pickCta, reasoningHeading } from '../src/lib/pickCta';
+import { bestHandoffForPick, heroAmericanForPick, MODEL_BOOK } from '../src/lib/markets';
+import { gameStartedLine, pickCta, pickCtaFor, reasoningHeading } from '../src/lib/pickCta';
 import { priceCheckForItem } from '../src/lib/pickPriceCheck';
 import { sortPicks } from '../src/lib/pickSort';
 import {
@@ -93,22 +104,51 @@ check('gameHasStarted: the live feed says Live → started', gameHasStarted({ sp
 check('gameHasStarted: past first pitch, no feed → started', gameHasStarted({ sport: 'MLB', commence_time: past }));
 check('gameHasStarted: final → started', gameHasStarted({ sport: 'MLB', commence_time: past, home_score: 3, away_score: 2 }));
 check('gameHasStarted: a delayed start (feed says Preview) is still pre', !gameHasStarted({ sport: 'MLB', commence_time: past }, { abstract_game_state: 'Preview' }));
+// Reviewer #847 M6: fail CLOSED when the games row or commence_time is missing.
+check('gameHasStarted: no games row, pick.game_time past → started', gameHasStarted(null, null, past));
+check('gameHasStarted: games row without commence_time, game_time past → started', gameHasStarted({ sport: 'MLB', commence_time: null }, null, past));
+check('gameHasStarted: no games row, game_time ahead → pre', !gameHasStarted(null, null, future));
+check('gameHasStarted: nothing known at all → pre', !gameHasStarted(null, null, null));
+check('gameHasStarted: the games row’s commence_time wins over game_time', !gameHasStarted({ sport: 'MLB', commence_time: future }, null, past));
+// Low: a game called off before first pitch never "started".
+const finalNoScore = { abstract_game_state: 'Final', home_score: null, away_score: null };
+check('postponed: Final with no score and the start still ahead → postponed', gameStartState({ sport: 'MLB', commence_time: future }, finalNoScore) === 'postponed');
+check('postponed: …is not "started"', !gameHasStarted({ sport: 'MLB', commence_time: future }, finalNoScore));
+check('postponed: via game_time when the games row is missing', gameStartState(null, finalNoScore, future) === 'postponed');
+check('Final with no score AFTER the start → over (ended), still started', gameStartState({ sport: 'MLB', commence_time: past }, finalNoScore) === 'over');
+check('Final with a score → over', gameStartState({ sport: 'MLB', commence_time: past }, { abstract_game_state: 'Final', home_score: 3, away_score: 2 }) === 'over');
+check('the feed says Live → live', gameStartState({ sport: 'MLB', commence_time: past }, { abstract_game_state: 'Live' }) === 'live');
 
 const pre = pickCta({ isLive: false, started: false });
 check('before the start: hand-off, Slip, Track, "Now"',
   pre.handoff && pre.slip && pre.track && !pre.startedLine && pre.priceTag === 'Now', JSON.stringify(pre));
-const after = pickCta({ isLive: false, started: true });
+const after = pickCta({ isLive: false, started: true, inPlay: true });
 check('after the start: NO hand-off', !after.handoff);
 check('after the start: the "Game started" line', after.startedLine);
 check('after the start: Slip hidden', !after.slip);
 check('after the start: Track kept', after.track);
 check('after the start: the tag reads "Live price"', after.priceTag === 'Live price');
-const liveSignal = pickCta({ isLive: true, started: true });
+const liveSignal = pickCta({ isLive: true, started: true, inPlay: true });
 check('a live in-play signal keeps its hand-off and Slip (made in-game by design)',
   liveSignal.handoff && liveSignal.slip && !liveSignal.startedLine && liveSignal.priceTag === 'Live price');
 check('"Game started · picked at -125 DK"', gameStartedLine(-125, 'DK') === 'Game started · picked at -125 DK', gameStartedLine(-125, 'DK'));
 check('"… picked at +215 FAN"', gameStartedLine(215, 'FAN') === 'Game started · picked at +215 FAN');
 check('no decision price → just "Game started"', gameStartedLine(null, 'DK') === 'Game started');
+// Low: "Live price" only while IN PLAY, not on a final game.
+check('a final game’s price tag is "Now", not "Live price"', pickCta({ isLive: false, started: true, inPlay: false }).priceTag === 'Now');
+const ctaPick = mkPick({ game_time: past });
+check('pickCtaFor: final (scores in) → no hand-off, started line, tag "Now"', (() => {
+  const c = pickCtaFor(ctaPick, { sport: 'MLB', commence_time: past, home_score: 3, away_score: 2 }, null);
+  return !c.handoff && c.startedLine && c.priceTag === 'Now';
+})());
+check('pickCtaFor: in play → "Live price"', pickCtaFor(ctaPick, { sport: 'MLB', commence_time: past }, { abstract_game_state: 'Live' }).priceTag === 'Live price');
+check('pickCtaFor: no games row, game_time past → started line, no hand-off (fails closed)', (() => {
+  const c = pickCtaFor(ctaPick, null, null);
+  return !c.handoff && !c.slip && c.startedLine;
+})());
+const called = pickCtaFor(mkPick({ game_time: future }), { sport: 'MLB', commence_time: future }, finalNoScore);
+check('pickCtaFor: postponed → no "Game started", no hand-off, no Slip, Track kept',
+  !called.startedLine && !called.handoff && !called.slip && called.track && called.priceTag === 'Now', JSON.stringify(called));
 
 // ── standing rule: before the start, the BEST book, never DK-only ──────────
 {
@@ -125,6 +165,27 @@ check('no decision price → just "Game started"', gameStartedLine(null, 'DK') =
   const rows: BookPricedRow[] = [{ bookmaker: 'fanduel', over_price: -115, total_line: 8.5 }];
   const h = bestHandoffForPick(mkPick(), rows);
   check('…and DK only when DK IS the best book', h?.bookmaker === MODEL_BOOK && h.price === -110, JSON.stringify(h));
+}
+{
+  // Reviewer #847 M4: record DK −110, now DK −130, FD −115. The record chip
+  // wins the ranking at its STORED price; the same-book swap then said
+  // "Bet DK −130". Re-ranked by DK's current price, FD −115 wins.
+  const pick = mkPick({ decision_book: 'draftkings', decision_odds: -110 });
+  const rows: BookPricedRow[] = [
+    { bookmaker: 'draftkings', over_price: -130, total_line: 8.5 },
+    { bookmaker: 'fanduel', over_price: -115, total_line: 8.5, over_link: 'fd://now' },
+  ];
+  const lo = latest({ over_price: -130 });
+  const hero = heroAmericanForPick(pick, lo, rows);
+  check('M4 setup: hero is Now DK −130', hero?.kind === 'now' && hero.price === -130 && hero.book === MODEL_BOOK, JSON.stringify(hero));
+  const h = bestHandoffForPick(pick, rows, hero);
+  check('M4: record DK −110 / now DK −130 / FD −115 → hand-off FD −115 ("Best"), never "Bet DK −130"',
+    h?.bookmaker === 'fanduel' && h.price === -115 && h.verb === 'Best' && h.link === 'fd://now', JSON.stringify(h));
+  // Still DK when DK's CURRENT price is the best one.
+  const lo2 = latest({ over_price: -112 });
+  const rows2: BookPricedRow[] = [{ bookmaker: 'draftkings', over_price: -112, total_line: 8.5 }, { bookmaker: 'fanduel', over_price: -115, total_line: 8.5 }];
+  const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, lo2, rows2));
+  check('M4: DK now −112 beats FD −115 → "Bet DK −112" (the current number)', h2?.bookmaker === MODEL_BOOK && h2.price === -112 && h2.verb === 'Bet', JSON.stringify(h2));
 }
 
 // ── H4: price check ─────────────────────────────────────────────────────────
@@ -150,6 +211,18 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
   check('priceCheckForItem: the lock far from the same book’s current price flags (−110 vs +700 = 610c)', priceCheckForItem(moved).flagged);
   const near = { pick: mkPick({ decision_edge: 0.05 }), latestOdds: latest({ over_price: 420 }), bookRows: [] };
   check('priceCheckForItem: −110 vs +420 (330c) is not flagged', !priceCheckForItem(near).flagged);
+  // Reviewer #847 M2: after the start the hero Now is the IN-PLAY price.
+  check('in-play: priceCheck({ edge: .05, locked: −150, current: +700 }) pre-game IS flagged', P(0.05, -150, 700));
+  check('in-play: …with started, the moved rule is skipped', !priceCheck({ edge: 0.05, locked: -150, current: 700, started: true }).flagged);
+  check('in-play: the edge rule still applies after the start', priceCheck({ edge: 0.3, locked: -150, current: 700, started: true }).flagged);
+  const inPlay = { pick: mkPick({ decision_edge: 0.05, decision_odds: -150, dk_odds: -150, is_live: true }), latestOdds: latest({ over_price: 700 }), bookRows: [] };
+  check('priceCheckForItem: an in-play signal −150 vs now +700 is not flagged', !priceCheckForItem(inPlay).flagged);
+  const startedGame = { pick: mkPick({ decision_edge: 0.05, decision_odds: -150, dk_odds: -150 }), game: { commence_time: past, sport: 'MLB' } as never, latestOdds: latest({ over_price: 700 }), bookRows: [] };
+  check('priceCheckForItem: a pre-game pick whose game started (−150 vs now +700) is not flagged', !priceCheckForItem(startedGame).flagged);
+  check('priceCheckForItem: …nor when the games row is missing and game_time has passed',
+    !priceCheckForItem({ ...startedGame, game: null, pick: { ...startedGame.pick, game_time: past } }).flagged);
+  check('priceCheckForItem: the live feed decides too (Live snapshot)',
+    !priceCheckForItem({ ...startedGame, game: { commence_time: future, sport: 'MLB' } as never }, { abstract_game_state: 'Live', home_score: 1, away_score: 0 }).flagged);
 }
 {
   type Row = { pick: Pick; flag: boolean };
@@ -187,7 +260,25 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
   check('rows sharing a minute get seconds', flicker.every((r) => /^3:50:\d\d PM ET$/.test(r.label)), flicker.map((r) => r.label).join(' | '));
   const many = Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 }));
   const rc = recentChanges(many, 8);
-  check('the card shows the last 8 changes and counts them all', rc.rows.length === 8 && rc.changes === 20);
+  check('the card shows the last 8 rows and counts every CHANGE (the opening row is not one)',
+    rc.rows.length === 8 && rc.changes === 19 && rc.shownChanges === 8 && rc.hidden === 12, JSON.stringify({ c: rc.changes, s: rc.shownChanges, h: rc.hidden }));
+  // Reviewer #847 lows.
+  const one = recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 30), line: 8.5, price: -115 }]);
+  check('M13: opening + one move = 1 change, not 2', one.changes === 1 && one.rows[0].opening && !one.rows[1].opening);
+  check('M13: an unmoved line is 0 changes', recentChanges([{ at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: 8.5, price: -110 }]).changes === 0);
+  const gap = collapseLineHistory([
+    { at: t(18, 0), line: 8.5, price: -110 },
+    { at: t(18, 5), line: 8.5, price: null },
+    { at: t(18, 10), line: null, price: -110 },
+    { at: t(18, 15), line: 8.5, price: -110 },
+  ]);
+  check('M13: a mid-run null is not an "N/A" change (one row)', gap.length === 1 && gap[0].count === 4, JSON.stringify(gap.map((r) => [r.line, r.price])));
+  const same = collapseLineHistory([
+    { at: t(18, 0), line: null, price: -110 },
+    { at: t(18, 0), line: null, price: -115 },
+    { at: t(18, 0), line: null, price: -110 },
+  ]);
+  check('M13: same-timestamp rows get unique keys', new Set(same.map((r) => r.key)).size === same.length && same.length === 3);
 }
 
 // ── M14: reasoning heading ──────────────────────────────────────────────────
@@ -198,10 +289,15 @@ check('a paused or preview BET is not called a bet', reasoningHeading('BET', { p
 
 // ── wiring ──────────────────────────────────────────────────────────────────
 const card = read('src/components/PickCard.tsx');
-check('PickCard: started = gameHasStarted(game, liveState); cta = pickCta(…)',
-  /gameHasStarted\(game, liveState\)/.test(card) && /pickCta\(\{ isLive: pick\.is_live === true, started \}\)/.test(card));
+check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, postponed, in-play tag)',
+  /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
+check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
 check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
-check('PickCard: Slip needs cta.slip, Track keeps cta.track', /&& cta\.slip;/.test(card) && /&& open && cta\.track;/.test(card));
+check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
+  /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));
+const startedDef = card.match(/const startedText =[^;]*;/)?.[0] ?? '';
+check('PickCard: the started line is NOT gated on paused (no new paused gating)',
+  /pick\.signal_type === 'BET' && !preview && open && cta\.startedLine/.test(startedDef) && !/paused|offersBook/.test(startedDef), startedDef.replace(/\s+/g, ' ').slice(0, 120));
 const started = card.match(/<View style=\{styles\.startedLine\}[\s\S]*?<\/View>/)?.[0] ?? '';
 check('PickCard: the started line is role text, lock icon, not a Pressable',
   /accessibilityRole="text"/.test(started) && /name="lock-closed"/.test(started) && !/Pressable|onPress/.test(started));
@@ -215,10 +311,17 @@ const detail = read('src/screens/PickDetailScreen.tsx');
 check('PickDetail: hand-off (BookLinesRow) only while cta.handoff, started line otherwise',
   /cta\.handoff \? \(\s*<View style=\{styles\.linesCard\}>/.test(detail) && /cta\.startedLine && openHere/.test(detail) && /gameStartedLine\(decisionOdds\(pick\), bookLabel\(storedQuoteBook\(pick\)\)\)/.test(detail));
 check('PickDetail: betslip card needs cta.slip; Track unchanged', /&& !voided && cta\.slip \?/.test(detail) && /const canTrack = openHere;/.test(detail));
+check('PickDetail: cta = pickCtaFor(pick, game, liveState)', /const cta = pickCtaFor\(pick, game, liveState\);/.test(detail));
+check('PickDetail: AllBooksCard (rows open betslips) hidden when !cta.handoff (H5)',
+  /\{live \|\| !cta\.handoff \? null : <AllBooksCard\b/.test(detail) && (detail.match(/<AllBooksCard\b/g) ?? []).length === 1);
+check('PickDetail: the started line is NOT gated on paused',
+  /\{pick\.signal_type === 'BET' && !preview && !retired && !voided && cta\.startedLine && openHere \? \(/.test(detail));
 check('ReasoningCard: heading from reasoningHeading', /reasoningHeading\(pick\.signal_type/.test(read('src/components/ReasoningCard.tsx')) && !/>Why this bet\?</.test(read('src/components/ReasoningCard.tsx')));
 check('LineMovementCard: rows from recentChanges', /recentChanges\(/.test(read('src/components/LineMovementCard.tsx')) && !/snaps\.slice\(-8\)/.test(read('src/components/LineMovementCard.tsx')));
 const home = read('src/screens/PicksHomeScreen.tsx');
-check('PicksHome: Edge sort passes the price check', /sortPicks\(filtered, sortKey, \{ priceCheck: \(d\) => priceCheckForItem\(d\)\.flagged \}\)/.test(home));
+check('PicksHome: Edge sort passes the price check, with the live snapshot',
+  /priceCheck: \(d\) => priceCheckForItem\(d, liveStates\.get\(d\.pick\.game_id\) \?\? null\)\.flagged/.test(home));
+check('LineMovementCard: rows keyed by r.key (timestamps can repeat)', /key=\{r\.key\}/.test(read('src/components/LineMovementCard.tsx')) && !/key=\{r\.at\}/.test(read('src/components/LineMovementCard.tsx')));
 const pc = read('src/lib/priceCheck.ts');
 check('priceCheck.ts: pure, and says it is a display heuristic only', !/^import /m.test(pc) && /DISPLAY HEURISTICS ONLY/.test(pc) && /MAX_EDGE_CAP/.test(pc));
 check('the thresholds live only in priceCheck.ts', !/PRICE_CHECK_MAX_(EDGE|CENTS)\s*=/.test(card + detail + home));
