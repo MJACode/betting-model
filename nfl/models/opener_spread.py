@@ -545,6 +545,18 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
             .groupby("game_id", as_index=False).first())
 
 
+def _soft_home_quote(rows: pd.DataFrame) -> dict:
+    """One soft book's HOME spread as eval_row kwargs; empty when none quotes."""
+    soft = rows[(rows.book != REFERENCE) & (rows.side == "home")
+                & rows.point.notna() & rows.price.notna()]
+    if soft.empty:
+        return {}
+    dk = soft[soft.book == "draftkings"]
+    q = (dk if not dk.empty else soft.sort_values("book")).iloc[0]
+    return dict(current_line=float(q.point), current_price=int(q.price),
+                current_book=q.book)
+
+
 def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
                    threshold: float = DEPLOY_THRESHOLD,
                    prior: pd.DataFrame | None = None, now=None) -> list[dict]:
@@ -582,9 +594,14 @@ def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
 
         pin = rows[(rows.book == REFERENCE) & (rows.side == "home")]
         if pin.empty:
+            # The soft book's home spread rides on the row even though nothing
+            # is measurable yet: the platform writes a NONE row per evaluated
+            # game (scripts/nfl_wind_publisher.publish_scored), and it needs
+            # the line the game is hanging at. DraftKings first, as the
+            # reference book everywhere else; else the first bettable quote.
             out.append(eval_row(qualifies=False,
                                 reason="waiting on Pinnacle (posts ~T-6.5 days)",
-                                **common))
+                                **_soft_home_quote(rows), **common))
             continue
         pin_line = float(pin.point.median())
 

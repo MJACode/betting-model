@@ -26,9 +26,12 @@ import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
 
 interface Props {
   pick: Pick;
+  /** Paused model, never posted (isPausedForDisplay): no stake row — the
+   *  model's number is shown, but nothing sizes it as a bet. */
+  paused?: boolean;
 }
 
-export function ReasoningCard({ pick }: Props) {
+export function ReasoningCard({ pick, paused = false }: Props) {
   // Everything here is at the price the pick was DECIDED at (2026-09-09):
   // the best bettable price at the DraftKings line, DraftKings itself on
   // rows from before the flip.
@@ -86,7 +89,7 @@ export function ReasoningCard({ pick }: Props) {
         />
       )}
 
-      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) ? (
+      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) && !paused ? (
         <Row
           label="Stake"
           value={

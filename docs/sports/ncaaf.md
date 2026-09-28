@@ -329,8 +329,9 @@ session needs to know:
 - **A paused model is paused on both sides** (`scorer._paused_signal`,
   sport-agnostic): `ncaaf_moneyline` had written 80 AVOID rows the Signals
   board rendered as fade signals.
-- **The totals under-lean is real and small; it is spread across inputs, with
-  no single feature, NaN column or artifact bias found.**
+- **The totals under-lean, as measured on 2026-09-10, looked spread across
+  inputs.** That reading is not the 2026-09-26 one — see the remeasure below.
+  What was measured that day, and is kept so it is not re-derived:
   `scripts/ncaaf_search/totals_input_drift.py`: on the 2026 board the
   production artifact predicts a mean 0.85 below DK (56.6% of games below)
   against +0.68 (47.3% below) on 2025's games through 09-20; the same lean
@@ -380,3 +381,146 @@ session needs to know:
   47.6%; no weather at all is worst (51.7% / 44.8%). The forecast haircut is
   real in one season of two and not separable at ~90 bets a season. Artifact
   unchanged; the issued series accrues for a two-season refit.
+
+### Remeasured 2026-09-26 — low PPA, not an under-only scorer
+
+The Sep 26 board was 10 open under BETs and 0 overs
+(`picks`, `model_id='ncaaf_over_under'`, `signal_type='BET'`,
+`game_date='2026-09-26'`). Season settled record from `profit_flat / 100`,
+`WIN`/`LOSS` only, `result='NO_ACTION'` excluded (those 13 rows are the
+2026-09-19 EV-floor void, `condition_status='VOID'`): over 6 bets 4-2
+**+1.54 units**, under 16 bets 5-11 **−6.50 units**. The point gate is still
+symmetric. The predictions are low, and a promoted calibration map then
+deletes the marginal over.
+
+**The scorer is side-symmetric in points.** `models/scorer.py` (`kind ==
+"total_regression"`) sets `disagreement = predicted_total − DK total` and
+forces NONE unless `abs(disagreement) >= artifact d_threshold` (8.0 on
+`models/saved/ncaaf_over_under_20260825_204305.pkl`). Both sides are then
+evaluated. The OOS residual ECDF (772 residuals, mean −0.618) is not centred:
+P(over) at +8 is 0.6503 and P(under) at −8 is 0.7098, which is why the point
+gate exists — a lone 0.65 floor would fire unders near −5. It is not doing
+that. Every stored under BET inverts to a disagreement in **[−9.25, −8.0]**;
+every stored over BET inverts to **[+8.12, +10.93]**.
+
+**The market is not the lean.** 149 completed games that have a pick row:
+mean actual − line **+0.29** (76 went over, 73 under). Mean predicted − line
+on those games **−1.18**, so actual − predicted is **+1.47**. The model is
+the thing sitting low. On the 200 games with a `game_date` before 2026-10-01
+(one row per game; BET disagreements inverted through the ECDF, inside-gate
+rows from `downgrade_reason` or the over-side probability): mean predicted −
+line **−1.47** (median −1.50), 136 below the line and 64 above, 29 under the
+−8 gate and 10 over the +8 gate. The Sep 26 slate is 51 games, mean **−2.31**,
+10 at or past −8 and 1 at or past +8.
+
+**Weather, tempo, SP+, and the line are not it.** All 10 open Sep 26 unders
+have a `game_weather` row fetched 2026-09-26 10:21Z: temperature 58–90°F,
+wind 4–12 mph, precipitation 0. FBS snapshot `as_of_date` 2026-09-23 versus
+2025-09-24 (138 teams): plays/game 66.55 vs 66.57, SP+ offense 27.16 vs
+27.14, SP+ defense 26.46 vs 26.61, points/game 29.18 vs 29.11. Raw scoring
+in `ncaaf_team_game_log` through Sep 26 is **up**, not down: 27.90 points
+per team-game in 2026 versus 27.23 in 2025 and 26.96 in 2024, on slightly
+fewer plays (64.74 vs 65.35). `decision_book` on the open unders is
+DraftKings or FanDuel; `line_book` is null; the gate reads the DraftKings
+total.
+
+**The input that moved is PPA, stored as `epa_per_play_*`.** Same two
+snapshots: EPA offense 0.135 vs 0.202, EPA defense 0.066 vs 0.148. Success
+rate and explosiveness, from the same CFBD advanced payload, did not move
+(success rate offense 0.433 vs 0.435, explosiveness 1.240 vs 1.263). The
+preseason prior (`as_of_date` August 1) matches the previous season's final
+snapshot within 0.01 in every year 2022–2025. For 2026 it does not: offense
+**−0.069**, defense **−0.068**, correlation with the 2025-12-12 finals still
+0.944 (138 FBS teams). SP+ is the prior-season rating held constant on
+purpose (`cfbd_ingestor._stat_row`); that part matches 2025. One snapshot,
+2026-09-10, sat back near the old scale (EPA offense 0.183, defense 0.129)
+and the weekends scored after 09-16 / 09-23 did not. A uniform −0.069 shift
+on all four EPA columns of the production artifact, on 400 random games
+drawn around these means, moves the predicted total by a mean **−2.36**
+(median −2.55). That is the size of the Sep 26 lean. It is a sensitivity,
+not a rescore of the live vectors. Every current under BET is only 0 to 1.3
+points past the gate, so a shift of that size is what fills the under tail
+and empties the over tail.
+
+**The 0.65 floor does not treat the two arms the same, once the Platt map
+is on.** The point gate is still symmetric (`abs(disagreement) >= 8`). The
+decision is not, because `_decide` uses the calibrated probability and the
+residual ECDF is not centred (772 residuals, mean −0.618). Read off that
+ECDF and the promoted map (`a=1`, `b=−0.2816`):
+
+| Disagreement | Raw P(side) | Calibrated | Clears 0.65? |
+|---|---|---|---|
+| +8.0 over | 0.6503 | 0.5838 | no |
+| −8.0 under | 0.7098 | 0.6486 | no |
+| +10.72 over | 0.7111 | 0.6501 | yes |
+| −8.09 under | 0.7111 | 0.6501 | yes |
+
+A large positive disagreement does produce a high P(over). It does not
+produce one that clears 0.65 at the same point gap that a large negative
+disagreement does. After the map, both sides need raw probability about
+0.711. That is −8.1 points for an under (the gate already requires 8) and
++10.7 points for an over. Before the map, raw 0.65 is +7.95 for an over
+and −5.13 for an under; the point gate is what stops the under arm firing
+at −5. The map undoes that protection on the over arm only.
+
+**What the rows do, split at the promotion.** Map promoted 2026-09-19
+17:45 ET. Over BETs, all 11, were locked by 2026-09-18 13:36 UTC with
+calibrated = raw (0.6516–0.7137). No over BET has been written since.
+Under BETs written from 2026-09-20 on: 18, raw 0.7111–0.7280, calibrated
+0.6500–0.6688, of which 16 are still open. The one post-map over that
+cleared raw 0.65 is `Fresno State vs Rice Over 44.5` (raw 0.6593,
+calibrated 0.5935, stored NONE). The under-BET probability knots are the
+ECDF itself: 0.7150 (13 bets), 0.7176 (7), 0.7098 (4). 0.7098 is P(under)
+at exactly −8.
+
+**The 0.35–0.50 over rows are not large positive disagreements the floor
+rejected.** 180 over-side `NONE` rows have median raw probability 0.4378.
+They are games that have not locked a BET. 142 of them have P(over) below
+0.50 (the model is not high versus the line); 109 of those carry the
+inside-the-gate reason. Six more sit at raw 0.608–0.648, five of them
+inside the gate, including `Boston College vs Virginia Tech Over 46.5`
+(raw 0.6477) and `Georgia vs Oklahoma Over 43.5` (raw 0.6386). The over
+side of an under BET is not in the table: 0 of 40 under BETs still have
+an over row. The next scoring pass deletes `signal_type != 'BET'` and the
+lock does not rewrite that side, so the complement (about 0.27–0.29) is
+gone. Season settled record is unchanged: 22 priced bets, over 4-2
+**+1.54 units**, under 5-11 **−6.50 units** (together **−4.96 units**;
+the kelly sum of those 22 is −212.1).
+
+**Demoted 2026-09-26.** Michael Alksninis approved taking that map out of
+the decision path ("Demote ncaaf_over_under Platt map"). Updated-By:
+mike. `data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql`
+clears `promoted` on the row whose `promoted_at` is
+`2026-09-19T17:45:14.751731-04:00` and whose `promoted_b` is −0.281555.
+`load_calibrations` then misses the model, and `apply_calibration`
+returns the raw probability. Both arms are back at the ±8 gate: raw
+P(over) at +8 is 0.6503 and raw P(under) at −8 is 0.7098, and the point
+gate is what still stops an under near −5. The 0.65 floor and the ±8
+gate are unchanged. No side-only floor. Already-locked BETs are not
+rewritten. A later promotion with a different `promoted_at` is a new
+model update; this migration will not clear it.
+
+**Open book, rechecked the same day.** Result-null BETs with
+`game_date >= 2026-08-01`: **16 under, 0 over**. Raw `model_probability`
+on those 16 is **0.7111–0.7280** (games 2026-09-26 through 2026-11-28).
+That cluster is P(under) just past the −8 gate (the ECDF gives 0.7098 at
+exactly −8). It is the left tail of a low predicted total.
+
+**`ncaaf_live_total` does not share this path.** A search of `ncaaf_live/`
+for `NCAAF_TOTALS_FEATURES`, `total_regression`, `epa_per_play`, and
+`ncaaf_over_under` is empty. Its engine is LightGBM remaining points
+(`ncaaf_live/engine/remaining.py`); the features are clock, score, the
+posted pregame line, pace, and wind. Config kind is `"engine"`. Its record
+stays with the Model Quality inventory.
+
+**Not done, and why.** Nothing was paused. No side was flipped. The artifact
+was not refit. The EV floor was not moved. The 0.65 floor was not moved.
+Predicted totals are still low because 2026 PPA is. The next measurement
+on that bias is one CFBD read: `/stats/season/advanced?year=2025` (no week bounds — that is what
+`_prior_season_context` stores as the 2026 prior) and
+`?year=2026&startWeek=1&endWeek=4`, and compare `offense.ppa` /
+`defense.ppa` for one FBS school to the 2026-08-01 prior and the 2025-12-12
+final. If the API still returns the ~0.18 scale, rebuild the 2026
+snapshots with `refresh_ncaaf_stats`. If the API returns the low number,
+the live scale has left the scale the artifact was fit on, and the prior
+should be pinned to the 2025-12-12 snapshot before anyone refits.

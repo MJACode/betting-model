@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -6,9 +6,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,7 +21,6 @@ import { useBettingState } from '@/hooks/useBettingState';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
-import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { NotificationsCard } from '@/components/NotificationsCard';
 import { useFeedbackUnread } from '@/hooks/useFeedback';
 import { useAuth } from '@/hooks/useAuth';
@@ -46,7 +43,6 @@ import {
   WEBSITE_URL,
   openLink,
 } from '@/lib/socialLinks';
-import { formatUnits } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -78,6 +74,11 @@ function LinkRow({
     <Pressable
       style={({ pressed }) => [styles.linkCard, pressed && styles.pressed]}
       onPress={onPress}
+      // Role only, NO accessibilityLabel: a label REPLACES what VoiceOver reads
+      // from the children, and five rows carry their status in `right` (Not
+      // signed in, Active, the connected books, Connected, "2 new replies").
+      // Left to the children, VoiceOver reads label, status and sub in order.
+      accessibilityRole="button"
     >
       <View style={{ flex: 1 }}>
         {right ? (
@@ -103,7 +104,6 @@ export function SettingsScreen() {
   const [statePickerOpen, setStatePickerOpen] = useState(false);
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
-  const { settings: rg, setExposureCapUnits } = useResponsibleGambling();
   const feedbackUnread = useFeedbackUnread();
   const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
   // Two different questions, deliberately asked of two different hooks:
@@ -113,30 +113,6 @@ export function SettingsScreen() {
   const { entitled } = useEntitlement();
   const { access, unlink, busy: discordBusy } = useAccess();
   const [discordSheet, setDiscordSheet] = useState(false);
-  const [rgDraft, setRgDraft] = useState<string>('');
-
-  useEffect(() => {
-    setRgDraft(rg.exposureCapUnits != null ? String(rg.exposureCapUnits) : '');
-  }, [rg.exposureCapUnits]);
-
-  // The cap is stored, summed and displayed in UNITS end to end
-  // (useResponsibleGambling, and PicksHomeScreen's unitsFor sum). This field
-  // used to divide the entry by 100 under a "units / day" label, so typing 10
-  // stored 0.1u — a ceiling every single pick breached. Units, no conversion.
-  const commitRgCap = (raw: string) => {
-    if (raw.trim() === '') return;
-    const units = parseFloat(raw);
-    if (!Number.isFinite(units) || units <= 0 || units > 100) {
-      Alert.alert('Invalid limit', 'Enter a number of units between 0 and 100.');
-      setRgDraft(rg.exposureCapUnits != null ? String(rg.exposureCapUnits) : '');
-      return;
-    }
-    setExposureCapUnits(units);
-  };
-
-  // A typical BET lays ~1.1u, so 10u/day is roughly a nine-pick day.
-  const toggleRgCap = (on: boolean) => setExposureCapUnits(on ? 10 : null);
-
   const openHelpline = () => {
     Linking.openURL('tel:1-800-522-4700').catch(() =>
       Alert.alert('Need help?', 'Call or text 1-800-GAMBLER (1-800-522-4700), available 24/7.'),
@@ -185,6 +161,8 @@ export function SettingsScreen() {
               </Text>
               <Pressable
                 onPress={confirmSignOut}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
                 style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.signOutText}>Sign out</Text>
@@ -344,43 +322,9 @@ export function SettingsScreen() {
 
         <SectionHeader title="Staying in control" />
 
-        <View style={styles.card}>
-          <View style={styles.capHeader}>
-            <Text style={styles.cardLabel}>Daily exposure limit</Text>
-            <Switch value={rg.exposureCapUnits != null} onValueChange={toggleRgCap} />
-          </View>
-          {rg.exposureCapUnits != null ? (
-            <>
-              <View style={styles.capRow}>
-                <TextInput
-                  style={styles.capInput}
-                  value={rgDraft}
-                  onChangeText={setRgDraft}
-                  onBlur={() => commitRgCap(rgDraft)}
-                  onSubmitEditing={() => commitRgCap(rgDraft)}
-                  keyboardType="decimal-pad"
-                  placeholder="10"
-                  placeholderTextColor={colors.textTertiary}
-                  returnKeyType="done"
-                />
-                <Text style={styles.capUnit}>units / day</Text>
-              </View>
-              <Text style={styles.sub}>
-                We’ll warn you when today’s recommended stakes add up to more than{' '}
-                {formatUnits(rg.exposureCapUnits)}. One unit is one flat bet, so a typical pick
-                lays about 1.1u. Staying small keeps you in the game.
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.sub}>
-              Off by default. Turn it on for a heads-up before a day’s picks over-extend you.
-            </Text>
-          )}
-        </View>
-
-        {/* Its own card, deliberately: this used to sit inside the exposure
-            card, which is OFF by default — so the one support resource in the
-            app rendered as a footnote on a feature the member had declined. */}
+        {/* The daily exposure limit card that sat above this was removed on
+            2026-09-26 (Matt), with the Picks banner it drove. The helpline
+            stays: it is the one support resource in the app. */}
         <View style={styles.card}>
           <Pressable
             onPress={openHelpline}
@@ -521,6 +465,10 @@ export function SettingsScreen() {
 
         <Pressable
           onPress={() => openLink(WEBSITE_URL, 'the website')}
+          accessibilityRole="link"
+          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}, ${websiteLabel}`}
+          accessibilityHint="Opens the website"
+          hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>
@@ -638,33 +586,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 18,
   },
-  capHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
-  capRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  capInput: {
-    width: 80,
-    fontSize: font.size.title3,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-    backgroundColor: colors.bg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-    textAlign: 'center',
-  },
-  capUnit: {
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-  },
   helplineRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -731,7 +652,7 @@ const styles = StyleSheet.create({
   },
   signOutBtn: {
     marginTop: spacing.md,
-    height: 40,
+    minHeight: 44,
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
