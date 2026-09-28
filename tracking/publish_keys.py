@@ -139,3 +139,23 @@ def live_lock_key(game_id: str, model_id: str, pick_side: str,
              "prop_market": prop_market}
     tail = "".join(f":{parts[c]}" for c in KEY_PARTS if parts[c])
     return f"{LIVE_KEY_PREFIX}{game_id}:{model_id}:{pick_side}{tail}"
+
+
+# The Discord channel kinds in push_sent. A lock_key in either means the pick
+# was POSTED as a signal -- the same join mobile's v_discord_published makes.
+DISCORD_KINDS = ("discord_signal", "discord_live")
+
+
+def posted_sql(alias: str = "p") -> str:
+    """EXISTS: the Discord ledger holds this pick's lock_key (pre-game or live).
+
+    Matt, 2026-09-28: "if a bet is posted as a signal it should be locked".
+    scripts/void_picks.py refuses any pick this is true for. Built from the two
+    key expressions above so there is one definition of the key, not two.
+    """
+    kinds = ", ".join(f"'{k}'" for k in DISCORD_KINDS)
+    return ("EXISTS (SELECT 1 FROM push_sent s "
+            f"WHERE s.kind IN ({kinds}) "
+            f"AND s.lock_key = CASE WHEN {alias}.is_live "
+            f"THEN {live_lock_key_sql(alias)} "
+            f"ELSE {lock_key_sql(alias)} END)")

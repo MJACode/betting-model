@@ -299,8 +299,8 @@ was available and is part of the pick's meaning.
   joining `model_action_thresholds`. The exits: **VOID** — a row the model should never
   have PRODUCED, not one overtaken by LINE MOVEMENT. `scripts/void_picks.py`
   sets `result='NO_ACTION'` + `condition_status='VOID'`, keeps `created_at`,
-  the line, the price and the lock, and REFUSES a graded pick (deleting
-  destroys the evidence) — and **`config.RECORD_EXCLUSIONS`**, naming who
+  the line, the price and the lock, and REFUSES a graded or Discord-posted
+  pick (Matt 09-28) — and **`config.RECORD_EXCLUSIONS`**, naming who
   asked. Sweep views DO re-cut (§7). Test:
   `tests/test_settled_record_is_immutable.py`.
   **A paused model is LISTED, not hidden** on the Record tab (mike, same day:

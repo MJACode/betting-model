@@ -40,6 +40,16 @@ WHAT IT REFUSES
 A pick already graded WIN / LOSS / PUSH. Voiding one of those is not correcting
 a bug, it is rewriting a settled result, and nothing in §1c permits it.
 
+A pick already POSTED as a signal. (Matt, 2026-09-28: "if a bet is posted as a
+signal it should be locked".) Once the channel has it, members were told to bet
+it, and a void cannot take the message back -- this script never touches the
+channel (2026-09-23). The 2026-09-19 EV-floor void showed what happens
+otherwise: Ailin Perez ML was posted, stayed on the board, won, and the daily
+recap said no UFC pick cleared the bar that day. "Posted" is the publish ledger
+on the pick's lock_key: tracking/publish_keys.posted_sql, the same join the
+app's published-picks view makes. There is no override flag on purpose:
+changing this rule is a code change.
+
 FIRST USE: 2026-09-07 (mike), the six `nfl_wind_totals` Week 1 picks that fired
 at 7.2-8.7 day leads before #517 landed the firing gate. All six had lost their
 premise by the time they were voided -- four had the wind forecast collapse to
@@ -61,6 +71,14 @@ VOID_STATUS = "VOID"
 GRADED = ("WIN", "LOSS", "PUSH")
 
 
+def _posted_sql() -> str:
+    from tracking.publish_keys import posted_sql
+    return posted_sql("p")
+
+
+POSTED_SQL = _posted_sql()
+
+
 def plan_voids(rows: list[dict], reason: str) -> tuple[list[dict], list[dict]]:
     """Split candidate rows into (to_void, refused). Pure; the tests drive this.
 
@@ -74,6 +92,8 @@ def plan_voids(rows: list[dict], reason: str) -> tuple[list[dict], list[dict]]:
             refused.append({**r, "why": f"already graded {result}"})
         elif result == VOID_RESULT:
             refused.append({**r, "why": "already void (no-op)"})
+        elif r.get("posted"):
+            refused.append({**r, "why": "posted as a signal -- a posted signal is locked"})
         elif not reason.strip():
             refused.append({**r, "why": "no reason given"})
         else:
@@ -96,9 +116,10 @@ def _select(conn, pick_ids, model, before, game_ids):
         where.append("created_at < %s")
         params.append(before)
     sql = (f"SELECT pick_id, game_id, model_id, pick_label, signal_type, result, "
-           f"created_at FROM picks WHERE {' AND '.join(where)} ORDER BY created_at")
+           f"created_at, {POSTED_SQL} AS posted "
+           f"FROM picks p WHERE {' AND '.join(where)} ORDER BY created_at")
     cols = ("pick_id", "game_id", "model_id", "pick_label", "signal_type",
-            "result", "created_at")
+            "result", "created_at", "posted")
     return [dict(zip(cols, r)) for r in conn.execute(sql, params).fetchall()]
 
 
