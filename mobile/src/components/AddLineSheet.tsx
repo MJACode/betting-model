@@ -99,7 +99,7 @@ export function AddLineSheet({
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close add line"
         />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the price rows and the
@@ -113,7 +113,7 @@ export function AddLineSheet({
               </Text>
               {matchup ? <Text style={styles.matchup}>{matchup}</Text> : null}
             </View>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close add line">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>

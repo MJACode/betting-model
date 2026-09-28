@@ -370,7 +370,7 @@ export function ParlayScreen() {
                 onPress={closeCustom}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Close"
+                accessibilityLabel="Close custom leg"
               >
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>

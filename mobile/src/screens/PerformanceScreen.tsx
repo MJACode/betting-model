@@ -562,7 +562,7 @@ function StakeEditModal({
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close stake editor"
         />
         <View style={styles.stakeModalCard} accessibilityViewIsModal>
           <Text style={styles.stakeModalTitle}>Stake for this bet</Text>

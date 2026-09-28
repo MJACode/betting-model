@@ -107,7 +107,7 @@ export function InfoTooltip({
             style={StyleSheet.absoluteFill}
             onPress={() => setOpen(false)}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel={`Close ${title}`}
           />
           {/* Inner Pressable swallows taps so touching the card doesn't dismiss. */}
           <Pressable

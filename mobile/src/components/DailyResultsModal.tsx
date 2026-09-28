@@ -134,7 +134,7 @@ export function DailyResultsModal({
             hitSlop={12}
             style={styles.closeBtn}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel="Close daily results"
           >
             <Ionicons name="close" size={22} color={colors.textSecondary} />
           </Pressable>

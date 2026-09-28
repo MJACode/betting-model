@@ -68,7 +68,7 @@ export function DiscordLinkModal({
             onPress={onClose}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel="Close Discord link"
             style={styles.close}
           >
             <Ionicons name="close" size={24} color={colors.textSecondary} />

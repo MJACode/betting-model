@@ -63,7 +63,7 @@ export function HitModeSheet({
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close bet type options"
         />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the rows unreachable. */}
@@ -71,7 +71,7 @@ export function HitModeSheet({
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Show bets that are</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close bet type options">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>

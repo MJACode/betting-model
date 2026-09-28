@@ -59,7 +59,7 @@ export function PlayerNewsSheet({
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close player news"
         />
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
           <View style={styles.grabber} />
@@ -121,7 +121,7 @@ export function PlayerNewsSheet({
           </ScrollView>
 
           <Pressable
-            accessibilityLabel="Close"
+            accessibilityLabel="Close player news"
             style={styles.closeButton}
             onPress={onClose}
             accessibilityRole="button"

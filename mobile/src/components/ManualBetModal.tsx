@@ -67,7 +67,7 @@ export function ManualBetModal({
           style={styles.backdropFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close add a bet"
         />
         <View style={styles.sheet}>
           <Text style={styles.title}>Add a bet</Text>

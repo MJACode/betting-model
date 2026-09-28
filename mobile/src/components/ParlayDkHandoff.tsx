@@ -74,14 +74,14 @@ export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: P
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close DraftKings hand-off"
         />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the rows unreachable. */}
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.header}>
             <Text style={styles.title}>Bet on {name}</Text>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close DraftKings hand-off">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>

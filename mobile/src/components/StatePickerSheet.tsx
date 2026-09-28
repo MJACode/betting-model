@@ -30,13 +30,13 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close state picker"
         />
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Your state</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close state picker">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>

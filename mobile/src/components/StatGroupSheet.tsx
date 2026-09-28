@@ -52,7 +52,7 @@ export function StatGroupSheet<T extends string>({
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close stat group picker"
         />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the rows unreachable. */}
@@ -60,7 +60,7 @@ export function StatGroupSheet<T extends string>({
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Stat group</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close stat group picker">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>

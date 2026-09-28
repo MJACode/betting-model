@@ -313,11 +313,14 @@ export function PickCard({
             ) : null}
           </View>
           {flagged ? (
+            // Read ONCE, in cardLabel ("Price check: this price looks off…"):
+            // the card is the accessible element, so a separately accessible
+            // chip inside it said it twice (Reviewer #848).
             <View
               style={[styles.labelChip, styles.priceCheckChip]}
-              accessible
               accessibilityRole="text"
-              accessibilityLabel="Price check: this price looks off, so edge and EV are hidden"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
             >
               <Ionicons
                 name="alert-circle-outline"
@@ -496,11 +499,13 @@ export function PickCard({
         <View style={styles.actionsRow}>
           {startedText ? (
             // Not a button: the pick was made at this price, before the start.
+            // Spoken once, in cardLabel (startedSpoken), not again here
+            // (Reviewer #848).
             <View
               style={styles.startedLine}
               accessibilityRole="text"
-              accessible
-              accessibilityLabel={startedSpoken ?? startedText}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
             >
               <Ionicons
                 name="lock-closed"

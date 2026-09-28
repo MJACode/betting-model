@@ -101,7 +101,7 @@ export function SportsbookPickerSheet({
           style={StyleSheet.absoluteFill}
           onPress={onClose}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel="Close sportsbook picker"
         />
         {/* accessible={false}: an accessible Pressable groups its children
             into ONE VoiceOver element, which would leave the book rows, the
@@ -114,7 +114,7 @@ export function SportsbookPickerSheet({
               accessibilityRole="button"
               onPress={onClose}
               hitSlop={12}
-              accessibilityLabel="Close"
+              accessibilityLabel="Close sportsbook picker"
             >
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
