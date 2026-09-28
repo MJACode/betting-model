@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatSigned, gameStatus } from '@/lib/format';
+import { formatSigned, gameHasStarted, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
@@ -19,6 +19,7 @@ import {
   numOrNull,
   pickTimingInfo,
   splitPickTitle,
+  storedQuoteBook,
   type Movement,
 } from '@/lib/markets';
 import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
@@ -31,6 +32,8 @@ import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
 import { openForAction } from '@/lib/discordPublish';
+import { gameStartedLine, pickCta } from '@/lib/pickCta';
+import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
@@ -90,9 +93,23 @@ export function PickCard({
       : colors.textSecondary;
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
   const ev = expectedValue(pick.model_probability, decisionOdds(pick));
+  // H4 price check (display only, lib/priceCheck.ts): an implausible edge or a
+  // lock far from the book's current price shows "Price check" and "—" for
+  // edge and EV instead of headlining the board.
+  const check = priceCheckForItem(item);
+  const flagged = check.flagged;
+  const edgeText = flagged ? '—' : formatPctSigned(decisionEdge(pick));
+  // H4: on NONE / AVOID the edge is a secondary line, not the hero number —
+  // a non-bet must not read like a BET. BET keeps the hero edge.
+  const demoteEdge = pick.signal_type !== 'BET';
+  // H5: what the card offers once the game has started (lib/pickCta.ts).
+  const started = gameHasStarted(game, liveState);
+  const cta = pickCta({ isLive: pick.is_live === true, started });
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
+  // A flagged row's movement line is built from the same suspect price, so it
+  // is suppressed too.
   const movement =
-    gameStatus(game, liveState).kind === 'pre'
+    gameStatus(game, liveState).kind === 'pre' && !flagged
       ? movementFromLatest(pick, item.latestOdds, item.bookRows)
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
@@ -156,21 +173,33 @@ export function PickCard({
   const hasExtras =
     Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
-  const handoff = !preview && !paused && pick.signal_type === 'BET'
+  // Before the start it is always the BEST available book (bestHandoffForPick),
+  // never DraftKings-only. After the start a pre-game pick has no hand-off: the
+  // in-play price is not the price it was made at (H5).
+  const offersBook = !preview && !paused && pick.signal_type === 'BET';
+  const handoff = offersBook && cta.handoff
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
     : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
-  const canTrack = Boolean(onToggleTrack) && open;
-  // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
+  // "Game started · picked at −125 DK" in the hand-off's place (H5).
+  const startedText =
+    offersBook && open && cta.startedLine
+      ? gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))
+      : null;
+  // Track stays after the start; it scores the pick at its lock.
+  const canTrack = Boolean(onToggleTrack) && open && cta.track;
+  // Betslip — priced (decision price, not dk_odds), unsettled, non-preview,
+  // and hidden once a pre-game pick's game has started (H5).
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused && cta.slip;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
-  const showSharp = Boolean(sharp);
+  // A flagged row carries "Price check" in the chip slot instead (H4).
+  const showSharp = Boolean(sharp) && !flagged;
   // The tier is the model's confidence in a BET. On a NONE / AVOID card a
   // "HIGH" chip reads as a high-confidence non-pick, so it is BET-only (M6).
-  const showTier = Boolean(pick.confidence_tier) && !showSharp && pick.signal_type === 'BET';
+  const showTier = Boolean(pick.confidence_tier) && !showSharp && !flagged && pick.signal_type === 'BET';
   const stakeCaption =
     pick.signal_type !== 'BET' || preview || paused
       ? null
@@ -179,7 +208,7 @@ export function PickCard({
         : formatUnits(stake.conviction);
   const caption = [
     `Model ${formatPct(pick.model_probability)}`,
-    ev == null ? null : `EV ${formatPctSigned(ev)}`,
+    flagged ? 'EV —' : ev == null ? null : `EV ${formatPctSigned(ev)}`,
     stakeCaption,
   ]
     .filter((p): p is string => p != null)
@@ -198,10 +227,11 @@ export function PickCard({
         matchup,
         pick.pick_label,
         paused ? 'Paused model, not a bet' : pick.signal_type,
-        `Edge ${formatPctSigned(decisionEdge(pick))}`,
+        flagged ? 'Price check. Edge unavailable' : `Edge ${edgeText}`,
         heroPrice
-          ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
+          ? `${heroPrice.kind === 'now' ? cta.priceTag : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
           : null,
+        startedText,
       ]
         .filter((p): p is string => Boolean(p))
         .join('. ')}
@@ -251,6 +281,18 @@ export function PickCard({
               </Text>
             ) : null}
           </View>
+          {flagged ? (
+            <View style={[styles.labelChip, styles.priceCheckChip]}>
+              <Ionicons
+                name="alert-circle-outline"
+                size={12}
+                color={colors.medInk}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.priceCheckText}>Price check</Text>
+            </View>
+          ) : null}
           {showSharp && sharp ? (
             <View style={styles.labelChip}>
               <SharpScorePill score={sharp.score} band={sharp.band} />
@@ -267,17 +309,21 @@ export function PickCard({
       </View>
 
       <View style={styles.heroRow}>
-        <View style={styles.heroEdgeBlock}>
-          <Text style={[styles.heroEdge, { color: edgeColor }]}>
-            {formatPctSigned(decisionEdge(pick))}
-          </Text>
-          <Text style={styles.heroEdgeLabel}>Edge</Text>
-        </View>
+        {demoteEdge ? (
+          <Text style={styles.edgeSecondary}>Edge {edgeText}</Text>
+        ) : (
+          <View style={styles.heroEdgeBlock}>
+            <Text style={[styles.heroEdge, { color: flagged ? colors.textSecondary : edgeColor }]}>
+              {edgeText}
+            </Text>
+            <Text style={styles.heroEdgeLabel}>Edge</Text>
+          </View>
+        )}
         {heroPrice ? (
           <View style={styles.heroPriceBlock}>
             <View style={heroPrice.kind === 'now' ? styles.pricePill : styles.heroPriceRow}>
               {heroPrice.kind !== 'decision' ? (
-                <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? 'Now' : 'Locked'}</Text>
+                <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? cta.priceTag : 'Locked'}</Text>
               ) : null}
               <Text style={styles.heroPrice}>
                 {heroPrice.price == null
@@ -410,9 +456,23 @@ export function PickCard({
         </View>
       ) : null}
 
-      {handoff || canTrack || canSlip ? (
+      {handoff || startedText || canTrack || canSlip ? (
         <View style={styles.actionsRow}>
-          {handoff ? (
+          {startedText ? (
+            // Not a button: the pick was made at this price, before the start.
+            <View style={styles.startedLine} accessibilityRole="text" accessible>
+              <Ionicons
+                name="lock-closed"
+                size={12}
+                color={colors.textSecondary}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.startedText} numberOfLines={1}>
+                {startedText}
+              </Text>
+            </View>
+          ) : handoff ? (
             <Pressable
               onPress={() => {
                 void openBookBetslip(handoff.bookmaker, handoff.link);
@@ -608,6 +668,46 @@ const styles = StyleSheet.create({
   },
   heroEdgeBlock: {
     flexShrink: 0,
+  },
+  // H4: NONE / AVOID edge as a secondary line (13pt medium textSecondary),
+  // not the 20pt hero, always textSecondary (10.94:1) — no verdict colour.
+  edgeSecondary: {
+    flexShrink: 1,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    fontVariant: ['tabular-nums'],
+    color: colors.textSecondary,
+  },
+  // H4 "Price check": medSoft fill, textPrimary 11pt semibold, medInk icon.
+  priceCheckChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    backgroundColor: colors.medSoft,
+  },
+  priceCheckText: {
+    fontSize: font.size.micro,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  // H5 "Game started · picked at …": 12pt semibold textSecondary, no fill —
+  // it must not read as a button.
+  startedLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 1,
+    minHeight: 36,
+  },
+  startedText: {
+    flexShrink: 1,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
   heroEdge: {
     fontSize: font.size.title3,

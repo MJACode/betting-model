@@ -23,6 +23,7 @@ import {
   storedQuoteBook,
 } from '@/lib/markets';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
+import { reasoningHeading } from '@/lib/pickCta';
 
 interface Props {
   pick: Pick;
@@ -52,7 +53,10 @@ export function ReasoningCard({ pick, paused = false }: Props) {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.heading}>Why this bet?</Text>
+      {/* M14: "Why this bet?" only on a bet (lib/pickCta reasoningHeading). */}
+      <Text style={styles.heading}>
+        {reasoningHeading(pick.signal_type, { paused, preview: isUnlockedPreview(pick) })}
+      </Text>
 
       <Row
         label="Model probability"

@@ -203,7 +203,8 @@ def test_paused_picks_reach_the_all_board_only_and_labelled():
     assert ">PAUSED<" in card
     assert "const sharp = preview || paused ? null" in card
     assert "!preview && !paused && pick.signal_type === 'BET'" in card
-    assert "&& open && !preview && !paused;" in card
+    # PR 3 (H5) also hides Slip once a pre-game pick's game has started.
+    assert re.search(r"&& open && !preview && !paused(?: && cta\.slip)?;", card)
     assert "pick.signal_type !== 'BET' || preview || paused" in card
     assert "const contra = paused ? null : contrarianTag(pick);" in card
 

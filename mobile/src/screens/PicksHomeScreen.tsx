@@ -104,6 +104,7 @@ import {
   resetImpossibleMarket,
 } from '@/lib/pickFilterState';
 import { publicSortAvailable, searchPicks, sortPicks, type SortKey } from '@/lib/pickSort';
+import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import {
   isModelPaused,
@@ -442,8 +443,12 @@ export function PicksHomeScreen() {
   // inside each group: a paused model's noisy edges would otherwise take the
   // top of an edge-sorted All board and push the real bets below the fold
   // (UX review, 2026-09-26). A stable partition of the sorted list.
+  //
+  // H4: on the Edge sort a row the price-check band flags goes after the rest
+  // of its group, so an implausible price never takes the top slot (display
+  // only, lib/priceCheck.ts).
   const sorted = useMemo(() => {
-    const all = sortPicks(filtered, sortKey);
+    const all = sortPicks(filtered, sortKey, { priceCheck: (d) => priceCheckForItem(d).flagged });
     return [
       ...all.filter((d) => !isPausedForDisplay(d.pick)),
       ...all.filter((d) => isPausedForDisplay(d.pick)),

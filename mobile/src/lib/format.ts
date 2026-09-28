@@ -470,6 +470,19 @@ export function reconcileLiveSnapshots<
 }
 
 /**
+ * Has the game started — LIVE, FINAL or ENDED, anything but PRE? The H5 test
+ * for "no hand-off at the in-play price" (usability audit PR 3). Same
+ * (game, live) signature as draft #846's `gameIsOver`, so the two helpers sit
+ * side by side once both land.
+ */
+export function gameHasStarted(
+  game: GameLike | null | undefined,
+  live?: LiveStateLike | null,
+): boolean {
+  return gameStatus(game, live).kind !== 'pre';
+}
+
+/**
  * Derive game status from a `games` row, refined by the live feed when we have
  * a fresh snapshot for the game (MLB only — the live poller's coverage).
  *

@@ -8,6 +8,7 @@
 import { sharpScore } from '@/lib/sharpScore';
 import type { Pick } from '@/types';
 import { decisionEdge } from '@/lib/decisionPrice';
+import { flaggedLast } from '@/lib/priceCheck';
 
 export type SortKey = 'edge' | 'sharp' | 'time' | 'public';
 
@@ -74,8 +75,16 @@ export function publicSortAvailable<T extends PublicSplitPick>(items: T[]): bool
  * sort uses edge as the final tiebreaker so ordering is stable. Public orders
  * by the crowd's share of tickets on each pick's own side, heaviest first, so
  * the top of the board is where the public money actually is.
+ *
+ * `priceCheck` (H4): on the Edge sort, rows the price-check band flags go
+ * last, in edge order among themselves, so an implausible price never
+ * headlines the board. Display only — lib/priceCheck.ts.
  */
-export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[] {
+export function sortPicks<T extends SortablePick>(
+  items: T[],
+  key: SortKey,
+  opts: { priceCheck?: (it: T) => boolean } = {},
+): T[] {
   const arr = [...items];
   switch (key) {
     case 'sharp':
@@ -100,7 +109,7 @@ export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[]
     case 'edge':
     default:
       arr.sort((a, b) => decisionEdge(b.pick) - decisionEdge(a.pick));
-      break;
+      return opts.priceCheck ? flaggedLast(arr, opts.priceCheck) : arr;
   }
   return arr;
 }
