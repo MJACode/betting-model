@@ -36,6 +36,20 @@ export function errorText(e: unknown, fallback = 'Something went wrong'): string
   return s === '[object Object]' || !s ? fallback : s;
 }
 
+/**
+ * PostgREST's "0 rows for a single-object request" (406 PGRST116): the row is
+ * GONE, which is an answer, not a failure. Retrying it can never succeed, so a
+ * detail screen shows its not-found state instead of an ErrorState (usability
+ * audit L11, Designer #845). `.maybeSingle()` returns null data for 0 rows and
+ * is the fix; this catches any read that still asks for exactly one row.
+ */
+export function isNotFoundError(e: unknown): boolean {
+  if (e == null) return false;
+  if (typeof e === 'object' && (e as Record<string, unknown>).code === 'PGRST116') return true;
+  const raw = typeof e === 'string' ? e : errorText(e, '');
+  return /\bPGRST116\b/.test(raw);
+}
+
 /** What kind of failure a load hit, so the copy can say what to do about it. */
 export type ErrorKind = 'offline' | 'slow' | 'auth' | 'server';
 

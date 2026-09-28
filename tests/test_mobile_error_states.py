@@ -199,9 +199,9 @@ eq(errorSurface(cold, false), 'banner', 'Custom cold failure');
 eq(errorSurface({ ...cold, hasData: true }, false), 'banner', 'Custom refresh failure');
 eq(errorSurface({ ...cold, error: null }, false), 'none', 'Custom no error');
 eq(errorSurface({ ...cold, error: abort }, false), 'none', 'Custom abort');
-eq(countLabel(knownCount(0, { error: 'x', hasData: false })), '—', 'dash on failure');
-eq(countLabel(knownCount(0, { error: null, hasData: false })), '0', 'real zero');
-eq(countLabel(knownCount(7, { error: 'x', hasData: true })), '7', 'kept count');
+eq(countLabel(knownCount(0, { loaded: false, error: 'x', hasData: false })), '—', 'dash on failure');
+eq(countLabel(knownCount(0, { loaded: true, error: null, hasData: false })), '0', 'real zero');
+eq(countLabel(knownCount(7, { loaded: true, error: 'x', hasData: true })), '7', 'kept count');
 const live = { view: 'live', liveError: null, pricesUnavailable: true, liveCount: 3 };
 eq(showLivePricesBanner(live), true, 'M2 banner');
 eq(showLivePricesBanner({ ...live, view: 'today' }), false, 'M2 other view');
@@ -217,6 +217,103 @@ eq(errorAnnouncement(c, 'Nothing is wrong with your picks.'),
 """
     proc = _run_node(script, tmp_path)
     assert proc.returncode == 0, proc.stderr
+
+
+def _load_state_dir(tmp_path: Path) -> Path:
+    lib = SRC / "lib"
+    (tmp_path / "errors.ts").write_text(_read(lib / "errors.ts"), encoding="utf-8")
+    load_state = _read(lib / "loadState.ts").replace("from './errors';", "from './errors.ts';")
+    (tmp_path / "loadState.ts").write_text(load_state, encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_designer_review_fixes_behaviour(tmp_path):
+    """Designer #845 (at 1cfc1652): L11 not-found, no fake zeros before the
+    first successful load, neutral sport chips while unknown, and a repeat
+    identical failure re-announced after a pressed Retry — run, not scanned."""
+    script = """
+import { countsKnown, countLabel, detailPresentation, knownCount, repeatFailureAnnounce,
+         sportChipState, sportChipsAvailable, todayHeaderCounts } from './loadState.ts';
+import { isNotFoundError } from './errors.ts';
+const eq = (got, want, what) => { if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${what}: ${JSON.stringify(got)}`); };
+// L11
+eq(isNotFoundError({ code: 'PGRST116' }), true, 'PGRST116 object');
+eq(isNotFoundError('JSON object requested, multiple (or no) rows returned (PGRST116)'), true, 'PGRST116 string');
+eq([{ code: '57014' }, 'Failed to fetch', null, ''].some(isNotFoundError), false, 'not not-found');
+eq(detailPresentation({ loading: false, error: null, found: false }), 'notFound', 'missing pick');
+eq(detailPresentation({ loading: false, error: { code: 'PGRST116' }, found: false }), 'notFound', 'PGRST116 → notFound');
+eq(detailPresentation({ loading: false, error: 'Failed to fetch', found: false }), 'error', 'real failure');
+eq(detailPresentation({ loading: true, error: null, found: false }), 'loading', 'loading');
+eq(detailPresentation({ loading: false, error: null, found: true }), 'content', 'content');
+// no fake zeros
+eq(countsKnown({ loaded: false, error: null, hasData: false }), false, 'first load in flight');
+eq(countLabel(knownCount(0, { loaded: false, error: null, hasData: false })), '—', 'dash while loading');
+eq(countsKnown({ loaded: false, error: 'x', hasData: false }), false, 'failed first load');
+eq(countsKnown({ loaded: true, error: null, hasData: false }), true, 'successful empty load');
+eq(countsKnown({ loaded: true, error: 'x', hasData: false }), false, 'failed refresh, nothing shown');
+eq(countsKnown({ loaded: false, error: null, hasData: true }), true, 'rows on screen');
+eq(todayHeaderCounts({ date: 'Sep 28', known: false, bet: 0, total: 0, paused: 0 }), 'Sep 28 · — bets · — scored', 'dash header');
+eq(todayHeaderCounts({ date: 'Sep 28', known: true, bet: 3, total: 12, paused: 2 }), 'Sep 28 · 3 bets · 12 scored · 2 paused', 'header');
+// neutral chips
+const unknown = sportChipsAvailable(new Set(), false);
+eq(unknown, undefined, 'unknown → undefined');
+eq(sportChipState({ sport: 'NFL', active: false, available: unknown, count: 0, live: false }), { muted: false, label: 'NFL' }, 'neutral chip');
+eq(sportChipState({ sport: 'NFL', active: false, available: sportChipsAvailable(new Set(), true), count: 0, live: false }),
+   { muted: true, label: 'NFL, no picks today' }, 'known empty chip');
+// (a) re-announce
+const base = { pressed: true, wasRetrying: true, retrying: false, key: 'k', lastKey: 'k' };
+eq(repeatFailureAnnounce(base), true, 'repeat after Retry');
+eq(repeatFailureAnnounce({ ...base, pressed: false }), false, 'poll');
+eq(repeatFailureAnnounce({ ...base, retrying: true }), false, 'in flight');
+eq(repeatFailureAnnounce({ ...base, key: 'other' }), false, 'different failure');
+"""
+    proc = _run_node(script, _load_state_dir(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_fetch_pick_by_id_is_maybe_single():
+    """L11: `.single()` made a missing pick a 406 PGRST116 → "Couldn't load this
+    pick" with a Retry that can never succeed; the not-found branch was dead."""
+    queries = _read(SRC / "lib" / "queries.ts")
+    m = re.search(r"export async function fetchPickById.*?\n}\n", queries, re.S)
+    assert m, "fetchPickById not found"
+    fn = m.group(0)
+    assert ".maybeSingle()" in fn and ".single()" not in fn
+    assert re.search(r"if \(error && !isNotFoundError\(error\)\) throw error;\s*if \(!data\) return null;", fn)
+    assert ".single()" not in queries, "a detail read still asks for exactly one row"
+    pd = _read(SRC / "screens" / "PickDetailScreen.tsx")
+    assert "detailPresentation({ loading, error, found: data != null })" in pd
+    assert "body === 'notFound'" in pd and "body === 'error'" in pd
+    assert "if (isNotFoundError(e)) setData(null);" in pd
+
+
+def test_picks_home_no_fake_zeros_and_neutral_chips():
+    for hook in ("useTodayPicks.ts", "useLivePicks.ts"):
+        assert re.search(r"setLoaded\(true\);\s*\} catch", _read(SRC / "hooks" / hook)), hook
+    home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    assert "knownCount(0, { loaded, error," in home
+    assert "knownCount(0, { loaded: liveLoaded, error: liveError," in home
+    assert "todayHeaderCounts({ date, known: !todayUnknown, ...todayStats })" in home
+    assert "count={todayUnknown ? null : todayStats.total}" in home
+    assert "count={todayUnknown ? null : live.length}" in home
+    assert "count={liveUnknown ? null : liveData.length}" in home
+    assert "${todayUnknown ? '—' : live.length} pre-game signals" in home
+    assert re.search(r"liveUnknown\s*\? '— in play'", home)
+    assert "available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}" in home
+    assert "available={availableSports}" not in home
+    toggle = _read(SRC / "components" / "SportToggle.tsx")
+    assert "sportChipState({" in toggle and "accessibilityLabel={label}" in toggle
+    assert "'no picks today'" not in toggle
+
+
+def test_error_surfaces_reannounce_and_live_regions():
+    es = _read(SRC / "components" / "ErrorState.tsx")
+    assert "repeatFailureAnnounce({ pressed: pressed.current" in es
+    assert len(re.findall(r"markRetry\(\);\s*onRetry\(\);", es)) == 2
+    assert es.count('accessibilityLiveRegion="polite"') == 2
+    home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    assert re.search(r'accessibilityHint="Reloads live prices"\s*accessibilityLiveRegion="polite"', home)
 
 
 def test_reassurance_prop_is_picks_home_only():
