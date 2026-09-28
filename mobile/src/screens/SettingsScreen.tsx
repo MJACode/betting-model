@@ -816,7 +816,7 @@ const styles = StyleSheet.create({
   fieldErrorText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.avoidText,
+    color: colors.avoidInk,
   },
   // The mockup's grouped inset, as the sportsbook row above it uses.
   unitRow: {
