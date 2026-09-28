@@ -11,9 +11,12 @@ here and read many times by the app. `data/migrations/cache_team_stats_board.sql
 has the measurements and the schema.
 
 Per (sport, season) pair, deliberately: each refresh is one transaction that
-swaps that pair's rows, so the app never reads a half-built board, and each
-pair fits inside any statement window on its own. The whole set is a few
-minutes on the worker, which has no timeout.
+swaps that pair's rows, so the app never reads a half-built board. The
+database statement_timeout is 120s (configuration file). The compute
+function's closing-line read is an index probe per game
+(`team_board_line_probe` in the worker migration), not a seq scan of `odds`,
+so one season stays inside that window. Daily run
+51e965f8023c4b0e86e03fe075af1f9c cancelled NCAAF 2026 at that cap.
 """
 
 from __future__ import annotations
