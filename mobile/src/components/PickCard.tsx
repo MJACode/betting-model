@@ -29,6 +29,7 @@ import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
+import { openForAction } from '@/lib/discordPublish';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
@@ -53,11 +54,17 @@ interface Props {
   /** Today board only: BET/AVOID/NONE sits immediately before the label.
    * Signals and Live are already BET-only, so the small badge is omitted. */
   showSignalBadge?: boolean;
+  /** All board only: this pick's model is PAUSED (Matt, 2026-09-26). The card
+   * shows the model's number but nothing that reads as a bet — a PAUSED chip in
+   * place of the signal badge, no stake, no Sharp Score, no book hand-off and no
+   * betslip button (the slip resolves legs from active models only). */
+  paused?: boolean;
 }
 
 export function PickCard({
   item, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
   showSignalBadge = false,
+  paused = false,
 }: Props) {
   const { pick, game } = item;
   // Golf picks are per-player on one tournament row (home_team = event name,
@@ -126,8 +133,10 @@ export function PickCard({
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
-  const sharp = preview ? null : sharpScore(pick);
-  const contra = contrarianTag(pick);
+  const sharp = preview || paused ? null : sharpScore(pick);
+  // A paused card must not carry the green "Sharp side" chip — it reads as a
+  // recommendation. The neutral crowd line below shows instead.
+  const contra = paused ? null : contrarianTag(pick);
   // Where the crowd is, for every pick that carries a split. contrarianTag only
   // speaks on a BET sitting in a decisive band, but nearly all captured splits
   // land on NONE/AVOID rows — and the Public sort orders the whole board by this
@@ -140,28 +149,31 @@ export function PickCard({
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c).
-  const timing = pick.result == null ? pickTimingInfo(pick) : null;
+  const timing = openForAction(pick) && !paused ? pickTimingInfo(pick) : null;
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
       : 'Preview — locks fight-day morning'
     : null;
+  const pausedLabel = paused ? 'Model paused — shown for reference, not a bet' : null;
   const hasExtras =
-    Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
+    Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
-  const handoff = !preview && pick.signal_type === 'BET'
+  const handoff = !preview && !paused && pick.signal_type === 'BET'
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
     : null;
-  const canTrack = Boolean(onToggleTrack) && pick.result == null;
+  // Open = unsettled, or a VOID Discord still shows (openForAction).
+  const open = openForAction(pick);
+  const canTrack = Boolean(onToggleTrack) && open;
   // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && pick.result == null && !preview;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
   const showSharp = Boolean(sharp);
   const showTier = Boolean(pick.confidence_tier) && !showSharp;
   const stakeCaption =
-    pick.signal_type !== 'BET' || preview
+    pick.signal_type !== 'BET' || preview || paused
       ? null
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
@@ -186,7 +198,7 @@ export function PickCard({
       accessibilityLabel={[
         matchup,
         pick.pick_label,
-        pick.signal_type,
+        paused ? 'Paused model, not a bet' : pick.signal_type,
         `Edge ${formatPctSigned(decisionEdge(pick))}`,
         heroPrice
           ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
@@ -211,6 +223,13 @@ export function PickCard({
           {preview ? (
             <View style={[styles.labelChip, styles.previewBadge]}>
               <Text style={styles.previewBadgeText}>PREVIEW</Text>
+            </View>
+          ) : paused ? (
+            // Same neutral pill as PREVIEW, and for the same reason: this is a
+            // number, not a bet. Replaces BET/AVOID/NONE rather than sitting
+            // beside it, so a paused BET never draws a green badge.
+            <View style={[styles.labelChip, styles.previewBadge]}>
+              <Text style={styles.previewBadgeText}>PAUSED</Text>
             </View>
           ) : showSignalBadge ? (
             <View style={styles.labelChip}>
@@ -363,6 +382,17 @@ export function PickCard({
                 style={styles.extraIcon}
               />
               <Text style={styles.extraText}>{previewLabel}</Text>
+            </View>
+          ) : null}
+          {pausedLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="pause-circle-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{pausedLabel}</Text>
             </View>
           ) : null}
           {pick.injury_flag ? (
@@ -676,7 +706,9 @@ const styles = StyleSheet.create({
     fontSize: font.size.nano,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    color: colors.none,
+    // textSecondary, not colors.none: none on noneSoft is ~2.85:1 at 10pt
+    // (UX review, 2026-09-26), and PAUSED put this pill on far more cards.
+    color: colors.textSecondary,
   },
   injuryText: {
     color: colors.med,

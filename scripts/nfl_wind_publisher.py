@@ -632,9 +632,15 @@ def publish(run_date: str | None = None) -> int:
         # fired, the bet is real. A forecast that later collapses is recorded
         # by scripts/nfl_pick_monitor.py as condition_status='GONE' and shown
         # loudly, instead of the pick vanishing as though it never happened.
+        #
+        # BET rows only (2026-09-26). The same table now holds a NONE row per
+        # evaluated game (publish_scored), and a NONE row is the model saying
+        # "not yet" -- it must never lock a game out of the bet that fires
+        # later. The NONE row is cleared as the BET lands (_clear_scored_row).
         locked = {
             r[0] for r in conn.execute("""
-                SELECT DISTINCT game_id FROM picks WHERE model_id = %s
+                SELECT DISTINCT game_id FROM picks
+                WHERE model_id = %s AND signal_type = 'BET'
             """, (NFL_WIND_MODEL_ID,)).fetchall()
         }
         skipped = [p for p in pick_rows if p["game_id"] in locked]
@@ -644,6 +650,7 @@ def publish(run_date: str | None = None) -> int:
                   + ", ".join(sorted({p["game_id"] for p in skipped})))
 
         for p in pick_rows:
+            _clear_scored_row(conn, p["game_id"], p["model_id"])
             conn.execute("""
                 INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
                                    pick_side, pick_label, model_probability,
@@ -709,11 +716,15 @@ def publish_opener(run_date: str | None = None) -> int:
             """, g)
 
         for p in pick_rows:
+            # BET rows only: a NONE row (publish_scored) is not a lock.
             existing = conn.execute("""
-                SELECT 1 FROM picks WHERE game_id = %s AND model_id = %s LIMIT 1
+                SELECT 1 FROM picks
+                WHERE game_id = %s AND model_id = %s AND signal_type = 'BET'
+                LIMIT 1
             """, (p["game_id"], p["model_id"])).fetchone()
             if existing:
                 continue  # locked at its first qualifying card
+            _clear_scored_row(conn, p["game_id"], p["model_id"])
             conn.execute("""
                 INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
                                    pick_side, pick_label, model_probability,
@@ -738,6 +749,243 @@ def publish_opener(run_date: str | None = None) -> int:
     return written
 
 
+# ── NONE rows: every game the two rules evaluated ───────────────────────────
+#
+# Matt, 2026-09-26: "There are only 7 bets showing under NFL. All bet lines
+# should be showing on the today tab." The two NFL game rules only ever wrote
+# BET rows, so a 14-game Sunday read as 7 cards on Today -- the rest of the
+# slate had been evaluated (every tick dumps the model's view of every game to
+# pick_eval_<date>.csv) and never reached `picks`. NCAAF has written a NONE row
+# per scored game all along; this is the NFL half of the same shape.
+#
+# What a NONE row here is, and is not:
+#   * NOT a pick. Discord, push, opening signals and every record query read
+#     `signal_type = 'BET'`; none of them see these rows.
+#   * NOT a lock. Both BET locks above are keyed on signal_type = 'BET', and a
+#     BET that lands clears the game's NONE row first (_clear_scored_row) --
+#     the dead-zone NONE on an unstarted game is the one row the pick rule
+#     allows to go (.claude/rules/picks-and-publishing.md, corollaries).
+#   * REFRESHED IN PLACE until kickoff, then frozen: the last pre-game view is
+#     what the evaluation rule (CLAUDE.md §7) grades. Updated only when a
+#     number or the reason changed, so the audit log sees changes, not ticks.
+#   * NEVER PRICELESS. A game with no quote gets no row: profit_flat fabricates
+#     -110 for a NULL price (CLAUDE.md §6).
+#
+# The numbers are the model's where it has them. Where it does not -- wind
+# below threshold, an opener deviation too small to price -- the rule has no
+# opinion, so the row says exactly that: model probability = the market's,
+# edge 0. The opener's row is always the HOME side at the HOME price; the rule
+# takes no side until a deviation fires. The model's own words go in
+# `downgrade_reason`.
+
+SCORED_MODEL_IDS = (NFL_WIND_MODEL_ID, NFL_OPENER_MODEL_ID)
+
+
+def _clear_scored_row(conn, game_id: str, model_id: str) -> None:
+    """Drop the unsettled NONE row a BET is about to replace."""
+    conn.execute("""
+        DELETE FROM picks
+        WHERE game_id = %s AND model_id = %s
+          AND signal_type = 'NONE' AND result IS NULL
+    """, (game_id, model_id))
+
+
+def _american_to_prob(px: float) -> float:
+    return 100.0 / (px + 100.0) if px > 0 else -px / (-px + 100.0)
+
+
+def latest_eval_rows(rows: list[dict]) -> dict[tuple[str, str], dict]:
+    """Newest observation per (game_id, model_id); ISO timestamps sort as text."""
+    out: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        key = ((r.get("game_id") or "").strip(), (r.get("model_id") or "").strip())
+        if not all(key) or key[1] not in SCORED_MODEL_IDS:
+            continue
+        if key not in out or (r.get("observed_at") or "") >= (out[key].get("observed_at") or ""):
+            out[key] = r
+    return out
+
+
+def build_scored_rows(latest: dict[tuple[str, str], dict],
+                      games: dict[str, dict], bankroll: float) -> list[dict]:
+    """
+    Pure transform: newest eval row per (game, model) -> NONE pick rows.
+
+    `games` maps game_id -> {home_team, away_team, game_date, commence_time}.
+    A game the platform does not know (FK), or a row with no line or price,
+    is skipped: a NONE row is only worth writing if it carries a real quote.
+    """
+    out: list[dict] = []
+    for (game_id, model_id), r in sorted(latest.items()):
+        g = games.get(game_id)
+        line, price = _num(r.get("current_line")), _num(r.get("current_price"))
+        if g is None or line is None or price is None or price == 0:
+            continue
+        book = (r.get("current_book") or "").strip()
+        # "(<words>, <BOOK>)" is the shape the app reads the quote's book from
+        # (mobile storedQuoteBook / clvLockBook): the BET rows' own form. A
+        # bare "(FD)" falls through to DraftKings there and mislabels the price.
+        tag = BOOK_ABBREV.get(book, book or "?")
+        home, away = g["home_team"], g["away_team"]
+        market = _american_to_prob(price)
+        m_prob, m_edge = _num(r.get("model_prob")), _num(r.get("edge"))
+        if model_id == NFL_WIND_MODEL_ID:
+            side = "under"
+            label = f"{away} @ {home} Under {_fmt_line(line)} (no bet, {tag})"
+            if m_prob is not None and m_edge is not None:
+                # The card de-vigs; its edge is against that market number.
+                model_prob, implied, edge = m_prob, m_prob - m_edge, m_edge
+            else:
+                model_prob, implied, edge = market, market, 0.0
+        else:
+            side = "home"
+            label = f"{away} @ {home} — {home} {line:+g} (no bet, {tag})"
+            model_prob, implied, edge = market, market, 0.0
+        out.append({
+            "game_id": game_id,
+            "model_id": model_id,
+            "sport": "NFL",
+            "game_date": g["game_date"],
+            "game_time": g["commence_time"],
+            "pick_side": side,
+            "pick_label": label,
+            "model_probability": round(model_prob, 4),
+            "dk_implied_prob": round(implied, 4),
+            "edge": round(edge, 4),
+            "dk_odds": price,
+            "scored_line": line,          # total (wind) / HOME spread (opener)
+            "kelly_fraction": 0.0,
+            "recommended_bet": 0.0,
+            "bankroll_at_pick": bankroll,
+            "signal_type": "NONE",
+            "downgrade_reason": (r.get("reason") or "")[:500] or None,
+        })
+    return out
+
+
+_SCORED_FIELDS = ("pick_label", "pick_side", "model_probability",
+                  "dk_implied_prob", "edge", "dk_odds", "scored_line",
+                  "downgrade_reason")
+
+
+def _changed(existing: dict, new: dict) -> bool:
+    for k in _SCORED_FIELDS:
+        a, b = existing.get(k), new.get(k)
+        if isinstance(a, (int, float)) or isinstance(b, (int, float)):
+            try:
+                if a is None or b is None or abs(float(a) - float(b)) > 1e-9:
+                    return True
+            except (TypeError, ValueError):
+                return True
+        elif (a or None) != (b or None):
+            return True
+    return False
+
+
+def publish_scored(run_date: str | None = None) -> int:
+    """
+    Write / refresh one NONE row per (game, model) the two rules evaluated.
+    Returns rows inserted + updated. Never touches a BET, never touches a
+    started game.
+    """
+    from data.db import get_connection
+
+    if run_date is None:
+        run_date = datetime.now(timezone.utc).date().isoformat()
+    path = CARDS_DIR / f"pick_eval_{run_date}.csv"
+    if not path.exists():
+        print(f"NFL scored rows {run_date}: no evaluation dump — nothing to do")
+        return 0
+    latest = latest_eval_rows(read_card(path))
+    if not latest:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    conn = get_connection()
+    inserted = updated = 0
+    try:
+        ids = sorted({gid for gid, _ in latest})
+        games: dict[str, dict] = {}
+        for gid, home, away, gdate, kick in conn.execute("""
+            SELECT game_id, home_team, away_team, game_date::text, commence_time::text
+            FROM games WHERE sport = 'NFL' AND game_id = ANY(%s)
+        """, (ids,)).fetchall():
+            if not kick:
+                continue
+            try:
+                kick_dt = datetime.fromisoformat(str(kick).replace(" ", "T"))
+            except ValueError:
+                continue
+            if kick_dt.tzinfo is None:        # stored naive = UTC, as kick_fields writes
+                kick_dt = kick_dt.replace(tzinfo=timezone.utc)
+            started = kick_dt <= now
+            if started:
+                continue            # frozen at its last pre-game view
+            games[gid] = {"home_team": home, "away_team": away,
+                          "game_date": gdate, "commence_time": kick}
+
+        existing: dict[tuple[str, str], dict] = {}
+        bet: set[tuple[str, str]] = set()
+        for row in conn.execute("""
+            SELECT pick_id, game_id, model_id, signal_type, pick_label, pick_side,
+                   model_probability, dk_implied_prob, edge, dk_odds,
+                   scored_line, downgrade_reason
+            FROM picks
+            WHERE model_id = ANY(%s) AND game_id = ANY(%s)
+        """, (list(SCORED_MODEL_IDS), ids)).fetchall():
+            key = (row[1], row[2])
+            if row[3] == "BET":
+                bet.add(key)
+            elif row[3] == "NONE":
+                existing[key] = dict(zip(
+                    ("pick_id", "game_id", "model_id", "signal_type") + _SCORED_FIELDS,
+                    row))
+
+        for p in build_scored_rows(latest, games, config.BANKROLL):
+            key = (p["game_id"], p["model_id"])
+            if key in bet:
+                continue            # the pick of record stands; no NONE beside it
+            old = existing.get(key)
+            if old is None:
+                conn.execute("""
+                    INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
+                                       pick_side, pick_label, model_probability,
+                                       dk_implied_prob, edge, dk_odds, scored_line,
+                                       kelly_fraction, recommended_bet, bankroll_at_pick,
+                                       signal_type, downgrade_reason)
+                    VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
+                            %(game_time)s, %(pick_side)s, %(pick_label)s,
+                            %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
+                            %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
+                            %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
+                            %(downgrade_reason)s)
+                """, p)
+                inserted += 1
+            elif _changed(old, p):
+                # created_at moves with the number: on a NONE row it says when
+                # THIS line was observed, which is what the card's chip shows.
+                conn.execute("""
+                    UPDATE picks
+                    SET pick_label = %(pick_label)s, pick_side = %(pick_side)s,
+                        model_probability = %(model_probability)s,
+                        dk_implied_prob = %(dk_implied_prob)s, edge = %(edge)s,
+                        dk_odds = %(dk_odds)s, scored_line = %(scored_line)s,
+                        downgrade_reason = %(downgrade_reason)s,
+                        game_date = %(game_date)s, game_time = %(game_time)s,
+                        created_at = now()::text
+                    WHERE pick_id = %(pick_id)s
+                      AND signal_type = 'NONE' AND result IS NULL
+                """, {**p, "pick_id": old["pick_id"]})
+                updated += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(f"NFL scored rows {run_date}: {inserted} NONE row(s) written, "
+          f"{updated} refreshed, {len(latest)} (game, model) evaluated")
+    return inserted + updated
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="card date (UTC, YYYY-MM-DD); default today")
@@ -745,8 +993,12 @@ if __name__ == "__main__":
                     help="publish the opener-spread card instead of the wind card")
     ap.add_argument("--snapshots", action="store_true",
                     help="flush the day's DK line snapshots only (no pick publishing)")
+    ap.add_argument("--scored", action="store_true",
+                    help="write/refresh a NONE row per evaluated game (both rules)")
     args = ap.parse_args()
-    if args.snapshots:
+    if args.scored:
+        publish_scored(args.date)
+    elif args.snapshots:
         publish_line_snapshots(args.date)
     elif args.opener:
         publish_opener(args.date)

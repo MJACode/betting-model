@@ -85,13 +85,13 @@ check('Market section still hides when it cannot cut', /\{marketCutBites \? \(/.
 check('leaving Today resets Signal to all three',
   /view !== 'today'/.test(screen) && /next\.signals = new Set\(ALL_SIGNALS\)/.test(screen));
 check('Signal\/Market locks apply on the first paint',
-  /displayFilter/.test(screen) && /applyFilter\(activeItems, displayFilter\)/.test(screen));
+  /displayFilter/.test(screen) && /applyFilter\((?:activeItems|datedItems), displayFilter\)/.test(screen));
 check('any segment change resets an impossible Market',
   /resetImpossibleMarket/.test(screen));
 check('Public share is measured on on-screen rows',
   /publicSortAvailable\(filtered\)/.test(screen));
 check('Games-empty copy names the board',
-  /No picks for \$\{gameSummary\} on \$\{boardLabel\(view\)\}/.test(screen));
+  /No picks for \$\{gameSummary\} on the \$\{boardLabel\(view\)\} board/.test(screen));
 check('and offers Clear games',
   /actionLabel="Clear games"/.test(screen) && /actionLabel\?:/.test(empty));
 
