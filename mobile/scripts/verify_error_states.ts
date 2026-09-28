@@ -247,6 +247,10 @@ for (const p of tsFiles(join(ROOT, 'src'))) {
   });
 }
 check('every catch that stores an error skips aborts (isAbortError)', unguarded.length === 0, unguarded.join(', '));
+check('failure toasts / alerts skip aborts too',
+  /if \(cancelled \|\| isAbortError\(e\)\) return;\s*setSlate/.test(read('src/components/TeamsBoard.tsx'))
+  && /if \(cancelled \|\| isAbortError\(e\)\) return;\s*setPropLines/.test(read('src/screens/StatsScreen.tsx'))
+  && /if \(!isAbortError\(e\)\) Alert\.alert\('Couldn’t start linking'/.test(read('src/screens/ConnectSportsbookScreen.tsx')));
 const pd = read('src/screens/PickDetailScreen.tsx');
 check('PickDetail: no dead retrying={loading} under the early-return spinner', !/retrying=\{loading\}/.test(pd));
 check('TeamsBoard: its ErrorBanner passes retrying', /retrying=\{loading\}/.test(read('src/components/TeamsBoard.tsx').match(/<ErrorBanner\b[\s\S]*?\/>/)?.[0] ?? ''));

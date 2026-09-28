@@ -164,7 +164,8 @@ export function TeamsBoard({
       // unreachable. But say so: an unreachable view and "no games" both look
       // like an empty column.
       .catch((e: unknown) => {
-        if (cancelled) return;
+        // An abort is a cancel like `cancelled`: no toast, no state change.
+        if (cancelled || isAbortError(e)) return;
         setSlate({ date: '', isToday: false, games: [] });
         setGameLines([]);
         showToast(`Couldn’t load today’s lines. ${friendlyCause(e)}`);

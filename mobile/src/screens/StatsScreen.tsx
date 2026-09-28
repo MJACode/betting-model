@@ -864,7 +864,8 @@ export function StatsScreen() {
       // view is unreachable. But it must not fail SILENTLY: an unreachable view
       // and "this book posts nothing" both look like an empty column.
       .catch((e: unknown) => {
-        if (cancelled) return;
+        // An abort is a cancel like `cancelled`: no toast, no state change.
+        if (cancelled || isAbortError(e)) return;
         setPropLines({ market: propMarket, rows: [], status: 'failed' });
         showToast(`Couldn’t load the latest lines. ${friendlyCause(e)}`);
       });

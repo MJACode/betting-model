@@ -246,6 +246,10 @@ def test_aborts_render_nothing_and_every_catch_skips_them():
             if re.search(r"(setError\(|error: )errorText\(", line) and "isAbortError(" not in line:
                 unguarded.append(f"{rel}:{i}")
     assert not unguarded, unguarded
+    # The catch-site toasts and the linking alert skip an abort too.
+    assert re.search(r"if \(cancelled \|\| isAbortError\(e\)\) return;\s*setSlate", _read(SRC / "components" / "TeamsBoard.tsx"))
+    assert re.search(r"if \(cancelled \|\| isAbortError\(e\)\) return;\s*setPropLines", _read(SRC / "screens" / "StatsScreen.tsx"))
+    assert "if (!isAbortError(e)) Alert.alert('Couldn’t start linking'" in _read(SRC / "screens" / "ConnectSportsbookScreen.tsx")
 
 
 def test_models_custom_tab_says_a_failed_load():
