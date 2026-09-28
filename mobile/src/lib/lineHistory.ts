@@ -8,10 +8,18 @@
  * same minute get seconds so the order is readable. Pure (Intl only).
  *
  * Reviewer (#847): the OPENING row is where the line started, not a change,
- * so it is not counted; a mid-run null (a snapshot with no price or no line
- * for the side) is a gap in the feed, not a move to "N/A" and back, so it
- * carries the run's value and joins the run; and every row has a unique
- * `key`, because two snapshots can share a timestamp.
+ * so it is not counted; a snapshot with NOTHING for the side (every tracked
+ * field null) is a gap in the feed, not a move to "N/A" and back, so it joins
+ * the run; and every row has a unique `key`, because two snapshots can share
+ * a timestamp.
+ *
+ * Reviewer (#847 approval): a PARTIAL snapshot (line but no price, or price
+ * but no line) is unknown, not carried. Carrying each field on its own
+ * invented pairs the book never posted — 8.5 @ −110 then 9.0 @ null printed
+ * "9.0 @ −110". A partial row neither joins, breaks nor starts a run and is
+ * not shown; the next complete snapshot says where the line went. A field no
+ * snapshot has (the line on a moneyline, where the card passes null) is not
+ * tracked, so it never makes a row partial.
  */
 
 export interface HistoryPoint {
@@ -52,15 +60,24 @@ function stamp(at: string, seconds: boolean): string {
 
 /** Collapse runs of the same line + price; returns oldest → newest. */
 export function collapseLineHistory(points: HistoryPoint[]): HistoryRow[] {
+  const tracksLine = points.some((p) => p.line != null);
+  const tracksPrice = points.some((p) => p.price != null);
   const runs: Array<HistoryPoint & { count: number }> = [];
   for (const p of points) {
+    const known = [tracksLine ? p.line != null : null, tracksPrice ? p.price != null : null].filter(
+      (k): k is boolean => k != null,
+    );
     const last = runs[runs.length - 1];
-    // A null mid-run is a gap in the feed, not a change to "N/A": it carries
-    // the run's value (and so joins the run).
-    const line = p.line == null && last ? last.line : p.line;
-    const price = p.price == null && last ? last.price : p.price;
-    if (last && last.line === line && last.price === price) last.count += 1;
-    else runs.push({ ...p, line, price, count: 1 });
+    // Nothing for the side: a gap in the feed. It joins the run (only both
+    // null carry); before any run it has nothing to join.
+    if (known.every((k) => !k)) {
+      if (last) last.count += 1;
+      continue;
+    }
+    // Partial: unknown, never half-carried into a pair (see the header).
+    if (!known.every((k) => k)) continue;
+    if (last && last.line === p.line && last.price === p.price) last.count += 1;
+    else runs.push({ ...p, count: 1 });
   }
   const minutes = runs.map((r) => stamp(r.at, false));
   const clash = new Set(minutes.filter((m, i) => minutes.indexOf(m) !== i));
@@ -89,4 +106,24 @@ export function recentChanges(
     shownChanges: rows.filter((r) => !r.opening).length,
     hidden: all.length - rows.length,
   };
+}
+
+/**
+ * The table's footer. "Last 8 of 19 changes" only when changes are really cut;
+ * when the one row off the top is the OPENING, every change is on screen and
+ * "Last 8 of 8 changes" read as a cut that wasn't (Reviewer #847) — it says
+ * "8 changes · opening not shown" instead.
+ */
+export function changesFooter(
+  r: { changes: number; shownChanges: number; hidden: number },
+  snapshots: number,
+): string {
+  const noun = (n: number) => `${n} ${n === 1 ? 'change' : 'changes'}`;
+  const head =
+    r.shownChanges < r.changes
+      ? `Last ${r.shownChanges} of ${r.changes} changes`
+      : r.hidden > 0
+        ? `${noun(r.changes)} · opening not shown`
+        : noun(r.changes);
+  return `${head} · ${snapshots} snapshots`;
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican } from '@/lib/format';
-import { recentChanges } from '@/lib/lineHistory';
+import { changesFooter, recentChanges } from '@/lib/lineHistory';
 import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -142,8 +142,7 @@ export function LineMovementCard({ pick, playerName }: Props) {
       ))}
       {hidden > 0 || snaps.length > recent.length ? (
         <Text style={styles.more}>
-          {hidden > 0 ? `Last ${shownChanges} of ${changes} changes` : `${changes} ${changes === 1 ? 'change' : 'changes'}`}
-          {` · ${snaps.length} snapshots`}
+          {changesFooter({ changes, shownChanges, hidden }, snaps.length)}
         </Text>
       ) : null}
       <Text style={styles.note}>
