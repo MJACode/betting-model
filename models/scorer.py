@@ -938,7 +938,7 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     # never be presented as if it were.
     signal_type = ("NONE" if REQUIRE_DK_PRICE
                    else ("BET" if model_prob >= prob_thresh else "NONE"))
-    # A paused model is paused on both sides -- see _paused_signal.
+    # Paused keeps the real verdict and stamps the note -- see _paused_signal.
     signal_type, _ = _paused_signal(model_id, signal_type)
 
     if signal_type == "BET":
@@ -1089,23 +1089,65 @@ def _is_paused(model_id: str) -> bool:
 
 
 def _paused_signal(model_id: str, signal_type: str) -> tuple[str, str | None]:
-    """A paused model's BET *and* AVOID both become NONE, with the reason.
+    """A paused model keeps its REAL verdict; being paused is not a verdict.
 
-    Until 2026-09-10 only the BET was downgraded, so a paused model kept
-    writing AVOID rows -- 80 of them from ncaaf_moneyline, paused because
-    every edge cell lost at real prices -- and the Today/Signals board, which
-    checks retired and VOID but not paused, drew them as fade signals. One
-    helper for every decision path so no lane can pause one side and not the
-    other. Returns (signal_type, downgrade_reason).
+    Returns (signal_type, pause_note). signal_type is returned UNCHANGED --
+    BET, AVOID or NONE, whatever the model's own rules decided -- and
+    pause_note is config.PAUSED_NOTE when the model is paused, else None.
+
+    2026-09-28 (Matt, via CoS; Michael-gated). Until now a paused model's BET
+    and AVOID were both written as NONE (2026-09-10: before that only the BET
+    was, and the Today/Signals board drew 80 paused ncaaf_moneyline AVOIDs as
+    fade signals). That made the stored row say something the model never
+    said, and it left the app nothing to show on All but "shown for
+    reference". Now the row carries the model's verdict and its stake, and
+    being paused means exactly one thing: the pick is NOT A SIGNAL. It is
+    never posted to Discord, never pushed, never counted in the published
+    record or its ROI, never takes a one-bet-per-player slot or a daily-cap
+    unit from a live model, and never moves the Kelly bankroll.
+
+    Every one of those exclusions is keyed on the ROW's downgrade_reason
+    (config.PAUSED_NOTE, stamped by _pause_note at write time and kept by
+    _requalify_keeping_pause), never on the model's present pause state --
+    see config.paused_row_exclusion_sql. The 2026-09-10 lesson still stands in
+    the other direction: the app's Signals / Live boards refuse a paused model
+    (passesActionFilter) and now the paused row as well, so a paused AVOID is
+    never drawn as a fade signal.
     """
-    if signal_type in ("BET", "AVOID") and _is_paused(model_id):
-        return "NONE", "model paused"
-    return signal_type, None
+    return signal_type, _pause_note(model_id)
 
 
 def _pause_note(model_id: str) -> str | None:
     """The persisted reason on every row a paused model writes."""
-    return "model paused" if _is_paused(model_id) else None
+    return config.PAUSED_NOTE if _is_paused(model_id) else None
+
+
+def _is_paused_row(pick: dict) -> bool:
+    """A pick written while its model was paused (the row's own marker)."""
+    return pick.get("downgrade_reason") == config.PAUSED_NOTE
+
+
+def _requalify_keeping_pause(pick: dict, best: dict | None, *,
+                             is_prop: bool) -> dict:
+    """_requalify_at_best for every pick, a paused model's included.
+
+    _requalify_at_best (unchanged) skips any pick that already carries a
+    downgrade_reason, and on a re-decision it rewrites that column from the
+    EV-floor note. A paused row carries PAUSED_NOTE from the builder, so on its
+    own it would stay decided at DraftKings while a live model's identical pick
+    is re-decided at the best bettable price -- the paused verdict would not be
+    the model's real one. So the note is lifted for the re-decision and put
+    back afterwards: the paused row is decided exactly like a live one and
+    still says it is paused. PAUSED_NOTE wins over an EV-floor note, as it
+    does in the builders (`_pause_note(model_id) or why.get("floor")`).
+    """
+    if not pick or not _is_paused_row(pick):
+        return _requalify_at_best(pick, best, is_prop=is_prop)
+    pick["downgrade_reason"] = None
+    try:
+        return _requalify_at_best(pick, best, is_prop=is_prop)
+    finally:
+        pick["downgrade_reason"] = config.PAUSED_NOTE
 
 
 def _apply_game_injury_gate(conn, picks: list[dict], sport: str, game_id: str,
@@ -1310,7 +1352,7 @@ def _decide(model_id: str, model_prob: float, implied_prob: float | None,
     if signal_type == "BET" and _missing_price(odds):
         signal_type = "NONE"
 
-    # A paused model is paused on BOTH sides -- see _paused_signal.
+    # Paused keeps the real verdict (the row carries the note) -- see _paused_signal.
     signal_type, _ = _paused_signal(model_id, signal_type)
     if why is not None:
         why["floor"] = floor_note
@@ -2068,7 +2110,7 @@ def _stamp_best_game_prices(conn: DBConnection, picks: list[dict],
             best = None
         p.update(_best_fields(best, float(p["model_probability"])))
         p["_quote_snapshot_at"] = (best or {}).get("snapshot_at")
-        _requalify_at_best(p, best, is_prop=False)
+        _requalify_keeping_pause(p, best, is_prop=False)
 
 
 def _tag_prop(pick: dict, ctx: tuple, conn: DBConnection | None = None) -> dict:
@@ -2096,7 +2138,7 @@ def _tag_prop(pick: dict, ctx: tuple, conn: DBConnection | None = None) -> dict:
         logger.debug(f"  best-price lookup failed for {pick.get('pick_label')}: {exc}")
         best = None
     pick.update(_best_fields(best, float(pick["model_probability"])))
-    return _requalify_at_best(pick, best, is_prop=True)
+    return _requalify_keeping_pause(pick, best, is_prop=True)
 
 
 def _pregame_cutoff(conn: DBConnection, game_id: str) -> str | None:
@@ -3518,9 +3560,13 @@ def _get_current_bankroll(conn: DBConnection) -> float:
         SELECT bankroll_at_pick, profit_kelly
         FROM picks
         WHERE result IS NOT NULL
+          -- A paused model's settled BET is graded (its record is how a pause
+          -- gets reassessed) but it was never staked, so it must not move the
+          -- bankroll every live model sizes from (_paused_signal).
+          AND downgrade_reason IS DISTINCT FROM %s
         ORDER BY settled_at DESC
         LIMIT 1
-    """).fetchone()
+    """, (config.PAUSED_NOTE,)).fetchone()
 
     if row and row[0] is not None and row[1] is not None:
         return row[0] + row[1]
@@ -3890,9 +3936,13 @@ def dedupe_player_props(picks: list[dict], already_bet: set | None = None,
     member = {m: name for name, ms in pools.items() for m in ms}
     taken = set(already_bet or ())
 
+    # A paused model's BET is not a signal (_paused_signal): it neither takes
+    # the player's slot from a live model nor is downgraded for it (which
+    # would also overwrite its PAUSED_NOTE). It passes through untouched.
     order = sorted(
         (i for i, p in enumerate(picks)
          if p.get("signal_type") == "BET"
+         and not _is_paused_row(p)
          and p.get("model_id") in member
          and p.get("player_id") is not None),
         key=lambda i: _claimed_ev(picks[i]), reverse=True)
@@ -3925,7 +3975,10 @@ def _prop_bets_today(conn: DBConnection, game_date: str) -> tuple[dict, set]:
         FROM picks
         WHERE game_date = %s AND signal_type = 'BET'
           AND (is_live IS NOT TRUE)
-    """, (game_date,)).fetchall():
+          -- A paused model's standing BET is not a signal: it holds no
+          -- player slot and spends no daily-cap unit (_paused_signal).
+          AND downgrade_reason IS DISTINCT FROM %s
+    """, (game_date, config.PAUSED_NOTE)).fetchall():
         counts[mid] = counts.get(mid, 0) + 1
         if pid is not None and mid in member:
             taken.add((member[mid], gid, pid))
@@ -3955,9 +4008,12 @@ def apply_prop_daily_cap(picks: list[dict], counts: dict,
     if not caps:
         return picks
     used = dict(counts)
+    # A paused model's BET is not one of the day's signals: it spends no unit
+    # of the allowance and is never downgraded by it (_paused_signal).
     order = sorted(
         (i for i, p in enumerate(picks)
-         if p.get("signal_type") == "BET" and p.get("model_id") in caps),
+         if p.get("signal_type") == "BET" and p.get("model_id") in caps
+         and not _is_paused_row(p)),
         key=lambda i: _claimed_ev(picks[i]), reverse=True)
 
     out = list(picks)

@@ -54,7 +54,7 @@ PICKS_COLS = """
     result TEXT, condition_status TEXT, player_id TEXT, player_key TEXT,
     prop_market TEXT, best_book TEXT, best_odds REAL, best_bet_link TEXT,
     decision_odds REAL, decision_book TEXT, scored_line REAL,
-    model_probability_cal REAL
+    model_probability_cal REAL, downgrade_reason TEXT
 """
 
 
@@ -73,15 +73,18 @@ def _db() -> _Conn:
     return _Conn(raw)
 
 
-def _pick(conn, pick_id, model_id, *, condition_status=None, label=None):
+def _pick(conn, pick_id, model_id, *, condition_status=None, label=None,
+          downgrade_reason=None):
     conn.execute(
         "INSERT INTO picks (pick_id, game_id, model_id, sport, game_date, "
         "pick_side, pick_label, signal_type, model_probability, edge, dk_odds, "
-        "kelly_fraction, created_at, is_live, result, condition_status) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "kelly_fraction, created_at, is_live, result, condition_status, "
+        "downgrade_reason) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (pick_id, f"G{pick_id}", model_id, "NCAAF", "2026-09-12", "over",
          label or f"{model_id} pick {pick_id}", "BET", 0.80, 0.20, -110, 0.02,
-         "2026-09-12T18:00:00-04:00", 1, None, condition_status),
+         "2026-09-12T18:00:00-04:00", 1, None, condition_status,
+         downgrade_reason),
     )
 
 
@@ -122,6 +125,19 @@ def test_a_paused_model_is_not_announced(producer):
     _threshold(conn, "ncaaf_live_total", paused=True)
     _pick(conn, 1, "ncaaf_live_total")
     assert producer(conn, "2026-09-12") == []
+
+
+@pytest.mark.parametrize("producer", PRODUCERS)
+def test_a_bet_written_while_paused_is_not_announced_after_an_unpause(producer):
+    """The row marker, not the model's current state (2026-09-28): a BET
+    the scorer wrote while the model was paused carries 'model paused', and
+    unpausing the model later must not announce it."""
+    conn = _db()
+    _threshold(conn, "ncaaf_live_total", paused=False)
+    _pick(conn, 1, "ncaaf_live_total", label="written while paused",
+          downgrade_reason="model paused")
+    _pick(conn, 2, "ncaaf_live_total", label="live and bettable")
+    assert _labels(producer(conn, "2026-09-12")) == ["live and bettable"]
 
 
 @pytest.mark.parametrize("producer", PRODUCERS)

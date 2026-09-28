@@ -199,6 +199,11 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Columns first so the view filter cannot run against a missing clv_method.
     "add_clv_method_2026_09_14.sql",
     "track_record_clv_no_vig_2026_09_14.sql",
+    # 2026-09-28 (Matt via CoS; Michael-gated): a paused model keeps its real
+    # verdict (scorer._paused_signal), so a paused BET can exist; it is not a
+    # signal and stays out of both published views, keyed on the row's
+    # 'model paused' marker. MUST run after track_record_clv_no_vig.
+    "record_excludes_paused_rows_2026_09_28.sql",
     # 2026-09-15 (mike): MLB game-market gate log. Live default (despite
     # no §7 cut) — does not ALTER picks; the scorer writes NONE itself.
     "add_game_market_gate_2026_09_15.sql",

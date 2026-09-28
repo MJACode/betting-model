@@ -32,6 +32,7 @@ from loguru import logger
 
 from config import (UFC_SCORE_AHEAD_DAYS, NFL_LOCK_AHEAD_DAYS,
                     NCAAF_SCORE_AHEAD_DAYS)
+import config
 from data.db import get_connection, DBConnection
 from tracking.publish_keys import lock_key_sql
 
@@ -139,6 +140,11 @@ def capture_opening_signals(target_date: str | None = None,
               AND p.signal_type = 'BET'
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
+              -- A paused model's BET is not a signal (scorer._paused_signal,
+              -- 2026-09-28). This ledger feeds the Discord free pick, the X
+              -- free pick, the dropped push and signal_delivery, so a paused
+              -- row captured here would be published from four places.
+              {config.paused_row_exclusion_sql("p")}
               -- Same guard as the INSERT below, so the dry-run count and the
               -- real run cannot disagree about what is capturable.
               AND (g.commence_time IS NULL OR p.created_at IS NULL
@@ -187,6 +193,11 @@ def capture_opening_signals(target_date: str | None = None,
               AND p.signal_type = 'BET'
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
+              -- A paused model's BET is not a signal (scorer._paused_signal,
+              -- 2026-09-28). This ledger feeds the Discord free pick, the X
+              -- free pick, the dropped push and signal_delivery, so a paused
+              -- row captured here would be published from four places.
+              {config.paused_row_exclusion_sql("p")}
               -- FIRST-PITCH GUARD (2026-09-03, mike: "add the first pitch
               -- guard"). A pick written after its own game started is not a
               -- pre-game pick (§7), and locking one into the shadow track

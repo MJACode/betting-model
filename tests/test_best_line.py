@@ -222,10 +222,16 @@ def test_the_builders_decide_at_draftkings_and_the_stamp_requalifies():
                 f"{fn} must record the line's book, DraftKings when it quoted it")
             assert '"dk_odds":           None if line_book else dk_odds' in body, (
                 "picks.dk_odds must stay NULL when DraftKings never quoted it")
+    # Through _requalify_keeping_pause since 2026-09-28: the same
+    # _requalify_at_best, with a paused model's 'model paused' marker lifted
+    # for the call and put back after (tests/test_paused_keeps_real_verdict.py).
+    wrapper = src[src.index("def _requalify_keeping_pause("):]
+    wrapper = wrapper[:wrapper.index("\ndef ", 1)]
+    assert "_requalify_at_best(" in wrapper
     for fn in ("def _stamp_best_game_prices(", "def _tag_prop("):
         start = src.index(fn)
         body = src[start:src.index("\ndef ", start + 1)]
-        assert "_requalify_at_best(" in body, fn
+        assert "_requalify_at_best(" in body or "_requalify_keeping_pause(" in body, fn
 
 
 def test_settlement_reads_the_deciding_price():

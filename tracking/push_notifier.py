@@ -28,6 +28,8 @@ from zoneinfo import ZoneInfo
 import requests
 from loguru import logger
 
+import config
+
 from data.db import get_connection
 from tracking.publish_lock import PUSH_SIGNALS_LOCK, publish_lock
 from tracking.publish_filters import live_publishable_sql
@@ -135,6 +137,10 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
               -- STANDING picks, which must keep publishing.
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
+              -- A paused model's pick is NOT A SIGNAL (scorer._paused_signal,
+              -- 2026-09-28): keyed on the row's own marker, so a pick written
+              -- while paused is never announced, even after an unpause.
+              {config.paused_row_exclusion_sql("p")}
               AND p.model_probability >= t.min_prob
               -- The cut at the price the pick was DECIDED at (2026-09-09):
               -- decision_* since the flip, DraftKings before. Same clause as
@@ -186,6 +192,9 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
           AND os.lock_key NOT LIKE '%%:early'
           AND os.result IS NULL
           AND p.signal_type = 'AVOID'
+          -- A paused model's AVOID is its real verdict but not a signal
+          -- (scorer._paused_signal): it never announces a "dropped" bet.
+          {config.paused_row_exclusion_sql("p")}
           AND NOT EXISTS (
               SELECT 1 FROM push_sent s
               WHERE s.lock_key = os.lock_key AND s.kind = 'dropped'

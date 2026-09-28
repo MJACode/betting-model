@@ -34,6 +34,8 @@ LEFT JOIN (Discord, for the price bound) or do not join at all (push).
 """
 from __future__ import annotations
 
+import config
+
 
 def live_publishable_sql(alias: str = "p") -> str:
     """The WHERE-clause fragment (leading ``AND``) a live pick must clear.
@@ -60,4 +62,8 @@ def live_publishable_sql(alias: str = "p") -> str:
           -- app's own SQL; scripts/void_picks.py takes any --model, so this is
           -- not an NFL-shaped concern.
           AND ({alias}.condition_status IS NULL
-               OR {alias}.condition_status <> 'VOID')"""
+               OR {alias}.condition_status <> 'VOID')
+          -- A pick written while its model was paused is NOT A SIGNAL
+          -- (scorer._paused_signal, 2026-09-28), whatever the model's state
+          -- now. The live lanes write NONE for a paused model today
+          -- (live_scorer), so this is the same rule held on the row.{config.paused_row_exclusion_sql(alias)}"""

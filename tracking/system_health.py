@@ -41,6 +41,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import config
 from config import MODELS, PROP_MODELS, PAPER_TRADING_START, today_et
 from data.db import get_connection
 from tracking.publish_keys import lock_key_sql, unique_row_sql
@@ -1055,6 +1056,9 @@ def run_system_health(run_date: str | None = None) -> dict:
             SELECT COUNT(DISTINCT p.game_date)
             FROM picks p
             WHERE p.signal_type = 'BET' AND p.is_live IS NOT TRUE
+              -- Capture skips a paused model's BET (not a signal), so a day
+              -- whose only BETs are paused has nothing to capture.
+              AND p.downgrade_reason IS DISTINCT FROM 'model paused'
               AND p.game_date >= ? AND p.game_date <= ?
               AND NOT EXISTS (
                   SELECT 1 FROM opening_signals os WHERE os.game_date = p.game_date
@@ -1064,6 +1068,7 @@ def run_system_health(run_date: str | None = None) -> dict:
         n_recent_bets = _scalar(conn, """
             SELECT COUNT(*) FROM picks
             WHERE signal_type = 'BET' AND is_live IS NOT TRUE
+              AND downgrade_reason IS DISTINCT FROM 'model paused'
               AND game_date >= ? AND game_date <= ?
         """, ((d - timedelta(days=3)).strftime("%Y-%m-%d"),
               d.strftime("%Y-%m-%d"))) or 0
@@ -1246,6 +1251,10 @@ def run_system_health(run_date: str | None = None) -> dict:
                   AND p.model_id NOT LIKE '%%_live_%%'
                   AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
                   AND t.paused = FALSE
+                  -- A paused model's pick is NOT A SIGNAL (scorer._paused_signal,
+                  -- 2026-09-28): keyed on the row's own marker, so a pick written
+                  -- while paused is never announced, even after an unpause.
+                  {config.paused_row_exclusion_sql("p")}
                   AND p.model_probability >= t.min_prob
                   AND (t.prob_only = TRUE
                        OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))

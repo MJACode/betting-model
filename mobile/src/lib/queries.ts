@@ -553,7 +553,7 @@ const PICK_COLUMNS =
   'public_bet_pct, public_money_pct, ' +
   'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
   'clv_captured_at, clv_method, clv_close_book, dk_bet_link, ' +
-  'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, ' +
+  'best_book, best_odds, best_implied_prob, best_edge, best_bet_link, downgrade_reason, ' +
   'decision_book, decision_odds, decision_implied_prob, decision_edge, line_book';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
@@ -564,7 +564,7 @@ const SETTLED_PICK_COLUMNS =
   'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, condition_status, result, profit_flat, player_id, ' +
   'public_bet_pct, injury_flag, clv_pct, decision_book, decision_odds, decision_edge, ' +
-  'is_live';
+  'is_live, downgrade_reason';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +

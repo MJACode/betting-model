@@ -148,6 +148,31 @@ def record_exclusion_sql(alias: str = "p") -> str:
     return "".join(f"\n          AND {c}" for c in clauses)
 
 
+
+# ── A paused model's rows ─────────────────────────────────────────────────────
+# Since 2026-09-28 (Matt, via CoS; Michael-gated) a paused model keeps its REAL
+# verdict: models.scorer._paused_signal no longer turns a BET/AVOID into NONE.
+# Being paused only means the pick is NOT A SIGNAL -- no Discord post, no push,
+# not counted in the published record or its ROI. The row says so itself: every
+# row a paused model writes carries downgrade_reason = PAUSED_NOTE (scorer
+# _pause_note), stamped when the pick is written and never re-read from config.
+#
+# Keyed on the ROW, not on model_action_thresholds.paused, for the reason the
+# record rule gives (CLAUDE.md 1c): "may bet next" and "did bet" are different
+# questions. A pick written while the model was paused stays unannounced after
+# an unpause; a pick written while it was live stays in the record after a
+# pause. Every publisher and record query ANDs paused_row_exclusion_sql() in.
+PAUSED_NOTE = "model paused"
+
+
+def paused_row_exclusion_sql(alias: str = "p") -> str:
+    """`AND <alias>.downgrade_reason IS DISTINCT FROM 'model paused'`.
+
+    IS DISTINCT FROM, not <>: downgrade_reason is NULL on almost every row, and
+    `NULL <> 'model paused'` is NULL, which would drop every ordinary pick.
+    """
+    return f"\n          AND {alias}.downgrade_reason IS DISTINCT FROM '{PAUSED_NOTE}'"
+
 # ── Pick locking ──────────────────────────────────────────────────────────────
 # When True (default), game-level picks (ML / runline / O-U / F5 / 3-way /
 # method) LOCK at the first scoring run of the day (≈7am ET) and are NOT

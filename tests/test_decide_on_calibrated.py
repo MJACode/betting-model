@@ -145,9 +145,14 @@ def test_avoid_is_judged_on_the_calibrated_number_too(monkeypatch):
 
 
 def test_a_paused_model_never_fires_regardless(monkeypatch):
+    """2026-09-28: a paused model keeps its REAL verdict (a BET here), and
+    "never fires" is now the row's 'model paused' marker, which keeps it off
+    Discord, push, the Signals board and the record
+    (tests/test_paused_keeps_real_verdict.py)."""
     monkeypatch.setattr(scorer, "PAUSED_MODELS", {MODEL})
     p = _pick(monkeypatch, raw_prob=0.86, calibrated_to=0.79)
-    assert p["signal_type"] == "NONE"
+    assert p["signal_type"] == "BET"
+    assert p["downgrade_reason"] == config.PAUSED_NOTE
 
 
 # ── the config decisions themselves ──────────────────────────────────────────
