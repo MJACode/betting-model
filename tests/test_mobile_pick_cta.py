@@ -128,7 +128,7 @@ eq(flaggedLast([1, 2, 3, 4, 5], (n) => n % 2 === 0), [1, 3, 5, 2, 4], 'stable pa
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_line_history_collapses_and_disambiguates(tmp_path):
     script = PRELUDE + """
-import { collapseLineHistory, recentChanges } from './lineHistory.ts';
+import { changesFooter, collapseLineHistory, recentChanges } from './lineHistory.ts';
 const t = (h, m, s = 0) => `2026-09-25T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}Z`;
 const runs = collapseLineHistory([
   { at: t(19, 50, 1), line: 8.5, price: -110 }, { at: t(19, 50, 20), line: 8.5, price: -110 },
@@ -149,12 +149,77 @@ const gap = collapseLineHistory([
   { at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: 8.5, price: null },
   { at: t(18, 10), line: null, price: -110 }, { at: t(18, 15), line: 8.5, price: -110 },
 ]);
-eq(gap.map((r) => r.count), [4], 'mid-run null');
+eq(gap.map((r) => r.count), [2], 'partial rows are unknown, not counted');
+// Reviewer #847 approval: carry only when BOTH are null; a partial row never
+// borrows the other field (8.5 @ -110 then 9.0 @ null must not print 9.0 @ -110).
+const invent = collapseLineHistory([
+  { at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: 9, price: null }, { at: t(18, 10), line: 9, price: -115 },
+]);
+eq(invent.map((r) => [r.line, r.price]), [[8.5, -110], [9, -115]], 'no invented pair');
+eq(collapseLineHistory([
+  { at: t(18, 0), line: 8.5, price: -110 }, { at: t(18, 5), line: null, price: null }, { at: t(18, 10), line: 8.5, price: -110 },
+]).map((r) => r.count), [3], 'both null is a gap');
+eq(collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 5), line: null, price: -120 }]).length, 2, 'moneyline: line untracked');
+// Footer: the hidden row is the opening → not "Last 8 of 8 changes".
+const nine = recentChanges(Array.from({ length: 9 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
+eq(changesFooter(nine, 9), '8 changes · opening not shown · 9 snapshots', 'opening-only hidden');
+eq(changesFooter(rc, 20), 'Last 8 of 19 changes · 20 snapshots', 'really cut');
 const same = collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 0), line: null, price: -115 }]);
 eq(new Set(same.map((r) => r.key)).size, 2, 'unique keys');
 """
     proc = _run(tmp_path, ["lineHistory.ts"], script)
     assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_best_handoff_reranks_by_current_price(tmp_path):
+    """Reviewer #847 M4, in CI (node 22 is set up there; no node_modules
+    needed): record DK -110, now DK -130, FD -115 → the hand-off is FD -115,
+    never "Bet DK -130". markets.ts and its pure imports run under node's type
+    stripping (type-only imports are erased)."""
+    files = ["markets.ts", "format.ts", "thresholds.ts", "thresholds.generated.ts", "decisionPrice.ts", "discordPublish.ts"]
+    for name in files:
+        src = _read(LIB / name)
+        src = re.sub(r"from '\./([\w.]+)';", r"from './\1.ts';", src)
+        (tmp_path / name).write_text(src, encoding="utf-8")
+    script = PRELUDE + """
+import { bestHandoffForPick, heroAmericanForPick, MODEL_BOOK } from './markets.ts';
+const pick = {
+  pick_id: 1, game_id: 'MLB_2026-09-13_NYJ_BUF', model_id: 'mlb_over_under', sport: 'MLB', game_date: '2026-09-13',
+  pick_side: 'over', pick_label: 'NYJ @ BUF Over 8.5', model_probability: 0.58, dk_implied_prob: 0.535, edge: 0.082,
+  dk_odds: -110, scored_line: 8.5, signal_type: 'BET', is_live: false, dk_bet_link: 'dk://lock',
+  decision_odds: -110, decision_edge: 0.082, decision_book: 'draftkings', line_book: null,
+};
+const latest = (over) => ({ game_id: pick.game_id, game_date: '2026-09-13', market: 'totals', home_price: null, away_price: null,
+  spread_home: null, total_line: 8.5, over_price: -110, under_price: -110, snapshot_at: '2026-09-13T17:00:00+00:00', ...over });
+const rows = [
+  { bookmaker: 'draftkings', over_price: -130, total_line: 8.5 },
+  { bookmaker: 'fanduel', over_price: -115, total_line: 8.5, over_link: 'fd://now' },
+];
+const hero = heroAmericanForPick(pick, latest({ over_price: -130 }), rows);
+eq([hero?.kind, hero?.price, hero?.book], ['now', -130, MODEL_BOOK], 'hero is Now DK -130');
+const h = bestHandoffForPick(pick, rows, hero);
+eq([h?.bookmaker, h?.price, h?.verb, h?.link], ['fanduel', -115, 'Best', 'fd://now'], 'M4 re-rank -> FD -115');
+// Still DK when DK's CURRENT price is the best.
+const rows2 = [{ bookmaker: 'draftkings', over_price: -112, total_line: 8.5 }, { bookmaker: 'fanduel', over_price: -115, total_line: 8.5 }];
+const h2 = bestHandoffForPick(pick, rows2, heroAmericanForPick(pick, latest({ over_price: -112 }), rows2));
+eq([h2?.bookmaker, h2?.price, h2?.verb], [MODEL_BOOK, -112, 'Bet'], 'DK now -112 beats FD -115');
+"""
+    proc = subprocess.run(
+        ["node", "--experimental-strip-types", "--input-type=module", "-e", script],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_best_handoff_rerank_is_wired():
+    """The static half, for runners without node: the re-rank reads the hero's
+    current price, not the record chip's stored one."""
+    markets = _read(LIB / "markets.ts")
+    assert re.search(r"export function bestHandoffForPick\(", markets)
+    assert "hero" in markets[markets.index("export function bestHandoffForPick("):][:3000]
+    card = _read(SRC / "components" / "PickCard.tsx")
+    assert re.search(r"bestHandoffForPick\(pick, item\.bookRows, heroPrice\)", card)
 
 
 def test_pick_card_wiring():

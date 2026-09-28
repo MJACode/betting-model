@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { gameHasStarted, gameStartState } from '../src/lib/format';
-import { collapseLineHistory, recentChanges } from '../src/lib/lineHistory';
+import { changesFooter, collapseLineHistory, recentChanges } from '../src/lib/lineHistory';
 import { bestHandoffForPick, heroAmericanForPick, MODEL_BOOK } from '../src/lib/markets';
 import { gameStartedLine, pickCta, pickCtaFor, reasoningHeading } from '../src/lib/pickCta';
 import { priceCheckForItem } from '../src/lib/pickPriceCheck';
@@ -272,7 +272,28 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
     { at: t(18, 10), line: null, price: -110 },
     { at: t(18, 15), line: 8.5, price: -110 },
   ]);
-  check('M13: a mid-run null is not an "N/A" change (one row)', gap.length === 1 && gap[0].count === 4, JSON.stringify(gap.map((r) => [r.line, r.price])));
+  check('M13: partial snapshots are unknown — no "N/A" row, not counted in the run', gap.length === 1 && gap[0].count === 2, JSON.stringify(gap.map((r) => [r.line, r.price, r.count])));
+  // Reviewer #847 approval: per-field carry invented 9.0 @ −110.
+  const invent = collapseLineHistory([
+    { at: t(18, 0), line: 8.5, price: -110 },
+    { at: t(18, 5), line: 9, price: null },
+    { at: t(18, 10), line: 9, price: -115 },
+  ]);
+  check('M13: a partial row never borrows the other field (no invented 9 @ −110)',
+    invent.length === 2 && !invent.some((r) => r.line === 9 && r.price === -110) && invent[1].line === 9 && invent[1].price === -115, JSON.stringify(invent.map((r) => [r.line, r.price])));
+  const blank = collapseLineHistory([
+    { at: t(18, 0), line: 8.5, price: -110 },
+    { at: t(18, 5), line: null, price: null },
+    { at: t(18, 10), line: 8.5, price: -110 },
+  ]);
+  check('M13: a snapshot with BOTH null is a feed gap and joins the run', blank.length === 1 && blank[0].count === 3);
+  const ml = collapseLineHistory([{ at: t(18, 0), line: null, price: -110 }, { at: t(18, 5), line: null, price: -120 }]);
+  check('M13: a field no snapshot has (moneyline line) is untracked, not "partial"', ml.length === 2);
+  const nine = recentChanges(Array.from({ length: 9 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 })), 8);
+  check('footer: only the opening hidden → "8 changes · opening not shown", not "Last 8 of 8"',
+    changesFooter(nine, 9) === '8 changes · opening not shown · 9 snapshots', changesFooter(nine, 9));
+  check('footer: changes really cut → "Last 8 of 19 changes"', changesFooter(rc, 20) === 'Last 8 of 19 changes · 20 snapshots', changesFooter(rc, 20));
+  check('footer: nothing hidden → "1 change"', changesFooter(one, 2) === '1 change · 2 snapshots');
   const same = collapseLineHistory([
     { at: t(18, 0), line: null, price: -110 },
     { at: t(18, 0), line: null, price: -115 },
@@ -292,6 +313,7 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, postponed, in-play tag)',
   /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
 check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
+check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length\)/.test(read('src/components/LineMovementCard.tsx')));
 check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
 check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
   /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));
