@@ -61,6 +61,8 @@ import {
 } from '@/lib/teamDetail';
 import { formatTeamStat, TEAM_STAT_CATALOG, type TeamStatDef } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
+import { friendlyCause } from '@/lib/errors';
 import type { RootStackParamList, TeamSport, TeamStatsRow } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'TeamStats'>;
@@ -149,9 +151,13 @@ export function TeamStatsScreen() {
         </View>
 
         {d.board.error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {d.board.error}</Text>
-          </View>
+          <ErrorBanner
+            what="this team’s board"
+            error={d.board.error}
+            onRetry={() => d.refresh()}
+            retrying={d.loading}
+            style={styles.errorBannerInset}
+          />
         ) : null}
 
         {/* ── 1. Next game + market read ─────────────────────────────────── */}
@@ -175,7 +181,7 @@ export function TeamStatsScreen() {
           <Card>
             <Text style={styles.muted}>
               {d.recent.error
-                ? `Couldn’t load recent games — ${d.recent.error}`
+                ? `Couldn’t load recent games. ${friendlyCause(d.recent.error)} Pull down to retry.`
                 : `No finished ${sport} games stored for ${team} yet.`}
             </Text>
           </Card>
@@ -300,7 +306,7 @@ export function TeamStatsScreen() {
           <Card>
             <Text style={styles.muted}>
               {d.picks.error
-                ? `Couldn’t load our picks — ${d.picks.error}`
+                ? `Couldn’t load our picks. ${friendlyCause(d.picks.error)} Pull down to retry.`
                 : `No settled picks in ${team}’s last ${Math.min(RECORD_GAMES, d.recent.data.length) || RECORD_GAMES} games.`}
             </Text>
           </Card>
@@ -426,7 +432,7 @@ function NextGameCard({
           </View>
         ) : unstarted && !loading ? (
           <Text style={styles.muted}>
-            {error ? `Couldn’t load lines — ${error}` : `${myBook.replace(/^./, (c) => c.toUpperCase())} ${books.length === 1 ? 'hasn’t' : 'haven’t'} posted lines for this game yet.`}
+            {error ? `Couldn’t load lines. ${friendlyCause(error)} Pull down to retry.` : `${myBook.replace(/^./, (c) => c.toUpperCase())} ${books.length === 1 ? 'hasn’t' : 'haven’t'} posted lines for this game yet.`}
           </Text>
         ) : null}
         {loading && !anyQuote ? <ActivityIndicator style={styles.loadingInline} /> : null}
@@ -821,15 +827,8 @@ const styles = StyleSheet.create({
   source: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 16 },
   loading: { marginVertical: spacing.xl },
   loadingInline: { marginTop: spacing.sm },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    borderRadius: radii.sm,
-  },
-  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: spacing.sm },
 
   fixtureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   fixture: { flexShrink: 1, fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },

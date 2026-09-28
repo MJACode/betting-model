@@ -141,7 +141,7 @@ import {
 } from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { errorText, friendlyCause } from '@/lib/errors';
 import type {
   EnrichedPick,
   GameRow,
@@ -866,7 +866,7 @@ export function StatsScreen() {
       .catch((e: unknown) => {
         if (cancelled) return;
         setPropLines({ market: propMarket, rows: [], status: 'failed' });
-        showToast(`Couldn’t load the latest lines — ${errorText(e)}`);
+        showToast(`Couldn’t load the latest lines. ${friendlyCause(e)}`);
       });
     return () => {
       cancelled = true;
@@ -2115,7 +2115,7 @@ export function StatsScreen() {
       {error ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText} numberOfLines={3}>
-            Couldn’t load the board: {error}
+            Couldn’t load the board. {friendlyCause(error)}
           </Text>
           <Pressable
             onPress={() => void load()}

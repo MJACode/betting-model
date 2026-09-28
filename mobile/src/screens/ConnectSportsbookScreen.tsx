@@ -11,7 +11,7 @@ import {
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import type { LinkedAccount } from '@/lib/sharpsports';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { errorText, friendlyCause } from '@/lib/errors';
 
 /** Books we don't yet support connecting — shown as "Coming soon". */
 const COMING_SOON: { abbrev: string; name: string }[] = [
@@ -49,7 +49,7 @@ export function ConnectSportsbookScreen() {
       // If no account came back, the user likely cancelled the Booklink flow —
       // stay silent rather than claiming a connection.
     } catch (e) {
-      Alert.alert('Could not start linking', errorText(e));
+      Alert.alert('Couldn’t start linking', friendlyCause(e));
     } finally {
       setPending(null);
     }
