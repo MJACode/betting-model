@@ -118,6 +118,7 @@ import {
   isModelRetired,
   isUnlockedPreview,
   passesActionFilter,
+  passesActionFilterIgnoringPause,
   unitsFor,
   formatUnits,
 } from '@/lib/thresholds';
@@ -180,9 +181,10 @@ export function PicksHomeScreen() {
   const { byGame: liveStates } = useLiveGameStates(liveDates);
 
   // The All board is every scored pick, INCLUDING a paused model's (Matt,
-  // 2026-09-26), each card labelled PAUSED. Signals is derived from this list
-  // through passesActionFilter, which refuses a paused model, so a paused row
-  // never becomes a signal, a stake, or a count in a sport badge.
+  // 2026-09-26), each card tagged Paused and otherwise like any other card
+  // (2026-09-28). Signals is derived from this list through the STRICT
+  // passesActionFilter, which refuses a paused model, so a paused row never
+  // becomes a signal or a count in a sport badge (those read `allData`).
   const todayData = useMemo(
     () => [...allData, ...pausedData].filter((d) => d.pick.sport === sport),
     [allData, pausedData, sport],
@@ -319,7 +321,8 @@ export function PicksHomeScreen() {
   const sportSignalCounts = useMemo(() => signalCountsBySport(allData), [allData]);
   // A pick is only a SIGNAL once it's locked. Future-dated UFC/golf picks
   // re-score until game day — they show on Today as lines/previews but are
-  // excluded here (and from every signal count) until they lock.
+  // excluded here (and from every signal count) until they lock. The STRICT
+  // filter: a paused model's pick is on All, never on Signals.
   const live = useMemo(
     () => todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)),
     [todayData],
@@ -443,14 +446,10 @@ export function PicksHomeScreen() {
     () =>
       applyFilter(datedItems, displayFilter).filter(
         (d) =>
-          isGameSelected(d.pick.game_id, gamePicker.selected) &&
-          // A Signal filter asks what the MODEL called, and a paused model
-          // is making no calls: a paused row's stored BET is not a bet
-          // (passesActionFilter refuses it, and the header's "N bets" does
-          // not count it). So once Signal narrows, paused rows drop out —
-          // otherwise "BET only" listed PAUSED cards under a header that
-          // counted three bets (UX review, 2026-09-26).
-          (displayFilter.signals.size === ALL_SIGNALS.length || !isPausedForDisplay(d.pick)),
+          // A Signal filter asks what the MODEL called, and a paused model's
+          // pick says what it called like any other (Matt, 2026-09-28): "BET
+          // only" keeps a paused model's BET, which All's "N bets" counts too.
+          isGameSelected(d.pick.game_id, gamePicker.selected),
       ),
     [datedItems, displayFilter, gamePicker.selected],
   );
@@ -459,24 +458,20 @@ export function PicksHomeScreen() {
   useEffect(() => {
     if (!publicSortLive && sortKey === 'public') setSortKey('edge');
   }, [publicSortLive, sortKey]);
-  // Paused rows sort AFTER active ones on every key, the chosen sort holding
-  // inside each group: a paused model's noisy edges would otherwise take the
-  // top of an edge-sorted All board and push the real bets below the fold
-  // (UX review, 2026-09-26). A stable partition of the sorted list.
+  // Paused rows sort like any other, on every key including Time (Matt,
+  // 2026-09-28) — the 2026-09-26 paused-last partition is gone.
   //
   // H4: on the Edge sort a row the price-check band flags goes after the rest
   // of its group, so an implausible price never takes the top slot (display
   // only, lib/priceCheck.ts).
   // The live snapshot goes in so the in-play skip matches the card's.
-  const sorted = useMemo(() => {
-    const all = sortPicks(filtered, sortKey, {
-      priceCheck: (d) => priceCheckForItem(d, liveStates.get(d.pick.game_id) ?? null).flagged,
-    });
-    return [
-      ...all.filter((d) => !isPausedForDisplay(d.pick)),
-      ...all.filter((d) => isPausedForDisplay(d.pick)),
-    ];
-  }, [filtered, sortKey, liveStates]);
+  const sorted = useMemo(
+    () =>
+      sortPicks(filtered, sortKey, {
+        priceCheck: (d) => priceCheckForItem(d, liveStates.get(d.pick.game_id) ?? null).flagged,
+      }),
+    [filtered, sortKey, liveStates],
+  );
   // Time sort reads as a schedule, so it is split by day with a header per
   // day (Matt, 2026-09-28). Every other sort is a ranking and stays one list.
   const rows: DayRow<EnrichedPick>[] = useMemo(
@@ -486,7 +481,6 @@ export function PicksHomeScreen() {
             sortPicks(filtered, 'time'),
             (d) => d.pick.game_date,
             (d) => String(d.pick.pick_id),
-            (d) => isPausedForDisplay(d.pick),
           )
         : sorted.map((d) => ({ kind: 'item' as const, key: String(d.pick.pick_id), item: d })),
     [filtered, sorted, sortKey],
@@ -510,9 +504,14 @@ export function PicksHomeScreen() {
     [filtered.length, search, unsearched.length],
   );
 
-  // All: BET/AVOID/NONE counts.
+  // All: BET/AVOID/NONE counts. "N bets" is what the MODELS called, so it is
+  // the LENIENT filter: a paused model's BET counts (Matt, 2026-09-28), and
+  // " · N paused" still says how many of the board's rows are paused. Signals
+  // (`live` above) and the sport badges stay on the strict filter.
   const todayStats = useMemo(() => {
-    const bet = todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).length;
+    const bet = todayData.filter(
+      (d) => passesActionFilterIgnoringPause(d.pick) && !isUnlockedPreview(d.pick),
+    ).length;
     const paused = todayData.filter((d) => isPausedForDisplay(d.pick)).length;
     return { total: todayData.length, bet, paused };
   }, [todayData]);
@@ -601,7 +600,7 @@ export function PicksHomeScreen() {
               // and the empty state are the two places a reader is told which
               // sports have an in-play model, and a hand-written list here would
               // be the one that goes stale when a lane ships (lib/liveSports.ts).
-              `All = every pick the model scored today. Picks from a paused model show here too, marked PAUSED — they are the model’s number, not a bet, and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
+              `All = every pick the model scored today. Picks from a paused model show here too, tagged Paused. They work like any other pick, but aren’t sent as signals (no Discord or push alerts) and never appear on Signals.\n\nSignals = pre-game picks that crossed the bet line and are still standing right now. In-play picks are counted separately, on Live Signals — the two boards never hold the same pick.\n\nLive Signals = in-play picks, priced at DraftKings while a game is running. This board is always here, and it fills only while a game is in play and the in-play model finds an edge — so (0) is a real answer, not a board that failed. In-play models run on ${liveModelSportsSentence()} today. A game that started before midnight stays here until it ends, so a late game keeps yesterday’s date everywhere else in the app.\n\nA red dot on a sport, or on Live Signals, means a game is in play now.\n\nPicks lock the first time they’re scored each day (props at their first signal) and never change again after that — so a signal shown here won’t flip to AVOID later. Open a pick to see how the DK line has moved since it locked.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm. Live picks refresh every 30 seconds.`
             }
             accessibilityLabel="About the three boards"
           />

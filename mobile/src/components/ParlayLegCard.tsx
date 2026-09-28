@@ -8,6 +8,8 @@ import { modelShort } from '@/lib/modelMeta';
 import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { matchupForLeg, type ParlayLeg } from '@/lib/parlay';
+import { isPausedForDisplay } from '@/lib/thresholds';
+import { PausedTag } from '@/components/PausedTag';
 
 interface Props {
   leg: ParlayLeg;
@@ -35,6 +37,9 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           <View style={styles.modelChip}>
             <Text style={styles.modelChipText}>{modelShort(leg.modelId)}</Text>
           </View>
+          {/* A paused model's pick (isPausedForDisplay), next to the model it
+              is about. This card has no one label, so the tag speaks. */}
+          {leg.pick && isPausedForDisplay(leg.pick) ? <PausedTag speak /> : null}
           <View style={[styles.tag, leg.isFavorite ? styles.favTag : styles.dogTag]}>
             <Text style={[styles.tagText, leg.isFavorite ? styles.favText : styles.dogText]}>
               {leg.isFavorite ? 'FAV' : 'DOG'}

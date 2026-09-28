@@ -15,8 +15,10 @@ import type { Pick } from '@/types';
  * on offer at lock. Renders nothing for anything that is not a locked BET —
  * see pickTimingInfo.
  */
-export function PickTimingCard({ pick }: { pick: Pick }) {
-  const timing = pickTimingInfo(pick);
+export function PickTimingCard({ pick, paused = false }: { pick: Pick; paused?: boolean }) {
+  // `paused`: a paused model's pick (isPausedForDisplay) reads "Picked …" —
+  // it was never posted.
+  const timing = pickTimingInfo(pick, { paused });
   if (!timing) return null;
 
   return (

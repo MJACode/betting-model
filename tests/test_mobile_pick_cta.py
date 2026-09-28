@@ -94,7 +94,7 @@ eq(gameStartedLine(null, 'DK'), 'Game started', 'no price');
 eq(reasoningHeading('BET'), 'Why this bet?', 'BET');
 eq(reasoningHeading('NONE'), 'Why no bet?', 'NONE');
 eq(reasoningHeading('AVOID'), 'Why avoid?', 'AVOID');
-eq(reasoningHeading('BET', { paused: true }), 'Why this pick?', 'paused BET');
+eq(reasoningHeading('BET', { preview: true }), 'Why this pick?', 'preview BET');
 """
     proc = _run(tmp_path, ["format.ts", "pickCta.ts"], script)
     assert proc.returncode == 0, proc.stderr

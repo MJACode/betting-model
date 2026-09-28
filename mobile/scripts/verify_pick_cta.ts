@@ -306,7 +306,7 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
 check('BET → "Why this bet?"', reasoningHeading('BET') === 'Why this bet?');
 check('NONE → "Why no bet?"', reasoningHeading('NONE') === 'Why no bet?');
 check('AVOID → "Why avoid?"', reasoningHeading('AVOID') === 'Why avoid?');
-check('a paused or preview BET is not called a bet', reasoningHeading('BET', { paused: true }) === 'Why this pick?' && reasoningHeading('BET', { preview: true }) === 'Why this pick?');
+check('a preview BET is not called a bet', reasoningHeading('BET', { preview: true }) === 'Why this pick?');
 
 // ── wiring ──────────────────────────────────────────────────────────────────
 const card = read('src/components/PickCard.tsx');

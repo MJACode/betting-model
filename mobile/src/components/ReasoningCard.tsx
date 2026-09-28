@@ -11,7 +11,7 @@ import {
   formatUnits,
   MAX_RISK_UNITS,
   isUnlockedPreview,
-  passesActionFilter,
+  passesActionFilterIgnoringPause,
 } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -27,8 +27,10 @@ import { reasoningHeading } from '@/lib/pickCta';
 
 interface Props {
   pick: Pick;
-  /** Paused model, never posted (isPausedForDisplay): no stake row — the
-   *  model's number is shown, but nothing sizes it as a bet. */
+  /** Paused model, never posted (isPausedForDisplay). Everything shows as
+   *  usual (Matt, 2026-09-28) — only the stake line's last sentence changes:
+   *  the model publishes nothing while paused, so it is "the stake the model
+   *  would publish". */
   paused?: boolean;
 }
 
@@ -53,9 +55,11 @@ export function ReasoningCard({ pick, paused = false }: Props) {
 
   return (
     <View style={styles.card}>
-      {/* M14: "Why this bet?" only on a bet (lib/pickCta reasoningHeading). */}
+      {/* M14: "Why this bet?" only on a bet (lib/pickCta reasoningHeading).
+          A paused model's BET is still the model's bet, so it is not passed
+          as paused here: the header's tag and note say it isn't sent. */}
       <Text style={styles.heading}>
-        {reasoningHeading(pick.signal_type, { paused, preview: isUnlockedPreview(pick) })}
+        {reasoningHeading(pick.signal_type, { preview: isUnlockedPreview(pick) })}
       </Text>
 
       <Row
@@ -82,7 +86,7 @@ export function ReasoningCard({ pick, paused = false }: Props) {
         <Row
           label="Edge"
           value={formatPctSigned(edge)}
-          tint={passesActionFilter(pick) ? colors.betInk : pick.signal_type === 'AVOID' ? colors.avoidInk : undefined}
+          tint={passesActionFilterIgnoringPause(pick) ? colors.betInk : pick.signal_type === 'AVOID' ? colors.avoidInk : undefined}
           sub={`= model ${formatPct(pick.model_probability)} − ${book} ${formatPct(implied)}. Positive means we think the side is mispriced in our favor.`}
         />
       ) : (
@@ -93,7 +97,7 @@ export function ReasoningCard({ pick, paused = false }: Props) {
         />
       )}
 
-      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) && !paused ? (
+      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) ? (
         <Row
           label="Stake"
           value={
@@ -108,7 +112,10 @@ export function ReasoningCard({ pick, paused = false }: Props) {
             (stake.capped
               ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `
               : '') +
-            `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. The same stake the Discord channel and push publish; it is not sized to a bankroll.`
+            `Every BET is a 1u play — one unit to WIN, grossed up by the price into what you lay. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. ` +
+            (paused
+              ? 'This is the stake the model would publish; it is not sized to a bankroll.'
+              : 'The same stake the Discord channel and push publish; it is not sized to a bankroll.')
           }
         />
       ) : null}

@@ -58,12 +58,18 @@ export function useResolvedSlip() {
   const slip = useParlaySlip();
   const lineLegs = useLineLegs();
   const picks = useTodayPicks();
-  const { data, loading, error } = picks;
+  const { data, pausedData, loading, error } = picks;
   const livePicks = useLivePicksUnfocused({ pollMs: LIVE_IDLE_POLL_MS });
 
   // Pre-game first: a key can only ever match one of the two (a pick is in-play
   // or it is not), and resolveSlipLegs keeps the first leg per key regardless.
-  const board = useMemo(() => [...data, ...livePicks.data], [data, livePicks.data]);
+  // A paused model's pick resolves too (Matt, 2026-09-28): All offers Slip on
+  // it, and a board without `pausedData` read its key as gone and pruned it
+  // straight back out. Its leg carries the Paused tag (ParlayLegCard).
+  const board = useMemo(
+    () => [...data, ...pausedData, ...livePicks.data],
+    [data, pausedData, livePicks.data],
+  );
 
   const { legs: pickLegs, missingKeys } = useMemo(
     () => resolveSlipLegs(board, slip.keys),

@@ -60,14 +60,14 @@ export function useTodayPicks(date?: string) {
   const [data, setData] = useState<EnrichedPick[]>([]);
   // PAUSED models' rows, kept apart from `data` (Matt, 2026-09-26: "NFL is only
   // showing tackle bets. It should be all bets"). Eleven of twelve NFL prop
-  // models are paused, so hiding them left the NFL board a tackles board. Only
-  // the Picks screen's All segment reads this, and labels every card PAUSED.
-  // A paused pick Discord already POSTED stays in `data` (isPausedForDisplay):
-  // it is the bet of record, so it draws as one and the betslip can hold it;
-  // every other consumer of this hook (Signals, the sport badges, Models, the
-  // Stats pills, the betslip) still sees `data` alone, so the 2026-09-19 rule
-  // holds everywhere else. passesActionFilter already refuses a paused model,
-  // so none of these rows can be counted or drawn as a bet.
+  // models are paused, so hiding them left the NFL board a tackles board. Two
+  // readers: the Picks screen's All segment, which tags every card Paused, and
+  // the betslip (useResolvedSlip), so a paused pick added from All is not
+  // pruned as "gone" (2026-09-28). A paused pick Discord already POSTED stays
+  // in `data` (isPausedForDisplay): it is the bet of record. Every other
+  // consumer of this hook (Signals, the sport badges, Models, the Stats pills)
+  // still sees `data` alone, so the 2026-09-19 rule holds everywhere else, and
+  // the strict passesActionFilter refuses a paused model anyway.
   const [pausedData, setPausedData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
