@@ -13,6 +13,12 @@ The properties pinned here are the ones that would cost a real bet if broken:
   * a BET that lands clears the game's NONE row, never the other way round;
   * a NONE row never carries a fabricated price, and never sits beside a BET;
   * the pick monitor never flags a NONE row as a locked pick.
+
+Reviewer's post-merge findings on #838 add: a row the model FIRED on is never
+written as a NONE row; a NONE row left beside a BET is cleared; a flexed
+kickoff refreshes the row; and the scored writer and the BET writers share a
+per-model advisory lock so a BET cannot commit between the scored writer's
+read and its insert.
 """
 
 from __future__ import annotations
@@ -247,6 +253,18 @@ def run(monkeypatch, tmp_path):
     return _run
 
 
+def _none_row(pick_id=7, model_id="nfl_wind_totals", games=GAMES, **eval_kw):
+    """An existing NONE row exactly as publish_scored would read it back."""
+    (p,) = pub.build_scored_rows({(GAME, model_id): _eval(model_id, **eval_kw)},
+                                 games, 1000.0)
+    return (pick_id, GAME, model_id, "NONE") + tuple(p[k] for k in pub._SCORED_FIELDS)
+
+
+def _bet_row(pick_id=1, model_id="nfl_wind_totals", side="under"):
+    return (pick_id, GAME, model_id, "BET", "x", side, 0.57, 0.51, 0.06, -105,
+            42.5, None, "2026-09-27", "2026-09-27T17:00:00+00:00")
+
+
 class TestPublishScored:
     def test_writes_a_none_row_for_an_unstarted_game(self, run):
         conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))])
@@ -267,10 +285,12 @@ class TestPublishScored:
         assert not conn.writes("INSERT") and not conn.writes("UPDATE")
 
     def test_unchanged_row_is_not_rewritten(self, run):
-        (p,) = pub.build_scored_rows({(GAME, "nfl_wind_totals"): _eval()}, GAMES, 1000.0)
+        kick = _kick(24)
+        games = {GAME: {**GAMES[GAME], "commence_time": kick}}
+        (p,) = pub.build_scored_rows({(GAME, "nfl_wind_totals"): _eval()}, games, 1000.0)
         existing = (7, GAME, "nfl_wind_totals", "NONE") + tuple(
             p[k] for k in pub._SCORED_FIELDS)
-        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", kick)],
                      picks=[existing])
         assert run(conn, [_eval()]) == 0
         assert not conn.writes("UPDATE") and not conn.writes("INSERT")
@@ -285,6 +305,239 @@ class TestPublishScored:
         (upd,) = [(s, prm) for s, prm in conn.sql if s.startswith("UPDATE picks")]
         assert "signal_type = 'NONE' AND result IS NULL" in upd[0]
         assert upd[1]["pick_id"] == 7 and upd[1]["scored_line"] == 41.5
+
+
+# ── Reviewer, #838 post-merge ───────────────────────────────────────────────
+
+class TestQualifyingRowIsNotANoneRow:
+    """build_scored_rows never read `qualifies`: a game the model FIRED on,
+    before its BET row landed, got a "(no bet)" row carrying the firing edge."""
+
+    @pytest.mark.parametrize("model_id", ["nfl_wind_totals", "nfl_opener_spread"])
+    def test_fired_row_is_skipped(self, model_id):
+        r = _eval(model_id, qualifies="1", model_prob="0.5900", edge="0.0700",
+                  reason="wind 14 mph, edge +7.0pp")
+        assert pub.build_scored_rows({(GAME, model_id): r}, GAMES, 1000.0) == []
+
+    def test_non_qualifying_row_still_written(self):
+        (p,) = pub.build_scored_rows(
+            {(GAME, "nfl_wind_totals"): _eval(qualifies="0")}, GAMES, 1000.0)
+        assert p["signal_type"] == "NONE"
+
+    def test_fired_row_writes_nothing_to_the_db(self, run):
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))])
+        assert run(conn, [_eval(qualifies="1", model_prob="0.59", edge="0.07")]) == 0
+        assert not conn.writes("INSERT") and not conn.writes("UPDATE")
+
+
+class TestNoneRowBesideABetIsCleared:
+    def test_leftover_none_beside_a_bet_is_deleted_with_the_guard(self, run):
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                     picks=[_bet_row(), _none_row()])
+        assert run(conn, [_eval()]) == 0
+        (delete,) = [(q, prm) for q, prm in conn.sql if q.startswith("DELETE")]
+        assert "signal_type = 'NONE' AND result IS NULL" in delete[0]
+        assert delete[1] == (GAME, "nfl_wind_totals")
+        assert not conn.writes("INSERT") and not conn.writes("UPDATE")
+
+    def test_started_game_is_left_alone(self, run):
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(-1))],
+                     picks=[_bet_row(), _none_row()])
+        run(conn, [_eval()])
+        assert not conn.writes("DELETE")
+
+    def test_no_delete_when_there_is_no_none_row(self, run):
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                     picks=[_bet_row()])
+        run(conn, [_eval()])
+        assert not conn.writes("DELETE")
+
+
+class TestFlexedKickoffRefreshes:
+    def test_moved_kickoff_alone_refreshes_the_row(self, run):
+        # Same line, price and reason; only the kickoff moved (a flex).
+        old = _none_row()                              # GAMES: 2026-09-27 17:00Z
+        new_kick = _kick(48)
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-28", new_kick)],
+                     picks=[old])
+        assert run(conn, [_eval()]) == 1
+        (upd,) = [(q, prm) for q, prm in conn.sql if q.startswith("UPDATE picks")]
+        assert upd[1]["game_time"] == new_kick and upd[1]["game_date"] == "2026-09-28"
+        assert "game_date = %(game_date)s, game_time = %(game_time)s" in upd[0]
+
+    def test_scored_fields_cover_the_kickoff(self):
+        assert {"game_date", "game_time"} <= set(pub._SCORED_FIELDS)
+
+
+class TestPickEmLabel:
+    def test_none_row_pick_em_reads_pk(self):
+        r = _eval("nfl_opener_spread", current_line="0", current_price="-110")
+        (p,) = pub.build_scored_rows({(GAME, "nfl_opener_spread"): r}, GAMES, 1000.0)
+        assert p["pick_label"] == "CIN @ PIT — PIT PK (no bet, DK)"
+        assert "+0" not in p["pick_label"]
+        assert pick_problems(p["pick_label"], "home", 0.0, "nfl_opener_spread",
+                             home="PIT", away="CIN") == []
+
+    def test_bet_row_label_is_unchanged(self):
+        # The BET label keeps "+0": tracking/pick_integrity reads the FIRST
+        # signed number after the dash, and with "PK" that becomes the
+        # "(Opener -2.5 vs Pinnacle" deviation -- a false label mismatch on a
+        # real bet. Only the NONE row (no signed number after it) says PK.
+        _, (p,) = pub.build_opener_rows([{
+            "game_id": "2026_03_CIN_PIT", "matchup": "CIN @ PIT",
+            "kick_utc": "2026-09-27 17:00:00+00:00", "lead_days": "4.2",
+            "side": "away", "bet_team": "CIN", "book": "betmgm", "price": "-105",
+            "side_line": "0", "soft_home_line": "0", "pin_home_line": "2.5",
+            "dev": "-2.5", "model_prob": "0.5900", "market_prob": "0.5122",
+            "edge": "0.0778", "stake_pct": "2.0"}], 1000.0)
+        assert "— CIN +0 (Opener" in p["pick_label"]
+        assert pick_problems(p["pick_label"], "away", 0.0, "nfl_opener_spread",
+                             home="PIT", away="CIN") == []
+
+    @pytest.mark.parametrize("line,text", [(-3.0, "-3"), (6.5, "+6.5"), (0.0, "PK")])
+    def test_fmt_spread(self, line, text):
+        assert pub._fmt_spread(line) == text
+
+
+# ── the publish race (Reviewer, #838 post-merge) ────────────────────────────
+#
+# publish_scored read the BET set and inserted later. An opener BET that
+# committed in between made a home NONE insert hit uq_picks_one_row_per_pick
+# (rolling back the whole scored pass), and an away BET left a permanent NONE
+# row beside it. Both writers now take the same per-model
+# pg_advisory_xact_lock BEFORE they read. Simulated here: the lock call is the
+# moment the scored writer waits for the opener's transaction, so the fake
+# "commits" the opener BET exactly then.
+
+class _RaceConn(_Conn):
+    def __init__(self, games, picks, on_lock=None):
+        super().__init__(games, picks)
+        self.on_lock, self.lock_keys = on_lock, []
+
+    def execute(self, sql, params=None):
+        flat = " ".join(sql.split())
+        if "pg_advisory_xact_lock" in flat:
+            self.lock_keys.append(params[0])
+            if self.on_lock:
+                self.on_lock(self)
+                self.on_lock = None
+        return super().execute(sql, params)
+
+
+def _lock_index(conn):
+    return next(i for i, (q, _) in enumerate(conn.sql) if "pg_advisory_xact_lock" in q)
+
+
+class TestPublishRace:
+    def test_scored_takes_the_lock_before_reading_bets(self, run):
+        conn = _RaceConn([(GAME, "PIT", "CIN", "2026-09-27", _kick(24))], [])
+        run(conn, [_eval()])
+        read = next(i for i, (q, _) in enumerate(conn.sql)
+                    if q.startswith("SELECT pick_id, game_id, model_id, signal_type"))
+        assert _lock_index(conn) < read
+        assert conn.lock_keys == [pub._model_lock_key("nfl_wind_totals")]
+
+    def test_home_bet_committing_during_the_wait_blocks_the_none_insert(self, run):
+        # Without the lock this was the uq_picks_one_row_per_pick violation.
+        conn = _RaceConn([(GAME, "PIT", "CIN", "2026-09-27", _kick(24))], [],
+                         on_lock=lambda c: c.picks.append(
+                             _bet_row(model_id="nfl_opener_spread", side="home")))
+        r = _eval("nfl_opener_spread", current_line="-3.0", current_price="-108")
+        assert run(conn, [r]) == 0
+        assert not conn.writes("INSERT") and not conn.writes("UPDATE")
+
+    def test_away_bet_committing_during_the_wait_clears_the_none_row(self, run):
+        # Without the lock + cleanup this left a NONE row beside the BET.
+        none = _none_row(model_id="nfl_opener_spread", current_line="-3.0")
+        conn = _RaceConn([(GAME, "PIT", "CIN", "2026-09-27", _kick(24))], [none],
+                         on_lock=lambda c: c.picks.append(
+                             _bet_row(model_id="nfl_opener_spread", side="away")))
+        r = _eval("nfl_opener_spread", current_line="-3.0", current_price="-108")
+        run(conn, [r])
+        (delete,) = [(q, prm) for q, prm in conn.sql if q.startswith("DELETE")]
+        assert delete[1] == (GAME, "nfl_opener_spread")
+        assert not conn.writes("INSERT")
+
+    def test_both_models_locked_in_a_fixed_order(self, run):
+        conn = _RaceConn([(GAME, "PIT", "CIN", "2026-09-27", _kick(24))], [])
+        run(conn, [_eval("nfl_wind_totals"), _eval("nfl_opener_spread", current_line="-3")])
+        assert conn.lock_keys == [pub._model_lock_key(m) for m in
+                                  sorted(("nfl_wind_totals", "nfl_opener_spread"))]
+
+    def test_opener_writer_takes_the_same_key_before_its_lock_read(self, monkeypatch, tmp_path):
+        import data.db as db
+        conn = _LockConn()
+        monkeypatch.setattr(db, "get_connection", lambda: conn)
+        monkeypatch.setattr(pub, "CARDS_DIR", tmp_path)
+        monkeypatch.setattr(pub, "_flush_snapshots_safe", lambda d: None)
+        _write_card(tmp_path / "opener_card_2026-09-26.csv", {
+            "game_id": "2026_03_CIN_PIT", "matchup": "CIN @ PIT",
+            "kick_utc": "2026-09-27 17:00:00+00:00", "lead_days": "4.2",
+            "side": "home", "bet_team": "PIT", "book": "betmgm", "price": "-105",
+            "side_line": "-5.0", "soft_home_line": "-5.0", "pin_home_line": "-2.5",
+            "dev": "2.5", "model_prob": "0.5900", "market_prob": "0.5122",
+            "edge": "0.0778", "stake_pct": "2.0"})
+        pub.publish_opener("2026-09-26")
+        lock = _lock_index(conn)
+        read = next(i for i, (q, _) in enumerate(conn.sql) if q.startswith("SELECT 1 FROM picks"))
+        assert lock < read
+        assert conn.sql[lock][1] == (pub._model_lock_key("nfl_opener_spread"),)
+
+    def test_wind_writer_takes_the_same_key_before_its_lock_read(self, monkeypatch, tmp_path):
+        import data.db as db
+        conn = _LockConn()
+        monkeypatch.setattr(db, "get_connection", lambda: conn)
+        monkeypatch.setattr(pub, "CARDS_DIR", tmp_path)
+        monkeypatch.setattr(pub, "_flush_snapshots_safe", lambda d: None)
+        monkeypatch.setattr(pub, "_flush_board_safe", lambda d: None)
+        pub.publish("2026-09-26")                  # no card: still locks and reads
+        lock = _lock_index(conn)
+        read = next(i for i, (q, _) in enumerate(conn.sql)
+                    if q.startswith("SELECT DISTINCT game_id FROM picks"))
+        assert lock < read
+        assert conn.sql[lock][1] == (pub._model_lock_key("nfl_wind_totals"),)
+
+    def test_lock_key_is_stable_and_per_model(self):
+        a, b = (pub._model_lock_key(m) for m in ("nfl_wind_totals", "nfl_opener_spread"))
+        assert a != b and all(-(2 ** 31) <= k < 2 ** 31 for k in (a, b))
+        assert a == pub._model_lock_key("nfl_wind_totals")
+
+
+# ── the preflight's tightened lock checks (Reviewer, #838 post-merge) ───────
+
+class TestPreflightLockChecks:
+    @pytest.fixture
+    def pf(self):
+        from scripts import nfl_preflight
+        return nfl_preflight
+
+    def test_guarded_none_delete_is_allowed(self, pf):
+        src = '''conn.execute("""
+            DELETE FROM picks WHERE game_id = %s
+              AND signal_type = 'NONE' AND result IS NULL
+        """)'''
+        assert pf._unguarded_pick_deletes(src) == []
+
+    @pytest.mark.parametrize("where", [
+        "game_id = %s",                                      # anything
+        "game_id = %s AND signal_type = 'NONE'",             # settled NONE too
+        "game_id = %s AND result IS NULL",                   # an unsettled BET
+        "game_id = %s AND signal_type = 'BET' AND result IS NULL",
+    ])
+    def test_any_other_delete_fails(self, pf, where):
+        src = f'''conn.execute("""DELETE FROM picks WHERE {where}""")'''
+        assert pf._unguarded_pick_deletes(src)
+
+    def test_lock_section_passes_on_this_tree(self, pf):
+        pf.results.clear()
+        pf.check_lock_semantics()
+        fails = [r for r in pf.results if r[1] == pf.FAIL]
+        pf.results.clear()
+        assert fails == []
+
+    def test_helper_is_above_both_writers(self):
+        src = (ROOT / "scripts" / "nfl_wind_publisher.py").read_text(encoding="utf-8")
+        assert src.index("\ndef _clear_scored_row(") < src.index("\ndef publish(")
 
 
 # ── a NONE row never locks a game, and a BET clears it ──────────────────────

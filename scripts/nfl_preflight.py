@@ -96,8 +96,12 @@ def check_models() -> None:
         check(s, "lead calibration measured to day 7", MAX_CALIBRATED_LEAD == 7)
         check(s, "live probability floors at lead 1 (never the ERA5 truth row)",
               MIN_LIVE_LEAD == 1 and model_under_prob(0) == model_under_prob(1))
-        check(s, "uncalibrated lead sizes to ZERO",
-              stake_units(model_under_prob(8), -110, 8) == 0.0)
+        # Stale on master: stake_units stopped gating on lead (its docstring:
+        # "Beyond MAX_CALIBRATED_LEAD the stake CLIPS to the lead-7 row rather
+        # than returning zero"). Assert the documented behaviour.
+        s8, s7 = stake_units(model_under_prob(8), -110, 8), stake_units(model_under_prob(7), -110, 7)
+        check(s, "uncalibrated lead clips to the lead-7 stake",
+              s7 > 0 and abs(s8 - s7) < 1e-12, f"lead8={s8:.4f} lead7={s7:.4f}")
         check(s, "calibrated lead sizes above zero",
               stake_units(model_under_prob(3), -110, 3) > 0)
         check(s, "1 unit = 1% of bankroll", UNIT_PCT == 0.01)
@@ -126,17 +130,57 @@ def check_import_shadowing() -> None:
           f"found: {bare.group(0).strip()!r}" if bare else "")
 
 
+# Every `DELETE FROM picks` statement, up to the end of its SQL string.
+_PICK_DELETE = re.compile(r"DELETE\s+FROM\s+picks\b.*?(?:\"\"\"|\'\'\'|$)",
+                          re.IGNORECASE | re.DOTALL)
+
+
+def _unguarded_pick_deletes(src: str) -> list[str]:
+    """Pick deletes NOT limited to an unsettled NONE row.
+
+    The one delete the NFL publishers may issue is the landing BET clearing
+    the game's own dead-zone NONE row: signal_type = 'NONE' AND result IS
+    NULL (.claude/rules/picks-and-publishing.md, corollaries). Anything else
+    -- a BET, a settled row -- is the lock being broken.
+    """
+    bad = []
+    for m in _PICK_DELETE.finditer(src):
+        stmt = m.group(0)
+        if not (re.search(r"signal_type\s*=\s*'NONE'", stmt, re.IGNORECASE)
+                and re.search(r"\bresult\s+IS\s+NULL\b", stmt, re.IGNORECASE)):
+            bad.append(" ".join(stmt.split())[:80])
+    return bad
+
+
+def _writer_slice(pub: str, start: str, end: str | None) -> str:
+    """The source of one writer, from its `def` line to the next writer's.
+    Anchored to a line start so prose quoting `def publish(` cannot move it."""
+    a = re.search(rf"^def {start}\(", pub, re.MULTILINE).start()
+    b = re.search(rf"^def {end}\(", pub, re.MULTILINE).start() if end else len(pub)
+    return pub[a:b]
+
+
 def check_lock_semantics() -> None:
     s = "THE LOCK"
     pub = (ROOT / "scripts" / "nfl_wind_publisher.py").read_text(encoding="utf-8")
-    wind = pub[pub.index("def publish("):pub.index("def publish_opener(")]
-    opener = pub[pub.index("def publish_opener("):]
-    check(s, "wind never deletes unstarted picks",
-          "DELETE FROM PICKS" not in wind.upper())
+    wind = _writer_slice(pub, "publish", "publish_opener")
+    opener = _writer_slice(pub, "publish_opener", None)
+    # Tightened (Reviewer, #838 post-merge). The old checks only asked whether
+    # the literal text appeared inside each writer's slice, so a delete moved
+    # into a helper passed the wind check unseen. Now BOTH checks require that
+    # no pick delete anywhere in the publisher -- in a writer or in any helper
+    # it calls -- touches anything but an unsettled NONE row.
+    anywhere = _unguarded_pick_deletes(pub)
+    in_wind = _unguarded_pick_deletes(wind)
+    in_opener = _unguarded_pick_deletes(opener)
+    check(s, "wind never deletes unstarted picks (only an unsettled NONE row)",
+          not anywhere and not in_wind,
+          f"unguarded: {anywhere or in_wind}" if anywhere or in_wind else "")
     check(s, "wind skips already-locked games",
           "SELECT DISTINCT game_id FROM picks" in wind)
-    check(s, "opener insert-once lock intact",
-          "INSERT-ONCE LOCK" in opener and "DELETE FROM PICKS" not in opener.upper())
+    check(s, "opener insert-once lock intact (only an unsettled NONE row deleted)",
+          "INSERT-ONCE LOCK" in opener and not anywhere and not in_opener,
+          f"unguarded: {anywhere or in_opener}" if anywhere or in_opener else "")
 
     mon = (ROOT / "scripts" / "nfl_pick_monitor.py").read_text(encoding="utf-8")
     upd = mon[mon.index("UPDATE picks"):mon.index("WHERE pick_id = %s")]
@@ -168,8 +212,11 @@ def check_schedule() -> None:
     m = re.search(r"NFL_POLL_HORIZON_DAYS\s*=\s*([\d.]+)", sch)
     check(s, "horizon is 10 days", bool(m) and float(m.group(1)) == 10.0,
           f"{m.group(1) if m else '?'} days")
-    m2 = re.search(r"NFL_FAST_WINDOW_HOURS\s*=\s*([\d.]+)", sch)
-    check(s, "fast window is 3 hours", bool(m2) and float(m2.group(1)) == 3.0,
+    # Stale on master: #489 (2026-09-05) made the window env-driven with a
+    # 24 h default (`float(os.environ.get("NFL_FAST_WINDOW_HOURS", "24"))`).
+    m2 = re.search(r'NFL_FAST_WINDOW_HOURS\s*=\s*float\(os\.environ\.get\('
+                   r'"NFL_FAST_WINDOW_HOURS",\s*"([\d.]+)"\)\)', sch)
+    check(s, "fast window defaults to 24 hours", bool(m2) and float(m2.group(1)) == 24.0,
           f"{m2.group(1) if m2 else '?'} h")
     check(s, "old fixed wind-card slots removed",
           "nfl_wind_card_" not in sch and 'id="nfl_opener_card"' not in sch)
@@ -222,9 +269,12 @@ def check_config_gates() -> None:
     if m:
         opener = _load(NFL / "models" / "opener_spread.py", "pf_opener2")
         gate = float(m.group(1))
-        lo, hi = opener.model_prob_for_dev(1.0), opener.model_prob_for_dev(8.0)
-        check(s, "gate is a breakeven floor, not an edge filter",
-              gate <= 0.52 and lo > gate, f"min_prob {gate}, P(1pt) {lo:.4f}")
+        # Stale on master: config.py (mike, 2026-09-11) set min_prob 0.55 to
+        # MIRROR the |dev| >= 2.0 rule -- P(2pt) clears, P(1pt) does not.
+        lo, two = opener.model_prob_for_dev(1.0), opener.model_prob_for_dev(2.0)
+        check(s, "gate drops a 1-pt deviation and clears a 2-pt one",
+              lo < gate <= two,
+              f"min_prob {gate}, P(1pt) {lo:.4f}, P(2pt) {two:.4f}")
         check(s, "opener edge is NOT established", INFO,
               "ROI +1.34% [-3.9,+6.4] flat over 2020-2025; live by decision, "
               "Kelly-sized. Retire on a 2026 season at or below flat")

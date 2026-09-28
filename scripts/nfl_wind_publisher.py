@@ -583,6 +583,60 @@ def _flush_snapshots_safe(run_date: str | None) -> None:
         print(f"WARNING: line snapshot publish failed: {exc}", file=sys.stderr)
 
 
+def _clear_scored_row(conn, game_id: str, model_id: str) -> None:
+    """Drop the unsettled NONE row a BET is about to replace.
+
+    THE ONLY DELETE the NFL publishers are allowed, and it sits ABOVE the
+    two BET writers on purpose. scripts/nfl_preflight.py (THE LOCK) slices
+    this file per writer and requires every delete of a pick, here or in a
+    writer, to be guarded by signal_type = 'NONE' AND result IS NULL. With
+    the helper below the wind writer it landed inside the opener's slice and
+    failed the insert-once check (Reviewer, #838 post-merge).
+    """
+    conn.execute("""
+        DELETE FROM picks
+        WHERE game_id = %s AND model_id = %s
+          AND signal_type = 'NONE' AND result IS NULL
+    """, (game_id, model_id))
+
+
+# Namespace for the per-model publish lock. Any process writing NFL game-rule
+# rows for a model (the BET writers and publish_scored) takes the SAME key,
+# derived here and nowhere else, so a scored-rows pass and an opener/wind
+# publish for one model can never interleave their read-then-write.
+_PICKS_LOCK_NS = "nfl_game_rule_picks:"
+
+
+def _model_lock_key(model_id: str) -> int:
+    """Stable signed 32-bit key for `model_id` (crc32; not Python's hash())."""
+    import zlib
+    k = zlib.crc32((_PICKS_LOCK_NS + model_id).encode("utf-8")) & 0xFFFFFFFF
+    return k - (1 << 32) if k >= (1 << 31) else k
+
+
+def _lock_model(conn, model_id: str) -> None:
+    """Hold the model's publish lock until this transaction ends.
+
+    pg_advisory_xact_lock, not the session form: the worker talks to the
+    TRANSACTION pooler (data/db.get_connection), where only a
+    transaction-scoped lock is guaranteed to stay on one backend. It blocks
+    rather than skips -- both writers must run, just not interleaved.
+
+    The race it closes (Reviewer, #838 post-merge): publish_scored read the
+    BET set, an opener BET committed, then the scored writer inserted a NONE
+    row. A home BET made that insert hit uq_picks_one_row_per_pick and roll
+    back the whole scored pass; an away BET left a permanent NONE row beside
+    the BET.
+    """
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_model_lock_key(model_id),))
+
+
+def _fmt_spread(line: float) -> str:
+    """-3.0 -> '-3', 6.5 -> '+6.5', 0 -> 'PK' (the app's pick'em convention,
+    mobile/src/lib/teamDetail.ts; tracking/pick_integrity accepts it)."""
+    return "PK" if float(line) == 0 else f"{line:+g}"
+
+
 def publish(run_date: str | None = None) -> int:
     """
     Mirror the day's card into games + picks. Returns picks written.
@@ -637,6 +691,9 @@ def publish(run_date: str | None = None) -> int:
         # evaluated game (publish_scored), and a NONE row is the model saying
         # "not yet" -- it must never lock a game out of the bet that fires
         # later. The NONE row is cleared as the BET lands (_clear_scored_row).
+        # Serialise against publish_scored for this model before reading the
+        # lock set (see _lock_model).
+        _lock_model(conn, NFL_WIND_MODEL_ID)
         locked = {
             r[0] for r in conn.execute("""
                 SELECT DISTINCT game_id FROM picks
@@ -715,6 +772,8 @@ def publish_opener(run_date: str | None = None) -> int:
                     game_date     = EXCLUDED.game_date
             """, g)
 
+        # Serialise against publish_scored before the insert-once reads.
+        _lock_model(conn, NFL_OPENER_MODEL_ID)
         for p in pick_rows:
             # BET rows only: a NONE row (publish_scored) is not a lock.
             existing = conn.execute("""
@@ -781,15 +840,6 @@ def publish_opener(run_date: str | None = None) -> int:
 SCORED_MODEL_IDS = (NFL_WIND_MODEL_ID, NFL_OPENER_MODEL_ID)
 
 
-def _clear_scored_row(conn, game_id: str, model_id: str) -> None:
-    """Drop the unsettled NONE row a BET is about to replace."""
-    conn.execute("""
-        DELETE FROM picks
-        WHERE game_id = %s AND model_id = %s
-          AND signal_type = 'NONE' AND result IS NULL
-    """, (game_id, model_id))
-
-
 def _american_to_prob(px: float) -> float:
     return 100.0 / (px + 100.0) if px > 0 else -px / (-px + 100.0)
 
@@ -817,6 +867,12 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
     """
     out: list[dict] = []
     for (game_id, model_id), r in sorted(latest.items()):
+        # The model FIRED on this tick. Its BET row is the publisher's to
+        # write (publish / publish_opener); a "(no bet)" row carrying the
+        # firing edge would be a bet dressed as a pass. Write nothing and
+        # let the BET land (Reviewer, #838 post-merge).
+        if str(r.get("qualifies") or "").strip() == "1":
+            continue
         g = games.get(game_id)
         line, price = _num(r.get("current_line")), _num(r.get("current_price"))
         if g is None or line is None or price is None or price == 0:
@@ -839,7 +895,7 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
                 model_prob, implied, edge = market, market, 0.0
         else:
             side = "home"
-            label = f"{away} @ {home} — {home} {line:+g} (no bet, {tag})"
+            label = f"{away} @ {home} — {home} {_fmt_spread(line)} (no bet, {tag})"
             model_prob, implied, edge = market, market, 0.0
         out.append({
             "game_id": game_id,
@@ -863,9 +919,11 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
     return out
 
 
+# game_date / game_time are compared too: a flexed kickoff changes nothing
+# else on the row, and must still be refreshed (Reviewer, #838 post-merge).
 _SCORED_FIELDS = ("pick_label", "pick_side", "model_probability",
                   "dk_implied_prob", "edge", "dk_odds", "scored_line",
-                  "downgrade_reason")
+                  "downgrade_reason", "game_date", "game_time")
 
 
 def _changed(existing: dict, new: dict) -> bool:
@@ -924,12 +982,18 @@ def publish_scored(run_date: str | None = None) -> int:
             games[gid] = {"home_team": home, "away_team": away,
                           "game_date": gdate, "commence_time": kick}
 
+        # Same per-model lock the BET writers take, in a fixed order (no
+        # deadlock), BEFORE the BET set is read: an opener/wind BET can no
+        # longer commit between that read and the NONE insert below.
+        for mid in sorted({m for _, m in latest}):
+            _lock_model(conn, mid)
+
         existing: dict[tuple[str, str], dict] = {}
         bet: set[tuple[str, str]] = set()
         for row in conn.execute("""
             SELECT pick_id, game_id, model_id, signal_type, pick_label, pick_side,
                    model_probability, dk_implied_prob, edge, dk_odds,
-                   scored_line, downgrade_reason
+                   scored_line, downgrade_reason, game_date::text, game_time
             FROM picks
             WHERE model_id = ANY(%s) AND game_id = ANY(%s)
         """, (list(SCORED_MODEL_IDS), ids)).fetchall():
@@ -940,6 +1004,16 @@ def publish_scored(run_date: str | None = None) -> int:
                 existing[key] = dict(zip(
                     ("pick_id", "game_id", "model_id", "signal_type") + _SCORED_FIELDS,
                     row))
+
+        # A NONE row left beside a BET (the pre-lock race, or any older
+        # leftover) is cleared here: the pick of record stands alone. Same
+        # delete, same guard, as a landing BET uses -- and unstarted games
+        # only (`games` holds no started game), like every write here.
+        cleared = 0
+        for key in sorted(bet):
+            if key in existing and key[0] in games:
+                _clear_scored_row(conn, *key)
+                cleared += 1
 
         for p in build_scored_rows(latest, games, config.BANKROLL):
             key = (p["game_id"], p["model_id"])
@@ -982,7 +1056,8 @@ def publish_scored(run_date: str | None = None) -> int:
         conn.close()
 
     print(f"NFL scored rows {run_date}: {inserted} NONE row(s) written, "
-          f"{updated} refreshed, {len(latest)} (game, model) evaluated")
+          f"{updated} refreshed, {cleared} cleared beside a BET, "
+          f"{len(latest)} (game, model) evaluated")
     return inserted + updated
 
 
