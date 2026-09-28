@@ -50,10 +50,46 @@ export function targetSize(
  * ONLY where the strip it reaches into is whitespace or non-interactive (Track
  * Record: the subtitle above, its own bottom margin below). A negative margin
  * over a neighbouring control is worse than no slop: the later sibling wins
- * the overlap, so taps there land on an empty ScrollView and do nothing. That
- * is why SportToggle and the Picks sub-tabs don't use it (PR 4 report).
+ * the overlap, so taps there land on an empty ScrollView and do nothing. Rows
+ * with a neighbouring control use reachFrame, which splits the shared gap.
  */
 export const ROW_SLOP_PAD = 11;
+
+export type ReachFrame = {
+  /** The ScrollView's own style: pulled back so nothing around it moves. */
+  frame: { marginTop: number; marginBottom: number; zIndex?: number };
+  /** Its contentContainerStyle padding: the room its chips' hitSlop may use. */
+  content: { paddingTop: number; paddingBottom: number };
+};
+
+/**
+ * H9 for a horizontal ScrollView row with neighbours: grow its touchable
+ * bounds by `above` / `below` points with no visual change (pad the content,
+ * pull the frame back by the same). `marginTop` is the frame's margin before
+ * the reach, so a row can take whitespace that used to be its own margin.
+ *
+ * - `above` may cover only whitespace or non-interactive content drawn
+ *   earlier: the row is the later sibling, so it is hit-tested first there.
+ * - `below` covers a LATER sibling, which would otherwise win the overlap, so
+ *   pass `raise` (zIndex 1: hit-tested first on iOS and Android). Give it only
+ *   whitespace, or HALF of a gap shared with the next row's chips, so the two
+ *   targets tile instead of stealing from each other. Not needed when `below`
+ *   only covers the parent's own padding.
+ */
+export function reachFrame(
+  above: number,
+  below: number = 0,
+  opts: { raise?: boolean; marginTop?: number } = {},
+): ReachFrame {
+  return {
+    frame: {
+      marginTop: (opts.marginTop ?? 0) - above,
+      marginBottom: -below,
+      ...(opts.raise ? { zIndex: 1 } : {}),
+    },
+    content: { paddingTop: above, paddingBottom: below },
+  };
+}
 
 /** "Page 2 of 4" — onboarding dots and any other pager (M19). */
 export function pageLabel(index: number, total: number): string {
@@ -124,6 +160,20 @@ export function unknownCountSpeech(text: string): string {
       return m ? `${m[1]} count not available` : part;
     }),
   );
+}
+
+/**
+ * M25: why the disabled "Add bet" (ManualBetModal) can't be pressed, as its
+ * accessibilityHint — "Enter a stake above zero to add this bet." It names
+ * only what is still missing; undefined once the bet can be added.
+ */
+export function addBetHint(o: { bet: string; stake: string }): string | undefined {
+  const stake = parseFloat(o.stake);
+  const missing = [
+    o.bet.trim().length > 0 ? null : 'the bet',
+    Number.isFinite(stake) && stake > 0 ? null : 'a stake above zero',
+  ].filter((m): m is string => m != null);
+  return missing.length === 0 ? undefined : `Enter ${missing.join(' and ')} to add this bet.`;
 }
 
 /** "1.2u → 1.0u" is read as "1.2 u arrow"; this says "stake 1.2 units to win 1.0 units". */

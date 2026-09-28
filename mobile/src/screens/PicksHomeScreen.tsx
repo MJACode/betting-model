@@ -122,7 +122,18 @@ import {
   formatUnits,
 } from '@/lib/thresholds';
 import { formatCurrency, formatPct, gameStatus, todayET } from '@/lib/format';
-import { unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
+import { reachFrame, unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
+
+/**
+ * H9 geometry of the sub-tab row. Above: the 12pt between the sport chips and
+ * these is split 6/6 (SportToggle reachBelow={4} takes 2 + 4; this row keeps
+ * its wrap's 2pt padding + the 4pt of margin the toggle doesn't cover). Below:
+ * 6pt of the header's 12pt bottom padding plus the wrap's 2pt. ~32pt segments
+ * reach 6 + 32 + 8 = 46pt.
+ */
+const SUBTAB_REACH_ABOVE = 6;
+const SUBTAB_REACH_BELOW = 6;
+const subTabsReach = reachFrame(0, SUBTAB_REACH_BELOW);
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
@@ -607,6 +618,11 @@ export function PicksHomeScreen() {
           available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
           signalCounts={sportSignalCounts}
           liveSports={liveSports}
+          // H9, 45pt with no visual change: 6pt over the subtitle line above
+          // (text, not a control) and half of the 12pt gap to the sub-tab chips
+          // below — they take the other half (SUBTAB_REACH_ABOVE).
+          reachAbove={6}
+          reachBelow={4}
         />
         {/* Horizontal scroller, the same one SportToggle uses. Three segments
             with counts and a dot fit comfortably at default text size, but only
@@ -625,7 +641,10 @@ export function PicksHomeScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.subTabsScroll}
+          // Down into the header's own bottom padding (no sibling there), so
+          // the sub-tabs' slop below is in bounds (H9).
+          style={subTabsReach.frame}
+          contentContainerStyle={[styles.subTabsScroll, subTabsReach.content]}
         >
           <View style={styles.subTabs} accessibilityRole="tablist">
             <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => setView('today')} onLayout={onSegmentLayout('today')} />
@@ -998,10 +1017,11 @@ function SubTabBtn({
     <Pressable
       onPress={onPress}
       onLayout={onLayout}
-      // Only the in-bounds part of this slop lands (a horizontal ScrollView
-      // takes no touches outside itself): 10 above, 2 below → ~41pt. The rest
-      // is a layout call — see the PR 4 report (audit H9/M8).
-      hitSlop={{ top: 8, bottom: 8 }}
+      // Only the in-bounds part of slop lands (a horizontal ScrollView takes
+      // no touches outside itself), so this is exactly the room inside the
+      // row: 6 above (its half of the gap to the sport chips) and 2 + 6 below
+      // (subTabsReach) → ~46pt (audit H9/M8).
+      hitSlop={{ top: SUBTAB_REACH_ABOVE, bottom: 2 + SUBTAB_REACH_BELOW }}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
       accessibilityLabel={count == null ? `${label}, count not available` : `${label}, ${count} ${noun}`}

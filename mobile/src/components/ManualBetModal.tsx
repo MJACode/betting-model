@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { addBetHint } from '@/lib/a11y';
 import type { ManualBetInput } from '@/hooks/useManualBets';
 
 /** Add-a-bet form for the manual fallback (sync gaps / unsupported books). */
@@ -38,14 +39,11 @@ export function ManualBetModal({
   const oddsNum = odds.trim() === '' ? null : parseInt(odds, 10);
   const valid = desc.trim().length > 0 && Number.isFinite(stakeNum) && stakeNum > 0;
 
-  // Why "Add bet" is greyed out, for VoiceOver (audit M25). The visible
-  // button gave no reason; an inline sighted hint would be a layout change and
-  // is left to Designer.
-  const missing = [
-    desc.trim().length > 0 ? null : 'the bet',
-    Number.isFinite(stakeNum) && stakeNum > 0 ? null : 'a stake above zero',
-  ].filter((m): m is string => m != null);
-  const addHint = valid ? undefined : `Enter ${missing.join(' and ')} to add this bet.`;
+  // Why "Add bet" is greyed out, for VoiceOver (audit M25): the hint names
+  // what is still missing, and accessibilityState says it is disabled. Only a
+  // visible restyle of the disabled state / an inline sighted hint is left to
+  // PR 5 — it would add a row.
+  const addHint = valid ? undefined : addBetHint({ bet: desc, stake });
 
   const submit = () => {
     if (!valid) return;

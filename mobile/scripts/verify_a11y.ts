@@ -65,7 +65,7 @@ const ALLOWLIST: { file: string; snippet: RegExp; rule: 'label' | 'size'; reason
     snippet: /accessibilityLabel=\{spokenDate\(date\)\}/,
     rule: 'size',
     reason:
-      'Calendar day: 32pt circle in a 36pt row, 2pt slop. Any more slop steals the neighbouring week’s taps; 44pt needs a taller grid, which is a visible layout change — flagged for Designer.',
+      'Calendar day: 44pt wide (6pt slop) but 36pt tall. 36pt is the row pitch (32pt circle + 2 + 2), so the 2pt vertical slop already tiles the weeks and more would steal the neighbouring week’s taps; 44pt tall needs a taller grid, a visible layout change — Designer (H9).',
   },
 ];
 
@@ -123,6 +123,7 @@ function styleBlock(src: string, name: string): string {
 const a11ySrc = read('src/lib/a11y.ts');
 const ROW_SLOP_PAD = Number(/export const ROW_SLOP_PAD = (\d+);/.exec(a11ySrc)?.[1] ?? NaN);
 const SPACING: Record<string, number> = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
+const MIN_TAP_V = 44;
 function num(v: string): number | null {
   const t = v.trim();
   if (/^\d+(\.\d+)?$/.test(t)) return Number(t);
@@ -311,19 +312,77 @@ check('BetslipBarSpacer: height = useBetslipBarInset(), nothing while the bar is
 console.log('\nH9 / M8 / L13 — tabs');
 const toggle = read('src/components/SportToggle.tsx');
 check('SportToggle: tablist container, tab items with selected', /accessibilityRole="tablist"/.test(toggle) && /accessibilityRole="tab"/.test(toggle) && /accessibilityState=\{\{ selected: active \}\}/.test(toggle) && !/accessibilityRole="button"/.test(toggle));
-check('SportToggle: slop is the in-bounds room (10 above, 2 below), no negative-margin frame that would overlap the row below',
-  /const TOGGLE_ROOM_ABOVE = spacing\.sm \+ 2;/.test(toggle) && /hitSlop=\{\{ top: TOGGLE_ROOM_ABOVE, bottom: 2, left: 2, right: 2 \}\}/.test(toggle) && !/marginVertical: -/.test(toggle));
+check('SportToggle: slop = the in-bounds room + the reach the screen grants; chips abut, so only the ends take side slop',
+  /const TOGGLE_ROOM_ABOVE = spacing\.sm \+ 2;/.test(toggle) &&
+    /top: TOGGLE_ROOM_ABOVE \+ reachAbove,\s*bottom: 2 \+ reachBelow,\s*left: i === 0 \? 2 : 0,\s*right: i === SPORTS\.length - 1 \? 2 : 0,/.test(toggle) &&
+    /const reach = reachFrame\(reachAbove, reachBelow, \{ raise: reachBelow > 0, marginTop \}\);/.test(toggle) &&
+    /style=\{reach\.frame\}/.test(toggle) && /contentContainerStyle=\{\[styles\.scroll, reach\.content\]\}/.test(toggle));
 const record = read('src/screens/TrackRecordScreen.tsx');
 check('TrackRecord sport tabs: tablist + tab + selected + label', /accessibilityRole="tablist"/.test(record) && /accessibilityRole="tab"/.test(record) && /accessibilityState=\{\{ selected: active \}\}/.test(record) && /accessibilityLabel=\{s === 'All' \? 'All sports' : s\}/.test(record));
 check('TrackRecord sport tabs: ROW_SLOP_PAD slop inside a framed horizontal ScrollView (L13: one row, no wrap)',
   /hitSlop=\{\{ top: ROW_SLOP_PAD, bottom: ROW_SLOP_PAD/.test(record) && /marginTop: -ROW_SLOP_PAD/.test(record) && /paddingVertical: ROW_SLOP_PAD/.test(record) && !/sportTabs: \{[^}]*flexWrap/.test(record));
 const home = read('src/screens/PicksHomeScreen.tsx');
-check('PicksHome sub-tabs: tablist + tab + selected', /<View style=\{styles\.subTabs\} accessibilityRole="tablist">/.test(home) && /hitSlop=\{\{ top: 8, bottom: 8 \}\}\s*accessibilityRole="tab"\s*accessibilityState=\{\{ selected: active \}\}/.test(home));
-check('PicksHome sub-tabs: no negative-margin frame (it overlapped the sport chips above)', !/subTabsFrame/.test(home));
+check('PicksHome sub-tabs: tablist + tab + selected', /<View style=\{styles\.subTabs\} accessibilityRole="tablist">/.test(home) && /hitSlop=\{\{ top: SUBTAB_REACH_ABOVE, bottom: 2 \+ SUBTAB_REACH_BELOW \}\}\s*accessibilityRole="tab"\s*accessibilityState=\{\{ selected: active \}\}/.test(home));
 const models = read('src/screens/ModelsScreen.tsx');
 check('Models segment: tablist + tab + 9pt slop on a ~27pt pill', /<View style=\{styles\.segmentRow\} accessibilityRole="tablist">/.test(models) && /hitSlop=\{\{ top: 9, bottom: 9/.test(models) && /accessibilityRole="tab"/.test(models));
 const groupTabs = read('src/components/GroupTabs.tsx');
 check('GroupTabs: tablist + tab + label', /accessibilityRole="tablist"/.test(groupTabs) && /accessibilityRole="tab"/.test(groupTabs) && /accessibilityLabel=\{item\}/.test(groupTabs));
+
+console.log('\nH9 — effective target height of the chip rows (visual + in-bounds slop)');
+// A horizontal ScrollView takes no touches outside itself, so a chip's
+// effective height is its visual height plus only the slop inside the row's
+// bounds: its own padding/margin plus what reachFrame lets the frame take.
+// Visual heights at default text size: a 13pt line is ~15.5pt.
+const LINE13 = 15.5;
+const intOf = (src: string, re: RegExp) => Number(re.exec(src)?.[1] ?? NaN);
+const TOGGLE_H = intOf(toggle, /export const TOGGLE_CHIP_H = (\d+);/);
+const TOGGLE_IN = { above: 10, below: 2 }; // wrap marginTop 8 + padding 2; padding 2
+function toggleUse(src: string, marker: RegExp): { above: number; below: number } | null {
+  const at = src.search(marker);
+  if (at < 0) return null;
+  const tag = openTag(src, at);
+  return { above: Number(/reachAbove=\{(\d+)\}/.exec(tag)?.[1] ?? 0), below: Number(/reachBelow=\{(\d+)\}/.exec(tag)?.[1] ?? 0) };
+}
+const picksToggle = toggleUse(home, /<SportToggle\b/);
+const modelsSrc = read('src/screens/ModelsScreen.tsx');
+const modelsToggle = toggleUse(modelsSrc, /<SportToggle\b/);
+const toggleEff = (u: { above: number; below: number } | null) => (u ? TOGGLE_H + TOGGLE_IN.above + u.above + TOGGLE_IN.below + u.below : NaN);
+check(`SportToggle on Picks: ${toggleEff(picksToggle)}pt (reach ${picksToggle?.above} over the subtitle text, ${picksToggle?.below} into the gap)`, toggleEff(picksToggle) >= MIN_TAP_V);
+check(`SportToggle on Models: ${toggleEff(modelsToggle)}pt (reach ${modelsToggle?.above} of its own 12pt margin)`,
+  toggleEff(modelsToggle) >= MIN_TAP_V && /<SportToggle marginTop=\{spacing\.md\} reachAbove=\{(\d+)\} \/>/.test(modelsSrc) && (modelsToggle?.above ?? 99) <= 12);
+// Picks: the 12pt between the sport chips and the sub-tabs is shared.
+const subAbove = intOf(home, /const SUBTAB_REACH_ABOVE = (\d+);/);
+const subBelow = intOf(home, /const SUBTAB_REACH_BELOW = (\d+);/);
+const subH = 2 * SPACING.sm + LINE13;
+check(`Picks: sport chips and sub-tabs tile the 12pt gap (${TOGGLE_IN.below + (picksToggle?.below ?? 0)} + ${subAbove})`,
+  TOGGLE_IN.below + (picksToggle?.below ?? 0) + subAbove === 2 + SPACING.sm + 2 && /reachFrame\(reachAbove, reachBelow, \{ raise: reachBelow > 0/.test(toggle));
+check(`Picks sub-tabs: ${subAbove} + ${subH} + ${2 + subBelow} = ${subAbove + subH + 2 + subBelow}pt (below reaches ${subBelow} of the header's 12pt padding)`,
+  subAbove + subH + 2 + subBelow >= MIN_TAP_V && subBelow <= 12 && /const subTabsReach = reachFrame\(0, SUBTAB_REACH_BELOW\);/.test(home) && /style=\{subTabsReach\.frame\}/.test(home));
+// PlayerStats: two chip rows sharing an 8pt gap (4 each).
+const ps = read('src/screens/PlayerStatsScreen.tsx');
+const chipH = 2 * 7 + LINE13 + 2; // paddingVertical 7, 1pt border
+const rangeBelow = intOf(ps, /const rangeReachBelow = error \? 0 : (\d+);/);
+check(`PlayerStats range chips: 4 + ${chipH} + ${4 + rangeBelow} = ${4 + chipH + 4 + rangeBelow}pt (raised over the next sibling; 0 over the ErrorBanner)`,
+  4 + chipH + 4 + rangeBelow >= MIN_TAP_V && /hitSlop=\{\{ top: 4, bottom: 4 \+ rangeReachBelow, left: 2, right: 2 \}\}/.test(ps) && /reachFrame\(0, rangeReachBelow, \{ raise: rangeReachBelow > 0 \}\)/.test(ps));
+const statAbove = intOf(ps, /const statReachAbove = [^?]+\? (\d+) : 0;/);
+check(`PlayerStats stat chips under the group header: ${statAbove + 4} + ${chipH} + 4 = ${statAbove + 4 + chipH + 4}pt`,
+  statAbove + 4 + chipH + 4 >= MIN_TAP_V && /hitSlop=\{\{ top: 4 \+ statReachAbove, bottom: 4, left: 2, right: 2 \}\}/.test(ps));
+// Known short, each with the reason (reported on the PR). A NEW short case
+// fails: every <SportToggle> must be on Picks / Models (reached) or listed here.
+const H9_SHORT: { where: string; eff: number; reason: string }[] = [
+  { where: 'src/screens/StatsScreen.tsx', eff: TOGGLE_H + TOGGLE_IN.above + TOGGLE_IN.below,
+    reason: 'Stats header: 39.5pt from the sportsbook line to the next control (Players/Teams bar or the stat group pill), both interactive (with no player board, the Settings button’s slop sits above instead); the chips (23pt) cannot reach 44 without covering one of them — needs ~5pt more header, a visible change (Designer).' },
+  { where: 'src/screens/PlayerStatsScreen.tsx#stat-under-tabs', eff: 4 + chipH + 4,
+    reason: 'PlayerStats stat chips under the group tabs: flush against the tab bar above, 8pt gap shared 4/4 with the range chips below — no whitespace left (Designer).' },
+  { where: 'src/components/CalendarGrid.tsx', eff: 36,
+    reason: 'Calendar day: 36pt is the row pitch; 44pt wide, 36 tall (see the size allowlist).' },
+];
+const statsUses = (read('src/screens/StatsScreen.tsx').match(/<SportToggle\b[^>]*\/>/g) ?? []);
+check(`every <SportToggle> is reached (Picks, Models) or listed short (${statsUses.length} on Stats, all plain)`,
+  statsUses.length > 0 && statsUses.every((t) => t === '<SportToggle />') &&
+    files.every((f) => { const r = relative(ROOT, f); const n = (readFileSync(f, 'utf-8').match(/<SportToggle\b/g) ?? []).length; return n === 0 || ['src/screens/PicksHomeScreen.tsx', 'src/screens/ModelsScreen.tsx', 'src/screens/StatsScreen.tsx'].includes(r); }));
+check('every H9 short entry carries a reason and is really short', H9_SHORT.every((x) => x.reason.length > 40 && x.eff < MIN_TAP_V));
+for (const x of H9_SHORT) console.log(`  (short: ${x.where} ≈ ${x.eff}pt — ${x.reason})`);
 
 console.log('\nM8 / M5 / M22 — spoken card');
 const card = read('src/components/PickCard.tsx');
@@ -352,7 +411,9 @@ check('M18: InfoTooltip icon slop 12 (20 + 24 = 44)', /hitSlop=\{12\}\s*accessib
 const onboarding = read('src/components/OnboardingModal.tsx');
 check('M19: Skip and Next have roles; dots read "Page N of 4"', /accessibilityLabel="Skip intro"/.test(onboarding) && /accessibilityLabel=\{pageLabel\(step, SLIDES\.length\)\}/.test(onboarding) && /accessibilityLabel=\{last \? 'Get started'/.test(onboarding));
 const manual = read('src/components/ManualBetModal.tsx');
-check('M25: disabled "Add bet" explains why (accessibilityHint)', /accessibilityHint=\{addHint\}/.test(manual) && /`Enter \$\{missing\.join\(' and '\)\} to add this bet\.`/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual));
+check('M25: disabled "Add bet" says why (accessibilityHint = addBetHint) and exposes disabled',
+  /const addHint = valid \? undefined : addBetHint\(\{ bet: desc, stake \}\);/.test(manual) && /accessibilityHint=\{addHint\}/.test(manual) && /accessibilityState=\{\{ disabled: !valid \}\}/.test(manual) && /disabled=\{!valid\}/.test(manual));
+check('M25: all four inputs are labelled', ['"Bet"', '"Sportsbook, optional"', '"Stake in dollars"', '"Odds, American"'].every((l) => manual.includes(`accessibilityLabel=${l}`)));
 const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
@@ -383,6 +444,11 @@ async function behaviour() {
   check('sharpScoreSpeech(78, "high")', a.sharpScoreSpeech(78, 'high') === 'Sharp score 78 of 100, high');
   check('pageLabel(1, 4) → "Page 2 of 4"', a.pageLabel(1, 4) === 'Page 2 of 4');
   check('spokenDate("2026-09-28") → "September 28, 2026"', a.spokenDate('2026-09-28') === 'September 28, 2026');
+  check('addBetHint names only what is missing (M25)',
+    a.addBetHint({ bet: '', stake: '' }) === 'Enter the bet and a stake above zero to add this bet.' &&
+      a.addBetHint({ bet: 'Yankees ML', stake: '0' }) === 'Enter a stake above zero to add this bet.' &&
+      a.addBetHint({ bet: ' ', stake: '50' }) === 'Enter the bet to add this bet.' &&
+      a.addBetHint({ bet: 'Yankees ML', stake: '50' }) === undefined);
   check('joinLabel drops empties', a.joinLabel(['MLB', null, '', false, '2 signals']) === 'MLB, 2 signals');
   check('unknownCountSpeech("Sep 28 · — bets · — scored") → "… bets count not available, …"',
     a.unknownCountSpeech('Sep 28 · — bets · — scored') === 'Sep 28, bets count not available, scored count not available', a.unknownCountSpeech('Sep 28 · — bets · — scored'));

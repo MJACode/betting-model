@@ -157,7 +157,47 @@ def test_audited_targets():
     assert "hitSlop={12}" in _read(SRC / "components" / "InfoTooltip.tsx")
     manual = _read(SRC / "components" / "ManualBetModal.tsx")
     assert "accessibilityHint={addHint}" in manual
+    assert "addBetHint({ bet: desc, stake })" in manual
+    assert "accessibilityState={{ disabled: !valid }}" in manual
+    for label in ['"Bet"', '"Sportsbook, optional"', '"Stake in dollars"', '"Odds, American"']:
+        assert f"accessibilityLabel={label}" in manual, label
     assert "hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}" in _read(SRC / "components" / "filters" / "FilterChip.tsx")
+
+
+def test_h9_rows_reach_44pt_inside_their_bounds():
+    """H9: slop only lands inside a horizontal ScrollView, so the rows grow
+    their bounds (reachFrame) instead; adjacent rows split the shared gap."""
+    toggle = _read(SRC / "components" / "SportToggle.tsx")
+    assert "top: TOGGLE_ROOM_ABOVE + reachAbove," in toggle and "bottom: 2 + reachBelow," in toggle
+    assert "reachFrame(reachAbove, reachBelow, { raise: reachBelow > 0, marginTop })" in toggle
+    chip = int(re.search(r"export const TOGGLE_CHIP_H = (\d+);", toggle).group(1))
+    home = _read(SRC / "screens" / "PicksHomeScreen.tsx")
+    above = int(re.search(r"reachAbove=\{(\d+)\}", home).group(1))
+    below = int(re.search(r"reachBelow=\{(\d+)\}", home).group(1))
+    assert chip + 10 + above + 2 + below >= 44
+    sub_above = int(re.search(r"const SUBTAB_REACH_ABOVE = (\d+);", home).group(1))
+    assert 2 + below + sub_above == 12, "the 12pt gap is split so the rows tile"
+    models = _read(SRC / "screens" / "ModelsScreen.tsx")
+    m = re.search(r"<SportToggle marginTop=\{spacing\.md\} reachAbove=\{(\d+)\} />", models)
+    assert m and int(m.group(1)) <= 12 and chip + 10 + int(m.group(1)) + 2 >= 44
+    ps = _read(SRC / "screens" / "PlayerStatsScreen.tsx")
+    assert "const rangeReachBelow = error ? 0 : 6;" in ps
+    assert "hitSlop={{ top: 4, bottom: 4 + rangeReachBelow, left: 2, right: 2 }}" in ps
+    assert "hitSlop={{ top: 2, bottom: 2, left: 6, right: 6 }}" in _read(SRC / "components" / "CalendarGrid.tsx")
+
+
+@needs_node
+def test_reach_frame_and_add_bet_hint(tmp_path):
+    script = PRELUDE + """
+import { reachFrame, addBetHint } from './a11y.ts';
+eq(reachFrame(6, 4, { raise: true }), { frame: { marginTop: -6, marginBottom: -4, zIndex: 1 }, content: { paddingTop: 6, paddingBottom: 4 } }, 'raised');
+eq(reachFrame(10, 0, { marginTop: 12 }), { frame: { marginTop: 2, marginBottom: -0 }, content: { paddingTop: 10, paddingBottom: 0 } }, 'own margin');
+eq(addBetHint({ bet: 'Yankees ML', stake: '' }), 'Enter a stake above zero to add this bet.', 'M25 stake');
+eq(addBetHint({ bet: '', stake: '0' }), 'Enter the bet and a stake above zero to add this bet.', 'M25 both');
+eq(addBetHint({ bet: 'x', stake: '5' }), undefined, 'M25 valid');
+"""
+    proc = _run(tmp_path, ["a11y.ts"], script)
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_sheet_backdrops_do_not_wrap_the_sheet():

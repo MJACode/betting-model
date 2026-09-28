@@ -143,9 +143,11 @@ export function ModelsScreen() {
             : `Save your own pick filters and see how they would have performed since ${BACKTEST_START_LABEL} — backtests use our full graded history, not just the live window.`}
         </Text>
 
-        <View style={styles.sportToggleWrap}>
-          <SportToggle />
-        </View>
+        {/* H9: the 12pt margin above the row is whitespace, so the frame takes
+            10 of it inside its bounds (marginTop 12, reach 10) and the chips
+            reach 20 + 23 + 2 = 45pt; the Built-in/Custom slop below keeps the
+            17pt gap to itself. Nothing moves. */}
+        <SportToggle marginTop={spacing.md} reachAbove={10} />
 
         <View style={styles.segmentRow} accessibilityRole="tablist">
           <SegmentPill label="Built-in" active={tab === 'builtin'} onPress={() => setTab('builtin')} />
@@ -546,9 +548,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
-  },
-  sportToggleWrap: {
-    marginTop: spacing.md,
   },
   segmentRow: {
     flexDirection: 'row',
