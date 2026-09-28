@@ -55,7 +55,7 @@ import {
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 
@@ -85,7 +85,7 @@ export function PickDetailScreen() {
         if (mounted) setData(row);
       })
       .catch((e: unknown) => {
-        if (mounted) setError(errorText(e));
+        if (mounted && !isAbortError(e)) setError(errorText(e));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -112,8 +112,9 @@ export function PickDetailScreen() {
         <ErrorState
           what="this pick"
           error={error}
+          // No `retrying`: a Retry sets loading, and loading is the early-return
+          // spinner above, so this never renders mid-retry (Reviewer, #845).
           onRetry={() => setAttempt((n) => n + 1)}
-          retrying={loading}
         />
       </SafeAreaView>
     );

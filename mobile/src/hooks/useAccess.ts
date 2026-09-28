@@ -9,7 +9,7 @@ import {
 } from '@/lib/discord';
 import { discordLinkReady } from '@/lib/discordConfig';
 import { billingReady } from '@/lib/billingConfig';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import { useAuth } from './useAuth';
 
 /**
@@ -80,7 +80,7 @@ async function refreshAccess(signedIn: boolean): Promise<void> {
       setState({ access: row, error: null, loaded: true });
     } catch (e) {
       // Keep the previous row — see the note above about not paywalling on a blip.
-      setState({ error: errorText(e), loaded: true });
+      setState({ error: isAbortError(e) ? null : errorText(e), loaded: true });
     } finally {
       setState({ loading: false });
       inFlight = null;

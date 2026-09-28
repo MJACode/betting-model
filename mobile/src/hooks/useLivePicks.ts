@@ -30,7 +30,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchLivePicks } from '@/lib/queries';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
+import { enrichmentTracker } from '@/lib/loadState';
 import { liveSlateDatesET } from '@/lib/format';
 import type { EnrichedPick } from '@/types';
 
@@ -81,18 +82,18 @@ function useLivePicksCore(pollMs: number) {
     setLoading(true);
     try {
       setError(null);
-      let missed = false;
-      const picks = await fetchLivePicks(target, (what, e) => {
-        missed = true;
-        console.warn(`[useLivePicks] ${what} failed`, e);
-      });
+      // lib/loadState: "any live-price read failed THIS fetch" (M2), so the
+      // flag clears on the next clean poll. An abort is not a miss.
+      const enrichment = enrichmentTracker((what, e) => console.warn(`[useLivePicks] ${what} failed`, e));
+      const picks = await fetchLivePicks(target, enrichment.onError);
       setData(picks);
-      setPricesUnavailable(missed);
+      setPricesUnavailable(enrichment.missed);
     } catch (e) {
       // errorText, not err.message: raw Postgres ("canceling statement due to
       // statement timeout") is not a sentence to hand a bettor, and this string
       // now renders on the home screen rather than a tab nobody opened.
-      setError(errorText(e));
+      // An intentional cancel is not a failure (isAbortError): no banner.
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }

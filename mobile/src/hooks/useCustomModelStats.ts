@@ -24,7 +24,7 @@ import {
 } from '@/lib/settledPickCache';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, SettledPick, SignalType } from '@/types';
 
@@ -84,7 +84,7 @@ export function useSettledPicksSincePaperStart() {
     } catch (e: unknown) {
       // Cached rows stay on screen — a failed refresh shouldn't blank the
       // backtest, it just leaves it as stale as the last successful load.
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -195,7 +195,7 @@ export function useCustomModelBacktest(
         })
         .catch((e: unknown) => {
           if (reqId.current !== id) return;
-          setError(errorText(e));
+          if (!isAbortError(e)) setError(errorText(e));
         })
         .finally(() => {
           if (reqId.current === id) setServerLoading(false);

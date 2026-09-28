@@ -55,20 +55,43 @@ const CAUSE: Record<ErrorKind, string> = {
 };
 
 /**
+ * An INTENTIONAL cancel: an unmount, a superseded request, a timer we cleared.
+ * Not a failure, so it never becomes an error state or a banner (Reviewer,
+ * #845 MEDIUM 2). Callers check this BEFORE storing an error:
+ *
+ *   catch (e) { if (!isAbortError(e)) setError(errorText(e)); }
+ *
+ * Reads the thrown value (DOMException / AbortError, code 20) or the string a
+ * hook already kept.
+ */
+export function isAbortError(e: unknown): boolean {
+  if (e == null) return false;
+  if (typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    if (o.name === 'AbortError' || o.code === 20 || o.code === 'ABORT_ERR') return true;
+  }
+  const raw = typeof e === 'string' ? e : errorText(e, '');
+  return /\bAbortError\b|\bthe (operation|request|user) (was )?abort(ed)?\b|\bsignal is aborted\b|\baborted without reason\b|^aborted$/i.test(raw.trim());
+}
+
+// Narrow on purpose: a bare "timeout" or "load failed" inside some other
+// message is not evidence of either (Reviewer, #845 MEDIUM 2).
+const OFFLINE = /\bfailed to fetch\b|\bnetwork request failed\b|\bnetwork ?error\b|\bERR_NETWORK\b|\bERR_INTERNET_DISCONNECTED\b|\bENOTFOUND\b|\bECONNREFUSED\b|internet connection appears to be offline|not connected to the internet|^(TypeError: )?load failed$/i;
+const SLOW = /\b57014\b|\bstatement timeout\b|\brequest timed out\b|\bETIMEDOUT\b|\bgateway time-?out\b|\b504\b/i;
+const AUTH = /\bJWT\b|\bPGRST30[0-3]\b|\b401\b|not authori[sz]ed|invalid claim|session (has )?expired|refresh token/i;
+
+/**
  * Sort a failure into offline / slow / auth / server. Reads the raw text the
  * hooks keep (errorText output) or the thrown value itself. Order matters:
  * "TypeError: Failed to fetch" is offline even though it is also an error, and
- * a PostgREST 57014 is a timeout even though it arrives as a 500.
+ * a PostgREST 57014 is a timeout even though it arrives as a 500. An abort is
+ * not a failure at all: check isAbortError first (it never reads as offline).
  */
 export function errorKind(e: unknown): ErrorKind {
-  const raw = typeof e === 'string' ? e : errorText(e, '');
-  if (/failed to fetch|network request failed|network ?error|internet|offline|load failed|aborted|ENOTFOUND|ECONNREFUSED|ERR_NETWORK/i.test(raw)) {
-    return 'offline';
-  }
-  if (/57014|statement timeout|timed? ?out|timeout/i.test(raw)) return 'slow';
-  if (/\bJWT\b|PGRST30[0-3]|\b401\b|not authori[sz]ed|invalid claim|session (has )?expired|refresh token/i.test(raw)) {
-    return 'auth';
-  }
+  const raw = (typeof e === 'string' ? e : errorText(e, '')).trim();
+  if (OFFLINE.test(raw)) return 'offline';
+  if (SLOW.test(raw)) return 'slow';
+  if (AUTH.test(raw)) return 'auth';
   return 'server';
 }
 
@@ -88,4 +111,12 @@ export function friendlyError(e: unknown, what: string): FriendlyError {
 /** Just the cause sentence, for inline one-liners ("Couldn’t load lines. {cause}"). */
 export function friendlyCause(e: unknown): string {
   return CAUSE[errorKind(e)];
+}
+
+/**
+ * What ErrorState / ErrorBanner read out: title, cause, then the optional
+ * reassurance line, in the order they are shown.
+ */
+export function errorAnnouncement(copy: Pick<FriendlyError, 'title' | 'cause'>, reassurance?: string): string {
+  return [copy.title, copy.cause, reassurance?.trim()].filter(Boolean).join('. ').replace(/\.\. /g, '. ');
 }

@@ -141,7 +141,7 @@ import {
 } from '@/lib/lineRuler';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
-import { errorText, friendlyCause } from '@/lib/errors';
+import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import type {
   EnrichedPick,
   GameRow,
@@ -720,7 +720,7 @@ export function StatsScreen() {
       setShownKey(stamp);
     } catch (e: unknown) {
       if (inFlight.current !== stamp) return;
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       if (inFlight.current === stamp) setLoading(false);
     }

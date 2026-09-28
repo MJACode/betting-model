@@ -63,6 +63,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
+import { knownCount, loadPresentation, showLivePricesBanner } from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SectionTitle } from '@/components/SectionTitle';
@@ -121,6 +122,10 @@ import { friendlyCause } from '@/lib/errors';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 export type { PicksView };
+
+// Designer (#845): on the one screen where a failed load could read as lost
+// picks, say plainly that they are not. Other screens pass no reassurance.
+const PICKS_REASSURANCE = 'Nothing is wrong with your picks.';
 
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
@@ -503,10 +508,17 @@ export function PicksHomeScreen() {
   // told the user the opposite of what happened (usability audit H3). With
   // rows still on screen from an earlier load, the banner carries the failure.
   const viewError = view === 'live' ? liveError : error;
-  const failed = Boolean(viewError) && (view === 'live' ? liveData.length === 0 : activeItems.length === 0);
+  // lib/loadState decides (and is RUN by the verify script and the pytest);
+  // busy is checked first below, so a failure mid-first-load stays a skeleton.
+  const failed =
+    loadPresentation({
+      loading: false,
+      error: viewError,
+      hasData: view === 'live' ? liveData.length > 0 : activeItems.length > 0,
+    }).body === 'error';
   // Counts that were never loaded are unknown, not zero ("—", PATTERNS §F5).
-  const todayUnknown = Boolean(error) && allData.length === 0;
-  const liveUnknown = Boolean(liveError) && allLiveData.length === 0;
+  const todayUnknown = knownCount(0, { error, hasData: allData.length > 0 }) === null;
+  const liveUnknown = knownCount(0, { error: liveError, hasData: allLiveData.length > 0 }) === null;
   // Pull-to-refresh still has to spin, and it cannot read `busy` any more for the
   // same reason. Local, because the hook cannot tell a poll from a pull.
   const [pulling, setPulling] = useState(false);
@@ -641,6 +653,7 @@ export function PicksHomeScreen() {
           error={viewError}
           onRetry={() => void (view === 'live' ? refreshLive() : refresh())}
           retrying={view === 'live' ? liveLoading : loading}
+          reassurance={PICKS_REASSURANCE}
         />
       ) : null}
 
@@ -668,7 +681,12 @@ export function PicksHomeScreen() {
       {/* Picks came back, DraftKings' in-play prices did not: every card would
           quietly lose its Now price. Say so, with the same retry as the Today
           partial banner (usability audit M2). */}
-      {view === 'live' && !liveError && livePricesUnavailable && liveData.length > 0 ? (
+      {showLivePricesBanner({
+        view,
+        liveError,
+        pricesUnavailable: livePricesUnavailable,
+        liveCount: liveData.length,
+      }) ? (
         <Pressable
           onPress={() => void refreshLive()}
           accessibilityRole="button"
@@ -760,6 +778,7 @@ export function PicksHomeScreen() {
               error={viewError}
               onRetry={() => void (view === 'live' ? refreshLive() : refresh())}
               retrying={view === 'live' ? liveLoading : loading}
+              reassurance={PICKS_REASSURANCE}
             />
           ) : (
             <EmptyForView

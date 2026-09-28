@@ -72,7 +72,7 @@ import {
   type TeamStatGroup,
 } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText, friendlyCause } from '@/lib/errors';
+import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
 
@@ -194,7 +194,7 @@ export function TeamsBoard({
       setRows(data);
       setSeason(used);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
       setRows([]);
     } finally {
       setLoading(false);
@@ -365,7 +365,7 @@ export function TeamsBoard({
       </View>
 
       {error ? (
-        <ErrorBanner what={`the ${sport} teams`} error={error} onRetry={() => void load()} />
+        <ErrorBanner what={`the ${sport} teams`} error={error} onRetry={() => void load()} retrying={loading} />
       ) : null}
 
       {noLinesNote ? (

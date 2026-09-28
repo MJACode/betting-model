@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useDeviceId } from './useDeviceId';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import {
   fetchSportsbookSync,
   startSportsbookLink,
@@ -34,7 +34,7 @@ export function useSportsbookSync() {
         setData(next);
         return next;
       } catch (e: unknown) {
-        setError(errorText(e));
+        if (!isAbortError(e)) setError(errorText(e));
         return null;
       } finally {
         setLoading(false);

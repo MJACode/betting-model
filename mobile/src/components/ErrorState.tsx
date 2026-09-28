@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { friendlyError, type FriendlyError } from '@/lib/errors';
+import { errorAnnouncement, friendlyError, isAbortError, type FriendlyError } from '@/lib/errors';
 
 /**
  * PATTERNS §E3, built from the Stats "Couldn’t load players / Retry" pattern
@@ -14,6 +14,9 @@ import { friendlyError, type FriendlyError } from '@/lib/errors';
  *   Retry. Use it IN PLACE of the empty state, never above one.
  * - `ErrorBanner`: a failure over content that is still on screen (a reload
  *   that failed, a section that did not come back). Plain Retry.
+ *
+ * An intentional cancel (isAbortError: an unmount, a superseded request)
+ * renders nothing and announces nothing: it is not a failure.
  *
  * Colour: the alert icon is avoidInk (5.01:1 on avoidSoft, 5.73:1 on bgCard);
  * the words are textPrimary / textSecondary. No red body text (§E3).
@@ -29,20 +32,29 @@ interface Props {
   retrying?: boolean;
   /** Outer margins where the screen's own gutter differs. */
   style?: StyleProp<ViewStyle>;
+  /**
+   * One optional line after the cause, e.g. "Nothing is wrong with your
+   * picks." — for a screen where a failed load could read as lost data
+   * (Designer, #845). Read out with the title and cause.
+   */
+  reassurance?: string;
 }
 
-function useAnnounceAndLog(copy: FriendlyError, error: unknown) {
+function useAnnounceAndLog(copy: FriendlyError, error: unknown, silent: boolean, reassurance?: string) {
   useEffect(() => {
-    AccessibilityInfo.announceForAccessibility(`${copy.title}. ${copy.cause}`);
+    if (silent) return;
+    AccessibilityInfo.announceForAccessibility(errorAnnouncement(copy, reassurance));
     if (__DEV__) console.warn(`[load error] ${copy.title}:`, error);
     // Announce once per distinct failure, not on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [copy.title, copy.kind]);
+  }, [copy.title, copy.kind, silent, reassurance]);
 }
 
-export function ErrorState({ what, error, onRetry, retrying, compact, style }: Props & { compact?: boolean }) {
+export function ErrorState({ what, error, onRetry, retrying, compact, style, reassurance }: Props & { compact?: boolean }) {
   const copy = friendlyError(error, what);
-  useAnnounceAndLog(copy, error);
+  const silent = isAbortError(error);
+  useAnnounceAndLog(copy, error, silent, reassurance);
+  if (silent) return null;
   return (
     <View style={[styles.state, compact && styles.stateCompact, style]} accessibilityRole="alert">
       <Ionicons
@@ -55,6 +67,7 @@ export function ErrorState({ what, error, onRetry, retrying, compact, style }: P
       />
       <Text style={styles.stateTitle}>{copy.title}</Text>
       <Text style={styles.stateCause}>{copy.cause}</Text>
+      {reassurance ? <Text style={styles.stateCause}>{reassurance}</Text> : null}
       <Pressable
         onPress={onRetry}
         disabled={retrying}
@@ -70,9 +83,11 @@ export function ErrorState({ what, error, onRetry, retrying, compact, style }: P
   );
 }
 
-export function ErrorBanner({ what, error, onRetry, retrying, style }: Props) {
+export function ErrorBanner({ what, error, onRetry, retrying, style, reassurance }: Props) {
   const copy = friendlyError(error, what);
-  useAnnounceAndLog(copy, error);
+  const silent = isAbortError(error);
+  useAnnounceAndLog(copy, error, silent, reassurance);
+  if (silent) return null;
   return (
     <View style={[styles.banner, style]} accessibilityRole="alert">
       <Ionicons
@@ -86,6 +101,7 @@ export function ErrorBanner({ what, error, onRetry, retrying, style }: Props) {
       <View style={styles.bannerText}>
         <Text style={styles.bannerTitle}>{copy.title}</Text>
         <Text style={styles.bannerCause}>{copy.cause}</Text>
+        {reassurance ? <Text style={styles.bannerCause}>{reassurance}</Text> : null}
       </View>
       <Pressable
         onPress={onRetry}

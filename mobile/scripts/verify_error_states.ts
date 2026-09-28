@@ -15,12 +15,27 @@
  *   - each screen that loads remotely uses ErrorState / ErrorBanner;
  *   - PicksHome says "No picks match" when only the search emptied the list,
  *     and a vanished pick offers "Open Picks" (L11).
+ *
+ * Behavioural (Reviewer, #845 — these RUN the logic, not scan for it):
+ *   - isAbortError: an intentional cancel is silent, never "You're offline";
+ *     errorKind's offline / slow patterns are narrow;
+ *   - lib/loadState: ErrorState vs ErrorBanner, "—" on a failed count, the
+ *     Models Custom-tab failure, and the live-prices banner (pricesUnavailable);
+ *   - errorAnnouncement reads the Designer's reassurance line after the cause.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { errorKind, friendlyCause, friendlyError } from '../src/lib/errors';
+import { errorAnnouncement, errorKind, friendlyCause, friendlyError, isAbortError } from '../src/lib/errors';
+import {
+  countLabel,
+  enrichmentTracker,
+  errorSurface,
+  knownCount,
+  loadPresentation,
+  showLivePricesBanner,
+} from '../src/lib/loadState';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
@@ -52,9 +67,87 @@ check('raw text never reaches the copy', !/relation|42P01|picks" does/.test(f.ti
 check('no [object Object] in the copy', !/object Object/.test(friendlyCause({}) + friendlyError({}, 'x').title));
 check('every cause is one sentence ending in a full stop',
   ['offline', 'slow', 'auth', 'server'].every((k) => {
-    const c = friendlyCause(k === 'offline' ? 'offline' : k === 'slow' ? 'timeout' : k === 'auth' ? 'JWT expired' : 'boom');
+    const c = friendlyCause(k === 'offline' ? 'Failed to fetch' : k === 'slow' ? 'statement timeout' : k === 'auth' ? 'JWT expired' : 'boom');
     return /^[A-Z].*\.$/.test(c);
   }));
+
+// ── aborts are silent; offline / slow are narrow (Reviewer MEDIUM 2) ───────
+const abort = Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' });
+const aborts: unknown[] = [
+  abort,
+  { name: 'AbortError', message: 'signal is aborted without reason' },
+  'AbortError: The user aborted a request.',
+  'The operation was aborted.',
+  'signal is aborted without reason',
+  'Aborted',
+  { code: 20, message: 'x' },
+];
+for (const e of aborts) check(`isAbortError(${JSON.stringify(e instanceof Error ? e.name : e)})`, isAbortError(e));
+const notAborts: unknown[] = [
+  new TypeError('Network request failed'),
+  'TypeError: Failed to fetch',
+  { message: 'canceling statement due to statement timeout', code: '57014' },
+  null,
+  '',
+  'Season aborted early for the franchise',
+];
+for (const e of notAborts) check(`not an abort: ${JSON.stringify(e instanceof Error ? e.message : e)}`, !isAbortError(e));
+check('an abort never reads as offline or slow', aborts.every((e) => !['offline', 'slow'].includes(errorKind(e))));
+const narrow: [unknown, string][] = [
+  ['Load failed', 'offline'], // Safari's fetch TypeError, exactly
+  ['TypeError: Load failed', 'offline'],
+  ['ENOTFOUND api.signalbase', 'offline'],
+  ['Gateway Timeout', 'slow'],
+  ['connect ETIMEDOUT 1.2.3.4:443', 'slow'],
+  ['Image load failed for logo', 'server'], // a bare "load failed" is not offline
+  ['timeout_ms must be positive', 'server'], // a bare "timeout" is not slow
+  ['offline_mode column missing', 'server'], // nor a bare "offline"
+  ['internet_explorer flag', 'server'],
+];
+for (const [e, kind] of narrow) check(`narrow: errorKind(${JSON.stringify(e)}) = ${kind}`, errorKind(e) === kind, errorKind(e));
+
+// ── lib/loadState: ErrorState vs ErrorBanner, "—", Custom tab, M2 ──────────
+const P = (loading: boolean, error: unknown, hasData: boolean) => loadPresentation({ loading, error, hasData });
+check('first load, nothing yet → skeleton', P(true, null, false).body === 'skeleton' && !P(true, null, false).banner);
+check('failed first load → ErrorState, no banner', P(false, 'Failed to fetch', false).body === 'error' && !P(false, 'x', false).banner);
+check('failed refresh over rows → rows kept + ErrorBanner', P(false, 'x', true).body === 'content' && P(false, 'x', true).banner);
+check('ErrorState and ErrorBanner never stack',
+  [true, false].every((l) => [null, 'x'].every((e) => [true, false].every((d) => {
+    const p = P(l, e, d);
+    return !(p.body === 'error' && p.banner);
+  }))));
+check('loaded and empty → content (the empty state), not an error', P(false, null, false).body === 'content');
+check('an aborted load → no ErrorState, no banner', P(false, abort, false).body === 'content' && !P(false, abort, true).banner);
+const failedCold = { loading: false, error: 'Failed to fetch', hasData: false };
+check('Models Built-in: a failed first load is the list’s ErrorState', errorSurface(failedCold, true) === 'state');
+check('Models Custom: a failed first load is a BANNER, never silence (MEDIUM 1)', errorSurface(failedCold, false) === 'banner');
+check('Models Custom: a failed refresh is a banner too', errorSurface({ ...failedCold, hasData: true }, false) === 'banner');
+check('Models: no error → no surface on either tab', errorSurface({ ...failedCold, error: null }, false) === 'none' && errorSurface({ ...failedCold, error: null }, true) === 'none');
+check('Models Custom: an abort is silent', errorSurface({ ...failedCold, error: abort }, false) === 'none');
+check('"—" when the count never loaded', countLabel(knownCount(0, { error: 'x', hasData: false })) === '—');
+check('a real zero stays 0', countLabel(knownCount(0, { error: null, hasData: false })) === '0');
+check('rows on screen keep their count through a failed refresh', countLabel(knownCount(7, { error: 'x', hasData: true })) === '7');
+const live = { view: 'live', liveError: null, pricesUnavailable: true, liveCount: 3 };
+check('M2: prices-unavailable banner over live rows', showLivePricesBanner(live));
+check('M2: not on another view', !showLivePricesBanner({ ...live, view: 'today' }));
+check('M2: not over an empty board', !showLivePricesBanner({ ...live, liveCount: 0 }));
+check('M2: not on top of a whole-load failure', !showLivePricesBanner({ ...live, liveError: 'x' }));
+check('M2: not when prices loaded', !showLivePricesBanner({ ...live, pricesUnavailable: false }));
+const t1 = enrichmentTracker();
+check('M2: a clean fetch → pricesUnavailable false', t1.missed === false);
+t1.onError('live odds', new Error('boom'));
+check('M2: one failed live-price read → pricesUnavailable true', t1.missed === true);
+const t2 = enrichmentTracker();
+t2.onError('live odds', abort);
+check('M2: an aborted read is not a miss', t2.missed === false);
+
+// ── Designer: the reassurance line (PicksHome only) ─────────────────────────
+const copy = friendlyError('Failed to fetch', 'today’s MLB picks');
+check('announcement: title, cause, reassurance in order',
+  errorAnnouncement(copy, 'Nothing is wrong with your picks.') ===
+    'Couldn’t load today’s MLB picks. You’re offline. Check your connection and try again. Nothing is wrong with your picks.',
+  errorAnnouncement(copy, 'Nothing is wrong with your picks.'));
+check('announcement without reassurance is title + cause', errorAnnouncement(copy) === `${copy.title}. ${copy.cause}`);
 
 // ── no raw error rendered in <Text> ─────────────────────────────────────────
 function walk(dir: string, out: string[] = []): string[] {
@@ -117,6 +210,46 @@ const home = read('src/screens/PicksHomeScreen.tsx');
 check('PicksHome: search-emptied copy (M12)', /No picks match/.test(home) && /emptiedBySearch/.test(home) && /Clear search/.test(home));
 check('PicksHome: prices-unavailable banner (M2)', /pricesUnavailable/.test(home));
 check('PickDetail: vanished pick → Open Picks (L11)', /Open Picks/.test(read('src/screens/PickDetailScreen.tsx')));
+
+// ── wiring for the behaviour above (Reviewer, #845) ─────────────────────────
+check('ErrorState/ErrorBanner: optional reassurance prop, rendered after the cause',
+  /reassurance\?: string/.test(es) && (es.match(/\{copy\.cause\}<\/Text>\s*\{reassurance \?/g) ?? []).length === 2);
+check('ErrorState/ErrorBanner: announce via errorAnnouncement(copy, reassurance)', /errorAnnouncement\(copy, reassurance\)/.test(es));
+check('ErrorState/ErrorBanner: an abort renders nothing', (es.match(/if \(silent\) return null;/g) ?? []).length === 2);
+check('PicksHome passes the reassurance to both its error surfaces',
+  /PICKS_REASSURANCE = 'Nothing is wrong with your picks\.'/.test(home) && (home.match(/reassurance=\{PICKS_REASSURANCE\}/g) ?? []).length === 2);
+const reassuranceElsewhere = walk(join(ROOT, 'src'))
+  .filter((p) => !/PicksHomeScreen|ErrorState\.tsx/.test(p))
+  .filter((p) => /\breassurance=/.test(readFileSync(p, 'utf-8')));
+check('no other screen passes a reassurance', reassuranceElsewhere.length === 0, reassuranceElsewhere.map((p) => relative(ROOT, p)).join(', '));
+check('PicksHome: failed / "—" / M2 banner come from lib/loadState',
+  /loadPresentation\(/.test(home) && /knownCount\(/.test(home) && /showLivePricesBanner\(/.test(home));
+check('Models: the error surface comes from errorSurface(load, tab === \'builtin\')',
+  /errorSurface\(load, tab === 'builtin'\)/.test(models) && /surface === 'banner' \?/.test(models) && /surface === 'state' \?/.test(models));
+check('Models: no `error && !failedLoad` banner gate (it hid the Custom failure)', !/error && !failedLoad/.test(models));
+check('Models: ListHeaderComponent ternary is parenthesised', /firstLoad \|\| failedLoad \? null : \(\s*!loading &&/.test(models));
+check('useLivePicks: pricesUnavailable from enrichmentTracker', /enrichmentTracker\(/.test(read('src/hooks/useLivePicks.ts')) && /setPricesUnavailable\(enrichment\.missed\)/.test(read('src/hooks/useLivePicks.ts')));
+// Every catch that stores an error skips an intentional cancel.
+const tsFiles = (dir: string, out: string[] = []): string[] => {
+  for (const n of readdirSync(dir)) {
+    const p = join(dir, n);
+    if (statSync(p).isDirectory()) tsFiles(p, out);
+    else if (/\.tsx?$/.test(p)) out.push(p);
+  }
+  return out;
+};
+const unguarded: string[] = [];
+for (const p of tsFiles(join(ROOT, 'src'))) {
+  const rel = relative(ROOT, p);
+  if (/lib\/|SignInScreen/.test(rel)) continue;
+  readFileSync(p, 'utf-8').split('\n').forEach((line, i) => {
+    if (/(setError\(|error: )errorText\(/.test(line) && !/isAbortError\(/.test(line)) unguarded.push(`${rel}:${i + 1}`);
+  });
+}
+check('every catch that stores an error skips aborts (isAbortError)', unguarded.length === 0, unguarded.join(', '));
+const pd = read('src/screens/PickDetailScreen.tsx');
+check('PickDetail: no dead retrying={loading} under the early-return spinner', !/retrying=\{loading\}/.test(pd));
+check('TeamsBoard: its ErrorBanner passes retrying', /retrying=\{loading\}/.test(read('src/components/TeamsBoard.tsx').match(/<ErrorBanner\b[\s\S]*?\/>/)?.[0] ?? ''));
 
 console.log(failures ? `\n${failures} FAILED` : '\nALL PASS');
 process.exit(failures ? 1 : 0);

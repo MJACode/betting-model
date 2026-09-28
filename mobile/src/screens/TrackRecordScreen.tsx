@@ -32,7 +32,7 @@ import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 
@@ -68,7 +68,7 @@ export function TrackRecordScreen() {
       setRows(recRows);
       setDaily(dailyRows);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }

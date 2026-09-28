@@ -13,7 +13,7 @@ import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 import { SHADOW_TRACK_START } from '@/lib/recordStart';
 
@@ -68,7 +68,7 @@ export function OpeningComparisonScreen() {
       setTracks(t);
       setSlices(s);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }

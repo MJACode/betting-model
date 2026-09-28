@@ -9,7 +9,7 @@ import {
 import { addDays, isGameOver, todayET } from '@/lib/format';
 import { attachDiscordPublish, voidHiddenFromBoard } from '@/lib/discordPublish';
 import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
 
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
@@ -85,6 +85,8 @@ export function useTodayPicks(date?: string) {
     const whats: string[] = [];
     let reason: string | null = null;
     const note = (what: string) => (e: unknown) => {
+      // A cancel is not a missing section: no partial banner for it.
+      if (isAbortError(e)) return;
       if (!whats.includes(what)) whats.push(what);
       if (reason == null) reason = errorText(e);
       console.warn(`[useTodayPicks] ${what} failed`, e);
@@ -139,7 +141,7 @@ export function useTodayPicks(date?: string) {
       setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
       setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
