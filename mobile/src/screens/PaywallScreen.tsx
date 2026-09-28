@@ -180,7 +180,7 @@ export function PaywallScreen() {
         <View style={styles.card}>
           {INCLUDED.map((line) => (
             <View key={line} style={styles.includedRow}>
-              <Ionicons name="checkmark-circle" size={18} color={colors.bet} />
+              <Ionicons name="checkmark-circle" size={18} color={colors.tint} />
               <Text style={styles.includedText}>{line}</Text>
             </View>
           ))}

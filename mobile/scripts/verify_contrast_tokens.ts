@@ -333,17 +333,8 @@ check('PickCard CLV tone is from the rounded pp', /const clvTone = pnlTone\(pick
 // Ionicons in a bright GREEN or AMBER hue (`colors.med|bet|positive|high` with
 // no Soft/Ink suffix), anywhere in the `color={…}` expression, ternaries
 // included. Bright green is 2.22:1 on bgCard and amber 2.2:1, under the 3:1
-// non-text bar (Reviewer Low 2). The allowlist is the green-as-SELECTED
-// checkmarks that move to tint in PR 5 (Designer ruling); nothing else.
-const BRIGHT_ICON_ALLOW = new Set([
-  'src/components/SportsbookPickerSheet.tsx:127',
-  'src/components/SportsbookPickerSheet.tsx:190',
-  'src/components/StatePickerSheet.tsx:46',
-  'src/components/StatePickerSheet.tsx:61',
-  'src/components/StatGroupSheet.tsx:99',
-  'src/components/HitModeSheet.tsx:118',
-  'src/screens/PaywallScreen.tsx:183',
-]);
+// non-text bar (Reviewer Low 2). No allowlist: the green-as-SELECTED
+// checkmarks moved to tint (Designer verdict: selection is not "good").
 /** Every `<Ionicons … color={expr} …/>` as [line of `color=`, expr]. */
 function ioniconColors(src: string): [number, string][] {
   const out: [number, string][] = [];
@@ -367,21 +358,29 @@ function ioniconColors(src: string): [number, string][] {
 }
 const BRIGHT_ICON = /\bcolors\.(med|bet|positive|high)\b(?!Soft|Ink)/;
 const brightIcons: string[] = [];
-const allowSeen = new Set<string>();
 for (const f of files) {
   const rel = relative(ROOT, f).split('\\').join('/');
   for (const [line, expr] of ioniconColors(code(readFileSync(f, 'utf-8')))) {
     if (!BRIGHT_ICON.test(expr)) continue;
-    const key = `${rel}:${line}`;
-    if (BRIGHT_ICON_ALLOW.has(key)) allowSeen.add(key);
-    else brightIcons.push(`${key} ${expr.replace(/\s+/g, ' ')}`);
+    brightIcons.push(`${rel}:${line} ${expr.replace(/\s+/g, ' ')}`);
   }
 }
-check('no Ionicons in bright med/bet/positive/high, ternaries included (allowlist: PR 5 selected-state)', brightIcons.length === 0, brightIcons.join(', '));
-check('the bright-icon allowlist is still live (no stale entries)', allowSeen.size === BRIGHT_ICON_ALLOW.size, [...BRIGHT_ICON_ALLOW].filter((k) => !allowSeen.has(k)).join(', '));
+check('no Ionicons in bright med/bet/positive/high, ternaries included, no exceptions', brightIcons.length === 0, brightIcons.join(', '));
 const probe = ioniconColors(`<Ionicons\n  name="x"\n  color={on ? colors.bet : colors.textTertiary}\n/>\n<Ionicons name="y" color={colors.betInk} />\n<Ionicons name="z" color={pick(colors.medSoft)} size={3} />`);
 check('the bright-icon scan sees a multi-line ternary and passes Ink/Soft', probe.length === 3 && BRIGHT_ICON.test(probe[0][1]) && probe[0][0] === 3 && !BRIGHT_ICON.test(probe[1][1]) && !BRIGHT_ICON.test(probe[2][1]));
-check('Line shop pricetag icon is betInk (Reviewer MEDIUM B)', /name="pricetag-outline" size=\{13\} color=\{colors\.betInk\}/.test(read('src/screens/ParlayScreen.tsx')));
+check('Line shop pricetag icon is tint (Designer, over Reviewer MEDIUM B betInk)', /name="pricetag-outline" size=\{13\} color=\{colors\.tint\}/.test(read('src/screens/ParlayScreen.tsx')));
+// Selection is tint, never green (Designer verdict): the checkmark AND the row border.
+for (const rel of ['src/components/SportsbookPickerSheet.tsx', 'src/components/StatGroupSheet.tsx', 'src/components/HitModeSheet.tsx', 'src/components/StatePickerSheet.tsx', 'src/screens/PaywallScreen.tsx']) {
+  const s = read(rel);
+  const checks = s.match(/name="checkmark-circle" size=\{\d+\} color=\{colors\.(\w+)\}/g) ?? [];
+  check(`${rel}: selected checkmark and border are tint`, checks.length > 0 && checks.every((c) => c.endsWith('colors.tint}')) && !/rowActive:\s*\{\s*borderColor: colors\.bet\b/.test(s));
+}
+// Designer H2 / L9 misses: the equity-curve total and the share text.
+const eq = read('src/components/EquityCurve.tsx');
+check('EquityCurve total is pnlColor ink + formatSignedUnits (no bright text, no hyphen)', /<Text style=\{\[styles\.units, \{ color: pnlColor\(last, 1\) \}\]\}>\{formatSignedUnits\(last\)\}<\/Text>/.test(eq) && !/toFixed\(1\)\}u/.test(eq));
+const share = read('src/lib/shareRecord.ts');
+check('shareRecord signs ROI and units with the helpers (no hand-built "+")', /formatPctSigned\(s\.roiFlat\)/.test(share) && /formatSignedUnits\(opts\.endUnits\)/.test(share) && !/\? '\+' : ''/.test(share));
+check('DailyResults "No picks" rows: no opacity, textTertiary', /sportCardEmpty: \{ paddingVertical: spacing\.sm \}/.test(read('src/components/DailyResultsModal.tsx')));
 // Every pnlColor() names the display's precision: `, 1, 100)` for a ratio
 // printed by formatPctSigned, `, 2)` for dollars, `, 1)` for pp (Reviewer
 // MEDIUM A). tsc already refuses a call with no digits; this pins the values.

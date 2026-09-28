@@ -720,11 +720,13 @@ const styles = StyleSheet.create({
   },
   sportName: { fontSize: font.size.headline, fontWeight: font.weight.bold, color: colors.textPrimary },
   sportRoi: { fontSize: font.size.headline, fontWeight: font.weight.bold },
-  sportCardEmpty: { paddingVertical: spacing.sm, opacity: 0.75 },
+  // No opacity: 0.75 over textTertiary was 3.15:1. The muted look comes from
+  // the tertiary ink itself (5.23:1 on bgCard).
+  sportCardEmpty: { paddingVertical: spacing.sm },
   sportNameEmpty: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
+    color: colors.textTertiary,
   },
   sportEmptyNote: { fontSize: font.size.footnote, color: colors.textTertiary },
   sportSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.sm },

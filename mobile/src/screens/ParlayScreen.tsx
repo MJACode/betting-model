@@ -668,7 +668,7 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
   return (
     <View style={styles.lineShop}>
       <View style={styles.lineShopHeader}>
-        <Ionicons name="pricetag-outline" size={13} color={colors.betInk} />
+        <Ionicons name="pricetag-outline" size={13} color={colors.tint} />
         <Text style={styles.lineShopTitle}>Line shop</Text>
       </View>
       <View style={styles.corrRow}>

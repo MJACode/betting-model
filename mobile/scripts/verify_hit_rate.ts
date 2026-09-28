@@ -300,7 +300,7 @@ check(
   // comparison, and the preview is the reason the row exists.
   check('the selected row reserves its border rather than adding one',
     /borderWidth: 1\.5,\s*\n\s*borderColor: 'transparent',/.test(sheet)
-      && sheet.includes('rowActive: { borderColor: colors.bet }'));
+      && sheet.includes('rowActive: { borderColor: colors.tint }'));
   check('the preview cannot be the thing that truncates',
     /styles\.rowPreview[^\n]*\]\}>\s*\n\s*\{priced \? preview/.test(sheet)
       && !/rowPreview[^\n]*numberOfLines/.test(sheet));
