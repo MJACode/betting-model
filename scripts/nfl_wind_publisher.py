@@ -583,7 +583,7 @@ def _flush_snapshots_safe(run_date: str | None) -> None:
         print(f"WARNING: line snapshot publish failed: {exc}", file=sys.stderr)
 
 
-def _clear_scored_row(conn, game_id: str, model_id: str) -> None:
+def _clear_scored_row(conn, game_id: str, model_id: str) -> int:
     """Drop the unsettled NONE row a BET is about to replace.
 
     THE ONLY DELETE the NFL publishers are allowed, and it sits ABOVE the
@@ -592,12 +592,15 @@ def _clear_scored_row(conn, game_id: str, model_id: str) -> None:
     writer, to be guarded by signal_type = 'NONE' AND result IS NULL. With
     the helper below the wind writer it landed inside the opener's slice and
     failed the insert-once check (Reviewer, #838 post-merge).
+
+    Returns the rows actually deleted (0 when there was no NONE row).
     """
-    conn.execute("""
+    cur = conn.execute("""
         DELETE FROM picks
         WHERE game_id = %s AND model_id = %s
           AND signal_type = 'NONE' AND result IS NULL
     """, (game_id, model_id))
+    return getattr(cur, "rowcount", 0) or 0
 
 
 # Namespace for the per-model publish lock. Any process writing NFL game-rule
@@ -605,6 +608,12 @@ def _clear_scored_row(conn, game_id: str, model_id: str) -> None:
 # derived here and nowhere else, so a scored-rows pass and an opener/wind
 # publish for one model can never interleave their read-then-write.
 _PICKS_LOCK_NS = "nfl_game_rule_picks:"
+
+# How long a writer waits for another's pass before giving up. The passes hold
+# the lock for a few statements; a wait this long means something is stuck,
+# and the pass fails (nothing committed, the next tick retries) rather than
+# queueing behind it.
+_PICKS_LOCK_TIMEOUT = "5s"
 
 
 def _model_lock_key(model_id: str) -> int:
@@ -627,8 +636,21 @@ def _lock_model(conn, model_id: str) -> None:
     row. A home BET made that insert hit uq_picks_one_row_per_pick and roll
     back the whole scored pass; an away BET left a permanent NONE row beside
     the BET.
+
+    lock_timeout bounds the wait. A timeout (SQLSTATE 55P03) aborts the
+    transaction, so the pass raises with nothing written. data/db treats the
+    lock as a write, so a connection lost after it raises ConnectionLost
+    instead of re-running the pass on a new, unlocked backend.
     """
-    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_model_lock_key(model_id),))
+    conn.execute(f"SET LOCAL lock_timeout = '{_PICKS_LOCK_TIMEOUT}'")
+    try:
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (_model_lock_key(model_id),))
+    except Exception as exc:                                   # noqa: BLE001
+        if getattr(exc, "pgcode", None) == "55P03":            # lock_not_available
+            raise RuntimeError(
+                f"NFL publish lock for {model_id} not acquired within "
+                f"{_PICKS_LOCK_TIMEOUT}; pass aborted, nothing written") from exc
+        raise
 
 
 def _fmt_spread(line: float) -> str:
@@ -984,8 +1006,10 @@ def publish_scored(run_date: str | None = None) -> int:
 
         # Same per-model lock the BET writers take, in a fixed order (no
         # deadlock), BEFORE the BET set is read: an opener/wind BET can no
-        # longer commit between that read and the NONE insert below.
-        for mid in sorted({m for _, m in latest}):
+        # longer commit between that read and the NONE insert below. Every
+        # scored model, not just the ones in this dump: the cleanup below
+        # deletes for any model the picks read returns.
+        for mid in sorted(SCORED_MODEL_IDS):
             _lock_model(conn, mid)
 
         existing: dict[tuple[str, str], dict] = {}
@@ -1012,8 +1036,7 @@ def publish_scored(run_date: str | None = None) -> int:
         cleared = 0
         for key in sorted(bet):
             if key in existing and key[0] in games:
-                _clear_scored_row(conn, *key)
-                cleared += 1
+                cleared += _clear_scored_row(conn, *key)
 
         for p in build_scored_rows(latest, games, config.BANKROLL):
             key = (p["game_id"], p["model_id"])

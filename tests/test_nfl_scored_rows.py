@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
+import psycopg2
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -200,8 +201,9 @@ class TestBuildScoredRows:
 class _Conn:
     """Records every statement; answers the reads publish_scored makes."""
 
-    def __init__(self, games=(), picks=()):
+    def __init__(self, games=(), picks=(), delete_rowcount=1):
         self.games, self.picks, self.sql = list(games), list(picks), []
+        self.delete_rowcount = delete_rowcount
 
     def execute(self, sql, params=None):
         flat = " ".join(sql.split())
@@ -211,8 +213,11 @@ class _Conn:
             rows = self.games
         elif flat.startswith("SELECT pick_id, game_id, model_id, signal_type"):
             rows = self.picks
+        n = self.delete_rowcount if flat.startswith("DELETE") else len(rows)
 
         class R:
+            rowcount = n
+
             def fetchall(self_r):
                 return rows
 
@@ -352,6 +357,15 @@ class TestNoneRowBesideABetIsCleared:
         run(conn, [_eval()])
         assert not conn.writes("DELETE")
 
+    @pytest.mark.parametrize("rowcount", [1, 0])
+    def test_cleared_counts_rows_deleted_not_deletes_tried(self, run, capsys, rowcount):
+        # rowcount 0: the row went between the read and the delete.
+        conn = _Conn(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                     picks=[_bet_row(), _none_row()], delete_rowcount=rowcount)
+        run(conn, [_eval()])
+        assert len(conn.writes("DELETE")) == 1
+        assert f"{rowcount} cleared beside a BET" in capsys.readouterr().out
+
 
 class TestFlexedKickoffRefreshes:
     def test_moved_kickoff_alone_refreshes_the_row(self, run):
@@ -435,7 +449,14 @@ class TestPublishRace:
         read = next(i for i, (q, _) in enumerate(conn.sql)
                     if q.startswith("SELECT pick_id, game_id, model_id, signal_type"))
         assert _lock_index(conn) < read
-        assert conn.lock_keys == [pub._model_lock_key("nfl_wind_totals")]
+
+    def test_every_scored_model_is_locked_not_just_those_in_the_dump(self, run):
+        # The dump has only wind; the picks read (and the cleanup delete)
+        # covers every SCORED_MODEL_IDS model, so every one is locked.
+        conn = _RaceConn([(GAME, "PIT", "CIN", "2026-09-27", _kick(24))], [])
+        run(conn, [_eval("nfl_wind_totals")])
+        assert conn.lock_keys == [pub._model_lock_key(m)
+                                  for m in sorted(pub.SCORED_MODEL_IDS)]
 
     def test_home_bet_committing_during_the_wait_blocks_the_none_insert(self, run):
         # Without the lock this was the uq_picks_one_row_per_pick violation.
@@ -503,6 +524,113 @@ class TestPublishRace:
         assert a == pub._model_lock_key("nfl_wind_totals")
 
 
+# ── the lock survives neither a dropped connection nor a long wait ─────────
+#
+# #844 review M1: data/db classified `SELECT pg_advisory_xact_lock` as a read,
+# so a drop after it reconnected, replayed the next read on a NEW backend
+# (which holds no lock) and the pass carried on unlocked. (e): the wait is
+# bounded by lock_timeout, and a timeout fails the pass with nothing written.
+
+class _PgCursor:
+    def __init__(self, pg):
+        self.pg, self.rows, self.rowcount = pg, [], 0
+
+    def execute(self, sql, params=None):
+        flat = " ".join(sql.split())
+        self.pg.executed.append(flat)
+        if self.pg.drop_on and flat.startswith(self.pg.drop_on):
+            self.pg.drop_on, self.pg.closed = None, 2
+            raise psycopg2.OperationalError("server closed the connection unexpectedly")
+        self.rows = self.pg.games if flat.startswith("SELECT game_id, home_team") else []
+
+    def fetchall(self):
+        return list(self.rows)
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+
+class _Pg:
+    """A psycopg2 connection stand-in for data.db.DBConnection."""
+
+    def __init__(self, games=(), drop_on=None):
+        self.games, self.drop_on = list(games), drop_on
+        self.closed, self.executed, self.commits = 0, [], 0
+
+    def cursor(self):
+        if self.closed:
+            raise psycopg2.InterfaceError("connection already closed")
+        return _PgCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        self.closed = 1
+
+
+@pytest.fixture
+def wrapped(monkeypatch):
+    import data.db as db
+    reopened: list[_Pg] = []
+
+    def fake_open(url, options=None):
+        reopened.append(_Pg())
+        return reopened[-1]
+
+    monkeypatch.setattr(db, "_open", fake_open)
+    monkeypatch.setattr(db.time, "sleep", lambda s: None)
+    return db, reopened
+
+
+class TestLockSurvivesNothing:
+    def test_drop_after_the_lock_raises_connection_lost(self, wrapped):
+        db, reopened = wrapped
+        first = _Pg(drop_on="SELECT pick_id")
+        w = db.DBConnection(first, url="postgresql://x")
+        w.execute("SELECT pg_advisory_xact_lock(%s)", (7,))     # the lock alone
+        with pytest.raises(db.ConnectionLost):
+            w.execute("SELECT pick_id FROM picks")
+        assert reopened[0].executed == [], "nothing replayed on the unlocked backend"
+
+    def test_publish_scored_drop_after_the_lock_aborts_the_pass(self, wrapped, run):
+        db, reopened = wrapped
+        first = _Pg(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                    drop_on="SELECT pick_id, game_id, model_id, signal_type")
+        with pytest.raises(db.ConnectionLost):
+            run(db.DBConnection(first, url="postgresql://x"), [_eval()])
+        assert any("pg_advisory_xact_lock" in q for q in first.executed)
+        assert reopened[0].executed == [] and reopened[0].commits == 0
+
+    def test_lock_timeout_is_set_before_every_lock(self, run):
+        conn = _RaceConn([(GAME, "PIT", "CIN", "2026-09-27", _kick(24))], [])
+        run(conn, [_eval()])
+        qs = [q for q, _ in conn.sql]
+        for i, q in enumerate(qs):
+            if "pg_advisory_xact_lock" in q:
+                assert qs[i - 1] == f"SET LOCAL lock_timeout = '{pub._PICKS_LOCK_TIMEOUT}'"
+
+    def test_lock_timeout_fails_the_pass_with_nothing_written(self, run):
+        class _LockTimeout(psycopg2.errors.LockNotAvailable):
+            pgcode = "55P03"          # what the server sets; unset when built by hand
+
+        class _Busy(_Conn):
+            def execute(self, sql, params=None):
+                if "pg_advisory_xact_lock" in sql:
+                    self.sql.append(("LOCK TIMEOUT", None))
+                    raise _LockTimeout("canceling statement due to lock timeout")
+                return super().execute(sql, params)
+        conn = _Busy(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                     picks=[_bet_row(), _none_row()])
+        with pytest.raises(RuntimeError, match="not acquired within"):
+            run(conn, [_eval()])
+        assert not any(q.startswith(("INSERT", "UPDATE", "DELETE", "COMMIT"))
+                       for q, _ in conn.sql)
+
+
 # ── the preflight's tightened lock checks (Reviewer, #838 post-merge) ───────
 
 class TestPreflightLockChecks:
@@ -527,6 +655,27 @@ class TestPreflightLockChecks:
     def test_any_other_delete_fails(self, pf, where):
         src = f'''conn.execute("""DELETE FROM picks WHERE {where}""")'''
         assert pf._unguarded_pick_deletes(src)
+
+    @pytest.mark.parametrize("src", [
+        # schema-qualified table name: the old regex never matched it
+        '''conn.execute("""DELETE FROM public.picks WHERE game_id = %s""")''',
+        # OR-form guard: both phrases present, the OR deletes anything
+        '''conn.execute("""DELETE FROM picks WHERE signal_type = 'NONE'
+               AND result IS NULL OR game_id = %s""")''',
+        # guard only in a trailing SQL comment
+        '''conn.execute("""DELETE FROM picks WHERE game_id = %s
+               -- signal_type = 'NONE' AND result IS NULL
+        """)''',
+        # guard only in a trailing Python comment
+        '''conn.execute("DELETE FROM picks WHERE game_id = %s")  # signal_type = 'NONE' AND result IS NULL''',
+    ])
+    def test_evasions_fail(self, pf, src):
+        assert pf._unguarded_pick_deletes(src)
+
+    def test_guarded_delete_on_public_picks_is_allowed(self, pf):
+        src = '''conn.execute("""DELETE FROM public.picks WHERE game_id = %s
+               AND signal_type = 'NONE' AND result IS NULL""")'''
+        assert pf._unguarded_pick_deletes(src) == []
 
     def test_lock_section_passes_on_this_tree(self, pf):
         pf.results.clear()
@@ -609,6 +758,64 @@ class TestNoneRowNeverLocks:
             "edge": "0.0778", "stake_pct": "2.0"})
         assert pub.publish_opener("2026-09-26") == 1
         assert conn.writes("DELETE") and conn.writes("INSERT INTO picks")
+
+
+# ── preflight: CI mode and the pinned constants (#844 review) ──────────────
+
+class _After(datetime):
+    """A clock past the committed schedule (games.csv ends in January 2027)."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2027, 3, 1, tzinfo=timezone.utc)
+
+
+class TestPreflightCiMode:
+    @pytest.fixture
+    def pf(self, monkeypatch):
+        from scripts import nfl_preflight
+        monkeypatch.setattr(nfl_preflight, "datetime", _After)
+        monkeypatch.delenv("NFL_PREFLIGHT_OFFLINE", raising=False)
+        for name in ("check_models", "check_import_shadowing", "check_lock_semantics",
+                     "check_schedule", "check_cards_run", "check_schema",
+                     "check_config_gates"):
+            monkeypatch.setattr(nfl_preflight, name, lambda: None)
+        nfl_preflight.results.clear()
+        yield nfl_preflight
+        nfl_preflight.results.clear()
+        nfl_preflight.CI_MODE = False
+
+    def _schedule(self, pf):
+        return next(r for r in pf.results if "schedule covers" in r[2])
+
+    def test_ci_mode_passes_with_a_warning(self, pf):
+        assert pf.main(["--ci"]) == 0
+        assert self._schedule(pf)[1] == pf.WARN
+
+    def test_offline_env_is_ci_mode(self, pf, monkeypatch):
+        monkeypatch.setenv("NFL_PREFLIGHT_OFFLINE", "1")
+        assert pf.main([]) == 0
+        assert self._schedule(pf)[1] == pf.WARN
+
+    def test_default_mode_still_fails(self, pf):
+        assert pf.main([]) == 1
+        assert self._schedule(pf)[1] == pf.FAIL
+
+    def test_ci_workflow_runs_ci_mode(self):
+        wf = (ROOT / ".github" / "workflows" / "pr-ci.yml").read_text(encoding="utf-8")
+        assert "python -m scripts.nfl_preflight --ci" in wf
+
+
+def test_preflight_pins_the_fire_lead_and_deploy_threshold():
+    from scripts import nfl_preflight as pf
+    pf.results.clear()
+    pf.check_models()
+    pf.check_config_gates()
+    got = {r[2].split("  — ")[0]: r[1] for r in pf.results}
+    pf.results.clear()
+    assert got["wind fires no further out than 4 days"] == pf.PASS
+    assert got["opener fires at a 2-pt deviation"] == pf.PASS
+    assert got["a deviation at DEPLOY_THRESHOLD clears the gate"] == pf.PASS
 
 
 def test_pick_monitor_reads_locked_bets_only():
