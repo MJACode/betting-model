@@ -179,7 +179,7 @@ function BankrollCard() {
     if (!focused) setText(bankrollFieldText(settings.amount));
   }, [settings.amount]); // not `focused`: a blur must not undo the text just committed
 
-  const error = visibleBankrollError(checkBankroll(text), false) ?? blurError;
+  const fieldMessage = visibleBankrollError(checkBankroll(text), false) ?? blurError;
   const shown = bankrollDraft(text, settings.unitPct);
 
   const onChange = (raw: string) => {
@@ -202,7 +202,7 @@ function BankrollCard() {
         <Text style={styles.bookPillMuted}>Optional</Text>
       </View>
       <Text style={styles.bookHint}>{BANKROLL_CARD_COPY}</Text>
-      <View style={[styles.moneyField, error ? styles.moneyFieldError : null]}>
+      <View style={[styles.moneyField, fieldMessage ? styles.moneyFieldError : null]}>
         <Text
           style={[styles.moneyPrefix, text === '' && styles.moneyPrefixEmpty]}
           accessibilityElementsHidden
@@ -227,10 +227,10 @@ function BankrollCard() {
           accessibilityHint="Only used to show your units in dollars. Stays on this device."
         />
       </View>
-      {error ? (
+      {fieldMessage ? (
         <View style={styles.fieldErrorRow} accessibilityRole="alert" accessibilityLiveRegion="polite">
           <Ionicons name="alert-circle" size={14} color={colors.avoid} />
-          <Text style={styles.fieldErrorText}>{error}</Text>
+          <Text style={styles.fieldErrorText}>{fieldMessage}</Text>
         </View>
       ) : null}
 
