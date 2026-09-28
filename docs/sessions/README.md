@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-28 | [2026-09](./2026-09.md) | 2026-09-28, a posted signal is locked: `void_picks` refuses a pick in the Discord ledger (Matt). 98 posted VOIDs already in prod left as-is pending approval (69 rule-change, 29 bad-data). UFC finals land ~18:30 UTC next day from the CSV mirror; faster source unmeasured |
 | 2026-09-28 | [2026-09](./2026-09.md) | 2026-09-28, Picks Time sort grouped by day (SectionTitle headers, spoken form, paused last within each day); #840 ux_scan items fixed (Settings roles without silencing status pills, 44pt Sign out, badge font token). UI only |
 | 2026-09-28 | [2026-09](./2026-09.md) | 2026-09-28, daily run 51e965f8023c4b0e86e03fe075af1f9c: NCAAF 2026 team board statement timeout (seq scan of odds) replaced with per-game index probes (25.7s measured); NHL scoring savepoint so one statement timeout is logged as itself and does not cascade as InFailedSqlTransaction. No pause, no threshold, no credit fix |
 | 2026-09-26 | [2026-09](./2026-09.md) | 2026-09-26, a Date filter on the Picks board (sheet section, multi-select days with counts, empty = all). One day label (`dayLabelET`, "Sat 11/28") for chips and Games headers. UI only |
