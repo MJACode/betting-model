@@ -119,3 +119,35 @@ def test_the_abbreviations_are_the_ones_the_games_table_uses():
     ours = set(STATSAPI_TEAM_IDS.values())
     assert set(MLB_NICKNAMES.values()) == ours, (
         set(MLB_NICKNAMES.values()) ^ ours)
+
+
+# -- doubleheaders (review M3, 2026-09-28) --------------------------------------
+
+def test_a_doubleheader_resolves_to_the_game_that_is_live():
+    """Both games share the event name. The feeds are in-play only, so the
+    unscored row whose first pitch has happened is the one meant."""
+    rows = [("MLB_2026-09-25_BAL_NYY", "BAL", "NYY", "2026-09-25T20:08:00+00:00"),
+            ("MLB_2026-09-25_BAL_NYY_G2", "BAL", "NYY", None)]
+    assert resolve_game_id(_Conn(rows), "MLB", "BAL Orioles @ NY Yankees",
+                           ["2026-09-25"], {}) == "MLB_2026-09-25_BAL_NYY"
+
+
+def test_a_doubleheader_answer_is_not_cached_across_the_games():
+    """Game 1's answer must not stick once game 1 is final and game 2 is live."""
+    cache = {}
+    g1_live = [("MLB_2026-09-25_BAL_NYY", "BAL", "NYY", "2026-09-25T20:08:00+00:00"),
+               ("MLB_2026-09-25_BAL_NYY_G2", "BAL", "NYY", None)]
+    assert resolve_game_id(_Conn(g1_live), "MLB", "BAL Orioles @ NY Yankees",
+                           ["2026-09-25"], cache) == "MLB_2026-09-25_BAL_NYY"
+    g2_live = [("MLB_2026-09-25_BAL_NYY_G2", "BAL", "NYY", "2026-09-25T23:31:00+00:00")]
+    assert resolve_game_id(_Conn(g2_live), "MLB", "BAL Orioles @ NY Yankees",
+                           ["2026-09-25"], cache) == "MLB_2026-09-25_BAL_NYY_G2"
+
+
+def test_two_unscored_rows_neither_live_is_refused_and_not_cached():
+    cache = {}
+    rows = [("MLB_2026-09-25_BAL_NYY", "BAL", "NYY", None),
+            ("MLB_2026-09-25_BAL_NYY_G2", "BAL", "NYY", None)]
+    assert resolve_game_id(_Conn(rows), "MLB", "BAL Orioles @ NY Yankees",
+                           ["2026-09-25"], cache) is None
+    assert cache == {}

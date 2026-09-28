@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import SPORTS, MIN_GAMES_BASELINE
 from data.db import get_connection, DBConnection
 from data.pitcher_rates import last3_rates
+from data.mlb_game_id import game_number, mlb_game_id
 
 # ── Safe Imports (pybaseball is optional at import time) ─────────────────────
 
@@ -1300,7 +1301,8 @@ def backfill_f5_scores(start_season: int, end_season: int) -> dict:
                 if not home_abbrev or not away_abbrev:
                     continue
 
-                game_id = f"MLB_{date_str}_{away_abbrev}_{home_abbrev}"
+                game_id = mlb_game_id(date_str, away_abbrev, home_abbrev,
+                                      game_number(api_game))
 
                 linescore = api_game.get("linescore", {})
                 innings = linescore.get("innings", [])
@@ -1484,7 +1486,8 @@ def backfill_player_game_log(start_season: int, end_season: int) -> dict:
                     if not home_abbrev or not away_abbrev:
                         continue
 
-                    game_id = f"MLB_{date_str}_{away_abbrev}_{home_abbrev}"
+                    game_id = mlb_game_id(date_str, away_abbrev, home_abbrev,
+                                          game_number(game))
 
                     # Per-game skip. Idempotent and, unlike the old per-date
                     # check, it cannot hide a missing game behind a present one.
@@ -1675,7 +1678,8 @@ def ingest_game_log_for_date(game_date: str) -> dict:
             if not home_abbrev or not away_abbrev:
                 continue
 
-            game_id = f"MLB_{game_date}_{away_abbrev}_{home_abbrev}"
+            game_id = mlb_game_id(game_date, away_abbrev, home_abbrev,
+                                  game_number(game))
             if game_id in done_game_ids:
                 continue          # already ingested — costs no boxscore call
 

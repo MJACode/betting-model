@@ -82,6 +82,7 @@ from config import (
 from data.live_quote_guard import quote_predates_score
 from data.db import get_connection, DBConnection, ConnectionLost
 from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
+from data.mlb_game_id import game_number, mlb_game_id
 from data.name_match import resolve_feed_name
 
 # Max minutes two books' opening snapshots may be apart and still count as
@@ -2745,7 +2746,8 @@ def _get_postponed_games(target_date: str) -> set[str]:
             home_abbr = _STATSAPI_TEAM_IDS.get(home_id, "")
             away_abbr = _STATSAPI_TEAM_IDS.get(away_id, "")
             if home_abbr and away_abbr:
-                game_id = f"MLB_{target_date}_{away_abbr}_{home_abbr}"
+                game_id = mlb_game_id(target_date, away_abbr, home_abbr,
+                                      game_number(game))
                 postponed_ids.add(game_id)
                 logger.info(f"  Postponed: {away_abbr} @ {home_abbr} ({status})")
 
@@ -2820,6 +2822,26 @@ def _log_pipeline(conn, run_date, status, records_in, records_out,
 
 
 # ── Main Daily Run ────────────────────────────────────────────────────────────
+
+# "Not yet started" is decided per PICK as well as per games row. Every sweep
+# below that clears unsettled picks "for games not yet started" keyed only on
+# games.commence_time. On 2026-09-25 BAL@NYY's game 1 and game 2 shared one
+# row: game 1's final (10-2, live 'Final' 22:54:55Z) was on it, and its
+# commence_time had been re-stamped to game 2's 23:30Z. At 23:29:22Z (7:29 PM
+# ET) the non-BET sweep deleted that row's moneyline NONE pair (2911172,
+# 2911173) as "not started" -- and nothing re-inserted them, because the
+# scoring loop only reads games with home_score IS NULL. Two guards:
+#   * the games row must not carry a final score: a row with a final is not
+#     "not started", and the loop will never re-score it, so a delete there is
+#     permanent, not a refresh;
+#   * the pick's OWN game_time must still be in the future (or unknown): a pick
+#     whose game has started is never deleted as "not started", whatever its
+#     row's commence_time says.
+# Text comparison, like the commence_time test beside it: both are ISO-8601
+# UTC strings ("2026-09-25T23:30:00+00:00" vs now_utc's isoformat()). The
+# clause is written out in each statement (not concatenated) so the
+# source-reading tests see one complete SQL string per sweep.
+_NOT_STARTED_PICK = "AND (game_time IS NULL OR game_time > %s)"
 
 def run_scorer(target_date: str = None, dry_run: bool = False,
                only_games: set | None = None) -> dict:
@@ -3085,10 +3107,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                    AND signal_type = 'BET'
                    AND dk_odds IS NULL
                    AND game_date >= %s
+                   AND (game_time IS NULL OR game_time > %s)
                    AND game_id IN (
                        SELECT game_id FROM games
-                        WHERE commence_time IS NULL OR commence_time > %s
-                   )""" + _sc, (target_date, now_utc) + _sp)
+                        WHERE (commence_time IS NULL OR commence_time > %s)
+                          AND home_score IS NULL
+                   )""" + _sc, (target_date, now_utc, now_utc) + _sp)
 
         locked_pairs: set[tuple] = set()
         if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
@@ -3148,11 +3172,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                     DELETE FROM picks
                     WHERE game_date = %s
                       AND result IS NULL
+                      AND (game_time IS NULL OR game_time > %s)
                       AND game_id IN (
                           SELECT game_id FROM games
                           WHERE game_date = %s
                             AND (commence_time IS NULL OR commence_time > %s)
-                      )""" + _sc, (target_date, target_date, now_utc) + _sp)
+                            AND home_score IS NULL
+                      )""" + _sc, (target_date, now_utc, target_date, now_utc) + _sp)
             # UFC look-ahead. This used to ALWAYS re-score, on the theory that
             # early-week lines are soft. That contradicted the pick lock: the
             # first cross IS the bet of record, and a pick must never be
@@ -3165,12 +3191,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                 conn.execute("""
                     DELETE FROM picks
                     WHERE result IS NULL
+                      AND (game_time IS NULL OR game_time > %s)
                       AND game_id IN (
                           SELECT game_id FROM games
                           WHERE sport = 'UFC'
                             AND game_date > %s AND game_date <= %s
                             AND (commence_time IS NULL OR commence_time > %s)
-                      )""" + _sc, (target_date, ufc_horizon, now_utc) + _sp)
+                            AND home_score IS NULL
+                      )""" + _sc, (now_utc, target_date, ufc_horizon, now_utc) + _sp)
 
         all_picks = []
         rescored: set[str] = set()
@@ -3429,12 +3457,15 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
               AND signal_type != 'BET'
               AND is_live IS NOT TRUE
               AND model_id NOT LIKE 'nfl_prop_%%'
+              AND (game_time IS NULL OR game_time > %s)
               AND game_id IN (
                   SELECT game_id FROM games
                   WHERE game_date >= %s AND game_date <= %s
                     AND (commence_time IS NULL OR commence_time > %s)
+                    AND home_score IS NULL
               )""" + _sc + _keep,
-            (target_date,
+            (now_utc,
+             target_date,
              # EVERY look-ahead horizon, not just the two that existed when
              # this was written. The bound has to cover the whole window
              # the loop below re-inserts over, or the newly-scored future
@@ -3810,7 +3841,7 @@ def _get_probable_pitchers(target_date: str, conn: DBConnection) -> list[dict]:
         if not home_name or not away_name:
             continue
 
-        game_id = f"MLB_{target_date}_{away_name}_{home_name}"
+        game_id = mlb_game_id(target_date, away_name, home_name, game_number(game))
 
         for side, team_abbr in [("home_probable_pitcher", home_name),
                                   ("away_probable_pitcher", away_name)]:

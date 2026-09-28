@@ -47,7 +47,7 @@ class _Conn:
             def fetchall(_):
                 if "FROM results_snapshots" in sql:
                     return conn.snaps
-                if "p.settled_at > %s" in sql:
+                if dn._SETTLED_AFTER_SQL in sql:
                     return [("NFL",)] * conn.late_by_date.get(params[0], 0)
                 return []
 
@@ -95,8 +95,23 @@ def test_the_late_query_is_the_recap_universe_plus_settled_after():
     dn.recaps_needing_restatement(conn, through="2026-09-10")
     late_sql, late_params = conn.sql[1]
     assert late_sql.startswith(dn._SETTLED_SQL.format(window="= %s"))
-    assert late_sql.rstrip().endswith("AND p.settled_at > %s")
+    assert late_sql.rstrip().endswith(
+        "AND p.settled_at::timestamptz > %s::timestamptz")
     assert late_params == ("2026-09-09", PUB)
+
+
+def test_late_settlement_compares_instants_not_text():
+    """Night Watch 2026-09: settled_at and published_at are TEXT in mixed
+    offsets (the settler writes ET, void() wrote UTC, recaps publish in ET).
+    As text, a UTC stamp reads up to four hours later than it is: a void at
+    09:30+00:00 (05:30 ET) sorted after a recap published 06:02-04:00 and
+    would have forced a restatement that corrects nothing. Both sides are
+    cast to timestamptz."""
+    pub_et = "2026-09-10T06:02:22-04:00"
+    early_utc = "2026-09-10T09:30:00+00:00"          # 05:30 ET, before the recap
+    assert early_utc > pub_et, "text order says late"
+    assert datetime.fromisoformat(early_utc) < datetime.fromisoformat(pub_et)
+    assert dn._SETTLED_AFTER_SQL == "p.settled_at::timestamptz > %s::timestamptz"
 
 
 # ── the key and the note ─────────────────────────────────────────────────────

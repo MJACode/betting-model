@@ -35,6 +35,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from data.db import get_connection
+from data.mlb_game_id import game_number, mlb_game_id
 
 # MLB Stats API team_id → 3-letter abbreviation (same map used elsewhere)
 _TEAM_IDS: dict[int, str] = {
@@ -86,7 +87,8 @@ def _fetch_umpires_for_date(game_date: str) -> list[dict]:
             if hp_umpire is None:
                 continue  # no HP umpire announced yet — skip
 
-            game_id = f"MLB_{game_date}_{away_abbr}_{home_abbr}"
+            game_id = mlb_game_id(game_date, away_abbr, home_abbr,
+                                  game_number(game))
             results.append({
                 "game_id":       game_id,
                 "game_date":     game_date,

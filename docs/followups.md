@@ -1457,6 +1457,72 @@ all seasons, recompute 2026, re-sweep the thresholds, and stamp it
 
 ## [ ] Doubleheaders collide under one game_id, and their props land on top of each other
 
+**2026-09-25 -- fix in DRAFT PR (branch `coder/mlb-doubleheader-ingest`), not
+merged.** It happened again, and this time it settled a bet wrong: BAL@NYY
+2026-09-25 was a doubleheader, game 1's in-play prices (+3300 NYY, stamped
+`open`) and final landed on `MLB_2026-09-25_BAL_NYY` beside game 2's board, and
+a game-2 BET settled LOSS at 7:12 PM ET on game 1's box score before game 2
+started. The PR:
+- `data/mlb_game_id.py`: one id per physical game. Game 1 and single games keep
+  `MLB_<date>_<away>_<home>`; game 2 is `_G2`. Stats API sites read
+  `gameNumber`; sportsbook feeds (Odds API bulk/per-event/props/live, Action
+  Network, in-play history) match the event's start time to the Stats API
+  schedule. A traditional doubleheader's TBD game 2 placeholder (game 1 + 5
+  min) is pushed to game 1 + 3h before matching. Schedule unavailable = game 1
+  = the old id.
+- MLB odds rows are labelled per snapshot against their own event's start
+  (`snapshot_type_for`), not from the batch.
+- The finals writer keys on game_id (date+teams wrote game 1's final onto the
+  shared row and dropped game 2's), and box scores for game 2 now ingest under
+  `_G2` instead of being skipped as already-done.
+- An INTERIM settlement guard (`paper_tracker._settle_hold_reason`) holds a pick
+  whose game has not started, and on a doubleheader day one whose start does
+  not match the row's, whose row went live >60 min before its start, or that was
+  created after the row's game ended. Held picks stay unsettled and are logged.
+- `data/migrations/scored_outcomes_doubleheader_guard_2026_09_25.sql` (NOT
+  applied, NOT in ACTIVE_MIGRATIONS) applies the same ungrading to
+  `mv_scored_pick_outcomes` for rows already stored under a collapsed id.
+
+NOT done, and needs a decision: the 25 doubleheaders of 2026 already stored as
+one collapsed row each (Stats API gameNumber=2 list, read 2026-09-25; 19 carry
+picks, 1,730 picks, 32 settled BETs) are not repaired, and picks 2899429 /
+2911172 are untouched (Matt deciding). `sbr_loader.py` (historical SBR) and the
+dk_direct / bovada name resolver are unchanged -- the resolver refuses on
+ambiguity, so while both games are unscored those two in-play feeds drop
+BAL@NYY-style rows rather than guess.
+
+**2026-09-28 -- same draft PR, second commit.**
+- The "not started" sweeps in `models/scorer.run_scorer` key on each pick's
+  own `game_time` (and an unscored game): pick 2911172 was deleted at 7:29 PM
+  ET 09-25 because the collapsed row's `commence_time` had been re-stamped to
+  game 2's start while the pick's own game (game 1) had been played.
+- Guard check 5 (pick's start + 30 min > the row's final) and a 120-min
+  first-pitch gap for check 3; postponement finals no longer count as finals.
+- `scripts/dry_run_doubleheader_repair.py`: SELECT-only re-grade of the 32
+  settled BETs against the game each was for. 10 results change, net +2.43u
+  (7 / -2.60u on high-confidence assignments). No repair run; Matt decides.
+- Migration: CIN@CWS 2026-08-13 was a start re-stamp, not a doubleheader; the
+  first-pitch rule is 120 min so its 91 rows stay. 518 rows leave, all on six
+  doubleheaders.
+- Night Watch: `recaps_needing_restatement` compares instants; `void()` writes
+  ET; a pin test keeps voids in `scripts/void_picks.py`.
+- Review (REQUEST CHANGES at 9eb06c3e), same PR:
+  - H1: `MlbEventBatch` assigns a doubleheader's events by start order and
+    records event id -> game_id (`mlb_event_game_map`, migration UNAPPLIED;
+    memory-only until then). An ambiguous lone event, a second event on a
+    claimed game, or two events at one start are DROPPED at ERROR. Single
+    games never touch the map.
+  - H2: a failed schedule read keeps the last good one (retry after 60 s); a
+    cold failure matches existing base/_G2 rows or drops a two-event matchup;
+    settlement holds a matchup with a _G2 row when the schedule is missing.
+  - H3: check 2 compares schedule game numbers on a COLLAPSED row only (no
+    commence_time); a hold older than 2 days is raised once on ops.
+  - M3: `book_team_map.resolve_game_id` picks the LIVE row of a doubleheader
+    and does not cache ambiguous or doubleheader answers.
+  - OPEN: `_game_settle_window_days` still widens for any held pick; a lone
+    game-1 event on a traditional doubleheader is refused until game 2 is
+    listed beside it (placeholder ambiguity).
+
 Found 2026-09-05 while designing the alternate-lines view. 1,546 (game,
 market, player, book) keys since 2026-08-29 carry TWO rows at the same
 `snapshot_at`, DraftKings included (163): `_build_game_id` is

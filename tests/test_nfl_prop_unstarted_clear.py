@@ -73,14 +73,16 @@ def _apply(sql: str, params: tuple, rows: list[tuple]) -> list[tuple]:
             model_id TEXT,
             signal_type TEXT,
             result TEXT,
-            is_live INTEGER
+            is_live INTEGER,
+            game_time TEXT
         )
     """)
     conn.execute("""
         CREATE TABLE games (
             game_id TEXT,
             game_date TEXT,
-            commence_time TEXT
+            commence_time TEXT,
+            home_score INTEGER
         )
     """)
     conn.execute(
@@ -134,7 +136,9 @@ def test_sweep_keeps_unstarted_nfl_prop_nones_and_still_clears_game_nones():
     """The DELETE beside the 6:06 PM log line. A full-board pass has no
     subset and, for a game the loop did not re-score, no rescored exclusion.
     """
-    _assert_split(_apply(_sweep_sql(), (DATE, HORIZON, NOW), _ROWS))
+    # (pick game_time guard, first date, last date, commence_time guard);
+    # these rows have no game_time, which the pick guard lets through.
+    _assert_split(_apply(_sweep_sql(), (NOW, DATE, HORIZON, NOW), _ROWS))
 
 
 def test_per_game_clear_keeps_nfl_prop_rows_on_a_game_the_loop_reaches():

@@ -51,6 +51,7 @@ from loguru import logger
 
 from data.db import get_connection, DBConnection
 from data.ingestors.mlb_stats_ingestor import STATSAPI_TEAM_IDS
+from data.mlb_game_id import game_number, mlb_game_id
 
 _MLB_API_V11 = "https://statsapi.mlb.com/api/v1.1"
 _API_SLEEP_SEC = 0.15
@@ -416,7 +417,7 @@ def _game_id_from_schedule(g: dict, target_date: str) -> Optional[str]:
     home = STATSAPI_TEAM_IDS.get(g["home_id"])
     if not away or not home:
         return None
-    return f"MLB_{target_date}_{away}_{home}"
+    return mlb_game_id(target_date, away, home, game_number(g))
 
 
 def backfill_pbp(start_year: int, end_year: int, force: bool = False) -> dict:
@@ -506,29 +507,35 @@ def backfill_pbp(start_year: int, end_year: int, force: bool = False) -> dict:
 
 # ── Single-game CLI path ──────────────────────────────────────────────────────
 
+def resolve_game_pk(game_id: str, schedule) -> int:
+    """game_id -> MLBAM gamePk, `_G<n>` included: game 2 of a doubleheader is
+    the scheduled game with game_num 2, never simply the first matchup hit.
+    `schedule` is statsapi.schedule (tests pass a stub)."""
+    from data.mlb_game_id import game_number, parse_mlb_game_id
+    parsed = parse_mlb_game_id(game_id)
+    if parsed is None:
+        raise ValueError(f"Unrecognized game_id: {game_id}")
+    target_date, away, home, n = parsed
+    hits = [g for g in schedule(date=target_date, sportId=1)
+            if STATSAPI_TEAM_IDS.get(g["away_id"]) == away
+            and STATSAPI_TEAM_IDS.get(g["home_id"]) == home
+            and game_number(g) == n
+            # A suspended game resumed on target_date is listed on it too,
+            # under its ORIGINAL date (statsapi `game_date` = officialDate).
+            and g.get("game_date", target_date) == target_date]
+    if len(hits) != 1:
+        raise ValueError(f"Could not resolve {game_id} → mlbam_game_pk "
+                         f"({len(hits)} scheduled games match)")
+    return hits[0]["game_id"]
+
+
 def ingest_pbp_for_game_id(game_id: str, force: bool = False) -> int:
     """
     Resolve game_id → mlbam_game_pk via statsapi.schedule, then ingest.
     Used by `--game-id` CLI for spot-checks.
     """
-    parts = game_id.split("_")
-    if len(parts) < 4 or parts[0] != "MLB":
-        raise ValueError(f"Unrecognized game_id: {game_id}")
-    target_date = parts[1]
-    away = parts[2]
-    home = parts[3]
-    season = int(target_date[:4])
-
-    games = statsapi.schedule(date=target_date, sportId=1)
-    mlbam_pk = None
-    for g in games:
-        away_ab = STATSAPI_TEAM_IDS.get(g["away_id"])
-        home_ab = STATSAPI_TEAM_IDS.get(g["home_id"])
-        if away_ab == away and home_ab == home:
-            mlbam_pk = g["game_id"]
-            break
-    if mlbam_pk is None:
-        raise ValueError(f"Could not resolve {game_id} → mlbam_game_pk")
+    mlbam_pk = resolve_game_pk(game_id, statsapi.schedule)
+    season = int(game_id.split("_")[1][:4])
 
     conn = get_connection()
     try:
