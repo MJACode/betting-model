@@ -165,7 +165,7 @@ export function PickCard({
   // Open = unsettled, or a VOID Discord still shows (openForAction) — and,
   // for that VOID, only until the game is over: PickDetail's rule, shared
   // (openForActionNow; Reviewer, #839 post-merge).
-  const open = openForActionNow(pick, gameIsOver(game, liveState));
+  const open = openForActionNow(pick, gameIsOver(game, liveState, pick));
   const canTrack = Boolean(onToggleTrack) && open;
   // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
   const canSlip =

@@ -196,7 +196,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // A VOID Discord still shows is open too (openForAction).
   // A VOID never settles, so its actions switch off when the game ends
   // instead (the board already drops finished games; this screen does not).
-  const over = gameIsOver(game, liveState);
+  const over = gameIsOver(game, liveState, pick);
   const openHere = openForActionNow(pick, over);
   const canTrack = openHere;
   // Line-move alerts only apply to game-level pre-game picks with a DK price

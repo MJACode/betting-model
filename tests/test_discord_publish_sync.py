@@ -257,7 +257,7 @@ if (win !== "won") throw new Error("win " + win);
     assert "case 'not_graded':" in perf
     detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
     assert "openForActionNow(pick, over)" in detail
-    assert "gameIsOver(game, liveState)" in detail
+    assert "gameIsOver(game, liveState, pick)" in detail
     assert "hasPricedLine(pick) && openHere" in detail
 
 
@@ -288,13 +288,28 @@ for (const [result, condition_status, discordPublish, over, want] of cases) {
     lib = (ROOT / "mobile/src/lib/discordPublish.ts").read_text(encoding="utf-8")
     assert "return openForAction(p) && (p.result == null || !over);" in lib
     card = (ROOT / "mobile/src/components/PickCard.tsx").read_text(encoding="utf-8")
-    assert "const open = openForActionNow(pick, gameIsOver(game, liveState));" in card
+    assert "const open = openForActionNow(pick, gameIsOver(game, liveState, pick));" in card
     assert "const canTrack = Boolean(onToggleTrack) && open;" in card
     assert "hasPricedLine(pick) && open &&" in card
     # One definition of "over": neither screen spells the status list itself.
     detail = (ROOT / "mobile/src/screens/PickDetailScreen.tsx").read_text(encoding="utf-8")
     for src in (card, detail):
         assert "['final', 'ended'].includes" not in src
+
+
+@pytest.mark.skipif(
+    not (ROOT / "mobile/node_modules/.bin/tsx").exists(),
+    reason="mobile node modules not installed",
+)
+def test_a_missing_game_row_falls_back_to_the_picks_own_start():
+    """Reviewer, #846: gameIsOver(null) read "not over" forever, so a VOID
+    whose game row never loaded kept its actions on. The pick's game_time and
+    sport stand in (mobile/scripts/verify_game_is_over.ts)."""
+    proc = subprocess.run(
+        [str(ROOT / "mobile/node_modules/.bin/tsx"), "scripts/verify_game_is_over.ts"],
+        cwd=ROOT / "mobile", capture_output=True, text=True, timeout=300,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_the_settled_record_still_excludes_every_void():

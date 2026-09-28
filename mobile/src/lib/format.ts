@@ -511,13 +511,21 @@ export function gameStatus(
 }
 
 /** Is the game over — FINAL, or ENDED with no score yet? The one test every
- *  "switch the actions off once it's done" rule uses (openForActionNow). */
+ *  "switch the actions off once it's done" rule uses (openForActionNow).
+ *  With no game row, or a row with no kickoff, `pick` stands in: its own
+ *  game_time and sport get the same blind window gameStatus gives a row, so a
+ *  missing row no longer reads "not over" forever (Reviewer, #846). */
 export function gameIsOver(
   game: GameLike | null | undefined,
   live?: LiveStateLike | null,
+  pick?: { sport?: string | null; game_time?: string | null } | null,
 ): boolean {
-  const kind = gameStatus(game, live).kind;
-  return kind === 'final' || kind === 'ended';
+  const over = (k: GameStatus['kind']) => k === 'final' || k === 'ended';
+  if (over(gameStatus(game, live).kind)) return true;
+  if (game?.commence_time || !pick?.game_time) return false;
+  return over(gameStatus(
+    { ...game, sport: game?.sport ?? pick.sport, commence_time: pick.game_time }, live,
+  ).kind);
 }
 
 /** "T5" / "B9" — the compact inning chip for a pick card. */
