@@ -281,7 +281,6 @@ def test_no_ionicon_in_bright_green_or_amber():
     "rel",
     [
         "components/SportsbookPickerSheet.tsx",
-        "components/StatGroupSheet.tsx",
         "components/HitModeSheet.tsx",
         "components/StatePickerSheet.tsx",
         "screens/PaywallScreen.tsx",
@@ -292,6 +291,15 @@ def test_selection_is_tint_not_green(rel):
     marks = re.findall(r'name="checkmark-circle" size=\{\d+\} color=\{colors\.(\w+)\}', src)
     assert marks and set(marks) == {"tint"}
     assert not re.search(r"rowActive:\s*\{\s*borderColor: colors\.bet\b", src)
+
+
+def test_group_tabs_selection_is_tint_not_green():
+    # StatGroupSheet is gone (#830); GroupTabs, the position row that replaced
+    # it, carries the selection.
+    src = _read(SRC / "components" / "GroupTabs.tsx")
+    assert re.search(r"tabActive: \{\s*borderBottomColor: colors\.tint,", src)
+    assert re.search(r"textActive: \{\s*color: colors\.tint,", src)
+    assert not re.search(r"colors\.bet\b", src)
 
 
 def test_equity_total_share_text_and_no_picks_rows():
