@@ -74,9 +74,11 @@ function LinkRow({
     <Pressable
       style={({ pressed }) => [styles.linkCard, pressed && styles.pressed]}
       onPress={onPress}
+      // Role only, NO accessibilityLabel: a label REPLACES what VoiceOver reads
+      // from the children, and five rows carry their status in `right` (Not
+      // signed in, Active, the connected books, Connected, "2 new replies").
+      // Left to the children, VoiceOver reads label, status and sub in order.
       accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityHint={sub}
     >
       <View style={{ flex: 1 }}>
         {right ? (
@@ -464,7 +466,9 @@ export function SettingsScreen() {
         <Pressable
           onPress={() => openLink(WEBSITE_URL, 'the website')}
           accessibilityRole="link"
-          accessibilityLabel={`Signalbase version ${APP_VERSION}. Open ${websiteLabel}`}
+          accessibilityLabel={`Signalbase version ${APP_VERSION}, build ${BUILD_STAMP}, ${websiteLabel}`}
+          accessibilityHint="Opens the website"
+          hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>
@@ -648,7 +652,7 @@ const styles = StyleSheet.create({
   },
   signOutBtn: {
     marginTop: spacing.md,
-    height: 40,
+    minHeight: 44,
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',

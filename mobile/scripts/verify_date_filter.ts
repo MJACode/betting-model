@@ -119,15 +119,24 @@ check('a paused pick goes to the end of ITS OWN day, not after every day',
   shape === '[Today] live tonight pausedToday [Sat 11/28] sat', shape);
 const oneDay = rowsByDay([timeSorted[0]!, timeSorted[2]!], (p) => p.date, (p) => p.id, () => false, TODAY);
 check('a single-day board gets no header', oneDay.every((r) => r.kind === 'item') && oneDay.length === 2);
+check('day headers carry the spoken form', rows[0]!.kind === 'day' && rows[0]!.spoken === 'Today' && rows.some((r) => r.kind === 'day' && r.spoken === 'Saturday, November 28'));
+const tbd = rowsByDay([{ id: 'x', date: null }, { id: 'y', date: TODAY }] as P[], (p) => p.date, (p) => p.id, () => false, TODAY);
+check('a dateless row sorts after the dated days', tbd[0]!.kind === 'day' && (tbd[0] as { label: string }).label === 'Today', JSON.stringify(tbd.map((r) => r.key)));
+const title = read('src/components/SectionTitle.tsx');
+check('section titles are headings for VoiceOver', /accessibilityRole="header"/.test(title));
+check('the first day header sits at the list top', /index === 0 \? styles\.firstDayHeader/.test(screen));
 check('row keys are unique', new Set(rows.map((r) => r.key)).size === rows.length);
 check('the Picks list is grouped only under Time sort',
   /sortKey === 'time'\s*\?\s*rowsByDay\(/.test(screen) && /data=\{rows\}/.test(screen));
-check('a day header renders as the app\'s section title', /row\.kind === 'day'\) return <SectionTitle/.test(screen));
+check('a day header renders as the app\'s section title', /row\.kind === 'day'\)[\s\S]{0,300}<SectionTitle\s+title=\{row\.label\}\s+accessibilityLabel=\{row\.spoken\}/.test(screen));
 
 // 6. The PR #840 scan items.
 const settings = read('src/screens/SettingsScreen.tsx');
 const detail = read('src/screens/PickDetailScreen.tsx');
-check('Settings link rows announce as buttons', /styles\.linkCard[\s\S]{0,120}accessibilityRole="button"/.test(settings));
+const linkRow = settings.slice(settings.indexOf('function LinkRow'), settings.indexOf('export function SettingsScreen'));
+check('Settings link rows announce as buttons', /accessibilityRole="button"/.test(linkRow));
+check('and keep their status pill audible (no label overriding the children)', !/accessibilityLabel=/.test(linkRow) && !/accessibilityHint=/.test(linkRow));
+check('Sign out meets the 44pt target', /signOutBtn: \{[\s\S]{0,60}minHeight: 44/.test(settings));
 check('Sign out announces as a button', /onPress=\{confirmSignOut\}\s*accessibilityRole="button"/.test(settings));
 check('the version line announces as a link', /openLink\(WEBSITE_URL, 'the website'\)\}\s*accessibilityRole="link"/.test(settings));
 check('the preview badge uses the type scale', /previewBadgeText: \{\s*fontSize: font\.size\.caption/.test(detail));

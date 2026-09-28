@@ -104,7 +104,7 @@ export function dateFilterSummary(selected: Set<string>, options: DateOption[]):
 
 /** One row of the Picks list: a pick, or the header that opens a day. */
 export type DayRow<T> =
-  | { kind: 'day'; key: string; date: string; label: string }
+  | { kind: 'day'; key: string; date: string; label: string; spoken: string }
   | { kind: 'item'; key: string; item: T };
 
 /**
@@ -135,7 +135,11 @@ export function rowsByDay<T>(
     if (!g) byDay.set(d, (g = { lead: [], tail: [] }));
     (trailing(it) ? g.tail : g.lead).push(it);
   }
-  const days = Array.from(byDay.keys()).sort();
+  // A row with no date (should not exist — game_date is NOT NULL) goes LAST,
+  // never above TODAY.
+  const days = Array.from(byDay.keys()).sort((a, b) =>
+    a === b ? 0 : a === '' ? 1 : b === '' ? -1 : a < b ? -1 : 1,
+  );
   const withHeaders = days.length > 1;
   const out: DayRow<T>[] = [];
   for (const d of days) {
@@ -146,6 +150,7 @@ export function rowsByDay<T>(
         key: `day:${d}`,
         date: d,
         label: d ? dayLabelET(d, today) : 'Date TBD',
+        spoken: d ? dayLabelSpokenET(d, today) : 'Date to be decided',
       });
     }
     for (const it of [...g.lead, ...g.tail]) out.push({ kind: 'item', key: keyOf(it), item: it });

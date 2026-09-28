@@ -678,8 +678,18 @@ export function PicksHomeScreen() {
       <FlatList
         data={rows}
         keyExtractor={(row) => row.key}
-        renderItem={({ item: row }) => {
-          if (row.kind === 'day') return <SectionTitle title={row.label} />;
+        renderItem={({ item: row, index }) => {
+          if (row.kind === 'day') {
+            // The first header sits where the first card would (the list's
+            // own paddingTop), so switching to Time does not drop the board.
+            return (
+              <SectionTitle
+                title={row.label}
+                accessibilityLabel={row.spoken}
+                style={index === 0 ? styles.firstDayHeader : undefined}
+              />
+            );
+          }
           const item = row.item;
           return (
             <PickCard
@@ -942,6 +952,7 @@ const styles = StyleSheet.create({
   subTabTextActive: {
     color: colors.tint,
   },
+  firstDayHeader: { marginTop: 0 },
   list: {
     paddingTop: spacing.sm,
     paddingBottom: spacing.xl,

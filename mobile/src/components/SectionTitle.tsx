@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { colors, font, spacing } from '@/lib/theme';
 
@@ -13,13 +13,22 @@ import { colors, font, spacing } from '@/lib/theme';
 export function SectionTitle({
   title,
   tooltip,
+  accessibilityLabel,
+  style,
 }: {
   title: string;
   tooltip?: { title: string; body: string };
+  /** What VoiceOver says, when the printed title abbreviates ("SAT 11/28"). */
+  accessibilityLabel?: string;
+  /** Merged onto the row — e.g. no top margin for the first title in a list. */
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.row}>
-      <Text style={styles.title}>{title.toUpperCase()}</Text>
+    <View style={[styles.row, style]}>
+      {/* A heading, so the VoiceOver Headings rotor can jump between them. */}
+      <Text style={styles.title} accessibilityRole="header" accessibilityLabel={accessibilityLabel ?? title}>
+        {title.toUpperCase()}
+      </Text>
       {tooltip ? (
         <InfoTooltip title={tooltip.title} body={tooltip.body} accessibilityLabel={`About ${title}`} />
       ) : null}
