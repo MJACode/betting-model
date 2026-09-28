@@ -43,6 +43,8 @@ export const LIVE_IDLE_POLL_MS = 120_000;
 export type LivePicksState = {
   data: EnrichedPick[];
   loading: boolean;
+  /** At least one fetch has SUCCEEDED; until then counts read "—", not 0. */
+  loaded: boolean;
   error: string | null;
   /**
    * The picks loaded but DraftKings' in-play prices did not, so no card has a
@@ -61,6 +63,7 @@ function useLivePicksCore(pollMs: number) {
   const [data, setData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [pricesUnavailable, setPricesUnavailable] = useState(false);
   // The slate window is RECOMPUTED per fetch, never captured. It used to be a
   // single ET date held in useState, which was wrong twice over: an app left
@@ -88,6 +91,7 @@ function useLivePicksCore(pollMs: number) {
       const picks = await fetchLivePicks(target, enrichment.onError);
       setData(picks);
       setPricesUnavailable(enrichment.missed);
+      setLoaded(true);
     } catch (e) {
       // errorText, not err.message: raw Postgres ("canceling statement due to
       // statement timeout") is not a sentence to hand a bettor, and this string
@@ -117,7 +121,7 @@ function useLivePicksCore(pollMs: number) {
     [],
   );
 
-  return { data, loading, error, pricesUnavailable, refresh, date: dates[0]!, dates, startPolling };
+  return { data, loading, loaded, error, pricesUnavailable, refresh, date: dates[0]!, dates, startPolling };
 }
 
 /**

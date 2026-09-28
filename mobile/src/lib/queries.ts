@@ -2,6 +2,7 @@ import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
+import { isNotFoundError } from './errors';
 import {
   LOG_COLUMNS,
   LOG_TABLE,
@@ -1578,8 +1579,12 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
     .from('picks')
     .select(PICK_COLUMNS)
     .eq('pick_id', pickId)
-    .single();
-  if (error) throw error;
+    // maybeSingle: a pick_id with no row is "not found" (null), which
+    // PickDetail answers with "Open Picks". The exactly-one-row read turned it
+    // into a 406 PGRST116 and a Retry that could never succeed (L11, Designer
+    // #845).
+    .maybeSingle();
+  if (error && !isNotFoundError(error)) throw error;
   if (!data) return null;
   const [pick] = await attachDiscordPublish([data as Pick]);
   const market = gameMarketForModel(pick.model_id);

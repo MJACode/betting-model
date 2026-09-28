@@ -63,7 +63,13 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorBanner, ErrorState } from '@/components/ErrorState';
-import { knownCount, loadPresentation, showLivePricesBanner } from '@/lib/loadState';
+import {
+  knownCount,
+  loadPresentation,
+  showLivePricesBanner,
+  sportChipsAvailable,
+  todayHeaderCounts,
+} from '@/lib/loadState';
 import { Skeleton, SkeletonBlock } from '@/components/Skeleton';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SectionTitle } from '@/components/SectionTitle';
@@ -132,7 +138,7 @@ const PICKS_REASSURANCE = 'Nothing is wrong with your picks.';
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<RouteProp<TabParamList, 'Picks'>>();
-  const { data: allData, pausedData, loading, error, partial, refresh, date } = useTodayPicks();
+  const { data: allData, pausedData, loading, loaded, error, partial, refresh, date } = useTodayPicks();
   const { sport } = useSportFilter();
   const tracked = useTrackedBets();
   const slip = useParlaySlip();
@@ -148,6 +154,7 @@ export function PicksHomeScreen() {
   const {
     data: allLiveData,
     loading: liveLoading,
+    loaded: liveLoaded,
     error: liveError,
     pricesUnavailable: livePricesUnavailable,
     refresh: refreshLive,
@@ -522,9 +529,13 @@ export function PicksHomeScreen() {
       error: viewError,
       hasData: view === 'live' ? liveData.length > 0 : activeItems.length > 0,
     }).body === 'error';
-  // Counts that were never loaded are unknown, not zero ("—", PATTERNS §F5).
-  const todayUnknown = knownCount(0, { error, hasData: allData.length > 0 }) === null;
-  const liveUnknown = knownCount(0, { error: liveError, hasData: allLiveData.length > 0 }) === null;
+  // Counts that were never loaded are unknown, not zero ("—", PATTERNS §F5):
+  // a failed first load, and also everything BEFORE the first successful one
+  // (loading or slow). "0 bets · 0 scored" and "(0)" on a cold start claimed
+  // an empty board nobody had read yet (Designer #845).
+  const todayUnknown =
+    knownCount(0, { loaded, error, hasData: allData.length > 0 || pausedData.length > 0 }) === null;
+  const liveUnknown = knownCount(0, { loaded: liveLoaded, error: liveError, hasData: allLiveData.length > 0 }) === null;
   // Pull-to-refresh still has to spin, and it cannot read `busy` any more for the
   // same reason. Local, because the hook cannot tell a poll from a pull.
   const [pulling, setPulling] = useState(false);
@@ -532,11 +543,9 @@ export function PicksHomeScreen() {
   const subtitle = failed
     ? view === 'live'
       ? 'Live signals unavailable'
-      : `${date} · — bets · — scored`
+      : todayHeaderCounts({ date, known: false, ...todayStats })
     : view === 'today'
-      ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored${
-          todayStats.paused > 0 ? ` · ${todayStats.paused} paused` : ''
-        }`
+      ? todayHeaderCounts({ date, known: !todayUnknown, ...todayStats })
       // NO DATE on the live board, and that is not a tidy-up. The board can now
       // hold a game that kicked off before midnight ET, which the whole system
       // files under YESTERDAY -- Discord posted it under that date, the track
@@ -548,8 +557,11 @@ export function PicksHomeScreen() {
       // Apple Sports and FotMob both replace the date with the clock in play).
       : view === 'live'
         ? // An always-on board is read when it is empty too, so the header says
-          // so in words rather than handing back "0 in play".
-          liveData.length === 0
+          // so in words rather than handing back "0 in play". Not before the
+          // first fetch has answered, though: that is unknown, not empty.
+          liveUnknown
+          ? '— in play'
+          : liveData.length === 0
           ? 'No live signals right now'
           : `${liveData.length} in play${stakedSuffix}`
         // "PRE-GAME signals". Signals and Live Signals are disjoint sets —
@@ -560,7 +572,7 @@ export function PicksHomeScreen() {
         // 2026-09-12). "signals", not "live", for the older reason: with a
         // segment labelled Live on the same control, "3 live" meant two different
         // things one line apart.
-        : `${date} · ${live.length} pre-game signals${stakedSuffix}`;
+        : `${date} · ${todayUnknown ? '—' : live.length} pre-game signals${stakedSuffix}`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -584,8 +596,11 @@ export function PicksHomeScreen() {
           </View>
         </View>
         <Text style={styles.subtitle}>{subtitle}</Text>
+        {/* Neutral chips until today's board (and the live one) is known: built
+            from empty data, every chip read muted and "no picks today" after a
+            failure or before the first load (Designer #845). */}
         <SportToggle
-          available={availableSports}
+          available={sportChipsAvailable(availableSports, !todayUnknown && !liveUnknown)}
           signalCounts={sportSignalCounts}
           liveSports={liveSports}
         />
@@ -698,6 +713,7 @@ export function PicksHomeScreen() {
           accessibilityRole="button"
           accessibilityLabel="Live prices unavailable. Cards show the locked price only."
           accessibilityHint="Reloads live prices"
+          accessibilityLiveRegion="polite"
           style={({ pressed }) => [styles.partialBanner, pressed && styles.partialPressed]}
         >
           <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
