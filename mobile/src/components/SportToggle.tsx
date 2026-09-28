@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
+import { sportChipState } from '@/lib/loadState';
 
 /**
  * Global sport selector. Drives the shared sport filter so every board shows one
@@ -16,6 +17,9 @@ import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
  * `available` mutes sports with nothing on the board — they stay tappable (this
  * is the app-wide selector, and a user switching sports expects the empty state
  * to explain itself) but read as secondary so the eye lands on live sports.
+ * Pass undefined while the board is unknown (loading, slow, failed): every chip
+ * is then neutral and none says "no picks today" (lib/loadState
+ * sportChipsAvailable / sportChipState, Designer #845).
  *
  * `signalCounts` badges each sport with how many picks have cleared the bet
  * line there. Because the boards show ONE sport at a time, a user parked on
@@ -62,9 +66,9 @@ export function SportToggle({
       <View style={styles.wrap}>
         {SPORTS.map((s: Sport) => {
           const active = s === sport;
-          const muted = available != null && !available.has(s) && !active;
           const count = signalCounts?.[s] ?? 0;
           const isLive = liveSports?.has(s) ?? false;
+          const { muted, label } = sportChipState({ sport: s, active, available, count, live: isLive });
           return (
             <Pressable
               key={s}
@@ -80,14 +84,7 @@ export function SportToggle({
               hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={[
-                s,
-                count > 0 ? `${count} signal${count === 1 ? '' : 's'}` : null,
-                isLive ? 'in play now' : null,
-                count === 0 && !isLive && muted ? 'no picks today' : null,
-              ]
-                .filter(Boolean)
-                .join(', ')}
+              accessibilityLabel={label}
               style={({ pressed }) => [
                 styles.segment,
                 active && styles.segmentActive,

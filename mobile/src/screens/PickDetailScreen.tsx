@@ -55,7 +55,8 @@ import {
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
-import { errorText, isAbortError } from '@/lib/errors';
+import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
+import { detailPresentation } from '@/lib/loadState';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 
@@ -85,7 +86,10 @@ export function PickDetailScreen() {
         if (mounted) setData(row);
       })
       .catch((e: unknown) => {
-        if (mounted && !isAbortError(e)) setError(errorText(e));
+        if (!mounted) return;
+        // A row that isn't there is not-found, never a Retry that can't work.
+        if (isNotFoundError(e)) setData(null);
+        else if (!isAbortError(e)) setError(errorText(e));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -95,7 +99,11 @@ export function PickDetailScreen() {
     };
   }, [pickId, attempt]);
 
-  if (loading) {
+  // lib/loadState decides (and the verify script and the pytest RUN it): a
+  // missing pick_id is 'notFound' → "Open Picks", not "Couldn’t load" (L11).
+  const body = detailPresentation({ loading, error, found: data != null });
+
+  if (body === 'loading') {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <ActivityIndicator style={styles.loading} />
@@ -103,7 +111,7 @@ export function PickDetailScreen() {
     );
   }
 
-  if (error) {
+  if (body === 'error') {
     // A failed FETCH is worth retrying, and says why in plain words: the raw
     // Supabase text never reaches the screen, and "check your connection" is
     // only said when the phone is actually offline (usability audit M1).
@@ -120,7 +128,7 @@ export function PickDetailScreen() {
     );
   }
 
-  if (!data) {
+  if (body === 'notFound' || !data) {
     // Genuinely gone: never worth retrying, so the one action is the board
     // (usability audit L11: the copy said "Open Picks" with nothing to tap).
     return (

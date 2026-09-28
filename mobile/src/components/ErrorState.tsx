@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorAnnouncement, friendlyError, isAbortError, type FriendlyError } from '@/lib/errors';
+import { repeatFailureAnnounce } from '@/lib/loadState';
 
 /**
  * PATTERNS §E3, built from the Stats "Couldn’t load players / Retry" pattern
@@ -40,23 +41,63 @@ interface Props {
   reassurance?: string;
 }
 
-function useAnnounceAndLog(copy: FriendlyError, error: unknown, silent: boolean, reassurance?: string) {
+/**
+ * Announce once per distinct failure, not on every parent render — and once
+ * more when a Retry the user pressed settles on the SAME failure (Designer
+ * #845 a): nothing the first effect keys on changes then, so without the
+ * settled retry attempt as a second key VoiceOver heard nothing and the Retry
+ * seemed dead. Returns the press marker for the Retry button.
+ */
+function useAnnounceAndLog(
+  copy: FriendlyError,
+  error: unknown,
+  silent: boolean,
+  retrying: boolean | undefined,
+  reassurance?: string,
+): () => void {
+  const key = `${copy.title}|${copy.kind}|${reassurance ?? ''}`;
+  const lastKey = useRef<string | null>(null);
+  const pressed = useRef(false);
+  const wasRetrying = useRef(Boolean(retrying));
+  const announce = () => {
+    AccessibilityInfo.announceForAccessibility(errorAnnouncement(copy, reassurance));
+    lastKey.current = key;
+  };
+  // Declared FIRST so it compares against the copy read out BEFORE this
+  // commit: a retry that settles on a different failure is the effect below's
+  // job, and is read out once, not twice.
+  useEffect(() => {
+    const now = Boolean(retrying);
+    if (!silent && repeatFailureAnnounce({ pressed: pressed.current, wasRetrying: wasRetrying.current, retrying: now, key, lastKey: lastKey.current })) {
+      pressed.current = false;
+      announce();
+    }
+    if (wasRetrying.current && !now) pressed.current = false;
+    wasRetrying.current = now;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retrying]);
   useEffect(() => {
     if (silent) return;
-    AccessibilityInfo.announceForAccessibility(errorAnnouncement(copy, reassurance));
+    announce();
     if (__DEV__) console.warn(`[load error] ${copy.title}:`, error);
-    // Announce once per distinct failure, not on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [copy.title, copy.kind, silent, reassurance]);
+  return () => {
+    pressed.current = true;
+  };
 }
 
 export function ErrorState({ what, error, onRetry, retrying, compact, style, reassurance }: Props & { compact?: boolean }) {
   const copy = friendlyError(error, what);
   const silent = isAbortError(error);
-  useAnnounceAndLog(copy, error, silent, reassurance);
+  const markRetry = useAnnounceAndLog(copy, error, silent, retrying, reassurance);
   if (silent) return null;
   return (
-    <View style={[styles.state, compact && styles.stateCompact, style]} accessibilityRole="alert">
+    <View
+      style={[styles.state, compact && styles.stateCompact, style]}
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+    >
       <Ionicons
         name={copy.kind === 'offline' ? 'cloud-offline-outline' : 'alert-circle-outline'}
         size={28}
@@ -69,7 +110,10 @@ export function ErrorState({ what, error, onRetry, retrying, compact, style, rea
       <Text style={styles.stateCause}>{copy.cause}</Text>
       {reassurance ? <Text style={styles.stateCause}>{reassurance}</Text> : null}
       <Pressable
-        onPress={onRetry}
+        onPress={() => {
+          markRetry();
+          onRetry();
+        }}
         disabled={retrying}
         accessibilityRole="button"
         accessibilityLabel={`Retry loading ${what}`}
@@ -86,10 +130,10 @@ export function ErrorState({ what, error, onRetry, retrying, compact, style, rea
 export function ErrorBanner({ what, error, onRetry, retrying, style, reassurance }: Props) {
   const copy = friendlyError(error, what);
   const silent = isAbortError(error);
-  useAnnounceAndLog(copy, error, silent, reassurance);
+  const markRetry = useAnnounceAndLog(copy, error, silent, retrying, reassurance);
   if (silent) return null;
   return (
-    <View style={[styles.banner, style]} accessibilityRole="alert">
+    <View style={[styles.banner, style]} accessibilityRole="alert" accessibilityLiveRegion="polite">
       <Ionicons
         name={copy.kind === 'offline' ? 'cloud-offline-outline' : 'alert-circle-outline'}
         size={16}
@@ -104,7 +148,10 @@ export function ErrorBanner({ what, error, onRetry, retrying, style, reassurance
         {reassurance ? <Text style={styles.bannerCause}>{reassurance}</Text> : null}
       </View>
       <Pressable
-        onPress={onRetry}
+        onPress={() => {
+          markRetry();
+          onRetry();
+        }}
         disabled={retrying}
         hitSlop={{ left: 8, right: 8 }}
         accessibilityRole="button"

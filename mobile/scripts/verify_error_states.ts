@@ -22,19 +22,37 @@
  *   - lib/loadState: ErrorState vs ErrorBanner, "—" on a failed count, the
  *     Models Custom-tab failure, and the live-prices banner (pricesUnavailable);
  *   - errorAnnouncement reads the Designer's reassurance line after the cause.
+ *
+ * Designer review fixes (#845, at 1cfc1652, re-verified on f815347b):
+ *   - L11: fetchPickById reads with .maybeSingle(); a missing pick (null, or a
+ *     PGRST116 that still arrives) is PickDetail's not-found / "Open Picks"
+ *     state, never an ErrorState whose Retry can't succeed;
+ *   - no fake zeros: counts are "—" until the FIRST SUCCESSFUL load (loading,
+ *     slow and failed first loads alike), then real — a successful empty load
+ *     is a real 0;
+ *   - sport chips are neutral while the board is unknown: nothing muted, no
+ *     "no picks today";
+ *   - a repeat identical failure after a pressed Retry is announced again;
+ *     ErrorState, ErrorBanner and the M2 banner are polite live regions.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { errorAnnouncement, errorKind, friendlyCause, friendlyError, isAbortError } from '../src/lib/errors';
+import { errorAnnouncement, errorKind, friendlyCause, friendlyError, isAbortError, isNotFoundError } from '../src/lib/errors';
 import {
   countLabel,
+  countsKnown,
+  detailPresentation,
   enrichmentTracker,
   errorSurface,
   knownCount,
   loadPresentation,
+  repeatFailureAnnounce,
   showLivePricesBanner,
+  sportChipState,
+  sportChipsAvailable,
+  todayHeaderCounts,
 } from '../src/lib/loadState';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -124,9 +142,9 @@ check('Models Custom: a failed first load is a BANNER, never silence (MEDIUM 1)'
 check('Models Custom: a failed refresh is a banner too', errorSurface({ ...failedCold, hasData: true }, false) === 'banner');
 check('Models: no error → no surface on either tab', errorSurface({ ...failedCold, error: null }, false) === 'none' && errorSurface({ ...failedCold, error: null }, true) === 'none');
 check('Models Custom: an abort is silent', errorSurface({ ...failedCold, error: abort }, false) === 'none');
-check('"—" when the count never loaded', countLabel(knownCount(0, { error: 'x', hasData: false })) === '—');
-check('a real zero stays 0', countLabel(knownCount(0, { error: null, hasData: false })) === '0');
-check('rows on screen keep their count through a failed refresh', countLabel(knownCount(7, { error: 'x', hasData: true })) === '7');
+check('"—" when the count never loaded', countLabel(knownCount(0, { loaded: false, error: 'x', hasData: false })) === '—');
+check('a real zero stays 0 (a successful empty load)', countLabel(knownCount(0, { loaded: true, error: null, hasData: false })) === '0');
+check('rows on screen keep their count through a failed refresh', countLabel(knownCount(7, { loaded: true, error: 'x', hasData: true })) === '7');
 const live = { view: 'live', liveError: null, pricesUnavailable: true, liveCount: 3 };
 check('M2: prices-unavailable banner over live rows', showLivePricesBanner(live));
 check('M2: not on another view', !showLivePricesBanner({ ...live, view: 'today' }));
@@ -140,6 +158,69 @@ check('M2: one failed live-price read → pricesUnavailable true', t1.missed ===
 const t2 = enrichmentTracker();
 t2.onError('live odds', abort);
 check('M2: an aborted read is not a miss', t2.missed === false);
+
+// ── Designer review fixes (#845) — RUN, not scanned ─────────────────────────
+// L11: not-found is an answer, not a failure.
+check('L11: PGRST116 (object) is not-found', isNotFoundError({ code: 'PGRST116', message: 'JSON object requested, multiple (or no) rows returned' }));
+check('L11: PGRST116 kept as errorText string is not-found', isNotFoundError('JSON object requested, multiple (or no) rows returned (PGRST116)'));
+check('L11: a timeout / offline / null is NOT not-found',
+  [{ code: '57014', message: 'statement timeout' }, 'Failed to fetch', null, '', { code: 'PGRST301' }].every((e) => !isNotFoundError(e)));
+const D = (loading: boolean, error: unknown, found: boolean) => detailPresentation({ loading, error, found });
+check('L11: a missing pick (no row, no error) → notFound ("Open Picks")', D(false, null, false) === 'notFound');
+check('L11: a PGRST116 that still arrives → notFound, not the ErrorState', D(false, { code: 'PGRST116' }, false) === 'notFound' && D(false, 'x (PGRST116)', false) === 'notFound');
+check('L11: a real failure → ErrorState (Retry)', D(false, 'Failed to fetch', false) === 'error');
+check('L11: loading → spinner; a row → content', D(true, null, false) === 'loading' && D(false, null, true) === 'content');
+check('L11: an abort is not an ErrorState', D(false, abort, false) === 'notFound' || D(false, abort, false) === 'content');
+const queries = read('src/lib/queries.ts');
+const fetchPickById = queries.match(/export async function fetchPickById[\s\S]*?\n}\n/)?.[0] ?? '';
+export function singleRowRead(fn: string): boolean {
+  return /\.maybeSingle\(\)/.test(fn) && !/\.single\(\)/.test(fn);
+}
+check('probe: the .single() pin catches a revert', !singleRowRead(fetchPickById.replace('.maybeSingle()', '.single()')));
+check('L11: fetchPickById reads with .maybeSingle(), never .single()', fetchPickById.length > 0 && singleRowRead(fetchPickById), fetchPickById.slice(0, 80));
+check('L11: fetchPickById lets not-found through as null', /if \(error && !isNotFoundError\(error\)\) throw error;\s*if \(!data\) return null;/.test(fetchPickById));
+check('L11: no detail read in queries.ts uses .single() (0 rows would be a 406)', !/\.single\(\)/.test(queries));
+const pdSrc = read('src/screens/PickDetailScreen.tsx');
+check('L11: PickDetail branches on detailPresentation', /detailPresentation\(\{ loading, error, found: data != null \}\)/.test(pdSrc)
+  && /body === 'error'/.test(pdSrc) && /body === 'notFound'/.test(pdSrc));
+check('L11: PickDetail maps a caught PGRST116 to not-found', /if \(isNotFoundError\(e\)\) setData\(null\);/.test(pdSrc));
+
+// No fake zeros: unknown until the first SUCCESSFUL load.
+const K = (loaded: boolean, error: unknown, hasData: boolean) => countsKnown({ loaded, error, hasData });
+check('zeros: first load in flight (or slow) → unknown, not 0', !K(false, null, false) && countLabel(knownCount(0, { loaded: false, error: null, hasData: false })) === '—');
+check('zeros: failed first load → unknown', !K(false, 'Failed to fetch', false));
+check('zeros: aborted first load (no error kept, never loaded) → unknown', !K(false, null, false));
+check('zeros: a successful empty load → a real 0', K(true, null, false));
+check('zeros: a refresh after a successful load stays known (no flicker to —)', K(true, null, false));
+check('zeros: a failed refresh with nothing on screen → unknown', !K(true, 'x', false));
+check('zeros: rows on screen → known', K(false, null, true) && K(true, 'x', true));
+check('header: "—" bets / scored until known',
+  todayHeaderCounts({ date: 'Sep 28', known: false, bet: 0, total: 0, paused: 0 }) === 'Sep 28 · — bets · — scored');
+check('header: real counts once known',
+  todayHeaderCounts({ date: 'Sep 28', known: true, bet: 0, total: 0, paused: 0 }) === 'Sep 28 · 0 bets · 0 scored'
+  && todayHeaderCounts({ date: 'Sep 28', known: true, bet: 3, total: 12, paused: 2 }) === 'Sep 28 · 3 bets · 12 scored · 2 paused');
+
+// Sport chips: neutral while unknown.
+const empty = new Set<string>();
+const unknownChips = sportChipsAvailable(empty, false);
+check('chips: unknown board → no availability set (neutral)', unknownChips === undefined);
+const nfl = sportChipState({ sport: 'NFL', active: false, available: unknownChips, count: 0, live: false });
+check('chips: unknown → NFL not muted, no "no picks today"', !nfl.muted && nfl.label === 'NFL', nfl.label);
+const known = sportChipState({ sport: 'NFL', active: false, available: sportChipsAvailable(empty, true), count: 0, live: false });
+check('chips: known and empty → muted, "NFL, no picks today"', known.muted && known.label === 'NFL, no picks today', known.label);
+check('chips: a sport with picks is never muted',
+  !sportChipState({ sport: 'MLB', active: false, available: new Set(['MLB']), count: 2, live: true }).muted
+  && sportChipState({ sport: 'MLB', active: false, available: new Set(['MLB']), count: 2, live: true }).label === 'MLB, 2 signals, in play now');
+check('chips: the active sport is never muted', !sportChipState({ sport: 'NFL', active: true, available: empty, count: 0, live: false }).muted);
+
+// (a) A repeat identical failure after a pressed Retry is announced again.
+const R = (o: Partial<Parameters<typeof repeatFailureAnnounce>[0]>) =>
+  repeatFailureAnnounce({ pressed: true, wasRetrying: true, retrying: false, key: 'k', lastKey: 'k', ...o });
+check('a11y: pressed Retry settles on the SAME failure → announce again', R({}));
+check('a11y: a background poll (no press) stays quiet', !R({ pressed: false }));
+check('a11y: still retrying → not yet', !R({ retrying: true }));
+check('a11y: a DIFFERENT failure is the title/kind effect’s (announced once, not twice)', !R({ key: 'other' }));
+check('a11y: nothing announced before → not a repeat', !R({ lastKey: null }));
 
 // ── Designer: the reassurance line (PicksHome only) ─────────────────────────
 const copy = friendlyError('Failed to fetch', 'today’s MLB picks');
@@ -252,6 +333,25 @@ check('failure toasts / alerts skip aborts too',
   && /if \(cancelled \|\| isAbortError\(e\)\) return;\s*setPropLines/.test(read('src/screens/StatsScreen.tsx'))
   && /if \(!isAbortError\(e\)\) Alert\.alert\('Couldn’t start linking'/.test(read('src/screens/ConnectSportsbookScreen.tsx')));
 const pd = read('src/screens/PickDetailScreen.tsx');
+// Designer review fixes: wiring for the behaviour pinned above.
+check('zeros: useTodayPicks / useLivePicks expose `loaded`, set only on success',
+  /setLoaded\(true\);\s*\} catch/.test(read('src/hooks/useTodayPicks.ts')) && /setLoaded\(true\);\s*\} catch/.test(read('src/hooks/useLivePicks.ts')));
+check('zeros: PicksHome feeds `loaded` into both unknown flags',
+  /knownCount\(0, \{ loaded, error,/.test(home) && /knownCount\(0, \{ loaded: liveLoaded, error: liveError,/.test(home));
+check('zeros: the All header comes from todayHeaderCounts(known: !todayUnknown)', /todayHeaderCounts\(\{ date, known: !todayUnknown, \.\.\.todayStats \}\)/.test(home));
+check('zeros: tabs read (—) while unknown', /count=\{todayUnknown \? null : todayStats\.total\}/.test(home)
+  && /count=\{todayUnknown \? null : live\.length\}/.test(home) && /count=\{liveUnknown \? null : liveData\.length\}/.test(home));
+check('zeros: Signals and Live headers do not print 0 while unknown',
+  /\$\{todayUnknown \? '—' : live\.length\} pre-game signals/.test(home) && /liveUnknown\s*\? '— in play'/.test(home));
+check('chips: PicksHome passes sportChipsAvailable(availableSports, known)',
+  /available=\{sportChipsAvailable\(availableSports, !todayUnknown && !liveUnknown\)\}/.test(home) && !/available=\{availableSports\}/.test(home));
+const toggle = read('src/components/SportToggle.tsx');
+check('chips: SportToggle takes muted + label from sportChipState', /sportChipState\(\{/.test(toggle) && /accessibilityLabel=\{label\}/.test(toggle) && !/'no picks today'/.test(toggle));
+check('a11y: ErrorState/ErrorBanner re-announce via repeatFailureAnnounce, keyed on the pressed Retry',
+  /repeatFailureAnnounce\(\{ pressed: pressed\.current/.test(es) && (es.match(/markRetry\(\);\s*onRetry\(\);/g) ?? []).length === 2);
+check('a11y: ErrorState, ErrorBanner are polite live regions', (es.match(/accessibilityLiveRegion="polite"/g) ?? []).length === 2);
+check('a11y: the M2 live-prices banner is a polite live region',
+  /accessibilityHint="Reloads live prices"\s*accessibilityLiveRegion="polite"/.test(home));
 check('PickDetail: no dead retrying={loading} under the early-return spinner', !/retrying=\{loading\}/.test(pd));
 check('TeamsBoard: its ErrorBanner passes retrying', /retrying=\{loading\}/.test(read('src/components/TeamsBoard.tsx').match(/<ErrorBanner\b[\s\S]*?\/>/)?.[0] ?? ''));
 
