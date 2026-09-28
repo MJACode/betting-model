@@ -267,7 +267,7 @@ export function DailyResultsModal({
                   <HeroStat
                     label="P&L (flat)"
                     value={formatCurrencySigned(scoped.record.profitFlat)}
-                    color={roiColor(scoped.record.roiFlat)}
+                    color={pnlColor(scoped.record.profitFlat, 2)}
                   />
                   <HeroStat
                     label="Win rate"
@@ -454,7 +454,7 @@ function PickRow({ pick }: { pick: Pick }) {
       {recordOnly ? (
         <Text style={styles.recordOnlyLabel}>Record only</Text>
       ) : (
-        <Text style={[styles.modelRoi, { color: roiColor(profit) }]}>
+        <Text style={[styles.modelRoi, { color: pnlColor(profit, 2) }]}>
           {formatCurrencySigned(profit)}
         </Text>
       )}
@@ -513,8 +513,10 @@ function recordLine(s: CustomModelStats): string {
 
 // Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
 // which are 2.22 / 3.55:1 as text (audit H2).
+// The tone of the ROUNDED percent formatPctSigned prints (1 dp of roi × 100),
+// so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
-  return pnlColor(roi, 0.001);
+  return pnlColor(roi, 1, 100);
 }
 
 function prettyDate(date: string): string {

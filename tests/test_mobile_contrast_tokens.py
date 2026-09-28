@@ -189,7 +189,11 @@ def test_no_bright_hue_left_as_a_text_colour():
 
 def test_pnl_color_and_signed_formatter_are_wired():
     theme = _read(SRC / "lib" / "theme.ts")
-    assert "return colors[pnlTone(value, epsilon)]" in theme
+    assert "return colors[pnlTone(value, digits, scale)]" in theme
+    tone = _read(SRC / "lib" / "tone.ts")
+    # The tone is the ROUNDED value's sign (Reviewer MEDIUM A), not an epsilon.
+    assert "Number((n * scale).toFixed(digits))" in tone
+    assert "epsilon" not in tone
     fmt = _read(SRC / "lib" / "format.ts")
     assert "export const MINUS = '\\u2212'" in fmt
     pct = fmt[fmt.index("export function formatPctSigned"):]
@@ -225,6 +229,83 @@ def test_no_warning_icon_left_in_bright_med():
     assert hits == []
 
 
+# Reviewer Low 2: no Ionicons in bright green/amber, ternaries included. The
+# allowlist is the green-as-selected checkmarks that move to tint in PR 5.
+BRIGHT_ICON_ALLOW = {
+    "src/components/SportsbookPickerSheet.tsx:127",
+    "src/components/SportsbookPickerSheet.tsx:190",
+    "src/components/StatePickerSheet.tsx:46",
+    "src/components/StatePickerSheet.tsx:61",
+    "src/components/StatGroupSheet.tsx:99",
+    "src/components/HitModeSheet.tsx:118",
+    "src/screens/PaywallScreen.tsx:183",
+}
+BRIGHT_ICON = re.compile(r"\bcolors\.(med|bet|positive|high)\b(?!Soft|Ink)")
+
+
+def _ionicon_colors(src: str) -> list[tuple[int, str]]:
+    out = []
+    for m in re.finditer(r"<Ionicons\b", src):
+        end = src.find("/>", m.start())
+        tag = src[m.start(): end if end >= 0 else None]
+        at = re.search(r"\bcolor=\{", tag)
+        if not at:
+            continue
+        i = tag.index("{", at.start())
+        start, depth = i, 0
+        while i < len(tag):
+            if tag[i] == "{":
+                depth += 1
+            elif tag[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        out.append((src[: m.start() + at.start()].count("\n") + 1, tag[start + 1: i]))
+    return out
+
+
+def test_bright_icon_scan_sees_ternaries():
+    probe = "<Ionicons\n  name=\"x\"\n  color={on ? colors.bet : colors.textTertiary}\n/>\n<Ionicons color={colors.betInk} />"
+    found = _ionicon_colors(probe)
+    assert found[0][0] == 3 and BRIGHT_ICON.search(found[0][1])
+    assert not BRIGHT_ICON.search(found[1][1])
+
+
+def test_no_ionicon_in_bright_green_or_amber():
+    hits, seen = [], set()
+    for path in [*SRC.rglob("*.tsx"), *SRC.rglob("*.ts"), MOBILE / "App.tsx"]:
+        src = "\n".join(_code_lines(path))
+        for line, expr in _ionicon_colors(src):
+            if not BRIGHT_ICON.search(expr):
+                continue
+            key = f"{path.relative_to(MOBILE).as_posix()}:{line}"
+            if key in BRIGHT_ICON_ALLOW:
+                seen.add(key)
+            else:
+                hits.append(f"{key} {' '.join(expr.split())}")
+    assert hits == []
+    assert seen == BRIGHT_ICON_ALLOW, f"stale allowlist: {BRIGHT_ICON_ALLOW - seen}"
+    parlay = _read(SRC / "screens" / "ParlayScreen.tsx")
+    assert 'name="pricetag-outline" size={13} color={colors.betInk}' in parlay
+
+
+def test_every_pnl_color_call_names_its_precision():
+    bad, n = [], 0
+    for path in [*SRC.rglob("*.tsx"), *SRC.rglob("*.ts"), MOBILE / "App.tsx"]:
+        if path.name == "theme.ts":
+            continue
+        src = "\n".join(_code_lines(path))
+        for m in re.finditer(r"pnlColor\(((?:[^()]|\([^()]*\))*)\)", src):
+            n += 1
+            if not re.search(r",\s*(1,\s*100|2|1)\s*$", m.group(1)):
+                bad.append(f"{path.relative_to(ROOT)}: pnlColor({m.group(1)})")
+    assert n >= 25 and bad == [], bad
+    pick_detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
+    assert "const flat = !lineMoved && roundsToZero(pick.clv_pct, 1)" in pick_detail
+    assert "evColor" not in _read(SRC / "components" / "PickCard.tsx")
+
+
 def test_tracking_and_in_slip_on_state_is_tint_not_green():
     t = _tokens()
     assert _ratio(t["tint"], t["bgCard"]) >= 4.5
@@ -234,6 +315,9 @@ def test_tracking_and_in_slip_on_state_is_tint_not_green():
         assert not re.search(r"colors\.(bet|betInk|betSoft|positive)\b", src)
     assert "tracked ? 'checkmark'" in track
     assert "inPlay ? 'checkmark'" in add
+    # Reviewer Low 3: VoiceOver announces the ON state.
+    assert "accessibilityState={{ selected: tracked }}" in track
+    assert "accessibilityState={{ selected: inPlay }}" in add
     player = _read(SRC / "screens" / "PlayerStatsScreen.tsx")
     assert re.search(r"slipBtnIn: \{[^}]*borderColor: colors\.tint", player)
     assert "slipBtnTextIn: { color: colors.tint }" in player
@@ -259,7 +343,7 @@ def _node_strips_types() -> bool:
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_signed_formatter_and_tone_behaviour():
     script = """
-import { formatCurrencySigned, formatPctSigned, formatSigned, formatSignedUnits } from './mobile/src/lib/format.ts';
+import { formatCurrency, formatCurrencySigned, formatPctSigned, formatSigned, formatSignedUnits } from './mobile/src/lib/format.ts';
 import { badgeGlyphSize, pnlTone } from './mobile/src/lib/tone.ts';
 const M = '\\u2212';
 const cases = [
@@ -268,8 +352,17 @@ const cases = [
   [formatPctSigned(0.125), '+12.5%'], [formatPctSigned(-0.03), M + '3.0%'], [formatPctSigned(-0.0004), '0.0%'],
   [formatCurrencySigned(-25), M + '$25.00'], [formatCurrencySigned(0.004), '$0.00'],
   [formatSignedUnits(2.44), '+2.4u'], [formatSignedUnits(-0.5), M + '0.5u'], [formatSignedUnits(0.04), '0.0u'],
-  [pnlTone(1), 'betInk'], [pnlTone(-1), 'avoidInk'], [pnlTone(0), 'textSecondary'],
-  [pnlTone(null), 'textSecondary'], [pnlTone(0.0005, 0.001), 'textSecondary'],
+  [pnlTone(1, 1), 'betInk'], [pnlTone(-1, 1), 'avoidInk'], [pnlTone(0, 1), 'textSecondary'],
+  [pnlTone(null, 1), 'textSecondary'], [pnlTone(Infinity, 1), 'textSecondary'],
+  // Reviewer MEDIUM A pins: tone from the value as PRINTED.
+  [formatPctSigned(-0.0004), '0.0%'], [pnlTone(-0.0004, 1, 100), 'textSecondary'],
+  [formatCurrencySigned(1e-13), '$0.00'], [pnlTone(1e-13, 2), 'textSecondary'],
+  [formatPctSigned(0.0008), '+0.1%'], [pnlTone(0.0008, 1, 100), 'betInk'],
+  [formatSigned(-0.03, 1, 'pp'), '0.0pp'], [pnlTone(-0.03, 1), 'textSecondary'],
+  // Reviewer Low 4.
+  [formatSigned(Infinity), '—'], [formatSigned(NaN), '—'],
+  [formatSignedUnits(0.25), '+0.3u'], [formatSignedUnits(-0.25), M + '0.3u'],
+  [formatCurrency(-4), M + '$4.00'], [formatCurrency(-0.001), '$0.00'],
   [badgeGlyphSize(11, 1), 11], [badgeGlyphSize(11, 1.5), 17], [badgeGlyphSize(11, 3.1), 22], [badgeGlyphSize(11, NaN), 11],
 ];
 for (const [got, want] of cases) if (got !== want) throw new Error(`${got} !== ${want}`);

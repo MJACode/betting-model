@@ -24,6 +24,8 @@ export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
       // taps meant for its neighbour (UX review, 2026-09-05).
       hitSlop={{ top: 11, bottom: 11, left: 6, right: 6 }}
       accessibilityRole="button"
+      // VoiceOver says "selected" on the ON state, not only a changed label.
+      accessibilityState={{ selected: inPlay }}
       accessibilityLabel={
         inPlay
           ? 'In your betslip. Tap to remove.'

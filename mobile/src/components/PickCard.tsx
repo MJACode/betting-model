@@ -23,7 +23,8 @@ import {
 } from '@/lib/markets';
 import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
-import { colors, font, inkFor, pnlColor, radii, spacing } from '@/lib/theme';
+import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
+import { pnlTone, roundedAt } from '@/lib/tone';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
@@ -82,7 +83,6 @@ export function PickCard({
       : colors.textSecondary;
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
   const ev = expectedValue(pick.model_probability, decisionOdds(pick));
-  const evColor = pnlColor(ev);
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   const movement =
     gameStatus(game, liveState).kind === 'pre'
@@ -90,15 +90,12 @@ export function PickCard({
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
   const showClv = pick.clv_pct != null;
-  // The icon keeps the bright hue; the words take inkFor(clvColor) (audit H2).
-  const clvColor =
-    pick.clv_pct == null
-      ? colors.textTertiary
-      : pick.clv_pct > 0
-        ? colors.bet
-        : pick.clv_pct < 0
-          ? colors.avoid
-          : colors.textTertiary;
+  // Icon and words share one ink (non-text 3:1 ruling), toned from the CLV
+  // ROUNDED as formatClv prints it (1 dp): −0.03 reads "0.0pp" and stays
+  // neutral, never a red zero (audit H2, Reviewer).
+  const clvRounded = roundedAt(pick.clv_pct, 1);
+  const clvTone = pnlTone(pick.clv_pct, 1);
+  const clvInk = clvTone === 'textSecondary' ? colors.textTertiary : colors[clvTone];
 
   const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
   // Compare home-relative as numbers: PostgREST can send NUMERIC as a string,
@@ -346,12 +343,12 @@ export function PickCard({
           {showClv && hero.has('clv') ? (
             <View style={styles.extraItem}>
               <Ionicons
-                name={pick.clv_pct! >= 0 ? 'trending-up-outline' : 'trending-down-outline'}
+                name={(clvRounded ?? 0) < 0 ? 'trending-down-outline' : 'trending-up-outline'}
                 size={13}
-                color={inkFor(clvColor)}
+                color={clvInk}
                 style={styles.extraIcon}
               />
-              <Text style={[styles.extraText, { color: inkFor(clvColor), fontWeight: font.weight.medium }]}>
+              <Text style={[styles.extraText, { color: clvInk, fontWeight: font.weight.medium }]}>
                 CLV {formatClv(pick.clv_pct!)}
               </Text>
             </View>

@@ -772,6 +772,7 @@ export function PlayerStatsScreen() {
                   onPress={toggleSlip}
                   hitSlop={8}
                   accessibilityRole="button"
+                  accessibilityState={{ selected: inSlip }}
                   accessibilityLabel={inSlip ? 'Remove from betslip' : 'Add to betslip'}
                   style={({ pressed }) => [
                     styles.slipBtn,

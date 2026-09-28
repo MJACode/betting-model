@@ -277,9 +277,13 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // One sentence, shared with the Record tab's rows and gate-free — see
   // thinSampleCaption, which is the only place this wording is written.
   const thinNote = thinSampleCaption();
+  // Each figure's tone comes from the number it prints, rounded as printed.
   const roiColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.roiFlat);
+    : pnlColor(stats.roiFlat, 1, 100);
+  const profitColor = thin
+    ? colors.textSecondary
+    : pnlColor(stats.profitFlat, 2);
   return (
     <Pressable
       onPress={onPress}
@@ -330,7 +334,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         <Text style={[styles.roi, { color: roiColor }]}>
           {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
         </Text>
-        <Text style={[styles.profit, { color: roiColor }]}>
+        <Text style={[styles.profit, { color: profitColor }]}>
           {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
         </Text>
       </View>
@@ -370,7 +374,8 @@ function CustomModelRow({
   onEdit,
 }: CustomRowProps) {
   const decided = wins + losses;
-  const roiColor = pnlColor(roiFlat);
+  const roiColor = pnlColor(roiFlat, 1, 100);
+  const profitColor = pnlColor(profitFlat, 2);
   const shown = live.slice(0, CARD_BET_LIMIT);
   const withdrawnEmpty = withdrawnRulesEmpty(model.rules);
   return (
@@ -446,7 +451,7 @@ function CustomModelRow({
         <Stat
           label="P&L"
           value={picks > 0 ? formatCurrencySigned(profitFlat) : '—'}
-          color={roiColor}
+          color={profitColor}
         />
       </View>
     </Pressable>

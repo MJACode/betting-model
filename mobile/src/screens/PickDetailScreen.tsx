@@ -52,6 +52,7 @@ import {
 } from '@/lib/markets';
 import { isModelRetired, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { roundsToZero } from '@/lib/tone';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
@@ -494,7 +495,10 @@ function ClvCard({ pick }: { pick: Pick }) {
   const hasLines = pick.scored_line != null && pick.closing_line != null;
 
   const beat = pick.clv_beat_close;
-  const flat = !lineMoved && pick.clv_pct === 0;
+  // Flat means the headline PRINTS zero ("0.0pp" at 1 dp), not that the raw
+  // value is exactly 0: a CLV of −0.03 is "Matched the close" in grey, never a
+  // red "0.0pp · Closed worse" (Reviewer, audit PR 1).
+  const flat = !lineMoved && roundsToZero(pick.clv_pct, 1);
   const valueColor = flat
     ? colors.textSecondary
     : beat == null

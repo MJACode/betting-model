@@ -86,7 +86,9 @@ export function ModelDetailScreen() {
   }
 
   const decided = stats.wins + stats.losses;
-  const roiColor = pnlColor(stats.roiFlat);
+  // Each tile's tone comes from the number it prints, rounded as printed.
+  const roiColor = pnlColor(stats.roiFlat, 1, 100);
+  const pnlTint = pnlColor(stats.profitFlat, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -152,7 +154,7 @@ export function ModelDetailScreen() {
               <StatTile
                 label="P&L"
                 value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
-                tint={roiColor}
+                tint={pnlTint}
                 caption="all graded picks"
               />
             </View>
@@ -230,7 +232,7 @@ export function ModelDetailScreen() {
               style={[
                 styles.pickProfit,
                 {
-                  color: pnlColor(item.profit_flat ?? 0),
+                  color: pnlColor(item.profit_flat, 2),
                 },
               ]}
             >

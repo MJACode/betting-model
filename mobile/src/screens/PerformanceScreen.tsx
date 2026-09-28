@@ -146,7 +146,7 @@ export function PerformanceScreen() {
     Array.from(new Set(accounts.map((a) => a.book).filter(Boolean) as string[])),
   );
   // Ink, not the bright bet/avoid hues (2.22 / 3.55:1 as text; audit H2).
-  const profitColor = pnlColor(summary.net_profit);
+  const profitColor = pnlColor(summary.net_profit, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -309,7 +309,7 @@ function ManualBetsCard({
 
 function manualResultColor(result: ManualBetResult, profit: number): string {
   if (result === 'open') return colors.textSecondary;
-  return pnlColor(profit);
+  return pnlColor(profit, 2);
 }
 
 const TRACKED_ROW_CAP = 40;
@@ -528,7 +528,7 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 function BetRow({ bet }: { bet: SyncedBet }) {
   const settled = bet.settled;
   const profit = Number(bet.profit ?? 0);
-  const resultColor = !settled ? colors.textSecondary : pnlColor(profit);
+  const resultColor = !settled ? colors.textSecondary : pnlColor(profit, 2);
   const right = settled
     ? formatCurrencySigned(profit)
     : bet.stake != null
