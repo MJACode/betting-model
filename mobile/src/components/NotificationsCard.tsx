@@ -132,6 +132,7 @@ export function NotificationsCard(): React.ReactElement {
             ) : null}
             {diagnosis.opensSettings ? (
               <Pressable
+                accessibilityLabel="Open iOS Settings"
                 onPress={openSettings}
                 accessibilityRole="button"
                 style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
@@ -148,6 +149,7 @@ export function NotificationsCard(): React.ReactElement {
             onPress={() => setDetailOverride(!showDetail)}
             accessibilityRole="button"
             accessibilityState={{ expanded: showDetail }}
+            accessibilityLabel={showDetail ? 'Hide details' : 'Show details'}
             // A 12pt caption is a ~16pt target against UX_REVIEW §4's 44pt
             // floor, and this row has to stay visually small.
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -215,6 +217,7 @@ export function NotificationsCard(): React.ReactElement {
                 </Text>
                 <View style={styles.actions}>
                   <Pressable
+                    accessibilityLabel="Open iOS Settings"
                     onPress={openSettings}
                     accessibilityRole="button"
                     style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}

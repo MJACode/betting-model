@@ -45,6 +45,7 @@ import {
 } from '@/lib/socialLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -330,6 +331,9 @@ export function SettingsScreen() {
             onPress={openHelpline}
             accessibilityRole="link"
             accessibilityLabel="Call or text 1-800-GAMBLER, the national problem gambling helpline"
+            // The row's top padding is inside the card's divider; slop below
+            // brings a one-line wrap up to 44pt without moving the rule (M9).
+            hitSlop={{ top: 0, bottom: 12, left: 0, right: 0 }}
             style={styles.helplineRow}
           >
             <Ionicons name="call-outline" size={15} color={colors.tint} />
@@ -475,6 +479,7 @@ export function SettingsScreen() {
             Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
           </Text>
         </Pressable>
+        <BetslipBarSpacer />
       </ScrollView>
       <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />
       <StatePickerSheet visible={statePickerOpen} onClose={() => setStatePickerOpen(false)} />

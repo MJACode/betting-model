@@ -50,6 +50,7 @@ export function SegmentTabs<T extends string>({
         const isActive = item === active;
         return (
           <Pressable
+            accessibilityLabel={item}
             key={item}
             onPress={() => onChange(item)}
             accessibilityRole="tab"

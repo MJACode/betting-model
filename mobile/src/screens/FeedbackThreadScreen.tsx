@@ -25,6 +25,7 @@ import {
 } from '@/lib/feedbackHelpers';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'FeedbackThread'>;
 
@@ -112,7 +113,12 @@ export function FeedbackThreadScreen() {
           {loading ? (
             <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.tint} />
           ) : failed ? (
-            <Pressable style={styles.errorCard} onPress={load}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Couldn't load this conversation. Tap to retry."
+              style={styles.errorCard}
+              onPress={load}
+            >
               <Text style={styles.errorText}>Couldn't load this conversation. Tap to retry.</Text>
             </Pressable>
           ) : (
@@ -124,10 +130,12 @@ export function FeedbackThreadScreen() {
               We haven't replied yet — you'll get a notification here when we do.
             </Text>
           ) : null}
+          <BetslipBarSpacer />
         </ScrollView>
 
         <View style={styles.composer}>
           <TextInput
+            accessibilityLabel="Reply"
             style={styles.replyInput}
             value={reply}
             onChangeText={setReply}
@@ -137,6 +145,10 @@ export function FeedbackThreadScreen() {
             editable={!sending}
           />
           <Pressable
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+            accessibilityRole="button"
+            accessibilityLabel={sending ? 'Sending reply' : 'Send reply'}
+            accessibilityState={{ disabled: !canSend, busy: sending }}
             onPress={send}
             disabled={!canSend}
             style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}

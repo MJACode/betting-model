@@ -28,6 +28,7 @@ import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_R
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Tab = 'builtin' | 'custom';
@@ -146,7 +147,7 @@ export function ModelsScreen() {
           <SportToggle />
         </View>
 
-        <View style={styles.segmentRow}>
+        <View style={styles.segmentRow} accessibilityRole="tablist">
           <SegmentPill label="Built-in" active={tab === 'builtin'} onPress={() => setTab('builtin')} />
           <SegmentPill label="Custom" active={tab === 'custom'} onPress={() => setTab('custom')} />
         </View>
@@ -166,6 +167,7 @@ export function ModelsScreen() {
 
       {tab === 'builtin' ? (
         <FlatList
+          ListFooterComponent={<BetslipBarSpacer />}
           data={firstLoad || failedLoad ? [] : builtInWithStats}
           keyExtractor={(item) => item.modelId}
           // Every active model is listed whether or not it has settled a bet.
@@ -237,6 +239,7 @@ export function ModelsScreen() {
         />
       ) : (
         <FlatList
+          ListFooterComponent={<BetslipBarSpacer />}
           data={customWithStats}
           keyExtractor={(item) => item.model.id}
           renderItem={({ item }) => (
@@ -283,6 +286,8 @@ function SegmentPill({
   return (
     <Pressable
       onPress={onPress}
+      // ~27pt pill; 9 + 27 + 9 = 45pt without growing the segmented control.
+      hitSlop={{ top: 9, bottom: 9, left: 2, right: 2 }}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
       accessibilityLabel={`${label} models`}

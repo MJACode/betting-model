@@ -120,6 +120,7 @@ import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '
 import { decisionOdds } from '@/lib/decisionPrice';
 import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
 import { friendlyCause } from '@/lib/errors';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 export type { PicksView };
@@ -607,7 +608,7 @@ export function PicksHomeScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.subTabsScroll}
         >
-          <View style={styles.subTabs}>
+          <View style={styles.subTabs} accessibilityRole="tablist">
             <SubTabBtn label="All" count={todayUnknown ? null : todayStats.total} active={view === 'today'} onPress={() => setView('today')} onLayout={onSegmentLayout('today')} />
             <SubTabBtn label="Signals" count={todayUnknown ? null : live.length} active={view === 'signals'} onPress={() => setView('signals')} onLayout={onSegmentLayout('signals')} />
             {/* UNCONDITIONAL, on every sport (matt, 2026-09-12) — see the file
@@ -745,6 +746,7 @@ export function PicksHomeScreen() {
         />
       ) : (
       <FlatList
+        ListFooterComponent={<BetslipBarSpacer />}
         data={rows}
         keyExtractor={(row) => row.key}
         renderItem={({ item: row, index }) => {
@@ -976,8 +978,11 @@ function SubTabBtn({
     <Pressable
       onPress={onPress}
       onLayout={onLayout}
+      // Only the in-bounds part of this slop lands (a horizontal ScrollView
+      // takes no touches outside itself): 10 above, 2 below → ~41pt. The rest
+      // is a layout call — see the PR 4 report (audit H9/M8).
       hitSlop={{ top: 8, bottom: 8 }}
-      accessibilityRole="button"
+      accessibilityRole="tab"
       accessibilityState={{ selected: active }}
       accessibilityLabel={count == null ? `${label}, count not available` : `${label}, ${count} ${noun}`}
       style={({ pressed }) => [styles.subTab, active && styles.subTabActive, pressed && styles.pressed]}

@@ -55,6 +55,17 @@ export function gameStartedLine(decisionPrice: number | null | undefined, decisi
 }
 
 /**
+ * The started line as VoiceOver should say it (audit PR 4): the full book
+ * name, no "·" separator, and why there's no button — "Game started. Picked
+ * at -125 at DraftKings. Betting links are off once a game starts."
+ */
+export function gameStartedSpeech(decisionPrice: number | null | undefined, decisionBookName: string): string {
+  const picked =
+    decisionPrice == null ? '' : ` Picked at ${formatAmerican(decisionPrice)}${decisionBookName ? ` at ${decisionBookName}` : ''}.`;
+  return `Game started.${picked} Betting links are off once a game starts.`;
+}
+
+/**
  * M14: "Why this bet?" only on a bet. A NONE is not a bet and an AVOID is a
  * reason not to bet; a paused model's or an unlocked preview's BET is shown
  * for reference, not as a signal.

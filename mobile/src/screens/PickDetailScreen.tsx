@@ -61,6 +61,7 @@ import { roundsToZero } from '@/lib/tone';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -518,6 +519,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         {playerTrends.loading || homeTrends.loading || awayTrends.loading ? (
           <ActivityIndicator style={styles.loadingTrend} />
         ) : null}
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );

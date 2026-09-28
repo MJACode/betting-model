@@ -32,6 +32,7 @@ import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -267,6 +268,8 @@ export function BuiltInModelDetailScreen() {
                 ))}
                 {!historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`See all ${pickHistory.rows.length} picks`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryExpanded(true)}
                   >
@@ -277,6 +280,8 @@ export function BuiltInModelDetailScreen() {
                 ) : null}
                 {historyExpanded && pickHistory.rows.length > historyShown ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show ${Math.min(100, pickHistory.rows.length - historyShown)} more, ${pickHistory.rows.length - historyShown} remaining`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryShown((n) => n + 100)}
                   >
@@ -288,6 +293,8 @@ export function BuiltInModelDetailScreen() {
                 ) : null}
                 {historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Show latest day only"
                     style={styles.showMoreBtn}
                     onPress={() => {
                       setHistoryExpanded(false);
@@ -319,6 +326,8 @@ export function BuiltInModelDetailScreen() {
                 ))}
                 {history.length > latestSettledRows.length ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={historyExpanded ? 'Show latest day only' : `See all ${history.length} picks`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryExpanded((e) => !e)}
                   >
@@ -411,6 +420,7 @@ export function BuiltInModelDetailScreen() {
             {settledLoading && stats.picks === 0 ? (
               <ActivityIndicator style={styles.loading} />
             ) : null}
+            <BetslipBarSpacer />
           </>
         }
         contentContainerStyle={styles.list}
@@ -429,7 +439,12 @@ function TodayPickRow({
   const { pick, game } = enriched;
   const timeLabel = formatGameTimeET(game?.commence_time);
   return (
-    <Pressable style={styles.pickRow} onPress={onPress}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={[pick.pick_label, pick.signal_type, timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
+      style={styles.pickRow}
+      onPress={onPress}
+    >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
@@ -473,7 +488,12 @@ function FullOutcomeHistoryRow({
         : colors.textSecondary;
   const profit = row.profit_units == null ? null : Number(row.profit_units) * 100;
   return (
-    <Pressable style={styles.pickRow} onPress={onPress}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={[row.pick_label, row.result, row.game_date, `${bookLabelShort(storedQuoteBook(row))} ${formatAmerican(decisionOdds(row))}`, formatCurrencySigned(profit)].filter(Boolean).join(', ')}
+      style={styles.pickRow}
+      onPress={onPress}
+    >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>

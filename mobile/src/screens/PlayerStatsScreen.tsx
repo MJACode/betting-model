@@ -92,6 +92,7 @@ import {
 } from '@/lib/playerDetail';
 import type { LineupSlotRow, PlayerType, SavantStatsRow } from '@/types';
 import { ordinal } from '@/lib/teamDetail';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
@@ -551,6 +552,8 @@ export function PlayerStatsScreen() {
                 const active = c.key === stat?.key && c.group === stat?.group;
                 return (
                   <Pressable
+                    // In-bounds only: the row's 4pt padding (34 + 8 = 42pt).
+                    hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
                     key={chipKey(c)}
                     onPress={() => setPicked(c)}
                     // Pre-existing (ux_scan a11y-pressable, byte-identical to
@@ -585,6 +588,8 @@ export function PlayerStatsScreen() {
             const active = w.value === gameWindow;
             return (
               <Pressable
+                // In-bounds only: the row's 4pt padding (34 + 8 = 42pt).
+                hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
                 key={String(w.value)}
                 onPress={() => setGameWindow(w.value)}
                 accessibilityRole="button"
@@ -869,6 +874,7 @@ export function PlayerStatsScreen() {
             ))}
           </>
         )}
+        <BetslipBarSpacer />
       </ScrollView>
 
       <HitModeSheet
@@ -1080,6 +1086,7 @@ function HeadToHeadCard({
           ))}
           {h2h.meetings.length > MEETINGS_SHOWN ? (
             <Pressable
+              hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
               onPress={() => setShowAll((v) => !v)}
               accessibilityRole="button"
               accessibilityLabel={

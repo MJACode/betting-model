@@ -239,6 +239,14 @@ export function PaywallScreen() {
         </View>
 
         <Pressable
+          accessibilityLabel={
+            !signedIn
+              ? 'Sign in to continue'
+              : plan.trialDays > 0
+                ? `Start ${plan.trialDays}-day free trial`
+                : 'Continue'
+          }
+          accessibilityState={{ busy, disabled: busy }}
           onPress={onSubscribe}
           disabled={busy}
           accessibilityRole="button"
@@ -265,6 +273,7 @@ export function PaywallScreen() {
             Discord unlocks the app too — see docs/DISCORD_LINKING.md. */}
         {showDiscordRail ? (
           <Pressable
+            accessibilityLabel="Get access on Discord"
             onPress={() => openLink(WHOP_CHECKOUT_URL, 'Discord membership')}
             disabled={busy}
             accessibilityRole="button"
@@ -278,11 +287,23 @@ export function PaywallScreen() {
         <View style={styles.linkRow}>
           {BILLING_RAIL === 'iap' ? (
             <>
-              <Pressable onPress={onRestore} disabled={busy} hitSlop={8}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Restore purchases"
+                onPress={onRestore}
+                disabled={busy}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              >
                 <Text style={styles.linkText}>Restore Purchases</Text>
               </Pressable>
               {Platform.OS === 'ios' ? (
-                <Pressable onPress={onRedeem} disabled={busy} hitSlop={8}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Redeem code"
+                  onPress={onRedeem}
+                  disabled={busy}
+                  hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                >
                   <Text style={styles.linkText}>Redeem Code</Text>
                 </Pressable>
               ) : null}
@@ -291,20 +312,41 @@ export function PaywallScreen() {
         </View>
 
         <View style={styles.legalRow}>
-          <Pressable onPress={() => openLink(TERMS_URL, 'Terms')} hitSlop={8}>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel="Terms"
+            onPress={() => openLink(TERMS_URL, 'Terms')}
+            hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
+          >
             <Text style={styles.legalLink}>Terms</Text>
           </Pressable>
           <Text style={styles.legalSep}>·</Text>
-          <Pressable onPress={() => openLink(PRIVACY_URL, 'Privacy Policy')} hitSlop={8}>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel="Privacy policy"
+            onPress={() => openLink(PRIVACY_URL, 'Privacy Policy')}
+            hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
+          >
             <Text style={styles.legalLink}>Privacy</Text>
           </Pressable>
           <Text style={styles.legalSep}>·</Text>
-          <Pressable onPress={() => openLink(EULA_URL, 'EULA')} hitSlop={8}>
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel="EULA"
+            onPress={() => openLink(EULA_URL, 'EULA')}
+            hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }}
+          >
             <Text style={styles.legalLink}>EULA</Text>
           </Pressable>
         </View>
 
-        <Pressable onPress={() => navigation.goBack()} disabled={busy}>
+        <Pressable
+          hitSlop={{ top: 0, bottom: 0, left: 16, right: 16 }}
+          accessibilityRole="button"
+          accessibilityLabel="Not now"
+          onPress={() => navigation.goBack()}
+          disabled={busy}
+        >
           <Text style={styles.skip}>Not now</Text>
         </Pressable>
 

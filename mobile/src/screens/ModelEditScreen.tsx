@@ -55,6 +55,7 @@ import {
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'ModelEdit'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -213,6 +214,7 @@ export function ModelEditScreen() {
             What you'll call this model in your list. Required.
           </Text>
           <TextInput
+            accessibilityLabel="Model name"
             style={styles.nameInput}
             value={name}
             onChangeText={setName}
@@ -339,6 +341,7 @@ export function ModelEditScreen() {
               </Text>
             </View>
             <Switch
+              accessibilityLabel="Skip injury-flagged picks"
               value={filters.excludeInjuries === true}
               onValueChange={(on) =>
                 setFilters((f) => {
@@ -362,6 +365,7 @@ export function ModelEditScreen() {
             <Text style={styles.deleteBtnText}>Delete model</Text>
           </Pressable>
         ) : null}
+        <BetslipBarSpacer />
       </ScrollView>
 
       <PreviewFooter
@@ -462,6 +466,7 @@ function PreviewFooter({
         <ActivityIndicator style={styles.previewLoading} size="small" />
       ) : null}
       <Pressable
+        accessibilityLabel={saveLabel}
         onPress={onSave}
         disabled={!canSave}
         accessibilityRole="button"
@@ -527,6 +532,9 @@ function ChipRow({
           const on = selected.includes(o.value);
           return (
             <Pressable
+              // ~32pt chip in a wrapping row (8pt gap): 6pt slop reaches 44.
+              hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+              accessibilityLabel={o.label}
               key={o.value}
               onPress={() => onToggle(o.value)}
               accessibilityRole="button"
@@ -716,6 +724,7 @@ function RuleRow({
           <Text style={styles.ruleFieldLabel}>Min model %</Text>
           <View style={styles.inputWrap}>
             <TextInput
+              accessibilityLabel={`${betTypeLabel(rule.model_id)}: Min model percent`}
               style={styles.ruleInput}
               value={probText}
               onChangeText={setProbText}
@@ -734,6 +743,7 @@ function RuleRow({
           <Text style={styles.ruleFieldLabel}>Min edge %</Text>
           <View style={styles.inputWrap}>
             <TextInput
+              accessibilityLabel={`${betTypeLabel(rule.model_id)}: Min edge percent`}
               style={styles.ruleInput}
               value={edgeText}
               onChangeText={setEdgeText}
@@ -752,6 +762,7 @@ function RuleRow({
           <Text style={styles.ruleFieldLabel}>Min EV %</Text>
           <View style={styles.inputWrap}>
             <TextInput
+              accessibilityLabel={`${betTypeLabel(rule.model_id)}: Min EV percent`}
               style={styles.ruleInput}
               value={evText}
               onChangeText={setEvText}

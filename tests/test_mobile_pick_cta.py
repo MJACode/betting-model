@@ -135,7 +135,7 @@ def test_pick_card_wiring():
     assert "pickCta({ isLive: pick.is_live === true, started })" in card
     assert re.search(r"offersBook && cta\.handoff\s*\?\s*bestHandoffForPick", card)
     assert "&& cta.slip;" in card and "&& open && cta.track;" in card
-    started = re.search(r"<View style=\{styles\.startedLine\}.*?</View>", card, re.S)
+    started = re.search(r"<View\s+style=\{styles\.startedLine\}.*?</View>", card, re.S)
     assert started, "no Game started line"
     block = started.group(0)
     assert 'accessibilityRole="text"' in block and 'name="lock-closed"' in block

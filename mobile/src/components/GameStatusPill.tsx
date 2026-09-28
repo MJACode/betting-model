@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { gameDayLabelET, gameStatus, inningLong, inningShort } from '@/lib/format';
 import { LiveDot } from '@/components/LiveDot';
+import { gameStatusSpeech } from '@/lib/a11y';
 import { colors, font, radii } from '@/lib/theme';
 import type { GameRow, LiveGameStateRow } from '@/types';
 
@@ -19,13 +20,19 @@ interface Props {
 
 export function GameStatusPill({ game, compact = true, live }: Props) {
   const status = gameStatus(game, live);
+  // Spoken form (audit M22): "Live, bottom 9th, 3 to 2", not "3 dash 2 B9 live".
+  const spoken = gameStatusSpeech(status, gameDayLabelET(game?.commence_time));
 
   if (status.kind === 'pre') {
     if (!status.timeLabel) return null;
     // Future-day events (the upcoming UFC card) get a day prefix: "Sat 6/14 · 10:00 PM ET"
     const dayLabel = gameDayLabelET(game?.commence_time);
     const label = dayLabel ? `${dayLabel} · ${status.timeLabel}` : status.timeLabel;
-    return <Text style={compact ? styles.timeCompact : styles.time}>{label}</Text>;
+    return (
+      <Text style={compact ? styles.timeCompact : styles.time} accessibilityLabel={spoken ?? undefined}>
+        {label}
+      </Text>
+    );
   }
 
   if (status.kind === 'live') {
@@ -35,7 +42,7 @@ export function GameStatusPill({ game, compact = true, live }: Props) {
       ? inningShort(status.inning, status.inningHalf)
       : inningLong(status.inning, status.inningHalf, status.outs);
     return (
-      <View style={styles.row}>
+      <View style={styles.row} accessible accessibilityRole="text" accessibilityLabel={spoken ?? 'Live'}>
         {scoreStr ? <Text style={styles.scoreText}>{scoreStr}</Text> : null}
         {inningStr ? <Text style={styles.inningText}>{inningStr}</Text> : null}
         <View style={[styles.pill, styles.livePill]}>
@@ -51,7 +58,7 @@ export function GameStatusPill({ game, compact = true, live }: Props) {
   if (status.kind === 'ended') return null;
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} accessible accessibilityRole="text" accessibilityLabel={spoken ?? 'Final'}>
       <Text style={styles.scoreText}>{scoreLabel(status.awayScore, status.homeScore)}</Text>
       <View style={[styles.pill, styles.finalPill]}>
         <Text style={styles.finalText}>FINAL</Text>

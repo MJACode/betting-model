@@ -100,13 +100,30 @@ export function FilterSheet({
       >
         {/* Backdrop tap closes. The sheet applies live, so dismissing keeps
             whatever the user set rather than discarding it. */}
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close filters">
-          <Pressable style={styles.sheet} onPress={() => {}}>
+        <View style={styles.backdrop}>
+          {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+              parent: an accessible Pressable groups everything inside it into
+              one VoiceOver element, so a backdrop that wrapped the sheet hid the
+              sheet's rows and buttons from VoiceOver (audit PR 4). */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Close filters"
+          />
+          <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
             <View style={styles.grabber} />
 
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
-              <Pressable onPress={onReset} disabled={!canReset} hitSlop={8}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
+                accessibilityState={{ disabled: !canReset }}
+                onPress={onReset}
+                disabled={!canReset}
+                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              >
                 <Text style={[styles.reset, !canReset && styles.resetDisabled]}>Clear all</Text>
               </Pressable>
             </View>
@@ -126,6 +143,7 @@ export function FilterSheet({
                   worse trade. It is announced busy rather than disabled, the
                   same call the slate chip made on the board (UX_REVIEW §5). */}
               <Pressable
+                accessibilityLabel={busy ? 'Updating results' : resultCount === 0 ? 'No matches. Adjust filters' : `Show ${resultCount} ${itemNoun}${resultCount === 1 ? '' : 's'}`}
                 onPress={onClose}
                 accessibilityRole="button"
                 accessibilityState={{ busy }}
@@ -145,7 +163,7 @@ export function FilterSheet({
               </Pressable>
             </View>
           </Pressable>
-        </Pressable>
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -202,6 +220,9 @@ export function FilterSection({
   return (
     <View style={styles.section}>
       <Pressable
+        // 32pt row; 6pt slop each way reaches 44.
+        hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
+        accessibilityLabel={title}
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityState={{ expanded }}

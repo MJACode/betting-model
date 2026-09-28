@@ -16,6 +16,7 @@ import { ErrorBanner } from '@/components/ErrorState';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 import { SHADOW_TRACK_START } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 // The shadow track keeps its own, longer window — a comparison needs history to
 // compare against. Named in lib/recordStart beside the live date so the two are
@@ -180,6 +181,7 @@ export function OpeningComparisonScreen() {
           experiment: it doesn’t change the picks you see
           or our published track record. No bet rule is built from it yet; we’re measuring first.
         </Text>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );

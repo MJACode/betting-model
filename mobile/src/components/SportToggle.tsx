@@ -30,6 +30,9 @@ import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
  * so a user on MLB still had to tap through all eight to find the NCAAF game.
  * The dot says it from wherever they are.
  */
+/** In-bounds room above a segment: wrap marginTop (spacing.sm) + padding 2. */
+const TOGGLE_ROOM_ABOVE = spacing.sm + 2;
+
 export function SportToggle({
   available,
   signalCounts,
@@ -59,7 +62,7 @@ export function SportToggle({
       contentContainerStyle={styles.scroll}
       keyboardShouldPersistTaps="handled"
     >
-      <View style={styles.wrap}>
+      <View style={styles.wrap} accessibilityRole="tablist">
         {SPORTS.map((s: Sport) => {
           const active = s === sport;
           const muted = available != null && !available.has(s) && !active;
@@ -73,12 +76,20 @@ export function SportToggle({
                 offsets.current[s] = e.nativeEvent.layout.x;
                 if (s === sport) scrollToActive();
               }}
-              // ~26pt tall, the smallest target on the Stats board and well
+              // ~23pt tall, the smallest target on the Stats board and well
               // under the 44pt HIG floor. Slop rather than height: this row is
               // on three tabs and growing it costs vertical space everywhere
-              // (UX review, 2026-09-12).
-              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
-              accessibilityRole="button"
+              // (UX review, 2026-09-12). BUT a horizontal ScrollView only
+              // takes touches inside its own bounds, so slop past them is
+              // dead: the room inside is the wrap's 8pt top margin + 2pt
+              // padding above and 2pt below — 10 + 23 + 2 = 35pt. The old
+              // 8/8 slop claimed 39 and delivered ~33. The last 9pt needs
+              // either a taller row or the whitespace around it, which
+              // differs on Picks / Models / Stats — a Designer call (audit H9,
+              // PR 4 report). Extending the ScrollView with a negative margin
+              // was tried and rejected: on Picks it overlaps the sub-tab row.
+              hitSlop={{ top: TOGGLE_ROOM_ABOVE, bottom: 2, left: 2, right: 2 }}
+              accessibilityRole="tab"
               accessibilityState={{ selected: active }}
               accessibilityLabel={[
                 s,

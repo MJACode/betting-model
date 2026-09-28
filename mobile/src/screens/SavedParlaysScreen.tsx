@@ -23,6 +23,7 @@ import { modelShort } from '@/lib/modelMeta';
 import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'SavedParlays'>;
 
@@ -131,12 +132,15 @@ export function SavedParlaysScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <FlatList
+        ListFooterComponent={<BetslipBarSpacer />}
         data={items}
         keyExtractor={(p) => p.id}
         contentContainerStyle={styles.scroll}
         ListHeaderComponent={
           <View style={styles.headerRow}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="New parlay"
               onPress={newParlay}
               style={({ pressed }) => [styles.newBtn, pressed && styles.pressed]}
             >
@@ -145,6 +149,8 @@ export function SavedParlaysScreen() {
             </Pressable>
             {items.length > 0 ? (
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Clear all saved parlays"
                 onPress={confirmClearAll}
                 style={({ pressed }) => [styles.clearAllBtn, pressed && styles.pressed]}
               >
@@ -175,7 +181,12 @@ export function SavedParlaysScreen() {
       {undo ? (
         <View style={styles.undoBar}>
           <Text style={styles.undoText}>Parlay deleted</Text>
-          <Pressable onPress={undoDelete} hitSlop={8}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Undo delete"
+            onPress={undoDelete}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+          >
             <Text style={styles.undoAction}>Undo</Text>
           </Pressable>
         </View>
@@ -224,6 +235,8 @@ function SavedParlayCard({
   const preUpgrade = parlay.legs.some((l) => l.bookLinks == null);
   const renderRightActions = () => (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Delete parlay"
       onPress={onDelete}
       style={({ pressed }) => [styles.swipeDelete, pressed && styles.pressed]}
     >
@@ -316,11 +329,23 @@ function SavedParlayCard({
           </Text>
         ) : null}
         <View style={styles.secondaryRow}>
-          <Pressable onPress={onEdit} style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}>
+          <Pressable
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+            accessibilityRole="button"
+            accessibilityLabel="Edit in builder"
+            onPress={onEdit}
+            style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}
+          >
             <Ionicons name="create-outline" size={16} color={colors.tint} />
             <Text style={styles.editBtnText}>Edit in builder</Text>
           </Pressable>
-          <Pressable onPress={onDelete} style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressed]}>
+          <Pressable
+            hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+            accessibilityRole="button"
+            accessibilityLabel="Delete parlay"
+            onPress={onDelete}
+            style={({ pressed }) => [styles.deleteBtn, pressed && styles.pressed]}
+          >
             <Ionicons name="trash-outline" size={16} color={colors.avoid} />
             <Text style={styles.deleteBtnText}>Delete</Text>
           </Pressable>
@@ -415,6 +440,9 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   swipeDelete: {
+    // Declared tap floor (verify_a11y); the action (full card height) is already ~120pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     backgroundColor: colors.avoid,
     justifyContent: 'center',
     alignItems: 'center',

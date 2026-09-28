@@ -11,6 +11,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { spokenDate } from '@/lib/a11y';
 
 const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
@@ -71,6 +72,8 @@ export function CalendarGrid({
     <View style={styles.card}>
       <View style={styles.monthRow}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canPrev }}
           onPress={() => canPrev && setMonth((cur) => addMonths(cur, -1))}
           disabled={!canPrev}
           hitSlop={8}
@@ -85,6 +88,8 @@ export function CalendarGrid({
         </Pressable>
         <Text style={styles.monthLabel}>{monthLabel(month)}</Text>
         <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canNext }}
           onPress={() => canNext && setMonth((cur) => addMonths(cur, 1))}
           disabled={!canNext}
           hitSlop={8}
@@ -112,6 +117,13 @@ export function CalendarGrid({
           return (
             <View key={date} style={styles.cell}>
               <Pressable
+                // 32pt circles in a 36pt row: 2pt slop is all the row has without
+                // stealing the next week's taps. Reaching 44 means a taller grid —
+                // flagged for Designer (verify_a11y allowlist).
+                hitSlop={{ top: 2, bottom: 2, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel={spokenDate(date)}
+                accessibilityState={{ selected: isSelected, disabled }}
                 onPress={() => !disabled && onSelect(date)}
                 disabled={disabled}
                 style={({ pressed }) => [

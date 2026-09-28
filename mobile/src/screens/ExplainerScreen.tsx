@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 export function ExplainerScreen() {
   return (
@@ -345,6 +346,7 @@ export function ExplainerScreen() {
             history through your own conviction rules.
           </P>
         </Section>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );

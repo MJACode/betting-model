@@ -202,7 +202,7 @@ check('PickCard: started = gameHasStarted(game, liveState); cta = pickCta(…)',
   /gameHasStarted\(game, liveState\)/.test(card) && /pickCta\(\{ isLive: pick\.is_live === true, started \}\)/.test(card));
 check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
 check('PickCard: Slip needs cta.slip, Track keeps cta.track', /&& cta\.slip;/.test(card) && /&& open && cta\.track;/.test(card));
-const started = card.match(/<View style=\{styles\.startedLine\}[\s\S]*?<\/View>/)?.[0] ?? '';
+const started = card.match(/<View\s+style=\{styles\.startedLine\}[\s\S]*?<\/View>/)?.[0] ?? '';
 check('PickCard: the started line is role text, lock icon, not a Pressable',
   /accessibilityRole="text"/.test(started) && /name="lock-closed"/.test(started) && !/Pressable|onPress/.test(started));
 check('PickCard: started line is textSecondary', /startedText: \{[\s\S]*?color: colors\.textSecondary/.test(card));

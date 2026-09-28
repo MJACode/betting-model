@@ -38,6 +38,15 @@ export function ManualBetModal({
   const oddsNum = odds.trim() === '' ? null : parseInt(odds, 10);
   const valid = desc.trim().length > 0 && Number.isFinite(stakeNum) && stakeNum > 0;
 
+  // Why "Add bet" is greyed out, for VoiceOver (audit M25). The visible
+  // button gave no reason; an inline sighted hint would be a layout change and
+  // is left to Designer.
+  const missing = [
+    desc.trim().length > 0 ? null : 'the bet',
+    Number.isFinite(stakeNum) && stakeNum > 0 ? null : 'a stake above zero',
+  ].filter((m): m is string => m != null);
+  const addHint = valid ? undefined : `Enter ${missing.join(' and ')} to add this bet.`;
+
   const submit = () => {
     if (!valid) return;
     onAdd({
@@ -56,7 +65,12 @@ export function ManualBetModal({
         style={styles.backdrop}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Pressable style={styles.backdropFill} onPress={onClose} />
+        <Pressable
+          style={styles.backdropFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
         <View style={styles.sheet}>
           <Text style={styles.title}>Add a bet</Text>
           <Text style={styles.subtitle}>
@@ -65,6 +79,7 @@ export function ManualBetModal({
 
           <Field label="Bet">
             <TextInput
+              accessibilityLabel="Bet"
               style={styles.input}
               value={desc}
               onChangeText={setDesc}
@@ -74,6 +89,7 @@ export function ManualBetModal({
           </Field>
           <Field label="Sportsbook (optional)">
             <TextInput
+              accessibilityLabel="Sportsbook, optional"
               style={styles.input}
               value={book}
               onChangeText={setBook}
@@ -84,6 +100,7 @@ export function ManualBetModal({
           <View style={styles.row}>
             <Field label="Stake ($)" style={{ flex: 1 }}>
               <TextInput
+                accessibilityLabel="Stake in dollars"
                 style={styles.input}
                 value={stake}
                 onChangeText={setStake}
@@ -94,6 +111,7 @@ export function ManualBetModal({
             </Field>
             <Field label="Odds (American)" style={{ flex: 1 }}>
               <TextInput
+                accessibilityLabel="Odds, American"
                 style={styles.input}
                 value={odds}
                 onChangeText={setOdds}
@@ -107,6 +125,10 @@ export function ManualBetModal({
           <Pressable
             onPress={submit}
             disabled={!valid}
+            accessibilityRole="button"
+            accessibilityLabel="Add bet"
+            accessibilityState={{ disabled: !valid }}
+            accessibilityHint={addHint}
             style={({ pressed }) => [
               styles.addBtn,
               !valid && styles.addBtnDisabled,
@@ -115,7 +137,12 @@ export function ManualBetModal({
           >
             <Text style={styles.addBtnText}>Add bet</Text>
           </Pressable>
-          <Pressable onPress={onClose} style={styles.cancelBtn}>
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            style={styles.cancelBtn}
+          >
             <Text style={styles.cancelText}>Cancel</Text>
           </Pressable>
         </View>
