@@ -54,7 +54,10 @@ for (const u of [0.05, 0.15, 0.25, 1.45, 3.35]) {
 
 const fmt = readFileSync(join(ROOT, 'src/lib/format.ts'), 'utf-8');
 const modal = readFileSync(join(ROOT, 'src/components/DailyResultsModal.tsx'), 'utf-8');
-const SYM = /Math\.sign\((\w+)\)\s*\*\s*Math\.round\(Math\.abs\(\1\)\s*\*\s*10\)\s*\/\s*10/;
+// Optional parentheses around the rounded magnitude: draft #833 writes
+// Math.sign(u) * (Math.round(Math.abs(u) * 10) / 10), the same value.
+const HALF = String.raw`Math\.round\(Math\.abs\(\1\)\s*\*\s*10\)\s*\/\s*10`;
+const SYM = new RegExp(String.raw`Math\.sign\((\w+)\)\s*\*\s*(?:${HALF}|\(\s*${HALF}\s*\))`);
 const fmtBody = fmt.slice(fmt.indexOf('export function formatSignedUnits'));
 const colorBody = modal.slice(modal.indexOf('function unitsColor'));
 check('formatSignedUnits uses the symmetric expression', SYM.test(fmtBody.slice(0, 600)));

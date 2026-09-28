@@ -98,9 +98,9 @@ jobs:
             tests/test_publish_key_identity.py \
             tests/test_void_picks.py
 
-  # tsc --noEmit + mobile/scripts/verify_*.ts, gated on NOTHING NEW against the
-  # committed baselines in mobile/ci/ (master already has known tsc errors and
-  # known-failing verify scripts). See scripts/mobile_ci_gate.py.
+  # tsc --noEmit + mobile/scripts/verify_*.ts, gated on NOTHING NEW and NOTHING
+  # GONE against the committed baselines in mobile/ci/ (master already has known
+  # tsc errors and known-failing verify scripts). See scripts/mobile_ci_gate.py.
   mobile-typecheck-verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -108,7 +108,11 @@ jobs:
       run:
         working-directory: mobile
     steps:
+      # Full history: the gate compares mobile/ci/ against origin/master and
+      # reads the PR's commit messages for the baseline-growth ack.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
