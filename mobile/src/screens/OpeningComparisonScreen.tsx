@@ -12,6 +12,7 @@ import { fetchOpeningVsLive, fetchOpeningSlices } from '@/lib/queries';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
 import { errorText } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 import { SHADOW_TRACK_START } from '@/lib/recordStart';
@@ -25,8 +26,10 @@ const RECORD_START = SHADOW_TRACK_START;
 
 // Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
 // which are 2.22 / 3.55:1 as text (audit H2).
+// The tone of the ROUNDED percent formatPctSigned prints (1 dp of roi × 100),
+// so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
-  return pnlColor(roi, 0.001);
+  return pnlColor(roi, 1, 100);
 }
 
 function roiOf(r: { profit_flat: number; staked_flat: number }): number {
@@ -117,7 +120,15 @@ export function OpeningComparisonScreen() {
           the line predict the result? This is a measurement experiment — not a separate product yet.
         </Text>
 
-        {error ? <Text style={styles.error}>Couldn’t load: {error}</Text> : null}
+        {error ? (
+          <ErrorBanner
+            what="the opening-line comparison"
+            error={error}
+            onRetry={() => void load()}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
+        ) : null}
         {loading && tracks.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
 
         {/* The two tracks side by side */}
@@ -241,7 +252,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
-  error: { fontSize: font.size.footnote, color: colors.avoidInk, marginBottom: spacing.md },
+  errorBannerInset: { marginHorizontal: 0, marginTop: 0, marginBottom: spacing.md },
   loading: { marginVertical: spacing.lg },
   row: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.md },
   trackCard: {

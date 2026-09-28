@@ -413,7 +413,7 @@ function PreviewFooter({
 }) {
   const roi = backtest?.roiFlat ?? 0;
   const roiColor =
-    !backtest || backtest.picks === 0 ? colors.textSecondary : pnlColor(roi);
+    !backtest || backtest.picks === 0 ? colors.textSecondary : pnlColor(roi, 1, 100);
   const decided = (backtest?.wins ?? 0) + (backtest?.losses ?? 0);
 
   return (

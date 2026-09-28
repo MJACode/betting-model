@@ -43,8 +43,10 @@ const RECORD_START = LIVE_RECORD_START;
 
 // Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
 // which are 2.22 / 3.55:1 as text (audit H2).
+// The tone of the ROUNDED percent formatPctSigned prints (1 dp of roi × 100),
+// so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
-  return pnlColor(roi, 0.001);
+  return pnlColor(roi, 1, 100);
 }
 
 export function TrackRecordScreen() {

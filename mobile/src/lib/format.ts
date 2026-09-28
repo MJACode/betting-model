@@ -34,8 +34,11 @@ export function expectedValue(
  * team lib.
  */
 export function formatSignedUnits(u: number): string {
-  // Round half-up first, as this always has, then apply the one sign rule.
-  return formatSigned(Math.round(u * 10) / 10, 1, 'u');
+  // Round the MAGNITUDE half-up, then put the sign back, so a tie rounds the
+  // same way on both sides of zero (+0.25 → "+0.3u", −0.25 → "−0.3u";
+  // Math.round(-2.5) alone is −2 and would print "−0.2u").
+  const r = Math.sign(u) * Math.round(Math.abs(u) * 10) / 10;
+  return formatSigned(r, 1, 'u');
 }
 
 /** U+2212, the minus every signed result uses — width-matched to "+". */
@@ -45,7 +48,7 @@ export const MINUS = '\u2212';
  * The one signed-number rule (usability audit H2 / L9, PATTERNS §F5): a gain
  * carries "+", a loss carries U+2212 "−", and anything that ROUNDS to zero at
  * the shown precision is unsigned ("0.0", never "+0.0" or "−0.0") so a push
- * never reads as a win or a loss. Missing → '—'.
+ * never reads as a win or a loss. Missing, NaN or ±Infinity → '—'.
  *
  *   formatSigned(1.23)       → "+1.2"
  *   formatSigned(-0.5, 2)    → "−0.50"
@@ -57,10 +60,13 @@ export function formatSigned(
   digits = 1,
   suffix = '',
 ): string {
-  if (value == null || Number.isNaN(value)) return '—';
-  const abs = Math.abs(value).toFixed(digits);
+  // Number(): PostgREST can send NUMERIC as a string ("12.5"), which the
+  // arithmetic below always coerced; only a non-number is '—'.
+  const n = Number(value);
+  if (value == null || !Number.isFinite(n)) return '—';
+  const abs = Math.abs(n).toFixed(digits);
   if (Number(abs) === 0) return `${abs}${suffix}`;
-  return `${value > 0 ? '+' : MINUS}${abs}${suffix}`;
+  return `${n > 0 ? '+' : MINUS}${abs}${suffix}`;
 }
 
 /** Percent formatting — 0.673 -> "67.3%". */
@@ -71,24 +77,28 @@ export function formatPct(value: number | null | undefined, digits = 1): string 
 
 /** Signed percent — 0.125 -> "+12.5%", -0.03 -> "−3.0%", 0.0001 -> "0.0%". */
 export function formatPctSigned(value: number | null | undefined, digits = 1): string {
-  if (value == null || Number.isNaN(value)) return '—';
+  if (value == null || !Number.isFinite(Number(value))) return '—';
   return formatSigned(value * 100, digits, '%');
 }
 
-/** Dollars — 30.5 -> "$30.50". */
+/** Dollars — 30.5 -> "$30.50", -4 -> "−$4.00" (U+2212, as every signed amount). */
 export function formatCurrency(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return '—';
-  const sign = value < 0 ? '-' : '';
-  return `${sign}$${Math.abs(value).toFixed(2)}`;
+  const n = Number(value);
+  if (value == null || !Number.isFinite(n)) return '—';
+  const abs = Math.abs(n).toFixed(2);
+  // A value that rounds to zero is "$0.00", never "−$0.00".
+  const sign = n < 0 && Number(abs) !== 0 ? MINUS : '';
+  return `${sign}$${abs}`;
 }
 
 /** Signed dollars — -25 -> "−$25.00", +30 -> "+$30.00". */
 export function formatCurrencySigned(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return '—';
+  const n = Number(value);
+  if (value == null || !Number.isFinite(n)) return '—';
   // A result that rounds to zero is a push: unsigned, never "+$0.00".
-  if (Number(Math.abs(value).toFixed(2)) === 0) return '$0.00';
-  const sign = value > 0 ? '+' : MINUS;
-  return `${sign}$${Math.abs(value).toFixed(2)}`;
+  if (Number(Math.abs(n).toFixed(2)) === 0) return '$0.00';
+  const sign = n > 0 ? '+' : MINUS;
+  return `${sign}$${Math.abs(n).toFixed(2)}`;
 }
 
 /** Today in America/New_York as YYYY-MM-DD. */
@@ -608,6 +618,42 @@ export function toIsoDate(value: string): string {
 }
 
 /** Add `days` to a YYYY-MM-DD string. Returns YYYY-MM-DD. */
+/**
+ * A slate DAY (YYYY-MM-DD, ET kickoff date) as the app writes it:
+ * 'Today' / 'Tomorrow' / 'Yesterday' / 'Sat 11/28'.
+ *
+ * The one spelling for a day the filters name — the Date chips and the Games
+ * section's day headers (upper-cased) — and it matches the card's own
+ * "Sat, 11/28" (gameDayLabelET) digit for digit, so a chip can be matched to
+ * a card at a glance. Three hand-rolled spellings of one day on one screen was
+ * the UX review's finding on 2026-09-26. "Yesterday" is real: a game keeps its
+ * kickoff's date, so a late start in play after midnight ET is filed there.
+ */
+export function dayLabelET(date: string, today: string = todayET()): string {
+  if (date === today) return 'Today';
+  if (date === addDays(today, 1)) return 'Tomorrow';
+  if (date === addDays(today, -1)) return 'Yesterday';
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(d);
+  return `${wd} ${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+/** The same day for VoiceOver: 'Today', or 'Saturday, November 28' — never
+ *  the abbreviated 'Sat 11/28' read aloud as "Sat eleven slash twenty-eight". */
+export function dayLabelSpokenET(date: string, today: string = todayET()): string {
+  const short = dayLabelET(date, today);
+  if (short === 'Today' || short === 'Tomorrow' || short === 'Yesterday') return short;
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  }).format(d);
+}
+
 export function addDays(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);

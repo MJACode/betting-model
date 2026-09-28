@@ -5,6 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
+import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -48,7 +50,13 @@ export function ModelsScreen() {
   const [tab, setTab] = useState<Tab>('builtin');
   const { sport } = useSportFilter();
   const { models, ready } = useCustomModels();
-  const { rows, records, loading, error } = useSettledPicksSincePaperStart();
+  const { rows, records, loading, error, refresh } = useSettledPicksSincePaperStart();
+  // Nothing settled has loaded yet (first fetch in flight, or it failed): the
+  // per-model stats would all be EMPTY_STATS, and a card per model reading
+  // "0 picks · No settled bets yet" is a claim, not a placeholder (audit H3).
+  const nothingLoaded = rows.length === 0 && Object.keys(records).length === 0;
+  const firstLoad = loading && nothingLoaded;
+  const failedLoad = Boolean(error) && !loading && nothingLoaded;
 
   // Custom models show under a sport if any of their rules target that sport.
   // Stats come from the server-graded every-pick universe (RPC), not just the
@@ -136,15 +144,20 @@ export function ModelsScreen() {
         </View>
       </View>
 
-      {error ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>Connection error: {error}</Text>
-        </View>
+      {/* A failed refresh over a record already on screen: keep it, say so,
+          offer Retry. A failed FIRST load replaces the list instead (below). */}
+      {error && !failedLoad ? (
+        <ErrorBanner
+          what="the latest model records"
+          error={error}
+          onRetry={() => void refresh()}
+          retrying={loading}
+        />
       ) : null}
 
       {tab === 'builtin' ? (
         <FlatList
-          data={builtInWithStats}
+          data={firstLoad || failedLoad ? [] : builtInWithStats}
           keyExtractor={(item) => item.modelId}
           // Every active model is listed whether or not it has settled a bet.
           // ListEmptyComponent fires when the sport has no catalog models
@@ -156,9 +169,7 @@ export function ModelsScreen() {
           // is EMPTY_STATS, so the zeros mean "not loaded yet": spinner. Once it
           // lands and nothing has settled, they mean what they say.
           ListHeaderComponent={
-            loading && rows.length === 0 ? (
-              <ActivityIndicator style={styles.loading} />
-            ) : !loading &&
+            firstLoad || failedLoad ? null : !loading &&
               builtInWithStats.length > 0 &&
               builtInWithStats.every((m) => m.stats.picks === 0) ? (
               <EmptyState
@@ -181,7 +192,22 @@ export function ModelsScreen() {
           // store over the bundled list — and until the inputs card was removed
           // something always rendered, so this path had never been seen.
           ListEmptyComponent={
-            loading ? (
+            firstLoad ? (
+              <Skeleton label={`${sport} model records`}>
+                {[0, 1, 2, 3].map((i) => (
+                  <View key={i} style={styles.skeletonCard}>
+                    <SkeletonRow />
+                  </View>
+                ))}
+              </Skeleton>
+            ) : failedLoad ? (
+              <ErrorState
+                what={`the ${sport} model records`}
+                error={error}
+                onRetry={() => void refresh()}
+                retrying={loading}
+              />
+            ) : loading ? (
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
@@ -277,9 +303,13 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // One sentence, shared with the Record tab's rows and gate-free — see
   // thinSampleCaption, which is the only place this wording is written.
   const thinNote = thinSampleCaption();
+  // Each figure's tone comes from the number it prints, rounded as printed.
   const roiColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.roiFlat);
+    : pnlColor(stats.roiFlat, 1, 100);
+  const profitColor = thin
+    ? colors.textSecondary
+    : pnlColor(stats.profitFlat, 2);
   return (
     <Pressable
       onPress={onPress}
@@ -330,7 +360,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         <Text style={[styles.roi, { color: roiColor }]}>
           {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
         </Text>
-        <Text style={[styles.profit, { color: roiColor }]}>
+        <Text style={[styles.profit, { color: profitColor }]}>
           {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
         </Text>
       </View>
@@ -370,7 +400,8 @@ function CustomModelRow({
   onEdit,
 }: CustomRowProps) {
   const decided = wins + losses;
-  const roiColor = pnlColor(roiFlat);
+  const roiColor = pnlColor(roiFlat, 1, 100);
+  const profitColor = pnlColor(profitFlat, 2);
   const shown = live.slice(0, CARD_BET_LIMIT);
   const withdrawnEmpty = withdrawnRulesEmpty(model.rules);
   return (
@@ -446,7 +477,7 @@ function CustomModelRow({
         <Stat
           label="P&L"
           value={picks > 0 ? formatCurrencySigned(profitFlat) : '—'}
-          color={roiColor}
+          color={profitColor}
         />
       </View>
     </Pressable>
@@ -677,13 +708,12 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+  // Same box as builtInCard, so the list does not jump when rows land.
+  skeletonCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
-    borderRadius: 8,
   },
-  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
 });

@@ -61,6 +61,7 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
 
 type ParlayNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -320,9 +321,13 @@ export function ParlayScreen() {
         </Text>
 
         {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {error}</Text>
-          </View>
+          <ErrorBanner
+            what="today’s picks for the slip"
+            error={error}
+            onRetry={() => void refresh()}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
         ) : null}
 
         {resolving ? (
@@ -668,7 +673,7 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
   return (
     <View style={styles.lineShop}>
       <View style={styles.lineShopHeader}>
-        <Ionicons name="pricetag-outline" size={13} color={colors.bet} />
+        <Ionicons name="pricetag-outline" size={13} color={colors.betInk} />
         <Text style={styles.lineShopTitle}>Line shop</Text>
       </View>
       <View style={styles.corrRow}>
@@ -679,7 +684,7 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
       </View>
       <View style={styles.corrRow}>
         <Text style={styles.corrLabel}>EV at best books</Text>
-        <Text style={[styles.corrValue, { color: pnlColor(lineShop.ev) }]}>
+        <Text style={[styles.corrValue, { color: pnlColor(lineShop.ev, 1, 100) }]}>
           {formatPctSigned(lineShop.ev)} ({formatPctSigned(lineShop.evDelta)})
         </Text>
       </View>
@@ -842,12 +847,12 @@ function SlipBody({
           <Stat
             label="EV"
             value={formatPctSigned(metrics.ev)}
-            color={pnlColor(metrics.ev)}
+            color={pnlColor(metrics.ev, 1, 100)}
           />
           <Stat
             label="Edge"
             value={formatPctSigned(metrics.edgeVsDk)}
-            color={pnlColor(metrics.edgeVsDk)}
+            color={pnlColor(metrics.edgeVsDk, 1, 100)}
           />
           <Stat label={allDk ? 'DK imp.' : 'Implied'} value={formatPct(metrics.dkImpliedProb)} />
         </View>
@@ -1077,19 +1082,8 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  errorBanner: {
-    marginTop: spacing.md,
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: {
-    color: colors.avoidInk,
-    fontSize: font.size.footnote,
-  },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: spacing.md, marginBottom: spacing.sm },
   panelTitle: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,

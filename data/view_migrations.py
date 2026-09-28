@@ -210,6 +210,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # post. push_sent stays closed except lock_key + kind on the two
     # channel kinds. No Discord mutation.
     "discord_publish_state_2026_09_23.sql",
+    # 2026-09-26 (mike / Michael Alksninis): demote the ncaaf_over_under
+    # Platt map promoted 2026-09-19 17:45 ET (a=1, b=-0.281555). The
+    # decision goes back to the raw probability, which is ~0.650 at the
+    # validated +8 gate. Pinned to that promotion so a later map is left
+    # alone. Does not pause, does not move the 0.65 floor or the ±8 gate.
+    "demote_ncaaf_over_under_platt_2026_09_26.sql",
 ]
 
 

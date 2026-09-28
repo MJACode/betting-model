@@ -257,12 +257,12 @@ function SavedParlayCard({
         <Stat
           label="EV"
           value={formatPctSigned(metrics.ev)}
-          color={pnlColor(metrics.ev)}
+          color={pnlColor(metrics.ev, 1, 100)}
         />
         <Stat
           label="Edge"
           value={formatPctSigned(metrics.edgeVsDk)}
-          color={pnlColor(metrics.edgeVsDk)}
+          color={pnlColor(metrics.edgeVsDk, 1, 100)}
         />
         <Stat label="DK imp." value={formatPct(metrics.dkImpliedProb)} />
       </View>

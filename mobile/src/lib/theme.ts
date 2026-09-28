@@ -179,14 +179,19 @@ export const font = {
 /**
  * The text colour for a signed result — P&L, ROI, EV, CLV, a line move. Gain
  * reads `betInk`, loss `avoidInk`, and zero / a push / a missing value a
- * neutral `textSecondary` (never a green "+0.00" or a red "−0.00"). `epsilon`
- * treats |value| ≤ epsilon as zero, for ratios that round to 0.0%.
+ * neutral `textSecondary` (never a green "+0.00" or a red "−0.00").
+ *
+ * The tone is taken from the value ROUNDED the way the screen shows it —
+ * `digits` decimals of `value × scale` — so a ratio printed as "0.0%" is grey
+ * and one printed as "+0.1%" is green. Match the formatter beside it:
+ * `formatPctSigned(v)` → `pnlColor(v, 1, 100)`, `formatCurrencySigned(v)` →
+ * `pnlColor(v, 2)`, `formatSigned(v, 1, 'pp')` → `pnlColor(v, 1)`.
  *
  * The rule itself lives in `lib/tone.ts` so the verify scripts, which cannot
  * import react-native, can pin it.
  */
-export function pnlColor(value: number | null | undefined, epsilon = 0): string {
-  return colors[pnlTone(value, epsilon)];
+export function pnlColor(value: number | null | undefined, digits: number, scale = 1): string {
+  return colors[pnlTone(value, digits, scale)];
 }
 
 /**

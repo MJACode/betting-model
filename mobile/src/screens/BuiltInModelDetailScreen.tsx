@@ -24,6 +24,8 @@ import {
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
+import { roundsToZero } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
@@ -51,6 +53,7 @@ export function BuiltInModelDetailScreen() {
     records: fullOutcomeRecords,
     loading: settledLoading,
     error: settledError,
+    refresh: refreshSettled,
   } = useSettledPicksSincePaperStart();
 
   // Today's BET picks for this model. Game-level and prop picks lock the first
@@ -134,9 +137,13 @@ export function BuiltInModelDetailScreen() {
   // one surface that shows the same 1-bet number in full bet-green with no
   // qualifier. Same constant, same caption, same rule.
   const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
+  // Each tile's tone comes from the number it prints, rounded as printed.
   const roiColor = thin
     ? colors.textSecondary
-    : pnlColor(stats.roiFlat);
+    : pnlColor(stats.roiFlat, 1, 100);
+  const pnlTint = thin
+    ? colors.textSecondary
+    : pnlColor(stats.profitFlat, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -231,7 +238,7 @@ export function BuiltInModelDetailScreen() {
               <StatTile
                 label="P&L"
                 value={stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
-                tint={roiColor}
+                tint={pnlTint}
                 caption="settled only"
               />
             </View>
@@ -334,7 +341,7 @@ export function BuiltInModelDetailScreen() {
                   <StatTile
                     label="Avg CLV"
                     value={formatSigned(clv.avg, 1, 'pp')}
-                    tint={clv.avg !== 0 ? pnlColor(clv.avg) : undefined}
+                    tint={roundsToZero(clv.avg, 1) ? undefined : pnlColor(clv.avg, 1)}
                     caption="vs the closing price"
                   />
                   <StatTile
@@ -393,9 +400,13 @@ export function BuiltInModelDetailScreen() {
             ) : null}
 
             {settledError ? (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>Connection error: {settledError}</Text>
-              </View>
+              <ErrorBanner
+                what="this model’s record"
+                error={settledError}
+                onRetry={() => void refreshSettled()}
+                retrying={settledLoading}
+                style={styles.errorBannerInset}
+              />
             ) : null}
             {settledLoading && stats.picks === 0 ? (
               <ActivityIndicator style={styles.loading} />
@@ -526,7 +537,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
 }
 
 function edgeColorStyle(edge: number) {
-  return { color: pnlColor(edge) };
+  return { color: pnlColor(edge, 1, 100) };
 }
 
 // Aggregate closing line value across this model's settled BET picks that
@@ -708,13 +719,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   loading: { marginVertical: spacing.xl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });

@@ -23,7 +23,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { SelectableGame } from '@/lib/gameFilter';
-import { todayET } from '@/lib/format';
+import { dayLabelET } from '@/lib/format';
 
 /** Above this many rows the list gets a search field. */
 const SEARCHABLE_AT = 20;
@@ -136,21 +136,10 @@ export function GameFilterSection({
   );
 }
 
-/** '2026-09-13' → 'TODAY' / 'SAT SEP 13'. The group says the day once. */
+/** '2026-09-13' → 'TODAY' / 'TOMORROW' / 'SUN 9/13'. The group says the day
+ *  once, spelled by the same helper as the Date chips and the card. */
 function dayLabel(date: string): string {
-  if (date === todayET()) return 'TODAY';
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'UTC',
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    })
-      .format(new Date(`${date}T12:00:00Z`))
-      .toUpperCase();
-  } catch {
-    return date;
-  }
+  return dayLabelET(date).toUpperCase();
 }
 
 /** The weekday is the group header now, so the row prints only the clock. */

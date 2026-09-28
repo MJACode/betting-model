@@ -23,13 +23,14 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import {
+  formatCurrency,
   formatCurrencySigned,
   formatPctSigned,
   formatSigned,
   formatSignedUnits,
   MINUS,
 } from '../src/lib/format';
-import { badgeGlyphSize, pnlTone, SIGNAL_BADGE } from '../src/lib/tone';
+import { badgeGlyphSize, pnlTone, roundedAt, roundsToZero, SIGNAL_BADGE } from '../src/lib/tone';
 
 const ROOT = join(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf-8');
@@ -198,12 +199,40 @@ check(
 check('SignalBadge no longer colours text with bet/avoid/none', !/colors\.(bet|avoid|none)\b(?!Soft|Ink)/.test(badgeSrc));
 
 // ── signed results (H2 / L9) ────────────────────────────────────────────────
-check('pnlTone gain → betInk', pnlTone(1.2) === 'betInk');
-check('pnlTone loss → avoidInk', pnlTone(-0.4) === 'avoidInk');
-check('pnlTone zero → textSecondary', pnlTone(0) === 'textSecondary');
-check('pnlTone missing → textSecondary', pnlTone(null) === 'textSecondary' && pnlTone(NaN) === 'textSecondary');
-check('pnlTone epsilon treats 0.0005 as a push', pnlTone(0.0005, 0.001) === 'textSecondary');
-check('theme.pnlColor delegates to pnlTone', /return colors\[pnlTone\(value, epsilon\)\]/.test(themeSrc));
+check('pnlTone gain → betInk', pnlTone(1.2, 1) === 'betInk');
+check('pnlTone loss → avoidInk', pnlTone(-0.4, 1) === 'avoidInk');
+check('pnlTone zero → textSecondary', pnlTone(0, 1) === 'textSecondary');
+check(
+  'pnlTone missing / non-finite → textSecondary',
+  [null, undefined, NaN, Infinity, -Infinity].every((v) => pnlTone(v, 1) === 'textSecondary'),
+);
+// Tone from the ROUNDED value, the one the screen prints (Reviewer MEDIUM A).
+// Each pair: the formatter's output and the tone beside it must agree.
+const TONE_CASES: [string, number, number, number, string, string][] = [
+  // label, value, digits, scale, printed, tone
+  ['−0.0004 as a percent', -0.0004, 1, 100, formatPctSigned(-0.0004), 'textSecondary'],
+  ['1e-13 dollars', 1e-13, 2, 1, formatCurrencySigned(1e-13), 'textSecondary'],
+  ['−1e-13 dollars', -1e-13, 2, 1, formatCurrencySigned(-1e-13), 'textSecondary'],
+  ['CLV −0.03pp', -0.03, 1, 1, formatSigned(-0.03, 1, 'pp'), 'textSecondary'],
+  ['0.0008 as a percent', 0.0008, 1, 100, formatPctSigned(0.0008), 'betInk'],
+  ['−0.0008 as a percent', -0.0008, 1, 100, formatPctSigned(-0.0008), 'avoidInk'],
+  // Half-way cases: whatever toFixed does, the tone and the print agree
+  // (checked just below), because both come from the same rounding.
+  ['0.0005 as a percent (a tie)', 0.0005, 1, 100, formatPctSigned(0.0005), pnlTone(0.0005, 1, 100)],
+  ['$0.005 (a tie)', 0.005, 2, 1, formatCurrencySigned(0.005), pnlTone(0.005, 2)],
+];
+for (const [label, v, d, sc, printed, tone] of TONE_CASES) {
+  check(`pnlTone(${label}) = ${tone}`, pnlTone(v, d, sc) === tone, pnlTone(v, d, sc));
+  const sign = printed.startsWith('+') ? 'betInk' : printed.startsWith(MINUS) ? 'avoidInk' : 'textSecondary';
+  check(`printed ${JSON.stringify(printed)} agrees with its tone`, sign === pnlTone(v, d, sc));
+}
+check('pnlTone −0.0004 @1dp% prints "0.0%"', formatPctSigned(-0.0004) === '0.0%');
+check('pnlTone 0.0008 @1dp% prints "+0.1%"', formatPctSigned(0.0008) === '+0.1%');
+check('pnlTone 1e-13 prints "$0.00"', formatCurrencySigned(1e-13) === '$0.00');
+check('roundedAt(-0.0004, 1, 100) is a zero', roundedAt(-0.0004, 1, 100) === 0 && roundsToZero(-0.0004, 1, 100));
+check('roundedAt coerces a NUMERIC string', roundedAt('12.5' as unknown as number, 1) === 12.5);
+check('pnlTone reads a NUMERIC string', pnlTone('-3.2' as unknown as number, 2) === 'avoidInk');
+check('theme.pnlColor delegates to pnlTone with digits/scale', /return colors\[pnlTone\(value, digits, scale\)\]/.test(themeSrc));
 
 const CASES: [string, string][] = [
   [formatSigned(1.23), '+1.2'],
@@ -213,6 +242,10 @@ const CASES: [string, string][] = [
   [formatSigned(2.3, 1, 'pp'), '+2.3pp'],
   [formatSigned(-1.5, 1, ' pts'), `${MINUS}1.5 pts`],
   [formatSigned(null), '—'],
+  [formatSigned(NaN), '—'],
+  [formatSigned(Infinity), '—'],
+  [formatSigned(-Infinity, 1, '%'), '—'],
+  [formatSigned('1.25' as unknown as number, 2), '+1.25'],
   [formatPctSigned(0.125), '+12.5%'],
   [formatPctSigned(-0.03), `${MINUS}3.0%`],
   [formatPctSigned(0.0001), '0.0%'],
@@ -222,9 +255,21 @@ const CASES: [string, string][] = [
   [formatCurrencySigned(30), '+$30.00'],
   [formatCurrencySigned(0.004), '$0.00'],
   [formatCurrencySigned(0), '$0.00'],
+  [formatCurrencySigned(1e-13), '$0.00'],
+  [formatCurrencySigned(Infinity), '—'],
+  [formatCurrency(-4), `${MINUS}$4.00`],
+  [formatCurrency(30.5), '$30.50'],
+  [formatCurrency(-0.001), '$0.00'],
+  [formatCurrency(null), '—'],
   [formatSignedUnits(2.44), '+2.4u'],
   [formatSignedUnits(-0.5), `${MINUS}0.5u`],
   [formatSignedUnits(0.04), '0.0u'],
+  // Ties round the magnitude, then take the sign: symmetric about zero.
+  [formatSignedUnits(0.25), '+0.3u'],
+  [formatSignedUnits(-0.25), `${MINUS}0.3u`],
+  [formatSignedUnits(1.05), formatSignedUnits(-1.05).replace(MINUS, '+')],
+  [formatSignedUnits(-0.04), '0.0u'],
+  [formatSignedUnits(NaN), '—'],
 ];
 for (const [got, want] of CASES) check(`signed: ${JSON.stringify(want)}`, got === want, got);
 check('MINUS is U+2212', MINUS === '\u2212');
@@ -280,8 +325,82 @@ const pc = read('src/components/PickCard.tsx');
 const extras = /extrasRow\}>([\s\S]*?)\n      \) : null\}/.exec(pc)?.[1] ?? '';
 check(
   'PickCard extras-row icons use the ink, not the bright hue',
-  extras.length > 0 && !/color=\{[^}]*colors\.(bet|med|avoid)\b(?!Ink)/.test(extras) && /color=\{inkFor\(clvColor\)\}/.test(extras) && /color=\{inkFor\(movementSummary\.color\)\}/.test(extras),
+  extras.length > 0 && !/color=\{[^}]*colors\.(bet|med|avoid)\b(?!Ink)/.test(extras) && /color=\{clvInk\}/.test(extras) && /color=\{inkFor\(movementSummary\.color\)\}/.test(extras),
 );
+check('PickCard has no unused evColor (Reviewer Low 1)', !/\bevColor\b/.test(pc));
+check('PickCard CLV tone is from the rounded pp', /const clvTone = pnlTone\(pick\.clv_pct, 1\)/.test(pc));
+
+// Ionicons in a bright GREEN or AMBER hue (`colors.med|bet|positive|high` with
+// no Soft/Ink suffix), anywhere in the `color={…}` expression, ternaries
+// included. Bright green is 2.22:1 on bgCard and amber 2.2:1, under the 3:1
+// non-text bar (Reviewer Low 2). The allowlist is the green-as-SELECTED
+// checkmarks that move to tint in PR 5 (Designer ruling); nothing else.
+const BRIGHT_ICON_ALLOW = new Set([
+  'src/components/SportsbookPickerSheet.tsx:127',
+  'src/components/SportsbookPickerSheet.tsx:190',
+  'src/components/StatePickerSheet.tsx:46',
+  'src/components/StatePickerSheet.tsx:61',
+  'src/components/StatGroupSheet.tsx:99',
+  'src/components/HitModeSheet.tsx:118',
+  'src/screens/PaywallScreen.tsx:183',
+]);
+/** Every `<Ionicons … color={expr} …/>` as [line of `color=`, expr]. */
+function ioniconColors(src: string): [number, string][] {
+  const out: [number, string][] = [];
+  const open = /<Ionicons\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = open.exec(src))) {
+    const end = src.indexOf('/>', m.index);
+    const tag = src.slice(m.index, end < 0 ? undefined : end);
+    const at = tag.search(/\bcolor=\{/);
+    if (at < 0) continue;
+    let depth = 0;
+    let i = tag.indexOf('{', at);
+    const start = i;
+    for (; i < tag.length; i++) {
+      if (tag[i] === '{') depth++;
+      else if (tag[i] === '}' && --depth === 0) break;
+    }
+    out.push([src.slice(0, m.index + at).split('\n').length, tag.slice(start + 1, i)]);
+  }
+  return out;
+}
+const BRIGHT_ICON = /\bcolors\.(med|bet|positive|high)\b(?!Soft|Ink)/;
+const brightIcons: string[] = [];
+const allowSeen = new Set<string>();
+for (const f of files) {
+  const rel = relative(ROOT, f).split('\\').join('/');
+  for (const [line, expr] of ioniconColors(code(readFileSync(f, 'utf-8')))) {
+    if (!BRIGHT_ICON.test(expr)) continue;
+    const key = `${rel}:${line}`;
+    if (BRIGHT_ICON_ALLOW.has(key)) allowSeen.add(key);
+    else brightIcons.push(`${key} ${expr.replace(/\s+/g, ' ')}`);
+  }
+}
+check('no Ionicons in bright med/bet/positive/high, ternaries included (allowlist: PR 5 selected-state)', brightIcons.length === 0, brightIcons.join(', '));
+check('the bright-icon allowlist is still live (no stale entries)', allowSeen.size === BRIGHT_ICON_ALLOW.size, [...BRIGHT_ICON_ALLOW].filter((k) => !allowSeen.has(k)).join(', '));
+const probe = ioniconColors(`<Ionicons\n  name="x"\n  color={on ? colors.bet : colors.textTertiary}\n/>\n<Ionicons name="y" color={colors.betInk} />\n<Ionicons name="z" color={pick(colors.medSoft)} size={3} />`);
+check('the bright-icon scan sees a multi-line ternary and passes Ink/Soft', probe.length === 3 && BRIGHT_ICON.test(probe[0][1]) && probe[0][0] === 3 && !BRIGHT_ICON.test(probe[1][1]) && !BRIGHT_ICON.test(probe[2][1]));
+check('Line shop pricetag icon is betInk (Reviewer MEDIUM B)', /name="pricetag-outline" size=\{13\} color=\{colors\.betInk\}/.test(read('src/screens/ParlayScreen.tsx')));
+// Every pnlColor() names the display's precision: `, 1, 100)` for a ratio
+// printed by formatPctSigned, `, 2)` for dollars, `, 1)` for pp (Reviewer
+// MEDIUM A). tsc already refuses a call with no digits; this pins the values.
+const toneCalls: string[] = [];
+const badToneCalls: string[] = [];
+for (const f of files) {
+  const rel = relative(ROOT, f);
+  for (const m of code(readFileSync(f, 'utf-8')).matchAll(/pnlColor\(((?:[^()]|\([^()]*\))*)\)/g)) {
+    if (/^value, digits/.test(m[1])) continue;
+    toneCalls.push(rel);
+    if (!/,\s*(1,\s*100|2|1)\s*$/.test(m[1])) badToneCalls.push(`${rel}: pnlColor(${m[1]})`);
+  }
+}
+check(`every pnlColor() call passes the display's digits/scale (${toneCalls.length} calls)`, toneCalls.length >= 20 && badToneCalls.length === 0, badToneCalls.join(', '));
+for (const rel of ['src/components/DailyResultsModal.tsx', 'src/screens/OpeningComparisonScreen.tsx', 'src/screens/TrackRecordScreen.tsx']) {
+  check(`${rel}: roiColor is the rounded percent tone, no epsilon`, /function roiColor\(roi: number\): string \{\n  return pnlColor\(roi, 1, 100\);/.test(read(rel)));
+}
+check('PickDetail "flat" CLV is rounding-aware', /const flat = !lineMoved && roundsToZero\(pick\.clv_pct, 1\)/.test(read('src/screens/PickDetailScreen.tsx')));
+check('BuiltIn Avg CLV tint is rounding-aware', /tint=\{roundsToZero\(clv\.avg, 1\) \? undefined : pnlColor\(clv\.avg, 1\)\}/.test(read('src/screens/BuiltInModelDetailScreen.tsx')));
 check("no literal '#fff' / 'white' left in the app (H6)", whiteLits.length === 0, whiteLits.join(', '));
 check('no bright bet/avoid/med/positive/negative hue used as a text colour', hueText.length === 0, hueText.join(', '));
 
@@ -302,6 +421,10 @@ check('player hit-rate badge text is dark on its bright fill', /hitBadgeText: \{
 const trackSrc = read('src/components/TrackButton.tsx');
 const addSrc = read('src/components/AddToPlayButton.tsx');
 const noGreen = (s: string) => !/colors\.(bet|betInk|betSoft|positive)\b/.test(code(s));
+check('TrackButton / AddToPlay / PlayerStats slip expose the ON state to VoiceOver (selected)',
+  /accessibilityState=\{\{ selected: tracked \}\}/.test(trackSrc) &&
+  /accessibilityState=\{\{ selected: inPlay \}\}/.test(addSrc) &&
+  /accessibilityState=\{\{ selected: inSlip \}\}/.test(player));
 check('TrackButton ON: checkmark, tint, no green', /tracked \? 'checkmark'/.test(trackSrc) && /on: \{\s*borderColor: colors\.tint/.test(trackSrc) && noGreen(trackSrc));
 check('AddToPlayButton ON: checkmark, tint outline, no green', /inPlay \? 'checkmark'/.test(addSrc) && /inPlay: \{\s*borderColor: colors\.tint/.test(addSrc) && noGreen(addSrc));
 check(

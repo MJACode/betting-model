@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchPlayerGameLog } from '@/lib/queries';
 import {
   logStatValue,
@@ -115,6 +115,9 @@ export function usePlayerTrends({
   // because it cannot know which tabs a player fills until the rows land.
   const [loaded, setLoaded] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by Retry on a failed load (usability audit M1: every error has one).
+  const [attempt, setAttempt] = useState(0);
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
   const key = stat?.key ?? statKey ?? null;
   // Whether a stat is selected at all gates the fetch; WHICH stat does not.
@@ -157,7 +160,7 @@ export function usePlayerTrends({
     return () => {
       mounted = false;
     };
-  }, [playerId, playerName, beforeDate, hasStat, sport, playerType, limit]);
+  }, [playerId, playerName, beforeDate, hasStat, sport, playerType, limit, attempt]);
 
   // Newest-first, missing games dropped rather than counted as zero.
   const values = useMemo(() => {
@@ -166,5 +169,5 @@ export function usePlayerTrends({
     // `stat` is an object literal at some call sites — key it by its stat key.
   }, [games, key, sport, playerType]);
 
-  return { games, values, trends: bucketize(values), loading, loaded, error };
+  return { games, values, trends: bucketize(values), loading, loaded, error, reload };
 }

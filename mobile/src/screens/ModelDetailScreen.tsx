@@ -23,6 +23,7 @@ import {
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -58,7 +59,7 @@ export function ModelDetailScreen() {
     (model?.rules.length ?? 0) > 0 && (model?.rules ?? []).every((r) => isModelRetired(r.model_id));
   // Backtests run against every scored pick (BET + AVOID + dead-zone), graded
   // server-side — not just the settled BET set.
-  const { stats, picks: matchingPicks, loading, error } = useCustomModelBacktest(
+  const { stats, picks: matchingPicks, loading, error, retry } = useCustomModelBacktest(
     model ?? null,
     { withPicks: true },
   );
@@ -86,7 +87,9 @@ export function ModelDetailScreen() {
   }
 
   const decided = stats.wins + stats.losses;
-  const roiColor = pnlColor(stats.roiFlat);
+  // Each tile's tone comes from the number it prints, rounded as printed.
+  const roiColor = pnlColor(stats.roiFlat, 1, 100);
+  const pnlTint = pnlColor(stats.profitFlat, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -152,15 +155,19 @@ export function ModelDetailScreen() {
               <StatTile
                 label="P&L"
                 value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
-                tint={roiColor}
+                tint={pnlTint}
                 caption="all graded picks"
               />
             </View>
 
             {error ? (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>Connection error: {error}</Text>
-              </View>
+              <ErrorBanner
+                what="this model’s backtest"
+                error={error}
+                onRetry={retry}
+                retrying={loading}
+                style={styles.errorBannerInset}
+              />
             ) : null}
 
             <Text style={styles.sectionHeader}>
@@ -230,7 +237,7 @@ export function ModelDetailScreen() {
               style={[
                 styles.pickProfit,
                 {
-                  color: pnlColor(item.profit_flat ?? 0),
+                  color: pnlColor(item.profit_flat, 2),
                 },
               ]}
             >
@@ -403,14 +410,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
   error: { color: colors.avoidInk, padding: spacing.lg, fontSize: font.size.body },
 });

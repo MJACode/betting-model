@@ -65,6 +65,8 @@ import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
+import { friendlyCause } from '@/lib/errors';
 import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
@@ -162,7 +164,7 @@ export function PlayerStatsScreen() {
   }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
   const beforeDate = todayET();
-  const { games, loading, loaded, error } = usePlayerTrends({
+  const { games, loading, loaded, error, reload: reloadTrends } = usePlayerTrends({
     playerId: playerId || null,
     playerName: playerId ? null : playerName,
     beforeDate,
@@ -601,9 +603,13 @@ export function PlayerStatsScreen() {
         </ScrollView>
 
         {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {error}</Text>
-          </View>
+          <ErrorBanner
+            what="recent games"
+            error={error}
+            onRetry={reloadTrends}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
         ) : null}
 
         {loading && games.length === 0 ? (
@@ -772,6 +778,7 @@ export function PlayerStatsScreen() {
                   onPress={toggleSlip}
                   hitSlop={8}
                   accessibilityRole="button"
+                  accessibilityState={{ selected: inSlip }}
                   accessibilityLabel={inSlip ? 'Remove from betslip' : 'Add to betslip'}
                   style={({ pressed }) => [
                     styles.slipBtn,
@@ -1188,7 +1195,7 @@ function TonightLineCard({
         ) : !tonight ? (
           <Text style={[styles.muted, styles.gapTop]}>
             {error
-              ? `Couldn’t load lines — ${error}`
+              ? `Couldn’t load lines. ${friendlyCause(error)} Pull down to retry.`
               : `No book has posted ${statLabel} for this game yet.`}
           </Text>
         ) : (
@@ -1419,7 +1426,7 @@ function PickRecordCard({
         <View style={styles.card}>
           <Text style={styles.muted}>
             {error
-              ? `Couldn’t load our picks — ${error}`
+              ? `Couldn’t load our picks. ${friendlyCause(error)} Pull down to retry.`
               : sportHasPropModel
                 ? `No settled picks on ${playerName}.`
                 : `No prop model prices ${sport} players yet.`}
@@ -1798,13 +1805,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });
