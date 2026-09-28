@@ -367,6 +367,37 @@ class TestNoneRowBesideABetIsCleared:
         assert f"{rowcount} cleared beside a BET" in capsys.readouterr().out
 
 
+    @pytest.mark.parametrize("rowcount", [1, 0])
+    def test_cleared_reads_rowcount_through_the_real_cursor_wrapper(self, run, capsys,
+                                                                    rowcount):
+        # The fake above sets rowcount itself; this goes through the REAL
+        # data.db._CursorResult, which had no rowcount, so prod always read 0.
+        from data.db import _CursorResult
+
+        class _Raw:
+            def __init__(self, rows, n):
+                self.rows, self.rowcount = rows, n
+
+            def fetchall(self):
+                return list(self.rows)
+
+            def fetchone(self):
+                return self.rows[0] if self.rows else None
+
+        class _Wrapped(_Conn):
+            def execute(self, sql, params=None):
+                r = super().execute(sql, params)
+                return _CursorResult(_Raw(r.fetchall(), r.rowcount))
+
+        conn = _Wrapped(games=[(GAME, "PIT", "CIN", "2026-09-27", _kick(24))],
+                        picks=[_bet_row(), _none_row()], delete_rowcount=rowcount)
+        assert pub._clear_scored_row(conn, GAME, "nfl_wind_totals") == rowcount
+        conn.sql.clear()
+        run(conn, [_eval()])
+        assert len(conn.writes("DELETE")) == 1
+        assert f"{rowcount} cleared beside a BET" in capsys.readouterr().out
+
+
 class TestFlexedKickoffRefreshes:
     def test_moved_kickoff_alone_refreshes_the_row(self, run):
         # Same line, price and reason; only the kickoff moved (a flex).

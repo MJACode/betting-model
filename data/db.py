@@ -166,6 +166,13 @@ class _CursorResult:
     def __iter__(self):
         return iter(self._cur)
 
+    @property
+    def rowcount(self) -> int:
+        """Rows the statement touched (psycopg2's cursor.rowcount; -1 when
+        unknown). Callers that used getattr(cur, "rowcount", 0) got 0 here
+        before this existed, whatever the statement did (#844 review)."""
+        return self._cur.rowcount
+
 
 # ── Connection loss ───────────────────────────────────────────────────────────
 
