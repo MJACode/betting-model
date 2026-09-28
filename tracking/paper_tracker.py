@@ -2301,7 +2301,10 @@ def _mlb_settle_holds(conn: DBConnection, game_date: str, settled_at: str) -> di
             # pick written while a book had its game delayed must not be moved
             # to the other game by its game_time. On a collapsed row the pick's
             # game is the one its start is unambiguously near, or unknown.
-            pick_n = (unambiguous_game_number(game_date, away, home, cands, game_time)
+            # Strict (closest=False): near both games is unknown, not the
+            # closer one -- a positive answer here only ever HOLDS a pick.
+            pick_n = (unambiguous_game_number(game_date, away, home, cands,
+                                              game_time, closest=False)
                       if len(cands) > 1 and (away, home) not in g2_matchups
                       else None)
             reason = _settle_hold_reason(

@@ -523,15 +523,83 @@ def test_a_lone_game_one_delayed_91_minutes_never_seen_is_refused(schedule):
 def test_game_two_listed_at_the_placeholder_is_game_two(schedule):
     """The book lists game 2 at MLB's 20:10Z placeholder, five minutes after
     game 1. Beside game 1: start order. Alone after game 1 was assigned: the
-    one game left. Alone with nothing assigned: near game 1 AND game 2's
-    placeholder, so refused."""
+    one game left. Alone with nothing assigned: 0 min from game 2's
+    placeholder and 5 from game 1, so the closer one, game 2."""
     assert _ids([_ev("g1", "2026-09-25T20:05:00Z"), _ev("g2", "2026-09-25T20:10:00Z")]) == {
         "20:05": "MLB_2026-09-25_BAL_NYY", "20:10": "MLB_2026-09-25_BAL_NYY_G2"}
     mgi.clear_cache()
     assert _ids([_ev("g1", "2026-09-25T20:05:00Z"), _ev("g2", "2026-09-25T23:30:00Z")])
     assert _ids([_ev("g2", "2026-09-25T20:10:00Z")]) == {"20:10": "MLB_2026-09-25_BAL_NYY_G2"}
     mgi.clear_cache()
-    assert _ids([_ev("gx", "2026-09-25T20:10:00Z")]) == {}
+    assert _ids([_ev("gx", "2026-09-25T20:10:00Z")]) == {"20:10": "MLB_2026-09-25_BAL_NYY_G2"}
+
+
+# ── N1: a lone event near two games goes to the closer one ───────────────────
+# BAL@NYY: game 1 at 20:05Z, game 2 TBD with its placeholder at 20:10Z. Books
+# often list only game 1 on the morning of a traditional doubleheader.
+
+G1_ID, G2_ID = "MLB_2026-09-25_BAL_NYY", "MLB_2026-09-25_BAL_NYY_G2"
+
+
+def test_lone_game_one_at_listed_start_is_game_one(schedule):
+    """Game 1's event alone at its listed 20:05Z start is 0 min from game 1
+    and 5 from game 2's placeholder: game 1, not DROPPED. (It was dropped at
+    efa2ab7b, leaving game 1's open, props and public betting empty until
+    game 2 was listed.) A book a minute late is still game 1."""
+    assert _ids([_ev("g1", "2026-09-25T20:05:00Z")]) == {"20:05": G1_ID}
+    assert mgi._event_map.by_event[("odds_api", "g1")] == G1_ID
+    mgi.clear_cache()
+    assert _ids([_ev("g1b", "2026-09-25T20:06:00Z")]) == {"20:06": G1_ID}
+    # The same answer from the lookup itself, and from the one-event helper.
+    mgi.clear_cache()
+    cands = mgi.schedule_state(DATE)[("BAL", "NYY")]
+    assert mgi.unambiguous_game_number(DATE, "BAL", "NYY", cands,
+                                       "2026-09-25T20:05:00Z") == 1
+    assert mgi.mlb_event_game_id(DATE, "BAL", "NYY", "2026-09-25T20:05:00Z",
+                                 event_id="solo") == G1_ID
+
+
+def test_lone_game_one_then_game_two_arrives_maps_to_g2(schedule):
+    """Game 1 assigned alone by closeness, then game 2's event arrives: it
+    goes to _G2 and game 1 keeps its id -- wherever game 2 is listed (its real
+    23:30Z start, or MLB's 20:10Z placeholder that is nearer game 1's start),
+    and even after game 1 is delayed onto the placeholder."""
+    assert _ids([_ev("g1", "2026-09-25T20:05:00Z")]) == {"20:05": G1_ID}
+    assert _ids([_ev("g1", "2026-09-25T20:05:00Z"),
+                 _ev("g2", "2026-09-25T23:30:00Z")]) == {"20:05": G1_ID, "23:30": G2_ID}
+    assert _ids([_ev("g1", "2026-09-25T20:10:00Z"),
+                 _ev("g2", "2026-09-25T23:30:00Z")]) == {"20:10": G1_ID, "23:30": G2_ID}
+    assert _ids([_ev("g2", "2026-09-25T23:30:00Z")]) == {"23:30": G2_ID}
+
+    # Game 2 first listed at the placeholder, alone, after game 1 was claimed.
+    mgi.clear_cache()
+    assert _ids([_ev("h1", "2026-09-25T20:05:00Z")]) == {"20:05": G1_ID}
+    assert _ids([_ev("h2", "2026-09-25T20:10:00Z")]) == {"20:10": G2_ID}
+    assert _ids([_ev("h1", "2026-09-25T20:05:00Z"),
+                 _ev("h2", "2026-09-25T20:10:00Z")]) == {"20:05": G1_ID, "20:10": G2_ID}
+    assert mgi._event_map.by_game == {("odds_api", G1_ID): "h1",
+                                      ("odds_api", G2_ID): "h2"}
+
+
+def test_lone_event_at_a_true_tie_is_refused(schedule):
+    """20:07Z and 20:08Z are 2 and 3 minutes from game 1 and game 2's
+    placeholder: within TIE_TOLERANCE, so which game is noise -- DROPPED,
+    and nothing recorded. Two synthetic games at exactly equal distance too."""
+    assert mgi.TIE_TOLERANCE == mgi.timedelta(minutes=2)
+    assert _ids([_ev("t1", "2026-09-25T20:07:00Z")]) == {}
+    assert _ids([_ev("t2", "2026-09-25T20:08:00Z")]) == {}
+    assert not mgi._event_map.by_event
+    assert _ids([_ev("t3", "2026-09-25T20:09:00Z")]) == {"20:09": G2_ID}
+
+    ts = mgi._ts
+    cands = [(1, ts("2026-07-04T17:05:00Z")), (2, ts("2026-07-04T17:55:00Z"))]
+    tie = "2026-07-04T17:30:00Z"
+    assert mgi.unambiguous_game_number("2026-07-04", "A", "B", cands, tie) is None
+    assert mgi.unambiguous_game_number("2026-07-04", "A", "B", cands,
+                                       "2026-07-04T17:20:00Z") == 1
+    # Settlement's check 2 keeps the strict rule: near both is unknown.
+    assert mgi.unambiguous_game_number("2026-07-04", "A", "B", cands,
+                                       "2026-07-04T17:20:00Z", closest=False) is None
 
 
 def test_a_split_doubleheader_game_one_delayed_over_2h15_keeps_its_id(schedule):

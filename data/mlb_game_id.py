@@ -192,29 +192,52 @@ def schedule_state(game_date: str) -> dict[tuple[str, str], list[tuple[int, date
 # it is not evidence of game 1.
 _tbd_placeholder: dict[tuple[str, str, str, int], datetime] = {}
 
-# How close a lone event's start must be to ONE scheduled game (and to no
-# other) to be placed on it by time alone. Farther, or near two, is ambiguous.
+# How close a lone event's start must be to a scheduled game to be placed on
+# it by time alone. Near no game is ambiguous (a game 1 delayed 91+ minutes).
 MATCH_WINDOW = timedelta(minutes=60)
+
+# Near TWO games, the closer one wins unless the two distances are within
+# TIE_TOLERANCE of each other. Why 2 minutes: book start times are minute
+# precision and are seen a minute off MLB's (CIN@CWS 2026-08-13 was listed
+# 17:11Z for a 17:10Z first pitch), and a 1-minute offset in the event's start
+# moves the DIFFERENCE between its two distances by up to 2 minutes. Closer
+# than that, which game the book meant is noise. The tightest real case is a
+# traditional doubleheader: game 1 at 20:05Z, game 2's TBD placeholder at
+# 20:10Z. A book listing game 1 at 20:05-20:06 gets game 1, a book listing
+# game 2 at the placeholder (20:09-20:10) gets game 2, and 20:07-20:08 is a
+# tie and refused. An event keeps its first assignment (`_EventMap`), so
+# game 2's event arriving later goes to the one game left, never onto game 1.
+TIE_TOLERANCE = timedelta(minutes=2)
 
 
 def unambiguous_game_number(game_date: str, away: str, home: str,
                             candidates: list[tuple[int, datetime]] | None,
-                            start) -> int | None:
-    """The one scheduled game this start is near, or None when it is near
-    none or several (a game 1 delayed 91+ minutes is 89 minutes from game 2's
-    effective start; a game 2 listed at the placeholder is 5 minutes from game
-    1). Near = within MATCH_WINDOW of the effective start or, for a TBD game,
-    of its placeholder."""
+                            start, *, closest: bool = True) -> int | None:
+    """The scheduled game this start belongs to by time alone, or None.
+
+    Near = within MATCH_WINDOW of the effective start or, for a TBD game, of
+    its placeholder; a game's distance is the smaller of the two. Near no game
+    is None (a game 1 delayed 91+ minutes is 89 minutes from game 2's
+    effective start). Near one game is that game. Near several: the closest,
+    unless the best two are within TIE_TOLERANCE (None). `closest=False` keeps
+    the strict rule -- near several is None -- for settlement's check 2, which
+    only ever HOLDS on a positive answer and is left as reviewed."""
     ct = _ts(start)
     if not candidates or ct is None:
         return None
-    near = set()
+    near: dict[int, timedelta] = {}
     for n, eff in candidates:
         times = [t for t in (eff, _tbd_placeholder.get((game_date, away, home, n)))
                  if t is not None]
-        if any(abs(t - ct) <= MATCH_WINDOW for t in times):
-            near.add(n)
-    return near.pop() if len(near) == 1 else None
+        d = min((abs(t - ct) for t in times), default=None)
+        if d is not None and d <= MATCH_WINDOW:
+            near[n] = d
+    if len(near) == 1:
+        return next(iter(near))
+    if not near or not closest:
+        return None
+    (n1, d1), (_n2, d2) = sorted(near.items(), key=lambda kv: (kv[1], kv[0]))[:2]
+    return n1 if d2 - d1 > TIE_TOLERANCE else None
 
 
 def schedule_starts(game_date: str) -> dict[tuple[str, str], list[tuple[int, datetime]]]:
@@ -383,9 +406,11 @@ class MlbEventBatch:
          its game_id, whatever its start says now;
       2. two or more NEW events are assigned by START ORDER to the scheduled
          games not already claimed (game numbers ascending);
-      3. one new event goes to the one unclaimed game left, or to the one
-         scheduled game its start is unambiguously near (MATCH_WINDOW); an
-         ambiguous lone event is DROPPED at ERROR, never guessed;
+      3. one new event goes to the one unclaimed game left, or by time to the
+         scheduled game it is near (MATCH_WINDOW) -- the closest when near
+         two, e.g. game 1 at its listed start vs game 2's TBD placeholder
+         five minutes later; near none, or a tie (TIE_TOLERANCE), is DROPPED
+         at ERROR, never guessed;
       4. schedule never read (cold Stats API failure): match against the
          base / _G2 rows already in `games`; with nothing to match, a lone
          event gets the base id (a single game, as before) and two or more
@@ -502,7 +527,7 @@ class MlbEventBatch:
                  if all(c[1] is not None for c in free) else free[0][0])
             if n is None:
                 logger.error(f"MLB {away}@{home} {game_date}: event {e} ({ct}) is "
-                             f"not unambiguously near one scheduled game "
+                             f"near no scheduled game, or equally near two "
                              f"({', '.join(f'G{c[0]} {c[1]:%H:%MZ}' for c in free)}); "
                              f"DROPPED until it is listed beside the other game "
                              f"or matches one")
