@@ -111,6 +111,21 @@ export function gameStatusSpeech(status: StatusForSpeech, dayLabel?: string | nu
   return joinLabel(['Live', inning, outs, score]);
 }
 
+/**
+ * A header line with unknown counts ("—", PATTERNS §F5) as VoiceOver should
+ * say it, in the sub-tabs' words: "Sep 28 · — bets · — scored" reads "Sep 28,
+ * bets count not available, scored count not available". Lines with no "—"
+ * only lose the "·" separators.
+ */
+export function unknownCountSpeech(text: string): string {
+  return joinLabel(
+    text.split(/\s*·\s*/).map((part) => {
+      const m = /^—\s*(.+)$/.exec(part.trim());
+      return m ? `${m[1]} count not available` : part;
+    }),
+  );
+}
+
 /** "1.2u → 1.0u" is read as "1.2 u arrow"; this says "stake 1.2 units to win 1.0 units". */
 export function unitsSpeech(text: string): string {
   return text.replace(/(\d)u\b/g, '$1 units').replace(/\s*→\s*/g, ' to win ');

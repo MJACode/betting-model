@@ -78,7 +78,7 @@ const eq = (got, want, what) => {
 @needs_node
 def test_spoken_labels(tmp_path):
     script = PRELUDE + """
-import { gameStatusSpeech, unitsSpeech, sharpScoreSpeech, pageLabel, spokenDate, slopFor } from './a11y.ts';
+import { gameStatusSpeech, unitsSpeech, sharpScoreSpeech, pageLabel, spokenDate, slopFor, unknownCountSpeech } from './a11y.ts';
 import { gameStartedSpeech, gameStartedLine } from './pickCta.ts';
 eq(gameStatusSpeech({ kind: 'live', awayScore: 3, homeScore: 2, inning: 9, inningHalf: 'bottom', outs: 2 }), 'Live, bottom 9th, 2 outs, 3 to 2', 'M22 live');
 eq(gameStatusSpeech({ kind: 'final', awayScore: 5, homeScore: 3 }), 'Final, 5 to 3', 'final');
@@ -90,6 +90,10 @@ eq(sharpScoreSpeech(35, 'low'), 'Sharp score 35 of 100, low', 'M5');
 eq(pageLabel(0, 4), 'Page 1 of 4', 'M19');
 eq(spokenDate('2026-01-05'), 'January 5, 2026', 'calendar');
 eq(slopFor(31), { top: 7, bottom: 7, left: 0, right: 0 }, 'slop');
+// "—" counts (#845) speak the sub-tabs' "count not available".
+eq(unknownCountSpeech('Sep 28 · — bets · — scored'), 'Sep 28, bets count not available, scored count not available', 'unknown counts');
+eq(unknownCountSpeech(unitsSpeech('Sep 28 · — pre-game signals · 1.2u staked')), 'Sep 28, pre-game signals count not available, 1.2 units staked', 'unknown + units');
+eq(unknownCountSpeech('3 in play'), '3 in play', 'known count');
 eq(gameStartedSpeech(-125, 'DraftKings'), 'Game started. Picked at -125 at DraftKings. Betting links are off once a game starts.', 'started speech');
 eq(gameStartedSpeech(null, 'DraftKings'), 'Game started. Betting links are off once a game starts.', 'started, no price');
 // The visible line is unchanged from #847.
@@ -134,6 +138,14 @@ def test_pick_card_label_is_complete():
     assert "`Stake ${unitsSpeech(stakeCaption)}`" in card
     assert "timing ? timing.label : null" in card
     assert "accessibilityActions={a11yActions.length > 0 ? a11yActions : undefined}" in card
+
+
+def test_started_line_speaks_the_same_on_card_and_detail():
+    """#847 moved the started line onto Pick Detail: both say gameStartedSpeech."""
+    spoken = "gameStartedSpeech(decisionOdds(pick), bookName(storedQuoteBook(pick)))"
+    assert spoken in _read(SRC / "components" / "PickCard.tsx")
+    detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
+    assert re.search(r"styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{" + re.escape(spoken) + r"\}", detail)
 
 
 def test_audited_targets():

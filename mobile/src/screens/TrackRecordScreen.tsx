@@ -31,7 +31,7 @@ import {
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPct, formatPctSigned } from '@/lib/format';
-import { ROW_SLOP_PAD } from '@/lib/a11y';
+import { ROW_SLOP_PAD, unknownCountSpeech } from '@/lib/a11y';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
@@ -248,7 +248,10 @@ export function TrackRecordScreen() {
           <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
             {overall.stakedFlat > 0 ? formatPctSigned(overall.roiFlat) : '—'}
           </Text>
-          <Text style={styles.heroRecord}>
+          <Text
+            style={styles.heroRecord}
+            accessibilityLabel={notLoaded ? unknownCountSpeech('— settled picks') : undefined}
+          >
             {notLoaded ? (
               '— settled picks'
             ) : (

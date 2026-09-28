@@ -122,6 +122,7 @@ import {
   formatUnits,
 } from '@/lib/thresholds';
 import { formatCurrency, formatPct, gameStatus, todayET } from '@/lib/format';
+import { unitsSpeech, unknownCountSpeech } from '@/lib/a11y';
 import type { EnrichedPick, PicksView, RootStackParamList, TabParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { hasLiveModel, liveModelSportsSentence } from '@/lib/liveSports';
@@ -598,7 +599,7 @@ export function PicksHomeScreen() {
             <SettingsButton />
           </View>
         </View>
-        <Text style={styles.subtitle}>{subtitle}</Text>
+        <Text style={styles.subtitle} accessibilityLabel={unknownCountSpeech(unitsSpeech(subtitle))}>{subtitle}</Text>
         {/* Neutral chips until today's board (and the live one) is known: built
             from empty data, every chip read muted and "no picks today" after a
             failure or before the first load (Designer #845). */}

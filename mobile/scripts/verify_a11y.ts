@@ -332,6 +332,10 @@ check('PickCard label carries the stake, in words', /stakeCaption \? `Stake \$\{
 check('PickCard label carries when it posted and the started line', /timing \? timing\.label : null/.test(card) && /startedSpoken,/.test(card));
 check('PickCard: Track / Betslip / book offered as accessibilityActions', /accessibilityActions=\{a11yActions\.length > 0 \? a11yActions : undefined\}/.test(card) && /name === 'track' && canTrack/.test(card) && /name === 'slip' && canSlip/.test(card) && /name === 'book' && handoff/.test(card));
 check('PickCard: "Game started" line speaks gameStartedSpeech (full book name)', /accessibilityLabel=\{startedSpoken \?\? startedText\}/.test(card) && /gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)/.test(card));
+const detail = read('src/screens/PickDetailScreen.tsx');
+check('Pick Detail: the started card speaks gameStartedSpeech, like the card (#847)', /styles\.startedCard\}[\s\S]{0,120}accessibilityLabel=\{gameStartedSpeech\(decisionOdds\(pick\), bookName\(storedQuoteBook\(pick\)\)\)\}/.test(detail));
+check('PicksHome: "—" header counts speak "count not available", like the sub-tabs (#845)', /<Text style=\{styles\.subtitle\} accessibilityLabel=\{unknownCountSpeech\(unitsSpeech\(subtitle\)\)\}>/.test(read('src/screens/PicksHomeScreen.tsx')));
+check('TrackRecord: "— settled picks" speaks "count not available"', /accessibilityLabel=\{notLoaded \? unknownCountSpeech\('— settled picks'\) : undefined\}/.test(read('src/screens/TrackRecordScreen.tsx')));
 check('PickCard: "Price check" chip says what it means', /accessibilityLabel="Price check: this price looks off, so edge and EV are hidden"/.test(card));
 check('SharpScorePill: "Sharp score N of 100, band" (M5)', /accessibilityLabel=\{sharpScoreSpeech\(score, BAND_WORD\[band\]\)\}/.test(read('src/components/SharpScorePill.tsx')));
 const pill = read('src/components/GameStatusPill.tsx');
@@ -380,6 +384,9 @@ async function behaviour() {
   check('pageLabel(1, 4) → "Page 2 of 4"', a.pageLabel(1, 4) === 'Page 2 of 4');
   check('spokenDate("2026-09-28") → "September 28, 2026"', a.spokenDate('2026-09-28') === 'September 28, 2026');
   check('joinLabel drops empties', a.joinLabel(['MLB', null, '', false, '2 signals']) === 'MLB, 2 signals');
+  check('unknownCountSpeech("Sep 28 · — bets · — scored") → "… bets count not available, …"',
+    a.unknownCountSpeech('Sep 28 · — bets · — scored') === 'Sep 28, bets count not available, scored count not available', a.unknownCountSpeech('Sep 28 · — bets · — scored'));
+  check('unknownCountSpeech leaves known counts, drops "·"', a.unknownCountSpeech('Sep 28 · 3 bets · 12 scored') === 'Sep 28, 3 bets, 12 scored' && a.unknownCountSpeech('— in play') === 'in play count not available');
 }
 
 behaviour()
