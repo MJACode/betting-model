@@ -808,18 +808,23 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
 
   const quotes = Array.from(byBook.values());
   if (quotes.length === 0) return [];
+  return rankQuotes(quotes);
+}
+
+/** Best payout first; ties go to the record chip, then LINE_SHOP_BOOKS order. */
+function rankQuotes(quotes: Array<Omit<LineQuote, 'isBest'>>): LineQuote[] {
   const order = (b: string) => {
     const i = (LINE_SHOP_BOOKS as string[]).indexOf(b);
     return i < 0 ? LINE_SHOP_BOOKS.length : i;
   };
-  quotes.sort((a, b) => {
+  const sorted = [...quotes].sort((a, b) => {
     const d = americanToDecimal(b.price) - americanToDecimal(a.price);
     if (d !== 0) return d;
     if (a.isRecord !== b.isRecord) return a.isRecord ? -1 : 1;
     return order(a.bookmaker) - order(b.bookmaker);
   });
-  const bestDecimal = americanToDecimal(quotes[0].price);
-  return quotes.map((q) => ({ ...q, isBest: americanToDecimal(q.price) === bestDecimal }));
+  const bestDecimal = americanToDecimal(sorted[0].price);
+  return sorted.map((q) => ({ ...q, isBest: americanToDecimal(q.price) === bestDecimal }));
 }
 
 /**
@@ -997,9 +1002,22 @@ export function bestHandoffForPick(
       verb: 'Bet',
     };
   }
-  const quotes = pickLineQuotes(pick, bookRows ?? []);
+  let quotes = pickLineQuotes(pick, bookRows ?? []);
   if (quotes.length === 0) return null;
-  const best = quotes.find((q) => q.isBest) ?? quotes[0];
+  let best = quotes.find((q) => q.isBest) ?? quotes[0];
+  // The record chip ranks at the STORED price, but the hand-off is a bet
+  // placed NOW. When the record chip wins and hero Now is at that same book,
+  // re-rank with that book at its current price: record DK −110, now DK −130,
+  // FD −115 must hand off to FD −115, not "Bet DK −130" (Reviewer #847).
+  if (best.isRecord && hero?.kind === 'now' && hero.price != null && best.bookmaker === hero.book) {
+    const nowPrice = hero.price;
+    quotes = rankQuotes(
+      quotes.map(({ isBest: _isBest, ...q }) =>
+        q.isRecord && q.bookmaker === hero.book ? { ...q, price: nowPrice, link: hero.link ?? q.link } : q,
+      ),
+    );
+    best = quotes.find((q) => q.isBest) ?? quotes[0];
+  }
   const verb: 'Best' | 'Bet' =
     best.isBest && quotes.length > 1 && !best.isRecord ? 'Best' : 'Bet';
   // When the CTA is the same book as hero Now, offer the current/bettable

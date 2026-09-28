@@ -7,7 +7,7 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatSigned, gameDayLabelET, gameHasStarted, gameStatus } from '@/lib/format';
+import { formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
@@ -33,7 +33,7 @@ import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
 import { openForAction } from '@/lib/discordPublish';
-import { gameStartedLine, gameStartedSpeech, pickCta } from '@/lib/pickCta';
+import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { gameStatusSpeech, unitsSpeech } from '@/lib/a11y';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import { GameStatusPill } from './GameStatusPill';
@@ -97,16 +97,18 @@ export function PickCard({
   const ev = expectedValue(pick.model_probability, decisionOdds(pick));
   // H4 price check (display only, lib/priceCheck.ts): an implausible edge or a
   // lock far from the book's current price shows "Price check" and "—" for
-  // edge and EV instead of headlining the board.
-  const check = priceCheckForItem(item);
+  // edge and EV instead of headlining the board. After the start "Now" is the
+  // in-play price, so only the edge rule applies then (Reviewer #847).
+  const check = priceCheckForItem(item, liveState);
   const flagged = check.flagged;
   const edgeText = flagged ? '—' : formatPctSigned(decisionEdge(pick));
   // H4: on NONE / AVOID the edge is a secondary line, not the hero number —
   // a non-bet must not read like a BET. BET keeps the hero edge.
   const demoteEdge = pick.signal_type !== 'BET';
-  // H5: what the card offers once the game has started (lib/pickCta.ts).
-  const started = gameHasStarted(game, liveState);
-  const cta = pickCta({ isLive: pick.is_live === true, started });
+  // H5: what the card offers once the game has started (lib/pickCta.ts). The
+  // pick's game_time stands in for a missing games row, and a game called off
+  // before first pitch is not "started" (gameStartState).
+  const cta = pickCtaFor(pick, game, liveState);
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   // A flagged row's movement line is built from the same suspect price, so it
   // is suppressed too.
@@ -184,9 +186,11 @@ export function PickCard({
     : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
-  // "Game started · picked at −125 DK" in the hand-off's place (H5).
+  // "Game started · picked at −125 DK" in the hand-off's place (H5). Not gated
+  // on paused: it states a fact about the pick, and this PR adds no paused
+  // gating (the existing !paused gates flip in the paused-on-All PR).
   const startedText =
-    offersBook && open && cta.startedLine
+    pick.signal_type === 'BET' && !preview && open && cta.startedLine
       ? gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))
       : null;
   // Track stays after the start; it scores the pick at its lock.

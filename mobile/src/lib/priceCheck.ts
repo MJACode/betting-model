@@ -41,6 +41,14 @@ export interface PriceCheckInput {
   locked: number | null | undefined;
   /** The current price at the same book, when the card has one. */
   current: number | null | undefined;
+  /**
+   * The game has started, or the pick is an in-play signal. The hero "Now" is
+   * then the IN-PLAY price, which is supposed to be far from a pre-game lock
+   * (−150 locked, +700 in the 8th is a game going badly, not a bad feed), so
+   * the moved-price rule is skipped; the edge rule still applies (Reviewer
+   * #847).
+   */
+  started?: boolean;
 }
 
 export interface PriceCheck {
@@ -52,10 +60,10 @@ export interface PriceCheck {
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
 /** Strictly greater than either bound flags; the bound itself does not. */
-export function priceCheck({ edge, locked, current }: PriceCheckInput): PriceCheck {
+export function priceCheck({ edge, locked, current, started = false }: PriceCheckInput): PriceCheck {
   const reasons: PriceCheck['reasons'] = [];
   if (finite(edge) && edge > PRICE_CHECK_MAX_EDGE) reasons.push('edge');
-  if (finite(locked) && finite(current) && centsApart(locked, current) > PRICE_CHECK_MAX_CENTS) {
+  if (!started && finite(locked) && finite(current) && centsApart(locked, current) > PRICE_CHECK_MAX_CENTS) {
     reasons.push('moved');
   }
   return { flagged: reasons.length > 0, reasons };
