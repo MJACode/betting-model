@@ -12,7 +12,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
-import { addDays, formatAmerican, formatCurrencySigned, formatPctSigned } from '@/lib/format';
+import { addDays, formatAmerican, formatPctSigned, formatSignedUnits } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
 import { RECORD_ONLY_MODELS } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
@@ -265,9 +265,9 @@ export function DailyResultsModal({
                 <View style={styles.heroStats}>
                   <HeroStat label="Picks" value={String(scoped.record.picks)} />
                   <HeroStat
-                    label="P&L (flat)"
-                    value={formatCurrencySigned(scoped.record.profitFlat)}
-                    color={pnlColor(scoped.record.profitFlat, 2)}
+                    label="Units"
+                    value={formatSignedUnits(scoped.record.profitFlat / 100)}
+                    color={unitsColor(scoped.record.profitFlat / 100)}
                   />
                   <HeroStat
                     label="Win rate"
@@ -321,7 +321,7 @@ export function DailyResultsModal({
                   </View>
                   {s.total.picks > 0 ? (
                     <Text style={styles.sportSub}>
-                      {recordLine(s.total)} · {formatCurrencySigned(s.total.profitFlat)}
+                      {recordLine(s.total)} · {formatSignedUnits(s.total.profitFlat / 100)}
                       {s.pending > 0 ? ` · ${s.pending} pending` : ''}
                     </Text>
                   ) : s.pending > 0 ? (
@@ -370,9 +370,9 @@ export function DailyResultsModal({
             ) : null}
 
             <Text style={styles.footer}>
-              Settled BET picks only, settled BET picks that meet our current criteria, as posted. Flat ROI assumes a $100
-              stake per pick. Open picks settle after their games go final. Home-run picks are
-              record-only — shown for transparency but never counted in the record or P&L.
+              Settled BET picks, as posted. Results are in units — one
+              unit is one flat bet per pick. Open picks settle after their games go final. Home-run
+              picks are record-only — shown for transparency but never counted in the record or units.
             </Text>
           </ScrollView>
         )}
@@ -404,7 +404,7 @@ function ModelRow({ model }: { model: ModelDayStats }) {
           </Text>
           <Text style={styles.modelSub}>
             {recordLine(model)}
-            {model.recordOnly ? ' · record only' : ` · ${formatCurrencySigned(model.profitFlat)}`}
+            {model.recordOnly ? ' · record only' : ` · ${formatSignedUnits(model.profitFlat / 100)}`}
           </Text>
         </View>
       </View>
@@ -454,8 +454,8 @@ function PickRow({ pick }: { pick: Pick }) {
       {recordOnly ? (
         <Text style={styles.recordOnlyLabel}>Record only</Text>
       ) : (
-        <Text style={[styles.modelRoi, { color: pnlColor(profit, 2) }]}>
-          {formatCurrencySigned(profit)}
+        <Text style={[styles.modelRoi, { color: unitsColor(profit / 100) }]}>
+          {formatSignedUnits(profit / 100)}
         </Text>
       )}
     </View>
@@ -517,6 +517,15 @@ function recordLine(s: CustomModelStats): string {
 // so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
   return pnlColor(roi, 1, 100);
+}
+
+/** Colour a units figure by what formatSignedUnits prints, so a day that
+ *  rounds to "0.0u" never reads as a win or a loss. */
+function unitsColor(units: number): string {
+  // The value formatSignedUnits prints (magnitude rounded half-up to 1 dp,
+  // then the sign), toned in ink, not the bright heat-map fills (audit H2).
+  const shown = Math.sign(units) * (Math.round(Math.abs(units) * 10) / 10);
+  return pnlColor(shown, 1);
 }
 
 function prettyDate(date: string): string {

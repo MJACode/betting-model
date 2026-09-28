@@ -36,6 +36,7 @@ import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { EmptyState } from '@/components/EmptyState';
 import { fetchPickById } from '@/lib/queries';
+import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
@@ -50,7 +51,7 @@ import {
   propMarketForModel,
   MODEL_BOOK,
 } from '@/lib/markets';
-import { isModelRetired, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
+import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
 import { errorText } from '@/lib/errors';
@@ -146,6 +147,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const retired = isModelRetired(pick.model_id);
+  // A paused model's pick that Discord never sent (Matt, 2026-09-26: they now
+  // show on the All board as PAUSED). This screen must say the same thing the
+  // card does — no BET badge, stake, Sharp Score, post time, hand-off or slip.
+  // The betslip resolves legs from active models only, so an added leg would
+  // be pruned straight back out.
+  const paused = !retired && isPausedForDisplay(pick);
   // WITHDRAWN only when Discord does not still have the post. A VOID the
   // channel shows is the same bet (Matt, 2026-09-23) — no withdrawn banner,
   // the hand-off stays. A VOID with no Discord post, including a ledger read
@@ -187,7 +194,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Live picks track by a stable proposition key so the delete+rescore
   // churn can't drop them (useTrackedBets).
-  const canTrack = pick.result == null;
+  // A VOID Discord still shows is open too (openForAction).
+  // A VOID never settles, so its actions switch off when the game ends
+  // instead (the board already drops finished games; this screen does not).
+  const over = ['final', 'ended'].includes(gameStatus(game, liveState).kind);
+  const openHere = openForAction(pick) && (pick.result == null || !over);
+  const canTrack = openHere;
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
@@ -261,9 +273,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             />
           </View>
           <View style={styles.metaRow}>
-            {preview ? (
+            {preview || paused ? (
               <View style={styles.previewBadge}>
-                <Text style={styles.previewBadgeText}>PREVIEW</Text>
+                <Text style={styles.previewBadgeText}>{preview ? 'PREVIEW' : 'PAUSED'}</Text>
               </View>
             ) : (
               <SignalBadge signal={voided ? 'NONE' : pick.signal_type} />
@@ -274,6 +286,18 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             <Text style={styles.previewNote}>
               Withdrawn — this pick was published in error and does not count
               toward the record.
+            </Text>
+          ) : null}
+          {pick.condition_status === 'VOID' && !voided ? (
+            <Text style={styles.previewNote}>
+              Posted to Discord · not counted in the model’s record.
+            </Text>
+          ) : null}
+          {paused ? (
+            <Text style={styles.previewNote}>
+              This model is paused. Paused models’ picks are shown for reference
+              only — they are not signals, and paused models don’t post to Discord
+              or push.
             </Text>
           ) : null}
           {preview ? (
@@ -300,11 +324,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
 
-        <ReasoningCard pick={pick} />
+        <ReasoningCard pick={pick} paused={paused} />
 
-        <PickTimingCard pick={pick} />
+        {paused ? null : <PickTimingCard pick={pick} />}
 
-        <SharpScoreCard pick={pick} />
+        {paused ? null : <SharpScoreCard pick={pick} />}
 
         {isProbOnlyModel(pick.model_id) ? (
           <View style={styles.infoCard}>
@@ -324,7 +348,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             table below carries books at a different number and the reference
             books that cannot be bet. Not for live picks: they are DraftKings
             only, and the in-play rows are no longer fetched. */}
-        {pick.signal_type === 'BET' && !preview && !retired && !voided ? (
+        {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
           <View style={styles.linesCard}>
             <BookLinesRow pick={pick} bookRows={bookRows} />
           </View>
@@ -335,7 +359,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
-        {hasPricedLine(pick) && pick.result == null && !preview && !retired
+        {hasPricedLine(pick) && openHere && !preview && !retired && !paused
           && !voided ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
@@ -361,7 +385,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                 {tracked.isTracked(pick) ? 'Tracking this bet' : 'Track this bet'}
               </Text>
               <Text style={styles.trackSub}>
-                {pick.is_live
+                {pick.condition_status === 'VOID'
+                  ? `${trackAlertsEligible ? 'We’ll send you a notification if the DK line moves a lot before game time. ' : ''}This pick doesn’t count in the model’s record, so the app won’t grade it — tracking keeps it with your bets.`
+                  : pick.is_live
                   ? 'Live signals lock at the first BET — this line and price are the bet of record. Tracked live bets score on the Performance tab once the game ends.'
                   : trackAlertsEligible
                     ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
@@ -684,7 +710,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    color: colors.textSecondary, // was `none`, 2.84:1 on noneSoft (H1 / L4)
+    color: colors.textSecondary,
   },
   previewNote: {
     marginTop: spacing.xs,

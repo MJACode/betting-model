@@ -300,7 +300,7 @@ def test_every_pnl_color_call_names_its_precision():
             n += 1
             if not re.search(r",\s*(1,\s*100|2|1)\s*$", m.group(1)):
                 bad.append(f"{path.relative_to(ROOT)}: pnlColor({m.group(1)})")
-    assert n >= 25 and bad == [], bad
+    assert n >= 20 and bad == [], bad
     pick_detail = _read(SRC / "screens" / "PickDetailScreen.tsx")
     assert "const flat = !lineMoved && roundsToZero(pick.clv_pct, 1)" in pick_detail
     assert "evColor" not in _read(SRC / "components" / "PickCard.tsx")

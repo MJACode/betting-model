@@ -395,7 +395,7 @@ for (const f of files) {
     if (!/,\s*(1,\s*100|2|1)\s*$/.test(m[1])) badToneCalls.push(`${rel}: pnlColor(${m[1]})`);
   }
 }
-check(`every pnlColor() call passes the display's digits/scale (${toneCalls.length} calls)`, toneCalls.length >= 25 && badToneCalls.length === 0, badToneCalls.join(', '));
+check(`every pnlColor() call passes the display's digits/scale (${toneCalls.length} calls)`, toneCalls.length >= 20 && badToneCalls.length === 0, badToneCalls.join(', '));
 for (const rel of ['src/components/DailyResultsModal.tsx', 'src/screens/OpeningComparisonScreen.tsx', 'src/screens/TrackRecordScreen.tsx']) {
   check(`${rel}: roiColor is the rounded percent tone, no epsilon`, /function roiColor\(roi: number\): string \{\n  return pnlColor\(roi, 1, 100\);/.test(read(rel)));
 }

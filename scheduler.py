@@ -792,6 +792,13 @@ def run_nfl_poll(fast: bool = False) -> None:
     # Record what the models thought of every game this tick, and flag any
     # locked pick whose conditions have changed. Never re-prices anything.
     _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
+    # And put that same view on the board: one NONE row per (game, model) the
+    # wind and opener rules evaluated, refreshed until kickoff (Matt,
+    # 2026-09-26: "All bet lines should be showing on the today tab"). Off the
+    # opener's one-minute path on purpose -- that path is timed in seconds to
+    # Discord, and a NONE row is not a pick. No dump today = no-op.
+    _run([sys.executable, "-m", "scripts.nfl_wind_publisher", "--scored"],
+         "nfl-scored-rows")
     # PUBLISH WHAT THE CARD JUST WROTE. Same reason as the pre-game poller
     # (2026-09-05): a writer outside the refresh pass used to leave its picks
     # sitting until the next :17 pass captured them, and inside the 3-hour fast

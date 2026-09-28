@@ -162,6 +162,26 @@ The health check now appends an eligibility clause for every flagged model
 (re-promote / not eligible / candidate not yet promoted) so these two stop
 reading as the same failure.
 
+### 2026-09-26 — `ncaaf_over_under` map demoted (mike)
+
+Michael Alksninis, explicit approval: "Demote ncaaf_over_under Platt map."
+Updated-By: mike.
+
+The map promoted 2026-09-19 17:45 ET (`promoted_a=1.0`, `promoted_b=-0.281555`)
+was in the decision path. On the residual ECDF a +8 over is raw 0.6503 and
+calibrates to 0.5838, so it fails the 0.65 floor. A −8.09 under is raw
+0.7111 and calibrates to 0.6501, so it clears. After the promotion the book
+was 18 under BETs and 0 over BETs.
+
+`data/migrations/demote_ncaaf_over_under_platt_2026_09_26.sql` is `demote()`
+for that one row, pinned to that `promoted_at` and that `promoted_b`. The
+worker ACTIVE_MIGRATIONS pass applies it. `load_calibrations` then returns
+no map, and `apply_calibration` returns the raw probability. Both arms are
+decided at the ±8 gate again (raw P(over) at +8 is 0.6503). The 0.65 floor,
+the point gate, and `PAUSED_MODELS` are unchanged. The nightly fit still
+writes a candidate and does not promote. A later promotion is a new model
+update; this migration will not clear it.
+
 ---
 
 ## Phase 2 — the map decides (mike, 2026-08-31)
