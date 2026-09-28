@@ -101,3 +101,54 @@ export function dateFilterSummary(selected: Set<string>, options: DateOption[]):
   if (shown.length === 1) return shown[0]!.label;
   return `${shown.length} dates`;
 }
+
+/** One row of the Picks list: a pick, or the header that opens a day. */
+export type DayRow<T> =
+  | { kind: 'day'; key: string; date: string; label: string }
+  | { kind: 'item'; key: string; item: T };
+
+/**
+ * The board under Time sort, split by day (Matt, 2026-09-28: "Sort by time,
+ * group by date"). Only Time: under Edge / Sharp / Public the order IS the
+ * ranking, and a header every time the day changed would chop it into pieces.
+ *
+ * `items` arrive already sorted by kickoff. Days are laid out earliest first
+ * and each keeps the order it was given, except that `trailing` rows (paused
+ * models' picks) go to the END OF THEIR OWN DAY — the board's rule that paused
+ * rows sort after active ones, applied inside the day rather than after every
+ * day, where a Today paused pick would land under the SAT 11/28 header.
+ *
+ * With fewer than two days there are no headers: one "TODAY" over the whole
+ * list says nothing the board's subtitle does not.
+ */
+export function rowsByDay<T>(
+  items: T[],
+  dateOf: (item: T) => string | null | undefined,
+  keyOf: (item: T) => string,
+  trailing: (item: T) => boolean = () => false,
+  today: string = todayET(),
+): DayRow<T>[] {
+  const byDay = new Map<string, { lead: T[]; tail: T[] }>();
+  for (const it of items) {
+    const d = dateOf(it) ?? '';
+    let g = byDay.get(d);
+    if (!g) byDay.set(d, (g = { lead: [], tail: [] }));
+    (trailing(it) ? g.tail : g.lead).push(it);
+  }
+  const days = Array.from(byDay.keys()).sort();
+  const withHeaders = days.length > 1;
+  const out: DayRow<T>[] = [];
+  for (const d of days) {
+    const g = byDay.get(d)!;
+    if (withHeaders) {
+      out.push({
+        kind: 'day',
+        key: `day:${d}`,
+        date: d,
+        label: d ? dayLabelET(d, today) : 'Date TBD',
+      });
+    }
+    for (const it of [...g.lead, ...g.tail]) out.push({ kind: 'item', key: keyOf(it), item: it });
+  }
+  return out;
+}

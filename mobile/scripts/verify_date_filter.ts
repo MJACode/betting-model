@@ -28,6 +28,7 @@ import {
   datesAreNarrowed,
   effectiveDateSelection,
   isDateSelected,
+  rowsByDay,
 } from '../src/lib/dateFilter';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -102,6 +103,34 @@ const gfs = read('src/components/filters/GameFilterSection.tsx');
 check('Games day headers use the same day label', /dayLabelET\(date\)\.toUpperCase\(\)/.test(gfs));
 check('Clear all clears the dates', /onClearDates\?\.\(\);/.test(filters));
 check('a narrowed date counts on the Filters badge', /\(datesNarrowed \? 1 : 0\)/.test(filters));
+
+// 5. Time sort, grouped by day (Matt, 2026-09-28).
+type P = { id: string; date: string | null; paused?: boolean };
+const timeSorted: P[] = [
+  { id: 'live', date: TODAY },
+  { id: 'pausedToday', date: TODAY, paused: true },
+  { id: 'tonight', date: TODAY },
+  { id: 'sat', date: '2026-11-28' },
+];
+const rows = rowsByDay(timeSorted, (p) => p.date, (p) => p.id, (p) => !!p.paused, TODAY);
+const shape = rows.map((r) => (r.kind === 'day' ? `[${r.label}]` : r.item.id)).join(' ');
+check('days get a header, earliest first', shape.startsWith('[Today]') && shape.includes('[Sat 11/28] sat'), shape);
+check('a paused pick goes to the end of ITS OWN day, not after every day',
+  shape === '[Today] live tonight pausedToday [Sat 11/28] sat', shape);
+const oneDay = rowsByDay([timeSorted[0]!, timeSorted[2]!], (p) => p.date, (p) => p.id, () => false, TODAY);
+check('a single-day board gets no header', oneDay.every((r) => r.kind === 'item') && oneDay.length === 2);
+check('row keys are unique', new Set(rows.map((r) => r.key)).size === rows.length);
+check('the Picks list is grouped only under Time sort',
+  /sortKey === 'time'\s*\?\s*rowsByDay\(/.test(screen) && /data=\{rows\}/.test(screen));
+check('a day header renders as the app\'s section title', /row\.kind === 'day'\) return <SectionTitle/.test(screen));
+
+// 6. The PR #840 scan items.
+const settings = read('src/screens/SettingsScreen.tsx');
+const detail = read('src/screens/PickDetailScreen.tsx');
+check('Settings link rows announce as buttons', /styles\.linkCard[\s\S]{0,120}accessibilityRole="button"/.test(settings));
+check('Sign out announces as a button', /onPress=\{confirmSignOut\}\s*accessibilityRole="button"/.test(settings));
+check('the version line announces as a link', /openLink\(WEBSITE_URL, 'the website'\)\}\s*accessibilityRole="link"/.test(settings));
+check('the preview badge uses the type scale', /previewBadgeText: \{\s*fontSize: font\.size\.caption/.test(detail));
 
 console.log(failures === 0 ? '\nAll date-filter checks passed.' : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -64,6 +64,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
+import { SectionTitle } from '@/components/SectionTitle';
 import {
   applyFilter,
   cloneFilter,
@@ -87,7 +88,13 @@ import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { signalCountsBySport } from '@/lib/lineMovementBoard';
 import { gameFilterSummary, isGameSelected, selectableGames } from '@/lib/gameFilter';
-import { dateOptionsFor, effectiveDateSelection, isDateSelected } from '@/lib/dateFilter';
+import {
+  dateOptionsFor,
+  effectiveDateSelection,
+  isDateSelected,
+  rowsByDay,
+  type DayRow,
+} from '@/lib/dateFilter';
 import { slipKeyForPick } from '@/lib/parlay';
 import {
   ALL_SIGNALS,
@@ -434,6 +441,20 @@ export function PicksHomeScreen() {
       ...all.filter((d) => isPausedForDisplay(d.pick)),
     ];
   }, [filtered, sortKey]);
+  // Time sort reads as a schedule, so it is split by day with a header per
+  // day (Matt, 2026-09-28). Every other sort is a ranking and stays one list.
+  const rows: DayRow<EnrichedPick>[] = useMemo(
+    () =>
+      sortKey === 'time'
+        ? rowsByDay(
+            sortPicks(filtered, 'time'),
+            (d) => d.pick.game_date,
+            (d) => String(d.pick.pick_id),
+            (d) => isPausedForDisplay(d.pick),
+          )
+        : sorted.map((d) => ({ kind: 'item' as const, key: String(d.pick.pick_id), item: d })),
+    [filtered, sorted, sortKey],
+  );
 
   // Games is shared with Stats. A game picked there (or here) can empty THIS
   // board while Today still has picks — the generic "widen signals / thresholds"
@@ -655,21 +676,25 @@ export function PicksHomeScreen() {
         />
       ) : (
       <FlatList
-        data={sorted}
-        keyExtractor={(item) => String(item.pick.pick_id)}
-        renderItem={({ item }) => (
-          <PickCard
-            item={item}
-            onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-            tracked={tracked.isTracked(item.pick)}
-            onToggleTrack={() => tracked.toggle(item.pick)}
-            inSlip={slip.has(slipKeyForPick(item.pick))}
-            onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
-            liveState={liveStates.get(item.pick.game_id) ?? null}
-            showSignalBadge={view === 'today'}
-            paused={view === 'today' && isPausedForDisplay(item.pick)}
-          />
-        )}
+        data={rows}
+        keyExtractor={(row) => row.key}
+        renderItem={({ item: row }) => {
+          if (row.kind === 'day') return <SectionTitle title={row.label} />;
+          const item = row.item;
+          return (
+            <PickCard
+              item={item}
+              onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+              tracked={tracked.isTracked(item.pick)}
+              onToggleTrack={() => tracked.toggle(item.pick)}
+              inSlip={slip.has(slipKeyForPick(item.pick))}
+              onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
+              liveState={liveStates.get(item.pick.game_id) ?? null}
+              showSignalBadge={view === 'today'}
+              paused={view === 'today' && isPausedForDisplay(item.pick)}
+            />
+          );
+        }}
         ListEmptyComponent={
           busy ? (
             <View style={styles.loadingWrap}>

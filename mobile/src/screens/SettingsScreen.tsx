@@ -74,6 +74,9 @@ function LinkRow({
     <Pressable
       style={({ pressed }) => [styles.linkCard, pressed && styles.pressed]}
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={sub}
     >
       <View style={{ flex: 1 }}>
         {right ? (
@@ -156,6 +159,8 @@ export function SettingsScreen() {
               </Text>
               <Pressable
                 onPress={confirmSignOut}
+                accessibilityRole="button"
+                accessibilityLabel="Sign out"
                 style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.signOutText}>Sign out</Text>
@@ -458,6 +463,8 @@ export function SettingsScreen() {
 
         <Pressable
           onPress={() => openLink(WEBSITE_URL, 'the website')}
+          accessibilityRole="link"
+          accessibilityLabel={`Signalbase version ${APP_VERSION}. Open ${websiteLabel}`}
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>

@@ -703,7 +703,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   previewBadgeText: {
-    fontSize: 12,
+    fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
     color: colors.textSecondary,
