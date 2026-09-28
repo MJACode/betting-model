@@ -5,8 +5,9 @@ purely informational display.").
 A member may enter a bankroll so Settings can say what one unit is worth in
 dollars. It sizes nothing: picks stay a flat 1u, no Kelly, no limit reads it.
 It lives on the device under `bankroll.v2`; #786's `bankroll` key (which
-defaulted to $1,000) is never read. The daily exposure card, its
-`responsibleGambling.v2` storage and the Picks > Today banner are untouched.
+defaulted to $1,000) is never read. The daily exposure card,
+`useResponsibleGambling` and the Picks > Today banner were removed on master
+(#838); this PR must not bring any of them back.
 
 The behavioural pins live in `mobile/scripts/verify_bankroll.ts`; this file
 runs it when the mobile toolchain is installed and pins the source-level
@@ -27,7 +28,7 @@ LIB = MOBILE / "src/lib/bankroll.ts"
 HOOK = MOBILE / "src/hooks/useBankroll.ts"
 SETTINGS = MOBILE / "src/screens/SettingsScreen.tsx"
 PICKS = MOBILE / "src/screens/PicksHomeScreen.tsx"
-RG = MOBILE / "src/hooks/useResponsibleGambling.ts"
+RG = MOBILE / "src/hooks/useResponsibleGambling.ts"  # deleted on master (#838)
 EXPLAINER = MOBILE / "src/screens/ExplainerScreen.tsx"
 
 
@@ -92,16 +93,15 @@ def test_display_only_nothing_sized():
     assert users == ["screens/SettingsScreen.tsx"]
 
 
-def test_exposure_card_storage_and_banner_unchanged():
+def test_exposure_card_hook_and_banner_stay_removed():
+    # Master removed all three in #838 (2026-09-26); this PR must not resurrect them.
     settings = _read(SETTINGS)
-    assert "<Text style={styles.cardLabel}>Daily exposure limit</Text>" in settings
-    assert "const toggleRgCap = (on: boolean) => setExposureCapUnits(on ? 10 : null);" in settings
-    rg = _read(RG)
-    assert "const STORAGE_KEY = 'responsibleGambling.v2';" in rg
-    assert "bankroll'" not in rg
+    for gone in ("Daily exposure limit", "exposureCap", "useResponsibleGambling", "toggleRgCap"):
+        assert gone not in settings
+    assert "onPress={openHelpline}" in settings  # the helpline card stays
+    assert not RG.exists()
     picks = _read(PICKS)
-    assert "Today’s picks ask for {formatUnits(exposure.total)} — over your{' '}" in picks
-    assert "{formatUnits(exposure.cap)} daily limit. Consider sizing" in picks
+    assert "daily limit" not in picks and "exposure.cap" not in picks
     assert "bankroll" not in picks.lower()
 
 

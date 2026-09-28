@@ -438,6 +438,8 @@ function trackedResultLabel(row: TrackedBetRow): string {
       return 'Open';
     case 'no_action':
       return 'No action';
+    case 'not_graded':
+      return 'Not graded';
     case 'push':
       return 'Push';
     default:

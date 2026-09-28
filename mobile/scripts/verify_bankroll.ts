@@ -11,8 +11,8 @@
  * display rule, the unit % bounds and steps, the `bankroll.v2` key with the
  * #786 `bankroll` key never read, the empty state (no $ figure anywhere), that
  * nothing sizes a bet off the bankroll (picks stay a flat 1u), and that the
- * daily exposure card, `responsibleGambling.v2` and the Picks banner are
- * untouched. Also (Reviewer, #831): the device's decimal and group separators
+ * daily exposure card, `useResponsibleGambling` and the Picks banner, which
+ * master removed in #838, stay removed. Also (Reviewer, #831): the device's decimal and group separators
  * (en-US and de-DE), nothing saved until blur / Done, a shared cold-start
  * read, steps from the latest %, no overwrite after a failed read, the
  * near-$10 display flip, and backspace over a separator.
@@ -587,25 +587,17 @@ check('out of scope stays out: no daily limit row, presets, $ switch, 24h wait',
   !/Daily limit:|Presets|Conservative|Aggressive|Show \$ next to units|24 hours|PROPOSED|DEFAULT_DAILY_LIMIT/.test(settings + lib));
 check('no font-size literals in Settings', !/fontSize:\s*\d/.test(settings));
 
-// The daily exposure card, its storage and the Picks banner are exactly master's.
-check('Settings: the daily exposure card is unchanged',
-  settings.includes(`        <View style={styles.card}>
-          <View style={styles.capHeader}>
-            <Text style={styles.cardLabel}>Daily exposure limit</Text>
-            <Switch value={rg.exposureCapUnits != null} onValueChange={toggleRgCap} />
-          </View>`) &&
-    settings.includes('const toggleRgCap = (on: boolean) => setExposureCapUnits(on ? 10 : null);') &&
-    settings.includes("Alert.alert('Invalid limit', 'Enter a number of units between 0 and 100.');") &&
-    settings.includes('Off by default. Turn it on for a heads-up before a day’s picks over-extend you.'));
-const rg = read('hooks/useResponsibleGambling.ts');
-check('responsibleGambling.v2 is unchanged and bankroll-free',
-  rg.includes("const STORAGE_KEY = 'responsibleGambling.v2';") &&
-    rg.includes('exposureCapUnits: number | null;') && !/bankroll'/i.test(rg) && !/offCap|dailyLimit/i.test(rg));
+// Master removed the daily exposure card, `useResponsibleGambling` and the
+// Picks banner it drove (#838, 2026-09-26). This PR must not bring any back.
+check('Settings: no daily exposure card (removed on master in #838)',
+  !/Daily exposure limit|exposureCap|useResponsibleGambling|toggleRgCap|rgDraft/.test(settings));
+check('Settings: the helpline card stays, directly under "Staying in control"',
+  /<SectionHeader title="Staying in control" \/>[\s\S]{0,400}onPress=\{openHelpline\}/.test(settings));
+check('useResponsibleGambling stays deleted',
+  !readdirSync(join(SRC, 'hooks')).includes('useResponsibleGambling.ts'));
 const picks = read('screens/PicksHomeScreen.tsx');
-check('Picks: the exposure banner is unchanged and shows no dollars',
-  picks.includes(`            Today’s picks ask for {formatUnits(exposure.total)} — over your{' '}
-            {formatUnits(exposure.cap)} daily limit. Consider sizing
-            down or sitting some out.`) && !/bankroll|Bankroll|formatDollars/.test(picks));
+check('Picks: no exposure banner comes back, and no dollars',
+  !/daily limit|exposure\.cap|useResponsibleGambling/.test(picks) && !/bankroll|Bankroll|formatDollars/.test(picks));
 
 // ── 8b. Error colour: text-safe red for words, `avoid` for icon + outline ──
 {
