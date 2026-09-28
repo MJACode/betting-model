@@ -1202,6 +1202,12 @@ def results_restate_note(late: int, prev_settled: int, now_settled: int) -> str:
                    "the record stands now.")
 
 
+# A pick settled after the recap was published, compared as instants (both
+# columns are TEXT, written in mixed offsets). Every settled_at since
+# RESULTS_RESTATE_FROM carries an offset, so the cast is exact.
+_SETTLED_AFTER_SQL = "p.settled_at::timestamptz > %s::timestamptz"
+
+
 def recaps_needing_restatement(conn, through: str | None = None,
                                lookback_days: int = RESULTS_RESTATE_LOOKBACK_DAYS,
                                game_date: str | None = None) -> list[dict]:
@@ -1232,8 +1238,14 @@ def recaps_needing_restatement(conn, through: str | None = None,
     out = []
     for d, published_at, settled in snaps:
         d = str(d)
+        # Both columns are TEXT in mixed offsets: settled_at is ET
+        # ("...-04:00") from the settler but "+00:00" from a void, published_at
+        # is ET. Compared as text, a UTC-stamped settlement at 02:00+00:00
+        # sorts before a recap published at 06:02-04:00 even when it came
+        # after it. Compare the instants.
         late = conn.execute(
-            _SETTLED_SQL.format(window="= %s") + "\n          AND p.settled_at > %s",
+            _SETTLED_SQL.format(window="= %s")
+            + "\n          AND " + _SETTLED_AFTER_SQL,
             (d, published_at)).fetchall()
         if late:
             out.append({"game_date": d, "published_at": published_at,

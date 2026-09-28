@@ -139,3 +139,52 @@ class TestTheToolRefusesToMatchEverything:
     def test_writing_requires_an_explicit_flag(self):
         src = (ROOT / "scripts" / "void_picks.py").read_text(encoding="utf-8")
         assert '"--apply"' in src and "DRY RUN" in src
+
+
+class TestTheVoidTimestampAndPath:
+    """Night Watch 2026-09-28."""
+
+    def test_default_timestamp_is_et_like_the_settler(self):
+        """settled_at is TEXT and the settler writes ET isoformat; a void
+        stamped "+00:00" reads up to four hours late wherever it is compared
+        as text (recaps_needing_restatement did exactly that)."""
+        conn = _FakeConn()
+        void(conn, [_row()], REASON)
+        params = conn.calls[0][1]
+        settled_at, checked_at = params[1], params[4]
+        assert settled_at == checked_at
+        assert settled_at[-6:] in ("-04:00", "-05:00"), settled_at
+
+    def test_no_other_module_writes_a_void(self):
+        """Voids go through void_picks. The 2026-09-19 slate was voided by a
+        hand-run UPDATE; this pins that no code path does the same: outside
+        scripts/void_picks.py, no UPDATE on picks sets condition_status to
+        VOID or imports the void constants to do it."""
+        import ast
+        import re
+        import subprocess
+
+        files = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT,
+                               capture_output=True, text=True).stdout.split()
+        if not files:                        # not a git checkout
+            files = [str(p.relative_to(ROOT)) for p in ROOT.rglob("*.py")]
+        set_void = re.compile(r"condition_status\s*=\s*'VOID'", re.I)
+        offenders = []
+        for f in files:
+            if f.startswith(("tests/", ".venv")) or "/tests/" in f \
+                    or f == "scripts/void_picks.py":
+                continue
+            try:
+                tree = ast.parse((ROOT / f).read_text(encoding="utf-8"))
+            except (SyntaxError, UnicodeDecodeError, FileNotFoundError):
+                continue
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                    s = n.value
+                    if re.search(r"\bUPDATE\s+picks\b", s, re.I) and set_void.search(s):
+                        offenders.append(f"{f}: UPDATE picks ... condition_status='VOID'")
+                if isinstance(n, ast.ImportFrom) and n.module == "scripts.void_picks":
+                    names = {a.name for a in n.names}
+                    if names & {"VOID_STATUS", "VOID_RESULT"} and "void" not in names:
+                        offenders.append(f"{f}: imports the void constants, not void()")
+        assert not offenders, offenders

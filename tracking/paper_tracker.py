@@ -2166,6 +2166,14 @@ def _heal_stranded_mlb(conn: DBConnection, game_date: str,
 # result IS NULL -- nothing is written -- and the reason is logged every pass,
 # so a hold is visible rather than silent.
 _DH_START_TOLERANCE = timedelta(minutes=SUSPICIOUS_EARLY_MINUTES)
+# Check 3's gap. A traditional game 2 starts 20-30 minutes after game 1 ends,
+# so at least ~2h10m after game 1's first pitch; every collapsed 2026 row
+# measured 340-386 minutes. A single game whose book start was re-stamped an
+# hour (MLB_2026-08-13_CIN_CWS: book 18:11Z, first pitch 17:00Z, 71 minutes)
+# must not look like one.
+_DH_FIRST_PITCH_GAP = timedelta(minutes=120)
+# Check 5's window. No real game is final within 30 minutes of its start.
+_MIN_GAME_LENGTH = timedelta(minutes=30)
 
 
 def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
@@ -2175,18 +2183,23 @@ def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
 
     Every check needs both of its timestamps and passes when either is missing
     (rows from before a column existed must keep settling exactly as before).
-    Check 1 always applies. Checks 2-4 apply only on a DOUBLEHEADER day (the
-    Stats API lists two games for the matchup): measured 2026-09-25 over the
-    3,659 settled 2026 MLB BETs, check 2 alone would also have held picks on
-    9 single games whose commence_time moved 65-134 minutes (delays), and a
+    Checks 1 and 5 always apply. Checks 2-4 apply only on a DOUBLEHEADER day
+    (the Stats API lists two games for the matchup): measured 2026-09-25 over
+    the 3,659 settled 2026 MLB BETs, check 2 alone would also have held picks
+    on 9 single games whose commence_time moved 65-134 minutes (delays), and a
     held pick never settles on its own.
 
     1. The pick's game had not started when this pass ran -- a final cannot
        exist yet, so the final on the row is another game's.
+    5. The row's game was already final before, or within 30 minutes after,
+       this pick's own start: that final is an earlier game's. This is the
+       one that holds pick 2899429 (game_time 23:05Z, settled 23:12Z on the
+       22:54:55Z final of game 1); checks 1-4 all pass it. Measured over all
+       settled 2026 MLB BETs it matches only collapsed doubleheaders.
     2. The pick was written for a start that is not the row's start (more than
        SUSPICIOUS_EARLY_MINUTES apart): the row's commence_time was overwritten
        by the other game of the day.
-    3. The row's actual first pitch is that far BEFORE the pick's start: the
+    3. The row's actual first pitch is 2+ hours BEFORE the pick's start: the
        live state feeding the row -- and its final -- is an earlier game's.
        This is the signature data/first_pitch.py measured on six collapsed
        doubleheaders.
@@ -2202,12 +2215,15 @@ def _settle_hold_reason(pick_created_at, pick_game_time, game_commence_time,
     final_at = _as_utc(game_final_at)
     if start and now and start > now:
         return f"its game starts {pick_game_time}, after this pass ({settled_at})"
+    if start and final_at and final_at < start + _MIN_GAME_LENGTH:
+        return (f"the scored game was final at {game_final_at}, too soon after "
+                f"this pick's {pick_game_time} start to be its game")
     if not doubleheader:
         return None
     if start and commence and abs(start - commence) > _DH_START_TOLERANCE:
         return (f"written for a {pick_game_time} start but the scored row "
                 f"starts {game_commence_time}")
-    if start and first_pitch and first_pitch < start - _DH_START_TOLERANCE:
+    if start and first_pitch and first_pitch < start - _DH_FIRST_PITCH_GAP:
         return (f"the scored row went live at {game_first_pitch_at}, hours "
                 f"before this pick's {pick_game_time} start")
     if created and final_at and created > final_at:
@@ -2224,7 +2240,10 @@ def _mlb_settle_holds(conn: DBConnection, game_date: str, settled_at: str) -> di
                g.away_team, g.home_team, g.commence_time, g.first_pitch_at,
                (SELECT MIN(s.snapshot_at) FROM live_game_state s
                  WHERE s.game_id = p.game_id
-                   AND s.abstract_game_state = 'Final') AS final_at
+                   AND s.abstract_game_state = 'Final'
+                   -- A postponement is also 'Final' in the feed, with no
+                   -- score (MLB_2026-07-27_CLE_CIN); only a played final counts.
+                   AND s.home_score IS NOT NULL) AS final_at
         FROM picks p
         JOIN games g ON g.game_id = p.game_id
         WHERE p.game_date = %s

@@ -87,7 +87,9 @@ def test_live_per_game_clear_interpolates_with_one_game_id():
 def test_live_sweep_clear_interpolates_with_date_horizon_now():
     sql = _sweep_sql()
     assert "NOT LIKE 'nfl_prop_%%'" in sql
-    rendered = sql % ("2026-09-22", "2026-09-29", "2026-09-22T11:18:00+00:00")
+    # (pick game_time guard, first date, last date, commence_time guard)
+    rendered = sql % ("2026-09-22T11:18:00+00:00", "2026-09-22", "2026-09-29",
+                      "2026-09-22T11:18:00+00:00")
     assert "nfl_prop_%" in rendered
     assert "%%" not in rendered
 

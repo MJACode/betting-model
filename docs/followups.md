@@ -1491,6 +1491,22 @@ dk_direct / bovada name resolver are unchanged -- the resolver refuses on
 ambiguity, so while both games are unscored those two in-play feeds drop
 BAL@NYY-style rows rather than guess.
 
+**2026-09-28 -- same draft PR, second commit.**
+- The "not started" sweeps in `models/scorer.run_scorer` key on each pick's
+  own `game_time` (and an unscored game): pick 2911172 was deleted at 7:29 PM
+  ET 09-25 because the collapsed row's `commence_time` had been re-stamped to
+  game 2's start while the pick's own game (game 1) had been played.
+- Guard check 5 (pick's start + 30 min > the row's final) and a 120-min
+  first-pitch gap for check 3; postponement finals no longer count as finals.
+- `scripts/dry_run_doubleheader_repair.py`: SELECT-only re-grade of the 32
+  settled BETs against the game each was for. 10 results change, net +2.43u
+  (7 / -2.60u on high-confidence assignments). No repair run; Matt decides.
+- Migration: CIN@CWS 2026-08-13 was a start re-stamp, not a doubleheader; the
+  first-pitch rule is 120 min so its 91 rows stay. 518 rows leave, all on six
+  doubleheaders.
+- Night Watch: `recaps_needing_restatement` compares instants; `void()` writes
+  ET; a pin test keeps voids in `scripts/void_picks.py`.
+
 Found 2026-09-05 while designing the alternate-lines view. 1,546 (game,
 market, player, book) keys since 2026-08-29 carry TWO rows at the same
 `snapshot_at`, DraftKings included (163): `_build_game_id` is

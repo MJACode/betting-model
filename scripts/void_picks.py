@@ -40,6 +40,13 @@ WHAT IT REFUSES
 A pick already graded WIN / LOSS / PUSH. Voiding one of those is not correcting
 a bug, it is rewriting a settled result, and nothing in §1c permits it.
 
+THE ONLY WAY A PICK IS VOIDED. Run this script (or the `void_picks` worker job,
+which calls `void()` below), never a hand-written UPDATE. On 2026-09-19 at
+00:35 ET twelve MLB BETs (the all-under public-fade slate) were voided by raw
+SQL: no --dry-run preview, no graded-pick refusal, and a Postgres-text UTC
+settled_at ("2026-09-19 04:35:23.516439+00") that sorts unlike every other
+settlement. tests/test_void_picks.py pins that no other module writes VOID.
+
 FIRST USE: 2026-09-07 (mike), the six `nfl_wind_totals` Week 1 picks that fired
 at 7.2-8.7 day leads before #517 landed the firing gate. All six had lost their
 premise by the time they were voided -- four had the wind forecast collapse to
@@ -51,7 +58,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+ET = ZoneInfo("America/New_York")
 
 VOID_RESULT = "NO_ACTION"
 VOID_STATUS = "VOID"
@@ -103,8 +113,13 @@ def _select(conn, pick_ids, model, before, game_ids):
 
 
 def void(conn, rows: list[dict], reason: str, now: str | None = None) -> int:
-    """Apply the void. Matches the shape paper_tracker's own NO_ACTION path uses."""
-    now = now or datetime.now(timezone.utc).isoformat()
+    """Apply the void. Matches the shape paper_tracker's own NO_ACTION path uses.
+
+    `now` defaults to ET isoformat ("...-04:00"), the format the settler writes
+    settled_at in. It was UTC until 2026-09-28: every void since 09-01 (87 rows)
+    carries "+00:00", which read as a settlement up to four hours later than it
+    was wherever settled_at is compared as text."""
+    now = now or datetime.now(ET).isoformat()
     for r in rows:
         conn.execute("""
             UPDATE picks

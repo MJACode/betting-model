@@ -13,9 +13,28 @@
 -- MEASURED 2026-09-25 (read-only, Supabase): 652 of 151,448 matview rows would
 -- leave it, on 7 games, 5 of them BETs. Six games are 2026 doubleheaders
 -- (07-22 BAL_BOS, 07-22 PIT_NYY, 07-28 CLE_CIN, 07-29 ATL_NYM, 08-29 ARI_SF,
--- 08-29 BOS_NYY). The seventh, MLB_2026-08-13_CIN_CWS (91 rows), is NOT a
--- doubleheader on the Stats API schedule and is unexplained -- look at it
--- before applying.
+-- 08-29 BOS_NYY). The seventh was MLB_2026-08-13_CIN_CWS (91 rows).
+--
+-- CIN_CWS WAS A REGRESSION, FIXED HERE (2026-09-28). It is a single game
+-- (Stats API gamePk 824561, doubleHeader N, 12:10 PM CT = 17:10Z, firstPitch
+-- 17:10Z, 186 min, no delay). The book listed it at 18:11Z until ~15:00Z,
+-- then 17:11Z; the games row's commence_time was later re-stamped back to
+-- 18:11Z. The 91 rows are exactly its 7 AVOID + 84 NONE picks written
+-- 10:09-14:18Z with game_time 18:11Z -- all BEFORE first pitch, all for this
+-- game. The live feed went live at 17:00:01Z, 71 minutes before 18:11, so the
+-- 60-minute first-pitch rule ungraded them. A doubleheader game 2 cannot start
+-- within two hours of game 1's first pitch (it follows a whole game; the six
+-- collapsed rows above measure 340-386 minutes), so the rule now needs 120
+-- minutes -- the same gap as paper_tracker._DH_FIRST_PITCH_GAP. Re-measured
+-- 2026-09-28 against the current matview (152,966 rows): 518 rows on the six
+-- doubleheaders leave it (5 BETs: 656351, 656369, 883305, 883532, 914594),
+-- CIN_CWS keeps all 91, and no other game moves.
+--
+-- A postponement is also 'Final' in the live feed, with no score
+-- (MLB_2026-07-27_CLE_CIN); `finals` counts played finals only, as the
+-- settler's guard does. The settler's check 5 (final within 30 minutes of the
+-- pick's start) is deliberately NOT mirrored here: on the current matview it
+-- would move exactly one row, BET 2899429, whose disposition Matt is deciding.
 --
 -- WHAT IT DOES. The matview body is decide_on_best_price_2026_09_09.sql's,
 -- unchanged but for the `finals` CTE, one join and two WHEN lines. Its two
@@ -69,6 +88,7 @@ BEGIN
         SELECT s.game_id, MIN(s.snapshot_at::timestamptz) AS final_at
           FROM live_game_state s
          WHERE s.abstract_game_state = 'Final'
+           AND s.home_score IS NOT NULL
          GROUP BY s.game_id
       ),
       base AS (
@@ -88,12 +108,13 @@ BEGIN
             -- `_G2` id, both games of a doubleheader shared one games row and
             -- a game-2 pick was graded on game 1's final. Such a pick is
             -- ungraded ('U', so it leaves the view) when the row's live state
-            -- began more than SUSPICIOUS_EARLY_MINUTES (60) before the pick's
-            -- own start, or when the pick was created after the row's game
-            -- ended. The same rule as tracking/paper_tracker._settle_hold_reason.
+            -- began 120+ minutes before the pick's own start (a book start
+            -- re-stamped an hour, MLB_2026-08-13_CIN_CWS, is not a game 2), or
+            -- when the pick was created after the row's game ended. The same
+            -- rule as tracking/paper_tracker._settle_hold_reason checks 3-4.
             WHEN g.first_pitch_at IS NOT NULL AND p.game_time IS NOT NULL
                  AND g.first_pitch_at::timestamptz
-                     < p.game_time::timestamptz - interval '60 minutes' THEN 'U'
+                     < p.game_time::timestamptz - interval '120 minutes' THEN 'U'
             WHEN f.final_at IS NOT NULL AND p.created_at IS NOT NULL
                  AND p.created_at::timestamptz > f.final_at THEN 'U'
             WHEN p.model_id = 'mlb_moneyline' THEN CASE

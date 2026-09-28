@@ -279,6 +279,15 @@ def _pick(raw, gid, game_time, created_at, side="home", odds=3300.0):
     return raw.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
+def _final(raw, gid, snapshot_at, home_score=2, away_score=10):
+    """A 'Final' live_game_state snapshot. home_score=None is what the feed
+    writes for a POSTPONED game (MLB_2026-07-27_CLE_CIN, 23:50Z)."""
+    raw.execute("""INSERT INTO live_game_state (game_id, snapshot_at,
+                   abstract_game_state, home_score, away_score)
+                   VALUES (?, ?, 'Final', ?, ?)""",
+                (gid, snapshot_at, home_score, away_score))
+
+
 def _result(raw, pid):
     return raw.execute("SELECT result FROM picks WHERE pick_id = ?",
                        (pid,)).fetchone()[0]
@@ -330,11 +339,11 @@ def test_a_game_two_pick_on_a_collapsed_row_is_not_settled_before_game_two(raw, 
 
 def test_a_pick_created_after_the_scored_game_ended_is_held(raw, schedule):
     _game(raw, "MLB_2026-09-25_BAL_NYY", "2026-09-25T23:30:00+00:00", 2, 10)
-    raw.execute("""INSERT INTO live_game_state (game_id, snapshot_at, abstract_game_state)
-                   VALUES ('MLB_2026-09-25_BAL_NYY', '2026-09-25T22:54:00+00:00', 'Final')""")
+    _final(raw, "MLB_2026-09-25_BAL_NYY", "2026-09-25T22:54:00+00:00")
     pid = _pick(raw, "MLB_2026-09-25_BAL_NYY", "2026-09-25T23:30:00+00:00",
                 "2026-09-25 23:05:00")
-    # After game 2's start, so check 1 passes; check 4 must catch it.
+    # After game 2's start, so check 1 passes; checks 4 and 5 both catch it
+    # (check 4 alone: test_check_four_alone_holds_a_pick_created_after_the_final).
     pt._settle_game_picks(_Shim(raw), DATE, "2026-09-26T01:00:00-04:00")
     assert _result(raw, pid) is None
 
@@ -398,3 +407,61 @@ def test_a_held_prop_pick_stays_unsettled(raw, schedule):
                            'MLB_2026-09-25_BAL_NYY', ?, 2026, 0)""", (DATE,))
     pt._settle_prop_picks(_Shim(raw), DATE, "2026-09-25T19:12:00-04:00")
     assert _result(raw, pid) is None
+
+
+# ── check 5, and the 2899429 case (the guard as first pushed did NOT hold it) ─
+
+def test_2899429_is_held(raw, schedule):
+    """Pick 2899429's own timestamps (a walks prop; the guard is the same for
+    game-level picks): created 21:27:50Z for the 23:05Z start the row carried
+    then, settled LOSS at 23:12:19Z on the row that by then said 23:30Z and
+    held game 1's final (live 'Final' at 22:54:55Z). Check 1 passes (23:05 is
+    before 23:12), check 2 passes (25 minutes), first_pitch_at was NULL, and
+    it was created before game 1 ended. Only check 5 sees it."""
+    _game(raw, "MLB_2026-09-25_BAL_NYY", "2026-09-25T23:30:00+00:00", 2, 10)
+    _final(raw, "MLB_2026-09-25_BAL_NYY", "2026-09-25T22:54:55.011468+00:00")
+    pid = _pick(raw, "MLB_2026-09-25_BAL_NYY", "2026-09-25T23:05:00+00:00",
+                "2026-09-25 21:27:50")
+    pt._settle_game_picks(_Shim(raw), DATE, "2026-09-25T23:12:19+00:00")
+    assert _result(raw, pid) is None
+
+
+def test_2899429_reason_is_check_five_even_on_a_non_doubleheader_day():
+    reason = pt._settle_hold_reason(
+        "2026-09-25T21:27:50+00:00", "2026-09-25T23:05:00+00:00",
+        "2026-09-25T23:30:00+00:00", None, "2026-09-25T22:54:55+00:00",
+        "2026-09-25T23:12:19+00:00", doubleheader=False)
+    assert reason and "too soon after" in reason
+
+
+def test_a_postponement_final_does_not_count_as_a_final(raw, schedule):
+    """The feed marks a postponed game 'Final' with no score. That snapshot
+    (hours before the replay) must not make check 5 or 4 hold the replay."""
+    _game(raw, "MLB_2026-09-25_NYM_PHI", "2026-09-25T23:05:00+00:00", 3, 1,
+          home="PHI", away="NYM")
+    _final(raw, "MLB_2026-09-25_NYM_PHI", "2026-09-25T16:00:00+00:00",
+           home_score=None, away_score=None)
+    _final(raw, "MLB_2026-09-25_NYM_PHI", "2026-09-26T02:10:00+00:00", 3, 1)
+    pid = _pick(raw, "MLB_2026-09-25_NYM_PHI", "2026-09-25T23:05:00+00:00",
+                "2026-09-25 14:00:00")
+    pt._settle_game_picks(_Shim(raw), DATE, "2026-09-26T03:00:00-04:00")
+    assert _result(raw, pid) == "WIN"
+
+
+def test_check_four_alone_holds_a_pick_created_after_the_final():
+    reason = pt._settle_hold_reason(
+        "2026-09-25T23:05:00+00:00", "2026-09-25T20:05:00+00:00",
+        "2026-09-25T20:05:00+00:00", None, "2026-09-25T22:54:00+00:00",
+        "2026-09-26T01:00:00+00:00", doubleheader=True)
+    assert reason and "after the scored game ended" in reason
+
+
+def test_a_one_hour_start_restamp_is_not_a_doubleheader_collapse():
+    """MLB_2026-08-13_CIN_CWS: morning picks carry the book's 18:11Z start,
+    the game went live at 17:00:01Z (71 minutes earlier). Even on a
+    doubleheader day that is not a game-2 pick on game 1's row."""
+    assert pt._settle_hold_reason(
+        "2026-08-13T14:18:54+00:00", "2026-08-13T18:11:00+00:00",
+        "2026-08-13T18:11:00+00:00", "2026-08-13T17:00:01+00:00",
+        "2026-08-13T20:18:14+00:00", "2026-08-13T21:00:00+00:00",
+        doubleheader=True) is None
