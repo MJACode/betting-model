@@ -31,10 +31,12 @@ import {
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPct, formatPctSigned } from '@/lib/format';
+import { ROW_SLOP_PAD, unknownCountSpeech } from '@/lib/a11y';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_LABEL, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** First day of the tracked record. Every published number starts here.
  *  The official live date — see lib/recordStart, which is the one place it is
@@ -175,13 +177,29 @@ export function TrackRecordScreen() {
         </Text>
 
         {availableSports.length > 2 ? (
-          <View style={styles.sportTabs}>
+          // One scrolling row, not a wrap: at seven sports the tabs broke onto
+          // a second line and the orphaned NHL chip read as a separate control
+          // (audit L13). The row pads by ROW_SLOP_PAD and pulls back by the
+          // same (sportTabsFrame), reaching only into the subtitle text above
+          // and its own bottom margin, so the ~27pt tabs get 11 + 27 + 11 =
+          // 49pt inside the ScrollView, which is where touches land (H9).
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.sportTabsFrame}
+            contentContainerStyle={styles.sportTabs}
+            accessibilityRole="tablist"
+          >
             {availableSports.map((s) => {
               const active = s === sportSel;
               return (
                 <Pressable
                   key={s}
                   onPress={() => setSportSel(s)}
+                  hitSlop={{ top: ROW_SLOP_PAD, bottom: ROW_SLOP_PAD, left: 2, right: 2 }}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={s === 'All' ? 'All sports' : s}
                   style={({ pressed }) => [
                     styles.sportTab,
                     active && styles.sportTabActive,
@@ -192,7 +210,7 @@ export function TrackRecordScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
         ) : null}
 
         {/* A failed first load says so, with Retry, and the hero below reads
@@ -230,7 +248,10 @@ export function TrackRecordScreen() {
           <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
             {overall.stakedFlat > 0 ? formatPctSigned(overall.roiFlat) : '—'}
           </Text>
-          <Text style={styles.heroRecord}>
+          <Text
+            style={styles.heroRecord}
+            accessibilityLabel={notLoaded ? unknownCountSpeech('— settled picks') : undefined}
+          >
             {notLoaded ? (
               '— settled picks'
             ) : (
@@ -321,6 +342,7 @@ export function TrackRecordScreen() {
           produced it. If we pause a model, its past bets stay here; it just stops producing
           new picks.
         </Text>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -452,11 +474,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   noteBody: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 19 },
+  sportTabsFrame: {
+    flexGrow: 0,
+    marginTop: -ROW_SLOP_PAD,
+    marginBottom: spacing.md - ROW_SLOP_PAD,
+  },
   sportTabs: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.xs,
-    marginBottom: spacing.md,
+    paddingVertical: ROW_SLOP_PAD,
   },
   sportTab: {
     paddingVertical: spacing.xs + 1,

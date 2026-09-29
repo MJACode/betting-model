@@ -155,6 +155,7 @@ import {
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import type {
   EnrichedPick,
   GameRow,
@@ -1901,6 +1902,7 @@ export function StatsScreen() {
       <View style={styles.searchWrap}>
         <Ionicons name="search" size={16} color={colors.textTertiary} />
         <TextInput
+          accessibilityLabel="Search players in this list"
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
@@ -2181,6 +2183,7 @@ export function StatsScreen() {
             Couldn’t load the board. {friendlyCause(error)}
           </Text>
           <Pressable
+            accessibilityRole="button"
             onPress={() => void load()}
             disabled={loading}
             hitSlop={8}
@@ -2199,6 +2202,7 @@ export function StatsScreen() {
             Building your betslip — tap a line to add it, and you’ll head right back.
           </Text>
           <Pressable
+            accessibilityRole="button"
             onPress={() => navigation.setParams({ fromParlay: undefined })}
             hitSlop={8}
             accessibilityLabel="Dismiss"
@@ -2218,6 +2222,7 @@ export function StatsScreen() {
         >
           {activePills.map((p) => (
             <Pressable
+              accessibilityRole="button"
               key={p.key}
               onPress={p.onRemove}
               accessibilityLabel={`Remove filter ${p.label}`}
@@ -2248,6 +2253,7 @@ export function StatsScreen() {
 
       {noLinesNote ? (
         <Pressable
+          hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
           onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
           disabled={!noLinesNote.canSwitch}
           accessibilityRole={noLinesNote.canSwitch ? 'button' : undefined}
@@ -2287,6 +2293,7 @@ export function StatsScreen() {
 
       {effectiveMode === 'hitRate' ? (
         <FlatList
+          ListFooterComponent={<BetslipBarSpacer />}
           data={rowsAreStale ? EMPTY_ROWS : hitRatePlayers}
           // `slateChecking` counts as loading under H2H: the load gate skips
           // the REQUEST until the slate lands but nothing held the RENDER, so
@@ -2340,6 +2347,7 @@ export function StatsScreen() {
         />
       ) : (
         <FlatList
+          ListFooterComponent={<BetslipBarSpacer />}
           data={rowsAreStale ? EMPTY_ROWS : ranked}
           keyExtractor={(item) => item.row.player_id}
           renderItem={({ item, index }) => {
@@ -3562,6 +3570,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tickCol: {
+    // Declared tap floor (verify_a11y); the tick column is already ~58pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     alignItems: 'center',
     paddingTop: 6,
   },

@@ -37,6 +37,7 @@ export function FilterField({
       <Text style={styles.label}>{label}</Text>
       <View style={styles.inputWrap}>
         <TextInput
+          accessibilityLabel={suffix ? `${label}, ${suffix}` : label}
           style={styles.input}
           value={value}
           onChangeText={sanitize}

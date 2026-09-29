@@ -40,7 +40,7 @@ import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
-import { gameStartedLine, pickCtaFor } from '@/lib/pickCta';
+import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookLabel,
@@ -62,6 +62,7 @@ import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
 import { detailPresentation } from '@/lib/loadState';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -382,7 +383,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             about the pick, and this PR adds no paused gating (the existing
             !paused gates flip in the paused-on-All PR). */}
         {pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (
-          <View style={styles.startedCard} accessibilityRole="text" accessible>
+          <View
+            style={styles.startedCard}
+            accessibilityRole="text"
+            accessible
+            accessibilityLabel={gameStartedSpeech(decisionOdds(pick), bookName(storedQuoteBook(pick)))}
+          >
             <Ionicons
               name="lock-closed"
               size={14}
@@ -533,6 +539,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         {playerTrends.loading || homeTrends.loading || awayTrends.loading ? (
           <ActivityIndicator style={styles.loadingTrend} />
         ) : null}
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );

@@ -7,10 +7,11 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { formatSigned, gameStatus } from '@/lib/format';
+import { formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
+  bookName,
   formatSideLine,
   gameMarketForModel,
   heroAmericanForPick,
@@ -32,7 +33,8 @@ import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
 import { openForAction } from '@/lib/discordPublish';
-import { gameStartedLine, pickCtaFor } from '@/lib/pickCta';
+import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
+import { gameStatusSpeech, unitsSpeech } from '@/lib/a11y';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
@@ -218,6 +220,35 @@ export function PickCard({
     .filter((p): p is string => p != null)
     .join(' · ');
   const { primary: titlePrimary, secondary: titleSecondary } = splitPickTitle(pick);
+  // VoiceOver (audit M8): the card is ONE accessible element, so its label has
+  // to carry what the eye gets from the whole card — game status and time,
+  // the stake, when it posted — not just matchup, pick and edge.
+  const startedSpoken = startedText
+    ? gameStartedSpeech(decisionOdds(pick), bookName(storedQuoteBook(pick)))
+    : null;
+  const cardLabel = [
+    matchup,
+    gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
+    pick.pick_label,
+    paused ? 'Paused model, not a bet' : pick.signal_type,
+    flagged ? 'Price check: this price looks off, so edge and EV are hidden' : `Edge ${edgeText}`,
+    heroPrice
+      ? `${heroPrice.kind === 'now' ? cta.priceTag : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
+      : null,
+    stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
+    timing ? timing.label : null,
+    startedSpoken,
+  ]
+    .filter((p): p is string => Boolean(p))
+    .join('. ');
+  // Nested buttons inside an accessible card aren't separately focusable on
+  // iOS — VoiceOver groups the card — so Track, Betslip and the book hand-off
+  // are also offered as custom actions (swipe up/down on the card).
+  const a11yActions = [
+    ...(handoff ? [{ name: 'book', label: `${handoff.verb} at ${bookName(handoff.bookmaker)}` }] : []),
+    ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
+    ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
+  ];
 
   return (
     // The card tap is the only route to the pick's breakdown now that the
@@ -227,18 +258,14 @@ export function PickCard({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={[
-        matchup,
-        pick.pick_label,
-        paused ? 'Paused model, not a bet' : pick.signal_type,
-        flagged ? 'Price check. Edge unavailable' : `Edge ${edgeText}`,
-        heroPrice
-          ? `${heroPrice.kind === 'now' ? cta.priceTag : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
-          : null,
-        startedText,
-      ]
-        .filter((p): p is string => Boolean(p))
-        .join('. ')}
+      accessibilityLabel={cardLabel}
+      accessibilityActions={a11yActions.length > 0 ? a11yActions : undefined}
+      onAccessibilityAction={(e) => {
+        const name = e.nativeEvent.actionName;
+        if (name === 'book' && handoff) void openBookBetslip(handoff.bookmaker, handoff.link);
+        else if (name === 'slip' && canSlip) onToggleSlip!();
+        else if (name === 'track' && canTrack) onToggleTrack!();
+      }}
       accessibilityHint="Opens the full breakdown, including recent form and matchup context."
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
@@ -286,7 +313,15 @@ export function PickCard({
             ) : null}
           </View>
           {flagged ? (
-            <View style={[styles.labelChip, styles.priceCheckChip]}>
+            // Read ONCE, in cardLabel ("Price check: this price looks off…"):
+            // the card is the accessible element, so a separately accessible
+            // chip inside it said it twice (Reviewer #848).
+            <View
+              style={[styles.labelChip, styles.priceCheckChip]}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
               <Ionicons
                 name="alert-circle-outline"
                 size={12}
@@ -464,7 +499,14 @@ export function PickCard({
         <View style={styles.actionsRow}>
           {startedText ? (
             // Not a button: the pick was made at this price, before the start.
-            <View style={styles.startedLine} accessibilityRole="text" accessible>
+            // Spoken once, in cardLabel (startedSpoken), not again here
+            // (Reviewer #848).
+            <View
+              style={styles.startedLine}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
               <Ionicons
                 name="lock-closed"
                 size={12}
@@ -586,6 +628,9 @@ function tierFg(tier: 'HIGH' | 'MED' | 'LOW') {
 
 const styles = StyleSheet.create({
   card: {
+    // Declared tap floor (verify_a11y); the card is already ~150pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
     paddingVertical: spacing.sm,

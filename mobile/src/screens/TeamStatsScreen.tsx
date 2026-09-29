@@ -64,6 +64,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { friendlyCause } from '@/lib/errors';
 import type { RootStackParamList, TeamSport, TeamStatsRow } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'TeamStats'>;
 
@@ -342,6 +343,7 @@ export function TeamStatsScreen() {
             <Text style={styles.muted}>No efficiency metrics stored for {team} yet.</Text>
           </Card>
         )}
+        <BetslipBarSpacer />
       </ScrollView>
 
       <AddLineSheet

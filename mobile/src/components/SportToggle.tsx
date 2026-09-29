@@ -4,6 +4,7 @@ import { LiveDot } from '@/components/LiveDot';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
 import { sportChipState } from '@/lib/loadState';
+import { reachFrame } from '@/lib/a11y';
 
 /**
  * Global sport selector. Drives the shared sport filter so every board shows one
@@ -34,15 +35,39 @@ import { sportChipState } from '@/lib/loadState';
  * so a user on MLB still had to tap through all eight to find the NCAAF game.
  * The dot says it from wherever they are.
  */
+/** In-bounds room above a segment: wrap marginTop (spacing.sm) + padding 2. */
+const TOGGLE_ROOM_ABOVE = spacing.sm + 2;
+
+/** Chip height at default text size: 4 + 4 padding + a 13pt line (~15.5). */
+export const TOGGLE_CHIP_H = 23;
+
 export function SportToggle({
   available,
   signalCounts,
   liveSports,
+  reachAbove = 0,
+  reachBelow = 0,
+  marginTop = 0,
 }: {
   available?: Set<string>;
   signalCounts?: Record<string, number>;
   liveSports?: Set<string>;
+  /**
+   * H9: points of whitespace / non-interactive content above the row that its
+   * chips' touch area may cover (lib/a11y reachFrame). Each screen passes what
+   * its own layout has; 0 keeps the in-bounds 10pt.
+   */
+  reachAbove?: number;
+  /**
+   * Points of the gap below the row it may take. A later sibling sits there,
+   * so the frame is raised; pass HALF of a gap shared with the next row's
+   * chips so the two tile.
+   */
+  reachBelow?: number;
+  /** The frame's own margin before the reach (e.g. a wrapper's margin). */
+  marginTop?: number;
 }) {
+  const reach = reachFrame(reachAbove, reachBelow, { raise: reachBelow > 0, marginTop });
   const { sport, setSport } = useSportFilter();
   const scrollRef = React.useRef<ScrollView>(null);
   const offsets = React.useRef<Record<string, number>>({});
@@ -60,11 +85,12 @@ export function SportToggle({
       ref={scrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.scroll}
+      style={reach.frame}
+      contentContainerStyle={[styles.scroll, reach.content]}
       keyboardShouldPersistTaps="handled"
     >
-      <View style={styles.wrap}>
-        {SPORTS.map((s: Sport) => {
+      <View style={styles.wrap} accessibilityRole="tablist">
+        {SPORTS.map((s: Sport, i: number) => {
           const active = s === sport;
           const count = signalCounts?.[s] ?? 0;
           const isLive = liveSports?.has(s) ?? false;
@@ -77,12 +103,21 @@ export function SportToggle({
                 offsets.current[s] = e.nativeEvent.layout.x;
                 if (s === sport) scrollToActive();
               }}
-              // ~26pt tall, the smallest target on the Stats board and well
-              // under the 44pt HIG floor. Slop rather than height: this row is
-              // on three tabs and growing it costs vertical space everywhere
-              // (UX review, 2026-09-12).
-              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
-              accessibilityRole="button"
+              // ~23pt tall, the smallest target on the Stats board. Slop, not
+              // height: this row is on three tabs (UX review, 2026-09-12). A
+              // horizontal ScrollView only takes touches inside its own bounds,
+              // so the slop is exactly the room inside them: the wrap's 8pt
+              // margin + 2pt padding above and 2pt below (35pt), plus whatever
+              // the screen lets the frame reach (reachAbove / reachBelow; Picks
+              // and Models reach 45pt). Chips abut, so no slop between them —
+              // only the row's two ends take the wrap's 2pt padding.
+              hitSlop={{
+                top: TOGGLE_ROOM_ABOVE + reachAbove,
+                bottom: 2 + reachBelow,
+                left: i === 0 ? 2 : 0,
+                right: i === SPORTS.length - 1 ? 2 : 0,
+              }}
+              accessibilityRole="tab"
               accessibilityState={{ selected: active }}
               accessibilityLabel={label}
               style={({ pressed }) => [

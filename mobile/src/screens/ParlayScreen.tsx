@@ -289,8 +289,10 @@ export function ParlayScreen() {
           </View>
           <View style={styles.rightActions}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Saved parlays${savedParlays.count > 0 ? `, ${savedParlays.count}` : ''}`}
               onPress={() => navigation.navigate('SavedParlays')}
-              hitSlop={8}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
               style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
             >
               <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
@@ -368,7 +370,7 @@ export function ParlayScreen() {
                 onPress={closeCustom}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Close"
+                accessibilityLabel="Close custom leg"
               >
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>
@@ -376,6 +378,7 @@ export function ParlayScreen() {
 
             <Text style={styles.panelTitle}>Pick</Text>
             <TextInput
+              accessibilityLabel="Pick"
               style={styles.customInput}
               value={customLabel}
               onChangeText={setCustomLabel}
@@ -386,6 +389,7 @@ export function ParlayScreen() {
 
             <Text style={styles.panelTitle}>American odds</Text>
             <TextInput
+              accessibilityLabel="Odds, American"
               style={styles.customInput}
               value={customOddsText}
               onChangeText={setCustomOddsText}
@@ -402,6 +406,9 @@ export function ParlayScreen() {
             </Text>
 
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add leg"
+              accessibilityState={{ disabled: !customValid }}
               onPress={handleSaveCustom}
               disabled={!customValid}
               style={({ pressed }) => [
@@ -771,6 +778,9 @@ function SlipBody({
   const staleNote =
     staleCount > 0 ? (
       <Pressable
+        hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+        accessibilityRole="button"
+        accessibilityLabel={`${staleCount} selection${staleCount === 1 ? '' : 's'} can't be priced right now. Tap to remove ${staleCount === 1 ? 'it' : 'them'}.`}
         onPress={onClearStale}
         style={({ pressed }) => [styles.missingNote, pressed && styles.pressed]}
       >
@@ -797,6 +807,8 @@ function SlipBody({
           subtitle={'Find a player you want to bet and tap "Add to betslip" — you\'ll come right back here. Picks from the Picks tab work too, or enter a custom leg.'}
         />
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Find players to add"
           onPress={onFindPlayers}
           style={({ pressed }) => [styles.buildBtn, styles.manualBtn, pressed && styles.pressed]}
         >
@@ -804,6 +816,8 @@ function SlipBody({
           <Text style={styles.buildBtnText}>Find players to add</Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add a custom leg"
           onPress={onAddCustom}
           style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
         >
@@ -955,6 +969,7 @@ function SlipBody({
           onSaved={onSaved}
         />
         <Pressable
+          accessibilityLabel="Find players"
           onPress={onFindPlayers}
           accessibilityRole="button"
           style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}
@@ -963,6 +978,7 @@ function SlipBody({
           <Text style={styles.gridBtnText}>Find players</Text>
         </Pressable>
         <Pressable
+          accessibilityLabel="Custom leg"
           onPress={onAddCustom}
           accessibilityRole="button"
           style={({ pressed }) => [styles.gridBtn, styles.outlineBtn, pressed && styles.pressed]}

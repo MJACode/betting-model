@@ -75,6 +75,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
 import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 
 /**
@@ -350,6 +351,7 @@ export function TeamsBoard({
       <View style={styles.searchWrap}>
         <Ionicons name="search" size={16} color={colors.textTertiary} />
         <TextInput
+          accessibilityLabel="Search teams"
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
@@ -371,6 +373,7 @@ export function TeamsBoard({
 
       {noLinesNote ? (
         <Pressable
+          hitSlop={{ top: 5, bottom: 5, left: 0, right: 0 }}
           onPress={() => setPickerOpen(true)}
           accessibilityRole="button"
           accessibilityLabel={`${noLinesNote} Switch sportsbook`}
@@ -401,6 +404,7 @@ export function TeamsBoard({
       ) : null}
 
       <FlatList
+        ListFooterComponent={<BetslipBarSpacer />}
         data={ranked}
         keyExtractor={(item) => item.team}
         renderItem={({ item, index }) => {

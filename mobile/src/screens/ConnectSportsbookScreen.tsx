@@ -12,6 +12,7 @@ import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import type { LinkedAccount } from '@/lib/sharpsports';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /** Books we don't yet support connecting — shown as "Coming soon". */
 const COMING_SOON: { abbrev: string; name: string }[] = [
@@ -115,6 +116,8 @@ export function ConnectSportsbookScreen() {
 
               {linked && !unverified ? (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Disconnect ${book.name}`}
                   onPress={() => onDisconnect(book)}
                   style={({ pressed }) => [styles.btnSecondary, pressed && styles.btnPressed]}
                 >
@@ -122,6 +125,9 @@ export function ConnectSportsbookScreen() {
                 </Pressable>
               ) : (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={unverified ? `Reconnect ${book.name}` : `Connect ${book.name}`}
+                  accessibilityState={{ busy: isPending, disabled: isPending }}
                   onPress={() => onConnect(book)}
                   disabled={isPending}
                   style={({ pressed }) => [
@@ -176,6 +182,7 @@ export function ConnectSportsbookScreen() {
           We never see or store your sportsbook password. You log in through SharpSports' secure
           hosted flow, and the app only ever receives read-only bet history.
         </Text>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );

@@ -134,7 +134,7 @@ export function DailyResultsModal({
             hitSlop={12}
             style={styles.closeBtn}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel="Close daily results"
           >
             <Ionicons name="close" size={22} color={colors.textSecondary} />
           </Pressable>
@@ -143,6 +143,7 @@ export function DailyResultsModal({
         {/* Day navigation — always visible so an empty/error day isn't a dead end. */}
         <View style={styles.dateNav}>
           <Pressable
+            accessibilityRole="button"
             onPress={() => canPrev && onSelectDate(addDays(date, -1))}
             disabled={!canPrev}
             hitSlop={10}
@@ -156,6 +157,8 @@ export function DailyResultsModal({
             />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: calendarOpen }}
             onPress={() => setCalendarOpen((open) => !open)}
             hitSlop={8}
             accessibilityLabel="Pick a date"
@@ -170,6 +173,7 @@ export function DailyResultsModal({
             />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
             onPress={() => canNext && onSelectDate(addDays(date, 1))}
             disabled={!canNext}
             hitSlop={10}
@@ -224,12 +228,18 @@ export function DailyResultsModal({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              style={styles.sportChipsFrame}
               contentContainerStyle={styles.sportChips}
             >
               {['ALL', ...ALL_SPORTS].map((s) => {
                 const active = sportFilter === s;
                 return (
                   <Pressable
+                    // ~30pt chip; the row's frame (sportChipsFrame) keeps this slop
+                    // inside the horizontal ScrollView.
+                    hitSlop={{ top: 7, bottom: 7, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                     key={s}
                     onPress={() => setSportFilter(s)}
                     style={[styles.sportChip, active && styles.sportChipActive]}
@@ -633,10 +643,15 @@ const styles = StyleSheet.create({
   },
   list: { padding: spacing.lg, paddingTop: spacing.xs, gap: spacing.md },
 
+  // The chips' 7pt vertical slop has to land inside the ScrollView (which
+  // clips touches to its bounds): pad by 7 and pull back by 7 — no visual move.
+  sportChipsFrame: {
+    marginVertical: -7,
+  },
   sportChips: {
     flexDirection: 'row',
     gap: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 2 + 7,
   },
   sportChip: {
     paddingHorizontal: spacing.md,

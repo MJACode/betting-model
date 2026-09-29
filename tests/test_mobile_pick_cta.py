@@ -233,7 +233,7 @@ def test_pick_card_wiring():
     started_def = re.search(r"const startedText =[^;]*;", card)
     assert started_def and "pick.signal_type === 'BET' && !preview && open && cta.startedLine" in started_def.group(0)
     assert "paused" not in started_def.group(0) and "offersBook" not in started_def.group(0)
-    started = re.search(r"<View style=\{styles\.startedLine\}.*?</View>", card, re.S)
+    started = re.search(r"<View\s+style=\{styles\.startedLine\}.*?</View>", card, re.S)
     assert started, "no Game started line"
     block = started.group(0)
     assert 'accessibilityRole="text"' in block and 'name="lock-closed"' in block

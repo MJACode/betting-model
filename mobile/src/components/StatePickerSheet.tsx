@@ -21,12 +21,22 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
   };
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close state picker"
+        />
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Your state</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close state picker">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -64,7 +74,7 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
             })}
           </ScrollView>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

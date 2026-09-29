@@ -68,7 +68,7 @@ export function DiscordLinkModal({
             onPress={onClose}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel="Close Discord link"
             style={styles.close}
           >
             <Ionicons name="close" size={24} color={colors.textSecondary} />
@@ -97,6 +97,7 @@ export function DiscordLinkModal({
 
           {alreadyLinked ? (
             <Pressable
+              accessibilityLabel="Open the Discord"
               onPress={() => openLink(DISCORD_URL, 'Discord')}
               accessibilityRole="button"
               style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
@@ -105,6 +106,8 @@ export function DiscordLinkModal({
             </Pressable>
           ) : (
             <Pressable
+              accessibilityLabel="Join the Discord"
+              accessibilityState={{ busy: pending, disabled: pending }}
               onPress={onConnect}
               disabled={pending}
               accessibilityRole="button"
@@ -126,7 +129,12 @@ export function DiscordLinkModal({
               guild-join that failed. The invite still works; they just won't
               get the subscriber role until they connect. */}
           {!alreadyLinked ? (
-            <Pressable onPress={() => openLink(DISCORD_URL, 'Discord')} hitSlop={8}>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Use an invite link instead"
+              onPress={() => openLink(DISCORD_URL, 'Discord')}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+            >
               <Text style={styles.altLink}>Use an invite link instead</Text>
             </Pressable>
           ) : null}

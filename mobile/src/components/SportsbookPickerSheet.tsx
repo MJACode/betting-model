@@ -92,12 +92,17 @@ export function SportsbookPickerSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Close"
-      >
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close sportsbook picker"
+        />
         {/* accessible={false}: an accessible Pressable groups its children
             into ONE VoiceOver element, which would leave the book rows, the
             Close button and Apply unreachable. Same fix as StatsLineSheet. */}
@@ -105,7 +110,12 @@ export function SportsbookPickerSheet({
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Your sportsbooks</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityLabel="Close">
+            <Pressable
+              accessibilityRole="button"
+              onPress={onClose}
+              hitSlop={12}
+              accessibilityLabel="Close sportsbook picker"
+            >
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -208,7 +218,7 @@ export function SportsbookPickerSheet({
             <Text style={styles.applyText}>Apply</Text>
           </Pressable>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

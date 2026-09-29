@@ -69,6 +69,7 @@ export function FilterBar({
           <View style={styles.searchWrap}>
             <Ionicons name="search" size={15} color={colors.textTertiary} />
             <TextInput
+              accessibilityLabel={searchPlaceholder.replace(/…$/, '')}
               style={styles.searchInput}
               value={search}
               onChangeText={onSearchChange}

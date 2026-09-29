@@ -320,7 +320,7 @@ check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
 const startedDef = card.match(/const startedText =[^;]*;/)?.[0] ?? '';
 check('PickCard: the started line is NOT gated on paused (no new paused gating)',
   /pick\.signal_type === 'BET' && !preview && open && cta\.startedLine/.test(startedDef) && !/paused|offersBook/.test(startedDef), startedDef.replace(/\s+/g, ' ').slice(0, 120));
-const started = card.match(/<View style=\{styles\.startedLine\}[\s\S]*?<\/View>/)?.[0] ?? '';
+const started = card.match(/<View\s+style=\{styles\.startedLine\}[\s\S]*?<\/View>/)?.[0] ?? '';
 check('PickCard: the started line is role text, lock icon, not a Pressable',
   /accessibilityRole="text"/.test(started) && /name="lock-closed"/.test(started) && !/Pressable|onPress/.test(started));
 check('PickCard: started line is textSecondary', /startedText: \{[\s\S]*?color: colors\.textSecondary/.test(card));
