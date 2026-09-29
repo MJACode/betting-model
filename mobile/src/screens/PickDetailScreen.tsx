@@ -40,8 +40,10 @@ import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
 import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
+import { gameStartedLine, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
+  bookLabel,
   bookName,
   clvLockBook,
   displayQuoteForPick,
@@ -50,6 +52,7 @@ import {
   numOrNull,
   playerNameFromPickLabel,
   propMarketForModel,
+  storedQuoteBook,
   MODEL_BOOK,
 } from '@/lib/markets';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
@@ -215,6 +218,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const over = ['final', 'ended'].includes(gameStatus(game, liveState).kind);
   const openHere = openForAction(pick) && (pick.result == null || !over);
   const canTrack = openHere;
+  // H5 (lib/pickCta.ts): once a PRE-GAME pick's game has started, no hand-off
+  // at the in-play price and no betslip — "Game started · picked at …" says
+  // what the pick was. Track stays. Live in-play signals are unchanged. The
+  // pick's game_time stands in for a missing games row (fails closed).
+  const cta = pickCtaFor(pick, game, liveState);
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
@@ -364,18 +372,39 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             books that cannot be bet. Not for live picks: they are DraftKings
             only, and the in-play rows are no longer fetched. */}
         {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
-          <View style={styles.linesCard}>
-            <BookLinesRow pick={pick} bookRows={bookRows} />
+          cta.handoff ? (
+            <View style={styles.linesCard}>
+              <BookLinesRow pick={pick} bookRows={bookRows} />
+            </View>
+          ) : null
+        ) : null}
+        {/* "Game started · picked at …" — not gated on paused: it states a fact
+            about the pick, and this PR adds no paused gating (the existing
+            !paused gates flip in the paused-on-All PR). */}
+        {pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (
+          <View style={styles.startedCard} accessibilityRole="text" accessible>
+            <Ionicons
+              name="lock-closed"
+              size={14}
+              color={colors.textSecondary}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+            <Text style={styles.startedText}>
+              {gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))}
+            </Text>
           </View>
         ) : null}
-        {live ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
+        {/* Every row of AllBooksCard opens that book's betslip, so after the
+            start it goes with the hand-off and the Slip (H5, Reviewer #847). */}
+        {live || !cta.handoff ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
 
         {/* A retired model's pick (reachable from a tracked bet on Performance)
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
         {hasPricedLine(pick) && openHere && !preview && !retired && !paused
-          && !voided ? (
+          && !voided && cta.slip ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
               <Text style={styles.trackTitle}>
@@ -806,6 +835,26 @@ const styles = StyleSheet.create({
   },
   // The Betting lines row (BookLinesRow) on its own card — the row carries
   // its own top margin, so the card only pads the sides and bottom.
+  // H5: the non-interactive "Game started · picked at …" line in the hand-off's
+  // place — textSecondary, no fill, so it never reads as a button.
+  startedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  startedText: {
+    flexShrink: 1,
+    color: colors.textSecondary,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    fontVariant: ['tabular-nums'],
+  },
   linesCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.lg,

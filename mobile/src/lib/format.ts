@@ -469,6 +469,56 @@ export function reconcileLiveSnapshots<
   return out;
 }
 
+/** Where a game stands for the pick CTA (H5): not yet, in play, over, or called off. */
+export type GameStartState = 'pre' | 'live' | 'over' | 'postponed';
+
+/**
+ * The H5 start test (usability audit PR 3), with two fixes from Reviewer (#847):
+ *
+ *  - FAILS CLOSED on a missing game row or commence_time: `scheduledStart`
+ *    (the pick's own `game_time`, stamped by the scorer, ~100% populated)
+ *    stands in, so a pick whose games row did not load still knows its game
+ *    has begun. It used to read 'pre' and keep the in-play hand-off.
+ *  - 'postponed': the feed says Final but no score was ever recorded AND the
+ *    scheduled start is still ahead. That is a game called off before first
+ *    pitch (MLB's Final/Postponed — the client reads abstract_game_state only;
+ *    the detailed status is not fetched), or a quiet Preview row that
+ *    reconcileLiveSnapshots marked terminal. Either way it never STARTED.
+ *    A postponement after the scheduled start can't be told apart from an
+ *    ended game on this data and still reads 'over'.
+ */
+export function gameStartState(
+  game: GameLike | null | undefined,
+  live?: LiveStateLike | null,
+  scheduledStart?: string | null,
+  now: number = Date.now(),
+): GameStartState {
+  const start = game?.commence_time || scheduledStart || null;
+  const scored = game?.home_score != null && game?.away_score != null;
+  if (!scored && live?.abstract_game_state === 'Final' && live.home_score == null && live.away_score == null && start) {
+    const t = parseStamp(start).getTime();
+    if (!Number.isNaN(t) && t > now) return 'postponed';
+  }
+  const withStart: GameLike = { ...(game ?? {}), commence_time: start };
+  const kind = gameStatus(withStart, live).kind;
+  return kind === 'pre' ? 'pre' : kind === 'live' ? 'live' : 'over';
+}
+
+/**
+ * Has the game started — LIVE, FINAL or ENDED? The H5 test for "no hand-off at
+ * the in-play price". Same (game, live) leading signature as draft #846's
+ * `gameIsOver`, so the two helpers sit side by side once both land. Pass the
+ * pick's `game_time` as `scheduledStart` so a missing games row fails closed.
+ */
+export function gameHasStarted(
+  game: GameLike | null | undefined,
+  live?: LiveStateLike | null,
+  scheduledStart?: string | null,
+): boolean {
+  const s = gameStartState(game, live, scheduledStart);
+  return s === 'live' || s === 'over';
+}
+
 /**
  * Derive game status from a `games` row, refined by the live feed when we have
  * a fresh snapshot for the game (MLB only — the live poller's coverage).

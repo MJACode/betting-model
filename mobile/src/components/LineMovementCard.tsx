@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { formatAmerican, formatGameTimeET } from '@/lib/format';
+import { formatAmerican } from '@/lib/format';
+import { changesFooter, recentChanges } from '@/lib/lineHistory';
 import { canShowLineMovementHistory, formatSideLine, gameMarketForModel, historyBookForPick, isNflLineOnly, lineForSide, lineFromSnapshot, movementFromSameBookHistory, priceForSide, propMarketForModel, type PricedSnapshot, bookName, storedQuoteBook } from '@/lib/markets';
 import { fetchOddsHistory, fetchPropOddsHistory } from '@/lib/queries';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -100,7 +101,15 @@ export function LineMovementCard({ pick, playerName }: Props) {
   })();
 
   const showLineCol = market.startsWith('totals') || market.startsWith('spreads') || isProp;
-  const recent = snaps.slice(-8);
+  // M13: a row is a CHANGE, not a raw snapshot — runs at the same line and
+  // price collapse, and rows sharing a minute get seconds (lib/lineHistory).
+  const { rows: recent, changes, shownChanges, hidden } = recentChanges(
+    snaps.map((s) => ({
+      at: s.snapshot_at,
+      line: showLineCol ? lineForSide(lineFromSnapshot(s, market), pick.pick_side, market) : null,
+      price: priceForSide(s, pick.pick_side),
+    })),
+  );
 
   return (
     <View style={styles.card}>
@@ -120,23 +129,21 @@ export function LineMovementCard({ pick, playerName }: Props) {
       </View>
 
       <View style={styles.tableHead}>
-        <Text style={[styles.cell, styles.cellTime, styles.headText]}>Snapshot</Text>
+        <Text style={[styles.cell, styles.cellTime, styles.headText]}>Changed at</Text>
         {showLineCol ? <Text style={[styles.cell, styles.headText]}>Line</Text> : null}
         <Text style={[styles.cell, styles.headText]}>Price</Text>
       </View>
-      {recent.map((s) => (
-        <View key={s.snapshot_at} style={styles.row}>
-          <Text style={[styles.cell, styles.cellTime]}>{formatGameTimeET(s.snapshot_at)}</Text>
-          {showLineCol ? (
-            <Text style={styles.cell}>
-              {lineForSide(lineFromSnapshot(s, market), pick.pick_side, market) ?? '—'}
-            </Text>
-          ) : null}
-          <Text style={styles.cell}>{formatAmerican(priceForSide(s, pick.pick_side))}</Text>
+      {recent.map((r) => (
+        <View key={r.key} style={styles.row}>
+          <Text style={[styles.cell, styles.cellTime]}>{r.label}</Text>
+          {showLineCol ? <Text style={styles.cell}>{r.line ?? '—'}</Text> : null}
+          <Text style={styles.cell}>{formatAmerican(r.price)}</Text>
         </View>
       ))}
-      {snaps.length > recent.length ? (
-        <Text style={styles.more}>Showing last {recent.length} of {snaps.length} snapshots</Text>
+      {hidden > 0 || snaps.length > recent.length ? (
+        <Text style={styles.more}>
+          {changesFooter({ changes, shownChanges, hidden }, snaps.length)}
+        </Text>
       ) : null}
       <Text style={styles.note}>
         {lineOnly
