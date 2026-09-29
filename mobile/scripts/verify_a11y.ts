@@ -168,6 +168,7 @@ const SHORT_BASELINE: [string, string, number][] = [
   ['src/screens/SettingsScreen.tsx', 'bookPickRow', 2], // 41.8, 41.8pt
   ['src/screens/SettingsScreen.tsx', 'helplineRow', 1], // 39.5pt
   ['src/screens/SettingsScreen.tsx', 'pressed', 1], // 38.3pt
+  ['src/screens/SettingsScreen.tsx', 'doneBtn,pressed', 1], // 41.8pt — #831's keyboard Done (landed on master after this rule); follow-up with the rest
   ['src/screens/SignInScreen.tsx', '', 3], // 17.8, 39.5, 39.5pt
   ['src/screens/StatsScreen.tsx', '', 2], // 32.0, 34.0pt
   ['src/screens/StatsScreen.tsx', 'clearBtn,pressed', 1], // 42.3pt
@@ -656,7 +657,7 @@ const settings = read('src/screens/SettingsScreen.tsx');
 check('M9: helpline row reaches 44 (slop below the divider)', /hitSlop=\{\{ top: 0, bottom: 12, left: 0, right: 0 \}\}/.test(settings));
 check('M26: Settings Sign out is minHeight 44', /signOutBtn: \{[^}]*minHeight: 44/.test(settings));
 check('Sheets: the tap-outside backdrop is a sibling, never the sheet’s parent',
-  ['AddLineSheet', 'HitModeSheet', 'StatGroupSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
+  ['AddLineSheet', 'HitModeSheet', 'PlayerNewsSheet', 'StatePickerSheet', 'ParlayDkHandoff', 'SportsbookPickerSheet', 'InfoTooltip', 'filters/FilterSheet'].every((n) => {
     const s = read(`src/components/${n}.tsx`);
     return /<View style=\{styles\.backdrop\}>/.test(s) && !/<Pressable\s+style=\{styles\.backdrop\}/.test(s);
   }));

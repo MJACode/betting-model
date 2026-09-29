@@ -370,10 +370,16 @@ const probe = ioniconColors(`<Ionicons\n  name="x"\n  color={on ? colors.bet : c
 check('the bright-icon scan sees a multi-line ternary and passes Ink/Soft', probe.length === 3 && BRIGHT_ICON.test(probe[0][1]) && probe[0][0] === 3 && !BRIGHT_ICON.test(probe[1][1]) && !BRIGHT_ICON.test(probe[2][1]));
 check('Line shop pricetag icon is tint (Designer, over Reviewer MEDIUM B betInk)', /name="pricetag-outline" size=\{13\} color=\{colors\.tint\}/.test(read('src/screens/ParlayScreen.tsx')));
 // Selection is tint, never green (Designer verdict): the checkmark AND the row border.
-for (const rel of ['src/components/SportsbookPickerSheet.tsx', 'src/components/StatGroupSheet.tsx', 'src/components/HitModeSheet.tsx', 'src/components/StatePickerSheet.tsx', 'src/screens/PaywallScreen.tsx']) {
+for (const rel of ['src/components/SportsbookPickerSheet.tsx', 'src/components/HitModeSheet.tsx', 'src/components/StatePickerSheet.tsx', 'src/screens/PaywallScreen.tsx']) {
   const s = read(rel);
   const checks = s.match(/name="checkmark-circle" size=\{\d+\} color=\{colors\.(\w+)\}/g) ?? [];
   check(`${rel}: selected checkmark and border are tint`, checks.length > 0 && checks.every((c) => c.endsWith('colors.tint}')) && !/rowActive:\s*\{\s*borderColor: colors\.bet\b/.test(s));
+}
+// StatGroupSheet is gone (#830); GroupTabs, the position row that replaced it,
+// carries the selection: tint (or textPrimary on the second level), never green.
+{
+  const tabs = read('src/components/GroupTabs.tsx');
+  check('GroupTabs (replaced StatGroupSheet): selected tab is tint, never green', /tabActive: \{\s*borderBottomColor: colors\.tint,/.test(tabs) && /textActive: \{\s*color: colors\.tint,/.test(tabs) && !/colors\.bet\b/.test(tabs));
 }
 // Designer H2 / L9 misses: the equity-curve total and the share text.
 const eq = read('src/components/EquityCurve.tsx');

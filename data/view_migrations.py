@@ -216,6 +216,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # validated +8 gate. Pinned to that promotion so a later map is left
     # alone. Does not pause, does not move the 0.65 floor or the ±8 gate.
     "demote_ncaaf_over_under_platt_2026_09_26.sql",
+    # 2026-09-28: NCAAF 2026 team board refresh cancelled at statement_timeout
+    # (daily run 51e965f8023c4b0e86e03fe075af1f9c, 10:15:00Z). The closing-line
+    # CTE seq-scanned odds because `bookmaker = 'draftkings' OR LIKE 'cfbd\_%'`.
+    # Replaces team_stats_board_compute with per-game index probes. Guards on
+    # the probe marker so the DDL runs once.
+    "team_stats_board_line_probe_2026_09_28.sql",
 ]
 
 

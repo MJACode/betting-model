@@ -202,7 +202,7 @@ eq(addBetHint({ bet: 'x', stake: '5' }), undefined, 'M25 valid');
 
 def test_sheet_backdrops_do_not_wrap_the_sheet():
     """An accessible backdrop that wraps the sheet hides the sheet from VoiceOver."""
-    for name in ["AddLineSheet", "HitModeSheet", "StatGroupSheet", "PlayerNewsSheet", "StatePickerSheet",
+    for name in ["AddLineSheet", "HitModeSheet", "PlayerNewsSheet", "StatePickerSheet",
                  "ParlayDkHandoff", "SportsbookPickerSheet", "InfoTooltip", "filters/FilterSheet"]:
         src = _read(SRC / "components" / f"{name}.tsx")
         assert "<View style={styles.backdrop}>" in src, name
