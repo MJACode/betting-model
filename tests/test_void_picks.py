@@ -139,3 +139,48 @@ class TestTheToolRefusesToMatchEverything:
     def test_writing_requires_an_explicit_flag(self):
         src = (ROOT / "scripts" / "void_picks.py").read_text(encoding="utf-8")
         assert '"--apply"' in src and "DRY RUN" in src
+
+
+class TestAPostedSignalIsLocked:
+    """Matt, 2026-09-28: "if a bet is posted as a signal it should be locked".
+
+    Ailin Perez ML (pick 2482412) was posted to Discord on 2026-09-19, voided by
+    the EV-floor sweep three hours later, stayed on the board (a VOID never
+    retracts the post), won on 2026-09-26 -- and the recap said no UFC pick
+    cleared the bar that day. A void cannot un-send a message, so it must not
+    be allowed to un-count one.
+    """
+
+    def test_a_posted_pick_is_refused(self):
+        to_void, refused = plan_voids([{**_row(), "posted": True}], REASON)
+        assert not to_void
+        assert "posted as a signal" in refused[0]["why"]
+
+    def test_an_unposted_pick_is_still_voidable(self):
+        """The lock is on the post, not on voiding: phantom-game rows that
+        never reached the channel (pick 661) still void."""
+        to_void, _ = plan_voids([{**_row(), "posted": False}], REASON)
+        assert len(to_void) == 1
+
+    def test_the_select_reads_the_discord_ledger_on_the_shared_key(self):
+        """Both callers (the script and the worker's void_picks job) go
+        through _select, so the posted flag must be computed THERE, from the
+        one lock_key definition -- not retyped."""
+        from scripts.void_picks import POSTED_SQL, _select
+        from tracking.publish_keys import live_lock_key_sql, lock_key_sql, posted_sql
+
+        assert POSTED_SQL == posted_sql("p")
+
+        assert "push_sent" in POSTED_SQL
+        assert "'discord_signal'" in POSTED_SQL and "'discord_live'" in POSTED_SQL
+        assert lock_key_sql("p") in POSTED_SQL
+        assert live_lock_key_sql("p") in POSTED_SQL
+
+        conn = _FakeConn()
+        _select(conn, [2482412], None, None, None)
+        sql = conn.calls[0][0]
+        assert "AS posted" in sql and "push_sent" in sql
+
+    def test_the_worker_job_uses_the_same_plan(self):
+        src = (ROOT / "tracking" / "job_queue.py").read_text(encoding="utf-8")
+        assert "from scripts.void_picks import _select, plan_voids, void" in src
