@@ -12,7 +12,8 @@ import { fetchOpeningVsLive, fetchOpeningSlices } from '@/lib/queries';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { ErrorBanner } from '@/components/ErrorState';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 import { SHADOW_TRACK_START } from '@/lib/recordStart';
 
@@ -67,7 +68,7 @@ export function OpeningComparisonScreen() {
       setTracks(t);
       setSlices(s);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -119,7 +120,15 @@ export function OpeningComparisonScreen() {
           the line predict the result? This is a measurement experiment — not a separate product yet.
         </Text>
 
-        {error ? <Text style={styles.error}>Couldn’t load: {error}</Text> : null}
+        {error ? (
+          <ErrorBanner
+            what="the opening-line comparison"
+            error={error}
+            onRetry={() => void load()}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
+        ) : null}
         {loading && tracks.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
 
         {/* The two tracks side by side */}
@@ -243,7 +252,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     lineHeight: 18,
   },
-  error: { fontSize: font.size.footnote, color: colors.avoidInk, marginBottom: spacing.md },
+  errorBannerInset: { marginHorizontal: 0, marginTop: 0, marginBottom: spacing.md },
   loading: { marginVertical: spacing.lg },
   row: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.md },
   trackCard: {

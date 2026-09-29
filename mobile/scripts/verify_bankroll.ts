@@ -229,7 +229,7 @@ eq('kept sentence: de-DE separators', keptSentence(2000, DE), 'Kept $2.000.');
   check('a valid entry: no error, no "Kept"', valid.error === null && valid.save === 3000);
 }
 check('the error, "Kept" included, is one Text in the alert live region',
-  /<View style=\{styles\.fieldErrorRow\} accessibilityRole="alert" accessibilityLiveRegion="polite">\s*<Ionicons[^>]*\/>\s*<Text style=\{styles\.fieldErrorText\}>\{error\}<\/Text>/.test(
+  /<View style=\{styles\.fieldErrorRow\} accessibilityRole="alert" accessibilityLiveRegion="polite">\s*<Ionicons[^>]*\/>\s*<Text style=\{styles\.fieldErrorText\}>\{fieldMessage\}<\/Text>/.test(
     readFileSync(join(import.meta.dirname, '..', 'src', 'screens', 'SettingsScreen.tsx'), 'utf-8')));
 
 // ── 3. Units → dollars ─────────────────────────────────────────────────────
@@ -574,7 +574,7 @@ check('the field: decimal pad, Done bar, $ prefix, placeholder, label',
       settings.includes('{unitRowTitle(shown)}') && settings.includes('{unitRowSubtitle(shown)}'));
   check('errors: blur and Done commit, the live one does not wait',
     /onBlur=\{commit\}/.test(settings) &&
-      settings.includes('const error = visibleBankrollError(checkBankroll(text), false) ?? blurError;'));
+      settings.includes('const fieldMessage = visibleBankrollError(checkBankroll(text), false) ?? blurError;'));
   check('Lower / Raise: disabled until loaded, stepped in the store',
     settings.includes('canLower={ready && canStepUnitPct(settings.unitPct, -1)}') &&
       settings.includes('canRaise={ready && canStepUnitPct(settings.unitPct, 1)}') &&
@@ -632,7 +632,7 @@ check('Picks: no exposure banner comes back, and no dollars',
   check('the error TEXT uses avoidInk', /color: colors\.avoidInk/.test(style('fieldErrorText')));
   check('the outline still uses avoid', /borderColor: colors\.avoid\b(?!Ink)/.test(style('moneyFieldError')));
   check('the icon still uses avoid',
-    /<Ionicons name="alert-circle" size=\{14\} color=\{colors\.avoid\} \/>\s*<Text style=\{styles\.fieldErrorText\}>\{error\}<\/Text>/.test(settings));
+    /<Ionicons name="alert-circle" size=\{14\} color=\{colors\.avoid\} \/>\s*<Text style=\{styles\.fieldErrorText\}>\{fieldMessage\}<\/Text>/.test(settings));
   check('avoidInk is text only in Settings (never an outline or icon)', !/borderColor: colors\.avoidInk\b/.test(settings) && !/<Ionicons[^>]*color=\{colors\.avoidInk\}/.test(settings));
 }
 

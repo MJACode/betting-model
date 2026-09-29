@@ -24,6 +24,7 @@ import {
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
@@ -52,6 +53,7 @@ export function BuiltInModelDetailScreen() {
     records: fullOutcomeRecords,
     loading: settledLoading,
     error: settledError,
+    refresh: refreshSettled,
   } = useSettledPicksSincePaperStart();
 
   // Today's BET picks for this model. Game-level and prop picks lock the first
@@ -398,9 +400,13 @@ export function BuiltInModelDetailScreen() {
             ) : null}
 
             {settledError ? (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>Connection error: {settledError}</Text>
-              </View>
+              <ErrorBanner
+                what="this model’s record"
+                error={settledError}
+                onRetry={() => void refreshSettled()}
+                retrying={settledLoading}
+                style={styles.errorBannerInset}
+              />
             ) : null}
             {settledLoading && stats.picks === 0 ? (
               <ActivityIndicator style={styles.loading} />
@@ -713,13 +719,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   loading: { marginVertical: spacing.xl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });

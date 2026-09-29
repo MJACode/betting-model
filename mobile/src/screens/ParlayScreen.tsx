@@ -61,6 +61,7 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
 
 type ParlayNav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -320,9 +321,13 @@ export function ParlayScreen() {
         </Text>
 
         {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {error}</Text>
-          </View>
+          <ErrorBanner
+            what="today’s picks for the slip"
+            error={error}
+            onRetry={() => void refresh()}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
         ) : null}
 
         {resolving ? (
@@ -1077,19 +1082,8 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  errorBanner: {
-    marginTop: spacing.md,
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: {
-    color: colors.avoidInk,
-    fontSize: font.size.footnote,
-  },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: spacing.md, marginBottom: spacing.sm },
   panelTitle: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,

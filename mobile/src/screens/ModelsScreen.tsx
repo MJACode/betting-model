@@ -5,6 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorBanner, ErrorState } from '@/components/ErrorState';
+import { errorSurface, loadPresentation } from '@/lib/loadState';
+import { Skeleton, SkeletonRow } from '@/components/Skeleton';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -48,7 +51,20 @@ export function ModelsScreen() {
   const [tab, setTab] = useState<Tab>('builtin');
   const { sport } = useSportFilter();
   const { models, ready } = useCustomModels();
-  const { rows, records, loading, error } = useSettledPicksSincePaperStart();
+  const { rows, records, loading, error, refresh } = useSettledPicksSincePaperStart();
+  // Nothing settled has loaded yet (first fetch in flight, or it failed): the
+  // per-model stats would all be EMPTY_STATS, and a card per model reading
+  // "0 picks · No settled bets yet" is a claim, not a placeholder (audit H3).
+  const nothingLoaded = rows.length === 0 && Object.keys(records).length === 0;
+  const load = { loading, error, hasData: !nothingLoaded };
+  const body = loadPresentation(load).body;
+  const firstLoad = body === 'skeleton';
+  const failedLoad = body === 'error';
+  // Where a failure is SAID (lib/loadState). The Built-in list owns a failed
+  // first load (its ErrorState); the Custom list is local models and never
+  // does, so there a failed settled-records load is always the banner — never
+  // silence that reads as "no models" (Reviewer, #845 MEDIUM 1).
+  const surface = errorSurface(load, tab === 'builtin');
 
   // Custom models show under a sport if any of their rules target that sport.
   // Stats come from the server-graded every-pick universe (RPC), not just the
@@ -136,15 +152,21 @@ export function ModelsScreen() {
         </View>
       </View>
 
-      {error ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>Connection error: {error}</Text>
-        </View>
+      {/* A failed refresh over a record already on screen: keep it, say so,
+          offer Retry. A failed FIRST load replaces the Built-in list instead
+          (below); on Custom it is this banner, on any load. */}
+      {surface === 'banner' ? (
+        <ErrorBanner
+          what="the latest model records"
+          error={error}
+          onRetry={() => void refresh()}
+          retrying={loading}
+        />
       ) : null}
 
       {tab === 'builtin' ? (
         <FlatList
-          data={builtInWithStats}
+          data={firstLoad || failedLoad ? [] : builtInWithStats}
           keyExtractor={(item) => item.modelId}
           // Every active model is listed whether or not it has settled a bet.
           // ListEmptyComponent fires when the sport has no catalog models
@@ -156,11 +178,11 @@ export function ModelsScreen() {
           // is EMPTY_STATS, so the zeros mean "not loaded yet": spinner. Once it
           // lands and nothing has settled, they mean what they say.
           ListHeaderComponent={
-            loading && rows.length === 0 ? (
-              <ActivityIndicator style={styles.loading} />
-            ) : !loading &&
+            firstLoad || failedLoad ? null : (
+              !loading &&
               builtInWithStats.length > 0 &&
-              builtInWithStats.every((m) => m.stats.picks === 0) ? (
+              builtInWithStats.every((m) => m.stats.picks === 0)
+            ) ? (
               <EmptyState
                 title={`No settled bets yet for ${sport}`}
                 subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
@@ -181,7 +203,22 @@ export function ModelsScreen() {
           // store over the bundled list — and until the inputs card was removed
           // something always rendered, so this path had never been seen.
           ListEmptyComponent={
-            loading ? (
+            firstLoad ? (
+              <Skeleton label={`${sport} model records`}>
+                {[0, 1, 2, 3].map((i) => (
+                  <View key={i} style={styles.skeletonCard}>
+                    <SkeletonRow />
+                  </View>
+                ))}
+              </Skeleton>
+            ) : surface === 'state' ? (
+              <ErrorState
+                what={`the ${sport} model records`}
+                error={error}
+                onRetry={() => void refresh()}
+                retrying={loading}
+              />
+            ) : loading ? (
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
@@ -682,13 +719,12 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+  // Same box as builtInCard, so the list does not jump when rows land.
+  skeletonCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
-    borderRadius: 8,
   },
-  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
 });

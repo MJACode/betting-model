@@ -12,6 +12,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { friendlyCause } from '@/lib/errors';
 import { addDays, formatAmerican, formatPctSigned, formatSignedUnits } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
 import { RECORD_ONLY_MODELS } from '@/lib/thresholds';
@@ -206,7 +207,7 @@ export function DailyResultsModal({
         ) : error ? (
           <View style={styles.center}>
             <Text style={styles.error}>Couldn’t load this day’s results.</Text>
-            <Text style={styles.errorDetail}>{error}</Text>
+            <Text style={styles.errorDetail}>{friendlyCause(error)}</Text>
           </View>
         ) : !hasContent ? (
           <View style={styles.center}>

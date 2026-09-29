@@ -30,7 +30,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchLivePicks } from '@/lib/queries';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
+import { enrichmentTracker } from '@/lib/loadState';
 import { liveSlateDatesET } from '@/lib/format';
 import type { EnrichedPick } from '@/types';
 
@@ -42,7 +43,14 @@ export const LIVE_IDLE_POLL_MS = 120_000;
 export type LivePicksState = {
   data: EnrichedPick[];
   loading: boolean;
+  /** At least one fetch has SUCCEEDED; until then counts read "—", not 0. */
+  loaded: boolean;
   error: string | null;
+  /**
+   * The picks loaded but DraftKings' in-play prices did not, so no card has a
+   * Now price (usability audit M2). Cleared by the next fetch that gets them.
+   */
+  pricesUnavailable: boolean;
   refresh: () => Promise<void>;
   /** Today ET — dates[0]. What a header should say. */
   date: string;
@@ -55,6 +63,8 @@ function useLivePicksCore(pollMs: number) {
   const [data, setData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [pricesUnavailable, setPricesUnavailable] = useState(false);
   // The slate window is RECOMPUTED per fetch, never captured. It used to be a
   // single ET date held in useState, which was wrong twice over: an app left
   // warm across midnight polled yesterday's slate for as long as it stayed in
@@ -75,13 +85,19 @@ function useLivePicksCore(pollMs: number) {
     setLoading(true);
     try {
       setError(null);
-      const picks = await fetchLivePicks(target);
+      // lib/loadState: "any live-price read failed THIS fetch" (M2), so the
+      // flag clears on the next clean poll. An abort is not a miss.
+      const enrichment = enrichmentTracker((what, e) => console.warn(`[useLivePicks] ${what} failed`, e));
+      const picks = await fetchLivePicks(target, enrichment.onError);
       setData(picks);
+      setPricesUnavailable(enrichment.missed);
+      setLoaded(true);
     } catch (e) {
       // errorText, not err.message: raw Postgres ("canceling statement due to
       // statement timeout") is not a sentence to hand a bettor, and this string
       // now renders on the home screen rather than a tab nobody opened.
-      setError(errorText(e));
+      // An intentional cancel is not a failure (isAbortError): no banner.
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -105,7 +121,7 @@ function useLivePicksCore(pollMs: number) {
     [],
   );
 
-  return { data, loading, error, refresh, date: dates[0]!, dates, startPolling };
+  return { data, loading, loaded, error, pricesUnavailable, refresh, date: dates[0]!, dates, startPolling };
 }
 
 /**

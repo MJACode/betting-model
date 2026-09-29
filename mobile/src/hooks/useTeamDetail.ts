@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { useNow } from '@/hooks/useNow';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import { addDays, todayET } from '@/lib/format';
 import { MODEL_BOOK } from '@/lib/markets';
 import {
@@ -99,7 +99,7 @@ function useSection<T>(
         if (!cancelled) setState({ data, loading: false, error: null });
       })
       .catch((e: unknown) => {
-        if (!cancelled) setState({ data: initial, loading: false, error: errorText(e) });
+        if (!cancelled) setState({ data: initial, loading: false, error: isAbortError(e) ? null : errorText(e) });
       });
     return () => {
       cancelled = true;

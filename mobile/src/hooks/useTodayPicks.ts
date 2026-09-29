@@ -9,7 +9,7 @@ import {
 import { addDays, isGameOver, todayET } from '@/lib/format';
 import { attachDiscordPublish, voidHiddenFromBoard } from '@/lib/discordPublish';
 import { isModelRetired, isPausedForDisplay } from '@/lib/thresholds';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
 
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
@@ -71,6 +71,10 @@ export function useTodayPicks(date?: string) {
   const [pausedData, setPausedData] = useState<EnrichedPick[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  // At least one load has SUCCEEDED. Until then a count is unknown ("—"), not
+  // zero: `loading` alone can't say it, because every refresh sets it too
+  // (lib/loadState countsKnown, Designer #845).
+  const [loaded, setLoaded] = useState(false);
   // Reads that failed WITHOUT taking the board down: the odds views behind the
   // line pills, or one sport's look-ahead card. What failed, deduped, plus the
   // FIRST reason (the 2026-09-04 failure took three reads down with the same
@@ -85,6 +89,8 @@ export function useTodayPicks(date?: string) {
     const whats: string[] = [];
     let reason: string | null = null;
     const note = (what: string) => (e: unknown) => {
+      // A cancel is not a missing section: no partial banner for it.
+      if (isAbortError(e)) return;
       if (!whats.includes(what)) whats.push(what);
       if (reason == null) reason = errorText(e);
       console.warn(`[useTodayPicks] ${what} failed`, e);
@@ -138,8 +144,9 @@ export function useTodayPicks(date?: string) {
       setData(all.filter((d) => !isPausedForDisplay(d.pick)));
       setPausedData(all.filter((d) => isPausedForDisplay(d.pick)));
       setPartial(whats.length > 0 && reason != null ? { whats, reason } : null);
+      setLoaded(true);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -149,5 +156,5 @@ export function useTodayPicks(date?: string) {
     void load();
   }, [load]);
 
-  return { data, pausedData, loading, error, partial, refresh: load, date: target };
+  return { data, pausedData, loading, loaded, error, partial, refresh: load, date: target };
 }

@@ -35,6 +35,7 @@ import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
@@ -54,7 +55,8 @@ import {
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
+import { detailPresentation } from '@/lib/loadState';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 
@@ -63,6 +65,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function PickDetailScreen() {
   const route = useRoute<DetailRoute>();
+  const navigation = useNavigation<Nav>();
   const { pickId } = route.params;
 
   const [data, setData] = useState<EnrichedPick | null>(null);
@@ -83,7 +86,10 @@ export function PickDetailScreen() {
         if (mounted) setData(row);
       })
       .catch((e: unknown) => {
-        if (mounted) setError(errorText(e));
+        if (!mounted) return;
+        // A row that isn't there is not-found, never a Retry that can't work.
+        if (isNotFoundError(e)) setData(null);
+        else if (!isAbortError(e)) setError(errorText(e));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -93,7 +99,11 @@ export function PickDetailScreen() {
     };
   }, [pickId, attempt]);
 
-  if (loading) {
+  // lib/loadState decides (and the verify script and the pytest RUN it): a
+  // missing pick_id is 'notFound' → "Open Picks", not "Couldn’t load" (L11).
+  const body = detailPresentation({ loading, error, found: data != null });
+
+  if (body === 'loading') {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <ActivityIndicator style={styles.loading} />
@@ -101,29 +111,34 @@ export function PickDetailScreen() {
     );
   }
 
-  if (error || !data) {
-    // A failed FETCH and a pick that is genuinely gone are different answers
-    // and need different words: one is worth retrying, the other never will be.
+  if (body === 'error') {
+    // A failed FETCH is worth retrying, and says why in plain words: the raw
+    // Supabase text never reaches the screen, and "check your connection" is
+    // only said when the phone is actually offline (usability audit M1).
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ErrorState
+          what="this pick"
+          error={error}
+          // No `retrying`: a Retry sets loading, and loading is the early-return
+          // spinner above, so this never renders mid-retry (Reviewer, #845).
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (body === 'notFound' || !data) {
+    // Genuinely gone: never worth retrying, so the one action is the board
+    // (usability audit L11: the copy said "Open Picks" with nothing to tap).
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <EmptyState
-          title={error ? 'Couldn’t load this pick' : 'This pick is no longer on the board'}
-          subtitle={
-            error
-              ? `${error} Check your connection and try again.`
-              : 'It may have settled, or the market was pulled. Open Picks to see what’s live now.'
-          }
+          title="This pick is no longer on the board"
+          subtitle="It may have settled, or the market was pulled. Open Picks to see what’s live now."
+          actionLabel="Open Picks"
+          onAction={() => navigation.navigate('Tabs', { screen: 'Picks' })}
         />
-        {error ? (
-          <Pressable
-            onPress={() => setAttempt((n) => n + 1)}
-            accessibilityRole="button"
-            accessibilityLabel="Try loading this pick again"
-            style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
-          >
-            <Text style={styles.retryText}>Try again</Text>
-          </Pressable>
-        ) : null}
       </SafeAreaView>
     );
   }
@@ -774,22 +789,6 @@ const styles = StyleSheet.create({
   },
   loadingTrend: {
     marginTop: spacing.md,
-  },
-  retry: {
-    alignSelf: 'center',
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.lg,
-    // 44pt minimum touch target (UX_REVIEW §4).
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  retryPressed: {
-    opacity: 0.6,
-  },
-  retryText: {
-    color: colors.tint,
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
   },
   viewStatsBtn: {
     flexDirection: 'row',
