@@ -61,11 +61,10 @@ export function SegmentTabs<T extends string>({
         const isActive = item === active;
         return (
           <Pressable
-            accessibilityLabel={item}
             key={item}
             onPress={() => onChange(item)}
             accessibilityRole="tab"
-            accessibilityLabel={accessibilityLabelFor ? accessibilityLabelFor(item) : undefined}
+            accessibilityLabel={accessibilityLabelFor ? accessibilityLabelFor(item) : item}
             accessibilityState={{ selected: isActive }}
             // The tabs are 33-38pt tall, under the 44pt HIG floor, and adding
             // height is the one thing this screen cannot spend (UX review,

@@ -559,7 +559,7 @@ check('PicksHome sub-tabs: tablist + tab + selected', /<View style=\{styles\.sub
 const models = read('src/screens/ModelsScreen.tsx');
 check('Models segment: tablist + tab + 9pt slop on a ~27pt pill', /<View style=\{styles\.segmentRow\} accessibilityRole="tablist">/.test(models) && /hitSlop=\{\{ top: 9, bottom: 9/.test(models) && /accessibilityRole="tab"/.test(models));
 const groupTabs = read('src/components/GroupTabs.tsx');
-check('GroupTabs: tablist + tab + label', /accessibilityRole="tablist"/.test(groupTabs) && /accessibilityRole="tab"/.test(groupTabs) && /accessibilityLabel=\{item\}/.test(groupTabs));
+check('GroupTabs: tablist + tab + label', /accessibilityRole="tablist"/.test(groupTabs) && /accessibilityRole="tab"/.test(groupTabs) && /accessibilityLabel=\{(?:accessibilityLabelFor \? accessibilityLabelFor\(item\) : )?item\}/.test(groupTabs));
 
 console.log('\nH9 — effective target height of the chip rows (visual + in-bounds slop)');
 // A horizontal ScrollView takes no touches outside itself, so a chip's
