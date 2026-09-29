@@ -597,7 +597,7 @@ export function PicksHomeScreen() {
           doesn't apply" contradicted itself (UX review). */}
       {view === 'live' && liveData.length > 0 ? (
         <View style={styles.liveNoteWrap}>
-          <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+          <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
           <Text style={styles.liveNote}>DraftKings only · prices up to ~45s old</Text>
           <InfoTooltip
             title="Live pricing"
@@ -631,7 +631,7 @@ export function PicksHomeScreen() {
           accessibilityHint="Reloads today’s picks"
           style={({ pressed }) => [styles.partialBanner, pressed && styles.partialPressed]}
         >
-          <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+          <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
           <Text style={styles.partialText} numberOfLines={3}>
             {partialSentence(partial)} <Text style={styles.partialLink}>Retry</Text>
           </Text>
@@ -970,7 +970,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   errorText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.footnote,
   },
   partialBanner: {

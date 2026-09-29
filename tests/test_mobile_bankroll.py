@@ -114,11 +114,11 @@ def test_explainer_no_longer_denies_a_bankroll():
 
 def test_error_text_uses_the_text_safe_red():
     # `avoid` (#FF3B30) is 3.55:1 on white: fine for the icon and outline, not
-    # for words. The message takes `avoidText` (#D70015, 5.38:1).
+    # for words. The message takes `avoidInk` (#C4281C, 5.73:1).
     theme = _read(MOBILE / "src/lib/theme.ts")
-    assert "avoidText: '#D70015'," in theme
+    assert "avoidInk: '#C4281C'," in theme
     settings = _read(SETTINGS)
-    assert "color: colors.avoidText," in settings
+    assert "color: colors.avoidInk," in settings
     assert "borderColor: colors.avoid," in settings
     assert '<Ionicons name="alert-circle" size={14} color={colors.avoid} />' in settings
 

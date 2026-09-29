@@ -100,17 +100,19 @@ const styles = StyleSheet.create({
   livePill: {
     backgroundColor: colors.avoidSoft,
   },
+  // micro (11pt, the iOS caption2 floor) and avoidInk: the literal 10 in
+  // `avoid` was 3.10:1 on avoidSoft. The LiveDot keeps the bright red (M22).
   liveText: {
-    fontSize: 10,
+    fontSize: font.size.micro,
     fontWeight: font.weight.bold,
-    color: colors.avoid,
+    color: colors.avoidInk,
     letterSpacing: 0.5,
   },
   finalPill: {
     backgroundColor: colors.noneSoft,
   },
   finalText: {
-    fontSize: 10,
+    fontSize: font.size.micro,
     fontWeight: font.weight.bold,
     color: colors.textSecondary,
     letterSpacing: 0.5,

@@ -750,7 +750,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   bookBadgeTextDk: {
-    color: '#000',
+    color: colors.textPrimary,
   },
   bookRowName: {
     flex: 1,
@@ -816,7 +816,7 @@ const styles = StyleSheet.create({
   fieldErrorText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.avoidText,
+    color: colors.avoidInk,
   },
   // The mockup's grouped inset, as the sportsbook row above it uses.
   unitRow: {
@@ -933,7 +933,7 @@ const styles = StyleSheet.create({
   },
   bookPillText: {
     fontSize: font.size.caption,
-    color: colors.bet,
+    color: colors.betInk,
     fontWeight: font.weight.semibold,
   },
   bookPillMuted: {
@@ -963,7 +963,7 @@ const styles = StyleSheet.create({
   signOutText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: colors.avoid,
+    color: colors.avoidInk,
   },
   version: {
     fontSize: font.size.caption,

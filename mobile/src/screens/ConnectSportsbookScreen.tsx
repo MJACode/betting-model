@@ -278,14 +278,14 @@ const styles = StyleSheet.create({
   },
   statusPillText: {
     fontSize: font.size.caption,
-    color: colors.bet,
+    color: colors.betInk,
     fontWeight: font.weight.semibold,
   },
   statusPillWarn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: radii.pill,
@@ -296,9 +296,10 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: colors.med,
   },
+  // medInk 4.99:1 on medSoft; `med` was 1.97:1. The dot keeps amber (M24).
   statusPillWarnText: {
     fontSize: font.size.caption,
-    color: colors.med,
+    color: colors.medInk,
     fontWeight: font.weight.semibold,
   },
   btnPrimary: {
@@ -319,7 +320,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   btnSecondaryText: {
-    color: colors.avoid,
+    color: colors.avoidInk,
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
   },

@@ -185,10 +185,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
-  priceBest: { color: colors.positive },
+  priceBest: { color: colors.betInk },
   bestTag: {
     fontSize: font.size.caption,
-    color: colors.positive,
+    color: colors.betInk,
     fontWeight: '600',
   },
   footnote: {

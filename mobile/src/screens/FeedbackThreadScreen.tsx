@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   errorText: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.avoid,
+    color: colors.avoidInk,
     textAlign: 'center',
   },
   composer: {

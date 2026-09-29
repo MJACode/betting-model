@@ -180,7 +180,7 @@ export function PaywallScreen() {
         <View style={styles.card}>
           {INCLUDED.map((line) => (
             <View key={line} style={styles.includedRow}>
-              <Ionicons name="checkmark-circle" size={18} color={colors.bet} />
+              <Ionicons name="checkmark-circle" size={18} color={colors.tint} />
               <Text style={styles.includedText}>{line}</Text>
             </View>
           ))}
@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
   sourceNote: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.bet,
+    color: colors.betInk,
   },
   planRow: {
     flexDirection: 'row',
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
-    color: colors.bet,
+    color: colors.betInk,
   },
   // Keeps the three cards the same height when only one carries a badge.
   saveBadgeSpacer: { height: 18 },

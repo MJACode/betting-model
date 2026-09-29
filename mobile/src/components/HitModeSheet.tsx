@@ -115,7 +115,7 @@ export function HitModeSheet({
                     </Text>
                   </View>
                   {active ? (
-                    <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
+                    <Ionicons name="checkmark-circle" size={22} color={colors.tint} />
                   ) : (
                     <View style={styles.emptyCircle} />
                   )}
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
-  rowActive: { borderColor: colors.bet },
+  rowActive: { borderColor: colors.tint },
   rowBody: { flex: 1, gap: 2 },
   rowName: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
   rowPreview: { fontSize: font.size.footnote, color: colors.textSecondary },

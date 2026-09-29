@@ -784,5 +784,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     borderRadius: 8,
   },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
 });

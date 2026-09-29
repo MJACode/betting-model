@@ -94,7 +94,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   cellGames: {
-    fontSize: 10,
+    fontSize: font.size.micro,
     color: colors.textTertiary,
     marginTop: 1,
   },

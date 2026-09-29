@@ -20,7 +20,7 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { betTypeLabel, betTypeStatusSuffix, MODEL_META, modelLong, modelShort, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START_LABEL, LIVE_RECORD_START_LABEL, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -277,9 +277,13 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   // One sentence, shared with the Record tab's rows and gate-free — see
   // thinSampleCaption, which is the only place this wording is written.
   const thinNote = thinSampleCaption();
+  // Each figure's tone comes from the number it prints, rounded as printed.
   const roiColor = thin
     ? colors.textSecondary
-    : stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
+    : pnlColor(stats.roiFlat, 1, 100);
+  const profitColor = thin
+    ? colors.textSecondary
+    : pnlColor(stats.profitFlat, 2);
   return (
     <Pressable
       onPress={onPress}
@@ -330,7 +334,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
         <Text style={[styles.roi, { color: roiColor }]}>
           {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
         </Text>
-        <Text style={[styles.profit, { color: roiColor }]}>
+        <Text style={[styles.profit, { color: profitColor }]}>
           {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
         </Text>
       </View>
@@ -370,7 +374,8 @@ function CustomModelRow({
   onEdit,
 }: CustomRowProps) {
   const decided = wins + losses;
-  const roiColor = roiFlat > 0 ? colors.bet : roiFlat < 0 ? colors.avoid : colors.textSecondary;
+  const roiColor = pnlColor(roiFlat, 1, 100);
+  const profitColor = pnlColor(profitFlat, 2);
   const shown = live.slice(0, CARD_BET_LIMIT);
   const withdrawnEmpty = withdrawnRulesEmpty(model.rules);
   return (
@@ -446,7 +451,7 @@ function CustomModelRow({
         <Stat
           label="P&L"
           value={picks > 0 ? formatCurrencySigned(profitFlat) : '—'}
-          color={roiColor}
+          color={profitColor}
         />
       </View>
     </Pressable>
@@ -672,7 +677,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   statCaption: {
-    fontSize: 10,
+    fontSize: font.size.micro,
     color: colors.textTertiary,
     marginTop: 1,
   },
@@ -685,5 +690,5 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     borderRadius: 8,
   },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
 });

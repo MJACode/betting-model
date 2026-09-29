@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.avoid,
+    color: colors.avoidInk,
   },
   noticeBanner: {
     flexDirection: 'row',

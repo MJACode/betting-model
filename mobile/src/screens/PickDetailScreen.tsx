@@ -38,7 +38,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
   bookName,
@@ -53,6 +53,7 @@ import {
 } from '@/lib/markets';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { roundsToZero } from '@/lib/tone';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
@@ -520,14 +521,17 @@ function ClvCard({ pick }: { pick: Pick }) {
   const hasLines = pick.scored_line != null && pick.closing_line != null;
 
   const beat = pick.clv_beat_close;
-  const flat = !lineMoved && pick.clv_pct === 0;
+  // Flat means the headline PRINTS zero ("0.0pp" at 1 dp), not that the raw
+  // value is exactly 0: a CLV of −0.03 is "Matched the close" in grey, never a
+  // red "0.0pp · Closed worse" (Reviewer, audit PR 1).
+  const flat = !lineMoved && roundsToZero(pick.clv_pct, 1);
   const valueColor = flat
     ? colors.textSecondary
     : beat == null
       ? colors.textSecondary
       : beat
-        ? colors.bet
-        : colors.avoid;
+        ? colors.betInk
+        : colors.avoidInk;
   const verdict = flat
     ? 'Matched the close'
     : beat == null
@@ -539,9 +543,9 @@ function ClvCard({ pick }: { pick: Pick }) {
   // The number moved → quote the move in points, the unit the bet is actually
   // in. It held → quote the price move in pp, as before.
   const headline = lineMoved
-    ? `${lineCLV > 0 ? '+' : ''}${lineCLV.toFixed(1)} pts`
+    ? formatSigned(lineCLV, 1, ' pts')
     : pick.clv_pct != null
-      ? `${pick.clv_pct > 0 ? '+' : ''}${pick.clv_pct.toFixed(1)}pp`
+      ? formatSigned(pick.clv_pct, 1, 'pp')
       : '—';
 
   const closeBook = (pick.clv_close_book || 'draftkings').toLowerCase();
@@ -721,7 +725,7 @@ const styles = StyleSheet.create({
   bestLine: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: colors.bet,
+    color: colors.betInk,
     marginTop: 2,
   },
   quoteProvenance: {

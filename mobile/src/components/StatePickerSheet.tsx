@@ -43,7 +43,7 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
               style={({ pressed }) => [styles.row, state == null && styles.rowActive, pressed && styles.pressed]}
             >
               <Text style={styles.rowName}>Not set</Text>
-              {state == null ? <Ionicons name="checkmark-circle" size={22} color={colors.bet} /> : <View style={styles.emptyCircle} />}
+              {state == null ? <Ionicons name="checkmark-circle" size={22} color={colors.tint} /> : <View style={styles.emptyCircle} />}
             </Pressable>
             {BETTING_STATES.map((s) => {
               const active = s.code === state;
@@ -58,7 +58,7 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
                 >
                   <Text style={styles.rowCode}>{s.code.toUpperCase()}</Text>
                   <Text style={styles.rowName}>{s.name}</Text>
-                  {active ? <Ionicons name="checkmark-circle" size={22} color={colors.bet} /> : <View style={styles.emptyCircle} />}
+                  {active ? <Ionicons name="checkmark-circle" size={22} color={colors.tint} /> : <View style={styles.emptyCircle} />}
                 </Pressable>
               );
             })}
@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
     marginBottom: spacing.xs,
   },
-  rowActive: { borderColor: colors.bet },
+  rowActive: { borderColor: colors.tint },
   rowCode: {
     minWidth: 32,
     fontSize: font.size.footnote,

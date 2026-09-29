@@ -615,25 +615,25 @@ check('Picks: no exposure banner comes back, and no dollars',
   const theme = read('lib/theme.ts');
   const token = (name: string) => theme.match(new RegExp(`\\n  ${name}: '(#[0-9A-Fa-f]{6})'`))?.[1] ?? '#000000';
   const colors = {
-    avoid: token('avoid'), avoidText: token('avoidText'),
+    avoid: token('avoid'), avoidInk: token('avoidInk'),
     bg: token('bg'), bgCard: token('bgCard'), bgGrouped: token('bgGrouped'),
   };
-  eq('avoidText is #D70015', colors.avoidText, '#D70015');
+  eq('avoidInk is #C4281C', colors.avoidInk, '#C4281C');
   check('the backgrounds it sits on are the light tokens (the theme has no dark variant)',
     colors.bgCard === '#FFFFFF' && colors.bgGrouped === '#F2F2F7' && colors.bg === '#F2F2F7');
-  const onCard = ratio(colors.avoidText, colors.bgCard);
-  const onGrouped = ratio(colors.avoidText, colors.bgGrouped);
-  check(`avoidText clears AA (4.5:1) on bgCard: ${onCard.toFixed(2)}:1`, onCard >= 4.5);
-  check(`avoidText clears AA (4.5:1) on bg / bgGrouped: ${onGrouped.toFixed(2)}:1`, onGrouped >= 4.5 &&
-    ratio(colors.avoidText, colors.bg) >= 4.5);
+  const onCard = ratio(colors.avoidInk, colors.bgCard);
+  const onGrouped = ratio(colors.avoidInk, colors.bgGrouped);
+  check(`avoidInk clears AA (4.5:1) on bgCard: ${onCard.toFixed(2)}:1`, onCard >= 4.5);
+  check(`avoidInk clears AA (4.5:1) on bg / bgGrouped: ${onGrouped.toFixed(2)}:1`, onGrouped >= 4.5 &&
+    ratio(colors.avoidInk, colors.bg) >= 4.5);
   check(`avoid stays non-text only: ${ratio(colors.avoid, colors.bgCard).toFixed(2)}:1 ≥ 3:1, < 4.5:1`,
     ratio(colors.avoid, colors.bgCard) >= 3 && ratio(colors.avoid, colors.bgCard) < 4.5);
   const style = (name: string) => settings.match(new RegExp(`\\n  ${name}: \\{[^}]*\\}`))?.[0] ?? '';
-  check('the error TEXT uses avoidText', /color: colors\.avoidText/.test(style('fieldErrorText')));
-  check('the outline still uses avoid', /borderColor: colors\.avoid\b(?!Text)/.test(style('moneyFieldError')));
+  check('the error TEXT uses avoidInk', /color: colors\.avoidInk/.test(style('fieldErrorText')));
+  check('the outline still uses avoid', /borderColor: colors\.avoid\b(?!Ink)/.test(style('moneyFieldError')));
   check('the icon still uses avoid',
     /<Ionicons name="alert-circle" size=\{14\} color=\{colors\.avoid\} \/>\s*<Text style=\{styles\.fieldErrorText\}>\{error\}<\/Text>/.test(settings));
-  check('avoidText is used for that text only', (settings.match(/colors\.avoidText/g) ?? []).length === 1);
+  check('avoidInk is text only in Settings (never an outline or icon)', !/borderColor: colors\.avoidInk\b/.test(settings) && !/<Ionicons[^>]*color=\{colors\.avoidInk\}/.test(settings));
 }
 
 // ── 8c. The keyboard never covers the field ────────────────────────────────

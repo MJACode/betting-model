@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     backgroundColor: colors.bg,
     paddingHorizontal: 4,
-    fontSize: 13,
+    fontSize: font.size.footnote,
     color: colors.textPrimary,
   },
   bullet: {

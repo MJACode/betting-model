@@ -22,7 +22,7 @@ import {
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
 import { decisionOdds } from '@/lib/decisionPrice';
@@ -86,7 +86,9 @@ export function ModelDetailScreen() {
   }
 
   const decided = stats.wins + stats.losses;
-  const roiColor = stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
+  // Each tile's tone comes from the number it prints, rounded as printed.
+  const roiColor = pnlColor(stats.roiFlat, 1, 100);
+  const pnlTint = pnlColor(stats.profitFlat, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -152,7 +154,7 @@ export function ModelDetailScreen() {
               <StatTile
                 label="P&L"
                 value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
-                tint={roiColor}
+                tint={pnlTint}
                 caption="all graded picks"
               />
             </View>
@@ -230,12 +232,7 @@ export function ModelDetailScreen() {
               style={[
                 styles.pickProfit,
                 {
-                  color:
-                    (item.profit_flat ?? 0) > 0
-                      ? colors.bet
-                      : (item.profit_flat ?? 0) < 0
-                        ? colors.avoid
-                        : colors.textSecondary,
+                  color: pnlColor(item.profit_flat, 2),
                 },
               ]}
             >
@@ -416,6 +413,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     borderRadius: 8,
   },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
-  error: { color: colors.avoid, padding: spacing.lg, fontSize: font.size.body },
+  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
+  error: { color: colors.avoidInk, padding: spacing.lg, fontSize: font.size.body },
 });

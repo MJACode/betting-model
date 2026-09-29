@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
   },
   favTag: { backgroundColor: colors.betSoft },
-  dogTag: { backgroundColor: '#FFF4E5' },
+  dogTag: { backgroundColor: colors.medSoft },
   // Same soft-red ground as GameStatusPill's LIVE pill, so the two read as one
   // mark. The dot needs the row layout the FAV/DOG tags don't.
   liveTag: {
@@ -153,13 +153,14 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   tagText: {
-    fontSize: 10,
+    fontSize: font.size.micro,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
   },
-  favText: { color: colors.bet },
-  dogText: { color: colors.med },
-  liveText: { color: colors.avoid },
+  // Inks on the washes; the bright hues were 2.0–3.1:1 at 10pt (audit H2/L4).
+  favText: { color: colors.betInk },
+  dogText: { color: colors.medInk },
+  liveText: { color: colors.avoidInk },
   stat: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
@@ -167,7 +168,7 @@ const styles = StyleSheet.create({
   },
   bestBook: {
     fontSize: font.size.footnote,
-    color: colors.bet,
+    color: colors.betInk,
     fontWeight: font.weight.semibold,
   },
   controls: {

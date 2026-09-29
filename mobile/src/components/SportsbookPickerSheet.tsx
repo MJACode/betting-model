@@ -124,7 +124,7 @@ export function SportsbookPickerSheet({
           >
             <Text style={styles.selectAllText}>{allOn ? 'Keep DraftKings only' : 'Select all'}</Text>
             {allOn ? (
-              <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
+              <Ionicons name="checkmark-circle" size={22} color={colors.tint} />
             ) : (
               <View style={styles.emptyCircleSm} />
             )}
@@ -187,7 +187,7 @@ export function SportsbookPickerSheet({
                     // selected, and greying the one book that is definitively
                     // on made it look the most off (UX review). The lock icon
                     // beside the sub-line carries the state instead.
-                    <Ionicons name="checkmark-circle" size={24} color={colors.bet} />
+                    <Ionicons name="checkmark-circle" size={24} color={colors.tint} />
                   ) : (
                     <View style={styles.emptyCircle} />
                   )}
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   rowActive: {
-    borderColor: colors.bet,
+    borderColor: colors.tint,
   },
   badge: {
     width: 44,
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   badgeTextDk: {
-    color: '#000',
+    color: colors.textPrimary,
   },
   rowBody: {
     flex: 1,
@@ -332,9 +332,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
+  // tint + textInverse, as FilterSheet's "Show N picks" (18.6:1). Selected
+  // and confirm are tint, never green; white on `bet` was 2.22:1 (audit H6).
   applyBtn: {
     marginTop: spacing.md,
-    backgroundColor: colors.bet,
+    backgroundColor: colors.tint,
     borderRadius: radii.pill,
     paddingVertical: 14,
     alignItems: 'center',
@@ -345,7 +347,7 @@ const styles = StyleSheet.create({
   applyText: {
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
-    color: '#fff',
+    color: colors.textInverse,
   },
   pressed: {
     opacity: 0.7,

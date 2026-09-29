@@ -829,7 +829,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     borderRadius: radii.sm,
   },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  errorText: { color: colors.avoidInk, fontSize: font.size.footnote },
 
   fixtureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   fixture: { flexShrink: 1, fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
