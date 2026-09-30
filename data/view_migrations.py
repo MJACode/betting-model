@@ -222,6 +222,14 @@ ACTIVE_MIGRATIONS: list[str] = [
     # Replaces team_stats_board_compute with per-game index probes. Guards on
     # the probe marker so the DDL runs once.
     "team_stats_board_line_probe_2026_09_28.sql",
+    # 2026-09-30: MLB 2026 team board refresh cancelled at statement_timeout
+    # (daily runs 873cb1fe2e1e487d975ae3367f219a3f and
+    # fd57b13575f04d63b219134d62f434dc). The 09-28 probe still starts at the
+    # newest in-play row because the commence cutoff is a timestamptz cast
+    # on a text snapshot_at. Bounds the same index at commence. Must run
+    # after team_stats_board_line_probe_2026_09_28, which owns the function
+    # and would otherwise restore the unbounded scan on the next pass.
+    "team_stats_board_commence_bound_2026_09_30.sql",
 ]
 
 
