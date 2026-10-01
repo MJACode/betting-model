@@ -90,12 +90,17 @@ export function AddLineSheet({
 
   return (
     <Modal visible={input != null} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Close"
-      >
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close add line"
+        />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the price rows and the
             buttons unreachable. Same fix as SportsbookPickerSheet. */}
@@ -108,7 +113,7 @@ export function AddLineSheet({
               </Text>
               {matchup ? <Text style={styles.matchup}>{matchup}</Text> : null}
             </View>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close add line">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -186,7 +191,7 @@ export function AddLineSheet({
             <Text style={styles.secondaryText}>Not now</Text>
           </Pressable>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

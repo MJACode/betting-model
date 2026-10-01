@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { BACKTEST_START, LIVE_RECORD_START } from '@/lib/recordStart';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 export function ExplainerScreen() {
   return (
@@ -114,9 +115,12 @@ export function ExplainerScreen() {
         <Section heading="Stakes are in units, not dollars">
           <P>
             Every stake we publish is in <Strong>units</Strong>. One unit is one
-            flat bet at whatever size you bet — we never ask for your bankroll
-            and never put a dollar figure on a pick, because the same "$50" means
-            something different to every reader.
+            flat bet at whatever size you bet, and we never put a dollar figure
+            on a pick, because the same "$50" means something different to every
+            reader. You can add a bankroll in Settings if you like: it's
+            optional, it stays on this device, and it only converts your units
+            into dollars. It never sizes a bet: every pick is still the same
+            1u play for everyone.
           </P>
           <P>
             A pick is quoted as units to <Strong>win</Strong>, then grossed up by
@@ -345,6 +349,7 @@ export function ExplainerScreen() {
             history through your own conviction rules.
           </P>
         </Section>
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -421,7 +426,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier',
     backgroundColor: colors.bg,
     paddingHorizontal: 4,
-    fontSize: 13,
+    fontSize: font.size.footnote,
     color: colors.textPrimary,
   },
   bullet: {

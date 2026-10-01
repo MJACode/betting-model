@@ -2,6 +2,7 @@ import { fetchAllPages } from '@/lib/paging';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
+import { isNotFoundError } from './errors';
 import {
   LOG_COLUMNS,
   LOG_TABLE,
@@ -1448,7 +1449,10 @@ export async function fetchUpcomingNhlPicks(
 // while the board strip says the feed is ~45s old — so we re-read the in-play
 // view, DK rows only, for the slate dates. All-books shopping stays off
 // (pickLineQuotes still returns the record chip on live; detail is unchanged).
-export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
+export async function fetchLivePicks(
+  dates: string[],
+  onEnrichmentError?: (what: string, error: unknown) => void,
+): Promise<EnrichedPick[]> {
   const nowIso = new Date().toISOString();
   const [picksRes, gamesRes, weatherRes, inplayRes] = await Promise.all([
     supabase
@@ -1482,7 +1486,11 @@ export async function fetchLivePicks(dates: string[]): Promise<EnrichedPick[]> {
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
   // In-play odds are enrichment: a miss leaves Now empty and the card labels
-  // the lock Locked. Do not fail the board for it.
+  // the lock Locked. Do not fail the board for it -- but REPORT it, so the
+  // board can say "Live prices unavailable" instead of silently dropping every
+  // Now price (v_latest_inplay_odds_all_books 500'd repeatedly on 2026-09-25;
+  // usability audit M2). Same contract as fetchPicksForDate.
+  if (inplayRes.error) onEnrichmentError?.('live prices', inplayRes.error);
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
@@ -1571,8 +1579,12 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
     .from('picks')
     .select(PICK_COLUMNS)
     .eq('pick_id', pickId)
-    .single();
-  if (error) throw error;
+    // maybeSingle: a pick_id with no row is "not found" (null), which
+    // PickDetail answers with "Open Picks". The exactly-one-row read turned it
+    // into a 406 PGRST116 and a Retry that could never succeed (L11, Designer
+    // #845).
+    .maybeSingle();
+  if (error && !isNotFoundError(error)) throw error;
   if (!data) return null;
   const [pick] = await attachDiscordPublish([data as Pick]);
   const market = gameMarketForModel(pick.model_id);

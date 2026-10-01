@@ -166,6 +166,13 @@ class _CursorResult:
     def __iter__(self):
         return iter(self._cur)
 
+    @property
+    def rowcount(self) -> int:
+        """Rows the statement touched (psycopg2's cursor.rowcount; -1 when
+        unknown). Callers that used getattr(cur, "rowcount", 0) got 0 here
+        before this existed, whatever the statement did (#844 review)."""
+        return self._cur.rowcount
+
 
 # ── Connection loss ───────────────────────────────────────────────────────────
 
@@ -219,6 +226,7 @@ def connection_lost(exc: BaseException, conn=None) -> bool:
 
 
 _READ_PREFIXES = ("select", "show", "explain", "values", "table")
+_ADVISORY_LOCK = re.compile(r"\bpg_(?:try_)?advisory_(?:xact_)?lock")
 
 
 def _is_write(sql: str) -> bool:
@@ -230,6 +238,11 @@ def _is_write(sql: str) -> bool:
     read raises ConnectionLost instead of retrying that one statement.
     """
     head = sql.lstrip().lower()
+    # An advisory lock is state held by THIS backend: after a drop, a
+    # replayed `SELECT pg_advisory_xact_lock(...)` would carry on unlocked on
+    # a new one. Dirty, so a later drop raises ConnectionLost.
+    if _ADVISORY_LOCK.search(head):
+        return True
     if head.startswith(_READ_PREFIXES):
         return False
     if head.startswith(("savepoint ", "release savepoint ", "rollback")):

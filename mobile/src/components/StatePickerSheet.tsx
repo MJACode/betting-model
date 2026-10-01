@@ -21,12 +21,22 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
   };
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close state picker"
+        />
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Your state</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close state picker">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -43,7 +53,7 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
               style={({ pressed }) => [styles.row, state == null && styles.rowActive, pressed && styles.pressed]}
             >
               <Text style={styles.rowName}>Not set</Text>
-              {state == null ? <Ionicons name="checkmark-circle" size={22} color={colors.bet} /> : <View style={styles.emptyCircle} />}
+              {state == null ? <Ionicons name="checkmark-circle" size={22} color={colors.tint} /> : <View style={styles.emptyCircle} />}
             </Pressable>
             {BETTING_STATES.map((s) => {
               const active = s.code === state;
@@ -58,13 +68,13 @@ export function StatePickerSheet({ visible, onClose }: { visible: boolean; onClo
                 >
                   <Text style={styles.rowCode}>{s.code.toUpperCase()}</Text>
                   <Text style={styles.rowName}>{s.name}</Text>
-                  {active ? <Ionicons name="checkmark-circle" size={22} color={colors.bet} /> : <View style={styles.emptyCircle} />}
+                  {active ? <Ionicons name="checkmark-circle" size={22} color={colors.tint} /> : <View style={styles.emptyCircle} />}
                 </Pressable>
               );
             })}
           </ScrollView>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -104,7 +114,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
     marginBottom: spacing.xs,
   },
-  rowActive: { borderColor: colors.bet },
+  rowActive: { borderColor: colors.tint },
   rowCode: {
     minWidth: 32,
     fontSize: font.size.footnote,

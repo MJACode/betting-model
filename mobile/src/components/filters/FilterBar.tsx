@@ -69,6 +69,7 @@ export function FilterBar({
           <View style={styles.searchWrap}>
             <Ionicons name="search" size={15} color={colors.textTertiary} />
             <TextInput
+              accessibilityLabel={searchPlaceholder.replace(/…$/, '')}
               style={styles.searchInput}
               value={search}
               onChangeText={onSearchChange}
@@ -263,10 +264,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  // tint, not red: clearing filters is not destructive, and `avoid` was
+  // 3.18:1 here (audit M12; PATTERNS §F1).
   clearText: {
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
-    color: colors.avoid,
+    color: colors.tint,
   },
   pressed: { opacity: 0.65 },
 });

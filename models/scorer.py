@@ -1162,7 +1162,8 @@ def _apply_game_injury_gate(conn, picks: list[dict], sport: str, game_id: str,
     """
     if not picks or conn is None:
         return
-    try:
+
+    def _run():
         from models.game_injury_gate import (
             apply_to_picks, load_sport_injury_index, relevant_players,
         )
@@ -1178,8 +1179,8 @@ def _apply_game_injury_gate(conn, picks: list[dict], sport: str, game_id: str,
         diag = apply_to_picks(picks, quote_ts, relevant, index)
         if diag.get("injury_gate"):
             logger.info(f"  {game_id}: injury gate vetoed {diag['injury_gate']} BET(s)")
-    except Exception as exc:  # noqa: BLE001 — fail open
-        logger.debug(f"  {game_id}: injury gate skipped ({exc})")
+
+    _fail_open(conn, "sp_injury_gate", _run, None, f"{game_id} injury gate")
 
 
 def _apply_game_market_gate(conn, picks: list[dict], market: str,
@@ -1201,7 +1202,8 @@ def _apply_game_market_gate(conn, picks: list[dict], market: str,
     models = set(config.GAME_MARKET_GATE_MODELS)
     if not any(p.get("model_id") in models for p in picks):
         return
-    try:
+
+    def _run():
         from models import game_market_gate as gmg
         as_of = (odds or {}).get("snapshot_at")
         opening = gmg.load_opening_odds(
@@ -1228,8 +1230,9 @@ def _apply_game_market_gate(conn, picks: list[dict], market: str,
             )
         if not dry_run:
             gmg.persist(conn, picks, mode=config.GAME_MARKET_GATE_MODE)
-    except Exception as exc:  # noqa: BLE001 — fail open
-        logger.debug(f"  market gate skipped ({exc})")
+
+    _fail_open(conn, "sp_market_gate", _run, None,
+               f"{picks[0]['game_id']}/{market} market gate")
 
 
 def _apply_no_signal(picks: list[dict], reason: str) -> list[dict]:
@@ -2097,17 +2100,25 @@ def _stamp_best_game_prices(conn: DBConnection, picks: list[dict],
     """
     cutoff = None
     if picks:
-        try:
-            cutoff = _pregame_cutoff(conn, picks[0]["game_id"])
-        except Exception as exc:               # noqa: BLE001 - fail open (no bound)
-            logger.debug(f"  pre-game cutoff lookup failed for {picks[0]['game_id']}: {exc}")
+        gid = picks[0]["game_id"]
+        cutoff = _fail_open(
+            conn, "sp_pregame_cutoff",
+            lambda: _pregame_cutoff(conn, gid),
+            None,
+            f"pre-game cutoff lookup for {gid}",
+        )
     for p in picks:
-        try:
-            best = _best_game_price(conn, p["game_id"], market,
-                                    p["pick_side"], p.get("scored_line"), cutoff)
-        except Exception as exc:               # never let line shopping kill scoring
-            logger.debug(f"  best-price lookup failed for {p.get('pick_label')}: {exc}")
-            best = None
+        label = p.get("pick_label")
+        side = p["pick_side"]
+        line = p.get("scored_line")
+        gid = p["game_id"]
+        best = _fail_open(
+            conn, "sp_best_price",
+            lambda gid=gid, side=side, line=line: _best_game_price(
+                conn, gid, market, side, line, cutoff),
+            None,
+            f"best-price lookup for {label}",
+        )
         p.update(_best_fields(best, float(p["model_probability"])))
         p["_quote_snapshot_at"] = (best or {}).get("snapshot_at")
         _requalify_keeping_pause(p, best, is_prop=False)
@@ -2131,12 +2142,16 @@ def _tag_prop(pick: dict, ctx: tuple, conn: DBConnection | None = None) -> dict:
         return pick
     game_id, player_name, market = ctx[0], ctx[1], ctx[2]
     cutoff = ctx[3] if len(ctx) > 3 else None
-    try:
-        best = _best_prop_price(conn, game_id, player_name, market,
-                                pick["pick_side"], pick.get("scored_line"), cutoff)
-    except Exception as exc:                   # line shopping never blocks a pick
-        logger.debug(f"  best-price lookup failed for {pick.get('pick_label')}: {exc}")
-        best = None
+    side = pick["pick_side"]
+    line = pick.get("scored_line")
+    label = pick.get("pick_label")
+    best = _fail_open(
+        conn, "sp_prop_best",
+        lambda: _best_prop_price(
+            conn, game_id, player_name, market, side, line, cutoff),
+        None,
+        f"best-price lookup for {label}",
+    )
     pick.update(_best_fields(best, float(pick["model_probability"])))
     return _requalify_keeping_pause(pick, best, is_prop=True)
 
@@ -2264,10 +2279,12 @@ def _get_scoring_odds(conn: DBConnection, game_id: str, market: str) -> dict | N
         return odds
     cutoff = None
     if conn is not None:
-        try:
-            cutoff = _pregame_cutoff(conn, game_id)
-        except Exception:  # noqa: BLE001 - fail open, same as the DK read
-            cutoff = None
+        cutoff = _fail_open(
+            conn, "sp_pregame_cutoff",
+            lambda: _pregame_cutoff(conn, game_id),
+            None,
+            f"pre-game cutoff lookup for {game_id}",
+        )
     return _fallback_game_line_quote(conn, game_id, market, cutoff)
 
 
@@ -2588,25 +2605,33 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
         p.pop("_market_as_of", None)
         if live_ctx is not None and "best_book" not in p:
             lg_id, lmarket = live_ctx
-            try:
-                best = _best_live_price(conn, lg_id, lmarket, p["pick_side"],
-                                        p.get("scored_line"))
-            except Exception as exc:           # line shopping never blocks a pick
-                logger.debug(f"  best live price failed for "
-                             f"{p.get('pick_label')}: {exc}")
-                best = None
+            side = p["pick_side"]
+            line = p.get("scored_line")
+            label = p.get("pick_label")
+            best = _fail_open(
+                conn, "sp_live_best",
+                lambda lg_id=lg_id, lmarket=lmarket, side=side, line=line: (
+                    _best_live_price(conn, lg_id, lmarket, side, line)),
+                None,
+                f"best live price for {label}",
+            )
             p.update(_best_fields(best, float(p["model_probability"])))
 
         ctx = p.pop("_best_ctx", None)
         if ctx is None or "best_book" in p:
             continue
         game_id, player_name, market = ctx
-        try:
-            best = _best_prop_price(conn, game_id, player_name, market,
-                                    p["pick_side"], p.get("scored_line"))
-        except Exception as exc:               # line shopping never blocks a pick
-            logger.debug(f"  best-price lookup failed for {p.get('pick_label')}: {exc}")
-            best = None
+        side = p["pick_side"]
+        line = p.get("scored_line")
+        label = p.get("pick_label")
+        best = _fail_open(
+            conn, "sp_prop_best",
+            lambda game_id=game_id, player_name=player_name, market=market,
+                   side=side, line=line: _best_prop_price(
+                conn, game_id, player_name, market, side, line),
+            None,
+            f"best-price lookup for {label}",
+        )
         p.update(_best_fields(best, float(p["model_probability"])))
 
     # Ensure new optional columns are present; game-level picks omit player_id /
@@ -2804,6 +2829,56 @@ def _rollback_conn(conn) -> None:
         rollback()
     except Exception:                                      # noqa: BLE001
         logger.exception("price pre-filter: rollback failed")
+
+
+def _call_in_savepoint(conn, savepoint: str, fn):
+    """Run fn() on `conn`. On failure, restore the transaction and re-raise.
+
+    Postgres aborts the whole transaction on any statement error. The next
+    execute then raises InFailedSqlTransaction, which hides the statement
+    that actually failed. A savepoint is the one command still allowed in
+    that state, so the caller keeps the original exception and a usable
+    connection. `savepoint` is a bare SQL identifier chosen by the caller.
+    """
+    try:
+        conn.execute(f"SAVEPOINT {savepoint}")
+    except Exception:
+        _rollback_conn(conn)
+        raise
+    try:
+        result = fn()
+    except Exception:
+        _reset_prefilter_savepoint(conn, savepoint)
+        raise
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+    except Exception:
+        _rollback_conn(conn)
+        raise
+    return result
+
+
+def _fail_open(conn, savepoint: str, fn, default, label: str):
+    """Run fn() in a savepoint. On failure, log the original error and
+    return `default` with the transaction still usable.
+
+    Fail-open lookups (best price, injury gate, market gate) used to catch
+    the error and keep going on the same connection. Daily run
+    51e965f8023c4b0e86e03fe075af1f9c (2026-09-28 10:36:24Z) cancelled the
+    VAN@EDM best-price read at statement_timeout; the except logged nothing
+    at ERROR, and both NHL models then failed with InFailedSqlTransaction.
+    ConnectionLost is re-raised: that one means the game's unit of work is
+    gone, and swallowing it would score the rest of the game on a fresh
+    connection without the statements that preceded it.
+    """
+    try:
+        return _call_in_savepoint(conn, savepoint, fn)
+    except ConnectionLost:
+        raise
+    except Exception as exc:
+        logger.warning(f"{label} failed ({exc!r}); continuing")
+        logger.warning(f"{label} traceback:\n{traceback.format_exc()}")
+        return default
 
 
 def _reset_prefilter_savepoint(conn, savepoint: str) -> None:
@@ -3353,14 +3428,29 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                         # step is still marked failed and refresh_pass_steps still
                         # CRITs. Swallowing it here would be worse than the crash.
                         try:
-                            picks = score_game(conn, game_id, model_id, features,
-                                                bankroll, dry_run=dry_run,
-                                                commence_time=commence_time)
+                            # Own savepoint: one model's SQL error must not
+                            # abort the game's transaction. Daily run
+                            # 51e965f8023c4b0e86e03fe075af1f9c logged both
+                            # NHL models on VAN@EDM as InFailedSqlTransaction
+                            # after an earlier statement_timeout; psycopg2
+                            # commit() on that state rolls the game back and
+                            # the next game continues, so the original error
+                            # never reaches this log. Bind model_id: the loop
+                            # variable would otherwise score every model as
+                            # the last one.
+                            picks = _call_in_savepoint(
+                                conn, "sp_model_game",
+                                lambda model_id=model_id: score_game(
+                                    conn, game_id, model_id, features,
+                                    bankroll, dry_run=dry_run,
+                                    commence_time=commence_time))
                         except ConnectionLost:
                             raise                      # the game's unit, not the model's
                         except Exception as exc:
                             model_failures.append(f"{model_id}: {exc!r}")
-                            logger.error(f"  {game_id}/{model_id} FAILED: {exc!r}")
+                            logger.error(
+                                f"  {game_id}/{model_id} FAILED: {exc!r}\n"
+                                f"{traceback.format_exc()}")
                             continue
                         game_picks.extend(picks)
 

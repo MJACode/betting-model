@@ -24,7 +24,7 @@ import {
 } from '@/lib/settledPickCache';
 import { todayET } from '@/lib/format';
 import { LIVE_RECORD_START } from '@/lib/recordStart';
-import { errorText } from '@/lib/errors';
+import { errorText, isAbortError } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, SettledPick, SignalType } from '@/types';
 
@@ -84,7 +84,7 @@ export function useSettledPicksSincePaperStart() {
     } catch (e: unknown) {
       // Cached rows stay on screen — a failed refresh shouldn't blank the
       // backtest, it just leaves it as stale as the last successful load.
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -145,6 +145,9 @@ export function useCustomModelBacktest(
   const [serverPicks, setServerPicks] = useState<BacktestPickRow[]>([]);
   const [serverLoading, setServerLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by Retry on a failed backtest (usability audit M1).
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const reqId = useRef(0);
 
   const { covered, uncovered } = useMemo(
@@ -192,7 +195,7 @@ export function useCustomModelBacktest(
         })
         .catch((e: unknown) => {
           if (reqId.current !== id) return;
-          setError(errorText(e));
+          if (!isAbortError(e)) setError(errorText(e));
         })
         .finally(() => {
           if (reqId.current === id) setServerLoading(false);
@@ -206,7 +209,7 @@ export function useCustomModelBacktest(
     // serverKey is the content hash of covered+filters; model/covered are read
     // inside but change only when serverKey does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverKey, withPicks, debounceMs]);
+  }, [serverKey, withPicks, debounceMs, attempt]);
 
   // Settled fallback for rules the server doesn't grade (UFC/NHL/golf).
   const localStats = useMemo(() => {
@@ -241,7 +244,7 @@ export function useCustomModelBacktest(
 
   const loading = serverLoading || (uncovered.length > 0 && settledLoading);
 
-  return { stats, picks, loading, error };
+  return { stats, picks, loading, error, retry };
 }
 
 /** Full-universe backtest stats for every saved custom model (Models list). */

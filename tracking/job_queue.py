@@ -984,9 +984,12 @@ def _job_team_stats_asof_verify(**kw):
     queue's ❌ card carries the detail. The rebuild itself already ran
     2026-09-03; this job is the ongoing gate after the marker lifts the freeze.
 
-    verify() skips the current max (live) season for impossible-games and
-    tolerates a 1-game date-boundary mismatch — see that function. This wrapper
-    only reports what verify returns; it never rebuilds or DELETE.
+    verify() skips the current max (live) season for impossible-games,
+    tolerates a 1-game date-boundary mismatch, and excuses a thin snapshot
+    count on that live season only while its finals span fewer than
+    MIN_SNAPSHOTS_PER_SEASON days — see that function. Historical seasons
+    are not excused. This wrapper only reports what verify returns; it
+    never rebuilds or DELETE.
     """
     from data.db import get_connection
     from data.team_stats_rebuild import SPORTS, verify
@@ -1013,6 +1016,7 @@ def _job_team_stats_asof_verify(**kw):
                 "impossible": len(v["impossible"]),
                 "thin_seasons": v["thin_seasons"],
                 "skipped_live_season": v.get("skipped_live_season"),
+                "live_snapshot_grace": v.get("live_snapshot_grace"),
             })
             if v["impossible"]:
                 eg = v["impossible"][0]

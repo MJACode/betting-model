@@ -19,16 +19,20 @@ import {
   formatGameTimeET,
   formatPct,
   formatPctSigned,
+  formatSigned,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
+import { roundsToZero } from '@/lib/tone';
 import { isModelPaused, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
 import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -50,6 +54,7 @@ export function BuiltInModelDetailScreen() {
     records: fullOutcomeRecords,
     loading: settledLoading,
     error: settledError,
+    refresh: refreshSettled,
   } = useSettledPicksSincePaperStart();
 
   // Today's BET picks for this model. Game-level and prop picks lock the first
@@ -133,9 +138,13 @@ export function BuiltInModelDetailScreen() {
   // one surface that shows the same 1-bet number in full bet-green with no
   // qualifier. Same constant, same caption, same rule.
   const thin = decided < MIN_PICKS_FOR_COLOURED_ROI;
+  // Each tile's tone comes from the number it prints, rounded as printed.
   const roiColor = thin
     ? colors.textSecondary
-    : stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
+    : pnlColor(stats.roiFlat, 1, 100);
+  const pnlTint = thin
+    ? colors.textSecondary
+    : pnlColor(stats.profitFlat, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -230,7 +239,7 @@ export function BuiltInModelDetailScreen() {
               <StatTile
                 label="P&L"
                 value={stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
-                tint={roiColor}
+                tint={pnlTint}
                 caption="settled only"
               />
             </View>
@@ -259,6 +268,8 @@ export function BuiltInModelDetailScreen() {
                 ))}
                 {!historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`See all ${pickHistory.rows.length} picks`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryExpanded(true)}
                   >
@@ -269,6 +280,8 @@ export function BuiltInModelDetailScreen() {
                 ) : null}
                 {historyExpanded && pickHistory.rows.length > historyShown ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show ${Math.min(100, pickHistory.rows.length - historyShown)} more, ${pickHistory.rows.length - historyShown} remaining`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryShown((n) => n + 100)}
                   >
@@ -280,6 +293,8 @@ export function BuiltInModelDetailScreen() {
                 ) : null}
                 {historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Show latest day only"
                     style={styles.showMoreBtn}
                     onPress={() => {
                       setHistoryExpanded(false);
@@ -311,6 +326,8 @@ export function BuiltInModelDetailScreen() {
                 ))}
                 {history.length > latestSettledRows.length ? (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={historyExpanded ? 'Show latest day only' : `See all ${history.length} picks`}
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryExpanded((e) => !e)}
                   >
@@ -332,14 +349,14 @@ export function BuiltInModelDetailScreen() {
                 <View style={styles.statRow}>
                   <StatTile
                     label="Avg CLV"
-                    value={`${clv.avg > 0 ? '+' : ''}${clv.avg.toFixed(1)}pp`}
-                    tint={clv.avg > 0 ? colors.bet : clv.avg < 0 ? colors.avoid : undefined}
+                    value={formatSigned(clv.avg, 1, 'pp')}
+                    tint={roundsToZero(clv.avg, 1) ? undefined : pnlColor(clv.avg, 1)}
                     caption="vs the closing price"
                   />
                   <StatTile
                     label="Beat close"
                     value={formatPct(clv.beatRate)}
-                    tint={clv.beatRate >= 0.5 ? colors.bet : colors.avoid}
+                    tint={clv.beatRate >= 0.5 ? colors.betInk : colors.avoidInk}
                     caption={`${clv.count} picks with CLV`}
                   />
                 </View>
@@ -392,13 +409,18 @@ export function BuiltInModelDetailScreen() {
             ) : null}
 
             {settledError ? (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>Connection error: {settledError}</Text>
-              </View>
+              <ErrorBanner
+                what="this model’s record"
+                error={settledError}
+                onRetry={() => void refreshSettled()}
+                retrying={settledLoading}
+                style={styles.errorBannerInset}
+              />
             ) : null}
             {settledLoading && stats.picks === 0 ? (
               <ActivityIndicator style={styles.loading} />
             ) : null}
+            <BetslipBarSpacer />
           </>
         }
         contentContainerStyle={styles.list}
@@ -417,7 +439,12 @@ function TodayPickRow({
   const { pick, game } = enriched;
   const timeLabel = formatGameTimeET(game?.commence_time);
   return (
-    <Pressable style={styles.pickRow} onPress={onPress}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={[pick.pick_label, pick.signal_type, timeLabel, `${bookLabelShort(storedQuoteBook(pick))} ${formatAmerican(decisionOdds(pick))}`, `Model ${formatPct(pick.model_probability)}`, `Edge ${formatPctSigned(decisionEdge(pick))}`].filter(Boolean).join(', ')}
+      style={styles.pickRow}
+      onPress={onPress}
+    >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
@@ -455,13 +482,18 @@ function FullOutcomeHistoryRow({
 }) {
   const resultColor =
     row.result === 'WIN'
-      ? colors.bet
+      ? colors.betInk
       : row.result === 'LOSS'
-        ? colors.avoid
+        ? colors.avoidInk
         : colors.textSecondary;
   const profit = row.profit_units == null ? null : Number(row.profit_units) * 100;
   return (
-    <Pressable style={styles.pickRow} onPress={onPress}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={[row.pick_label, row.result, row.game_date, `${bookLabelShort(storedQuoteBook(row))} ${formatAmerican(decisionOdds(row))}`, formatCurrencySigned(profit)].filter(Boolean).join(', ')}
+      style={styles.pickRow}
+      onPress={onPress}
+    >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
@@ -489,9 +521,9 @@ function FullOutcomeHistoryRow({
 function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => void }) {
   const resultColor =
     pick.result === 'WIN'
-      ? colors.bet
+      ? colors.betInk
       : pick.result === 'LOSS'
-        ? colors.avoid
+        ? colors.avoidInk
         : colors.textSecondary;
   return (
     <Pressable
@@ -525,7 +557,7 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
 }
 
 function edgeColorStyle(edge: number) {
-  return { color: edge > 0 ? colors.bet : edge < 0 ? colors.avoid : colors.textSecondary };
+  return { color: pnlColor(edge, 1, 100) };
 }
 
 // Aggregate closing line value across this model's settled BET picks that
@@ -707,13 +739,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   loading: { marginVertical: spacing.xl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });

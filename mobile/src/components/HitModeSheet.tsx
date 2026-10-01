@@ -54,14 +54,24 @@ export function HitModeSheet({
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close bet type options"
+        />
         {/* accessible={false}: an accessible Pressable groups its children into
             ONE VoiceOver element, which would leave the rows unreachable. */}
         <Pressable style={styles.sheet} onPress={() => {}} accessible={false} accessibilityViewIsModal>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Show bets that are</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close bet type options">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -115,7 +125,7 @@ export function HitModeSheet({
                     </Text>
                   </View>
                   {active ? (
-                    <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
+                    <Ionicons name="checkmark-circle" size={22} color={colors.tint} />
                   ) : (
                     <View style={styles.emptyCircle} />
                   )}
@@ -125,7 +135,7 @@ export function HitModeSheet({
             {unavailableNote ? <Text style={styles.note}>{unavailableNote}</Text> : null}
           </View>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -176,7 +186,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
-  rowActive: { borderColor: colors.bet },
+  rowActive: { borderColor: colors.tint },
   rowBody: { flex: 1, gap: 2 },
   rowName: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
   rowPreview: { fontSize: font.size.footnote, color: colors.textSecondary },

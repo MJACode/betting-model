@@ -156,6 +156,9 @@ export function SignInScreen() {
                 const pending = busy === provider;
                 return (
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={isApple ? 'Continue with Apple' : 'Continue with Google'}
+                    accessibilityState={{ busy: pending, disabled: busy != null }}
                     key={provider}
                     onPress={() => onProvider(provider)}
                     disabled={busy != null}
@@ -204,6 +207,7 @@ export function SignInScreen() {
               {AUTH_PROVIDERS.email ? (
                 <>
                   <TextInput
+                    accessibilityLabel="Email address"
                     style={styles.input}
                     value={email}
                     onChangeText={setEmail}
@@ -219,6 +223,9 @@ export function SignInScreen() {
                     returnKeyType="go"
                   />
                   <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Email me a code"
+                    accessibilityState={{ busy: busy === 'email', disabled: busy != null }}
                     onPress={onSendCode}
                     disabled={busy != null}
                     style={({ pressed }) => [
@@ -239,6 +246,7 @@ export function SignInScreen() {
           ) : (
             <>
               <TextInput
+                accessibilityLabel={`${EMAIL_OTP_LENGTH}-digit sign-in code`}
                 style={[styles.input, styles.codeInput]}
                 value={code}
                 onChangeText={(t) => setCode(normalizeOtp(t))}
@@ -254,6 +262,9 @@ export function SignInScreen() {
                 returnKeyType="go"
               />
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Verify and sign in"
+                accessibilityState={{ busy: busy === 'email', disabled: busy != null || !isCompleteOtp(code) }}
                 onPress={onVerify}
                 disabled={busy != null || !isCompleteOtp(code)}
                 style={({ pressed }) => [
@@ -269,16 +280,34 @@ export function SignInScreen() {
                 )}
               </Pressable>
 
-              <Pressable onPress={onSendCode} disabled={busy != null}>
+              <Pressable
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Send a new code"
+                onPress={onSendCode}
+                disabled={busy != null}
+              >
                 <Text style={styles.linkText}>Send a new code</Text>
               </Pressable>
-              <Pressable onPress={onBackToEmail} disabled={busy != null}>
+              <Pressable
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Use a different email"
+                onPress={onBackToEmail}
+                disabled={busy != null}
+              >
                 <Text style={styles.linkText}>Use a different email</Text>
               </Pressable>
             </>
           )}
 
-          <Pressable onPress={dismiss} disabled={busy != null}>
+          <Pressable
+            hitSlop={{ top: 0, bottom: 0, left: 16, right: 16 }}
+            accessibilityRole="button"
+            accessibilityLabel="Not now"
+            onPress={dismiss}
+            disabled={busy != null}
+          >
             <Text style={styles.skipText}>Not now</Text>
           </Pressable>
 
@@ -323,7 +352,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    color: colors.avoid,
+    color: colors.avoidInk,
   },
   noticeBanner: {
     flexDirection: 'row',

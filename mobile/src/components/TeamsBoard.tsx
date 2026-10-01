@@ -72,8 +72,10 @@ import {
   type TeamStatGroup,
 } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { errorText, friendlyCause, isAbortError } from '@/lib/errors';
+import { ErrorBanner } from '@/components/ErrorState';
 import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 
 /**
@@ -163,10 +165,11 @@ export function TeamsBoard({
       // unreachable. But say so: an unreachable view and "no games" both look
       // like an empty column.
       .catch((e: unknown) => {
-        if (cancelled) return;
+        // An abort is a cancel like `cancelled`: no toast, no state change.
+        if (cancelled || isAbortError(e)) return;
         setSlate({ date: '', isToday: false, games: [] });
         setGameLines([]);
-        showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
+        showToast(`Couldn’t load today’s lines. ${friendlyCause(e)}`);
       });
     return () => {
       cancelled = true;
@@ -193,7 +196,7 @@ export function TeamsBoard({
       setRows(data);
       setSeason(used);
     } catch (e: unknown) {
-      setError(errorText(e));
+      if (!isAbortError(e)) setError(errorText(e));
       setRows([]);
     } finally {
       setLoading(false);
@@ -348,6 +351,7 @@ export function TeamsBoard({
       <View style={styles.searchWrap}>
         <Ionicons name="search" size={16} color={colors.textTertiary} />
         <TextInput
+          accessibilityLabel="Search teams"
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
@@ -364,13 +368,12 @@ export function TeamsBoard({
       </View>
 
       {error ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>Connection error: {error}</Text>
-        </View>
+        <ErrorBanner what={`the ${sport} teams`} error={error} onRetry={() => void load()} retrying={loading} />
       ) : null}
 
       {noLinesNote ? (
         <Pressable
+          hitSlop={{ top: 5, bottom: 5, left: 0, right: 0 }}
           onPress={() => setPickerOpen(true)}
           accessibilityRole="button"
           accessibilityLabel={`${noLinesNote} Switch sportsbook`}
@@ -401,6 +404,7 @@ export function TeamsBoard({
       ) : null}
 
       <FlatList
+        ListFooterComponent={<BetslipBarSpacer />}
         data={ranked}
         keyExtractor={(item) => item.team}
         renderItem={({ item, index }) => {
@@ -776,13 +780,4 @@ const styles = StyleSheet.create({
   thinLabel: { fontSize: font.size.nano, color: colors.textTertiary, fontStyle: 'italic' },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
 });

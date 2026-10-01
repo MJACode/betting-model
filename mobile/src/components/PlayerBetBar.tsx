@@ -41,6 +41,7 @@ import { bookName, booksNoneName, sideNotPostedNote } from '@/lib/markets';
 import { matchupForLeg } from '@/lib/parlay';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { friendlyCause } from '@/lib/errors';
 import type { StatsOddsQuote } from '@/lib/statsOdds';
 import type { GameRow } from '@/types';
 
@@ -97,7 +98,7 @@ export function PlayerBetBar({
   if (error) {
     return (
       <View style={[styles.card, styles.cardQuiet]}>
-        <Text style={styles.emptyText}>{error}</Text>
+        <Text style={styles.emptyText}>Couldn’t load the odds. {friendlyCause(error)}</Text>
         <Pressable
           onPress={onRetry}
           accessibilityRole="button"

@@ -11,7 +11,8 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { friendlyCause } from '@/lib/errors';
 import { addDays, formatAmerican, formatPctSigned, formatSignedUnits } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
 import { RECORD_ONLY_MODELS } from '@/lib/thresholds';
@@ -133,7 +134,7 @@ export function DailyResultsModal({
             hitSlop={12}
             style={styles.closeBtn}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel="Close daily results"
           >
             <Ionicons name="close" size={22} color={colors.textSecondary} />
           </Pressable>
@@ -142,6 +143,7 @@ export function DailyResultsModal({
         {/* Day navigation — always visible so an empty/error day isn't a dead end. */}
         <View style={styles.dateNav}>
           <Pressable
+            accessibilityRole="button"
             onPress={() => canPrev && onSelectDate(addDays(date, -1))}
             disabled={!canPrev}
             hitSlop={10}
@@ -155,6 +157,8 @@ export function DailyResultsModal({
             />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: calendarOpen }}
             onPress={() => setCalendarOpen((open) => !open)}
             hitSlop={8}
             accessibilityLabel="Pick a date"
@@ -169,6 +173,7 @@ export function DailyResultsModal({
             />
           </Pressable>
           <Pressable
+            accessibilityRole="button"
             onPress={() => canNext && onSelectDate(addDays(date, 1))}
             disabled={!canNext}
             hitSlop={10}
@@ -206,7 +211,7 @@ export function DailyResultsModal({
         ) : error ? (
           <View style={styles.center}>
             <Text style={styles.error}>Couldn’t load this day’s results.</Text>
-            <Text style={styles.errorDetail}>{error}</Text>
+            <Text style={styles.errorDetail}>{friendlyCause(error)}</Text>
           </View>
         ) : !hasContent ? (
           <View style={styles.center}>
@@ -223,12 +228,18 @@ export function DailyResultsModal({
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              style={styles.sportChipsFrame}
               contentContainerStyle={styles.sportChips}
             >
               {['ALL', ...ALL_SPORTS].map((s) => {
                 const active = sportFilter === s;
                 return (
                   <Pressable
+                    // ~30pt chip; the row's frame (sportChipsFrame) keeps this slop
+                    // inside the horizontal ScrollView.
+                    hitSlop={{ top: 7, bottom: 7, left: 2, right: 2 }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
                     key={s}
                     onPress={() => setSportFilter(s)}
                     style={[styles.sportChip, active && styles.sportChipActive]}
@@ -420,9 +431,11 @@ function ModelRow({ model }: { model: ModelDayStats }) {
 }
 
 const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = {
-  WIN: { label: 'W', color: colors.positive, bg: colors.betSoft },
-  LOSS: { label: 'L', color: colors.negative, bg: colors.avoidSoft },
-  PUSH: { label: 'P', color: colors.none, bg: colors.noneSoft },
+  // The letter carries the result; the ink makes it readable on its wash
+  // (4.61 / 5.01 / 9.55:1 — the bright hues were 2.0–3.1:1; audit H2).
+  WIN: { label: 'W', color: colors.betInk, bg: colors.betSoft },
+  LOSS: { label: 'L', color: colors.avoidInk, bg: colors.avoidSoft },
+  PUSH: { label: 'P', color: colors.textSecondary, bg: colors.noneSoft },
 };
 
 function PickRow({ pick }: { pick: Pick }) {
@@ -509,19 +522,21 @@ function recordLine(s: CustomModelStats): string {
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
 }
 
+// Text ink with the sign (pnlColor), not the positive/negative heat-map fills,
+// which are 2.22 / 3.55:1 as text (audit H2).
+// The tone of the ROUNDED percent formatPctSigned prints (1 dp of roi × 100),
+// so "+0.1%" is green and "0.0%" is grey — never an epsilon of its own.
 function roiColor(roi: number): string {
-  if (roi > 0.001) return colors.positive;
-  if (roi < -0.001) return colors.negative;
-  return colors.textSecondary;
+  return pnlColor(roi, 1, 100);
 }
 
 /** Colour a units figure by what formatSignedUnits prints, so a day that
  *  rounds to "0.0u" never reads as a win or a loss. */
 function unitsColor(units: number): string {
-  const rounded = Math.round(units * 10) / 10;
-  if (rounded > 0) return colors.positive;
-  if (rounded < 0) return colors.negative;
-  return colors.textSecondary;
+  // The value formatSignedUnits prints (magnitude rounded half-up to 1 dp,
+  // then the sign), toned in ink, not the bright heat-map fills (audit H2).
+  const shown = Math.sign(units) * (Math.round(Math.abs(units) * 10) / 10);
+  return pnlColor(shown, 1);
 }
 
 function prettyDate(date: string): string {
@@ -628,10 +643,15 @@ const styles = StyleSheet.create({
   },
   list: { padding: spacing.lg, paddingTop: spacing.xs, gap: spacing.md },
 
+  // The chips' 7pt vertical slop has to land inside the ScrollView (which
+  // clips touches to its bounds): pad by 7 and pull back by 7 — no visual move.
+  sportChipsFrame: {
+    marginVertical: -7,
+  },
   sportChips: {
     flexDirection: 'row',
     gap: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: 2 + 7,
   },
   sportChip: {
     paddingHorizontal: spacing.md,
@@ -716,11 +736,13 @@ const styles = StyleSheet.create({
   },
   sportName: { fontSize: font.size.headline, fontWeight: font.weight.bold, color: colors.textPrimary },
   sportRoi: { fontSize: font.size.headline, fontWeight: font.weight.bold },
-  sportCardEmpty: { paddingVertical: spacing.sm, opacity: 0.75 },
+  // No opacity: 0.75 over textTertiary was 3.15:1. The muted look comes from
+  // the tertiary ink itself (5.23:1 on bgCard).
+  sportCardEmpty: { paddingVertical: spacing.sm },
   sportNameEmpty: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
+    color: colors.textTertiary,
   },
   sportEmptyNote: { fontSize: font.size.footnote, color: colors.textTertiary },
   sportSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.sm },

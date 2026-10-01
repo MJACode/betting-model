@@ -212,6 +212,11 @@ def test_write_classification_is_conservative():
     assert db._is_write("DELETE FROM picks")
     assert db._is_write("SET LOCAL lock_timeout = '10s'")
     assert db._is_write("do $$ begin end $$")
+    # An advisory lock lives on the backend: replaying it after a drop would
+    # carry on unlocked, so it counts as a write (#844 review).
+    assert db._is_write("SELECT pg_advisory_xact_lock(%s)")
+    assert db._is_write("select pg_advisory_lock(42)")
+    assert db._is_write("SELECT pg_try_advisory_xact_lock(1)")
     # Transaction control around a read must not look like a write.
     assert not db._is_write("SAVEPOINT ncaaf_price_prefilter")
     assert not db._is_write("RELEASE SAVEPOINT ncaaf_price_prefilter")

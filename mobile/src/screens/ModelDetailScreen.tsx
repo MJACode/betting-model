@@ -22,11 +22,13 @@ import {
 } from '@/lib/format';
 import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION, PAUSED_RULE_CAPTION, withdrawnRulesEmpty } from '@/lib/modelMeta';
 import { isModelRetired, isModelPaused } from '@/lib/thresholds';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
+import { ErrorBanner } from '@/components/ErrorState';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 import { BACKTEST_START } from '@/lib/recordStart';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 /**
  * The minimums a rule actually carries. Every floor is optional — a rule with
@@ -58,7 +60,7 @@ export function ModelDetailScreen() {
     (model?.rules.length ?? 0) > 0 && (model?.rules ?? []).every((r) => isModelRetired(r.model_id));
   // Backtests run against every scored pick (BET + AVOID + dead-zone), graded
   // server-side — not just the settled BET set.
-  const { stats, picks: matchingPicks, loading, error } = useCustomModelBacktest(
+  const { stats, picks: matchingPicks, loading, error, retry } = useCustomModelBacktest(
     model ?? null,
     { withPicks: true },
   );
@@ -86,11 +88,14 @@ export function ModelDetailScreen() {
   }
 
   const decided = stats.wins + stats.losses;
-  const roiColor = stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
+  // Each tile's tone comes from the number it prints, rounded as printed.
+  const roiColor = pnlColor(stats.roiFlat, 1, 100);
+  const pnlTint = pnlColor(stats.profitFlat, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
+        ListFooterComponent={<BetslipBarSpacer />}
         data={[...matchingPicks].sort((a, b) => b.game_date.localeCompare(a.game_date))}
         keyExtractor={(p) => String(p.pick_id)}
         ListHeaderComponent={
@@ -152,15 +157,19 @@ export function ModelDetailScreen() {
               <StatTile
                 label="P&L"
                 value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
-                tint={roiColor}
+                tint={pnlTint}
                 caption="all graded picks"
               />
             </View>
 
             {error ? (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>Connection error: {error}</Text>
-              </View>
+              <ErrorBanner
+                what="this model’s backtest"
+                error={error}
+                onRetry={retry}
+                retrying={loading}
+                style={styles.errorBannerInset}
+              />
             ) : null}
 
             <Text style={styles.sectionHeader}>
@@ -177,6 +186,8 @@ export function ModelDetailScreen() {
             ) : (
               upcoming.map((ep) => (
                 <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={[ep.pick.pick_label, ep.pick.signal_type, modelShort(ep.pick.model_id), `${gameDayLabelET(ep.pick.game_time) ?? 'Today'}${ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}`, `${bookLabelShort(storedQuoteBook(ep.pick))} ${formatAmerican(decisionOdds(ep.pick))}`].filter(Boolean).join(', ')}
                   key={ep.pick.pick_id}
                   style={styles.pickRow}
                   onPress={() => navigation.navigate('PickDetail', { pickId: ep.pick.pick_id })}
@@ -208,6 +219,8 @@ export function ModelDetailScreen() {
         }
         renderItem={({ item }) => (
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={[item.pick_label, item.signal_type, modelShort(item.model_id)].filter(Boolean).join(', ')}
             style={styles.pickRow}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick_id })}
           >
@@ -230,12 +243,7 @@ export function ModelDetailScreen() {
               style={[
                 styles.pickProfit,
                 {
-                  color:
-                    (item.profit_flat ?? 0) > 0
-                      ? colors.bet
-                      : (item.profit_flat ?? 0) < 0
-                        ? colors.avoid
-                        : colors.textSecondary,
+                  color: pnlColor(item.profit_flat, 2),
                 },
               ]}
             >
@@ -408,14 +416,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
-  error: { color: colors.avoid, padding: spacing.lg, fontSize: font.size.body },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
+  error: { color: colors.avoidInk, padding: spacing.lg, fontSize: font.size.body },
 });

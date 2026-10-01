@@ -65,6 +65,9 @@ import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
 import { colors, font, gradeColor, radii, spacing } from '@/lib/theme';
+import { reachFrame } from '@/lib/a11y';
+import { ErrorBanner } from '@/components/ErrorState';
+import { friendlyCause } from '@/lib/errors';
 import { gradeSpoken, type MatchupGrade } from '@/lib/matchup';
 import type { RootStackParamList } from '@/types';
 import { bookName, sideNotPostedNote, storedQuoteBook } from '@/lib/markets';
@@ -90,6 +93,7 @@ import {
 } from '@/lib/playerDetail';
 import type { LineupSlotRow, PlayerType, SavantStatsRow } from '@/types';
 import { ordinal } from '@/lib/teamDetail';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
 
@@ -162,7 +166,7 @@ export function PlayerStatsScreen() {
   }, [sport, playerType, playerId, windows, requested, requestedMode, route.params.gameWindow]);
 
   const beforeDate = todayET();
-  const { games, loading, loaded, error } = usePlayerTrends({
+  const { games, loading, loaded, error, reload: reloadTrends } = usePlayerTrends({
     playerId: playerId || null,
     playerName: playerId ? null : playerName,
     beforeDate,
@@ -451,6 +455,18 @@ export function PlayerStatsScreen() {
     if (!detail.loading) setPulled(false);
   }, [detail.loading]);
 
+  // H9 (lib/a11y reachFrame). The stat chips sit flush under the group tabs
+  // and share an 8pt gap with the range chips (4 each), so under the tabs they
+  // stop at 4 + ~32 + 4 — there is no whitespace left to take. With the group
+  // header TEXT above instead, the frame reaches 6pt into its bottom padding.
+  const statReachAbove = groups.length === 1 && groupsOfChips(allChips).length > 1 ? 6 : 0;
+  const statReach = reachFrame(statReachAbove);
+  // The range chips reach 6pt down over the next sibling, raised so it is
+  // hit-tested first: the hit card's 8pt top margin, the empty card's 16pt
+  // padding or the spinner's margin — never the ErrorBanner, whose Retry
+  // starts at its top edge.
+  const rangeReachBelow = error ? 0 : 6;
+  const rangeReach = reachFrame(0, rangeReachBelow, { raise: rangeReachBelow > 0 });
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -539,16 +555,21 @@ export function PlayerStatsScreen() {
               }}
             />
 
-            {/* Stat selector */}
+            {/* Stat selector. H9: with the group header text above (no
+                group tabs) the frame reaches 6pt into its bottom padding;
+                under the group tabs it can't — see statReach. */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.windowRow}
+              style={statReach.frame}
+              contentContainerStyle={[styles.windowRow, statReach.content]}
             >
               {groupChips.map((c) => {
                 const active = c.key === stat?.key && c.group === stat?.group;
                 return (
                   <Pressable
+                    // In-bounds only: the row's 4pt padding (+ statReach above).
+                    hitSlop={{ top: 4 + statReachAbove, bottom: 4, left: 2, right: 2 }}
                     key={chipKey(c)}
                     onPress={() => setPicked(c)}
                     // Pre-existing (ux_scan a11y-pressable, byte-identical to
@@ -573,16 +594,22 @@ export function PlayerStatsScreen() {
           </>
         )}
 
-        {/* Game-range selector */}
+        {/* Game-range selector. H9: raised 6pt over the next sibling's top
+            margin / padding (whitespace, or the non-interactive empty card) —
+            not over the ErrorBanner, whose Retry starts at its top edge. */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.windowRow}
+          style={rangeReach.frame}
+          contentContainerStyle={[styles.windowRow, rangeReach.content]}
         >
           {windows.map((w) => {
             const active = w.value === gameWindow;
             return (
               <Pressable
+                // In-bounds only: the row's 4pt padding (4 above is its half of
+                // the 8pt gap to the stat chips) + rangeReach below.
+                hitSlop={{ top: 4, bottom: 4 + rangeReachBelow, left: 2, right: 2 }}
                 key={String(w.value)}
                 onPress={() => setGameWindow(w.value)}
                 accessibilityRole="button"
@@ -601,9 +628,13 @@ export function PlayerStatsScreen() {
         </ScrollView>
 
         {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {error}</Text>
-          </View>
+          <ErrorBanner
+            what="recent games"
+            error={error}
+            onRetry={reloadTrends}
+            retrying={loading}
+            style={styles.errorBannerInset}
+          />
         ) : null}
 
         {loading && games.length === 0 ? (
@@ -772,6 +803,7 @@ export function PlayerStatsScreen() {
                   onPress={toggleSlip}
                   hitSlop={8}
                   accessibilityRole="button"
+                  accessibilityState={{ selected: inSlip }}
                   accessibilityLabel={inSlip ? 'Remove from betslip' : 'Add to betslip'}
                   style={({ pressed }) => [
                     styles.slipBtn,
@@ -782,7 +814,7 @@ export function PlayerStatsScreen() {
                   <Ionicons
                     name={inSlip ? 'checkmark' : 'add'}
                     size={16}
-                    color={inSlip ? colors.bet : colors.textInverse}
+                    color={inSlip ? colors.tint : colors.textInverse}
                   />
                   <Text style={[styles.slipBtnText, inSlip && styles.slipBtnTextIn]}>
                     {inSlip ? 'In slip' : 'Add'}
@@ -862,6 +894,7 @@ export function PlayerStatsScreen() {
             ))}
           </>
         )}
+        <BetslipBarSpacer />
       </ScrollView>
 
       <HitModeSheet
@@ -1073,6 +1106,7 @@ function HeadToHeadCard({
           ))}
           {h2h.meetings.length > MEETINGS_SHOWN ? (
             <Pressable
+              hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
               onPress={() => setShowAll((v) => !v)}
               accessibilityRole="button"
               accessibilityLabel={
@@ -1188,7 +1222,7 @@ function TonightLineCard({
         ) : !tonight ? (
           <Text style={[styles.muted, styles.gapTop]}>
             {error
-              ? `Couldn’t load lines — ${error}`
+              ? `Couldn’t load lines. ${friendlyCause(error)} Pull down to retry.`
               : `No book has posted ${statLabel} for this game yet.`}
           </Text>
         ) : (
@@ -1419,7 +1453,7 @@ function PickRecordCard({
         <View style={styles.card}>
           <Text style={styles.muted}>
             {error
-              ? `Couldn’t load our picks — ${error}`
+              ? `Couldn’t load our picks. ${friendlyCause(error)} Pull down to retry.`
               : sportHasPropModel
                 ? `No settled picks on ${playerName}.`
                 : `No prop model prices ${sport} players yet.`}
@@ -1515,17 +1549,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  // ON: outlined in tint with a checkmark (same as AddToPlayButton), not green.
   slipBtnIn: {
-    backgroundColor: colors.betSoft,
+    backgroundColor: colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.bet,
+    borderColor: colors.tint,
   },
   slipBtnText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textInverse,
   },
-  slipBtnTextIn: { color: colors.bet },
+  slipBtnTextIn: { color: colors.tint },
   container: { flex: 1, backgroundColor: colors.bg },
   // Clears BetslipBar, which is mounted at the app ROOT and sits over the
   // bottom of this screen whenever the slip has a leg — at 24pt the tail of
@@ -1630,10 +1665,12 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     alignItems: 'center',
   },
+  // Dark on every fill (5.9–9.6:1). White was 2.22:1 on the green and
+  // 2.20:1 on the amber — the same fault as audit H6.
   hitBadgeText: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
-    color: colors.textInverse,
+    color: colors.textPrimary,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1795,13 +1832,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   loading: { marginVertical: spacing.xxl },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  // ErrorBanner (PATTERNS §E3) keeps this screen's old banner spacing.
+  errorBannerInset: { marginTop: 0, marginBottom: spacing.sm },
 });

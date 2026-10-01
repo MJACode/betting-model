@@ -23,6 +23,7 @@ import {
   storedQuoteBook,
 } from '@/lib/markets';
 import { decisionEdge, decisionOdds, lineBook } from '@/lib/decisionPrice';
+import { reasoningHeading } from '@/lib/pickCta';
 
 interface Props {
   pick: Pick;
@@ -52,7 +53,10 @@ export function ReasoningCard({ pick, paused = false }: Props) {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.heading}>Why this bet?</Text>
+      {/* M14: "Why this bet?" only on a bet (lib/pickCta reasoningHeading). */}
+      <Text style={styles.heading}>
+        {reasoningHeading(pick.signal_type, { paused, preview: isUnlockedPreview(pick) })}
+      </Text>
 
       <Row
         label="Model probability"
@@ -78,7 +82,7 @@ export function ReasoningCard({ pick, paused = false }: Props) {
         <Row
           label="Edge"
           value={formatPctSigned(edge)}
-          tint={passesActionFilter(pick) ? colors.bet : pick.signal_type === 'AVOID' ? colors.avoid : undefined}
+          tint={passesActionFilter(pick) ? colors.betInk : pick.signal_type === 'AVOID' ? colors.avoidInk : undefined}
           sub={`= model ${formatPct(pick.model_probability)} − ${book} ${formatPct(implied)}. Positive means we think the side is mispriced in our favor.`}
         />
       ) : (

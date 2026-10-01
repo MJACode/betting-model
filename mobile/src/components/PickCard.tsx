@@ -7,10 +7,11 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
-import { gameStatus } from '@/lib/format';
+import { formatSigned, gameDayLabelET, gameStatus } from '@/lib/format';
 import {
   bestHandoffForPick,
   bookLabel,
+  bookName,
   formatSideLine,
   gameMarketForModel,
   heroAmericanForPick,
@@ -19,17 +20,22 @@ import {
   numOrNull,
   pickTimingInfo,
   splitPickTitle,
+  storedQuoteBook,
   type Movement,
 } from '@/lib/markets';
 import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
+import { pnlTone, roundedAt } from '@/lib/tone';
 import { decisionEdge, decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
 import { openForAction } from '@/lib/discordPublish';
+import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
+import { gameStatusSpeech, unitsSpeech } from '@/lib/a11y';
+import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import { GameStatusPill } from './GameStatusPill';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
@@ -89,23 +95,35 @@ export function PickCard({
       : colors.textSecondary;
   // EV, edge and stake at the price the pick was DECIDED at (2026-09-09).
   const ev = expectedValue(pick.model_probability, decisionOdds(pick));
-  const evColor =
-    ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
+  // H4 price check (display only, lib/priceCheck.ts): an implausible edge or a
+  // lock far from the book's current price shows "Price check" and "—" for
+  // edge and EV instead of headlining the board. After the start "Now" is the
+  // in-play price, so only the edge rule applies then (Reviewer #847).
+  const check = priceCheckForItem(item, liveState);
+  const flagged = check.flagged;
+  const edgeText = flagged ? '—' : formatPctSigned(decisionEdge(pick));
+  // H4: on NONE / AVOID the edge is a secondary line, not the hero number —
+  // a non-bet must not read like a BET. BET keeps the hero edge.
+  const demoteEdge = pick.signal_type !== 'BET';
+  // H5: what the card offers once the game has started (lib/pickCta.ts). The
+  // pick's game_time stands in for a missing games row, and a game called off
+  // before first pitch is not "started" (gameStartState).
+  const cta = pickCtaFor(pick, game, liveState);
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
+  // A flagged row's movement line is built from the same suspect price, so it
+  // is suppressed too.
   const movement =
-    gameStatus(game, liveState).kind === 'pre'
+    gameStatus(game, liveState).kind === 'pre' && !flagged
       ? movementFromLatest(pick, item.latestOdds, item.bookRows)
       : null;
   const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
   const showClv = pick.clv_pct != null;
-  const clvColor =
-    pick.clv_pct == null
-      ? colors.textTertiary
-      : pick.clv_pct > 0
-        ? colors.bet
-        : pick.clv_pct < 0
-          ? colors.avoid
-          : colors.textTertiary;
+  // Icon and words share one ink (non-text 3:1 ruling), toned from the CLV
+  // ROUNDED as formatClv prints it (1 dp): −0.03 reads "0.0pp" and stays
+  // neutral, never a red zero (audit H2, Reviewer).
+  const clvRounded = roundedAt(pick.clv_pct, 1);
+  const clvTone = pnlTone(pick.clv_pct, 1);
+  const clvInk = clvTone === 'textSecondary' ? colors.textTertiary : colors[clvTone];
 
   const heroPrice = heroAmericanForPick(pick, item.latestOdds, item.bookRows);
   // Compare home-relative as numbers: PostgREST can send NUMERIC as a string,
@@ -159,19 +177,35 @@ export function PickCard({
   const hasExtras =
     Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
-  const handoff = !preview && !paused && pick.signal_type === 'BET'
+  // Before the start it is always the BEST available book (bestHandoffForPick),
+  // never DraftKings-only. After the start a pre-game pick has no hand-off: the
+  // in-play price is not the price it was made at (H5).
+  const offersBook = !preview && !paused && pick.signal_type === 'BET';
+  const handoff = offersBook && cta.handoff
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
     : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
-  const canTrack = Boolean(onToggleTrack) && open;
-  // Betslip — priced (decision price, not dk_odds), unsettled, non-preview.
+  // "Game started · picked at −125 DK" in the hand-off's place (H5). Not gated
+  // on paused: it states a fact about the pick, and this PR adds no paused
+  // gating (the existing !paused gates flip in the paused-on-All PR).
+  const startedText =
+    pick.signal_type === 'BET' && !preview && open && cta.startedLine
+      ? gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))
+      : null;
+  // Track stays after the start; it scores the pick at its lock.
+  const canTrack = Boolean(onToggleTrack) && open && cta.track;
+  // Betslip — priced (decision price, not dk_odds), unsettled, non-preview,
+  // and hidden once a pre-game pick's game has started (H5).
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused && cta.slip;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
-  const showSharp = Boolean(sharp);
-  const showTier = Boolean(pick.confidence_tier) && !showSharp;
+  // A flagged row carries "Price check" in the chip slot instead (H4).
+  const showSharp = Boolean(sharp) && !flagged;
+  // The tier is the model's confidence in a BET. On a NONE / AVOID card a
+  // "HIGH" chip reads as a high-confidence non-pick, so it is BET-only (M6).
+  const showTier = Boolean(pick.confidence_tier) && !showSharp && !flagged && pick.signal_type === 'BET';
   const stakeCaption =
     pick.signal_type !== 'BET' || preview || paused
       ? null
@@ -180,12 +214,41 @@ export function PickCard({
         : formatUnits(stake.conviction);
   const caption = [
     `Model ${formatPct(pick.model_probability)}`,
-    ev == null ? null : `EV ${formatPctSigned(ev)}`,
+    flagged ? 'EV —' : ev == null ? null : `EV ${formatPctSigned(ev)}`,
     stakeCaption,
   ]
     .filter((p): p is string => p != null)
     .join(' · ');
   const { primary: titlePrimary, secondary: titleSecondary } = splitPickTitle(pick);
+  // VoiceOver (audit M8): the card is ONE accessible element, so its label has
+  // to carry what the eye gets from the whole card — game status and time,
+  // the stake, when it posted — not just matchup, pick and edge.
+  const startedSpoken = startedText
+    ? gameStartedSpeech(decisionOdds(pick), bookName(storedQuoteBook(pick)))
+    : null;
+  const cardLabel = [
+    matchup,
+    gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
+    pick.pick_label,
+    paused ? 'Paused model, not a bet' : pick.signal_type,
+    flagged ? 'Price check: this price looks off, so edge and EV are hidden' : `Edge ${edgeText}`,
+    heroPrice
+      ? `${heroPrice.kind === 'now' ? cta.priceTag : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
+      : null,
+    stakeCaption ? `Stake ${unitsSpeech(stakeCaption)}` : null,
+    timing ? timing.label : null,
+    startedSpoken,
+  ]
+    .filter((p): p is string => Boolean(p))
+    .join('. ');
+  // Nested buttons inside an accessible card aren't separately focusable on
+  // iOS — VoiceOver groups the card — so Track, Betslip and the book hand-off
+  // are also offered as custom actions (swipe up/down on the card).
+  const a11yActions = [
+    ...(handoff ? [{ name: 'book', label: `${handoff.verb} at ${bookName(handoff.bookmaker)}` }] : []),
+    ...(canSlip ? [{ name: 'slip', label: inSlip ? 'Remove from betslip' : 'Add to betslip' }] : []),
+    ...(canTrack ? [{ name: 'track', label: tracked ? 'Untrack' : 'Track' }] : []),
+  ];
 
   return (
     // The card tap is the only route to the pick's breakdown now that the
@@ -195,17 +258,14 @@ export function PickCard({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={[
-        matchup,
-        pick.pick_label,
-        paused ? 'Paused model, not a bet' : pick.signal_type,
-        `Edge ${formatPctSigned(decisionEdge(pick))}`,
-        heroPrice
-          ? `${heroPrice.kind === 'now' ? 'Now' : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
-          : null,
-      ]
-        .filter((p): p is string => Boolean(p))
-        .join('. ')}
+      accessibilityLabel={cardLabel}
+      accessibilityActions={a11yActions.length > 0 ? a11yActions : undefined}
+      onAccessibilityAction={(e) => {
+        const name = e.nativeEvent.actionName;
+        if (name === 'book' && handoff) void openBookBetslip(handoff.bookmaker, handoff.link);
+        else if (name === 'slip' && canSlip) onToggleSlip!();
+        else if (name === 'track' && canTrack) onToggleTrack!();
+      }}
       accessibilityHint="Opens the full breakdown, including recent form and matchup context."
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
@@ -252,6 +312,26 @@ export function PickCard({
               </Text>
             ) : null}
           </View>
+          {flagged ? (
+            // Read ONCE, in cardLabel ("Price check: this price looks off…"):
+            // the card is the accessible element, so a separately accessible
+            // chip inside it said it twice (Reviewer #848).
+            <View
+              style={[styles.labelChip, styles.priceCheckChip]}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="alert-circle-outline"
+                size={12}
+                color={colors.medInk}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.priceCheckText}>Price check</Text>
+            </View>
+          ) : null}
           {showSharp && sharp ? (
             <View style={styles.labelChip}>
               <SharpScorePill score={sharp.score} band={sharp.band} />
@@ -268,17 +348,21 @@ export function PickCard({
       </View>
 
       <View style={styles.heroRow}>
-        <View style={styles.heroEdgeBlock}>
-          <Text style={[styles.heroEdge, { color: edgeColor }]}>
-            {formatPctSigned(decisionEdge(pick))}
-          </Text>
-          <Text style={styles.heroEdgeLabel}>Edge</Text>
-        </View>
+        {demoteEdge ? (
+          <Text style={styles.edgeSecondary}>Edge {edgeText}</Text>
+        ) : (
+          <View style={styles.heroEdgeBlock}>
+            <Text style={[styles.heroEdge, { color: flagged ? colors.textSecondary : edgeColor }]}>
+              {edgeText}
+            </Text>
+            <Text style={styles.heroEdgeLabel}>Edge</Text>
+          </View>
+        )}
         {heroPrice ? (
           <View style={styles.heroPriceBlock}>
             <View style={heroPrice.kind === 'now' ? styles.pricePill : styles.heroPriceRow}>
               {heroPrice.kind !== 'decision' ? (
-                <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? 'Now' : 'Locked'}</Text>
+                <Text style={styles.nowTag}>{heroPrice.kind === 'now' ? cta.priceTag : 'Locked'}</Text>
               ) : null}
               <Text style={styles.heroPrice}>
                 {heroPrice.price == null
@@ -313,13 +397,13 @@ export function PickCard({
               <Ionicons
                 name={movementSummary.icon}
                 size={13}
-                color={movementSummary.color}
+                color={inkFor(movementSummary.color)}
                 style={styles.extraIcon}
               />
               <Text
                 style={[
                   styles.extraText,
-                  { color: movementSummary.color, fontWeight: font.weight.medium },
+                  { color: inkFor(movementSummary.color), fontWeight: font.weight.medium },
                 ]}
               >
                 {movementSummary.label}
@@ -331,14 +415,14 @@ export function PickCard({
               <Ionicons
                 name={contra.tone === 'sharp' ? 'shield-checkmark-outline' : 'people-outline'}
                 size={13}
-                color={contra.tone === 'sharp' ? colors.bet : colors.med}
+                color={contra.tone === 'sharp' ? colors.betInk : colors.medInk}
                 style={styles.extraIcon}
               />
               <Text
                 style={[
                   styles.extraText,
                   {
-                    color: contra.tone === 'sharp' ? colors.bet : colors.med,
+                    color: contra.tone === 'sharp' ? colors.betInk : colors.medInk,
                     fontWeight: font.weight.medium,
                   },
                 ]}
@@ -363,12 +447,12 @@ export function PickCard({
           {showClv && hero.has('clv') ? (
             <View style={styles.extraItem}>
               <Ionicons
-                name={pick.clv_pct! >= 0 ? 'trending-up-outline' : 'trending-down-outline'}
+                name={(clvRounded ?? 0) < 0 ? 'trending-down-outline' : 'trending-up-outline'}
                 size={13}
-                color={clvColor}
+                color={clvInk}
                 style={styles.extraIcon}
               />
-              <Text style={[styles.extraText, { color: clvColor, fontWeight: font.weight.medium }]}>
+              <Text style={[styles.extraText, { color: clvInk, fontWeight: font.weight.medium }]}>
                 CLV {formatClv(pick.clv_pct!)}
               </Text>
             </View>
@@ -400,7 +484,7 @@ export function PickCard({
               <Ionicons
                 name="medkit-outline"
                 size={13}
-                color={colors.med}
+                color={colors.medInk}
                 style={styles.extraIcon}
               />
               <Text style={[styles.extraText, styles.injuryText]} numberOfLines={1}>
@@ -411,9 +495,30 @@ export function PickCard({
         </View>
       ) : null}
 
-      {handoff || canTrack || canSlip ? (
+      {handoff || startedText || canTrack || canSlip ? (
         <View style={styles.actionsRow}>
-          {handoff ? (
+          {startedText ? (
+            // Not a button: the pick was made at this price, before the start.
+            // Spoken once, in cardLabel (startedSpoken), not again here
+            // (Reviewer #848).
+            <View
+              style={styles.startedLine}
+              accessibilityRole="text"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <Ionicons
+                name="lock-closed"
+                size={12}
+                color={colors.textSecondary}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+              <Text style={styles.startedText} numberOfLines={1}>
+                {startedText}
+              </Text>
+            </View>
+          ) : handoff ? (
             <Pressable
               onPress={() => {
                 void openBookBetslip(handoff.bookmaker, handoff.link);
@@ -453,7 +558,7 @@ export function PickCard({
           <Ionicons
             name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
             size={13}
-            color={timing.kind === 'live' ? colors.bet : colors.textTertiary}
+            color={timing.kind === 'live' ? colors.betInk : colors.textTertiary}
             style={styles.extraIcon}
           />
           <Text
@@ -461,7 +566,7 @@ export function PickCard({
               styles.extraText,
               styles.timingText,
               timing.kind === 'live'
-                ? { color: colors.bet, fontWeight: font.weight.medium }
+                ? { color: colors.betInk, fontWeight: font.weight.medium }
                 : null,
             ]}
           >
@@ -505,8 +610,7 @@ function summarizeMovement(
 
 // CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).
 function formatClv(clvPct: number): string {
-  const sign = clvPct > 0 ? '+' : '';
-  return `${sign}${clvPct.toFixed(1)}pp`;
+  return formatSigned(clvPct, 1, 'pp');
 }
 
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
@@ -516,13 +620,17 @@ function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
 }
 
 function tierFg(tier: 'HIGH' | 'MED' | 'LOW') {
-  if (tier === 'HIGH') return { color: colors.high };
-  if (tier === 'MED') return { color: colors.med };
-  return { color: colors.low };
+  // Inks, not the bright confidence hues (2.02:1 at 10pt; audit M6).
+  if (tier === 'HIGH') return { color: colors.betInk };
+  if (tier === 'MED') return { color: colors.medInk };
+  return { color: colors.textSecondary };
 }
 
 const styles = StyleSheet.create({
   card: {
+    // Declared tap floor (verify_a11y); the card is already ~150pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
     paddingVertical: spacing.sm,
@@ -609,6 +717,46 @@ const styles = StyleSheet.create({
   },
   heroEdgeBlock: {
     flexShrink: 0,
+  },
+  // H4: NONE / AVOID edge as a secondary line (13pt medium textSecondary),
+  // not the 20pt hero, always textSecondary (10.94:1) — no verdict colour.
+  edgeSecondary: {
+    flexShrink: 1,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+    fontVariant: ['tabular-nums'],
+    color: colors.textSecondary,
+  },
+  // H4 "Price check": medSoft fill, textPrimary 11pt semibold, medInk icon.
+  priceCheckChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    backgroundColor: colors.medSoft,
+  },
+  priceCheckText: {
+    fontSize: font.size.micro,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  // H5 "Game started · picked at …": 12pt semibold textSecondary, no fill —
+  // it must not read as a button.
+  startedLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 1,
+    minHeight: 36,
+  },
+  startedText: {
+    flexShrink: 1,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
   heroEdge: {
     fontSize: font.size.title3,
@@ -711,7 +859,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   injuryText: {
-    color: colors.med,
+    // medInk, not med (2.20:1): the medkit icon keeps the amber (audit H8).
+    color: colors.medInk,
     fontWeight: font.weight.medium,
   },
   actionsRow: {

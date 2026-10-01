@@ -35,12 +35,15 @@ import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
+import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
+  bookLabel,
   bookName,
   clvLockBook,
   displayQuoteForPick,
@@ -49,19 +52,24 @@ import {
   numOrNull,
   playerNameFromPickLabel,
   propMarketForModel,
+  storedQuoteBook,
   MODEL_BOOK,
 } from '@/lib/markets';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { errorText } from '@/lib/errors';
+import { roundsToZero } from '@/lib/tone';
+import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
+import { detailPresentation } from '@/lib/loadState';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function PickDetailScreen() {
   const route = useRoute<DetailRoute>();
+  const navigation = useNavigation<Nav>();
   const { pickId } = route.params;
 
   const [data, setData] = useState<EnrichedPick | null>(null);
@@ -82,7 +90,10 @@ export function PickDetailScreen() {
         if (mounted) setData(row);
       })
       .catch((e: unknown) => {
-        if (mounted) setError(errorText(e));
+        if (!mounted) return;
+        // A row that isn't there is not-found, never a Retry that can't work.
+        if (isNotFoundError(e)) setData(null);
+        else if (!isAbortError(e)) setError(errorText(e));
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -92,7 +103,11 @@ export function PickDetailScreen() {
     };
   }, [pickId, attempt]);
 
-  if (loading) {
+  // lib/loadState decides (and the verify script and the pytest RUN it): a
+  // missing pick_id is 'notFound' → "Open Picks", not "Couldn’t load" (L11).
+  const body = detailPresentation({ loading, error, found: data != null });
+
+  if (body === 'loading') {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <ActivityIndicator style={styles.loading} />
@@ -100,29 +115,34 @@ export function PickDetailScreen() {
     );
   }
 
-  if (error || !data) {
-    // A failed FETCH and a pick that is genuinely gone are different answers
-    // and need different words: one is worth retrying, the other never will be.
+  if (body === 'error') {
+    // A failed FETCH is worth retrying, and says why in plain words: the raw
+    // Supabase text never reaches the screen, and "check your connection" is
+    // only said when the phone is actually offline (usability audit M1).
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ErrorState
+          what="this pick"
+          error={error}
+          // No `retrying`: a Retry sets loading, and loading is the early-return
+          // spinner above, so this never renders mid-retry (Reviewer, #845).
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  if (body === 'notFound' || !data) {
+    // Genuinely gone: never worth retrying, so the one action is the board
+    // (usability audit L11: the copy said "Open Picks" with nothing to tap).
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <EmptyState
-          title={error ? 'Couldn’t load this pick' : 'This pick is no longer on the board'}
-          subtitle={
-            error
-              ? `${error} Check your connection and try again.`
-              : 'It may have settled, or the market was pulled. Open Picks to see what’s live now.'
-          }
+          title="This pick is no longer on the board"
+          subtitle="It may have settled, or the market was pulled. Open Picks to see what’s live now."
+          actionLabel="Open Picks"
+          onAction={() => navigation.navigate('Tabs', { screen: 'Picks' })}
         />
-        {error ? (
-          <Pressable
-            onPress={() => setAttempt((n) => n + 1)}
-            accessibilityRole="button"
-            accessibilityLabel="Try loading this pick again"
-            style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
-          >
-            <Text style={styles.retryText}>Try again</Text>
-          </Pressable>
-        ) : null}
       </SafeAreaView>
     );
   }
@@ -199,6 +219,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const over = ['final', 'ended'].includes(gameStatus(game, liveState).kind);
   const openHere = openForAction(pick) && (pick.result == null || !over);
   const canTrack = openHere;
+  // H5 (lib/pickCta.ts): once a PRE-GAME pick's game has started, no hand-off
+  // at the in-play price and no betslip — "Game started · picked at …" says
+  // what the pick was. Track stays. Live in-play signals are unchanged. The
+  // pick's game_time stands in for a missing games row (fails closed).
+  const cta = pickCtaFor(pick, game, liveState);
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
@@ -348,18 +373,44 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             books that cannot be bet. Not for live picks: they are DraftKings
             only, and the in-play rows are no longer fetched. */}
         {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
-          <View style={styles.linesCard}>
-            <BookLinesRow pick={pick} bookRows={bookRows} />
+          cta.handoff ? (
+            <View style={styles.linesCard}>
+              <BookLinesRow pick={pick} bookRows={bookRows} />
+            </View>
+          ) : null
+        ) : null}
+        {/* "Game started · picked at …" — not gated on paused: it states a fact
+            about the pick, and this PR adds no paused gating (the existing
+            !paused gates flip in the paused-on-All PR). */}
+        {pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (
+          <View
+            style={styles.startedCard}
+            accessibilityRole="text"
+            accessible
+            accessibilityLabel={gameStartedSpeech(decisionOdds(pick), bookName(storedQuoteBook(pick)))}
+          >
+            <Ionicons
+              name="lock-closed"
+              size={14}
+              color={colors.textSecondary}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+            <Text style={styles.startedText}>
+              {gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))}
+            </Text>
           </View>
         ) : null}
-        {live ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
+        {/* Every row of AllBooksCard opens that book's betslip, so after the
+            start it goes with the hand-off and the Slip (H5, Reviewer #847). */}
+        {live || !cta.handoff ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
 
         {/* A retired model's pick (reachable from a tracked bet on Performance)
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
         {hasPricedLine(pick) && openHere && !preview && !retired && !paused
-          && !voided ? (
+          && !voided && cta.slip ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
               <Text style={styles.trackTitle}>
@@ -488,6 +539,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         {playerTrends.loading || homeTrends.loading || awayTrends.loading ? (
           <ActivityIndicator style={styles.loadingTrend} />
         ) : null}
+        <BetslipBarSpacer />
       </ScrollView>
     </SafeAreaView>
   );
@@ -520,14 +572,17 @@ function ClvCard({ pick }: { pick: Pick }) {
   const hasLines = pick.scored_line != null && pick.closing_line != null;
 
   const beat = pick.clv_beat_close;
-  const flat = !lineMoved && pick.clv_pct === 0;
+  // Flat means the headline PRINTS zero ("0.0pp" at 1 dp), not that the raw
+  // value is exactly 0: a CLV of −0.03 is "Matched the close" in grey, never a
+  // red "0.0pp · Closed worse" (Reviewer, audit PR 1).
+  const flat = !lineMoved && roundsToZero(pick.clv_pct, 1);
   const valueColor = flat
     ? colors.textSecondary
     : beat == null
       ? colors.textSecondary
       : beat
-        ? colors.bet
-        : colors.avoid;
+        ? colors.betInk
+        : colors.avoidInk;
   const verdict = flat
     ? 'Matched the close'
     : beat == null
@@ -539,9 +594,9 @@ function ClvCard({ pick }: { pick: Pick }) {
   // The number moved → quote the move in points, the unit the bet is actually
   // in. It held → quote the price move in pp, as before.
   const headline = lineMoved
-    ? `${lineCLV > 0 ? '+' : ''}${lineCLV.toFixed(1)} pts`
+    ? formatSigned(lineCLV, 1, ' pts')
     : pick.clv_pct != null
-      ? `${pick.clv_pct > 0 ? '+' : ''}${pick.clv_pct.toFixed(1)}pp`
+      ? formatSigned(pick.clv_pct, 1, 'pp')
       : '—';
 
   const closeBook = (pick.clv_close_book || 'draftkings').toLowerCase();
@@ -721,7 +776,7 @@ const styles = StyleSheet.create({
   bestLine: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: colors.bet,
+    color: colors.betInk,
     marginTop: 2,
   },
   quoteProvenance: {
@@ -771,22 +826,6 @@ const styles = StyleSheet.create({
   loadingTrend: {
     marginTop: spacing.md,
   },
-  retry: {
-    alignSelf: 'center',
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.lg,
-    // 44pt minimum touch target (UX_REVIEW §4).
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  retryPressed: {
-    opacity: 0.6,
-  },
-  retryText: {
-    color: colors.tint,
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-  },
   viewStatsBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -803,6 +842,26 @@ const styles = StyleSheet.create({
   },
   // The Betting lines row (BookLinesRow) on its own card — the row carries
   // its own top margin, so the card only pads the sides and bottom.
+  // H5: the non-interactive "Game started · picked at …" line in the hand-off's
+  // place — textSecondary, no fill, so it never reads as a button.
+  startedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  startedText: {
+    flexShrink: 1,
+    color: colors.textSecondary,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    fontVariant: ['tabular-nums'],
+  },
   linesCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.lg,

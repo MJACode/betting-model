@@ -384,7 +384,9 @@ check(
   check('PickCard titles through splitPickTitle', src.includes('splitPickTitle'));
   check(
     'PickCard a11y still announces the stored pick_label',
-    /accessibilityLabel=\{\[[\s\S]*?pick\.pick_label/.test(src),
+    // PR 4 (M8) builds the label as `cardLabel` so it can carry status, stake
+    // and timing too; the stored pick_label is still in it.
+    /const cardLabel = \[[\s\S]*?pick\.pick_label/.test(src) && /accessibilityLabel=\{cardLabel\}/.test(src),
   );
   check(
     'PickCard does not write pick_label',

@@ -92,12 +92,17 @@ export function SportsbookPickerSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Close"
-      >
+      <View style={styles.backdrop}>
+        {/* Tap-outside-to-close is a SIBLING behind the sheet, not its
+            parent: an accessible Pressable groups everything inside it into
+            one VoiceOver element, so a backdrop that wrapped the sheet hid the
+            sheet's rows and buttons from VoiceOver (audit PR 4). */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close sportsbook picker"
+        />
         {/* accessible={false}: an accessible Pressable groups its children
             into ONE VoiceOver element, which would leave the book rows, the
             Close button and Apply unreachable. Same fix as StatsLineSheet. */}
@@ -105,7 +110,12 @@ export function SportsbookPickerSheet({
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Your sportsbooks</Text>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityLabel="Close">
+            <Pressable
+              accessibilityRole="button"
+              onPress={onClose}
+              hitSlop={12}
+              accessibilityLabel="Close sportsbook picker"
+            >
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -124,7 +134,7 @@ export function SportsbookPickerSheet({
           >
             <Text style={styles.selectAllText}>{allOn ? 'Keep DraftKings only' : 'Select all'}</Text>
             {allOn ? (
-              <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
+              <Ionicons name="checkmark-circle" size={22} color={colors.tint} />
             ) : (
               <View style={styles.emptyCircleSm} />
             )}
@@ -187,7 +197,7 @@ export function SportsbookPickerSheet({
                     // selected, and greying the one book that is definitively
                     // on made it look the most off (UX review). The lock icon
                     // beside the sub-line carries the state instead.
-                    <Ionicons name="checkmark-circle" size={24} color={colors.bet} />
+                    <Ionicons name="checkmark-circle" size={24} color={colors.tint} />
                   ) : (
                     <View style={styles.emptyCircle} />
                   )}
@@ -208,7 +218,7 @@ export function SportsbookPickerSheet({
             <Text style={styles.applyText}>Apply</Text>
           </Pressable>
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -267,7 +277,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   rowActive: {
-    borderColor: colors.bet,
+    borderColor: colors.tint,
   },
   badge: {
     width: 44,
@@ -286,7 +296,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   badgeTextDk: {
-    color: '#000',
+    color: colors.textPrimary,
   },
   rowBody: {
     flex: 1,
@@ -332,9 +342,11 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
+  // tint + textInverse, as FilterSheet's "Show N picks" (18.6:1). Selected
+  // and confirm are tint, never green; white on `bet` was 2.22:1 (audit H6).
   applyBtn: {
     marginTop: spacing.md,
-    backgroundColor: colors.bet,
+    backgroundColor: colors.tint,
     borderRadius: radii.pill,
     paddingVertical: 14,
     alignItems: 'center',
@@ -345,7 +357,7 @@ const styles = StyleSheet.create({
   applyText: {
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
-    color: '#fff',
+    color: colors.textInverse,
   },
   pressed: {
     opacity: 0.7,

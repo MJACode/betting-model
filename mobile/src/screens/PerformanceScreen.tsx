@@ -23,10 +23,11 @@ import { ManualBetModal } from '@/components/ManualBetModal';
 import { formatAmerican, formatCurrency, formatCurrencySigned } from '@/lib/format';
 import type { SyncedBet } from '@/lib/sharpsports';
 import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
-import { colors, font, radii, spacing } from '@/lib/theme';
+import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 import { decisionOdds } from '@/lib/decisionPrice';
 import { bookLabelShort, storedQuoteBook } from '@/lib/markets';
+import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -127,6 +128,8 @@ export function PerformanceScreen() {
 
           <Pressable
             onPress={() => navigation.navigate('TrackRecord')}
+            accessibilityRole="button"
+            accessibilityLabel="See the model’s verified track record"
             style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
           >
             <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
@@ -136,6 +139,7 @@ export function PerformanceScreen() {
 
           {manualCard}
           {trackedCard}
+          <BetslipBarSpacer />
         </ScrollView>
         {addModal}
       </SafeAreaView>
@@ -145,8 +149,8 @@ export function PerformanceScreen() {
   const bookLabel = formatBookList(
     Array.from(new Set(accounts.map((a) => a.book).filter(Boolean) as string[])),
   );
-  const profitColor =
-    summary.net_profit > 0 ? colors.bet : summary.net_profit < 0 ? colors.avoid : colors.textPrimary;
+  // Ink, not the bright bet/avoid hues (2.22 / 3.55:1 as text; audit H2).
+  const profitColor = pnlColor(summary.net_profit, 2);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -172,6 +176,8 @@ export function PerformanceScreen() {
 
         <Pressable
           onPress={() => navigation.navigate('TrackRecord')}
+          accessibilityRole="button"
+          accessibilityLabel="See the model’s verified track record"
           style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
         >
           <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
@@ -182,9 +188,11 @@ export function PerformanceScreen() {
         {needsReconnect ? (
           <Pressable
             onPress={() => navigation.navigate('ConnectSportsbook')}
+            accessibilityRole="button"
+            accessibilityLabel="A linked account needs reconnecting. Tap to fix."
             style={({ pressed }) => [styles.reconnect, pressed && styles.btnPressed]}
           >
-            <Ionicons name="alert-circle-outline" size={16} color={colors.med} />
+            <Ionicons name="alert-circle-outline" size={16} color={colors.medInk} />
             <Text style={styles.reconnectText}>
               A linked account needs reconnecting — tap to fix.
             </Text>
@@ -224,10 +232,13 @@ export function PerformanceScreen() {
 
         <Pressable
           onPress={() => navigation.navigate('ConnectSportsbook')}
+          accessibilityRole="button"
+          accessibilityLabel="Manage connections"
           style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
         >
           <Text style={styles.secondaryBtnText}>Manage connections</Text>
         </Pressable>
+        <BetslipBarSpacer />
       </ScrollView>
       {addModal}
     </SafeAreaView>
@@ -253,7 +264,14 @@ function ManualBetsCard({
       <View style={styles.manualHeader}>
         <Text style={styles.manualTitle}>Your bets</Text>
         {bets.length > 0 ? (
-          <Pressable onPress={onAdd} hitSlop={8} style={styles.addManualBtn}>
+          <Pressable
+            onPress={onAdd}
+            // ~18pt text link in the card header: 13 + 18 + 13 = 44pt.
+            hitSlop={{ top: 13, bottom: 13, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Add a bet"
+            style={styles.addManualBtn}
+          >
             <Ionicons name="add" size={16} color={colors.tint} />
             <Text style={styles.addManualText}>Add a bet</Text>
           </Pressable>
@@ -268,6 +286,8 @@ function ManualBetsCard({
           </Text>
           <Pressable
             onPress={onAdd}
+            accessibilityRole="button"
+            accessibilityLabel="Add a bet"
             style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
           >
             <Text style={styles.primaryBtnText}>Add a bet</Text>
@@ -280,7 +300,22 @@ function ManualBetsCard({
             {settled.length < bets.length ? ` · ${bets.length - settled.length} open` : ''}
           </Text>
           {bets.map((b) => (
-            <Pressable key={b.id} onPress={() => onRowPress(b)} style={styles.manualRow}>
+            <Pressable
+              key={b.id}
+              onPress={() => onRowPress(b)}
+              accessibilityRole="button"
+              accessibilityLabel={[
+                b.description,
+                b.book,
+                `${formatCurrency(b.stake)} risk`,
+                b.odds_american != null ? formatAmerican(b.odds_american) : null,
+                b.result === 'open' ? 'Open' : formatCurrencySigned(b.profit),
+              ]
+                .filter(Boolean)
+                .join(', ')}
+              accessibilityHint="Settle or remove this bet"
+              style={styles.manualRow}
+            >
               <View style={{ flex: 1 }}>
                 <Text style={styles.manualDesc} numberOfLines={1}>
                   {b.description}
@@ -309,9 +344,7 @@ function ManualBetsCard({
 
 function manualResultColor(result: ManualBetResult, profit: number): string {
   if (result === 'open') return colors.textSecondary;
-  if (profit > 0) return colors.bet;
-  if (profit < 0) return colors.avoid;
-  return colors.textSecondary;
+  return pnlColor(profit, 2);
 }
 
 const TRACKED_ROW_CAP = 40;
@@ -368,13 +401,19 @@ function TrackedBetsCard({
               : 'Nothing settled yet'}
             {summary.open > 0 ? ` · ${summary.open} open` : ''}
           </Text>
-          <View style={styles.stakePills}>
+          <View style={styles.stakePills} accessibilityRole="radiogroup">
             {STAKE_MODES.map((m) => {
               const active = stakeMode === m.value;
               return (
                 <Pressable
                   key={m.value}
                   onPress={() => onStakeModeChange(m.value)}
+                  // ~28pt pill: 8 + 28 + 8 = 44pt; a stake basis is one-of-two,
+                  // so radio + checked, not a bare button (audit M10).
+                  hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: active, selected: active }}
+                  accessibilityLabel={`Stake basis: ${m.label}`}
                   style={[styles.stakePill, active && styles.stakePillActive]}
                 >
                   <Text style={[styles.stakePillText, active && styles.stakePillTextActive]}>
@@ -390,6 +429,31 @@ function TrackedBetsCard({
               key={row.pick.pick_id}
               onPress={() => onRowPress(row)}
               onLongPress={() => onRowLongPress(row)}
+              accessibilityRole="button"
+              accessibilityLabel={[
+                row.pick.pick_label,
+                formatGameDate(row.pick.game_date),
+                decisionOdds(row.pick) != null
+                  ? `${bookLabelShort(storedQuoteBook(row.pick))} ${formatAmerican(decisionOdds(row.pick))}`
+                  : null,
+                stakeMode === 'custom' ? `${formatCurrency(row.stake)} stake` : null,
+                trackedResultLabel(row),
+              ]
+                .filter(Boolean)
+                .join(', ')}
+              accessibilityHint={row.pick.pick_id > 0 ? 'Opens the pick' : undefined}
+              // The row groups its children for VoiceOver, so the nested stake
+              // chip and the long-press Untrack are offered as actions too —
+              // long-press was the only route to Untrack (audit M10; the
+              // visible Untrack + Undo toast is PR 5).
+              accessibilityActions={[
+                { name: 'untrack', label: 'Untrack' },
+                ...(stakeMode === 'custom' ? [{ name: 'editStake', label: 'Edit stake' }] : []),
+              ]}
+              onAccessibilityAction={(e) => {
+                if (e.nativeEvent.actionName === 'untrack') onRowLongPress(row);
+                else if (e.nativeEvent.actionName === 'editStake') onEditStake(row);
+              }}
               style={styles.manualRow}
             >
               <View style={{ flex: 1 }}>
@@ -409,7 +473,11 @@ function TrackedBetsCard({
                 {stakeMode === 'custom' ? (
                   <Pressable
                     onPress={() => onEditStake(row)}
-                    hitSlop={6}
+                    // ~20pt chip: 12 + 20 + 12 = 44pt. Slop, not size, so the
+                    // row doesn't grow (audit M10: was an 11pt pencil, slop 6).
+                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit stake, ${formatCurrency(row.stake)}`}
                     style={styles.stakeChip}
                   >
                     <Ionicons name="pencil-outline" size={11} color={colors.tint} />
@@ -448,8 +516,8 @@ function trackedResultLabel(row: TrackedBetRow): string {
 }
 
 function trackedResultColor(row: TrackedBetRow): string {
-  if (row.status === 'won') return colors.bet;
-  if (row.status === 'lost') return colors.avoid;
+  if (row.status === 'won') return colors.betInk;
+  if (row.status === 'lost') return colors.avoidInk;
   return colors.textSecondary;
 }
 
@@ -487,12 +555,22 @@ function StakeEditModal({
   return (
     <Modal visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.stakeModalBackdrop}>
-        <View style={styles.stakeModalCard}>
+        {/* Tap outside the card to dismiss (audit M10). A sibling behind the
+            card, not its parent, so VoiceOver still reaches the card's input
+            and buttons one by one. */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close stake editor"
+        />
+        <View style={styles.stakeModalCard} accessibilityViewIsModal>
           <Text style={styles.stakeModalTitle}>Stake for this bet</Text>
           <Text style={styles.stakeModalLabel} numberOfLines={2}>
             {row?.pick.pick_label ?? ''}
           </Text>
           <TextInput
+            accessibilityLabel="Stake in dollars"
             style={styles.stakeModalInput}
             value={amount}
             onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
@@ -502,14 +580,19 @@ function StakeEditModal({
             placeholderTextColor={colors.textTertiary}
           />
           <View style={styles.stakeModalActions}>
-            <Pressable onPress={() => onSave(null)} hitSlop={6}>
+            <Pressable
+              onPress={() => onSave(null)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Reset to $100"
+            >
               <Text style={styles.stakeModalReset}>Reset to $100</Text>
             </Pressable>
             <View style={styles.stakeModalRight}>
-              <Pressable onPress={onClose} hitSlop={6}>
+              <Pressable onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={styles.stakeModalCancel}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={save} hitSlop={6}>
+              <Pressable onPress={save} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Save stake">
                 <Text style={styles.stakeModalSave}>Save</Text>
               </Pressable>
             </View>
@@ -532,13 +615,7 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
 function BetRow({ bet }: { bet: SyncedBet }) {
   const settled = bet.settled;
   const profit = Number(bet.profit ?? 0);
-  const resultColor = !settled
-    ? colors.textSecondary
-    : profit > 0
-      ? colors.bet
-      : profit < 0
-        ? colors.avoid
-        : colors.textSecondary;
+  const resultColor = !settled ? colors.textSecondary : pnlColor(profit, 2);
   const right = settled
     ? formatCurrencySigned(profit)
     : bet.stake != null
@@ -696,16 +773,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: colors.medSoft,
     borderRadius: radii.md,
     padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
+  // medInk 4.99:1 on medSoft; `med` was 1.97:1. The icon keeps amber (M24).
   reconnectText: {
     flex: 1,
     fontSize: font.size.footnote,
-    color: colors.med,
+    color: colors.medInk,
     fontWeight: font.weight.medium,
   },
   betRow: {
@@ -770,6 +848,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   manualRow: {
+    // Declared tap floor (verify_a11y); the two-line row is already ~56pt, so this
+    // changes nothing on screen.
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.sm,

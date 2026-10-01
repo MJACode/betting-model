@@ -47,6 +47,8 @@ export function SignalLockCard({
         </Text>
 
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Start ${TRIAL_DAYS}-day free trial`}
           onPress={onPress}
           style={({ pressed }) => [styles.cta, pressed && styles.pressed]}
         >

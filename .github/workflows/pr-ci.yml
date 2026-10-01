@@ -40,6 +40,13 @@ jobs:
       - name: Mobile thresholds drift check
         run: python -m scripts.generate_mobile_thresholds --check
 
+      # Offline NFL wiring checks (no DB, no API credits): the #838 lock
+      # checks allow only an unsettled-NONE delete in the publishers. --ci:
+      # the DATA section (schedule coverage, odds cache) warns instead of
+      # failing, so the step doesn't go red when the committed schedule ends.
+      - name: NFL preflight
+        run: python -m scripts.nfl_preflight --ci
+
       # test_discord_publish_sync runs the app predicate with
       # node --experimental-strip-types. The runner image's node is not
       # that, and a missing flag fails the subset.
@@ -60,6 +67,7 @@ jobs:
             tests/test_mlb_retrain_freeze.py \
             tests/test_retired_models.py \
             tests/test_mobile_threshold_parity.py \
+            tests/test_mobile_bankroll.py \
             tests/test_nfl_prop_thresholds.py \
             tests/test_pick_lock_is_on_picks.py \
             tests/test_pick_lock_survives_settlement.py \
@@ -76,6 +84,7 @@ jobs:
             tests/test_cfbd_snapshot_leakage.py \
             tests/test_paused_and_no_signal_rows.py \
             tests/test_paused_keeps_real_verdict.py \
+            tests/test_nfl_scored_rows.py \
             tests/test_nfl_rule_2026_track.py \
             tests/test_game_scorer_spares_nfl_props.py \
             tests/test_nfl_prop_unstarted_clear.py \
@@ -93,7 +102,12 @@ jobs:
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
             tests/test_mobile_betslip_combine.py \
+            tests/test_mobile_contrast_tokens.py \
+            tests/test_mobile_error_states.py \
+            tests/test_mobile_pick_cta.py \
+            tests/test_mobile_a11y.py \
             tests/test_mobile_nhl_lookahead.py \
             tests/test_discord_publish_sync.py \
             tests/test_publish_key_identity.py \
-            tests/test_void_picks.py
+            tests/test_void_picks.py \
+            tests/test_mobile_stat_segments.py

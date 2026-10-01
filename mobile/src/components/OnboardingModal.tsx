@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BrandMark } from '@/components/BrandMark';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { pageLabel } from '@/lib/a11y';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -55,7 +56,12 @@ export function OnboardingModal({ visible, onDone }: { visible: boolean; onDone:
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.skipRow}>
-          <Pressable onPress={onDone} hitSlop={12}>
+          <Pressable
+            onPress={onDone}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Skip intro"
+          >
             <Text style={styles.skip}>Skip</Text>
           </Pressable>
         </View>
@@ -75,13 +81,22 @@ export function OnboardingModal({ visible, onDone }: { visible: boolean; onDone:
         </View>
 
         <View style={styles.footer}>
-          <View style={styles.dots}>
+          {/* One spoken element for the dots, "Page 2 of 4" — four bare
+              circles said nothing to VoiceOver (audit M19). */}
+          <View
+            style={styles.dots}
+            accessible
+            accessibilityRole="text"
+            accessibilityLabel={pageLabel(step, SLIDES.length)}
+          >
             {SLIDES.map((_, i) => (
               <View key={i} style={[styles.dot, i === step && styles.dotActive]} />
             ))}
           </View>
           <Pressable
             onPress={next}
+            accessibilityRole="button"
+            accessibilityLabel={last ? 'Get started' : `Next, ${pageLabel(step + 1, SLIDES.length).toLowerCase()}`}
             style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
           >
             <Text style={styles.btnText}>{last ? 'Get started' : 'Next'}</Text>
