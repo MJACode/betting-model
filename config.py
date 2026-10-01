@@ -3580,8 +3580,9 @@ PROP_MARKETS_NFL = [
 # NHL player prop markets, COLLECTED and not yet modelled (mike, 2026-10-01:
 # an opening and a closing price for every game). The same six the history
 # purchase bought (data/ingestors/nhl_prop_odds_history.py), so the live series
-# continues the three priced seasons docs/nhl_market_lab.md was graded on. No
-# NHL prop model exists; a row here is research until one clears its own grid.
+# continues the three priced seasons docs/nhl_market_lab.md was graded on.
+# Blocked shots has a model (nhl_prop_blocked_shots, same day); the other five
+# are research until each clears its own grid.
 PROP_MARKETS_NHL = [
     "player_shots_on_goal",
     "player_points",
