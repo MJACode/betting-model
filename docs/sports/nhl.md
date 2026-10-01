@@ -52,7 +52,8 @@
 >   probable starters carried the league-average line.
 > - `nhl_over_under` and `nhl_puckline` are still untrained; their stated
 >   blocker (no historical lines) ended 2026-09-21.
-> - The odds feed read 0 credits from 2026-09-26 to 09-30. No NHL price was
+> - The month's odds-feed allowance ran out on 2026-09-26 and reset on 10-01
+>   (mike: it refreshes every month; nothing to diagnose). No NHL price was
 >   stored between 09-26 22:59Z and 10-01 00:02Z, so opening night has no
 >   closing line and "CAR ML" was graded against a three-day-old price.
 

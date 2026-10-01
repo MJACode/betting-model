@@ -131,14 +131,6 @@ intervals span zero below 0.06 and the closing-line value is barely above zero
 decided at the CLOSE, and a forward paper track now that Pinnacle is in the
 live NHL fetch.
 
-## [ ] The odds feed read 0 credits from 2026-09-26 to 09-30 — not diagnosed
-
-`odds_api_quota`: 1,055,670 remaining on 09-19, 0 at each day's last reading
-from 09-26 to 09-30, reset 10-01. No NHL price stored between 09-26 22:59Z and
-10-01 00:02Z; the 15 NFL games of 09-27 / 09-28 hold no price after 09-26
-23:05Z. What spent the last 542,474 credits between 09-21 and 09-26, and what
-the picks written in the gap were priced on, has not been looked at.
-
 ## [ ] `nhl_over_under` and `nhl_puckline` have never been trained
 
 Blocked since 2026-06 on "no historical lines". DraftKings and Pinnacle game
