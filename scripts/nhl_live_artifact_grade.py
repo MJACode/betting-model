@@ -15,7 +15,8 @@ runs today, and on the model's own probability with the correction off.
 
 PRICES. Moneyline: `odds.source = 'odds_api_historical'`, the bet decided at
 each book's FIRST pre-game quote; closing-line value is Pinnacle's LAST
-pre-game no-vig probability minus DraftKings' no-vig probability at the bet.
+pre-game no-vig probability minus Pinnacle's FIRST, on the side taken (round
+three's measurement; the blind rows carry it too, as the bar).
 Regulation 3-way: the prop-history purchase, one pre-game snapshot per game,
 so no closing-line value. "best" is the best price among the books a member
 can bet (`config.BEST_LINE_BOOKMAKERS`).
@@ -179,7 +180,7 @@ def moneyline(conn):
         if b.empty:
             return b
         b["profit"] = np.where(b.won, b.price.map(win_per_unit), -1.0)
-        b["clv"] = b.pin_close - b.dk_nv
+        b["clv"] = b.pin_close - b.pin_open          # round three's measurement, same book both ends
         return b
 
     def line(name, b, at):
@@ -227,12 +228,14 @@ def moneyline(conn):
     for nm, fn in (("always home", lambda r: ("home", r.dk_home)), ("always away", lambda r: ("away", r.dk_away)),
                    ("always favourite", lambda r: ("home", r.dk_home) if r.dk_home < r.dk_away else ("away", r.dk_away)),
                    ("always underdog", lambda r: ("home", r.dk_home) if r.dk_home > r.dk_away else ("away", r.dk_away))):
-        pr = []
+        pr, clv = [], []
         for r in df.itertuples():
             side, price = fn(r)
             won = (r.hs > r.as_) if side == "home" else (r.as_ > r.hs)
             pr.append(win_per_unit(price) if won else -1.0)
-        rows.append({"blind": nm, **summarise(np.array(pr))})
+            move = r.pin_close_home - r.pin_open_home
+            clv.append(move if side == "home" else -move)
+        rows.append({"blind": nm, **summarise(np.array(pr), np.array(clv))})
     print("\n### Blind baselines, same games, DraftKings price\n")
     print(pd.DataFrame(rows).to_string(index=False))
 

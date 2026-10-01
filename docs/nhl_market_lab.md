@@ -981,9 +981,11 @@ other models' records because these two have none), then the 0.55 / 0.05 and
 at DraftKings. **On the model's own probability** is the same with the
 correction off. What this does not reproduce: production scores a game when its
 line opens, days ahead, and locks it; this decides at the game-day quote.
+`clv_pts` / `beat_close` are Pinnacle's last pre-game no-vig probability minus
+its first, on the side taken; the blind rows carry the same two columns as the
+bar.
 
 ```
-
 ===== nhl_moneyline 20260920_131606 on 2025-26: 1,352 games with a DraftKings pre-game price (1,352 with a Pinnacle close) =====
 log loss: model 0.6884 | DraftKings no-vig 0.6836 | home rate 0.6923   AUC: model 0.5579 | DraftKings 0.5798
 model home-win probability quantiles: {0.01: 0.359, 0.1: 0.424, 0.25: 0.471, 0.5: 0.535, 0.75: 0.593, 0.9: 0.644, 0.99: 0.722}; share >= 0.70: 0.019; share within 0.485..0.515: 0.106; share within 0.435..0.565 (the band the correction flips): 0.518
@@ -991,38 +993,38 @@ model home-win probability quantiles: {0.01: 0.359, 0.1: 0.424, 0.25: 0.471, 0.5
 ### The production rule on the holdout season
 
                                                  rule priced at  bets  units   roi           ci  clv_pts  beat_close  early  late  dog share  avg p  win%
-AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)        dk    30    6.3 20.97 -20.3..+62.2     0.97        66.7   18.5  23.4       1.00  0.492  53.3
-AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)      best    41    5.0 12.22 -23.5..+47.9     0.06        61.0   13.2  11.2       1.00  0.500  48.8
+AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)        dk    30    6.3 20.97 -20.3..+62.2     0.54        60.0   18.5  23.4       1.00  0.492  53.3
+AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)      best    41    5.0 12.22 -23.5..+47.9     0.23        53.7   13.2  11.2       1.00  0.500  48.8
              same cuts on the model's OWN probability        dk    15    NaN   NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
-             same cuts on the model's OWN probability      best    25    2.6 10.37 -32.2..+52.9    -0.85        52.0   22.9  -1.2       0.92  0.592  52.0
+             same cuts on the model's OWN probability      best    25    2.6 10.37 -32.2..+52.9    -0.34        56.0   22.9  -1.2       0.92  0.592  52.0
 
 of the 30 as-it-runs bets at DraftKings: 30 are on a side the model itself has under 50% ({'bets': 30, 'units': 6.3, 'roi': 20.97, 'ci': '-20.3..+62.2'}); 0 on a side it has at 50%+ ({})
 
 ### Neighbourhood: bet any side whose raw model probability beats DraftKings' implied by the cut (no other gate)
 
  edge>=  bets  units    roi           ci  clv_pts  beat_close  early  late  dog share  avg p  win%
-   0.02   587   -3.0  -0.51   -9.7..+8.7     0.72        61.3    0.0  -1.1       0.67  0.513  45.0
-   0.04   341   -1.0  -0.30 -12.6..+12.1     0.84        65.1   -9.1   8.4       0.74  0.518  44.3
-   0.05   256  -12.7  -4.98  -19.5..+9.5     0.88        66.4   -6.7  -3.3       0.78  0.516  41.0
-   0.06   188   -7.8  -4.13 -21.0..+12.7     1.19        68.1   -6.8  -1.4       0.81  0.517  41.5
-   0.08    80   -2.3  -2.83 -28.9..+23.2     1.38        71.2   -0.9  -4.8       0.90  0.524  41.2
-   0.10    31   -6.0 -19.48 -62.2..+23.2     1.74        71.0   18.7 -55.3       0.90  0.534  32.3
+   0.02   587   -3.0  -0.51   -9.7..+8.7     0.34        55.2    0.0  -1.1       0.67  0.513  45.0
+   0.04   341   -1.0  -0.30 -12.6..+12.1     0.40        57.5   -9.1   8.4       0.74  0.518  44.3
+   0.05   256  -12.7  -4.98  -19.5..+9.5     0.48        59.8   -6.7  -3.3       0.78  0.516  41.0
+   0.06   188   -7.8  -4.13 -21.0..+12.7     0.67        66.0   -6.8  -1.4       0.81  0.517  41.5
+   0.08    80   -2.3  -2.83 -28.9..+23.2     0.79        72.5   -0.9  -4.8       0.90  0.524  41.2
+   0.10    31   -6.0 -19.48 -62.2..+23.2     0.89        77.4   18.7 -55.3       0.90  0.534  32.3
    0.12    12    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
    0.15     2    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
 
 ### Probability floor x edge, raw probability, at DraftKings
 
  prob>=  edge>=  bets  units    roi           ci  clv_pts  beat_close  early  late  dog share  avg p  win%
-   0.50    0.03   258  -30.1 -11.67  -23.6..+0.2     0.78        62.4  -19.8  -3.5       0.47  0.574  45.7
-   0.50    0.05   150  -25.4 -16.93  -33.0..-0.9     0.74        67.3  -16.1 -17.8       0.63  0.569  41.3
-   0.50    0.08    52   -4.6  -8.89 -38.2..+20.4     1.13        73.1   -6.5 -11.2       0.85  0.562  42.3
-   0.55    0.03   159  -14.6  -9.21  -23.6..+5.2     0.41        57.9  -13.0  -5.4       0.18  0.604  49.7
-   0.55    0.05    84   -6.0  -7.18 -27.8..+13.4     0.30        63.1  -11.7  -2.6       0.33  0.604  48.8
-   0.55    0.08    31   -2.3  -7.33 -43.9..+29.3     0.59        61.3   -3.1 -11.3       0.74  0.589  45.2
-   0.60    0.03    67   -2.2  -3.22 -23.8..+17.4     0.03        53.7  -15.9   9.1       0.04  0.643  56.7
-   0.60    0.05    37   -4.8 -12.90 -42.3..+16.5    -0.19        59.5  -18.2  -7.9       0.08  0.639  48.6
+   0.50    0.03   258  -30.1 -11.67  -23.6..+0.2     0.31        52.7  -19.8  -3.5       0.47  0.574  45.7
+   0.50    0.05   150  -25.4 -16.93  -33.0..-0.9     0.34        56.7  -16.1 -17.8       0.63  0.569  41.3
+   0.50    0.08    52   -4.6  -8.89 -38.2..+20.4     0.58        67.3   -6.5 -11.2       0.85  0.562  42.3
+   0.55    0.03   159  -14.6  -9.21  -23.6..+5.2     0.10        49.7  -13.0  -5.4       0.18  0.604  49.7
+   0.55    0.05    84   -6.0  -7.18 -27.8..+13.4     0.18        54.8  -11.7  -2.6       0.33  0.604  48.8
+   0.55    0.08    31   -2.3  -7.33 -43.9..+29.3     0.45        67.7   -3.1 -11.3       0.74  0.589  45.2
+   0.60    0.03    67   -2.2  -3.22 -23.8..+17.4    -0.12        46.3  -15.9   9.1       0.04  0.643  56.7
+   0.60    0.05    37   -4.8 -12.90 -42.3..+16.5    -0.16        51.4  -18.2  -7.9       0.08  0.639  48.6
    0.60    0.08    11    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
-   0.65    0.03    27   -0.2  -0.81 -30.1..+28.5     0.28        55.6  -25.9  22.5       0.00  0.680  63.0
+   0.65    0.03    27   -0.2  -0.81 -30.1..+28.5    -0.17        37.0  -25.9  22.5       0.00  0.680  63.0
    0.65    0.05    12    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
    0.65    0.08     2    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
    0.70    0.03     4    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
@@ -1031,11 +1033,11 @@ of the 30 as-it-runs bets at DraftKings: 30 are on a side the model itself has u
 
 ### Blind baselines, same games, DraftKings price
 
-           blind  bets  units   roi          ci
-     always home  1352  -97.3 -7.19 -12.1..-2.3
-     always away  1352    9.0  0.67  -5.1..+6.5
-always favourite  1352 -121.0 -8.95 -13.4..-4.5
- always underdog  1352   38.5  2.85  -3.3..+9.0
+           blind  bets  units   roi          ci  clv_pts  beat_close
+     always home  1352  -97.3 -7.19 -12.1..-2.3    -0.39        40.8
+     always away  1352    9.0  0.67  -5.1..+6.5     0.39        57.5
+always favourite  1352 -121.0 -8.95 -13.4..-4.5    -0.19        46.5
+ always underdog  1352   38.5  2.85  -3.3..+9.0     0.21        52.7
 
 ===== nhl_moneyline_regulation 20260920_133544 on 2025-26: 1,352 games with a DraftKings 3-way price =====
 log loss: model 1.0772 | DraftKings no-vig 1.0727 | this season's own class rates 1.0825
@@ -1045,9 +1047,9 @@ after the correction the three probabilities sum to 1.144 on average (min 1.023,
 ### The production rule on the holdout season
 
                                               rule  bets  units    roi           ci  early  late  games  avg raw p home/draw/away
-                     AS IT RUNS TODAY @ DraftKings   300  -39.2 -13.08  -27.4..+1.2  -19.7  -6.5    300      0.415    0.43/0/0.57
+                     AS IT RUNS TODAY @ DraftKings   300  -39.3 -13.08  -27.4..+1.2  -19.7  -6.5    300      0.415    0.43/0/0.57
              AS IT RUNS TODAY @ best bettable book   447  -20.5  -4.59  -16.7..+7.5   -5.5  -3.7    447      0.415    0.49/0/0.51
-   same cuts, model's OWN probability @ DraftKings    21   -2.3 -11.19 -66.5..+44.1  -50.0  24.1     21      0.468    0.62/0/0.38
+   same cuts, model's OWN probability @ DraftKings    21   -2.4 -11.19 -66.5..+44.1  -50.0  24.1     21      0.468    0.62/0/0.38
 same cuts, model's OWN probability @ best bettable    47   -6.0 -12.66 -49.7..+24.4  -19.1  -6.5     47      0.467    0.74/0/0.26
 
 ### Neighbourhood: bet any outcome whose raw model EV at DraftKings clears the cut
@@ -1095,9 +1097,15 @@ band
   every probability-floor row is negative (-0.8% to -16.9%). The regulation
   model loses at every EV cut with a usable sample (-4.7% to -20.3%). The one
   interval that excludes zero is a losing one. **No cut clears.**
-- **The moneyline bets still beat the close** (61-71% of the time, +0.7 to +1.7
-  points), the same shape round three found in the logistic model: it reads
-  something the opening price lacks and it is not enough to beat the price.
+- **Closing-line value is positive, and at the loose cuts it is no better than
+  betting blind.** Measured as round three measured it (Pinnacle's last
+  pre-game no-vig probability minus its first, on the side taken), the edge
+  grid beats the close 55-60% of the time at cuts 0.02-0.05 (+0.3 to +0.5
+  points). Blindly taking the away side beat it 57.5% (+0.39) on the same
+  games and blind underdogs 52.7% (+0.21): the line moved toward road teams
+  this season, and two thirds or more of these bets are underdogs. Only at
+  0.06 and above does the grid clear those bars (66-77%, +0.7 to +0.9), on
+  188 bets or fewer. Not evidence the model reads the market.
 - **As it runs today the moneyline model bets only sides it believes are
   underdogs.** All 30 bets at DraftKings are on a side the model itself has
   under 50%, and all 41 at the best book are at plus money. The mechanism is
