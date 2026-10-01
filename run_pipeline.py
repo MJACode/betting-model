@@ -294,6 +294,13 @@ def _minutes_since(sql: str, params: tuple = ()) -> float | None:
         try:
             row = conn.execute(sql, params).fetchone()
         finally:
+            # A statement_timeout aborts the transaction. Close without
+            # ROLLBACK returns that backend to the pooler still aborted, and
+            # the next client fails with "current transaction is aborted".
+            try:
+                conn.rollback()
+            except Exception:                             # noqa: BLE001
+                pass
             conn.close()
     except Exception:                                     # noqa: BLE001
         return None
@@ -321,8 +328,14 @@ def step_injuries(run_date: str, max_age_min: int | None = None) -> bool:
     fresher than that — the refresh pass runs up to 42 times a day and ESPN has
     IP-blocked this worker twice, so the intraday call has to be self-limiting
     rather than trusting the cadence."""
+    # injury_id is the primary key and inserts are append-only, so the newest
+    # id is the newest write. SELECT MAX(created_at) was a parallel seq scan
+    # (EXPLAIN 2026-10-01: cost 22406, ~22s). This is an index scan backward
+    # of one row (cost 0.42..0.46 on that same database).
     if max_age_min is not None and _is_fresh(
-            "Injuries", "SELECT MAX(created_at) FROM injuries", (), max_age_min):
+            "Injuries",
+            "SELECT created_at FROM injuries ORDER BY injury_id DESC LIMIT 1",
+            (), max_age_min):
         return True
     fn = _import_step("injuries")
     try:

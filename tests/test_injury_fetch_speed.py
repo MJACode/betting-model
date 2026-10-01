@@ -38,8 +38,12 @@ _SRC = (Path(__file__).parent.parent / "data" / "ingestors"
 @pytest.fixture(autouse=True)
 def _clear_cache():
     inj._ATHLETE_NAME_CACHE = {}
+    inj._SEED_DB_ERROR = None
+    inj._SEED_ATTEMPTED = False
     yield
     inj._ATHLETE_NAME_CACHE = {}
+    inj._SEED_DB_ERROR = None
+    inj._SEED_ATTEMPTED = False
 
 
 # ── the cache removes requests ────────────────────────────────────────────────
@@ -106,23 +110,30 @@ def test_a_SUCCESSFUL_response_with_no_name_is_not_cached(monkeypatch):
     assert len(calls) == 2
 
 
-def test_the_cache_seeds_from_our_own_stored_injuries(monkeypatch):
+def test_the_cache_seeds_from_the_name_table_not_a_scan_of_injuries(monkeypatch):
     """
-    The answers are already in our `injuries` table from previous runs, so the
-    cache is warm on the FIRST fetch after a restart rather than the second.
+    The answers are already stored, one row per athlete, so the cache is warm
+    on the FIRST fetch after a restart rather than the second. Reading them
+    must not DISTINCT ON the injuries log — that sort is what timed out.
     """
+    seen = []
+
     class _Conn:
         def execute(self, sql, params=None):
-            assert "FROM injuries" in sql
+            seen.append(" ".join(sql.split()))
+            assert "FROM injuries" not in sql
+            assert "injury_player_names" in sql
             return self
         def fetchall(self):
             return [("1", "Mookie Betts"), ("2", "Freddie Freeman")]
+        def rollback(self): pass
         def close(self): pass
 
     import data.db as db
     monkeypatch.setattr(db, "get_connection", lambda *a, **k: _Conn())
     assert inj._seed_athlete_cache() == 2
     assert inj._ATHLETE_NAME_CACHE["1"] == "Mookie Betts"
+    assert seen and "DISTINCT ON" not in seen[0]
 
 
 def test_a_dead_database_leaves_the_cache_empty_not_broken(monkeypatch):

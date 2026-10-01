@@ -100,6 +100,21 @@ CREATE TABLE IF NOT EXISTS injuries (
 
 CREATE INDEX IF NOT EXISTS idx_injuries_team_date ON injuries(sport, team, report_date);
 CREATE INDEX IF NOT EXISTS idx_injuries_player    ON injuries(player_name, sport);
+-- Newest display name per athlete. The hourly refresh used to recompute this
+-- with DISTINCT ON over the whole injuries log (822,508 rows, sort cost
+-- 145558, ~63s on 2026-10-01). The ingestor maintains the table; the index
+-- is what makes a one-time backfill an index scan instead of that sort.
+CREATE TABLE IF NOT EXISTS injury_player_names (
+    player_id   TEXT PRIMARY KEY,
+    player_name TEXT NOT NULL
+);
+ALTER TABLE injury_player_names ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON injury_player_names FROM anon, authenticated;
+CREATE INDEX IF NOT EXISTS idx_injuries_player_id_created
+  ON injuries (player_id, created_at DESC)
+  INCLUDE (player_name)
+  WHERE player_id IS NOT NULL AND player_id <> ''
+    AND player_name IS NOT NULL AND player_name <> 'Unknown';
 
 
 -- ── MLB TEAM STATS ────────────────────────────────────────────────────────────

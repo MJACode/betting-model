@@ -235,6 +235,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # after team_stats_board_line_probe_2026_09_28, which owns the function
     # and would otherwise restore the unbounded scan on the next pass.
     "team_stats_board_commence_bound_2026_09_30.sql",
+    # 2026-10-01: injuries-refresh statement_timeout. The athlete-name seed
+    # sorted the whole injuries log (822k rows, ~63s) and the freshness probe
+    # parallel-seq-scanned MAX(created_at) (~22s). A timed-out statement then
+    # left the transaction aborted, so pipeline_log recorded
+    # "current transaction is aborted" instead of the timeout. Index plus
+    # one-row-per-athlete table; both no-op once present.
+    "injury_player_names_2026_10_01.sql",
 ]
 
 
