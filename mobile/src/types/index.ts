@@ -48,6 +48,12 @@ export interface Pick {
    *  is why only 'VOID' is filtered anywhere. NCAAF does not use this column at
    *  all; a downgraded NCAAF row carries `downgrade_reason` instead. */
   condition_status: string | null;
+  /** Why a row is not what its cut alone would say. 'model paused' (PAUSED_NOTE
+   *  in lib/thresholds) marks a pick written while its model was paused: since
+   *  2026-09-28 such a row keeps the model's REAL verdict (it can be a BET) but
+   *  is not a signal -- not on Signals/Live, not in the settled record.
+   *  Optional so hand-built rows and older caches still type-check. */
+  downgrade_reason?: string | null;
   /** Client-only. Set by attachDiscordPublish from v_discord_published.
    *  Not a column on `picks`. */
   discordPublish?: 'published' | 'unpublished' | 'unknown';
@@ -163,7 +169,13 @@ export type SettledPickKey =
 // shadows TypeScript's built-in Pick<> utility inside this module. It stays
 // derived from Pick, and adding a column to Pick does NOT silently join this
 // set — which is the point, since the SELECT is hand-listed to match.
-export type SettledPick = { [K in SettledPickKey]: Pick[K] };
+export type SettledPick = { [K in SettledPickKey]: Pick[K] } & {
+  // Selected by SETTLED_PICK_COLUMNS and read by passesRecordFilter
+  // (2026-09-28): a paused model's BET is not a settled-record bet, and the
+  // row's 'model paused' marker is how it knows. Optional like Pick's, so a
+  // full Pick still passes where a SettledPick is expected.
+  downgrade_reason?: string | null;
+};
 
 export interface LiveGameState {
   game_id: string;

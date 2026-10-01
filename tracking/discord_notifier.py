@@ -627,6 +627,10 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
               AND (g.commence_time IS NOT NULL OR p.game_date >= %s)
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = TRUE
+              -- A paused model's pick is NOT A SIGNAL (scorer._paused_signal,
+              -- 2026-09-28): keyed on the row's own marker, so a pick written
+              -- while paused is never announced, even after an unpause.
+              {config.paused_row_exclusion_sql("p")}
               AND p.model_probability >= t.min_prob
               AND (t.prob_only = TRUE
                    OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
@@ -731,6 +735,10 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               -- STANDING picks, which must keep publishing.
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
+              -- A paused model's pick is NOT A SIGNAL (scorer._paused_signal,
+              -- 2026-09-28): keyed on the row's own marker, so a pick written
+              -- while paused is never announced, even after an unpause.
+              {config.paused_row_exclusion_sql("p")}
               AND p.model_probability >= t.min_prob
               -- The cut is applied at the price the pick was DECIDED at
               -- (2026-09-09): decision_* since the flip, DraftKings before.
@@ -845,6 +853,10 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
               -- STANDING picks, which must keep publishing.
               AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
               AND t.paused = FALSE
+              -- A paused model's pick is NOT A SIGNAL (scorer._paused_signal,
+              -- 2026-09-28): keyed on the row's own marker, so a pick written
+              -- while paused is never announced, even after an unpause.
+              {config.paused_row_exclusion_sql("p")}
               AND p.model_probability >= t.min_prob
               -- The cut is applied at the price the pick was DECIDED at
               -- (2026-09-09): decision_* since the flip, DraftKings before.
@@ -1831,6 +1843,14 @@ def notify_discord_free_pick(target_date: str | None = None,
 #
 # The open-pick publishers above are the opposite case and keep their paused and
 # threshold checks: a paused model must not be offered as something to bet.
+#
+# A PICK WRITTEN WHILE ITS MODEL WAS PAUSED WAS NEVER BET (2026-09-28). Since
+# scorer._paused_signal keeps a paused model's real verdict, such a row can be
+# signal_type = 'BET' -- but it was never posted, never pushed and never
+# staked, so it is not part of what was bet. It carries downgrade_reason =
+# config.PAUSED_NOTE from the moment it is written, and that ROW marker (not
+# the model's present state) is what keeps it out, so this is still a filter
+# on what the pick WAS. A pick a live model wrote stays in after a pause.
 _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
                p.clv_pct, p.is_live
@@ -1840,7 +1860,8 @@ _SETTLED_SQL = r"""
           AND (p.is_live IS NOT TRUE OR p.model_id LIKE '%%\_live\_%%')
           -- VOIDed picks are result='NO_ACTION' and drop out here.
           AND p.result IN ('WIN', 'LOSS', 'PUSH')""" \
-    + config.record_exclusion_sql("p") + "\n"
+    + config.record_exclusion_sql("p") \
+    + config.paused_row_exclusion_sql("p") + "\n"
 
 
 def _settled_rows(conn, game_date: str) -> list[tuple]:

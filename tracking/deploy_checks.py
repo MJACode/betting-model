@@ -20,10 +20,16 @@ from datetime import datetime, timezone
 
 
 def _ncaaf_paused_avoid_gone(conn) -> tuple[bool, str]:
-    """After #645, no paused model may hold an AVOID on an unstarted game.
+    """No paused model holds an UNMARKED AVOID on an unstarted game.
 
-    The evening pass after the deploy re-scored only the near window, leaving
-    43 pre-deploy `ncaaf_moneyline` AVOIDs on look-ahead games; the 6am
+    After #645 the rule was "no paused AVOID at all". Since 2026-09-28 a
+    paused model keeps its real verdict (scorer._paused_signal), so a paused
+    AVOID is expected -- but it must carry downgrade_reason = 'model paused',
+    the marker every publisher and the app's Signals board exclude on. An
+    AVOID from a paused model WITHOUT the marker is the #645 defect again.
+
+    The evening pass after the #645 deploy re-scored only the near window,
+    leaving 43 pre-deploy `ncaaf_moneyline` AVOIDs on look-ahead games; the 6am
     full-horizon pass deletes and re-scores every unstarted non-BET row.
     """
     n, = conn.execute("""
@@ -31,6 +37,7 @@ def _ncaaf_paused_avoid_gone(conn) -> tuple[bool, str]:
         WHERE signal_type = 'AVOID' AND result IS NULL
           AND game_time::timestamptz > NOW()
           AND model_id IN (SELECT model_id FROM model_action_thresholds WHERE paused)
+          AND downgrade_reason IS DISTINCT FROM 'model paused'
     """).fetchone()
     none_ok, = conn.execute("""
         SELECT COUNT(*) FROM picks
@@ -39,7 +46,7 @@ def _ncaaf_paused_avoid_gone(conn) -> tuple[bool, str]:
           AND game_time::timestamptz > NOW()
     """).fetchone()
     return (int(n) == 0,
-            f"paused-model AVOID rows on unstarted games: {n} (expected 0); "
+            f"unmarked paused-model AVOID rows on unstarted games: {n} (expected 0); "
             f"ncaaf_moneyline NONE rows carrying 'model paused': {none_ok}")
 
 

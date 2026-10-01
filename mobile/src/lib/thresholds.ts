@@ -52,7 +52,23 @@ export type ActionFilterable = Pick<
   decision_edge?: number | null;
   /** Set by attachDiscordPublish. Omitted means the ledger was not read. */
   discordPublish?: DiscordPublish;
+  /** 'model paused' on a pick written while its model was paused. */
+  downgrade_reason?: string | null;
 };
+
+/**
+ * The marker on every row a paused model writes (config.PAUSED_NOTE,
+ * models/scorer._pause_note). Since 2026-09-28 a paused model keeps its REAL
+ * verdict, so a paused row can be a BET; being paused means it is NOT A
+ * SIGNAL. Keyed on the ROW, like the server's paused_row_exclusion_sql, so a
+ * pick written while paused never becomes a signal after an unpause, and a
+ * pick written while live never leaves the record after a pause.
+ */
+export const PAUSED_NOTE = 'model paused';
+
+export function isPausedRow(p: { downgrade_reason?: string | null }): boolean {
+  return p.downgrade_reason === PAUSED_NOTE;
+}
 
 export function isProbOnlyModel(modelId: string): boolean {
   return PROB_ONLY_MODELS.has(modelId) || RETIRED_PROB_ONLY_MODELS.has(modelId);
@@ -271,6 +287,10 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // ledger read that has not landed yet cannot blank the board. A VOID with
   // no evidence it is on Discord stays hidden.
   if (!discordLedVisible(p.condition_status, p.discordPublish)) return false;
+  // Written while its model was paused: the model's real verdict, not a
+  // signal (Discord and push never carry it either). Checked on the row, so an
+  // unpause does not turn it into one.
+  if (isPausedRow(p)) return false;
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.
   if (RETIRED_MODELS.has(p.model_id)) return false;
@@ -326,13 +346,18 @@ export function passesActionFilter(p: ActionFilterable): boolean {
 export type RecordFilterable = Pick<
   PickRow,
   'model_id' | 'signal_type' | 'condition_status' | 'is_live'
->;
+> & { downgrade_reason?: string | null };
 
 export function passesRecordFilter(p: RecordFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
   // A VOIDed pick is not a bet of record (CLAUDE.md 1c). Server-side the same
   // exclusion happens via result='NO_ACTION'.
   if (p.condition_status === 'VOID') return false;
+  // A pick written while its model was paused was never posted or staked, so
+  // it was never bet (2026-09-28). The ROW's marker, never the model's present
+  // state: a live model's settled bets stay in the record after a pause.
+  // Same clause as v_public_track_record and the Discord recap.
+  if (isPausedRow(p)) return false;
   // A pre-game model's in-play pick does not count; a dedicated live lane does.
   // Pre-game and in-play prices never mix (CLAUDE.md 6). Same helper the rest
   // of the record path uses, so this cannot drift from the DB views.

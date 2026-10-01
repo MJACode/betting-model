@@ -44,7 +44,11 @@ import { LIVE_RECORD_START } from '@/lib/recordStart';
 // reads that column to do it; on a v5 envelope it is undefined, the guard is
 // always false, and ~14k contaminated rows would count toward a model's
 // settled record and its CLV average. Exactly the v4 shape of bug.
-const KEY = 'settledPicks.v6';
+// v7 (2026-09-28): SETTLED_PICK_COLUMNS gained `downgrade_reason`. Since the
+// scorer keeps a paused model's real verdict, a paused BET can settle, and
+// passesRecordFilter keeps it out by the row's 'model paused' marker. On a v6
+// envelope that field is undefined and the guard would never fire.
+const KEY = 'settledPicks.v7';
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day

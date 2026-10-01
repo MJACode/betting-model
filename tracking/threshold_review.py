@@ -185,8 +185,12 @@ def _slate(conn) -> list[tuple[str, int, float]]:
           AND result IN ('WIN','LOSS','PUSH')
           AND is_live IS NOT TRUE
           AND game_date >= %s
+          -- The forward test judges the signals that were published. A pick
+          -- written while its model was paused (scorer._paused_signal) was
+          -- not one, so it counts toward no milestone and no slate ROI.
+          AND downgrade_reason IS DISTINCT FROM %s
         GROUP BY model_id
-    """, (EPOCH,)).fetchall()
+    """, (EPOCH, config.PAUSED_NOTE)).fetchall()
     # A retired model's picks stay in the table (§1c) but it is out of every
     # total, and it must never be judged or milestoned again.
     return [(r[0], int(r[1]), float(r[2])) for r in rows
