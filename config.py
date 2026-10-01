@@ -445,6 +445,33 @@ ACTION_THRESHOLDS: dict = {
     # 0.10 sits inside that plateau with both halves positive (+6.1% / +6.2%).
     # 99-100% of the bets are unders; the median price is +105.
     "nhl_prop_blocked_shots":   {"min_prob": 0.0, "min_edge": 0.0},
+    # NHL goalie saves, skater shots on goal and skater assists
+    # (models/nhl_props.py, mike 2026-10-01: "build saves, shots on goal and
+    # assists models"). Same shape as blocked shots -- THE CUT IS EV, in
+    # MODEL_OWN_EV_FLOOR, on the model's OWN probability, UNDERS ONLY -- and
+    # one difference: the bet is taken at the BEST PRICE among the bettable
+    # books (FanDuel left out), not at DraftKings alone. Walk-forward on three
+    # priced seasons (scripts/nhl_prop_backtest.py; the interval resamples
+    # whole game days):
+    #   saves    EV>=   bets   ROI     95% interval   2023-24  2024-25  2025-26
+    #            0.08   2,071  +6.8%   +2.5..+11.0    +8.3%    +9.4%    +2.1%
+    #            0.10   1,755  +7.8%   +3.2..+12.5    +7.3%    +10.1%   +4.7%
+    #            0.12   1,467  +9.8%   +4.9..+14.8    +9.6%    +12.0%   +6.5%
+    #            0.15   1,098  +10.4%  +4.3..+16.1    +7.0%    +13.6%   +7.3%
+    #   shots    0.08   6,833  +4.2%   +1.6..+6.8     +6.9%    +4.7%    +1.4%
+    #            0.10   4,707  +5.7%   +2.8..+8.7     +8.2%    +4.6%    +4.8%
+    #            0.12   3,157  +6.4%   +2.9..+9.9     +8.7%    +1.8%    +9.1%
+    #            0.15   1,720  +8.0%   +3.2..+12.9    +5.2%    +3.1%    +14.6%
+    #   assists  0.08   1,641  +7.5%   +2.5..+12.3    +8.6%    +10.0%   +4.2%
+    #            0.10   1,063  +10.9%  +4.7..+17.2    +11.0%   +11.3%   +10.6%
+    #            0.12     722  +15.1%  +8.0..+22.1    +13.6%   +13.3%   +19.3%
+    #            0.15     421  +20.4%  +11.8..+29.5   +14.3%   +25.7%   +33.1%
+    # At DraftKings alone saves (+8.0% on 1,110) and assists (+11.3% on 975)
+    # hold; shots on goal does NOT (+3.3% on 3,606, +0.3% in 2024-25), which
+    # is why the best price is the rule and not an option.
+    "nhl_prop_saves":           {"min_prob": 0.0, "min_edge": 0.0},
+    "nhl_prop_shots_on_goal":   {"min_prob": 0.0, "min_edge": 0.0},
+    "nhl_prop_assists":         {"min_prob": 0.0, "min_edge": 0.0},
     # NFL — the standalone wind-totals card (§28), published into picks by
     # scripts/nfl_wind_publisher.py. The card itself is the real gate (raw
     # forecast wind >= 11 mph AND >= 3% edge after de-vig at the best book);
@@ -1914,6 +1941,14 @@ MODEL_OWN_EV_FLOOR: dict = {
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
     "nhl_prop_blocked_shots":    0.10,
+    # Each on its own sweep (ACTION_THRESHOLDS has the three neighbourhoods).
+    # 0.10 sits inside each model's own range where every season is positive
+    # and the interval is clear of zero: saves 0.08-0.20, shots on goal
+    # 0.10-0.20 (0.03-0.08 are positive too, with the last season under 2%),
+    # assists 0.08-0.20.
+    "nhl_prop_saves":            0.10,
+    "nhl_prop_shots_on_goal":    0.10,
+    "nhl_prop_assists":          0.10,
     "ufc_moneyline":             0.13,   # n=5, min written EV +0.131
     "ufc_total_rounds":          0.15,   # n=8, min written EV +0.150
     "wnba_moneyline":            0.06,   # n=31, min written EV +0.069
@@ -1962,6 +1997,16 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     # is why the realised return is under the EV it asks for; revisit when it
     # has a map fitted on its own bets.
     "nhl_prop_blocked_shots",
+    # 2026-10-01 (mike). Same reason: each cut was measured on the model's own
+    # count probability, and none has a record to fit a map on. The borrowed
+    # offset pulls every probability above 50% down six points, which is most
+    # of what an under at even money has: under it assists loses at every cut
+    # up to 0.15 and shots on goal earns nothing (-1.7% to +2.6%, the last
+    # season negative at every cut) (scripts/nhl_prop_backtest.py). Saves
+    # survives either way, so nothing rides on the choice there.
+    "nhl_prop_saves",
+    "nhl_prop_shots_on_goal",
+    "nhl_prop_assists",
 })
 
 
@@ -2037,6 +2082,10 @@ SCORING_METHODS: dict = {
     # Same shape: trained and registered, scored by scripts/nhl_prop_card.py
     # rather than the generic prop path.
     "nhl_prop_blocked_shots": SCORING_ARTIFACT,
+    # And these three, scored by scripts/nhl_props_card.py.
+    "nhl_prop_saves": SCORING_ARTIFACT,
+    "nhl_prop_shots_on_goal": SCORING_ARTIFACT,
+    "nhl_prop_assists": SCORING_ARTIFACT,
 }
 
 
@@ -2064,6 +2113,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.05,
     "nhl_puckline":             0.05,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nhl_prop_saves":           0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nhl_prop_shots_on_goal":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
+    "nhl_prop_assists":         0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.00,   # card gates on |dev| >= 2.0; edge >= 0 drops juice-eaten quotes
@@ -2160,6 +2212,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
     "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nhl_prop_saves":           0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nhl_prop_shots_on_goal":   0.0,    # cut is EV; see ACTION_THRESHOLDS
+    "nhl_prop_assists":         0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
                                        # 2026 paper-track: MAX_FIRE_LEAD stays 4; no unit bump
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
@@ -3581,8 +3636,10 @@ PROP_MARKETS_NFL = [
 # an opening and a closing price for every game). The same six the history
 # purchase bought (data/ingestors/nhl_prop_odds_history.py), so the live series
 # continues the three priced seasons docs/nhl_market_lab.md was graded on.
-# Blocked shots has a model (nhl_prop_blocked_shots, same day); the other five
-# are research until each clears its own grid.
+# Blocked shots, saves, shots on goal and assists have models
+# (nhl_prop_blocked_shots, nhl_prop_saves, nhl_prop_shots_on_goal,
+# nhl_prop_assists, same day); points and anytime scorer are research until
+# each clears its own grid.
 PROP_MARKETS_NHL = [
     "player_shots_on_goal",
     "player_points",

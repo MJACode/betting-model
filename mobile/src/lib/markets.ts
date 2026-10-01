@@ -76,6 +76,9 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
   nba_prop_player_turnovers: 'player_turnovers',
   nba_prop_player_dd: 'player_double_double',
   nhl_prop_blocked_shots: 'player_blocked_shots',
+  nhl_prop_saves: 'player_total_saves',
+  nhl_prop_shots_on_goal: 'player_shots_on_goal',
+  nhl_prop_assists: 'player_assists',
 };
 
 /**

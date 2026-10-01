@@ -275,6 +275,11 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "wnba_prop_market":             ("wnba_player", "FROM_PROP_MARKET"),
     # NHL skater props — resolved from nhl_skater_game_log by player_id
     "nhl_prop_blocked_shots":       ("nhl_skater", "blocked_shots"),
+    "nhl_prop_assists":             ("nhl_skater", "assists"),
+    "nhl_prop_shots_on_goal":       ("nhl_skater", "shots"),
+    # Goalie saves -- resolved from nhl_goalie_game_log, STARTS only: a goalie
+    # who did not start is void at DraftKings and NO_ACTION here.
+    "nhl_prop_saves":               ("nhl_goalie", "saves"),
 }
 
 # Odds API market key -> the column (or sentinel) that settles it. Mirrors
@@ -435,9 +440,9 @@ def _load_nhl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     be logged under the next calendar date. Rows stay keyed on game_id.
     """
     day = datetime.strptime(game_date, "%Y-%m-%d")
-    cols = ["player_id", "player_name", "game_id", "blocked_shots", "shots", "toi_seconds"]
+    cols = ["player_id", "player_name", "game_id", "blocked_shots", "shots", "assists", "toi_seconds"]
     rows = conn.execute("""
-        SELECT s.player_id, s.player_name, t.game_id, s.blocked_shots, s.shots, s.toi_seconds
+        SELECT s.player_id, s.player_name, t.game_id, s.blocked_shots, s.shots, s.assists, s.toi_seconds
         FROM nhl_skater_game_log s
         JOIN nhl_team_game_log t ON t.nhl_game_id = s.nhl_game_id AND t.team = s.team
         WHERE s.game_date BETWEEN %s AND %s
@@ -449,6 +454,39 @@ def _load_nhl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
         out[(str(d["player_id"]), d["game_id"])] = d
     logger.debug(f"NHL prop actuals: {len(out)} skater rows for {game_date}")
     return out
+
+
+def _load_nhl_goalie_actuals(conn: DBConnection, game_date: str) -> tuple[dict, set]:
+    """
+    ({(player_id, game_id): row_dict} for goalies who STARTED, {game_id} logged).
+
+    Two things come back because the void rule needs both. DraftKings voids a
+    saves bet when the goalie does not start, so only starters are graded --
+    a backup who relieved the starter has a row and saves, and must NOT be
+    settled on them. The second value is every game with ANY goalie row: a
+    priced goalie absent from the first and present in the second did not
+    start (NO_ACTION); a game absent from both is not ingested yet (retry).
+    This is the rule scripts/nhl_prop_backtest.py grades on -- only starts are
+    rows in the model's frame -- so the record and the backtest cannot differ
+    on who was a bet.
+    """
+    day = datetime.strptime(game_date, "%Y-%m-%d")
+    rows = conn.execute("""
+        SELECT player_id, player_name, game_id, started, saves, shots_against
+        FROM nhl_goalie_game_log
+        WHERE game_date BETWEEN %s AND %s AND game_id IS NOT NULL
+    """, ((day - timedelta(days=1)).strftime("%Y-%m-%d"),
+          (day + timedelta(days=1)).strftime("%Y-%m-%d"))).fetchall()
+    cols = ["player_id", "player_name", "game_id", "started", "saves", "shots_against"]
+    starters: dict = {}
+    logged: set = set()
+    for row in rows:
+        d = dict(zip(cols, row))
+        logged.add(d["game_id"])
+        if d["player_id"] is not None and int(d["started"] or 0) == 1:
+            starters[(str(int(d["player_id"])), d["game_id"])] = d
+    logger.debug(f"NHL goalie actuals: {len(starters)} starts in {len(logged)} games for {game_date}")
+    return starters, logged
 
 
 def _load_nfl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
@@ -635,7 +673,10 @@ def _settle_prop_picks(
     # because they always have; a new sport's read should not be able to fail a
     # day's settlement for the sports that were already there.
     nhl_actuals = (_load_nhl_prop_actuals(conn, game_date)
-                   if any(str(r[2]).startswith("nhl_prop_") for r in prop_picks) else {})
+                   if any(_PROP_STAT_MAP.get(str(r[2]), ("",))[0] == "nhl_skater" for r in prop_picks) else {})
+    nhl_goalie_actuals, nhl_goalie_games = (
+        _load_nhl_goalie_actuals(conn, game_date)
+        if any(_PROP_STAT_MAP.get(str(r[2]), ("",))[0] == "nhl_goalie" for r in prop_picks) else ({}, set()))
 
     # Games whose box scores have been ingested (any player row). Used to tell
     # "log not ingested yet" (leave unsettled, retry tomorrow) apart from
@@ -653,6 +694,7 @@ def _settle_prop_picks(
         "nba_player":  nba_logged_games,
         "nfl_player":  nfl_logged_games,
         "nhl_skater":  nhl_logged_games,
+        "nhl_goalie":  nhl_goalie_games,
     }
 
     wins = losses = pushes = no_actions = 0
@@ -736,6 +778,14 @@ def _settle_prop_picks(
             # skater prop only when the player does not dress.
             if player_id:
                 row_data = nhl_actuals.get((str(player_id), game_id))
+                if row_data:
+                    actual_stat = row_data.get(stat_col)
+
+        elif player_type == "nhl_goalie":
+            # Starters only (see _load_nhl_goalie_actuals): a goalie who did
+            # not start has no entry, and the DNP branch below voids the pick.
+            if player_id:
+                row_data = nhl_goalie_actuals.get((str(player_id), game_id))
                 if row_data:
                     actual_stat = row_data.get(stat_col)
 
@@ -1352,6 +1402,9 @@ _PROP_MARKET_FOR_MODEL = {
     "nfl_prop_market":  "FROM_PROP_MARKET",
     "wnba_prop_market": "FROM_PROP_MARKET",
     "nhl_prop_blocked_shots": "player_blocked_shots",
+    "nhl_prop_saves": "player_total_saves",
+    "nhl_prop_shots_on_goal": "player_shots_on_goal",
+    "nhl_prop_assists": "player_assists",
 }
 
 # The market-relative cards write the SOFT book's price into dk_odds and name
@@ -1692,6 +1745,11 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             bookmaker = _book_from_label(pick_label)
             if not prop_market:
                 continue                 # no market on the row, nothing to close
+        elif model_id.startswith("nhl_prop_"):
+            # Priced at the best book on offer, named in the label the same
+            # way ("... Under 2.5 Shots on Goal (MGM)"): the close is read at
+            # that book, not at DraftKings.
+            bookmaker = _book_from_label(pick_label)
         if prop_market:
             # player_prop_odds keys on the book's name string, so the name is
             # recovered from the pick label the same way settlement does.

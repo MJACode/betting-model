@@ -1651,3 +1651,525 @@ at EV >= 0.06, floor -200: 3,422 under bets over 403 priced game days (8.5 a day
 - **Not yet built**: saves and shots on goal (positive at the best book, thin
   or flat at DraftKings), assists at 0.10, anytime scorer. Same module shape,
   each needs its own sweep.
+
+---
+
+# Saves, shots on goal, assists: three more prop models to production (2026-10-01)
+
+mike: *"build saves, shots on goal and assists models and we need total goals."*
+Built as one engine with a Spec per market (`models/nhl_props.py`), backtested
+through that module (`python -m scripts.nhl_prop_backtest`), scored by
+`scripts/nhl_props_card.py`. Walk-forward on the three priced seasons: each
+season scored by a model fitted on earlier seasons only, one pre-game snapshot
+a game with every book quoted at the same instant, one bet per player-game.
+
+Three things were decided on these same three seasons, and are said here
+rather than left to be found:
+
+1. **Unders only.** At DraftKings every over, blind, loses 9.0% (shots),
+   10.4% (assists) and 12.4% (saves); every under loses 2.9%, 3.5% and 0.3%.
+   The book's margin sits on the over in every NHL count market, as it did on
+   blocked shots. The models' overs lose in shots at every cut and in assists
+   at every cut up to 0.15, and are 62 bets in saves at the 0.10 cut ("The
+   side the rule does not bet" below).
+2. **The best price among the bettable books, FanDuel left out**, not
+   DraftKings alone. For saves and assists it changes little. For shots on goal
+   it is the difference between a model and no model: at DraftKings alone the
+   unders return +3.3% at the 0.10 cut with +0.3% in 2024-25; at the best price
+   +5.7% with every season and every half-season positive. FanDuel is out
+   because 2,556 of its shots rows fail the coherent-quote check (no other book
+   has more than 11) -- the shared parser paired an over from one of its lines
+   with an under from another, and the filter can only drop the pairs it can
+   see. With FanDuel in, the same cut reads +5.9% on 5,409.
+3. **For saves, three more inputs** (home, the goalie's rest, both teams'
+   rest), chosen because they lower out-of-sample deviance on the COUNT by
+   0.7% (2.176 to 2.160 over the three seasons), not on return. The same test
+   added nothing to shots or assists (-0.03% and -0.02% at best), so those two
+   run the lab's inputs unchanged.
+
+The floor is **EV >= 0.10 on the model's own probability** for all three, each
+on its own grid.
+
+## nhl_prop_saves
+
+```
+====================================================================================================
+nhl_prop_saves  (player_total_saves, settles on saves; LIVE)
+====================================================================================================
+player_total_saves: 26,916 quotes; dropped 0 taken after puck drop and 0 incoherent ({})
+  2023-24: fit on 8,632 rows, excess variance 0.0303; 2,555 rows to score; mean predicted 26.59 vs actual 26.33
+  2024-25: fit on 11,187 rows, excess variance 0.0319; 2,538 rows to score; mean predicted 24.32 vs actual 24.67
+  2025-26: fit on 13,725 rows, excess variance 0.0326; 2,537 rows to score; mean predicted 23.45 vs actual 24.11
+books shopped: ['draftkings', 'betmgm', 'williamhill_us', 'fanatics', 'betrivers', 'hardrockbet', 'betparx']
+priced player-games by season {2024: 1492, 2025: 1618, 2026: 1685} matched to a prediction (unmatched = under 10 games, a name the log does not hold; or a goalie who did not start: void); quotes by book {'hardrockbet': 4172, 'betmgm': 3787, 'draftkings': 3341, 'williamhill_us': 2146, 'fanatics': 212}
+DraftKings lines: {25.5: 556, 24.5: 476, 26.5: 462, 27.5: 443, 23.5: 411, 22.5: 304, 28.5: 288, 21.5: 151}
+blind always over at DraftKings: {'bets': 3341, 'units': -413.8, 'roi%': -12.39, '95% by day': '-15.6..-9.2', 'win%': 47.1, 'med price': -115, 'claimed': 0.44, 'won': 0.471, '2023-24': '-14.0% (1439) [-12/-16]', '2024-25': '-25.1% (314) [-17/-33]', '2025-26': '-8.5% (1588) [-4/-13]'}
+blind always under at DraftKings: {'bets': 3339, 'units': -10.7, 'roi%': -0.32, '95% by day': '-3.5..+2.9', 'win%': 53.0, 'med price': -115, 'claimed': 0.56, 'won': 0.53, '2023-24': '+1.2% (1437) [-1/+3]', '2024-25': '+11.8% (314) [+3/+21]', '2025-26': '-4.1% (1588) [-9/+0]'}
+
+### THE RULE: under only, the best price among the books shopped, the model's OWN probability, floor -200; per season as return (bets) [first half / second half]
+
+ EV>=  bets  units  roi%  95% by day  win%  med price  claimed   won               2023-24                2024-25               2025-26
+ 0.00  3406   78.7  2.31  -1.1..+5.7  54.3       -115    0.596 0.543   +4.2% (937) [+2/+7]  +5.7% (1268) [+15/-4]  -2.8% (1201) [-8/+2]
+ 0.03  2908  107.2  3.69  +0.1..+7.2  55.1       -115    0.606 0.551   +5.3% (794) [+1/+9]  +6.7% (1115) [+15/-1]   -0.9% (999) [-6/+4]
+ 0.05  2591  129.2  4.99  +1.3..+8.7  55.8       -115    0.613 0.558   +5.7% (704) [+4/+7]  +8.2% (1027) [+16/+0]   +0.6% (860) [-4/+6]
+ 0.06  2404  126.1  5.25  +1.3..+9.1  55.9       -115    0.617 0.559   +6.6% (643) [+5/+8]   +8.5% (972) [+16/+1]   +0.1% (789) [-4/+4]
+ 0.08  2071  140.6  6.79 +2.5..+11.0  56.7       -115    0.625 0.567   +8.3% (532) [+9/+8]   +9.4% (879) [+18/+1]   +2.1% (660) [+0/+4]
+ 0.10  1755  136.5  7.77 +3.2..+12.5  57.3       -115    0.633 0.573   +7.3% (448) [+6/+8]  +10.1% (780) [+17/+3]   +4.7% (527) [+0/+9]
+ 0.12  1467  143.7  9.80 +4.9..+14.8  58.3       -115    0.641 0.583  +9.6% (377) [+12/+7]  +12.0% (673) [+16/+8]  +6.5% (417) [+1/+12]
+ 0.15  1098  113.7 10.35 +4.3..+16.1  58.6       -115    0.655 0.586  +7.0% (277) [+13/+1] +13.6% (543) [+17/+10]  +7.3% (278) [+2/+13]
+ 0.20   635   95.0 14.97 +8.0..+22.0  61.1       -115    0.679 0.611 +12.9% (151) [+25/+1] +14.3% (354) [+18/+11] +19.2% (130) [+34/+4]
+
+### The same rule at DraftKings alone
+
+ EV>=  bets  units  roi%  95% by day  win%  med price  claimed   won               2023-24               2024-25               2025-26
+ 0.00  2291   35.4  1.54  -2.7..+5.7  54.0       -115    0.592 0.540   +4.2% (911) [+1/+7] +12.2% (263) [+1/+24]  -3.2% (1117) [-9/+2]
+ 0.03  1939   66.1  3.41  -0.8..+7.8  54.9       -115    0.602 0.549   +5.4% (773) [+2/+9] +13.4% (242) [+3/+24]   -0.9% (924) [-7/+5]
+ 0.05  1699   76.9  4.53  -0.0..+9.0  55.5       -115    0.608 0.555   +5.6% (679) [+4/+7] +13.8% (228) [-2/+30]   +0.9% (792) [-5/+6]
+ 0.06  1574   76.7  4.88  +0.0..+9.6  55.7       -115    0.612 0.557   +6.3% (619) [+5/+8] +13.1% (221) [-2/+28]   +1.2% (734) [-2/+4]
+ 0.08  1334   87.0  6.52 +1.2..+11.7  56.6       -115    0.620 0.566  +7.8% (515) [+10/+6] +16.5% (205) [-0/+33]   +2.1% (614) [-4/+8]
+ 0.10  1110   88.5  7.97 +2.0..+13.7  57.4       -115    0.628 0.574   +7.2% (436) [+7/+7] +14.9% (185) [-1/+31]  +6.1% (489) [-1/+13]
+ 0.12   916   74.5  8.13 +1.5..+14.5  57.4       -115    0.636 0.574  +8.9% (367) [+11/+7] +11.4% (161) [-5/+28]  +6.1% (388) [-2/+14]
+ 0.15   644   60.0  9.32 +1.8..+16.7  58.1       -115    0.651 0.581  +7.6% (265) [+14/+1] +15.4% (131) [-0/+31]  +7.9% (248) [+3/+13]
+ 0.20   344   43.4 12.62 +3.1..+22.3  59.9       -115    0.675 0.599 +12.7% (143) [+25/+1]  +13.1% (89) [-3/+29] +12.2% (112) [+26/-2]
+
+### The side the rule does not bet (over), best price
+
+ EV>=  bets  units   roi%   95% by day  win%  med price  claimed   won                2023-24              2024-25               2025-26
+ 0.00   301  -40.3 -13.39  -24.5..-2.8  46.5     -115.0    0.571 0.465 -15.3% (138) [-12/-19]  -3.5% (79) [+5/-11] -19.5% (84) [-29/-10]
+ 0.03   185  -15.8  -8.51  -22.9..+5.0  49.2     -115.0    0.588 0.492   -14.2% (88) [+5/-33]  +6.5% (47) [-3/+16] -12.7% (50) [-38/+13]
+ 0.05   149   -0.3  -0.23 -15.4..+14.5  53.7     -115.0    0.595 0.537   -0.3% (70) [+10/-10]  +9.3% (39) [+6/+12]  -9.5% (40) [-32/+13]
+ 0.06   129    7.0   5.41 -11.9..+21.5  56.6     -115.0    0.599 0.566    +2.5% (61) [+10/-5] +13.5% (36) [+2/+25]  +1.8% (32) [-27/+31]
+ 0.08    94    8.6   9.16 -11.6..+29.0  58.5     -115.0    0.609 0.585     +2.2% (45) [+8/-3]                 (25)                  (24)
+ 0.10    62    4.8   7.79 -16.7..+32.2  58.1     -115.0    0.625 0.581   -2.2% (32) [+14/-19]                 (18)                  (12)
+ 0.12    49    4.8   9.86 -19.3..+38.6  59.2     -115.0    0.633 0.592                   (29)                 (13)                   (7)
+ 0.15    30    1.3   4.35 -34.1..+39.1  56.7     -115.0    0.651 0.567                   (23)                  (5)                   (2)
+ 0.20    12    NaN    NaN          NaN   NaN        NaN      NaN   NaN                    NaN                  NaN                   NaN
+
+### The rule under the BORROWED correction instead (under, best price, floor -200)
+
+ EV>=  bets  units  roi%  95% by day  win%  med price  claimed   won               2023-24                2024-25                2025-26
+ 0.00  1906  152.5  8.00 +3.7..+12.2  57.1       -110    0.606 0.571   +5.4% (544) [+6/+4]  +11.5% (775) [+19/+4]   +5.8% (587) [+1/+11]
+ 0.03  1397  124.2  8.89 +3.8..+13.9  57.6       -110    0.619 0.576  +8.1% (379) [+13/+3]  +12.3% (608) [+19/+6]   +4.5% (410) [-2/+11]
+ 0.05  1120  100.9  9.01 +3.2..+14.6  57.7       -110    0.631 0.577 +10.1% (298) [+18/+2]  +12.0% (520) [+18/+6]   +2.8% (302) [-5/+10]
+ 0.06   984  118.0 11.99 +5.8..+17.9  59.2       -110    0.639 0.592 +13.5% (251) [+23/+4]  +14.4% (466) [+21/+8]   +6.3% (267) [+1/+12]
+ 0.08   758   93.2 12.29 +5.4..+18.8  59.5       -110    0.654 0.595 +10.7% (185) [+19/+3] +14.3% (389) [+19/+10]   +9.7% (184) [+10/+9]
+ 0.10   565   69.9 12.37 +5.0..+19.7  59.6       -110    0.675 0.596  +7.2% (136) [+22/-7] +14.0% (309) [+14/+14] +14.0% (120) [+10/+18]
+ 0.12   442   62.2 14.07 +5.5..+22.5  60.6       -115    0.688 0.606  +9.8% (105) [+22/-2] +14.8% (256) [+14/+15]  +17.3% (81) [+12/+22]
+ 0.15   304   37.7 12.40 +2.5..+22.0  59.9       -115    0.707 0.599  +11.3% (70) [+18/+5]  +12.2% (185) [+16/+8]  +14.8% (49) [+14/+15]
+ 0.20   168   25.2 15.00 +0.9..+28.3  61.3       -115    0.730 0.613  +16.5% (43) [+24/+9] +11.0% (108) [+12/+10]                   (17)
+
+### Claimed against realised, every priced side at DraftKings
+
+model says  sides  claimed  borrowed says  happened  price implies
+ 0.30-0.40    806    0.365          0.427     0.423          0.529
+ 0.40-0.50   2452    0.453          0.517     0.507          0.535
+ 0.50-0.55   1310    0.525          0.460     0.479          0.532
+ 0.55-0.60   1142    0.573          0.508     0.510          0.534
+ 0.60-0.65    596    0.623          0.561     0.557          0.539
+ 0.65-0.70    210    0.669          0.609     0.633          0.540
+ 0.70-0.80     77    0.729          0.675     0.610          0.542
+
+### Where the bets land at EV >= 0.10
+
+          book  bets  units  roi%   95% by day  win%  med price  claimed   won             2023-24               2024-25              2025-26
+    draftkings   969   74.3  7.66  +1.2..+13.9  57.1     -115.0    0.627 0.571 +8.1% (400) [+7/+9] +15.2% (136) [+9/+21] +4.9% (433) [-1/+11]
+        betmgm   627   55.6  8.87  +0.8..+16.5  57.9     -110.0    0.640 0.579                (17)  +8.0% (546) [+23/-7] +16.2% (64) [+4/+29]
+   hardrockbet   113   13.3 11.75  -5.2..+31.0  60.2     -115.0    0.648 0.602                 (8) +17.1% (87) [+21/+14]                 (18)
+williamhill_us    34   -2.9 -8.46 -39.3..+22.6  50.0     -119.0    0.658 0.500                (23)                  (11)                  (0)
+      fanatics    12    NaN   NaN          NaN   NaN        NaN      NaN   NaN                 NaN                   NaN                  NaN
+
+at EV >= 0.10: 1,755 bets over 494 priced game days (3.6 a day; most on one day 19)
+```
+
+## nhl_prop_shots_on_goal
+
+```
+====================================================================================================
+nhl_prop_shots_on_goal  (player_shots_on_goal, settles on shots; LIVE)
+====================================================================================================
+player_shots_on_goal: 399,757 quotes; dropped 0 taken after puck drop and 2,576 incoherent ({'fanduel': 2556, 'betrivers': 11, 'bovada': 7, 'draftkings': 1})
+  2023-24: fit on 43,961 rows, excess variance 0.0000; 46,227 rows to score; mean predicted 1.73 vs actual 1.69
+  2024-25: fit on 90,188 rows, excess variance 0.0000; 46,225 rows to score; mean predicted 1.57 vs actual 1.58
+  2025-26: fit on 136,413 rows, excess variance 0.0000; 46,125 rows to score; mean predicted 1.51 vs actual 1.56
+books shopped: ['draftkings', 'betmgm', 'williamhill_us', 'fanatics', 'betrivers', 'hardrockbet', 'betparx']
+priced player-games by season {2024: 18100, 2025: 17420, 2026: 18451} matched to a prediction (unmatched = under 10 games, a name the log does not hold); quotes by book {'draftkings': 51478, 'betmgm': 50523, 'hardrockbet': 46806, 'betrivers': 35107, 'williamhill_us': 30112, 'fanatics': 247}
+DraftKings lines: {2.5: 23905, 1.5: 22364, 3.5: 4740, 4.5: 455, 0.5: 9, 5.5: 5}
+blind always over at DraftKings: {'bets': 51444, 'units': -4636.2, 'roi%': -9.01, '95% by day': '-9.9..-8.1', 'win%': 49.3, 'med price': -125, 'claimed': 0.493, 'won': 0.493, '2023-24': '-10.7% (17057) [-9/-12]', '2024-25': '-9.9% (16581) [-14/-6]', '2025-26': '-6.5% (17806) [-5/-8]'}
+blind always under at DraftKings: {'bets': 51448, 'units': -1501.3, 'roi%': -2.92, '95% by day': '-3.9..-2.0', 'win%': 50.7, 'med price': -105, 'claimed': 0.507, 'won': 0.507, '2023-24': '-1.0% (17059) [-2/+0]', '2024-25': '-2.0% (16583) [+3/-7]', '2025-26': '-5.6% (17806) [-7/-4]'}
+
+### THE RULE: under only, the best price among the books shopped, the model's OWN probability, floor -200; per season as return (bets) [first half / second half]
+
+ EV>=  bets  units  roi%   95% by day  win%  med price  claimed   won               2023-24              2024-25                2025-26
+ 0.00 22324  370.7  1.66   +0.3..+3.0  53.0       -105    0.556 0.530  +3.5% (6859) [+3/+4] +2.2% (7832) [+4/+1]   -0.5% (7633) [-2/+1]
+ 0.03 15257  470.9  3.09   +1.4..+4.7  53.4       -105    0.563 0.534  +4.8% (4683) [+4/+5] +4.1% (5436) [+5/+3]   +0.4% (5138) [-1/+1]
+ 0.05 11337  435.3  3.84   +1.8..+5.8  53.3        100    0.567 0.533  +5.4% (3454) [+4/+7] +5.1% (4020) [+6/+4]   +1.1% (3863) [+0/+2]
+ 0.06  9695  433.6  4.47   +2.4..+6.6  53.4        100    0.569 0.534  +6.6% (2937) [+4/+9] +5.0% (3455) [+6/+4]   +2.0% (3303) [+2/+2]
+ 0.08  6833  288.3  4.22   +1.6..+6.8  52.6        105    0.573 0.526  +6.9% (2042) [+7/+7] +4.7% (2437) [+6/+3]   +1.4% (2354) [+2/+1]
+ 0.10  4707  270.3  5.74   +2.8..+8.7  52.7        105    0.577 0.527 +8.2% (1376) [+5/+11] +4.6% (1692) [+7/+2]   +4.8% (1639) [+7/+3]
+ 0.12  3157  200.7  6.36   +2.9..+9.9  52.3        110    0.582 0.523  +8.7% (873) [+10/+8] +1.8% (1139) [+2/+2]   +9.1% (1145) [+9/+9]
+ 0.15  1720  138.0  8.02  +3.2..+12.9  52.0        115    0.591 0.520   +5.2% (452) [+6/+4]  +3.1% (615) [+2/+5] +14.6% (653) [+18/+11]
+ 0.20   657  120.9 18.40 +10.4..+26.1  55.6        115    0.619 0.556  +8.2% (147) [+2/+14] +8.5% (239) [+5/+12] +32.6% (271) [+38/+27]
+
+### The same rule at DraftKings alone
+
+ EV>=  bets  units  roi%  95% by day  win%  med price  claimed   won              2023-24              2024-25                2025-26
+ 0.00 18661   48.2  0.26  -1.2..+1.7  52.4       -105    0.556 0.524 +2.3% (5824) [+2/+3] +0.9% (6545) [+2/+0]   -2.3% (6292) [-5/+0]
+ 0.03 12501  274.7  2.20  +0.4..+4.0  53.1       -105    0.564 0.531 +3.2% (3952) [+2/+4] +3.2% (4403) [+4/+2]   +0.2% (4146) [-1/+1]
+ 0.05  9184  273.1  2.97  +0.9..+5.0  53.1        100    0.569 0.531 +4.0% (2924) [+3/+5] +4.2% (3202) [+5/+4]   +0.7% (3058) [-1/+2]
+ 0.06  7770  249.7  3.21  +0.9..+5.5  53.0        100    0.571 0.530 +5.5% (2468) [+5/+6] +3.3% (2691) [+4/+3]   +1.0% (2611) [+1/+1]
+ 0.08  5375  130.0  2.42  -0.4..+5.1  52.0        105    0.576 0.520 +4.7% (1709) [+5/+5] +0.7% (1857) [+3/-2]   +2.1% (1809) [+2/+2]
+ 0.10  3606  120.1  3.33  +0.1..+6.4  51.7        105    0.580 0.517 +6.7% (1128) [+5/+8] +0.3% (1243) [+1/-0]   +3.2% (1235) [+4/+2]
+ 0.12  2380   87.1  3.66  -0.2..+7.4  51.3        110    0.585 0.513  +4.6% (724) [+6/+3]  -1.1% (822) [+3/-5]    +7.5% (834) [+7/+8]
+ 0.15  1275  103.7  8.14 +2.9..+13.5  52.4        114    0.593 0.524  +5.1% (363) [+6/+4]  -1.1% (432) [-0/-2] +18.8% (480) [+19/+19]
+ 0.20   462   90.4 19.56 +9.4..+29.2  56.3        115    0.624 0.563 +8.6% (108) [+13/+4]  +1.2% (161) [-2/+5] +41.0% (193) [+51/+31]
+
+### The side the rule does not bet (over), best price
+
+ EV>=  bets  units   roi%  95% by day  win%  med price  claimed   won                2023-24               2024-25               2025-26
+ 0.00  9164 -432.6  -4.72  -6.6..-2.8  50.7       -114    0.556 0.507   -6.4% (4617) [-4/-9]  -4.0% (2257) [-6/-2]  -2.0% (2290) [-0/-4]
+ 0.03  5076 -170.3  -3.35  -6.0..-0.8  50.3       -106    0.559 0.503   -5.9% (3112) [-3/-9]  +0.2% (1008) [-1/+2]   +1.1% (956) [+2/+0]
+ 0.05  3410 -114.3  -3.35  -6.6..-0.1  49.5        100    0.559 0.495   -5.6% (2301) [-3/-8]   +0.7% (589) [-5/+6]   +2.0% (520) [+1/+3]
+ 0.06  2761  -68.3  -2.47  -6.0..+1.0  49.6        100    0.560 0.496   -5.6% (1953) [-3/-9]   +4.3% (419) [+0/+8]   +6.1% (389) [+4/+9]
+ 0.08  1844  -71.9  -3.90  -8.2..+0.5  48.0        105    0.560 0.480   -7.4% (1423) [-6/-9]   +5.3% (218) [+5/+6] +11.1% (203) [+2/+21]
+ 0.10  1210  -58.5  -4.84 -10.2..+1.0  46.5        110    0.559 0.465  -8.8% (1007) [-5/-13] +18.4% (98) [+19/+17] +11.1% (105) [+1/+21]
+ 0.12   813  -47.8  -5.88 -12.8..+1.0  45.0        114    0.560 0.450   -8.4% (704) [-7/-10] +22.1% (49) [+25/+19]    +0.6% (60) [-2/+3]
+ 0.15   429  -23.2  -5.41 -14.6..+4.1  45.0        115    0.566 0.450   -9.1% (378) [-10/-8]                  (22)                  (29)
+ 0.20   123  -18.0 -14.62 -33.0..+4.7  39.0        125    0.572 0.390 -20.4% (107) [-31/-10]                   (4)                  (12)
+
+### The rule under the BORROWED correction instead (under, best price, floor -200)
+
+ EV>=  bets  units  roi% 95% by day  win%  med price  claimed   won              2023-24              2024-25              2025-26
+ 0.00 26817 -450.2 -1.68 -3.1..-0.3  45.2        120    0.456 0.452 +0.5% (8669) [+1/+0] -0.8% (8971) [+3/-5] -4.7% (9177) [-7/-3]
+ 0.03 22952 -294.6 -1.28 -2.8..+0.1  44.7        125    0.453 0.447 +1.2% (7423) [+1/+1] -0.9% (7736) [+3/-4] -4.0% (7793) [-6/-2]
+ 0.05 20132 -209.1 -1.04 -2.6..+0.5  44.5        125    0.452 0.445 +1.2% (6548) [+0/+2] -1.0% (6778) [+2/-4] -3.3% (6806) [-5/-2]
+ 0.06 18754 -156.4 -0.83 -2.5..+0.8  44.4        126    0.452 0.444 +1.6% (6131) [+0/+3] -1.3% (6313) [+2/-4] -2.8% (6310) [-4/-1]
+ 0.08 16071 -158.6 -0.99 -2.8..+0.8  44.0        127    0.453 0.440 +0.6% (5301) [+0/+1] -0.7% (5400) [+3/-4] -2.8% (5370) [-4/-1]
+ 0.10 13361   -6.7 -0.05 -2.0..+1.9  44.1        130    0.454 0.441 +0.4% (4479) [-1/+2] +1.1% (4468) [+3/-1] -1.7% (4414) [-4/+1]
+ 0.12 10765   40.6  0.38 -1.8..+2.6  44.0        130    0.457 0.440 +3.0% (3640) [+3/+3] +0.6% (3565) [+3/-2] -2.5% (3560) [-3/-2]
+ 0.15  7414  110.2  1.49 -1.3..+4.2  44.0        130    0.462 0.440 +5.2% (2562) [+5/+5] +1.9% (2462) [+4/+0] -3.0% (2390) [-6/-0]
+ 0.20  3375   86.1  2.55 -1.7..+6.5  43.8        135    0.474 0.438 +5.1% (1196) [+8/+2] +2.8% (1051) [-0/+6] -0.4% (1128) [-0/-1]
+
+### Claimed against realised, every priced side at DraftKings
+
+model says  sides  claimed  borrowed says  happened  price implies
+ 0.30-0.40  14063    0.366          0.428     0.390          0.438
+ 0.40-0.50  36748    0.451          0.516     0.457          0.488
+ 0.50-0.55  19052    0.525          0.460     0.522          0.557
+ 0.55-0.60  17697    0.574          0.509     0.566          0.596
+ 0.60-0.65  10432    0.622          0.559     0.603          0.620
+ 0.65-0.70   3624    0.669          0.610     0.634          0.634
+ 0.70-0.80    578    0.719          0.664     0.633          0.640
+ 0.80-1.00     61    0.846          0.809     0.836          0.491
+
+### Where the bets land at EV >= 0.10
+
+          book  bets  units  roi%  95% by day  win%  med price  claimed   won                2023-24                2024-25                2025-26
+    draftkings  2681   99.1  3.70  -0.4..+7.7  51.4      110.0    0.571 0.514    +5.6% (956) [+4/+7]    -0.2% (917) [+0/-1]    +5.9% (808) [+9/+3]
+     betrivers  1109   62.6  5.64 -0.6..+11.7  52.5      104.0    0.575 0.525 +11.0% (249) [+11/+11]    +5.7% (410) [+8/+3]    +2.6% (450) [+9/-4]
+        betmgm   424   34.7  8.18 -1.6..+17.8  54.2      100.0    0.594 0.542  +13.7% (104) [+8/+19]  +15.6% (182) [+27/+5]   -5.7% (138) [-11/-0]
+   hardrockbet   371   51.2 13.79 +3.9..+23.3  58.8     -105.0    0.598 0.588  +27.5% (58) [+25/+30] +15.5% (178) [+12/+19]    +5.6% (135) [+7/+4]
+williamhill_us   120   22.4 18.67 +1.5..+36.5  60.0     -109.0    0.597 0.600                    (9)                    (5) +18.6% (106) [+24/+13]
+      fanatics     2    NaN   NaN         NaN   NaN        NaN      NaN   NaN                    NaN                    NaN                    NaN
+
+at EV >= 0.10: 4,707 bets over 528 priced game days (8.9 a day; most on one day 54)
+```
+
+## nhl_prop_assists
+
+```
+====================================================================================================
+nhl_prop_assists  (player_assists, settles on assists; LIVE)
+====================================================================================================
+player_assists: 309,336 quotes; dropped 0 taken after puck drop and 0 incoherent ({})
+  2023-24: fit on 159,628 rows, excess variance 0.0000; 46,294 rows to score; mean predicted 0.30 vs actual 0.29
+  2024-25: fit on 205,922 rows, excess variance 0.0000; 46,243 rows to score; mean predicted 0.29 vs actual 0.28
+  2025-26: fit on 252,165 rows, excess variance 0.0000; 46,141 rows to score; mean predicted 0.29 vs actual 0.29
+books shopped: ['draftkings', 'betmgm', 'williamhill_us', 'fanatics', 'betrivers', 'hardrockbet', 'betparx']
+priced player-games by season {2024: 18756, 2025: 18918, 2026: 20928} matched to a prediction (unmatched = under 10 games, a name the log does not hold); quotes by book {'draftkings': 57238, 'betmgm': 56412, 'hardrockbet': 52208, 'williamhill_us': 28306, 'fanatics': 232}
+DraftKings lines: {0.5: 57046, 1.5: 192}
+blind always over at DraftKings: {'bets': 57213, 'units': -5932.1, 'roi%': -10.37, '95% by day': '-11.6..-9.2', 'win%': 34.7, 'med price': 170, 'claimed': 0.348, 'won': 0.347, '2023-24': '-11.7% (18440) [-11/-12]', '2024-25': '-10.2% (18288) [-12/-8]', '2025-26': '-9.3% (20485) [-9/-10]'}
+blind always under at DraftKings: {'bets': 57210, 'units': -1991.1, 'roi%': -3.48, '95% by day': '-4.2..-2.8', 'win%': 65.3, 'med price': -225, 'claimed': 0.652, 'won': 0.653, '2023-24': '-2.5% (18435) [-2/-3]', '2024-25': '-3.7% (18290) [-3/-5]', '2025-26': '-4.1% (20485) [-4/-4]'}
+
+### THE RULE: under only, the best price among the books shopped, the model's OWN probability, floor -200; per season as return (bets) [first half / second half]
+
+ EV>=  bets  units  roi%   95% by day  win%  med price  claimed   won                2023-24               2024-25                2025-26
+ 0.00  8107  -66.8 -0.82   -3.0..+1.4  55.5       -135    0.588 0.555   +1.3% (3069) [+3/-0]  -0.4% (2026) [+2/-2]   -3.2% (3012) [-2/-4]
+ 0.03  4604   -0.8 -0.02   -2.9..+2.7  54.1       -125    0.585 0.541   +2.8% (1990) [+4/+2]   -0.6% (998) [-0/-1]   -3.2% (1616) [-3/-3]
+ 0.05  3014   64.9  2.15   -1.5..+5.8  53.8       -115    0.582 0.538   +3.7% (1434) [+5/+3]   +3.9% (594) [+3/+4]    -1.1% (986) [-1/-1]
+ 0.06  2433   75.9  3.12   -1.0..+7.2  53.6       -110    0.580 0.536   +5.2% (1213) [+5/+5]   +6.4% (449) [+6/+6]    -2.0% (771) [-3/-1]
+ 0.08  1641  123.1  7.50  +2.5..+12.3  54.6       -105    0.577 0.546    +8.6% (885) [+8/+9] +10.0% (273) [+6/+13]    +4.2% (483) [+2/+7]
+ 0.10  1063  115.8 10.90  +4.7..+17.2  54.8        105    0.575 0.548  +11.0% (612) [+14/+8] +11.3% (150) [+3/+20]  +10.6% (301) [+6/+15]
+ 0.12   722  109.0 15.10  +8.0..+22.1  55.7        110    0.574 0.557 +13.6% (438) [+13/+14]  +13.3% (87) [+8/+18] +19.3% (197) [+16/+22]
+ 0.15   421   86.1 20.44 +11.8..+29.5  58.0        115    0.588 0.580 +14.3% (267) [+15/+14]  +25.7% (41) [+6/+44] +33.1% (113) [+40/+26]
+ 0.20   206   49.7 24.14 +10.7..+37.5  61.2        115    0.625 0.612 +15.8% (123) [+14/+17]                  (17)  +46.7% (66) [+57/+37]
+
+### The same rule at DraftKings alone
+
+ EV>=  bets  units  roi%   95% by day  win%  med price  claimed   won                2023-24               2024-25                2025-26
+ 0.00  7621  -64.6 -0.85   -3.1..+1.5  55.4       -135    0.587 0.554   +1.2% (2941) [+3/-1]  +0.1% (1878) [+2/-2]   -3.6% (2802) [-2/-5]
+ 0.03  4303  -17.0 -0.40   -3.3..+2.6  53.8       -125    0.583 0.538   +2.1% (1902) [+4/-0]   -0.7% (904) [-1/-0]   -3.4% (1497) [-3/-3]
+ 0.05  2806   32.4  1.15   -2.6..+4.9  53.2       -115    0.580 0.532   +2.3% (1359) [+4/+0]   +3.5% (528) [+4/+3]    -1.9% (919) [-3/-0]
+ 0.06  2261   58.1  2.57   -1.7..+6.9  53.3       -110    0.578 0.533   +4.5% (1145) [+5/+4]   +6.5% (393) [+5/+8]    -2.6% (723) [-6/+1]
+ 0.08  1508  102.0  6.76  +1.8..+11.8  54.3       -105    0.576 0.543    +7.3% (829) [+9/+6] +13.2% (234) [+7/+19]    +2.5% (445) [-3/+8]
+ 0.10   975  109.9 11.27  +4.5..+17.7  54.9        105    0.572 0.549  +11.0% (572) [+15/+7]  +9.4% (131) [-1/+19]  +12.8% (272) [+7/+19]
+ 0.12   652  105.9 16.24  +8.6..+23.8  56.3        110    0.572 0.563 +13.6% (403) [+14/+13]  +12.6% (75) [+19/+6] +23.9% (174) [+21/+27]
+ 0.15   377   74.5 19.75 +10.3..+29.1  57.3        114    0.583 0.573 +14.2% (243) [+15/+14]  +16.0% (37) [-3/+34]  +35.0% (97) [+42/+28]
+ 0.20   170   37.0 21.79  +5.9..+38.0  60.0        114    0.622 0.600  +12.0% (103) [+3/+21]                  (13)  +48.2% (54) [+59/+37]
+
+### The side the rule does not bet (over), best price
+
+ EV>=  bets  units  roi%   95% by day  win%  med price  claimed   won               2023-24              2024-25                2025-26
+ 0.00  8193 -243.1 -2.97   -6.2..+0.3  34.3        190    0.373 0.343  -4.1% (3484) [-3/-5] -2.1% (2355) [-8/+3]   -2.3% (2354) [-2/-2]
+ 0.03  4765 -101.1 -2.12   -6.2..+1.9  33.9        195    0.374 0.339  -1.4% (2239) [+0/-3] -2.0% (1248) [-9/+5]   -3.5% (1278) [-6/-1]
+ 0.05  3280  -71.1 -2.17   -7.2..+2.6  33.4        200    0.375 0.334  +0.8% (1648) [+3/-1] -6.2% (792) [-10/-2]    -4.1% (840) [-7/-2]
+ 0.06  2698  -34.8 -1.29   -7.0..+4.2  33.5        200    0.376 0.335  +3.0% (1395) [+3/+3] -7.0% (626) [-11/-3]    -4.9% (677) [-5/-5]
+ 0.08  1790  -36.8 -2.06   -8.8..+4.8  32.5        210    0.376 0.325   +3.1% (946) [+8/-2]  -7.7% (398) [-7/-8]   -8.1% (446) [-13/-3]
+ 0.10  1189   -3.1 -0.26   -8.9..+8.0  32.5        210    0.377 0.325  +3.8% (653) [+11/-3]  -1.1% (240) [-6/+4]    -8.4% (296) [-9/-8]
+ 0.12   789  -35.5 -4.50  -15.4..+5.9  30.9        220    0.379 0.309 -1.6% (453) [+11/-14]  -2.6% (145) [-8/+3]  -12.9% (191) [-19/-7]
+ 0.15   411   -9.4 -2.28 -17.2..+14.1  30.9        220    0.381 0.309 +3.5% (237) [+25/-18]  +6.2% (74) [-7/+19] -22.3% (100) [-29/-15]
+ 0.20   125   25.1 20.05  -8.2..+50.6  35.2        230    0.386 0.352 +23.6% (66) [+57/-10]                 (26)   +9.7% (33) [+52/-30]
+
+### The rule under the BORROWED correction instead (under, best price, floor -200)
+
+ EV>=  bets  units  roi%  95% by day  win%  med price  claimed   won              2023-24              2024-25                2025-26
+ 0.00  3475  -62.7 -1.80  -5.6..+1.9  46.7        110    0.484 0.467 -0.6% (1374) [+2/-4]  -1.7% (921) [+2/-5]   -3.3% (1180) [-4/-2]
+ 0.03  2824  -40.4 -1.43  -5.6..+2.7  45.6        115    0.474 0.456 +0.0% (1064) [+4/-4]  -1.0% (742) [+4/-6]   -3.3% (1018) [-6/-1]
+ 0.05  2478  -43.0 -1.74  -6.2..+2.6  44.8        120    0.470 0.448  +0.0% (906) [+6/-6]  -3.0% (651) [+1/-7]    -2.6% (921) [-6/+1]
+ 0.06  2295  -39.8 -1.73  -6.5..+2.9  44.5        120    0.469 0.445  +0.2% (833) [+5/-4]  -3.5% (587) [+1/-8]    -2.4% (875) [-4/-0]
+ 0.08  1973  -32.7 -1.66  -6.9..+3.5  44.0        124    0.468 0.440  +0.9% (686) [+8/-6]  -3.2% (502) [+1/-7]    -2.9% (785) [-2/-4]
+ 0.10  1675  -41.4 -2.47  -8.2..+3.1  43.2        126    0.468 0.432  +0.9% (575) [+3/-1] -5.9% (405) [-1/-11]    -3.2% (695) [-2/-4]
+ 0.12  1421  -18.7 -1.32  -7.6..+5.0  43.3        130    0.468 0.433  +0.0% (497) [+3/-3]  -5.3% (326) [-5/-5]    -0.2% (598) [+3/-3]
+ 0.15  1081   -0.7 -0.06  -7.2..+7.0  43.4        135    0.472 0.434  -1.4% (393) [+2/-5]  -3.5% (227) [-1/-6]    +2.8% (461) [+7/-2]
+ 0.20   600   44.6  7.44 -2.9..+17.2  46.0        140    0.484 0.460  +1.9% (241) [+4/-0]  +3.7% (109) [+0/+7] +14.4% (250) [+18/+11]
+
+### Claimed against realised, every priced side at DraftKings
+
+model says  sides  claimed  borrowed says  happened  price implies
+ 0.30-0.40  22762    0.349          0.410     0.345          0.382
+ 0.40-0.50  14602    0.444          0.508     0.441          0.480
+ 0.50-0.55   5914    0.525          0.461     0.527          0.554
+ 0.55-0.60   8695    0.577          0.513     0.580          0.604
+ 0.60-0.65  11065    0.625          0.563     0.627          0.654
+ 0.65-0.70  11690    0.676          0.616     0.682          0.704
+ 0.70-0.80  18991    0.739          0.686     0.738          0.762
+ 0.80-1.00    854    0.820          0.779     0.815          0.794
+
+### Where the bets land at EV >= 0.10
+
+       book  bets  units  roi%  95% by day  win%  med price  claimed   won                2023-24              2024-25               2025-26
+ draftkings   849   80.2  9.44 +2.1..+16.7  53.9      105.0    0.570 0.539   +8.9% (499) [+14/+3] +6.9% (107) [-0/+14] +11.8% (243) [+3/+20]
+     betmgm   187   34.6 18.51 +3.1..+34.1  58.3      115.0    0.582 0.583 +22.8% (103) [+23/+23] +16.6% (40) [-1/+34]  +10.2% (44) [+23/-3]
+hardrockbet    26    NaN   NaN         NaN   NaN        NaN      NaN   NaN                    NaN                  NaN                   NaN
+   fanatics     1    NaN   NaN         NaN   NaN        NaN      NaN   NaN                    NaN                  NaN                   NaN
+
+at EV >= 0.10: 1,063 bets over 528 priced game days (2.0 a day; most on one day 14)
+```
+
+## The opening weeks of a season, each model at its own cut
+
+No hold is applied to any of them (`MIN_GAMES` is ten CAREER rows in the log).
+This is what the three seasons say about that, not a proposal:
+
+```
+### nhl_prop_saves: the rule at EV >= 0.10, by time into the season
+       window  bets  units  roi%   95% by day  win%  med price  claimed   won               2023-24                2024-25               2025-26  share of priced players bet  EV claimed
+       week 1    37    4.0 10.69 -30.9..+45.1  59.5       -115    0.640 0.595                  (15)                   (11)                  (11)                        0.252       0.191
+       week 2    81   -1.6 -1.92 -22.1..+20.4  51.9       -110    0.634 0.519                  (14)   -10.6% (44) [-6/-15]                  (23)                        0.386       0.201
+    weeks 3-4   133    7.1  5.37 -14.8..+25.6  55.6       -115    0.629 0.556                  (21)   +17.5% (78) [-9/+44] -36.2% (34) [-54/-19]                        0.357       0.190
+    weeks 5-8   293   63.4 21.65 +11.6..+31.7  64.5       -115    0.638 0.645  +14.4% (69) [-6/+34] +23.8% (162) [+21/+27] +24.0% (62) [+29/+18]                        0.376       0.202
+ after week 8  1211   63.5  5.24  -0.2..+10.6  56.0       -115    0.632 0.560   +2.1% (329) [-1/+5]   +5.7% (485) [+17/-6]   +7.3% (397) [+7/+8]                        0.369       0.190
+first 2 weeks   118    2.4  2.03 -16.3..+22.2  54.2       -115    0.636 0.542                  (29)   -1.3% (55) [+11/-13] -20.0% (34) [-18/-22]                          NaN         NaN
+first 4 weeks   251    9.5  3.80 -10.1..+17.9  55.0       -115    0.632 0.550 +31.6% (50) [+34/+29]   +9.7% (133) [+5/+15] -28.1% (68) [-20/-36]                          NaN         NaN
+### nhl_prop_shots_on_goal: the rule at EV >= 0.10, by time into the season
+       window  bets  units  roi%  95% by day  win%  med price  claimed   won               2023-24               2024-25               2025-26  share of priced players bet  EV claimed
+       week 1   141   13.1  9.32 -3.4..+21.6  54.6        110    0.585 0.546  +13.4% (61) [+7/+19]   +5.4% (60) [-6/+17]                  (20)                        0.101       0.177
+       week 2   242   29.1 12.02 -2.8..+27.4  55.4        105    0.584 0.554  +8.4% (54) [-22/+39] +8.4% (139) [+33/-16] +26.2% (49) [+18/+34]                        0.126       0.166
+    weeks 3-4   413   15.1  3.66 -4.3..+11.3  51.8        110    0.581 0.518   -3.4% (84) [+9/-16]  +8.4% (249) [+3/+14]    -3.7% (80) [-1/-7]                        0.103       0.168
+    weeks 5-8   771   72.6  9.41 +3.0..+16.0  54.7        105    0.578 0.547 +10.8% (193) [+12/+9]  +7.0% (353) [+14/+0] +12.0% (225) [+20/+4]                        0.093       0.157
+ after week 8  3140  140.4  4.47  +0.8..+8.3  52.0        105    0.575 0.520  +8.3% (984) [+5/+12]   +2.0% (891) [+4/+0]  +3.2% (1265) [+4/+3]                        0.082       0.157
+first 2 weeks   383   42.2 11.03 +0.6..+21.7  55.1        105    0.585 0.551 +11.1% (115) [+21/+1]  +7.5% (199) [+15/+1]  +21.1% (69) [+4/+38]                          NaN         NaN
+first 4 weeks   796   57.4  7.20 +0.9..+13.7  53.4        110    0.583 0.534   +4.9% (199) [+3/+7]  +8.0% (448) [+5/+11]  +7.8% (149) [+22/-6]                          NaN         NaN
+### nhl_prop_assists: the rule at EV >= 0.10, by time into the season
+       window  bets  share of priced players bet  EV claimed  units  roi%   95% by day  win%  med price  claimed   won               2023-24              2024-25               2025-26
+       week 1    22                        0.014       0.196    NaN   NaN          NaN   NaN        NaN      NaN   NaN                   NaN                  NaN                   NaN
+       week 2    37                        0.018       0.167    2.4  6.50 -25.5..+34.2  54.1     -105.0    0.589 0.541                  (15)                 (13)                   (9)
+    weeks 3-4    71                        0.016       0.177   17.7 24.94  +0.2..+52.2  66.2     -115.0    0.627 0.662 +32.7% (31) [+46/+21]                 (16)                  (24)
+    weeks 5-8   175                        0.020       0.164    5.4  3.09 -10.1..+16.3  51.4      100.0    0.577 0.514   +1.4% (71) [+11/-8]  +7.3% (47) [-6/+20]    +1.7% (57) [-4/+8]
+ after week 8   758                        0.018       0.159   91.4 12.06  +4.3..+19.7  54.7      107.0    0.567 0.547 +10.7% (481) [+20/+2] +19.3% (72) [+9/+29] +12.8% (205) [+6/+19]
+first 2 weeks    59                          NaN         NaN    1.3  2.25 -22.2..+26.4  52.5     -105.0    0.606 0.525                  (29)                 (15)                  (15)
+first 4 weeks   130                          NaN         NaN   19.0 14.64  -2.7..+32.9  60.0     -110.0    0.617 0.600 +24.7% (60) [+20/+29] -1.3% (31) [-16/+13]  +11.8% (39) [-7/+30]
+```
+
+## Read, the three models
+
+- **Saves: +7.8% on 1,755 bets** (interval +3.2..+12.5), seasons +7.3% /
+  +10.1% / +4.7%. Clear of zero from 0.05 up and positive in every season from
+  0.05 up. It also survives the borrowed correction (+8.0% to +15.0% at every
+  cut), so nothing rides on which probability it decides on. A priced goalie
+  who did not start is not a bet here and is NO_ACTION in settlement -- one
+  rule, in both places.
+- **Shots on goal: +5.7% on 4,707 bets** (interval +2.8..+8.7), seasons +8.2%
+  / +4.6% / +4.8%, all six half-seasons positive. It is the thinnest of the
+  three and the only one that needs the best price to exist. It holds under
+  the wider count distribution too (+4.9% on 5,804, every season positive from
+  0.10 up). Volume is the thing to know: 8.9 bets a priced game day, 54 on the
+  busiest.
+- **Assists: +10.9% on 1,063 bets** (interval +4.7..+17.2), seasons +11.0% /
+  +11.3% / +10.6%, and the return RISES with the cut (+7.5% at 0.08, +15.1% at
+  0.12, +20.4% at 0.15), which is what a real signal does. Under the borrowed
+  correction it loses at every cut to 0.15: it must decide on its own number.
+- **All three over-claim where they bet**, as blocked shots does: saves says
+  63.3% and delivers 57.3%, shots 57.7% and 52.7%, assists 57.5% and 54.8%.
+  The returns above are what was realised, so they already carry that. It is
+  why a model asking for 10% earns 6-11%.
+- **The opening weeks are not worse.** Shots on goal in the first four weeks:
+  +7.2% on 796 (interval +0.9..+13.7). Saves: +3.8% on 251, interval -10.1 to
+  +17.9, one bad opening (2025-26, -28% on 68) against two good ones -- too few
+  bets to say more than "not evidently different". Assists: 130 bets, +14.6%.
+- **What the card does on a real slate** (2026-10-01, replayed against that
+  night's stored quotes, nothing written): saves 9 bets from 11 priced goalies,
+  shots 32 from 118 scored, assists 2 from 117. Nine of eleven goalies is far
+  above the backtest's 25-39% in opening weeks. The inputs were checked: on
+  the sixteen starts already played this season the model's mean is 23.5
+  against 23.6 actual, so it is not biased low. All nine landed at Hard Rock:
+  four where it hung a number a save higher than DraftKings, two it alone
+  priced, three at the same number and a better price. One night is not a
+  sample.
+- **Who is skipped.** A priced player whose last game was for neither of
+  tonight's teams (an off-season move, until he has played once for the new
+  side), and a name two players on one team share. 24 of 142 on 2026-10-01,
+  each named in the log.
+
+---
+
+# Total goals, round four: nothing in the full-game number (2026-10-01)
+
+mike: *"we need total goals."* Three rounds above fitted models and found
+nothing. This round asks what a model cannot hide behind, on six priced
+seasons with simultaneous quotes: `python -m scripts.nhl_totals_lab`.
+
+```
+347,307 pre-game totals quotes, 7,920 games, seasons [2021, 2022, 2023, 2024, 2025, 2026]; 6.7 API snapshots a game
+
+### BLIND at DraftKings' FIRST pre-game number (median 26.2h before puck drop)
+
+ side line  bets  units  roi%  95% by day      2020-21       2021-22      2022-23      2023-24      2024-25      2025-26
+ over  all  7763 -317.3 -4.09  -6.1..-2.0  -6.9% (770)  +2.1% (1401) -4.5% (1400) -7.8% (1400) -5.8% (1398) -2.9% (1394)
+ over  5.5  2374  -43.2 -1.82  -5.4..+1.8  -5.0% (409)   +1.2% (429)  -8.0% (102) -13.3% (149)  -0.3% (648)  +0.4% (637)
+ over  6.0  2260  -46.2 -2.04  -5.6..+1.5  -7.9% (241)   +1.9% (662)  -0.9% (512)  -1.4% (533)  -8.8% (312)          (0)
+ over  6.5  2970 -203.6 -6.86 -10.2..-3.3 -15.6% (106)   +5.3% (281)  -5.5% (722) -10.5% (668) -11.7% (437)  -5.4% (756)
+under  all  7763 -350.3 -4.51  -6.6..-2.5  -2.0% (770) -10.5% (1401) -4.2% (1400) -0.7% (1400) -2.4% (1398) -6.2% (1394)
+under  5.5  2374 -164.8 -6.94 -10.7..-3.1  -4.3% (409)  -10.4% (429)  +0.6% (102)  +4.9% (149)  -7.7% (648)  -9.5% (637)
+under  6.0  2260 -131.0 -5.80  -9.3..-2.2  +0.1% (241)   -9.9% (662)  -7.0% (512)  -6.6% (533)  +1.5% (312)          (0)
+under  6.5  2970  -64.7 -2.18  -5.6..+1.2  +6.4% (106)  -13.4% (281)  -4.1% (722)  +1.7% (668)  +2.4% (437)  -3.5% (756)
+
+### BLIND by price band, FIRST number
+
+ side      price  bets  units  roi%  95% by day      2020-21      2021-22      2022-23      2023-24      2024-25      2025-26
+ over -200..-131   259    3.1  1.21 -8.7..+10.8         (10)          (8)         (16)         (26)   +5.3% (43)  +1.1% (156)
+ over -130..-116  2324  -48.9 -2.10  -5.7..+1.5  -5.4% (170)  +3.6% (343)  +2.5% (413)  -4.9% (434) -10.9% (521)  +3.6% (443)
+ over -115..-106  2160  -94.7 -4.38  -8.4..-0.3  -9.0% (272)  -0.3% (481)  -5.6% (484)  -8.4% (416)  -0.9% (333)  -2.2% (174)
+ over  -105..104  2036 -116.7 -5.73  -9.8..-1.4 -10.3% (233)  +5.4% (499) -11.1% (417)  -9.8% (400)  -1.6% (281) -14.4% (206)
+ over   105..200   983  -59.2 -6.02 -12.6..+0.6   +2.8% (85)  -10.4% (70)   +3.8% (70) -11.6% (124)  -8.5% (219)  -5.7% (415)
+under -200..-131   240  -13.9 -5.81 -16.6..+5.5  -20.5% (61)          (7)         (16)         (22)  -13.3% (50)   +3.4% (84)
+under -130..-116  2003   -7.2 -0.36  -4.3..+3.5  +2.5% (250) -11.7% (320)  +3.9% (265)  +1.2% (353)  +1.7% (349)  +0.7% (466)
+under -115..-106  2179  -97.2 -4.46  -8.5..-0.4  +0.4% (278)  -9.9% (527)  -0.8% (482)  -0.6% (423)  -9.0% (297)  -7.5% (172)
+under  -105..104  2179 -138.1 -6.34 -10.4..-2.4  -2.3% (165) -12.0% (475)  -7.4% (478)  -2.8% (399)  +0.1% (433) -13.3% (229)
+under   105..200  1161  -94.1 -8.10 -13.7..-2.5         (16)   -3.8% (72) -16.4% (159)  -1.3% (203)  -2.7% (268) -11.0% (443)
+
+### BLIND at DraftKings' LAST pre-game number (median 0.2h before puck drop)
+
+ side line  bets  units  roi% 95% by day     2020-21       2021-22      2022-23      2023-24      2024-25      2025-26
+ over  all  7763 -313.0 -4.03 -6.1..-2.0 -6.6% (770)  +1.8% (1401) -3.4% (1400) -7.6% (1400) -6.0% (1398) -3.6% (1394)
+ over  5.5  2493  -89.0 -3.57 -7.2..+0.2 -6.5% (413)   -2.0% (497)  +4.4% (165)  -3.8% (186)  -5.3% (638)  -3.1% (594)
+ over  6.0  2083  -43.4 -2.08 -5.9..+1.8 -7.8% (230)   +6.2% (511)  -7.1% (504)  -2.4% (550)  -2.7% (288)          (0)
+ over  6.5  2959 -175.6 -5.94 -9.2..-2.8 -11.6% (99)   +1.0% (344)  -3.0% (644) -12.5% (604)  -8.9% (471)  -3.9% (797)
+under  all  7763 -341.1 -4.39 -6.5..-2.4 -2.5% (770) -10.3% (1401) -4.8% (1400) -0.9% (1400) -1.6% (1398) -5.4% (1394)
+under  5.5  2493 -124.1 -4.98 -8.8..-1.3 -3.1% (413)   -6.7% (497) -13.3% (165)  -5.1% (186)  -2.1% (638)  -5.5% (594)
+under  6.0  2083 -121.2 -5.82 -9.7..-1.9 +0.3% (230)  -14.5% (511)  -0.4% (504)  -5.8% (550)  -4.8% (288)          (0)
+under  6.5  2959  -84.1 -2.84 -6.1..+0.4  +2.7% (99)   -9.5% (344)  -6.1% (644)  +3.9% (604)  +0.9% (471)  -5.4% (797)
+
+### BLIND by price band, LAST number
+
+ side      price  bets  units  roi%  95% by day      2020-21      2021-22     2022-23      2023-24      2024-25      2025-26
+ over -200..-131   382   -5.4 -1.42 -10.6..+7.0         (21)         (19)  +4.7% (45)  -10.3% (76)   -6.9% (41)  -1.3% (180)
+ over -130..-116  2301  -60.9 -2.65  -6.2..+0.8 -11.2% (210)  +3.0% (378) -0.7% (401)  -1.4% (431) -10.5% (491)  +3.0% (390)
+ over -115..-106  2051 -125.0 -6.10 -10.3..-2.2  -2.4% (218)  +0.7% (418) -6.4% (395) -10.4% (438)  -8.5% (356)  -9.7% (226)
+ over  -105..104  2034  -88.8 -4.36  -8.5..-0.3  -7.2% (221)  +2.4% (448) -4.8% (441) -11.5% (359)  -3.9% (300)  -3.5% (265)
+ over   105..200   995  -32.9 -3.31  -9.8..+3.5 -10.4% (100)  -0.0% (138) -0.7% (118)   -5.1% (96)  +5.6% (210)  -8.5% (333)
+under -200..-131   318  -27.7 -8.70 -17.7..+0.0   -5.4% (75)   +4.6% (38)        (22)         (19)  -36.6% (68)   +4.7% (96)
+under -130..-116  1941  -52.8 -2.72  -6.5..+1.4  -0.1% (243)  -6.5% (340) -7.6% (326)  +2.7% (286)  -0.4% (339)  -2.9% (407)
+under -115..-106  2059  -53.2 -2.59  -6.6..+1.5  -6.7% (220) -14.4% (402) +0.7% (422)  +3.9% (459)  -1.8% (335)  +1.9% (221)
+under  -105..104  2164 -130.1 -6.01 -10.1..-1.8  +3.4% (204) -11.5% (469) -6.2% (423)  -7.9% (398)  +0.8% (413) -11.3% (257)
+under   105..200  1281  -77.3 -6.04 -11.4..-0.6         (28)  -8.0% (152) -7.9% (207)  -2.1% (238)  +2.6% (243) -10.4% (413)
+
+soft-book quotes with Pinnacle in the SAME snapshot: 253,918; same number 78.1%
+
+### SHARP-VS-SOFT: the first snapshot Pinnacle's no-vig makes DraftKings's price +EV (same number)
+
+ pin EV>=  bets  units  roi%   95% by day    2020-21      2021-22     2022-23     2023-24     2024-25     2025-26
+     0.00   577   11.0   1.9   -6.3..+9.8 +3.4% (67) +21.1% (121) -1.4% (123) -3.4% (149) -10.4% (41)  -7.6% (76)
+     0.01   228   -8.4  -3.7  -16.4..+8.3       (21)  +15.5% (54)  +6.8% (44) -32.3% (50)        (22) -15.4% (37)
+     0.02    77   -8.4 -10.9 -32.3..+10.7        (5)         (18)        (17)        (17)         (9)        (11)
+     0.03    27    NaN   NaN          NaN        NaN          NaN         NaN         NaN         NaN         NaN
+     0.04    12    NaN   NaN          NaN        NaN          NaN         NaN         NaN         NaN         NaN
+
+### SHARP-VS-SOFT: the first snapshot Pinnacle's no-vig makes the best soft book's price +EV (same number)
+
+ pin EV>=  bets  units  roi%   95% by day     2020-21     2021-22     2022-23     2023-24     2024-25     2025-26
+     0.00  2914   36.1  1.24   -2.3..+4.6 +2.7% (392) +2.3% (622) -3.4% (486) +3.1% (500) +2.0% (405) +0.9% (509)
+     0.01  1372   53.6  3.91   -1.1..+9.0 +7.6% (202) +9.2% (354) -1.5% (187) -7.2% (194) +5.2% (194) +5.1% (241)
+     0.02   605    1.6  0.27   -7.2..+7.4  +7.4% (99) +4.4% (192) -16.6% (64)  -8.8% (63)  -2.7% (81) +4.1% (106)
+     0.03   276    2.2  0.79 -10.3..+12.0  +6.8% (46) +0.3% (121)        (22)        (21)        (25)  -0.0% (41)
+     0.04   133   -0.5 -0.38 -18.7..+17.5        (27)  +0.4% (61)        (12)         (8)        (12)        (13)
+
+### OTHER NUMBER: DraftKings hangs a different total from Pinnacle; bet toward Pinnacle's
+
+ side  bets  units  roi% 95% by day     2020-21     2021-22     2022-23     2023-24     2024-25     2025-26
+ both  3187   11.5  0.36 -2.5..+3.3 -7.2% (190) -1.7% (506) +2.9% (450) +5.8% (477) -4.5% (648) +2.4% (916)
+ over  1657   13.9  0.84 -3.2..+4.8  -3.8% (33) +1.6% (298) +3.1% (270) +1.9% (230) -5.2% (367) +3.6% (459)
+under  1530   -2.4 -0.16 -4.6..+4.4 -8.0% (157) -6.5% (208) +2.7% (180) +9.5% (247) -3.7% (281) +1.2% (457)
+
+### OTHER NUMBER: any soft book hangs a different total from Pinnacle; bet toward Pinnacle's
+
+ side  bets  units  roi% 95% by day     2020-21     2021-22     2022-23     2023-24      2024-25      2025-26
+ both  5275  -74.9 -1.42 -3.7..+0.7 -6.6% (482) -3.1% (848) +4.4% (919) +0.8% (936) -4.7% (1007) -1.6% (1083)
+ over  2564  -27.5 -1.07 -4.2..+2.0 -9.6% (132) +5.2% (377) +3.0% (454) -0.1% (452)  -7.3% (527)  -1.5% (622)
+under  2711  -47.3 -1.75 -5.0..+1.4 -5.5% (350) -9.7% (471) +5.8% (465) +1.6% (484)  -1.8% (480)  -1.8% (461)
+
+DraftKings' number moved between its first and last pre-game snapshot in 24.9% of games
+
+### HINDSIGHT (not a rule): the first number, bet only where it later moved that way
+
+  bet  bets  units  roi%  95% by day     2020-21      2021-22     2022-23     2023-24      2024-25     2025-26
+ over   899   30.8  3.43  -2.4..+9.0  +0.5% (66) +10.3% (254) +3.4% (126) -8.6% (116)  -2.1% (165) +7.8% (172)
+under  1033   48.7  4.72 -0.9..+10.1 +2.9% (101)  -4.7% (219) +6.9% (227) +6.8% (200) +14.5% (159) +2.8% (127)
+```
+
+## Read, total goals
+
+- **The margin is on both sides.** Every over loses 4.0-4.1% and every under
+  4.4-4.5%, at the first number and the last, across six seasons. No line is
+  positive, and the one price band that is (+1.2% on 259 bets, interval -8.7
+  to +10.8) is noise. This is what
+  separates the total from the props: there the margin sits on the over, and
+  a model that says WHICH unders has something to work with. Here there is no
+  cheap side.
+- **Pinnacle does not disagree with DraftKings often enough to bet.** Same
+  number, same snapshot: 577 bets in six seasons at any positive EV, +1.9%
+  with an interval from -6.3 to +9.8; at 2% of EV, 77 bets. Shopping every
+  soft book gets it to +1.2% on 2,914. That recovers the margin and nothing
+  more.
+- **A different number from Pinnacle's is not a signal either**: +0.4% on
+  3,187 at DraftKings, -1.4% on 5,275 across the soft books.
+- **The ceiling is low.** DraftKings' number moves in 24.9% of games. Betting
+  the first number ONLY in the games where it later moved that way -- which no
+  rule can know in advance -- returns +3.4% and +4.7%, intervals through zero.
+  A perfect predictor of line movement would earn less than the prop models
+  do. That is the measurement that says stop fitting models to this number.
+- **Verdict: no cut clears, and `nhl_over_under` stays untrained.** What would
+  have to change is the market, not the model. The NHL results that hold are
+  all in markets where the book's margin is one-sided. The total-goals markets
+  shaped like that are the derivative ones -- team totals, period totals,
+  alternate totals -- and no price for any of them is stored. The feed sells
+  them (`team_totals`, `alternate_totals`, `totals_p1`; docs/nhl_market_research.md).

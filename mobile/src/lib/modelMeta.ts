@@ -431,6 +431,30 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'Blocked Shots',
   },
+  // Goalie saves, shots on goal and assists (models/nhl_props.py), each
+  // priced at the best book on offer. The stat labels are the wording the
+  // server writes into pick_label.
+  nhl_prop_saves: {
+    shortLabel: 'SV',
+    longLabel: 'Goalie Saves',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Saves',
+  },
+  nhl_prop_shots_on_goal: {
+    shortLabel: 'SOG',
+    longLabel: 'Player Shots on Goal',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Shots on Goal',
+  },
+  nhl_prop_assists: {
+    shortLabel: 'AST',
+    longLabel: 'Player Assists',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Assists',
+  },
 
   // ── NFL ───────────────────────────────────────────────────────────────────
   // The standalone wind-totals card (§28) — under-only, published into picks

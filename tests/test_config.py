@@ -161,11 +161,18 @@ def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
     nhl_prop_blocked_shots joined BY NAME on 2026-10-01 (mike): its cut was
     measured on its own probability, and the borrowed correction turned its
     three-season backtest from +6.2% into a loss. Each addition is a decision
-    with its own measurement, which is why this stays an exact list."""
+    with its own measurement, which is why this stays an exact list.
+
+    nhl_prop_saves / _shots_on_goal / _assists joined the same day, the same
+    way (mike: "build saves, shots on goal and assists models"): each cut was
+    swept on the model's own probability, and under the borrowed correction
+    assists loses at every cut to 0.15 and shots on goal earns nothing
+    (scripts/nhl_prop_backtest.py)."""
     import config
 
     assert config.MODELS_ON_OWN_PROBABILITY == frozenset(
-        {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots"}
+        {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
+         "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists"}
     )
 
 
@@ -218,13 +225,14 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
     """Carrying an own EV floor and deciding on the model's OWN probability
     were one expression until 2026-09-20. They are separate questions: where a
     model's edges sit, versus whether its calibration map can be trusted. Every
-    model but the two NFL rules and the NHL blocked-shots model (2026-10-01,
+    model but the two NFL rules and the four NHL prop models (2026-10-01, each
     measured) keeps the promoted map."""
     import config
 
     assert "mlb_moneyline" in config.MODEL_OWN_EV_FLOOR
     assert "mlb_moneyline" not in config.MODELS_ON_OWN_PROBABILITY
     not_named_here = config.MODELS_ON_OWN_PROBABILITY - {
-        "nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots"
+        "nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
+        "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists",
     }
     assert not not_named_here

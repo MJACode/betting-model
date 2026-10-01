@@ -110,7 +110,43 @@ bills. Blocked shots were not posted by any book at 18:08Z, five hours before
 the first puck; whether the closing snapshot carries them is the first thing to
 read off the stored rows.
 
-## [x] `nhl_prop_blocked_shots` built (2026-10-01, mike) — the other prop markets are next
+## [ ] NHL total goals — the derivative markets are the only place left to look
+
+mike, 2026-10-01: *"we need total goals."* The full-game total has nothing in
+it (four rounds; `docs/nhl_market_lab.md`, "Total goals, round four"): the
+book's margin is on both sides and Pinnacle agrees with DraftKings. Every NHL
+result that holds is in a market where the margin sits on one side. For total
+goals those are **team totals, period totals and alternate totals**, and no
+price for any of them is stored. The feed sells all three (`team_totals`,
+`alternate_totals`, `totals_p1`). One pre-game snapshot a game for the three
+priced seasons is about 4,200 games x 3 markets x 10 credits = **about 126,000
+credits** (the historical endpoint bills 10 a market returned; the count is an
+estimate until a probe measures it). Not bought: his call.
+
+## [ ] NHL prop models — what to watch now that four are live
+
+- **Volume on shots on goal.** 8.9 bets a priced game day in the backtest, 54
+  on the busiest, 32 on the first real slate. The floor is 0.10; 0.15 is +8.0%
+  on 1,720 (3.3 a day) with every season positive, if the feed is too loud.
+- **FanDuel is not shopped** (`models.nhl_props.EXCLUDED_BOOKS`): 2,556 of its
+  shots rows in the bought history fail the coherent-quote check, because the
+  shared prop parser keeps one row a player and FanDuel lists several lines.
+  The 2026-10-01 live rows were all coherent (137 of 137). Fix the parser to
+  keep every line, re-run the backtest with FanDuel in (+5.9% on 5,409 as it
+  stands), then lift the exclusion.
+- **A player who changed teams in the summer is skipped until he has played
+  once for the new side** (24 of 142 priced skaters on 2026-10-01). A roster
+  table would place him on day one.
+- **Saves wanted 9 of 11 goalies on its first slate** against 25-39% in the
+  backtest's opening weeks. The inputs check out (model mean 23.5 against 23.6
+  actual on this season's first sixteen starts). Read the settled record after
+  two weeks before reading anything into it.
+- **The label names an unmapped book by its raw key** ("(hardrockbet)"),
+  because that is what the closing-line lookup can read back.
+- A correction fitted on each model's own bets once it has about 150.
+- Points and anytime scorer have prices and no model.
+
+## [x] `nhl_prop_blocked_shots` built (2026-10-01, mike) — saves, shots on goal and assists followed the same day
 
 `models/nhl_prop_blocked_shots.py`, `scripts/nhl_prop_card.py` (refresh-pass
 step `nhl-prop-scoring`), walk-forward +6.2% on 2,054 bets at EV >= 0.10. Still

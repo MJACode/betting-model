@@ -266,7 +266,7 @@ def db():
             pass
     c.execute("CREATE TABLE IF NOT EXISTS nhl_skater_game_log (nhl_game_id INTEGER, player_id INTEGER, "
               "player_name TEXT, team TEXT, game_date TEXT, blocked_shots INTEGER, shots INTEGER, "
-              "toi_seconds INTEGER)")
+              "toi_seconds INTEGER, assists INTEGER)")
     c.execute("CREATE TABLE IF NOT EXISTS nhl_team_game_log (nhl_game_id INTEGER, team TEXT, game_id TEXT)")
     gid = "NHL_2026-10-01_BOS_NYR"
     c.execute("INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, home_score, "
@@ -288,7 +288,7 @@ def _bet(c, player_id: str, name: str, side: str = "under", line: float = 1.5, o
 
 
 def _played(c, player_id: int, name: str, team: str, blocks: int, date: str = "2026-10-01") -> None:
-    c.execute("INSERT INTO nhl_skater_game_log VALUES (2026020010, ?, ?, ?, ?, ?, 2, 1200)",
+    c.execute("INSERT INTO nhl_skater_game_log VALUES (2026020010, ?, ?, ?, ?, ?, 2, 1200, 0)",
               (player_id, name, team, date, blocks))
 
 
