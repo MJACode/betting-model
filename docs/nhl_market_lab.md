@@ -1280,7 +1280,21 @@ DraftKings' moneyline hold at the open on these games: 4.22%
   positive, on 317 and 408 bets.
 - **Home or road makes no difference to the underdog** (-7.4% home, -6.7%
   road).
-- **Where the underdog claim does hold is on price, not on side.** The best
+- **CORRECTED 2026-10-01, the same evening: the "best price against Pinnacle"
+  grid below was an artifact, and there is no moneyline rule in it.** The table
+  compared each book's FIRST stored quote with Pinnacle's FIRST stored quote.
+  Those are not the same moment: a game is first seen in the previous night's
+  snapshots at some books and not until the next day at others
+  (`odds.created_at` groups the rows of one snapshot; `snapshot_at` is each
+  book's own last update). A soft book's stale number against a later Pinnacle
+  number is a bet nobody could place. With the two quotes forced within five
+  minutes of each other (`scripts/nhl_moneyline_market_lab.py`, next section)
+  the rule finds 96 bets in six seasons at a 2% cut and no edge. The `best`
+  rows of the blind tables above mix moments the same way and are an upper
+  bound on what a bettor got; the DraftKings `open` and `close` rows are one
+  book and are unaffected. What was written here before, kept so the retraction
+  can be read against it:
+- ~~Where the underdog claim does hold is on price, not on side.~~ The best
   bettable underdog price beats Pinnacle's no-vig price in 22.7% of games
   against 16.6% for favourites, so books disagree more on the underdog. Betting
   EITHER side at the best price when it beats Pinnacle's fair price is positive
@@ -1465,3 +1479,175 @@ games of last season carried  first games  early   rest  all both score  AUC all
   previous calendar year, so it spans two seasons until New Year and one after;
   training uses this season only). Not supported by results: that either one
   makes the early weeks a bad time to bet this model.
+
+---
+
+# The moneyline "best price against Pinnacle" rule, stress-tested: it is not a rule (2026-10-01)
+
+`python -m scripts.nhl_moneyline_market_lab`. The same rule as the grid above
+— bet the better-EV side at the best price among the bettable books when it
+beats Pinnacle's no-vig probability — with the soft quote and Pinnacle's
+required to be within five minutes of each other, decided at each book's first
+stored quote ("open") and at its last ("close"). `EV at Pin close` prices the
+bet against where Pinnacle closed.
+
+```
+7,945 games 2020-21 -> 2025-26; quotes: 122,826 (game, book, open/close) rows; bettable books ['draftkings', 'fanduel', 'betmgm', 'williamhill_us', 'fanatics', 'betrivers', 'hardrockbet', 'betparx']; sharp pinnacle
+games with a Pinnacle quote and a simultaneous bettable quote: open 6,142, close 7,887; median bettable books per game at the open 4
+
+### Decided at the OPEN, best bettable price
+
+rule  EV>=  bets  units   roi           ci  early  late  dogs  EV at Pin close  still +EV at close      2020-21     2021-22      2022-23     2023-24     2024-25     2025-26
+open  0.00   595  -10.0 -1.69  -11.5..+8.1   -1.6  -1.8  0.70             0.49                51.8 -13.9% (113) -1.3% (149) +17.2% (116) -15.6% (94) -20.0% (80) +42.6% (43)
+open  0.01   255   -2.3 -0.88 -17.0..+15.3  -16.4  14.5  0.78             0.95                53.3  -22.4% (54) -13.2% (74)  +47.0% (50) -40.9% (31)  -3.7% (33)        (13)
+open  0.02    96    2.4  2.46 -26.6..+31.5    2.8   2.1  0.86             1.98                62.5         (27) -12.6% (39)         (13)        (10)         (6)         (1)
+open  0.03    50   -1.8 -3.53 -46.0..+38.9  -12.9   5.9  0.92             2.57                66.0         (15)        (25)          (5)         (5)         (0)         (0)
+open  0.04    28    NaN   NaN          NaN    NaN   NaN   NaN              NaN                 NaN          NaN         NaN          NaN         NaN         NaN         NaN
+open  0.05    13    NaN   NaN          NaN    NaN   NaN   NaN              NaN                 NaN          NaN         NaN          NaN         NaN         NaN         NaN
+open  0.06     8    NaN   NaN          NaN    NaN   NaN   NaN              NaN                 NaN          NaN         NaN          NaN         NaN         NaN         NaN
+open  0.08     3    NaN   NaN          NaN    NaN   NaN   NaN              NaN                 NaN          NaN         NaN          NaN         NaN         NaN         NaN
+
+### Decided at the CLOSE, best bettable price
+
+ rule  EV>=  bets  units   roi           ci  early  late  dogs  EV at Pin close  still +EV at close     2020-21      2021-22     2022-23     2023-24     2024-25     2025-26
+close  0.00  1266  -17.7 -1.40   -8.1..+5.3   -5.7   2.9  0.75             1.40                99.3 -3.3% (323)  -9.0% (279) +0.0% (163) -0.7% (145) +7.9% (172) +2.9% (184)
+close  0.01   571    5.4  0.95  -9.9..+11.8   -8.2  10.0  0.86             2.54               100.0 -3.6% (200) -10.6% (116)  -9.8% (63)  +7.5% (48) +16.8% (66) +20.9% (78)
+close  0.02   276   28.5 10.31  -6.2..+26.9   -2.2  22.8  0.93             3.72               100.0 +7.1% (117)   -4.9% (56)        (24)        (18)        (29) +14.3% (32)
+close  0.03   149   12.5  8.41 -14.7..+31.5   11.4   5.5  0.94             4.82               100.0 +11.5% (79)  -14.1% (32)        (10)         (4)         (9)        (15)
+close  0.04    77   -0.1 -0.08 -33.6..+33.5   11.0 -10.8  0.97             6.14               100.0  +0.5% (48)         (18)         (6)         (2)         (2)         (1)
+close  0.05    41    1.5  3.71 -44.8..+52.2    3.3   4.0  1.00             7.62               100.0        (27)         (11)         (1)         (1)         (0)         (1)
+close  0.06    27    NaN   NaN          NaN    NaN   NaN   NaN              NaN                 NaN         NaN          NaN         NaN         NaN         NaN         NaN
+close  0.08    14    NaN   NaN          NaN    NaN   NaN   NaN              NaN                 NaN         NaN          NaN         NaN         NaN         NaN         NaN
+
+### Decided at the open, quotes NOT required to be simultaneous
+
+         rule  EV>=  bets  units   roi          ci  early  late  dogs  EV at Pin close  still +EV at close
+open, any gap  0.00  3047   66.1  2.17  -1.8..+6.1   -0.0   4.4  0.57             2.70                68.9
+open, any gap  0.01  2119   91.8  4.33  -0.5..+9.2    3.5   5.1  0.60             3.80                75.9
+open, any gap  0.02  1480   54.9  3.71  -2.2..+9.6    4.3   3.1  0.62             4.92                80.6
+open, any gap  0.03  1075   52.8  4.91 -2.1..+12.0    4.2   5.6  0.66             5.97                84.0
+open, any gap  0.04   764   50.3  6.59 -2.1..+15.2    4.7   8.5  0.69             7.16                86.6
+open, any gap  0.05   543   59.2 10.91 +0.4..+21.4   13.6   8.2  0.72             8.30                88.6
+open, any gap  0.06   384   60.2 15.69 +2.7..+28.7   13.5  17.9  0.76             9.27                89.8
+open, any gap  0.08   190   37.9 19.93 +0.6..+39.2   13.1  26.7  0.78            12.34                95.3
+```
+
+- **With simultaneous quotes there is nothing at the open**: -1.7% on 595
+  bets at any positive EV, -0.9% on 255 at 1%, +2.5% on 96 at 2%, -3.5% on 50
+  at 3%. When the books are read at the same moment they agree with Pinnacle.
+- **At the close it is one cell, not a plateau**: +10.3% on 276 at 2%
+  (interval -6..+27), with -1.4% at 0%, +0.9% at 1% and -0.1% at 4% around it,
+  and the two seasons with 30 or more bets going opposite ways.
+- **The third table is the artifact itself**, reproduced by dropping the
+  five-minute requirement: +2.2% to +19.9%, every cut positive. That is what
+  the earlier section reported.
+- DraftKings alone, each book left out in turn, and the split by side are in
+  the script's output; none has a sample that says anything (96 bets or fewer).
+- **Verdict: no NHL moneyline rule.** The game lines are where the published
+  record said they would be — efficient. The lesson for every sharp-against-soft
+  backtest in this repo: the two quotes must come from one snapshot.
+
+---
+
+# nhl_prop_blocked_shots: the model that went to production (2026-10-01)
+
+mike: *"just build profitable models."* Of everything in this document, one
+result has intervals clear of zero across three seasons and was confirmed on
+seasons bought after it was picked out: blocked-shot unders at DraftKings. It
+is now `models/nhl_prop_blocked_shots.py` — the lab's Poisson model, moved into
+one module that the backtest, the fit and tonight's card all call — and this is
+that module's own backtest: `python -m scripts.nhl_prop_blocked_shots_backtest`.
+Walk-forward (each season scored by a model fitted on earlier seasons only),
+DraftKings' price from the one pre-game snapshot a game, one bet per
+player-game.
+
+```
+2023-24: fit on 159,628 skater-games; DraftKings priced 4,874 player-games, 4,092 matched to a prediction
+2024-25: fit on 205,922 skater-games; DraftKings priced 1,949 player-games, 1,633 matched to a prediction
+2025-26: fit on 252,165 skater-games; DraftKings priced 5,405 player-games, 4,699 matched to a prediction
+
+10,424 priced player-games; under prices: median 100, shorter than -200: 0.1%, shorter than -140: 17.8%; lines: {1.5: 8237, 2.5: 2174, 3.5: 7, 0.5: 6}
+blind always over: {'bets': 10415, 'units': -1011.4, 'roi': -9.71, 'ci': '-11.5..-7.9'}
+blind always under: {'bets': 10418, 'units': -242.1, 'roi': -2.32, 'ci': '-4.2..-0.4'}
+
+### The model's OWN probability, no price floor (the lab's rule)
+
+ EV>=  bets  units  roi          ci  early  late  unders  win%  median price      2023-24      2024-25      2025-26
+ 0.00  6584   91.1 1.38  -1.0..+3.8    2.0   0.8    0.94  52.3           100 +0.3% (2789) +5.2% (1207) +0.8% (2588)
+ 0.03  4904  189.6 3.87  +1.1..+6.6    4.1   3.7    0.97  53.3           100 +3.4% (2170) +5.8% (1005) +3.4% (1729)
+ 0.06  3470  168.2 4.85  +1.5..+8.2    3.2   6.5    0.99  53.5           100 +3.3% (1609)  +5.3% (796) +7.0% (1065)
+ 0.08  2704  137.7 5.09  +1.3..+8.9    4.4   5.8    0.99  53.3           105 +4.7% (1274)  +3.7% (658)  +6.9% (772)
+ 0.10  2056  126.3 6.14 +1.8..+10.5    6.0   6.3    1.00  53.5           105  +6.6% (973)  +2.4% (542)  +9.1% (541)
+ 0.12  1547  105.6 6.83 +1.7..+11.9    6.8   6.9    1.00  53.4           105  +6.9% (748)  +4.2% (422)  +9.6% (377)
+ 0.15   946   61.0 6.45 -0.1..+13.0    4.0   8.9    1.00  52.9           110  +4.1% (459)  +3.8% (295) +16.2% (192)
+
+### The model's OWN probability, by price floor
+
+ EV>=  floor  bets  units  roi          ci  early  late  unders  win%  median price      2023-24      2024-25      2025-26
+ 0.03    NaN  4904  189.6 3.87  +1.1..+6.6    4.1   3.7    0.97  53.3           100 +3.4% (2170) +5.8% (1005) +3.4% (1729)
+ 0.03 -250.0  4904  189.6 3.87  +1.1..+6.6    4.1   3.7    0.97  53.3           100 +3.4% (2170) +5.8% (1005) +3.4% (1729)
+ 0.03 -200.0  4900  189.2 3.86  +1.1..+6.6    4.1   3.6    0.97  53.3           100 +3.4% (2169) +5.8% (1005) +3.4% (1726)
+ 0.03 -170.0  4451  176.2 3.96  +1.0..+6.9    3.9   4.0    0.97  51.9           105 +2.6% (1959)  +6.1% (897) +4.4% (1595)
+ 0.03 -140.0  3892  148.8 3.82  +0.5..+7.1    4.4   3.2    0.97  50.3           110 +2.7% (1664)  +6.6% (788) +3.6% (1440)
+ 0.06    NaN  3470  168.2 4.85  +1.5..+8.2    3.2   6.5    0.99  53.5           100 +3.3% (1609)  +5.3% (796) +7.0% (1065)
+ 0.06 -250.0  3470  168.2 4.85  +1.5..+8.2    3.2   6.5    0.99  53.5           100 +3.3% (1609)  +5.3% (796) +7.0% (1065)
+ 0.06 -200.0  3468  168.8 4.87  +1.5..+8.2    3.1   6.6    0.99  53.5           100 +3.3% (1609)  +5.3% (796) +7.0% (1063)
+ 0.06 -170.0  3179  157.8 4.96  +1.4..+8.5    2.6   7.3    0.99  52.3           105 +2.4% (1475)  +5.3% (722)  +8.6% (982)
+ 0.06 -140.0  2775  135.6 4.89  +1.0..+8.8    3.5   6.3    0.99  50.6           110 +2.4% (1243)  +5.4% (634)  +7.9% (898)
+ 0.10    NaN  2056  126.3 6.14 +1.8..+10.5    6.0   6.3    1.00  53.5           105  +6.6% (973)  +2.4% (542)  +9.1% (541)
+ 0.10 -250.0  2056  126.3 6.14 +1.8..+10.5    6.0   6.3    1.00  53.5           105  +6.6% (973)  +2.4% (542)  +9.1% (541)
+ 0.10 -200.0  2054  126.8 6.17 +1.8..+10.5    6.1   6.2    1.00  53.5           105  +6.6% (973)  +2.4% (542)  +9.2% (539)
+ 0.10 -170.0  1915  121.9 6.36 +1.8..+11.0    5.9   6.9    1.00  52.5           105  +6.5% (910)  +1.2% (501) +11.3% (504)
+ 0.10 -140.0  1691  112.0 6.62 +1.6..+11.7    6.6   6.7    1.00  51.1           110  +6.9% (779)  +2.0% (452) +10.8% (460)
+
+### The BORROWED correction applied (what a model with no record is given), floor -200
+
+ EV>=  bets  units   roi         ci  early  late  unders  win%  median price      2023-24      2024-25      2025-26
+ 0.00  7088 -266.0 -3.75 -6.2..-1.3   -4.3  -3.2    0.79  45.9           115 -6.7% (2750) +2.7% (1131) -3.5% (3207)
+ 0.03  5645 -249.2 -4.42 -7.2..-1.6   -5.7  -3.1    0.84  44.6           120 -8.4% (2204)  +2.7% (929) -3.6% (2512)
+ 0.06  4481 -135.0 -3.01 -6.2..+0.2   -4.9  -1.2    0.88  44.5           120 -8.9% (1775)  +7.4% (766) -1.7% (1940)
+ 0.08  3764 -123.5 -3.28 -6.8..+0.2   -4.0  -2.6    0.91  43.8           124 -8.3% (1523)  +9.0% (651) -3.5% (1590)
+ 0.10  3155 -122.7 -3.89 -7.8..-0.0   -5.9  -1.9    0.93  43.0           126 -9.5% (1295)  +8.6% (543) -3.5% (1317)
+ 0.12  2595  -66.6 -2.57 -6.9..+1.8   -4.2  -0.9    0.94  43.2           126 -9.1% (1053) +12.0% (465) -2.5% (1077)
+ 0.15  1847   -0.6 -0.03 -5.2..+5.2   -2.3   2.2    0.96  43.6           130  -6.9% (759) +15.9% (342)  -0.4% (746)
+
+### Claimed against realised, the unders bet at EV >= 0.06 with the -200 floor
+
+model says under  bets  claimed  borrowed correction says  happened
+         0.5-0.6  1396    0.545                     0.480     0.497
+         0.6-0.7   976    0.649                     0.588     0.621
+         0.7-0.8   297    0.723                     0.668     0.650
+
+at EV >= 0.06, floor -200: 3,422 under bets over 403 priced game days (8.5 a day; most on one day 36)
+```
+
+## Read, the production model
+
+- **It reproduces the lab to the bet**: 4,904 / 3,470 / 2,056 / 946 bets at
+  +3.9% / +4.9% / +6.1% / +6.5%, the numbers in "Three seasons of priced
+  props" above.
+- **A plateau from 0.03 to 0.12, every season positive at every cut.** Chosen
+  floor: **EV >= 0.10** — +6.2% on 2,054 bets with the live price floor
+  (interval +1.8..+10.5), halves +6.1% / +6.2%, seasons +6.6% / +2.4% / +9.2%;
+  0.08 and 0.12 either side are +5.1% and +6.8% with intervals clear of zero.
+- **The -200 price floor removes four bets.** The unders this model takes are
+  near even money (median +105); 0.1% of DraftKings' under prices are shorter
+  than -200.
+- **It must decide on its own probability.** With the correction a model with
+  no record is handed, the same three seasons read -2.6% to -4.4% at every cut
+  up to 0.12 and flat at 0.15. `config.MODELS_ON_OWN_PROBABILITY`.
+- **Its own probability over-claims where it bets**: says 54.5% and delivers
+  49.7% (1,396 bets), 64.9% and 62.1% (976), 72.3% and 65.0% (297). That is
+  the selection: a bet is where the model disagrees most with the price. It is
+  why the realised return (+5 to +6%) is under the 10% the floor asks for, and
+  it is what a correction fitted on this model's OWN bets should fix once
+  there are enough of them.
+- **Volume**: about five bets a game day at 0.10 (2,054 over 403 priced days),
+  nearly all unders, and bunched (36 on the busiest day at the 0.06 cut).
+- **What production does that the backtest did not**: the backtest's quote was
+  taken an hour before the day's FIRST game; the card reads the newest quote on
+  each refresh pass and locks the first one that clears. A scratched player is
+  void at DraftKings and settles NO_ACTION here; the backtest never saw him.
+- **Not yet built**: saves and shots on goal (positive at the best book, thin
+  or flat at DraftKings), assists at 0.10, anytime scorer. Same module shape,
+  each needs its own sweep.

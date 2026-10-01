@@ -114,6 +114,10 @@ and a closing snapshot per game and nothing else, decided from what
 game per snapshot, so about 13,400 a season. One run stops at
 `NHL_PROP_MAX_CREDITS_PER_RUN` (400). Kill switch: `RUN_NHL_PROP_ODDS=0`.
 
+`nhl-prop-scoring` (`scripts/nhl_prop_card.py`) runs right after it: the
+blocked-shots card. It spends no credits, writes a pick at most once per player
+per game, and is a no-op until DraftKings has posted the market.
+
 ### College football player props
 
 `data/ingestors/ncaaf_prop_odds_ingestor.py`, 2026-09-05. **9am / 1pm / 6pm ET

@@ -422,6 +422,15 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // Blocked shots at DraftKings (models/nhl_prop_blocked_shots.py). The stat
+  // label is the wording the server writes into pick_label.
+  nhl_prop_blocked_shots: {
+    shortLabel: 'BLK',
+    longLabel: 'Player Blocked Shots',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Blocked Shots',
+  },
 
   // ── NFL ───────────────────────────────────────────────────────────────────
   // The standalone wind-totals card (§28) — under-only, published into picks

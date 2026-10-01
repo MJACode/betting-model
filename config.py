@@ -432,6 +432,19 @@ ACTION_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": {"min_prob": 0.40, "min_edge": 0.05},
     "nhl_over_under":           {"min_prob": 0.55, "min_edge": 0.05},
     "nhl_puckline":             {"min_prob": 0.55, "min_edge": 0.05},
+    # NHL blocked shots at DraftKings (models/nhl_prop_blocked_shots.py, mike
+    # 2026-10-01: "just build profitable models"). THE CUT IS EV, in
+    # MODEL_OWN_EV_FLOOR, on the model's OWN probability; prob / edge are 0.0
+    # here so the publishers show exactly what the card wrote. Walk-forward on
+    # three priced seasons at DraftKings (scripts/nhl_prop_blocked_shots_backtest.py):
+    #     EV>=   bets   ROI     95% interval   2023-24  2024-25  2025-26
+    #     0.06   3,468  +4.9%   +1.5..+8.2     +3.3%    +5.3%    +7.0%
+    #     0.08   2,704  +5.1%   +1.3..+8.9     +4.7%    +3.7%    +6.9%
+    #     0.10   2,054  +6.2%   +1.8..+10.5    +6.6%    +2.4%    +9.2%
+    #     0.12   1,547  +6.8%   +1.7..+11.9    +6.9%    +4.2%    +9.6%
+    # 0.10 sits inside that plateau with both halves positive (+6.1% / +6.2%).
+    # 99-100% of the bets are unders; the median price is +105.
+    "nhl_prop_blocked_shots":   {"min_prob": 0.0, "min_edge": 0.0},
     # NFL — the standalone wind-totals card (§28), published into picks by
     # scripts/nfl_wind_publisher.py. The card itself is the real gate (raw
     # forecast wind >= 11 mph AND >= 3% edge after de-vig at the best book);
@@ -1898,6 +1911,9 @@ MODEL_OWN_EV_FLOOR: dict = {
     "nhl_moneyline_regulation":  0.20,   # n=0, no written bet
     "nhl_over_under":            0.20,   # n=0, no written bet
     "nhl_puckline":              0.20,   # n=0, no written bet
+    # Its own sweep, not a written record: 0.10 is the cut the three priced
+    # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
+    "nhl_prop_blocked_shots":    0.10,
     "ufc_moneyline":             0.13,   # n=5, min written EV +0.131
     "ufc_total_rounds":          0.15,   # n=8, min written EV +0.150
     "wnba_moneyline":            0.06,   # n=31, min written EV +0.069
@@ -1938,6 +1954,14 @@ MODEL_OWN_EV_FLOOR: dict = {
 MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     "nfl_wind_totals",
     "nfl_opener_spread",
+    # 2026-10-01 (mike). Its cut was measured on its own Poisson probability.
+    # It has no record, so its map would be the offset borrowed from the other
+    # models -- and on the same three seasons that offset turns +6.2% at EV
+    # 0.10 into -3.9% (scripts/nhl_prop_blocked_shots_backtest.py). Its own
+    # number does over-claim where it bets (says 64.9%, delivers 62.1%), which
+    # is why the realised return is under the EV it asks for; revisit when it
+    # has a map fitted on its own bets.
+    "nhl_prop_blocked_shots",
 })
 
 
@@ -2010,6 +2034,9 @@ SCORING_METHODS: dict = {
     # registry artifact (models/saved/mlb_live_total_runs_*.pkl) and a missing
     # one would be a real fault — hence "artifact", not "rule".
     "mlb_live_total_runs": SCORING_ARTIFACT,
+    # Same shape: trained and registered, scored by scripts/nhl_prop_card.py
+    # rather than the generic prop path.
+    "nhl_prop_blocked_shots": SCORING_ARTIFACT,
 }
 
 
@@ -2036,6 +2063,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.05,
     "nhl_puckline":             0.05,
+    "nhl_prop_blocked_shots":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.00,   # card gates on |dev| >= 2.0; edge >= 0 drops juice-eaten quotes
@@ -2131,6 +2159,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
+    "nhl_prop_blocked_shots":   0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
                                        # 2026 paper-track: MAX_FIRE_LEAD stays 4; no unit bump
     "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS

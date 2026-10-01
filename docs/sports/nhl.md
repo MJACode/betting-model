@@ -39,9 +39,17 @@
 > - Graded at real 2025-26 prices, neither live artifact made money at any cut
 >   (`scripts/nhl_live_artifact_grade.py`).
 > - Blind underdogs lost in five of the last six seasons at DraftKings
->   (`scripts/nhl_underdog_grid.py`); the one rule in that grid that is positive
->   at every cut takes the best bettable price when it beats Pinnacle's no-vig
->   price, and most of those bets are underdogs.
+>   (`scripts/nhl_underdog_grid.py`). The "best price against Pinnacle" grid in
+>   the same script is NOT a rule: it compared quotes taken at different
+>   moments, and with simultaneous quotes there is nothing
+>   (`scripts/nhl_moneyline_market_lab.py`).
+> - **`nhl_prop_blocked_shots` is live** (mike, 2026-10-01: *"just build
+>   profitable models"*): a Poisson model of a skater's blocked shots priced
+>   against DraftKings, unders, EV >= 0.10 on its own probability. Walk-forward
+>   on three priced seasons: +6.2% on 2,054 bets, every season positive.
+>   `models/nhl_prop_blocked_shots.py`, `scripts/nhl_prop_card.py` (step
+>   `nhl-prop-scoring`, right after the prop prices). Settles from
+>   `nhl_skater_game_log`; a scratched player is NO_ACTION.
 > - **Player prop prices are collected from 2026-10-01**: an opening and a
 >   closing snapshot per game, six markets, ten books
 >   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step

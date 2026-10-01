@@ -110,7 +110,14 @@ bills. Blocked shots were not posted by any book at 18:08Z, five hours before
 the first puck; whether the closing snapshot carries them is the first thing to
 read off the stored rows.
 
-## [ ] An NHL prop model, on the three priced seasons and the live series
+## [x] `nhl_prop_blocked_shots` built (2026-10-01, mike) — the other prop markets are next
+
+`models/nhl_prop_blocked_shots.py`, `scripts/nhl_prop_card.py` (refresh-pass
+step `nhl-prop-scoring`), walk-forward +6.2% on 2,054 bets at EV >= 0.10. Still
+open under this heading: saves and shots on goal (best-book evidence, thin at
+DraftKings), assists at 0.10 and anytime scorer each need their own sweep
+through the same module shape; and a correction fitted on this model's own
+bets once it has about 150. The original item:
 
 The only NHL results with intervals clear of zero over three seasons are props
 (`docs/nhl_market_lab.md`: blocked-shot unders +3.9% to +6.1% at DraftKings on
@@ -119,17 +126,14 @@ models live in `scripts/nhl_prop_lab*.py`; nothing scores them in production.
 Build it as a paper model first and grade its closing-line value on the live
 series — one season cannot settle a 4% edge on results alone.
 
-## [ ] NHL moneyline: the best bettable price against Pinnacle's no-vig price
+## [x] NHL moneyline "best price against Pinnacle" — NOT A RULE (retracted 2026-10-01)
 
-`scripts/nhl_underdog_grid.py`, 7,624 games 2020-21 -> 2025-26. No model: bet
-either side at the best open price among the bettable books when it beats
-Pinnacle's no-vig open by a cut. Positive at every cut (+1.8% at 0.00 on 3,010
-bets to +5.9% at 0.04 on 737 and +16.3% at 0.06 on 370), both halves positive
-at every cut, five of six seasons positive at 0.02-0.04, 58-76% underdogs. The
-intervals span zero below 0.06 and the closing-line value is barely above zero
-(50-54% beat the close), so it is a candidate, not a model. Next: the same rule
-decided at the CLOSE, and a forward paper track now that Pinnacle is in the
-live NHL fetch.
+The positive grid compared each book's first stored quote with Pinnacle's, and
+those are different moments. With simultaneous quotes it is 96 bets in six
+seasons at a 2% cut and no edge (`scripts/nhl_moneyline_market_lab.py`,
+`docs/nhl_market_lab.md`). Any sharp-against-soft backtest must take both
+quotes from one snapshot (`odds.created_at` groups one; `snapshot_at` is each
+book's own last update).
 
 ## [ ] `nhl_over_under` and `nhl_puckline` have never been trained
 
