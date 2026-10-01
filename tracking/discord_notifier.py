@@ -1508,7 +1508,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
                -- headline through publish_price, like the pre-game cards.
                p.best_book, p.best_odds, p.best_bet_link,
                COALESCE(p.decision_odds, p.dk_odds) AS decision_odds,
-               p.decision_book, p.scored_line
+               p.decision_book, p.scored_line, p.prop_market
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         -- The model's own gates, from the same table the app's action filter
@@ -1536,6 +1536,12 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "best_book": r[18], "best_odds": r[19], "best_bet_link": r[20],
         "decision_odds": r[21], "decision_book": r[22],
         "side": r[2], "line": r[23],
+        # The market the pick settles against, so pick_integrity can check that
+        # the label does not NAME a different one. Without this the stat check
+        # is dead code, which is how "Blake Corum Under 11.5 Pass Attempts"
+        # reached this channel on a rushing bet (CLAUDE.md section 1b: a guard
+        # dead code can satisfy is not a guard).
+        "prop_market": r[24],
         # "good to" from the deciding price, the same way the pre-game
         # producers bound theirs.
         "good_to": price_bound(_honest(r[1], r[5]), r[1], r[15], r[16], r[21]),
