@@ -960,3 +960,190 @@ totals vs DraftKings open    0.06   332   -4.0 -1.20  -11.4..+9.0        0.02
 totals vs DraftKings open    0.08   125    0.4  0.31 -16.5..+17.1        0.02
 totals vs DraftKings open    0.10    36    7.3 20.30  -9.8..+50.4        0.03
 ```
+
+---
+
+# The live artifacts, graded (2026-10-01)
+
+Rounds one to three graded a regularised logistic model. **The two artifacts
+`model_registry` says are live had never been put against a price.** This is
+that run: `python -m scripts.nhl_live_artifact_grade`. Both were trained
+2018-19 -> 2024-25 (`nhl_moneyline` `20260920_131606`,
+`nhl_moneyline_regulation` `20260920_133544`), so 2025-26 is the only season
+neither has seen and the only one graded. 1,352 games, every one with a
+DraftKings and a Pinnacle price.
+
+Each rule is run twice. **As it runs today** is the scorer's decision as
+written (`models.scorer._decide`): the probability correction every model
+decides on (`model_calibration.promoted_b = -0.259947` for both, taken from the
+other models' records because these two have none), then the 0.55 / 0.05 and
+0.40 / 0.05 cuts, the 0.20 EV floor, the -200 price floor and the 0.20 edge cap
+at DraftKings. **On the model's own probability** is the same with the
+correction off. What this does not reproduce: production scores a game when its
+line opens, days ahead, and locks it; this decides at the game-day quote.
+
+```
+
+===== nhl_moneyline 20260920_131606 on 2025-26: 1,352 games with a DraftKings pre-game price (1,352 with a Pinnacle close) =====
+log loss: model 0.6884 | DraftKings no-vig 0.6836 | home rate 0.6923   AUC: model 0.5579 | DraftKings 0.5798
+model home-win probability quantiles: {0.01: 0.359, 0.1: 0.424, 0.25: 0.471, 0.5: 0.535, 0.75: 0.593, 0.9: 0.644, 0.99: 0.722}; share >= 0.70: 0.019; share within 0.485..0.515: 0.106; share within 0.435..0.565 (the band the correction flips): 0.518
+
+### The production rule on the holdout season
+
+                                                 rule priced at  bets  units   roi           ci  clv_pts  beat_close  early  late  dog share  avg p  win%
+AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)        dk    30    6.3 20.97 -20.3..+62.2     0.97        66.7   18.5  23.4       1.00  0.492  53.3
+AS IT RUNS TODAY (corrected prob, 0.55/0.05, EV 0.20)      best    41    5.0 12.22 -23.5..+47.9     0.06        61.0   13.2  11.2       1.00  0.500  48.8
+             same cuts on the model's OWN probability        dk    15    NaN   NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+             same cuts on the model's OWN probability      best    25    2.6 10.37 -32.2..+52.9    -0.85        52.0   22.9  -1.2       0.92  0.592  52.0
+
+of the 30 as-it-runs bets at DraftKings: 30 are on a side the model itself has under 50% ({'bets': 30, 'units': 6.3, 'roi': 20.97, 'ci': '-20.3..+62.2'}); 0 on a side it has at 50%+ ({})
+
+### Neighbourhood: bet any side whose raw model probability beats DraftKings' implied by the cut (no other gate)
+
+ edge>=  bets  units    roi           ci  clv_pts  beat_close  early  late  dog share  avg p  win%
+   0.02   587   -3.0  -0.51   -9.7..+8.7     0.72        61.3    0.0  -1.1       0.67  0.513  45.0
+   0.04   341   -1.0  -0.30 -12.6..+12.1     0.84        65.1   -9.1   8.4       0.74  0.518  44.3
+   0.05   256  -12.7  -4.98  -19.5..+9.5     0.88        66.4   -6.7  -3.3       0.78  0.516  41.0
+   0.06   188   -7.8  -4.13 -21.0..+12.7     1.19        68.1   -6.8  -1.4       0.81  0.517  41.5
+   0.08    80   -2.3  -2.83 -28.9..+23.2     1.38        71.2   -0.9  -4.8       0.90  0.524  41.2
+   0.10    31   -6.0 -19.48 -62.2..+23.2     1.74        71.0   18.7 -55.3       0.90  0.534  32.3
+   0.12    12    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+   0.15     2    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+
+### Probability floor x edge, raw probability, at DraftKings
+
+ prob>=  edge>=  bets  units    roi           ci  clv_pts  beat_close  early  late  dog share  avg p  win%
+   0.50    0.03   258  -30.1 -11.67  -23.6..+0.2     0.78        62.4  -19.8  -3.5       0.47  0.574  45.7
+   0.50    0.05   150  -25.4 -16.93  -33.0..-0.9     0.74        67.3  -16.1 -17.8       0.63  0.569  41.3
+   0.50    0.08    52   -4.6  -8.89 -38.2..+20.4     1.13        73.1   -6.5 -11.2       0.85  0.562  42.3
+   0.55    0.03   159  -14.6  -9.21  -23.6..+5.2     0.41        57.9  -13.0  -5.4       0.18  0.604  49.7
+   0.55    0.05    84   -6.0  -7.18 -27.8..+13.4     0.30        63.1  -11.7  -2.6       0.33  0.604  48.8
+   0.55    0.08    31   -2.3  -7.33 -43.9..+29.3     0.59        61.3   -3.1 -11.3       0.74  0.589  45.2
+   0.60    0.03    67   -2.2  -3.22 -23.8..+17.4     0.03        53.7  -15.9   9.1       0.04  0.643  56.7
+   0.60    0.05    37   -4.8 -12.90 -42.3..+16.5    -0.19        59.5  -18.2  -7.9       0.08  0.639  48.6
+   0.60    0.08    11    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+   0.65    0.03    27   -0.2  -0.81 -30.1..+28.5     0.28        55.6  -25.9  22.5       0.00  0.680  63.0
+   0.65    0.05    12    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+   0.65    0.08     2    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+   0.70    0.03     4    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+   0.70    0.05     2    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+   0.70    0.08     0    NaN    NaN          NaN      NaN         NaN    NaN   NaN        NaN    NaN   NaN
+
+### Blind baselines, same games, DraftKings price
+
+           blind  bets  units   roi          ci
+     always home  1352  -97.3 -7.19 -12.1..-2.3
+     always away  1352    9.0  0.67  -5.1..+6.5
+always favourite  1352 -121.0 -8.95 -13.4..-4.5
+ always underdog  1352   38.5  2.85  -3.3..+9.0
+
+===== nhl_moneyline_regulation 20260920_133544 on 2025-26: 1,352 games with a DraftKings 3-way price =====
+log loss: model 1.0772 | DraftKings no-vig 1.0727 | this season's own class rates 1.0825
+model mean probabilities away/draw/home: [0.355 0.22  0.425]; actual: [0.353 0.254 0.393]
+after the correction the three probabilities sum to 1.144 on average (min 1.023, max 1.176); raw they sum to 1.000
+
+### The production rule on the holdout season
+
+                                              rule  bets  units    roi           ci  early  late  games  avg raw p home/draw/away
+                     AS IT RUNS TODAY @ DraftKings   300  -39.2 -13.08  -27.4..+1.2  -19.7  -6.5    300      0.415    0.43/0/0.57
+             AS IT RUNS TODAY @ best bettable book   447  -20.5  -4.59  -16.7..+7.5   -5.5  -3.7    447      0.415    0.49/0/0.51
+   same cuts, model's OWN probability @ DraftKings    21   -2.3 -11.19 -66.5..+44.1  -50.0  24.1     21      0.468    0.62/0/0.38
+same cuts, model's OWN probability @ best bettable    47   -6.0 -12.66 -49.7..+24.4  -19.1  -6.5     47      0.467    0.74/0/0.26
+
+### Neighbourhood: bet any outcome whose raw model EV at DraftKings clears the cut
+
+ raw EV>=  bets  units    roi           ci  early  late
+     0.00   859  -41.8  -4.86  -14.9..+5.1   -0.2  -9.5
+     0.02   665  -65.0  -9.77  -20.9..+1.3   -4.5 -15.0
+     0.05   441  -20.9  -4.73  -18.7..+9.3    4.3 -13.7
+     0.10   230  -11.4  -4.98 -24.9..+15.0   -3.4  -6.6
+     0.15   105   -8.5  -8.14 -37.6..+21.3   -4.0 -12.2
+     0.20    47   -9.5 -20.32 -60.8..+20.2  -13.7 -26.7
+     0.30    13    0.1   0.77 -88.7..+90.3    NaN   NaN
+
+### Blind baselines at DraftKings
+
+      blind  bets  units    roi          ci
+always away  1352 -114.8  -8.49 -15.3..-1.7
+always draw  1352  114.6   8.47 -1.5..+18.4
+always home  1352 -202.1 -14.95 -20.7..-9.2
+
+### nhl_moneyline: what the model says, what the correction says, what happened (every side of every game)
+
+                sides  model_says  corrected_says  actually_won
+band
+[0.0, 0.4)        366       0.357           0.418         0.363
+[0.4, 0.435)      286       0.418           0.482         0.510
+[0.435, 0.485)    557       0.461           0.526         0.510
+[0.485, 0.5)      143       0.493           0.557         0.517
+[0.5, 0.515)      143       0.507           0.443         0.483
+[0.515, 0.565)    557       0.539           0.474         0.490
+[0.565, 0.6)      286       0.582           0.518         0.490
+[0.6, 0.65)       237       0.621           0.558         0.612
+[0.65, 1.0)       129       0.684           0.625         0.682
+
+### nhl_moneyline_regulation: outcomes under the 0.40 probability floor on the model's own number that the correction lifts over it
+
+669 outcomes | model says 0.368 | corrected says 0.430 | actually happened 0.365
+```
+
+## Read, the live artifacts
+
+- **Neither live model made money on the season it had not seen.** The
+  moneyline model's log loss is 0.6884 against DraftKings' no-vig 0.6836; every
+  row of its raw-edge grid is negative (-0.3% to -19.5% on 31-587 bets) and
+  every probability-floor row is negative (-0.8% to -16.9%). The regulation
+  model loses at every EV cut with a usable sample (-4.7% to -20.3%). The one
+  interval that excludes zero is a losing one. **No cut clears.**
+- **The moneyline bets still beat the close** (61-71% of the time, +0.7 to +1.7
+  points), the same shape round three found in the logistic model: it reads
+  something the opening price lacks and it is not enough to beat the price.
+- **As it runs today the moneyline model bets only sides it believes are
+  underdogs.** All 30 bets at DraftKings are on a side the model itself has
+  under 50%, and all 41 at the best book are at plus money. The mechanism is
+  the correction:
+  it is a single downward shift fitted on other models' favoured sides, applied
+  as `1 - f(1 - p)` below 50%, so a side the model has at 49.3% is decided at
+  55.7% and its opponent at 44.3%. On this season those sides won 51.7% (143
+  sides); the model's own 49.3% was the nearer number. +21.0% on 30 bets with an
+  interval of -20..+62 is not a result, and blind underdogs made +2.9% on the
+  same 1,352 games.
+- **For the regulation model the correction is simply wrong.** All three
+  outcomes sit under 50%, so all three are raised: the corrected probabilities
+  of one game sum to 1.144 on average. 669 outcomes are lifted over the 0.40
+  floor that would not otherwise clear it; the model said 36.8%, the correction
+  said 43.0%, 36.5% happened. As it runs it placed 300 bets at DraftKings for
+  -13.1% (447 at the best book, -4.6%), none of them on the draw, in a season
+  where blind draws made +8.5%. On its own probability it bets 21 times.
+- **In the middle of its range the moneyline model does not separate teams at
+  all.** Sides it has at 40-43.5% won 51.0%; sides it has at 56.5-60% won 49.0%.
+  Only the tails hold (under 40%: 36.3%; 60-65%: 61.2%; 65%+: 68.2%).
+
+## What the first week of 2026-27 shows about the inputs
+
+`features.feature_engine.build_features_for_game` on the 26 games dated
+2026-09-29 -> 10-03 (script-free: the function, the live artifact, one call per
+game):
+
+- **Before a team's first game its row is LAST SEASON'S FINAL totals**, and
+  goal difference is a running total. The model was fed goal-difference gaps of
+  +97, +112 and +106 on opening night and +133 the night after. In the first
+  fourteen days of 2025-26 the rows of that season's frame run -23 to +23; its
+  earliest game is dated 2025-10-11 and 42 rows were dropped for null inputs,
+  the way all 8 of this season's finished games drop today (null home / away
+  scoring splits). So the model has not seen a row like this. Three of the five
+  opening-night games were stored at 0.697 or higher for the home side (0.708,
+  0.755, 0.697); 1.9% of holdout games reach 0.70. "CAR ML" (stored at 0.7546,
+  0.7002 when rebuilt today) was one of them.
+- **After one game the goals columns are the raw one-game numbers**, compared
+  against an opponent still on last season's totals: goals-per-game gaps of
+  +2.84 and -3.45, win percentages of 0.00 and 1.00. Shot share, power play and
+  penalty kill are blended toward last season (`data/nhl_asof.py`); goals for,
+  goals against, goal difference and wins are not.
+- **28 of the 32 probable-starter rows since opening night are the league
+  average with no player id** (`nhl_goalie_stats`, game_date >= 2026-09-29:
+  save% .8959, GAA 2.863, GSAA 0.0 for Vasilevskiy, Sorokin, Saros, Swayman...).
+  The starter's name comes from ESPN and is matched to an id only through THIS
+  season's summary (`nhl_stats_ingestor._build_goalie_rows`), which is empty in
+  week one, so a returning starter is rated as a debutant until he has played.
+  The per-game log that holds his last season is never consulted for the id.

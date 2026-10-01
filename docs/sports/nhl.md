@@ -12,6 +12,31 @@
 > market key, the missing 2025-26 season) were fixed the same day; the
 > sections below marked **(2026-09-20)** describe the pipeline as it is now.
 
+> **State at 2026-10-01, three days into 2026-27** (queries and tables:
+> `docs/nhl_market_lab.md`, "The live artifacts, graded"; open items:
+> `docs/followups.md`).
+> - **Both models are writing BETs and nothing holds a paper-only model back.**
+>   11 BETs in `picks` (4 moneyline, 7 regulation). One was published to push
+>   and Discord: "CAR ML", written 2026-09-22 for 09-29, a loss, -1.0 unit. The
+>   other ten clear the scorer and fail the publishers' cut, because the scorer
+>   decides on the corrected probability and the publishers filter on the
+>   model's own.
+> - **Graded at real 2025-26 prices, neither live artifact made money** at any
+>   cut (`scripts/nhl_live_artifact_grade.py`).
+> - **The probability correction is what is producing the bets**, by raising
+>   every probability under 50%. Ten of the eleven BETs fail the stated cuts on
+>   the model's own number.
+> - **Week-one inputs are not rows the model trained on** (last season's running
+>   totals before a team's first game; raw one-game numbers after it), and 28 of
+>   32 probable starters carry the league-average goalie line.
+> - **No NHL prop price has been collected this season** (`player_prop_odds`,
+>   game_date >= 2026-09-29: 0 rows), so the lab's prop candidates have no paper
+>   record accruing. `nhl_over_under` and `nhl_puckline` are still untrained;
+>   their stated blocker (no historical lines) ended 2026-09-21.
+> - **The odds feed read 0 credits from 2026-09-26 to 09-30.** No NHL price was
+>   stored between 09-26 22:59Z and 10-01 00:02Z, so opening night has no
+>   closing line and "CAR ML" was graded against a three-day-old price.
+
 ### Inputs as they are now (2026-09-20)
 
 - **Per-game logs**, from the NHL's free stats API (`?isGame=true`), in
