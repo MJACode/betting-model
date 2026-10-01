@@ -21,74 +21,102 @@
 
 ---
 
-## [ ] [needs-decision] The probability correction raises every probability under 50% (53 models)
+## [ ] [needs-decision] A BET the scorer writes on the corrected probability can fail the publishers' cut on the model's own
 
-Found 2026-10-01 through the NHL picks; evidence and tables in
-`docs/nhl_market_lab.md` ("The live artifacts, graded").
+Found 2026-10-01 through the NHL picks. The scorer decides on the corrected
+probability (`models.scorer._decide`); the app, Discord and push filter on
+`picks.model_probability`, the model's own number (`scripts.emit_threshold_sql`,
+`tracking/discord_notifier.py`, `tracking/push_notifier.py`). Where the
+correction RAISES a probability — every side the model has under 50% — a row
+can be written as a BET and shown nowhere. Ten of the eleven NHL BETs written
+by 2026-10-01 are in that state; across all models, nine pre-game BETs since
+2026-09-19 have the model's own number under 50% and the corrected one at 50%+
+(`nhl_moneyline` 3, `wnba_prop_market` 3, `nhl_moneyline_regulation` 2,
+`mlb_over_under` 1). A BET that favours the model's own side is unaffected: its
+own number is the higher of the two.
 
-`apply_calibration` fits its map on the favoured side and defines the other
-side as `1 - f(1 - p)`. For the 53 of 62 promoted maps that are a single
-downward shift (`model_calibration`: `promoted_a = 1`, `promoted_b` -0.337 to
--0.253) that is a jump at 50%: a side the model has at 50.1% is decided at
-about 43.5% and its opponent at about 56.5%. Two consequences, both live:
+Two consistent states exist and the code is in neither: the publishers read the
+number the scorer decided on (`COALESCE(model_probability_cal,
+model_probability)`), so a BET written is a BET shown; or the record stops
+counting rows no surface showed. mike's answers of 2026-10-01 (NHL is live,
+underdog bets are wanted, the correction stays) point at the first. It changes
+what members are sent, on every model, so it is his call. What the as-it-runs
+rule did on 2025-26 is in `docs/nhl_market_lab.md`: moneyline 30 bets +6.3
+units (interval -20%..+62%), regulation 300 bets -39.3 units.
 
-- **A two-way model's close games are decided on the opposite side from the
-  one it favours.** `nhl_moneyline` 2025-26: sides the model had at 48.5-50%
-  were decided at 55.7% and won 51.7% (143 sides). All three underdog moneyline
-  BETs written 2026-09-30 / 10-01 have the model's own number at 0.4899-0.4984.
-- **A three-outcome model has all three outcomes raised.** The corrected
-  `nhl_moneyline_regulation` probabilities of one game sum to 1.144 on average.
+## [x] The probability correction and probabilities under 50% — DECIDED 2026-10-01 (mike): it stays
 
-Not NHL-only: pre-game BETs since 2026-09-19 with the model's own probability
-under 50% and the corrected one at 50%+ are `nhl_moneyline` 3, `wnba_prop_market`
-3 (1-2, -0.82 units), `nhl_moneyline_regulation` 2, `mlb_over_under` 1.
+Asked whether the correction should stop raising a probability the model has
+under 50% (53 of 62 promoted maps do it; the three corrected regulation
+probabilities of a game sum to 1.144). mike: underdog plus-money bets are
+wanted. Not changed. The measurements stay in `docs/nhl_market_lab.md` as a
+record, not an open question.
 
-**The decision:** what a model with no record of its own should decide on. The
-narrow fix is to apply the shift only to the side the model favours and leave
-a three-outcome model on its own numbers; the wider question is whether a
-correction fitted on other models' bet bands belongs on a probability near 50%
-at all. Either changes what 53 models bet, so it needs an `Updated-By`.
+## [x] Paper-only for the NHL models — DECIDED 2026-10-01 (mike): they are LIVE
 
-## [ ] [needs-decision] Nothing holds a paper-only model back from publishing
+*"this is a live model."* Gate not met, his call; recorded in CLAUDE.md §2 and
+at the top of `docs/sports/nhl.md`. No paper-only switch was built.
 
-CLAUDE.md §2 says a new or retrained model is paper-only until it clears the
-gate, and `docs/sports/nhl.md` says both NHL models are. No code enforces it:
-there is no paper-only list in `config.py`, `model_action_thresholds.paused` is
-false for all four NHL models, and "CAR ML" went to push and Discord on
-2026-09-22 (`push_sent`, kinds `new_bet` and `discord_signal`). Flagged in
-`docs/nhl_market_research.md` §1 on 2026-09-20 and not acted on.
+## [ ] NHL week-one inputs: blend goals and wins toward last season, then retrain
 
-## [ ] [needs-decision] No early-season rule runs for NHL
+mike, 2026-10-01, on a proposed 10-game hold: *"no, this is fucking why we have
+back testing and seasons worth of data frmo out data sources."* So there is no
+hold (CLAUDE.md §3) and the inputs have to carry the early weeks. Today they do
+not: before a team's first game the feature row is last season's FINAL running
+totals (goal-difference gaps of +97 to +133 on opening night against -23..+23
+in the first fortnight of the 2025-26 frame), after it the goals columns are
+raw one-game numbers, and the first game of a season is dropped from training.
+`data/nhl_asof.py` already blends shot share, power play, penalty kill and shot
+rates as `(n*current + 25*prior) / (n + 25)`; goals for and against, goal
+difference and wins need the same treatment AS RATES (a running total cannot be
+blended), a row has to exist before the first game, and both models retrain on
+the rebuilt history. A model update: `Updated-By: mike`.
 
-CLAUDE.md §3: no picks until a team has played 10 games.
-`config.MIN_GAMES_BASELINE` is imported by `models/scorer.py` and used nowhere
-in it; `is_early_season` is a model input, not a gate. All 26 games dated
-2026-09-29 -> 10-03 are flagged early-season and 10 of the 11 NHL BETs are on
-them (the eleventh is for 10-07).
-The inputs in that window are not rows the model trained on (same doc, "What
-the first week of 2026-27 shows about the inputs"): either gate the window, or
-blend goals for / against, goal difference and wins toward last season the way
-`data/nhl_asof.py` already blends shot share and special teams, and retrain.
+## [x] A returning NHL starter is rated as a debutant until he has played this season
 
-## [ ] A returning NHL starter is rated as a debutant until he has played this season
+Fixed 2026-10-01: `GoalieBook.player_named` resolves ESPN's name against the
+per-game log when this season's summary has no match, and the upsert removes
+the id-less row it replaces. Built for 2026-10-01 before and after: 4 of 16
+starters matched, then 16 of 16. It moves three model inputs
+(`d_goalie_save_pct`, `d_goalie_gaa`, `d_goalie_gsaa`).
 
-`nhl_stats_ingestor._build_goalie_rows` matches ESPN's probable starter to an
-NHL player id only through this season's summary, which is empty in week one.
-28 of the 32 rows written since 2026-09-29 carry no id and the league-average
-line. The per-game log (`_goalie_book`) holds last season under the same names:
-resolve the id from it when the summary has no match. Plumbing, no trailer
-needed, but it moves three model inputs — say so in the PR.
+## [x] NHL prop prices are collected — an opening and a closing snapshot per game
 
-## [ ] [needs-decision] NHL props: the lab's candidates have no prices coming in
+mike, 2026-10-01. `data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step
+`nhl-prop-odds`. Measured on the live endpoint that day: 5 credits a game per
+snapshot (8 games, 40 credits, 3,614 rows), not the 70 the historical endpoint
+bills. Blocked shots were not posted by any book at 18:08Z, five hours before
+the first puck; whether the closing snapshot carries them is the first thing to
+read off the stored rows.
+
+## [ ] An NHL prop model, on the three priced seasons and the live series
 
 The only NHL results with intervals clear of zero over three seasons are props
 (`docs/nhl_market_lab.md`: blocked-shot unders +3.9% to +6.1% at DraftKings on
-2,056-4,904 bets; saves and shots on goal at the best book). No production
-model exists for any of them and `player_prop_odds` holds 0 NHL rows for
-game_date >= 2026-09-29, so no paper record is accruing. Measured cost of one
-pre-game snapshot of seven prop markets: 70 credits a game, so about 94,000
-credits for one snapshot of all 1,344 games of an 84-game season, double for an
-open and a close. Spend is mike's call.
+2,056-4,904 bets; saves and shots on goal at the best book). The lab's Poisson
+models live in `scripts/nhl_prop_lab*.py`; nothing scores them in production.
+Build it as a paper model first and grade its closing-line value on the live
+series — one season cannot settle a 4% edge on results alone.
+
+## [ ] NHL moneyline: the best bettable price against Pinnacle's no-vig price
+
+`scripts/nhl_underdog_grid.py`, 7,624 games 2020-21 -> 2025-26. No model: bet
+either side at the best open price among the bettable books when it beats
+Pinnacle's no-vig open by a cut. Positive at every cut (+1.8% at 0.00 on 3,010
+bets to +5.9% at 0.04 on 737 and +16.3% at 0.06 on 370), both halves positive
+at every cut, five of six seasons positive at 0.02-0.04, 58-76% underdogs. The
+intervals span zero below 0.06 and the closing-line value is barely above zero
+(50-54% beat the close), so it is a candidate, not a model. Next: the same rule
+decided at the CLOSE, and a forward paper track now that Pinnacle is in the
+live NHL fetch.
+
+## [ ] The odds feed read 0 credits from 2026-09-26 to 09-30 — not diagnosed
+
+`odds_api_quota`: 1,055,670 remaining on 09-19, 0 at each day's last reading
+from 09-26 to 09-30, reset 10-01. No NHL price stored between 09-26 22:59Z and
+10-01 00:02Z; the 15 NFL games of 09-27 / 09-28 hold no price after 09-26
+23:05Z. What spent the last 542,474 credits between 09-21 and 09-26, and what
+the picks written in the gap were priced on, has not been looked at.
 
 ## [ ] `nhl_over_under` and `nhl_puckline` have never been trained
 

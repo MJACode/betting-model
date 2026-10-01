@@ -105,6 +105,15 @@ Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cade
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
 
+### NHL player props
+
+`data/ingestors/nhl_prop_odds_ingestor.py`, 2026-10-01 (mike). Step
+`nhl-prop-odds` on **every refresh pass**, and safe there: it buys an opening
+and a closing snapshot per game and nothing else, decided from what
+`player_prop_odds` already holds. Measured on the live endpoint: 5 credits a
+game per snapshot, so about 13,400 a season. One run stops at
+`NHL_PROP_MAX_CREDITS_PER_RUN` (400). Kill switch: `RUN_NHL_PROP_ODDS=0`.
+
 ### College football player props
 
 `data/ingestors/ncaaf_prop_odds_ingestor.py`, 2026-09-05. **9am / 1pm / 6pm ET

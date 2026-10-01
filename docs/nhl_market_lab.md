@@ -1155,3 +1155,161 @@ game):
   season's summary (`nhl_stats_ingestor._build_goalie_rows`), which is empty in
   week one, so a returning starter is rated as a debutant until he has played.
   The per-game log that holds his last season is never consulted for the id.
+
+---
+
+# Underdogs against favourites, six seasons of stored prices (2026-10-01)
+
+mike, on a proposal to stop the probability correction raising underdog
+probabilities: *"Underdog +money bets are more important that favorites. this
+has been proven, look in the internets."* Two things were done: the published
+record was searched, and the seasons it does not cover were measured here.
+`python -m scripts.nhl_underdog_grid` — no model, every game 2020-21 -> 2025-26
+with a DraftKings pre-game moneyline in the bought history, one unit a side.
+`open` / `close` are DraftKings' first and last pre-game quotes; `best` is the
+best open price among the books a member can bet.
+
+```
+7,624 games with a DraftKings pre-game moneyline and a favourite, seasons 2020-21 -> 2025-26; per season {2021: 878, 2022: 1340, 2023: 1356, 2024: 1358, 2025: 1356, 2026: 1336}; bettable books ['draftkings', 'fanduel', 'betmgm', 'williamhill_us', 'fanatics', 'betrivers', 'hardrockbet', 'betparx']
+
+### All six seasons, blind
+
+     side priced at  bets  units   roi         ci  clv_pts  beat_close  win%
+ underdog      open  7624 -528.8 -6.94 -9.6..-4.3    -0.21        43.3  39.2
+ underdog     close  7624 -481.1 -6.31 -9.0..-3.6    -0.21        43.3  39.2
+ underdog      best  7624 -330.3 -4.33 -7.1..-1.6    -0.21        43.3  39.2
+favourite      open  7624 -169.4 -2.22 -4.0..-0.4     0.21        55.3  60.8
+favourite     close  7624 -205.9 -2.70 -4.5..-0.9     0.21        55.3  60.8
+favourite      best  7624  -35.5 -0.47 -2.3..+1.4     0.21        55.3  60.8
+
+### By season, DraftKings open
+
+ season      side priced at  bets  units    roi          ci  clv_pts  beat_close  win%
+2020-21  underdog      open   878  -86.6  -9.86 -17.6..-2.2    -0.32        42.7  38.5
+2020-21 favourite      open   878   -5.3  -0.60  -5.9..+4.7     0.32        55.9  61.5
+2021-22  underdog      open  1340 -192.7 -14.38 -20.8..-7.9    -0.38        40.7  35.0
+2021-22 favourite      open  1340   46.6   3.48  -0.7..+7.6     0.38        58.1  65.0
+2022-23  underdog      open  1356  -84.3  -6.22 -12.8..+0.3    -0.34        40.0  38.3
+2022-23 favourite      open  1356  -26.1  -1.93  -6.1..+2.3     0.34        58.4  61.7
+2023-24  underdog      open  1358 -112.5  -8.28 -14.6..-2.0    -0.22        42.3  38.7
+2023-24 favourite      open  1358  -22.6  -1.67  -5.9..+2.6     0.22        56.3  61.3
+2024-25  underdog      open  1356  -81.2  -5.99 -12.3..+0.3    -0.24        42.0  39.8
+2024-25 favourite      open  1356  -45.7  -3.37  -7.6..+0.9     0.24        57.0  60.2
+2025-26  underdog      open  1336   28.5   2.13  -4.1..+8.3     0.19        52.2  44.7
+2025-26 favourite      open  1336 -116.3  -8.70 -13.1..-4.3    -0.19        46.2  55.3
+
+### By season, best bettable open price
+
+ season      side priced at  bets  units    roi          ci  clv_pts  beat_close  win%
+2020-21  underdog      best   878  -48.8  -5.56 -13.7..+2.6    -0.32        42.7  38.5
+2020-21 favourite      best   878    9.5   1.08  -4.3..+6.4     0.32        55.9  61.5
+2021-22  underdog      best  1340 -148.5 -11.09 -17.8..-4.3    -0.38        40.7  35.0
+2021-22 favourite      best  1340   71.8   5.36  +1.1..+9.6     0.38        58.1  65.0
+2022-23  underdog      best  1356  -62.7  -4.62 -11.3..+2.0    -0.34        40.0  38.3
+2022-23 favourite      best  1356   -8.1  -0.60  -4.8..+3.6     0.34        58.4  61.7
+2023-24  underdog      best  1358  -87.7  -6.46 -12.9..-0.0    -0.22        42.3  38.7
+2023-24 favourite      best  1358    2.1   0.15  -4.1..+4.5     0.22        56.3  61.3
+2024-25  underdog      best  1356  -45.8  -3.38  -9.9..+3.1    -0.24        42.0  39.8
+2024-25 favourite      best  1356  -20.6  -1.52  -5.8..+2.8     0.24        57.0  60.2
+2025-26  underdog      best  1336   63.2   4.73 -1.6..+11.1     0.19        52.2  44.7
+2025-26 favourite      best  1336  -90.1  -6.75 -11.3..-2.2    -0.19        46.2  55.3
+
+### Underdogs by DraftKings opening price, with each season's return (bets)
+
+underdog priced priced at  bets  units   roi          ci  clv_pts  beat_close  win%      2020-21      2021-22      2022-23      2023-24      2024-25     2025-26
+   +100 to +119      open  1974  -89.6 -4.54  -9.1..+0.0    -0.08        45.7  46.0 -16.2% (250) -11.2% (350)  -8.1% (302)  -6.7% (347)  +2.1% (317) +7.5% (408)
+   +120 to +149      open  2331 -152.6 -6.55 -11.2..-1.9    -0.24        44.3  40.4  -5.5% (241) -17.8% (366)  -3.3% (405)  -5.9% (395)  -6.3% (475) -1.6% (449)
+   +150 to +199      open  1674 -147.0 -8.78 -14.9..-2.7    -0.24        42.4  33.9 -14.0% (210) -18.3% (320) -10.5% (313)  -2.7% (306)  -9.9% (284) +4.3% (241)
+ +200 or longer      open  1016  -86.6 -8.52 -17.9..+0.8    -0.46        35.5  27.1   -9.2% (88)  -7.0% (232)  -1.0% (245) -21.1% (191) -10.8% (173)  -0.9% (87)
+
+### Home and road, DraftKings open
+
+          side priced at  bets  units   roi          ci  clv_pts  beat_close  win%
+ home underdog      open  2726 -200.7 -7.36 -11.7..-3.0    -0.38        40.4  40.2
+home favourite      open  4898 -133.2 -2.72  -4.9..-0.5     0.12        53.7  61.4
+ road underdog      open  4898 -328.1 -6.70 -10.1..-3.3    -0.12        45.0  38.6
+road favourite      open  2726  -36.2 -1.33  -4.4..+1.7     0.38        58.2  59.8
+
+### Line shopping: the best bettable open price against Pinnacle's no-vig open
+
+                                      side  games  share where best price beats Pinnacle's fair price  mean EV at best price, %   bets  units  roi          ci  clv_pts  beat_close
+                                  underdog 7623.0                                                22.7                     -1.90    NaN    NaN  NaN         NaN      NaN         NaN
+ underdog, bet when EV vs Pinnacle >= 0.00    NaN                                                 NaN                       NaN 1743.0   16.4 0.94  -5.1..+7.0    -0.20        44.8
+ underdog, bet when EV vs Pinnacle >= 0.02    NaN                                                 NaN                       NaN  900.0    8.9 0.99  -7.6..+9.6    -0.15        47.8
+ underdog, bet when EV vs Pinnacle >= 0.04    NaN                                                 NaN                       NaN  511.0   29.5 5.77 -6.0..+17.6    -0.00        50.3
+                                 favourite 7623.0                                                16.6                     -1.93    NaN    NaN  NaN         NaN      NaN         NaN
+favourite, bet when EV vs Pinnacle >= 0.00    NaN                                                 NaN                       NaN 1267.0   38.9 3.07  -1.5..+7.6     0.29        58.5
+favourite, bet when EV vs Pinnacle >= 0.02    NaN                                                 NaN                       NaN  525.0   39.1 7.44 +0.4..+14.5     0.43        61.9
+favourite, bet when EV vs Pinnacle >= 0.04    NaN                                                 NaN                       NaN  226.0   13.7 6.05 -4.9..+17.0     0.63        63.7
+
+### Either side, bet at the best bettable open price when it beats Pinnacle's no-vig open by the cut
+
+ EV vs Pinnacle >=  bets  units   roi          ci  clv_pts  beat_close  dog share  early  late     2020-21     2021-22      2022-23     2023-24      2024-25      2025-26
+              0.00  3010   55.3  1.84  -2.1..+5.8     0.01        50.5       0.58    0.4   3.3 -1.6% (455) -0.1% (674)  +4.0% (392) -3.4% (433)  +0.2% (548) +12.1% (508)
+              0.01  2064   85.7  4.15  -0.8..+9.1     0.03        51.7       0.61    3.2   5.1 -3.2% (307) +3.3% (496) +12.5% (236) -5.4% (284)  +5.6% (399) +12.5% (342)
+              0.02  1425   47.9  3.36  -2.7..+9.4     0.06        53.0       0.63    3.3   3.4 +0.1% (201) +4.1% (363)  +6.9% (149) -5.3% (183)  +2.1% (287) +10.8% (242)
+              0.03  1034   42.2  4.08 -3.2..+11.3     0.12        54.2       0.66    4.1   4.1 +7.6% (150) +2.8% (283)  +3.1% (100) -0.6% (116)  +6.2% (207)  +4.2% (178)
+              0.04   737   43.2  5.86 -3.0..+14.7     0.19        54.4       0.69    5.4   6.4 +14.9% (98) +1.1% (225)   +6.3% (60)  -3.7% (84) +11.2% (146)  +7.3% (124)
+              0.06   370   60.2 16.28 +2.9..+29.6     0.16        53.2       0.76   14.4  18.1 +26.7% (43) +9.1% (126)         (28) +17.4% (37)  +24.2% (69)   +8.1% (67)
+
+### The 0.02 cut, by the book whose price was taken
+
+book with the best price  bets  units    roi           ci  clv_pts  beat_close
+               betrivers   499   38.7   7.75  -1.8..+17.3     0.43        58.9
+                 fanduel   370  -11.7  -3.15  -16.2..+9.9    -0.46        45.1
+              draftkings   220    4.1   1.86 -12.8..+16.5     0.42        54.1
+                  betmgm   150   14.9   9.95  -7.5..+27.4     0.38        62.0
+          williamhill_us   106    5.1   4.82 -20.3..+30.0    -1.24        34.9
+             hardrockbet    57   -8.1 -14.15 -41.0..+12.7     0.33        56.1
+                fanatics    23    NaN    NaN          NaN      NaN         NaN
+
+DraftKings' moneyline hold at the open on these games: 4.22%
+```
+
+## Read, underdogs
+
+- **Blind underdogs lost in five of the last six seasons, at every price.**
+  -6.9% at DraftKings' open over 7,624 games against -2.2% for favourites;
+  -4.3% against -0.5% at the best bettable price. By season the underdog side
+  ran -9.9%, -14.4%, -6.2%, -8.3%, -6.0%, then **+2.1% in 2025-26** (+4.7% at
+  the best price), the one season favourites lost more (-8.7%).
+- **No price band is positive over the six seasons** (-4.5% to -8.8%). The
+  shortest underdogs, +100 to +119, improved every single season: -16.2%,
+  -11.2%, -8.1%, -6.7%, +2.1%, +7.5% on 250-408 bets a season. Six points in a
+  row is a pattern worth watching and not yet a rule: only the last two are
+  positive, on 317 and 408 bets.
+- **Home or road makes no difference to the underdog** (-7.4% home, -6.7%
+  road).
+- **Where the underdog claim does hold is on price, not on side.** The best
+  bettable underdog price beats Pinnacle's no-vig price in 22.7% of games
+  against 16.6% for favourites, so books disagree more on the underdog. Betting
+  EITHER side at the best price when it beats Pinnacle's fair price is positive
+  at every cut: +1.8% (3,010 bets) at 0.00, +3.4% (1,425) at 0.02, +5.9% (737)
+  at 0.04, +16.3% (370) at 0.06; both halves positive at every cut; five of six
+  seasons positive at 0.02-0.04; 58-76% of the bets are underdogs; no one book
+  carries it. **Against it:** every interval below 0.06 spans zero, 2023-24 is
+  negative at every cut up to 0.04, and closing-line value is barely above zero
+  (50-54% beat Pinnacle's close). A candidate — the same shape as
+  `nfl_opener_spread` — not a model.
+
+## The published record (web search, 2026-10-01; sources listed in that day's session entry)
+
+- **The claim was true on 1990s prices.** Woodland & Woodland 2001 found NHL
+  underdogs over-returned in 1990-96, and Gandar, Zuber & Johnson 2004
+  confirmed it after correcting the commission arithmetic.
+- **The same authors found it gone.** Woodland & Woodland 2011, ten later
+  seasons: "the bias is sustained for the first three seasons but disappears in
+  the last seven seasons as the market converges to efficiency".
+- **Every unfiltered modern figure found has favourites level or ahead**:
+  Action Network, 15 seasons from 2005, underdogs -2.4% and favourites -1.6%;
+  2017-18, favourites +1.6% and underdogs down nearly 100 units over 1,268
+  games; 2021-22 through 652 games, favourites +4.8% and underdogs -19%.
+- **Underdogs come out ahead only in filtered cuts from a vendor's own
+  database**: road underdogs +105 to +200 with 35% or less of the bets, +5.1%
+  over 2005-2012 (Sports Insights); playoff underdogs of +120 or longer, +3.1%
+  over 2012-2025 and then -22.1 units in 2025 (VSiN).
+- **Nothing published covers 2022-23 onward at real prices**, and nothing
+  published measures line shopping by side. The tables above are the only
+  numbers for either. Several pages would not load (Lahtinen 2019, the full
+  Woodland papers, Paul & Weinbach 2012); what is quoted from them is the
+  abstract or a search summary.

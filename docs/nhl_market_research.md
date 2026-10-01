@@ -128,7 +128,8 @@ calibrated, train 2018-19 → 2024-25, holdout 2025-26 (1,352 games):
 calibration error 2.82%; `nhl_moneyline_regulation` accuracy 41.6%
 (always-home-in-regulation: 39.5%), log loss 1.0772 against ≈ 1.0855 for the
 training class rates. Honest, calibrated, and almost no better than base
-rates. Both are paper-only under the §2 gate.
+rates. Both were paper-only under the §2 gate when this was written; **mike
+made both LIVE on 2026-10-01 with the gate not met** (`docs/sports/nhl.md`).
 
 What this does *not* measure: profit. There are no historical NHL prices in
 the database to grade against (the recorded "+22.6%" backtest assumed −110 on

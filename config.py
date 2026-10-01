@@ -1889,7 +1889,8 @@ MODEL_OWN_EV_FLOOR: dict = {
     # record to sweep and no written EV to sit under. Written out at the global
     # number rather than left absent (mike, 2026-09-20: every model carries its
     # own floor) so the next session reads a choice. Re-set from their own
-    # paper record once the 2026-27 season has produced one; the backtested
+    # record once the 2026-27 season has produced one (both are LIVE, mike
+    # 2026-10-01 -- docs/sports/nhl.md); the backtested
     # candidates in docs/nhl_market_lab.md are a DIFFERENT model (regularised
     # logistic on the per-game logs), not these artifacts, and were cut on a
     # probability edge, not EV.
@@ -3546,6 +3547,30 @@ PROP_MARKETS_NFL = [
     "player_tackles_assists",
     "player_sacks",
 ]
+
+# NHL player prop markets, COLLECTED and not yet modelled (mike, 2026-10-01:
+# an opening and a closing price for every game). The same six the history
+# purchase bought (data/ingestors/nhl_prop_odds_history.py), so the live series
+# continues the three priced seasons docs/nhl_market_lab.md was graded on. No
+# NHL prop model exists; a row here is research until one clears its own grid.
+PROP_MARKETS_NHL = [
+    "player_shots_on_goal",
+    "player_points",
+    "player_assists",
+    "player_goal_scorer_anytime",   # Yes/No, no number: stored as over 0.5
+    "player_total_saves",
+    "player_blocked_shots",
+]
+# The closing snapshot is taken by the first refresh pass inside this many
+# minutes of puck drop. 70, not less: the afternoon passes are hourly, and a
+# narrower window can fall between two of them and buy no close at all.
+NHL_PROP_CLOSE_WINDOW_MIN = int(os.environ.get("NHL_PROP_CLOSE_WINDOW_MIN", "70"))
+# One run's ceiling. Measured 2026-10-01 on the live endpoint; see
+# data/ingestors/nhl_prop_odds_ingestor.py. A full 16-game slate fits; a gate
+# that broke and fetched every game on every pass would stop here, not at the
+# bottom of the account.
+NHL_PROP_MAX_CREDITS_PER_RUN = int(os.environ.get("NHL_PROP_MAX_CREDITS_PER_RUN", "400"))
+RUN_NHL_PROP_ODDS = os.environ.get("RUN_NHL_PROP_ODDS", "1") == "1"
 
 # RETIRED 2026-09-02 (matt): mlb_prop_batter_hr (batter_home_runs) and
 # mlb_prop_batter_rbi (batter_rbis). Removing them from this registry is what
