@@ -238,18 +238,26 @@ def step_apply_view_migrations(run_date: str) -> bool:
     after the first. Same reasoning as tracking/run_ledger.py creating its own
     table at runtime."""
     try:
-        from data.view_migrations import apply_view_migrations, ACTIVE_MIGRATIONS
-        n = apply_view_migrations()
-        if n < len(ACTIVE_MIGRATIONS):
+        from data.view_migrations import (
+            ACTIVE_MIGRATIONS,
+            apply_view_migrations,
+            format_view_migration_failure,
+        )
+        result = apply_view_migrations()
+        total = len(ACTIVE_MIGRATIONS)
+        if result.failed or result.applied < total:
             # The STEP fails; the pass does not (refresh_pass.sh and the daily
             # both carry on past a failed step). Until 2026-09-21 this logged
             # "✓ 31/33 applied" as a success on every pass the logs still hold while
             # two migrations raised, so the ledger and the failure alerter saw
             # nothing and the published-units gate they owned had lapsed.
-            logger.error(f"✗ View migrations: {n}/{len(ACTIVE_MIGRATIONS)} applied — "
-                         f"{len(ACTIVE_MIGRATIONS) - n} FAILED (see 'View migration FAILED' above)")
+            # The filenames are IN this line: _timed_step stores the last ERROR
+            # in pipeline_log, and the per-file "View migration FAILED (name)"
+            # lines are not that last line.
+            logger.error(format_view_migration_failure(
+                result.applied, total, result.failed))
             return False
-        logger.success(f"✓ View migrations: {n}/{len(ACTIVE_MIGRATIONS)} applied")
+        logger.success(f"✓ View migrations: {result.applied}/{total} applied")
         return True
     except Exception as exc:
         # Never fail the pass for a view refinement.

@@ -132,7 +132,13 @@ def test_a_failed_view_migration_fails_the_step(monkeypatch):
     import data.view_migrations as vm
     import run_pipeline
     total = len(vm.ACTIVE_MIGRATIONS)
-    monkeypatch.setattr(vm, "apply_view_migrations", lambda: total - 2)
+    monkeypatch.setattr(
+        vm, "apply_view_migrations",
+        lambda: vm.ViewMigrationResult(
+            total - 2,
+            (("one.sql", "lock timeout"), ("two.sql", "lock timeout"))))
     assert run_pipeline.step_apply_view_migrations("2026-09-21") is False
-    monkeypatch.setattr(vm, "apply_view_migrations", lambda: total)
+    monkeypatch.setattr(
+        vm, "apply_view_migrations",
+        lambda: vm.ViewMigrationResult(total, ()))
     assert run_pipeline.step_apply_view_migrations("2026-09-21") is True

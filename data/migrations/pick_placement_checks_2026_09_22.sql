@@ -14,12 +14,35 @@
 -- once written (CLAUDE.md 1c); this is a human observation about it, made
 -- later, and it can be corrected without touching the pick.
 --
--- IDEMPOTENT: CREATE TABLE IF NOT EXISTS, and the grants are safe to repeat.
+-- IDEMPOTENT. CREATE TABLE IF NOT EXISTS on an existing table does not lock
+-- it, but ENABLE ROW LEVEL SECURITY is ALTER TABLE and takes
+-- AccessExclusiveLock on every execution, and REVOKE does too. Once the table
+-- exists, RLS is on, and anon/authenticated hold none of SELECT/INSERT/
+-- UPDATE/DELETE, this returns before any of that.
 -- Single DO block, because data/view_migrations.py runs each file as ONE
 -- statement.
 
 DO $mig$
 BEGIN
+  IF to_regclass('public.pick_placement_checks') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_class
+        WHERE oid = 'public.pick_placement_checks'::regclass
+          AND relrowsecurity
+     )
+     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'SELECT')
+     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'INSERT')
+     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'UPDATE')
+     AND NOT has_table_privilege('anon', 'public.pick_placement_checks', 'DELETE')
+     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'SELECT')
+     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'INSERT')
+     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'UPDATE')
+     AND NOT has_table_privilege('authenticated', 'public.pick_placement_checks', 'DELETE')
+  THEN
+    RAISE NOTICE 'pick_placement_checks already locked down - skipping';
+    RETURN;
+  END IF;
+
   CREATE TABLE IF NOT EXISTS public.pick_placement_checks (
     pick_id     BIGINT PRIMARY KEY,
     placeable   BOOLEAN NOT NULL,

@@ -22,10 +22,20 @@ Deliberate constraints:
     second run would red the pipeline forever.
   * Every migration must be a SINGLE statement -- in practice a DO $$...$$
     block. See the comment at the execute() call for why.
-  * Failures are logged and swallowed. A view refinement must never take down
-    settlement or scoring — the same rule run_ledger follows.
+  * Failures are logged and swallowed here (this function does not raise).
+    The step reports them and returns False; later steps still run. A view
+    refinement must never take down settlement or scoring — the same rule
+    run_ledger follows.
+  * An already-applied file must not take AccessExclusiveLock. PostgreSQL
+    locks first and checks IF NOT EXISTS second, so the SQL itself returns
+    on a catalog read. A lock that is still required (a real change, under
+    contention) uses a short lock_timeout and a few retries, then fails
+    the step with the filename in the error.
 """
 from __future__ import annotations
+
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from loguru import logger
@@ -238,49 +248,155 @@ ACTIVE_MIGRATIONS: list[str] = [
 ]
 
 
-def apply_view_migrations(conn=None) -> int:
-    """Run each ACTIVE_MIGRATIONS file. Returns how many applied cleanly.
-    Never raises — observability and schema polish must not break the pass."""
+# How long one attempt will sit in the lock queue. statement_timeout on the
+# worker role is 2min and lock_timeout is 0, so an AccessExclusive waiter
+# used to block new readers for the whole two minutes (lock-queue fairness)
+# and three of those were the 363s hourly failure on 2026-10-01. Five
+# seconds is long enough for a short transaction to finish and short enough
+# that a miss releases the queue. The work AFTER the lock is acquired still
+# has the server statement_timeout; this does not cancel a real index build.
+LOCK_TIMEOUT = "5s"
+LOCK_ATTEMPTS = 3
+# Sleep after attempt 1 and attempt 2. The third failure does not sleep.
+LOCK_BACKOFF_S = (0.5, 1.5)
+
+# 55P03 lock_not_available (lock_timeout), 40P01 deadlock_detected.
+# 57014 query_canceled is also admin cancel; only the timeout wording retries.
+_TRANSIENT_PGCODES = frozenset({"55P03", "40P01"})
+
+
+@dataclass(frozen=True)
+class ViewMigrationResult:
+    """applied is how many files committed. failed is (filename, error)."""
+
+    applied: int
+    failed: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def failed_names(self) -> tuple[str, ...]:
+        return tuple(name for name, _err in self.failed)
+
+
+def _is_transient_lock_error(exc: BaseException) -> bool:
+    """True for a lock timeout, a statement timeout, or a deadlock.
+
+    Anything else (missing column, syntax, a guard that raised) fails the
+    file on the first attempt. Retrying those would hide a real migration
+    bug behind three identical errors.
+    """
+    code = getattr(exc, "pgcode", None)
+    msg = str(exc).lower()
+    if code in _TRANSIENT_PGCODES:
+        return True
+    if code == "57014":
+        return "timeout" in msg
+    return (
+        "lock timeout" in msg
+        or "canceling statement due to statement timeout" in msg
+        or "deadlock detected" in msg
+    )
+
+
+def format_view_migration_failure(
+    applied: int,
+    total: int,
+    failed: tuple[tuple[str, str], ...] | list[tuple[str, str]],
+) -> str:
+    """The line step_apply_view_migrations logs. pipeline_log keeps the last
+    ERROR, truncated at 360 characters, so the filenames lead."""
+    if not failed:
+        return (
+            f"✗ View migrations: {applied}/{total} applied — "
+            f"FAILED: {total - applied} file(s) did not apply"
+        )
+    names = ", ".join(name for name, _err in failed)
+    head = f"✗ View migrations: {applied}/{total} applied — FAILED: {names}"
+    reason = " ".join(str(failed[0][1]).split())
+    if reason:
+        extra = f" — {reason[:120]}"
+        if len(head) + len(extra) <= 320:
+            head += extra
+    return head
+
+
+def _apply_one(conn, name: str, sql: str) -> str | None:
+    """Run one file. None means it committed. A string is the error that
+    survived the retries. Never raises.
+
+    `time.sleep` is looked up on each retry so a test can patch it. A
+    default argument would bind the real sleep at import and ignore the patch.
+    """
+    last = ""
+    for attempt in range(1, LOCK_ATTEMPTS + 1):
+        try:
+            # SET LOCAL dies with the transaction, so a passed-in connection
+            # does not keep the short timeout after we return.
+            conn.execute(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
+            # conn.execute, NOT conn.executescript: executescript splits on
+            # ";" and would shred a dollar-quoted DO $$...$$ block into
+            # fragments at every semicolon in its body. Each migration here
+            # must therefore be a SINGLE statement (a DO block), which is
+            # also what makes the idempotency check atomic.
+            conn.execute(sql)
+            conn.commit()
+            return None
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            last = str(exc)
+            if attempt < LOCK_ATTEMPTS and _is_transient_lock_error(exc):
+                delay = LOCK_BACKOFF_S[min(attempt - 1, len(LOCK_BACKOFF_S) - 1)]
+                logger.warning(
+                    f"View migration lock wait ({name}), "
+                    f"attempt {attempt}/{LOCK_ATTEMPTS}: {exc}"
+                )
+                time.sleep(delay)
+                continue
+            logger.error(f"View migration FAILED ({name}): {exc}")
+            return last
+    return last
+
+
+def apply_view_migrations(conn=None) -> ViewMigrationResult:
+    """Run each ACTIVE_MIGRATIONS file. Never raises — observability and
+    schema polish must not break the pass. The caller turns `failed` into
+    the step's error line."""
     owns = conn is None
     applied = 0
+    failed: list[tuple[str, str]] = []
     try:
         conn = conn or get_connection()
     except Exception as exc:                      # no DB — nothing to do
         logger.warning(f"View migrations skipped (no connection): {exc}")
-        return 0
+        return ViewMigrationResult(0, (("(connection)", str(exc)),))
 
     try:
         for name in ACTIVE_MIGRATIONS:
             path = MIGRATIONS_DIR / name
             if not path.exists():
                 logger.warning(f"View migration missing on disk: {name}")
+                failed.append((name, "missing on disk"))
                 continue
-            try:
-                # conn.execute, NOT conn.executescript: executescript splits on
-                # ";" and would shred a dollar-quoted DO $$...$$ block into
-                # fragments at every semicolon in its body. Each migration here
-                # must therefore be a SINGLE statement (a DO block), which is
-                # also what makes the idempotency check atomic.
-                conn.execute(path.read_text(encoding="utf-8"))
-                conn.commit()
+            err = _apply_one(conn, name, path.read_text(encoding="utf-8"))
+            if err is None:
                 applied += 1
                 logger.info(f"View migration OK: {name}")
-            except Exception as exc:
-                # Roll back so one bad migration cannot poison the next.
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                logger.error(f"View migration FAILED ({name}): {exc}")
+            else:
+                failed.append((name, err))
     finally:
         if owns:
             try:
                 conn.close()
             except Exception:
                 pass
-    return applied
+    return ViewMigrationResult(applied, tuple(failed))
 
 
 if __name__ == "__main__":
-    n = apply_view_migrations()
-    print(f"{n}/{len(ACTIVE_MIGRATIONS)} view migration(s) applied")
+    result = apply_view_migrations()
+    print(f"{result.applied}/{len(ACTIVE_MIGRATIONS)} view migration(s) applied")
+    if result.failed:
+        print(format_view_migration_failure(
+            result.applied, len(ACTIVE_MIGRATIONS), result.failed))
