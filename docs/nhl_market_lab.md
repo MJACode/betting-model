@@ -1047,7 +1047,7 @@ after the correction the three probabilities sum to 1.144 on average (min 1.023,
 ### The production rule on the holdout season
 
                                               rule  bets  units    roi           ci  early  late  games  avg raw p home/draw/away
-                     AS IT RUNS TODAY @ DraftKings   300  -39.3 -13.08  -27.4..+1.2  -19.7  -6.5    300      0.415    0.43/0/0.57
+                     AS IT RUNS TODAY @ DraftKings   300  -39.2 -13.08  -27.4..+1.2  -19.7  -6.5    300      0.415    0.43/0/0.57
              AS IT RUNS TODAY @ best bettable book   447  -20.5  -4.59  -16.7..+7.5   -5.5  -3.7    447      0.415    0.49/0/0.51
    same cuts, model's OWN probability @ DraftKings    21   -2.4 -11.19 -66.5..+44.1  -50.0  24.1     21      0.468    0.62/0/0.38
 same cuts, model's OWN probability @ best bettable    47   -6.0 -12.66 -49.7..+24.4  -19.1  -6.5     47      0.467    0.74/0/0.26
@@ -1055,11 +1055,11 @@ same cuts, model's OWN probability @ best bettable    47   -6.0 -12.66 -49.7..+2
 ### Neighbourhood: bet any outcome whose raw model EV at DraftKings clears the cut
 
  raw EV>=  bets  units    roi           ci  early  late
-     0.00   859  -41.8  -4.86  -14.9..+5.1   -0.2  -9.5
+     0.00   859  -41.8  -4.86  -14.9..+5.1    0.3 -10.0
      0.02   665  -65.0  -9.77  -20.9..+1.3   -4.5 -15.0
      0.05   441  -20.9  -4.73  -18.7..+9.3    4.3 -13.7
-     0.10   230  -11.4  -4.98 -24.9..+15.0   -3.4  -6.6
-     0.15   105   -8.5  -8.14 -37.6..+21.3   -4.0 -12.2
+     0.10   230  -11.5  -4.98 -24.9..+15.0   -3.4  -6.6
+     0.15   105   -8.6  -8.14 -37.6..+21.3   -4.0 -12.2
      0.20    47   -9.5 -20.32 -60.8..+20.2  -13.7 -26.7
      0.30    13    0.1   0.77 -88.7..+90.3    NaN   NaN
 
@@ -1067,7 +1067,7 @@ same cuts, model's OWN probability @ best bettable    47   -6.0 -12.66 -49.7..+2
 
       blind  bets  units    roi          ci
 always away  1352 -114.8  -8.49 -15.3..-1.7
-always draw  1352  114.6   8.47 -1.5..+18.4
+always draw  1352  114.5   8.47 -1.5..+18.4
 always home  1352 -202.1 -14.95 -20.7..-9.2
 
 ### nhl_moneyline: what the model says, what the correction says, what happened (every side of every game)
@@ -1313,3 +1313,155 @@ DraftKings' moneyline hold at the open on these games: 4.22%
   numbers for either. Several pages would not load (Lahtinen 2019, the full
   Woodland papers, Paul & Weinbach 2012); what is quoted from them is the
   abstract or a search summary.
+
+---
+
+# The early weeks, backtested (2026-10-01)
+
+Proposed to mike: hold NHL picks until both teams have played ten games,
+because the first week's inputs are outside anything the models trained on.
+His answer: *"no, this is fucking why we have back testing and seasons worth of
+data frmo out data sources."* So the early weeks were backtested, and the
+alternative input design was built and tested against the one that is live.
+**He was right, and the proposal was wrong: over five seasons the live inputs
+do no worse in the early weeks than in the rest of the season, and the
+alternative is not an improvement. Nothing was switched.**
+
+`python -m scripts.nhl_early_season_blend` (and `--sweep`, `--first-games`).
+Walk-forward with fixed parameters, test seasons 2021-22 -> 2025-26, each fit
+on every earlier season from 2018-19. OLD is the live feature list. BLENDED is
+`NHL_H2H_FEATURES_BLENDED`: goals for and against, the home / road scoring
+splits and a points rate (games not lost in regulation), each
+`(n * this season + 25 * last season) / (n + 25)` through
+`data.nhl_asof.TeamBook.inputs`, with the running goal-difference total
+removed. Three windows: EARLY (a team under 10 games played), FIRST GAMES, and
+the REST. **"First games" means the 225 games the old list drops from
+training** — the home team has not yet played at home, or the road team on the
+road; about 45 a season, of which a team's very first game is a subset.
+
+```
+games 2018-19 -> 2025-26: old list 10,034, blended list 10,367 (333 the old list drops for null inputs)
+test seasons 2021-22 -> 2025-26: 6,992 games; 225 first games only the blended list can score, 615 other early-season games, 6152 the rest; 6,745 with a DraftKings price
+
+### Accuracy by window (walk-forward, fixed parameters)
+
+                    window  games  home rate  log loss blended  AUC blended  log loss DraftKings  AUC DraftKings  log loss old  AUC old
+first games (blended only)    225      0.560            0.6786        0.595               0.6500           0.657           NaN      NaN
+  early season, both lists    615      0.535            0.6983        0.577               0.6727           0.609        0.6992    0.578
+            rest of season   6152      0.536            0.6864        0.594               0.6596           0.642        0.6828    0.602
+all games both lists score   6767      0.536            0.6875        0.593               0.6608           0.639        0.6843    0.600
+
+### Units at DraftKings' first pre-game price, by window
+
+ inputs                     window  edge>=  bets  units   roi           ci
+blended   early season, both lists    0.02   409  -17.5 -4.28  -14.1..+5.5
+    old   early season, both lists    0.02   430   -2.4 -0.56  -10.4..+9.3
+blended first games (blended only)    0.02   150  -11.1 -7.43  -23.0..+8.1
+blended             rest of season    0.02  4008 -245.4 -6.12   -9.3..-2.9
+    old             rest of season    0.02  4060 -120.0 -2.96   -6.1..+0.2
+blended   early season, both lists    0.04   334  -20.7 -6.20  -17.0..+4.6
+    old   early season, both lists    0.04   372    0.3  0.07 -10.6..+10.7
+blended first games (blended only)    0.04   122   -3.3 -2.74 -20.4..+14.9
+blended             rest of season    0.04  3199 -177.0 -5.53   -9.2..-1.9
+    old             rest of season    0.04  3235 -122.7 -3.79   -7.4..-0.2
+blended   early season, both lists    0.06   264  -15.1 -5.72  -17.8..+6.3
+    old   early season, both lists    0.06   288  -14.1 -4.90  -17.0..+7.2
+blended first games (blended only)    0.06    84   -3.5 -4.21 -25.8..+17.4
+blended             rest of season    0.06  2451 -133.2 -5.43   -9.6..-1.2
+    old             rest of season    0.06  2480  -91.9 -3.70   -7.8..+0.4
+
+### The early window season by season
+
+ season  early + first games  log loss old  log loss blended (same games)  log loss blended (all)
+2021-22                  169        0.6973                         0.6908                  0.6905
+2022-23                  169        0.6995                         0.7517                  0.7321
+2023-24                  166        0.7304                         0.6801                  0.6681
+2024-25                  169        0.6708                         0.6652                  0.6756
+2025-26                  167        0.6988                         0.7025                  0.6982
+
+first games: the blended model's home-win probability ranges 0.262..0.870 (mean 0.572); share at 0.70 or higher 0.240
+
+225 first games, 2021-22 -> 2025-26; 216 with a DraftKings price; rows with a missing old input: 143
+goal-difference gap fed to the old model: {0.5: 8.0, 0.9: 79.0, 1.0: 178.0} (absolute, median / 90th / max)
+
+### First games of a season: accuracy
+
+                                      model  games  log loss   AUC  share at 0.70+ or 0.30-
+old list, as production scores a first game    225    0.6650 0.628                    0.271
+                               blended list    225    0.6786 0.595                    0.258
+                          DraftKings no-vig    216    0.6500 0.657                    0.088
+
+### First games of a season: units at DraftKings' first pre-game price
+
+                                      model  edge>=  bets  units   roi           ci
+old list, as production scores a first game    0.02   169    4.3  2.53 -12.4..+17.4
+                               blended list    0.02   150  -11.1 -7.43  -23.0..+8.1
+old list, as production scores a first game    0.04   145    3.8  2.60 -13.7..+18.9
+                               blended list    0.04   122   -3.3 -2.74 -20.4..+14.9
+old list, as production scores a first game    0.06   112   13.7 12.19  -6.5..+30.9
+                               blended list    0.06    84   -3.5 -4.21 -25.8..+17.4
+
+
+### Log loss by how many games of last season the goals and results columns carry
+
+games of last season carried  first games  early   rest  all both score  AUC all both score  share of first games at 0.70+
+                           3       0.6813 0.6954 0.6872          0.6879              0.5912                          0.204
+                           5       0.6760 0.6936 0.6858          0.6866              0.5932                          0.191
+                          10       0.6527 0.6904 0.6844          0.6849              0.5964                          0.191
+                          25       0.6786 0.6983 0.6864          0.6875              0.5925                          0.240
+                          50       0.6773 0.6884 0.6834          0.6838              0.5992                          0.200
+              old list (raw)          NaN 0.6992 0.6828          0.6843              0.5999                            NaN
+```
+
+## Read, the early weeks
+
+- **The early weeks are not a worse time for the live inputs.** In units at
+  DraftKings the old list returns -0.6% / +0.1% / -4.9% in the early window
+  (288-430 bets) against -3.0% / -3.8% / -3.7% over the rest of the season
+  (2,480-4,060 bets). Its log loss is worse early (0.6992 against 0.6828), and
+  so is DraftKings' own (0.6727 against 0.6596): early games are harder for
+  everyone, not specially hard for this model. A hold was not supported.
+- **On the games the old list never trained on, scoring them the way
+  production does is the better of the two.** Last season's final row standing
+  in: log loss 0.6650, AUC 0.628, +2.5% to +12.2% on 112-169 bets (every
+  interval spans zero). Blended: 0.6786, 0.595, -2.7% to -7.4%. DraftKings:
+  0.6500. The inputs on those games ARE outside the training range (median
+  goal-difference gap 8, 90th percentile 79, largest 178; 27% of them priced
+  at 70% or 30% and beyond, against 9% for DraftKings) and it did not cost
+  accuracy. 225 games; a replay of the scoring path on rows the rebuild wrote.
+- **The blended list is not better anywhere it can be compared.** Same games:
+  log loss 0.6875 against 0.6843, AUC 0.593 against 0.600; units worse in both
+  windows at every cut (rest of season -6.1% / -5.5% / -5.4%).
+- **How much of last season to carry makes no difference.** 3, 5, 10, 25 or 50
+  games: 0.6838 to 0.6879 over the games both lists score, in no order. The
+  spread between refits (first games 0.6527 to 0.6813 with an identical input
+  on those rows) is the noise floor of this comparison. No value was chosen
+  from it; 25 matches the shot and special-teams rates.
+- **Both models were retrained on the blended list anyway** (`--no-register`,
+  Optuna 100 trials, train 2018-19 -> 2024-25) and graded on 2025-26 with
+  `scripts/nhl_live_artifact_grade.py --artifact`:
+
+  | 2025-26, at DraftKings | live | retrained on the blended list |
+  |---|---|---|
+  | moneyline log loss (DraftKings no-vig) | 0.6884 (0.6836), 1,352 games | 0.6906 (0.6828), 1,394 games |
+  | moneyline, raw edge >= 0.02 | 587 bets, -0.5% | 610 bets, -10.2% (-18.9..-1.5) |
+  | moneyline, raw edge >= 0.04 | 341 bets, -0.3% | 308 bets, -13.0% (-25.4..-0.6) |
+  | moneyline, raw edge >= 0.06 | 188 bets, -4.1% | 137 bets, -20.5% (-39.0..-2.0) |
+  | regulation log loss | 1.0772 | 1.0783 |
+  | regulation, raw EV >= 0.05 | 441 bets, -4.7% | 497 bets, -12.9% (-25.6..-0.1) |
+  | regulation, as it runs today | 300 bets, -39.2 units | 320 bets, -55.8 units |
+
+  Worse on every row with a sample. (The candidate column is from the run
+  before the script's sums were made order-independent, so its unit figures are
+  good to 0.1; a re-run was cancelled twice by the database's statement timeout
+  that evening and was not forced.) The candidates were not registered and are
+  not in the repo (`models/saved/_baseline/` is ignored); the live artifacts
+  and `FEATURE_MAP` are unchanged, and the blended columns are computed on the
+  training path only.
+- **What stays true from the first write-up, and what does not.** True: before
+  a team's first game the scoring path feeds last season's running totals, and
+  the live path's home / road scoring split is not the training path's
+  (`nhl_stats_ingestor._home_away_goals` reaches back to 1 October of the
+  previous calendar year, so it spans two seasons until New Year and one after;
+  training uses this season only). Not supported by results: that either one
+  makes the early weeks a bad time to bet this model.
