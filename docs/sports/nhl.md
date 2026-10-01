@@ -19,8 +19,11 @@
 >
 > **NHL HAS NO 10-GAME HOLD** (mike, same day, on a proposal to hold picks until
 > both teams had played ten games: *"no, this is fucking why we have back testing
-> and seasons worth of data frmo out data sources"*). The early weeks are handled
-> by the inputs, blended toward last season, not by sitting out.
+> and seasons worth of data frmo out data sources"*). **Backtested the same day,
+> and he was right:** over five seasons the live inputs do no worse in the
+> early weeks than in the rest of the season, and the alternative built to
+> replace them (every team number blended toward last season) graded worse.
+> Nothing was switched. `docs/nhl_market_lab.md`, "The early weeks, backtested".
 >
 > **THE PROBABILITY CORRECTION STAYS AS IT IS** (mike, same day: underdog
 > plus-money bets are wanted). What it does to these two models is measured in

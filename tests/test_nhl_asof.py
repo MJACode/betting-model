@@ -229,3 +229,98 @@ class TestReturningStarterIsNamedFromTheLog:
         book = GoalieBook(LEAGUE + [dict(_g(9, "2024-10-08", 2025, 30, 2), player_name="New Guy")])
         assert book.player_named("New Guy", 2025, "2024-10-08") is None
         assert book.player_named("New Guy", 2025, "2024-10-09") == 9
+
+
+def _r(team, date, season, gf, ga, home=1, ot=0, gid=None):
+    """A team-game with a result on it."""
+    row = dict(_t(team, date, season, 50, 50), goals_for=gf, goals_against=ga,
+               is_home=home, went_to_ot=ot)
+    if gid is not None:
+        row["nhl_game_id"] = gid
+    return row
+
+
+class TestBlendedTeamInputs:
+    """Goals and results reach a feature row blended toward last season, the way
+    shot share always did. Before this, a team's first game was fed LAST
+    season's running totals (goal-difference gaps of +97 to +133 on opening
+    night 2026) and its second was fed one game."""
+
+    # last season: 10 games, 3.0 for and 2.0 against, never beaten in regulation
+    PRIOR = [_r("BOS", f"2023-11-{d:02d}", 2024, 3, 2) for d in range(1, 11)]
+
+    def test_before_the_first_game_the_row_is_last_season_as_rates(self):
+        r = TeamBook(self.PRIOR).inputs("BOS", 2025, "2024-10-08")
+        assert r["games_played"] == 0
+        assert r["gf_pg"] == pytest.approx(3.0) and r["ga_pg"] == pytest.approx(2.0)
+        assert r["pts_rate"] == pytest.approx(1.0)
+        assert r["gf_home"] == pytest.approx(3.0)
+
+    def test_one_game_does_not_become_the_team(self):
+        cur = [_r("BOS", "2024-10-10", 2025, 0, 7)]
+        book = TeamBook(self.PRIOR + cur)
+        r = book.inputs("BOS", 2025, "2024-10-11")
+        k = TEAM_PRIOR_GAMES
+        assert r["games_played"] == 1
+        assert r["gf_pg"] == pytest.approx((1 * 0 + k * 3.0) / (1 + k), abs=1e-3)   # about 2.88, not 0.0
+        assert r["ga_pg"] == pytest.approx((1 * 7 + k * 2.0) / (1 + k), abs=1e-3)   # about 2.19, not 7.0
+        assert 0.9 < r["pts_rate"] < 1.0
+
+    def test_the_game_itself_is_not_in_its_own_row(self):
+        cur = [_r("BOS", "2024-10-10", 2025, 0, 7)]
+        r = TeamBook(self.PRIOR + cur).inputs("BOS", 2025, "2024-10-10")
+        assert r["games_played"] == 0 and r["ga_pg"] == pytest.approx(2.0)
+
+    def test_only_a_regulation_loss_costs_the_points_rate(self):
+        cur = [_r("BOS", "2024-10-10", 2025, 2, 3, ot=1, gid=1),     # overtime loss: a point
+               _r("BOS", "2024-10-12", 2025, 2, 2, ot=1, gid=2),     # shootout: a tie in the log
+               _r("BOS", "2024-10-14", 2025, 1, 4, ot=0, gid=3)]     # regulation loss
+        book = TeamBook(cur)                                         # no prior, no league: raw
+        assert book.inputs("BOS", 2025, "2024-10-15")["pts_rate"] == pytest.approx(2 / 3, abs=1e-3)
+
+    def test_the_home_and_road_splits_blend_on_their_own_counts(self):
+        prior = ([_r("BOS", f"2023-11-{d:02d}", 2024, 4, 2, home=1) for d in range(1, 6)]
+                 + [_r("BOS", f"2023-12-{d:02d}", 2024, 2, 2, home=0) for d in range(1, 6)])
+        cur = [_r("BOS", "2024-10-10", 2025, 0, 1, home=0)]          # one road game, none at home
+        r = TeamBook(prior + cur).inputs("BOS", 2025, "2024-10-11")
+        assert r["gf_home"] == pytest.approx(4.0)                    # untouched: no home game yet
+        assert 1.5 < r["gf_away"] < 2.0                              # pulled a little toward the 0
+
+    def test_an_expansion_team_starts_from_the_league(self):
+        r = TeamBook(self.PRIOR).inputs("SEA", 2025, "2024-10-08")
+        assert r["games_played"] == 0
+        assert r["gf_pg"] == pytest.approx(3.0) and r["ga_pg"] == pytest.approx(2.0)
+
+    def test_the_blend_is_built_and_not_adopted(self):
+        """Both models retrained on the blended list graded worse at real
+        2025-26 prices than the live ones (docs/nhl_market_lab.md). Until a
+        retrain is registered, the map names the list the live artifacts carry."""
+        from features.feature_engine import (FEATURE_MAP, NHL_H2H_FEATURES,
+                                             NHL_H2H_FEATURES_BLENDED)
+        assert FEATURE_MAP["nhl_moneyline"] is NHL_H2H_FEATURES
+        assert FEATURE_MAP["nhl_moneyline_regulation"] is NHL_H2H_FEATURES
+        assert not set(NHL_H2H_FEATURES_BLENDED) & {"d_goal_differential", "home_win_pct",
+                                                    "d_goals_per_game", "home_goals_home_avg"}
+
+    def test_the_scoring_path_does_not_compute_what_no_live_model_reads(self):
+        """Not adopted means not in the live path: no extra read per scoring
+        pass for columns no registered artifact lists."""
+        import inspect
+
+        from features import feature_engine as fe
+        assert "_nhl_blended_features(" in inspect.getsource(fe._build_nhl_features_from_bulk)
+        assert "_nhl_blended_features(" not in inspect.getsource(fe.build_nhl_game_features)
+
+
+
+def test_the_training_path_reads_nhl_odds_by_game_not_by_sport():
+    """The bulk loader read every NHL DraftKings row ever stored, a read that
+    grows with every poll of the live season (98,933 rows per market for 35
+    games). It was cancelled by the statement timeout twice on 2026-10-01,
+    failing the trainer's path. The read is bounded by the games asked for."""
+    import inspect
+
+    from features import feature_engine as fe
+    src = inspect.getsource(fe._build_bulk_nhl_lookups)
+    assert "game_id = ANY(%s)" in src
+    assert "WHERE o.sport = 'NHL'" not in src

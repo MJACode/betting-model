@@ -42,7 +42,7 @@ counting rows no surface showed. mike's answers of 2026-10-01 (NHL is live,
 underdog bets are wanted, the correction stays) point at the first. It changes
 what members are sent, on every model, so it is his call. What the as-it-runs
 rule did on 2025-26 is in `docs/nhl_market_lab.md`: moneyline 30 bets +6.3
-units (interval -20%..+62%), regulation 300 bets -39.3 units.
+units (interval -20%..+62%), regulation 300 bets -39.2 units.
 
 ## [x] The probability correction and probabilities under 50% — DECIDED 2026-10-01 (mike): it stays
 
@@ -57,7 +57,16 @@ record, not an open question.
 *"this is a live model."* Gate not met, his call; recorded in CLAUDE.md §2 and
 at the top of `docs/sports/nhl.md`. No paper-only switch was built.
 
-## [ ] NHL week-one inputs: blend goals and wins toward last season, then retrain
+## [x] NHL week-one inputs: blended toward last season — BUILT, BACKTESTED, NOT ADOPTED (2026-10-01)
+
+Outcome first: `scripts/nhl_early_season_blend.py`, five walk-forward seasons.
+The live inputs do no worse early than late (units at DraftKings -0.6% / +0.1%
+/ -4.9% in the early window against -3.0% / -3.8% / -3.7% the rest of the
+season); the blended list is not better on any comparable row; both models
+retrained on it graded worse on 2025-26 (moneyline raw edge >= 0.04: -13.0% on
+308 bets against -0.3% on 341). Not registered. `FEATURE_MAP` and the live
+artifacts are unchanged; `TeamBook.inputs` and `NHL_H2H_FEATURES_BLENDED` stay
+for the backtest, on the training path only. What was asked for, as written:
 
 mike, 2026-10-01, on a proposed 10-game hold: *"no, this is fucking why we have
 back testing and seasons worth of data frmo out data sources."* So there is no
@@ -71,6 +80,18 @@ rates as `(n*current + 25*prior) / (n + 25)`; goals for and against, goal
 difference and wins need the same treatment AS RATES (a running total cannot be
 blended), a row has to exist before the first game, and both models retrain on
 the rebuilt history. A model update: `Updated-By: mike`.
+
+## [ ] The live NHL home / road scoring split is not the one the models trained on
+
+`nhl_stats_ingestor._home_away_goals` averages a team's home (or road) goals
+since 1 October of the PREVIOUS CALENDAR YEAR — two seasons' worth until New
+Year, this season's only from January. Training
+(`feature_engine._blk_nhl_loc_goals`) uses this season only, and drops the game
+when there is none. Two of the 22 inputs (`home_goals_home_avg`,
+`away_goals_away_avg`). Found 2026-10-01 while building the blend above; the
+backtest there does not say it costs anything, so it is recorded, not urgent.
+Making the live number match training changes what the live models are fed:
+say so in the PR.
 
 ## [x] A returning NHL starter is rated as a debutant until he has played this season
 
