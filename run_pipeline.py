@@ -877,6 +877,26 @@ def step_nba_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:
         return False
 
 
+def step_nhl_prop_odds() -> bool:
+    """NHL player prop prices: an opening and a closing snapshot per game.
+
+    Safe on every refresh pass — the ingestor buys only what is due and a pass
+    with nothing due costs no credits (data/ingestors/nhl_prop_odds_ingestor.py).
+    """
+    from config import RUN_NHL_PROP_ODDS
+    if not RUN_NHL_PROP_ODDS:
+        logger.info("NHL prop odds: RUN_NHL_PROP_ODDS=0 — skipped")
+        return True
+    try:
+        from data.ingestors.nhl_prop_odds_ingestor import run_nhl_prop_odds_ingestor
+        result = run_nhl_prop_odds_ingestor()
+        logger.success(f"✓ NHL prop odds: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL prop odds failed: {exc}")
+        return False
+
+
 def step_nba_game_log(run_date: str) -> bool:
     """Ingest NBA games + player box scores for yesterday (feeds prop rolling stats). Local only."""
     from datetime import datetime, timedelta
@@ -1998,7 +2018,7 @@ Examples:
                                  "player-news-refresh",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
-                                 "nba-game-log", "nba-prop-odds",
+                                 "nba-game-log", "nba-prop-odds", "nhl-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
@@ -2069,6 +2089,7 @@ Examples:
             "wnba-prop-odds": lambda: step_wnba_prop_odds(run_date),
             "nba-game-log": lambda: step_nba_game_log(run_date),
             "nba-prop-odds": lambda: step_nba_prop_odds(run_date),
+            "nhl-prop-odds": lambda: step_nhl_prop_odds(),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-market": lambda: step_wnba_prop_market(run_date, dry_run=args.dry_run),

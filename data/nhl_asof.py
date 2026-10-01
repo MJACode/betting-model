@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import unicodedata
 from collections import defaultdict
 
 from loguru import logger
@@ -50,6 +51,12 @@ TEAM_RATE_COLUMNS = ("corsi_for_pct", "power_play_pct", "penalty_kill_pct",
 
 
 # ── goalies ──────────────────────────────────────────────────────────────────
+
+def name_key(name: str | None) -> str:
+    """Accent- and case-insensitive: ESPN and the NHL disagree on diacritics."""
+    flat = unicodedata.normalize("NFKD", name or "")
+    return "".join(c for c in flat.lower() if c.isalnum() and not unicodedata.combining(c))
+
 
 class GoalieBook:
     """Every goalie game, indexed so 'strictly before d' is a bisect, not a scan."""
@@ -108,6 +115,28 @@ class GoalieBook:
                         and r["game_date"] < as_of):
                     toi[pid] += (r.get("toi_seconds") or 0) * (2 if r["season"] == season else 1)
         return max(toi, key=toi.get) if toi else None
+
+    def player_named(self, name: str | None, season: int, as_of: str) -> int | None:
+        """The id of the goalie with this name, from the log itself.
+
+        The probable starter arrives as a NAME (ESPN). The season summary can
+        put an id to it only once he has played THIS season, so in week one a
+        returning starter matched nothing and was rated as a debutant: 28 of
+        the 32 rows written 2026-09-29 -> 10-01 carried the league-average
+        line. The log holds his last season under the same name. Two goalies
+        sharing a name resolve to the one who played most recently.
+        """
+        want = name_key(name)
+        if not want:
+            return None
+        best: tuple[str, int] | None = None
+        for pid, rows in self.by_player.items():
+            for r in reversed(rows):
+                if r["game_date"] < as_of and r["season"] in (season, season - 1):
+                    if name_key(r.get("player_name")) == want and (best is None or r["game_date"] > best[0]):
+                        best = (r["game_date"], pid)
+                    break                    # only his latest game in the window names him
+        return best[1] if best else None
 
     def asof(self, player_id: int | None, season: int, as_of: str) -> dict:
         """The six goalie columns for `player_id` strictly before `as_of`.

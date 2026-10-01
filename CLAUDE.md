@@ -345,6 +345,8 @@ not pause it or restore the gate without asking him.** Re-sweep its cut at ~50
 settled bets; it runs 0.0/0.0 because the cut is EV, in
 `nfl/live_model/config.EV_THRESHOLDS`. Detail: `docs/rules_evidence.md`.
 
+**Both NHL models are LIVE the same way** (mike, 2026-10-01): `docs/sports/nhl.md`.
+
 ---
 
 ## 3. Business Logic — Critical Rules
@@ -379,7 +381,8 @@ flat bet; tenth-Kelly keeps bets at 2-4% and lets edge drive the difference
 ### Early Season Rule
 No picks until a team has played >= 10 games; prior-season stats are the
 baseline in that window. Season-to-date rates are noise early — blend toward
-the prior season by games played.
+the prior season by games played. **NHL: no hold** (mike, 2026-10-01;
+`docs/sports/nhl.md`).
 
 ### NHL Overtime
 Full-game moneyline counts OT/SO; the regulation model prices a separate 3-way
@@ -558,9 +561,7 @@ to be known BEFORE deciding which file to open.
   the worker, so every golf pipeline step no-opped and the sport produced no
   games, no odds and no picks, ever. The ingestors, feature engine and pipeline
   steps are left in place; reviving it starts with the key, not with config.
-- **The platform is LIVE, not paper trading.** The go-live gate (≥50 settled
-  picks, positive flat ROI, calibration ≤5%) is per MODEL — a new or retrained
-  model is paper-only until it clears, and that is stated in its own doc.
+- **The platform is LIVE, not paper trading**; the go-live gate is per MODEL (§2).
 - **Where it runs:** the Railway worker (`scheduler.py`) — 6am daily pipeline,
   intraday refresh passes, the MLB and NCAAF live loops, the NFL card poll.
   See `docs/cloud_worker.md`.

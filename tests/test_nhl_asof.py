@@ -190,3 +190,42 @@ class TestOpeningNightIsEarlySeason:
         from features.feature_engine import _blk_nhl_asof
         store = {("BOS", 2027): (["2026-10-05"], [{"games_played": 3}])}
         assert "_prior_season" not in _blk_nhl_asof(store, "BOS", 2027, "2026-10-06")
+
+
+class TestReturningStarterIsNamedFromTheLog:
+    """ESPN names the probable starter; the season summary can put an id to the
+    name only once he has played THIS season. In week one that left a returning
+    starter rated as a debutant: 28 of the 32 rows written 2026-09-29 -> 10-01
+    carried the league-average line (Vasilevskiy, Sorokin, Saros...)."""
+
+    def _book(self):
+        rows = LEAGUE + [dict(_g(7, "2024-03-01", 2024, 900, 60), player_name="Andrei Vasilevskiy"),
+                         dict(_g(8, "2024-03-02", 2024, 30, 3), player_name="Jakub Dobeš")]
+        return GoalieBook(rows)
+
+    def test_last_seasons_starter_is_found_before_his_first_game_this_season(self):
+        book = self._book()
+        pid = book.player_named("Andrei Vasilevskiy", 2025, "2024-10-08")
+        assert pid == 7
+        line = book.asof(pid, 2025, "2024-10-08")
+        league = book.asof(None, 2025, "2024-10-08")
+        assert line["save_pct"] > league["save_pct"]          # his own .933, not the league's .900
+
+    def test_accents_and_case_do_not_break_the_match(self):
+        assert self._book().player_named("JAKUB DOBES", 2025, "2024-10-08") == 8
+
+    def test_an_unknown_name_is_none_never_somebody_else(self):
+        book = self._book()
+        assert book.player_named("Nobody Atall", 2025, "2024-10-08") is None
+        assert book.player_named("", 2025, "2024-10-08") is None
+        assert book.player_named(None, 2025, "2024-10-08") is None
+
+    def test_a_name_from_two_seasons_back_is_not_reached_for(self):
+        """The rating window is this season and last; a name older than that
+        has no line to give and must not be matched to one."""
+        assert self._book().player_named("Andrei Vasilevskiy", 2026, "2025-10-08") is None
+
+    def test_a_game_on_or_after_the_date_asked_about_does_not_name_him(self):
+        book = GoalieBook(LEAGUE + [dict(_g(9, "2024-10-08", 2025, 30, 2), player_name="New Guy")])
+        assert book.player_named("New Guy", 2025, "2024-10-08") is None
+        assert book.player_named("New Guy", 2025, "2024-10-09") == 9
