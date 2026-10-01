@@ -99,7 +99,7 @@ check('an active batter prop is still a bet type you can build on',
   check('WNBA omits Spread while that model is paused',
     !row('WNBA').some((label) => label.startsWith('Spread')));
   check('NHL line is Puck line, not Spread',
-    row('NHL').join(',') === 'ML|Moneyline,Puck line|±1.5');
+    row('NHL').join(',') === 'ML|Moneyline,Puck line|±1.5,Player props|All player markets');
   check('UFC is moneyline only',
     row('UFC').join(',') === 'ML|Moneyline');
   check('golf is not a picker section',

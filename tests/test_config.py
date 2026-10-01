@@ -156,11 +156,16 @@ def test_only_a_market_priced_model_carries_a_negative_floor():
 
 def test_models_on_own_probability_is_not_derived_from_the_floor_dict():
     """These were one expression while the floor dict held exactly these two.
-    Widening the floors must not take 36 more models off the calibration map."""
+    Widening the floors must not take 36 more models off the calibration map.
+
+    nhl_prop_blocked_shots joined BY NAME on 2026-10-01 (mike): its cut was
+    measured on its own probability, and the borrowed correction turned its
+    three-season backtest from +6.2% into a loss. Each addition is a decision
+    with its own measurement, which is why this stays an exact list."""
     import config
 
     assert config.MODELS_ON_OWN_PROBABILITY == frozenset(
-        {"nfl_wind_totals", "nfl_opener_spread"}
+        {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots"}
     )
 
 
@@ -213,12 +218,13 @@ def test_an_own_floor_does_not_take_a_model_off_the_calibration_map():
     """Carrying an own EV floor and deciding on the model's OWN probability
     were one expression until 2026-09-20. They are separate questions: where a
     model's edges sit, versus whether its calibration map can be trusted. Every
-    model but the two NFL rules keeps the promoted map."""
+    model but the two NFL rules and the NHL blocked-shots model (2026-10-01,
+    measured) keeps the promoted map."""
     import config
 
     assert "mlb_moneyline" in config.MODEL_OWN_EV_FLOOR
     assert "mlb_moneyline" not in config.MODELS_ON_OWN_PROBABILITY
-    on_own_but_not_a_rule = config.MODELS_ON_OWN_PROBABILITY - {
-        "nfl_wind_totals", "nfl_opener_spread"
+    not_named_here = config.MODELS_ON_OWN_PROBABILITY - {
+        "nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots"
     }
-    assert not on_own_but_not_a_rule
+    assert not not_named_here

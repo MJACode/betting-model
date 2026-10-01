@@ -897,6 +897,22 @@ def step_nhl_prop_odds() -> bool:
         return False
 
 
+def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
+    """NHL blocked-shots card: price DraftKings' lines, write the unders that clear.
+
+    Runs right after `nhl-prop-odds`. A pass with no quote, or with every
+    priced player already written, is a clean no-op (scripts/nhl_prop_card.py).
+    """
+    try:
+        from scripts.nhl_prop_card import run_card
+        result = run_card(do_publish=not dry_run)
+        logger.success(f"✓ NHL prop card: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL prop card failed: {exc}")
+        return False
+
+
 def step_nba_game_log(run_date: str) -> bool:
     """Ingest NBA games + player box scores for yesterday (feeds prop rolling stats). Local only."""
     from datetime import datetime, timedelta
@@ -2018,7 +2034,7 @@ Examples:
                                  "player-news-refresh",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
-                                 "nba-game-log", "nba-prop-odds", "nhl-prop-odds",
+                                 "nba-game-log", "nba-prop-odds", "nhl-prop-odds", "nhl-prop-scoring",
                                  "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "mlb-game-market", "mlb-total-public-fade", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
@@ -2090,6 +2106,7 @@ Examples:
             "nba-game-log": lambda: step_nba_game_log(run_date),
             "nba-prop-odds": lambda: step_nba_prop_odds(run_date),
             "nhl-prop-odds": lambda: step_nhl_prop_odds(),
+            "nhl-prop-scoring": lambda: step_nhl_prop_scoring(dry_run=args.dry_run),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-market": lambda: step_wnba_prop_market(run_date, dry_run=args.dry_run),

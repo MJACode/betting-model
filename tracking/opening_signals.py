@@ -280,6 +280,7 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
           AND os.model_id NOT LIKE 'mlb_prop_%%'
           AND os.model_id NOT LIKE 'wnba_prop_%%'
           AND os.model_id NOT LIKE 'nba_prop_%%'
+          AND os.model_id NOT LIKE 'nhl_prop_%%'
           AND os.model_id NOT LIKE 'ufc_%%'
           AND os.model_id NOT LIKE 'golf_%%'
           AND os.model_id NOT LIKE 'mlb_live_%%'

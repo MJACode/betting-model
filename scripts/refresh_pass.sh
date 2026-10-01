@@ -148,6 +148,9 @@ step umpires
 # all but two passes a game it is one free event-list call and one query — the
 # ingestor buys only what is due (data/ingestors/nhl_prop_odds_ingestor.py).
 step nhl-prop-odds
+# The blocked-shots card reads the quotes the step above just stored. Must
+# follow it; insert-once per player per game, so every later pass is a no-op.
+step nhl-prop-scoring
 
 # GROUP 2 — scoring. Reads everything above, so it MUST come after the wait.
 # The four scorers touch different model families and different pick rows, but
