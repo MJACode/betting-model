@@ -23,7 +23,8 @@ import {
   storedQuoteBook,
   type Movement,
 } from '@/lib/markets';
-import { stakeFor, formatUnits, passesActionFilter, isUnlockedPreview } from '@/lib/thresholds';
+import { stakeFor, formatUnits, passesActionFilterIgnoringPause, isUnlockedPreview } from '@/lib/thresholds';
+import { PAUSED_SPOKEN } from '@/lib/pausedPick';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { colors, font, inkFor, radii, spacing } from '@/lib/theme';
 import { pnlTone, roundedAt } from '@/lib/tone';
@@ -37,6 +38,7 @@ import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { gameStatusSpeech, unitsSpeech } from '@/lib/a11y';
 import { priceCheckForItem } from '@/lib/pickPriceCheck';
 import { GameStatusPill } from './GameStatusPill';
+import { PausedTag } from './PausedTag';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
 
@@ -60,10 +62,12 @@ interface Props {
   /** Today board only: BET/AVOID/NONE sits immediately before the label.
    * Signals and Live are already BET-only, so the small badge is omitted. */
   showSignalBadge?: boolean;
-  /** All board only: this pick's model is PAUSED (Matt, 2026-09-26). The card
-   * shows the model's number but nothing that reads as a bet — a PAUSED chip in
-   * place of the signal badge, no stake, no Sharp Score, no book hand-off and no
-   * betslip button (the slip resolves legs from active models only). */
+  /** All board only: this pick's model is PAUSED and Discord never posted it
+   * (isPausedForDisplay). Matt, 2026-09-28: the card works like any other —
+   * BET / NONE / AVOID badge, stake, Sharp Score, timing, best book, Slip and
+   * Track — plus a neutral "Paused" tag, because the pick is never sent as a
+   * signal. Every other rule (H4 price check, H5 started, postponed) applies
+   * unchanged. */
   paused?: boolean;
 }
 
@@ -82,9 +86,11 @@ export function PickCard({
     : '';
 
   // Edge reads green only when the pick actually clears its model-specific action
-  // threshold (passesActionFilter), not at a flat ±5% — a 6% edge that doesn't
-  // qualify for that model should not look like a green light. AVOID stays red.
-  const qualifies = passesActionFilter(pick);
+  // threshold, not at a flat ±5% — a 6% edge that doesn't qualify for that
+  // model should not look like a green light. AVOID stays red. The LENIENT
+  // filter: a paused model's pick that clears its bar reads green like any
+  // other on All (Matt, 2026-09-28); it is still never a signal.
+  const qualifies = passesActionFilterIgnoringPause(pick);
   // gradeGood / gradeBad, not bet/avoid: Edge is now the hero number and
   // colors.bet is 2.22:1 on bgCard (theme.ts). The ramp already exists for
   // a readable good/bad (UX review).
@@ -151,10 +157,8 @@ export function PickCard({
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
-  const sharp = preview || paused ? null : sharpScore(pick);
-  // A paused card must not carry the green "Sharp side" chip — it reads as a
-  // recommendation. The neutral crowd line below shows instead.
-  const contra = paused ? null : contrarianTag(pick);
+  const sharp = preview ? null : sharpScore(pick);
+  const contra = contrarianTag(pick);
   // Where the crowd is, for every pick that carries a split. contrarianTag only
   // speaks on a BET sitting in a decisive band, but nearly all captured splits
   // land on NONE/AVOID rows — and the Public sort orders the whole board by this
@@ -167,28 +171,27 @@ export function PickCard({
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c).
-  const timing = openForAction(pick) && !paused ? pickTimingInfo(pick) : null;
+  // A paused model's pick was never posted, so it reads "Picked …".
+  const timing = openForAction(pick) ? pickTimingInfo(pick, { paused }) : null;
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
       : 'Preview — locks fight-day morning'
     : null;
-  const pausedLabel = paused ? 'Model paused — shown for reference, not a bet' : null;
   const hasExtras =
-    Boolean(previewLabel) || Boolean(pausedLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
+    Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(crowd) || Boolean(pick.injury_flag);
   // One book CTA on the list card. Full BookLinesRow stays on Pick Detail.
   // Before the start it is always the BEST available book (bestHandoffForPick),
   // never DraftKings-only. After the start a pre-game pick has no hand-off: the
   // in-play price is not the price it was made at (H5).
-  const offersBook = !preview && !paused && pick.signal_type === 'BET';
+  const offersBook = !preview && pick.signal_type === 'BET';
   const handoff = offersBook && cta.handoff
     ? bestHandoffForPick(pick, item.bookRows, heroPrice)
     : null;
   // Open = unsettled, or a VOID Discord still shows (openForAction).
   const open = openForAction(pick);
-  // "Game started · picked at −125 DK" in the hand-off's place (H5). Not gated
-  // on paused: it states a fact about the pick, and this PR adds no paused
-  // gating (the existing !paused gates flip in the paused-on-All PR).
+  // "Game started · picked at −125 DK" in the hand-off's place (H5). A paused
+  // model's pick gets it too: it states a fact about the pick.
   const startedText =
     pick.signal_type === 'BET' && !preview && open && cta.startedLine
       ? gameStartedLine(decisionOdds(pick), bookLabel(storedQuoteBook(pick)))
@@ -198,7 +201,7 @@ export function PickCard({
   // Betslip — priced (decision price, not dk_odds), unsettled, non-preview,
   // and hidden once a pre-game pick's game has started (H5).
   const canSlip =
-    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && !paused && cta.slip;
+    Boolean(onToggleSlip) && hasPricedLine(pick) && open && !preview && cta.slip;
   // Sharp or confidence — not both, and never stacked on top of a badge-less
   // BET-only board as a third equal chip. Sharp wins when both exist.
   // A flagged row carries "Price check" in the chip slot instead (H4).
@@ -207,7 +210,7 @@ export function PickCard({
   // "HIGH" chip reads as a high-confidence non-pick, so it is BET-only (M6).
   const showTier = Boolean(pick.confidence_tier) && !showSharp && !flagged && pick.signal_type === 'BET';
   const stakeCaption =
-    pick.signal_type !== 'BET' || preview || paused
+    pick.signal_type !== 'BET' || preview
       ? null
       : stake.priced
         ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
@@ -230,7 +233,9 @@ export function PickCard({
     matchup,
     gameStatusSpeech(gameStatus(game, liveState), gameDayLabelET(game?.commence_time)),
     pick.pick_label,
-    paused ? 'Paused model, not a bet' : pick.signal_type,
+    pick.signal_type,
+    // Read ONCE, here: the tag itself is hidden from VoiceOver (PausedTag).
+    paused ? PAUSED_SPOKEN : null,
     flagged ? 'Price check: this price looks off, so edge and EV are hidden' : `Edge ${edgeText}`,
     heroPrice
       ? `${heroPrice.kind === 'now' ? cta.priceTag : heroPrice.kind === 'locked' ? 'Locked' : ''} ${heroPrice.price == null ? 'unavailable' : formatAmerican(heroPrice.price)} ${bookLabel(heroPrice.book)}`.trim()
@@ -283,13 +288,6 @@ export function PickCard({
           {preview ? (
             <View style={[styles.labelChip, styles.previewBadge]}>
               <Text style={styles.previewBadgeText}>PREVIEW</Text>
-            </View>
-          ) : paused ? (
-            // Same neutral pill as PREVIEW, and for the same reason: this is a
-            // number, not a bet. Replaces BET/AVOID/NONE rather than sitting
-            // beside it, so a paused BET never draws a green badge.
-            <View style={[styles.labelChip, styles.previewBadge]}>
-              <Text style={styles.previewBadgeText}>PAUSED</Text>
             </View>
           ) : showSignalBadge ? (
             <View style={styles.labelChip}>
@@ -384,7 +382,16 @@ export function PickCard({
         ) : null}
       </View>
 
-      {caption ? (
+      {caption && paused ? (
+        // The tag leads the model line ("Model 76.2% · EV …"): it is about the
+        // model, and the badge above keeps saying what the model called.
+        <View style={styles.captionWithTag}>
+          <PausedTag />
+          <Text style={[styles.captionLine, styles.captionShrink]} numberOfLines={2}>
+            {caption}
+          </Text>
+        </View>
+      ) : caption ? (
         <Text style={styles.captionLine} numberOfLines={2}>
           {caption}
         </Text>
@@ -466,17 +473,6 @@ export function PickCard({
                 style={styles.extraIcon}
               />
               <Text style={styles.extraText}>{previewLabel}</Text>
-            </View>
-          ) : null}
-          {pausedLabel ? (
-            <View style={styles.extraItem}>
-              <Ionicons
-                name="pause-circle-outline"
-                size={13}
-                color={colors.textTertiary}
-                style={styles.extraIcon}
-              />
-              <Text style={styles.extraText}>{pausedLabel}</Text>
             </View>
           ) : null}
           {pick.injury_flag ? (
@@ -821,6 +817,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.xs,
   },
+  captionWithTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: spacing.xs,
+  },
+  captionShrink: {
+    flexShrink: 1,
+    marginBottom: 0,
+  },
   extrasRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -855,7 +861,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
     // textSecondary, not colors.none: none on noneSoft is ~2.85:1 at 10pt
-    // (UX review, 2026-09-26), and PAUSED put this pill on far more cards.
+    // (UX review, 2026-09-26).
     color: colors.textSecondary,
   },
   injuryText: {

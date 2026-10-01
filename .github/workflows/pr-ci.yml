@@ -93,6 +93,7 @@ jobs:
             tests/test_mobile_team_detail.py \
             tests/test_mobile_player_detail.py \
             tests/test_mobile_betslip_combine.py \
+            tests/test_mobile_paused_on_all.py \
             tests/test_mobile_contrast_tokens.py \
             tests/test_mobile_error_states.py \
             tests/test_mobile_pick_cta.py \

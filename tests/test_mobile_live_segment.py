@@ -357,7 +357,9 @@ def test_the_slip_resolves_against_live_picks_too():
         "is_live rows, and this hook prunes what it cannot resolve -- so adding a "
         "live pick to the betslip would silently delete itself."
     )
-    assert re.search(r"\[\.\.\.data,\s*\.\.\.livePicks\.data\]", src), (
+    # Paused models' pre-game picks (`pausedData`) sit between the two since
+    # the paused-on-All PR (2026-09-28): All offers Slip on them too.
+    assert re.search(r"\[\.\.\.data,\s*(\.\.\.pausedData,\s*)?\.\.\.livePicks\.data\]", src), (
         "the resolution board is no longer the union of pre-game and live picks"
     )
 

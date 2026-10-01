@@ -171,9 +171,11 @@ export function isModelPaused(modelId: string): boolean {
 }
 
 /**
- * Whether a pick is DRAWN as paused — the PAUSED pill, no stake, no hand-off
- * (Matt, 2026-09-26: paused models' picks show on the All board). Its model
- * is paused, the pick is UNSETTLED, and Discord never posted it. Both
+ * Whether a pick is DRAWN as paused — the neutral "Paused" tag beside a card
+ * that otherwise works like any other (Matt, 2026-09-28: paused models' picks
+ * show on the All board with stake, Sharp Score, book, Slip and Track; they
+ * are just never sent as signals). Its model is paused, the pick is
+ * UNSETTLED, and Discord never posted it. Both
  * exemptions are CLAUDE.md §1c: a settled bet stays a bet whatever the model
  * does next (record screens open this pick too), and a pick the channel
  * already sent is the bet of record (display follows Discord, 2026-09-23).
@@ -250,6 +252,12 @@ export function isUnlockedPreview(
   return UNLOCKED_LOOKAHEAD_SPORTS.has(p.sport) && p.game_date > today;
 }
 
+/**
+ * THE STRICT FILTER: a standing signal. Signals, the sport-chip badges and
+ * every other "is this a bet we sent" surface. A paused model's pick never
+ * passes (it is not sent as a signal), and a bet Discord does not have is not
+ * a Discord-led bet.
+ */
 export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
   // A VOIDED pick is not an action either (CLAUDE.md §1c). It is a row the
@@ -274,24 +282,53 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // A retired model's old BETs are history, never an action. Checked before the
   // server store, whose row for a retired model outlives the model itself.
   if (RETIRED_MODELS.has(p.model_id)) return false;
+  // A paused model sends no signals: the server flag when it has loaded, the
+  // bundled PAUSED_MODELS until then (the same answer as isModelPaused).
+  const sv = serverThresholds?.[p.model_id];
+  if (sv ? sv.paused : PAUSED_MODELS.has(p.model_id)) return false;
+  return clearsModelBar(p);
+}
 
-  // Prefer the server-fed thresholds (model_action_thresholds, synced from
-  // config.py); fall back to the bundled constants when not yet loaded / offline.
-  // The cut is applied at the price the pick was DECIDED at (2026-09-09):
-  // decision_* since the flip, DraftKings before it. Same clause the scorer,
-  // the Discord and push producers and the record views apply.
+/**
+ * THE LENIENT FILTER (Matt, 2026-09-28): does the pick clear its model's bar,
+ * whether or not the model is paused? Used where the All board shows what the
+ * model called — All's "N bets", a card's green edge, the Edge tint on Pick
+ * Detail — so a paused model's BET reads the same as any other there.
+ *
+ * Differs from passesActionFilter ONLY for a paused model's pick: the pause
+ * is ignored, and so is the Discord-posted check (a paused model is never
+ * posted, by design), but a VOID still never counts. For every other model it
+ * IS passesActionFilter. Never use it for Signals, the sport badges or Live
+ * Signals: those are signals, and a paused model sends none.
+ */
+export function passesActionFilterIgnoringPause(p: ActionFilterable): boolean {
+  if (!isModelPaused(p.model_id)) return passesActionFilter(p);
+  if (p.signal_type !== 'BET') return false;
+  if (p.condition_status === 'VOID') return false;
+  if (RETIRED_MODELS.has(p.model_id)) return false;
+  return clearsModelBar(p);
+}
+
+/**
+ * The model's own cut, and nothing else: min prob, min odds, then min edge
+ * (or prob alone for a prob-only model). Prefer the server-fed thresholds
+ * (model_action_thresholds, synced from config.py); fall back to the bundled
+ * constants when not yet loaded / offline. The cut is applied at the price the
+ * pick was DECIDED at (2026-09-09): decision_* since the flip, DraftKings
+ * before it. Same clause the scorer, the Discord and push producers and the
+ * record views apply. The two filters above decide pause / VOID / Discord.
+ */
+function clearsModelBar(p: ActionFilterable): boolean {
   const odds = decisionOdds(p);
   const edge = decisionEdge(p);
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
-    if (sv.paused) return false;
     if (p.model_probability < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
     return edge >= sv.min_edge;
   }
 
-  if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
   if (p.model_probability < t.min_prob) return false;

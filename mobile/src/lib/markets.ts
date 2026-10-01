@@ -1310,7 +1310,7 @@ export function nflTimingInfo(pick: Pick): NflTiming | null {
 export interface PickTiming {
   /** Drives presentation: the live lock is emphasized, the rest is context. */
   kind: 'live' | 'nfl' | 'posted';
-  verb: 'Locked' | 'Priced' | 'Posted';
+  verb: 'Locked' | 'Priced' | 'Posted' | 'Picked';
   /** Card chip text, e.g. "Posted 11:07 AM ET" / "Locked Tue 8/18 · 9:31 AM ET". */
   label: string;
   /** Plain-language explanation for the detail screen. */
@@ -1333,8 +1333,12 @@ export interface PickTiming {
  *     which are delete+rescored every pass), and
  *   - unlocked look-ahead previews (future UFC/golf), which re-price until
  *     game day.
+ *
+ * `paused` (isPausedForDisplay: a paused model's pick Discord never sent):
+ * the same time, but "Picked", not "Posted" — nothing was posted (Matt,
+ * 2026-09-28). The lock rules are the model's, so the note keeps them.
  */
-export function pickTimingInfo(pick: Pick): PickTiming | null {
+export function pickTimingInfo(pick: Pick, opts: { paused?: boolean } = {}): PickTiming | null {
   if (!pick.created_at) return null;
   if (pick.signal_type !== 'BET') return null;
   if (isUnlockedPreview(pick)) return null;
@@ -1362,6 +1366,19 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
         'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
         'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
         'before betting.',
+    };
+  }
+
+  if (opts.paused) {
+    return {
+      kind: 'posted',
+      verb: 'Picked',
+      label: `Picked ${stamp}`,
+      note:
+        (pick.player_id != null
+          ? 'Props lock at the first signal after the lineup is confirmed, and are never re-priced. '
+          : 'Game picks lock at the first scoring run of the day and are never re-priced. ') +
+        'This is when the model made this pick, at the line and price shown. The model is paused, so it wasn’t sent as a signal.',
     };
   }
 

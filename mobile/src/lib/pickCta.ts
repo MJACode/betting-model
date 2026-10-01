@@ -34,7 +34,7 @@ export interface PickCtaInput {
 }
 
 export interface PickCta {
-  /** The book hand-off may show (the card still applies its own BET / preview / paused rules). */
+  /** The book hand-off may show (the card still applies its own BET / preview rules). */
   handoff: boolean;
   /** Show "Game started · picked at …" where the hand-off would have been. */
   startedLine: boolean;
@@ -92,14 +92,16 @@ export function gameStartedSpeech(decisionPrice: number | null | undefined, deci
 
 /**
  * M14: "Why this bet?" only on a bet. A NONE is not a bet and an AVOID is a
- * reason not to bet; a paused model's or an unlocked preview's BET is shown
- * for reference, not as a signal.
+ * reason not to bet; an unlocked preview's BET re-prices until it locks, so
+ * it is not a signal yet. A paused model's BET is "Why this bet?" like any
+ * other (Matt, 2026-09-28): Pick Detail's Paused tag and note say it is not
+ * sent as a signal.
  */
 export function reasoningHeading(
   signal: string | null | undefined,
-  opts: { paused?: boolean; preview?: boolean } = {},
+  opts: { preview?: boolean } = {},
 ): string {
   if (signal === 'AVOID') return 'Why avoid?';
-  if (signal === 'BET') return opts.paused || opts.preview ? 'Why this pick?' : 'Why this bet?';
+  if (signal === 'BET') return opts.preview ? 'Why this pick?' : 'Why this bet?';
   return 'Why no bet?';
 }

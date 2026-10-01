@@ -56,6 +56,8 @@ import {
   MODEL_BOOK,
 } from '@/lib/markets';
 import { isModelRetired, isPausedForDisplay, isProbOnlyModel, isUnlockedPreview } from '@/lib/thresholds';
+import { PAUSED_DETAIL_NOTE } from '@/lib/pausedPick';
+import { PausedTag } from '@/components/PausedTag';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { roundsToZero } from '@/lib/tone';
 import { errorText, isAbortError, isNotFoundError } from '@/lib/errors';
@@ -166,11 +168,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const retired = isModelRetired(pick.model_id);
-  // A paused model's pick that Discord never sent (Matt, 2026-09-26: they now
-  // show on the All board as PAUSED). This screen must say the same thing the
-  // card does — no BET badge, stake, Sharp Score, post time, hand-off or slip.
-  // The betslip resolves legs from active models only, so an added leg would
-  // be pruned straight back out.
+  // A paused model's pick that Discord never sent (isPausedForDisplay). Matt,
+  // 2026-09-28: it works like any other pick — badge, stake, timing, Sharp
+  // Score, bet-at and betslip, under the same started / AllBooksCard rules —
+  // with a neutral "Paused" tag and one line saying it isn't sent as a signal.
+  // The betslip resolves paused keys too (useResolvedSlip).
   const paused = !retired && isPausedForDisplay(pick);
   // WITHDRAWN only when Discord does not still have the post. A VOID the
   // channel shows is the same bet (Matt, 2026-09-23) — no withdrawn banner,
@@ -297,14 +299,17 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             />
           </View>
           <View style={styles.metaRow}>
-            {preview || paused ? (
+            {preview ? (
               <View style={styles.previewBadge}>
-                <Text style={styles.previewBadgeText}>{preview ? 'PREVIEW' : 'PAUSED'}</Text>
+                <Text style={styles.previewBadgeText}>PREVIEW</Text>
               </View>
             ) : (
               <SignalBadge signal={voided ? 'NONE' : pick.signal_type} />
             )}
             <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
+            {/* Beside the model, never in place of the badge. Hidden from
+                VoiceOver: the note right below says it in full. */}
+            {paused ? <PausedTag large /> : null}
           </View>
           {voided ? (
             <Text style={styles.previewNote}>
@@ -317,13 +322,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
               Posted to Discord · not counted in the model’s record.
             </Text>
           ) : null}
-          {paused ? (
-            <Text style={styles.previewNote}>
-              This model is paused. Paused models’ picks are shown for reference
-              only — they are not signals, and paused models don’t post to Discord
-              or push.
-            </Text>
-          ) : null}
+          {paused ? <Text style={styles.pausedNote}>{PAUSED_DETAIL_NOTE}</Text> : null}
           {preview ? (
             <Text style={styles.previewNote}>
               {pick.sport === 'GOLF'
@@ -350,9 +349,9 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
 
         <ReasoningCard pick={pick} paused={paused} />
 
-        {paused ? null : <PickTimingCard pick={pick} />}
+        <PickTimingCard pick={pick} paused={paused} />
 
-        {paused ? null : <SharpScoreCard pick={pick} />}
+        <SharpScoreCard pick={pick} />
 
         {isProbOnlyModel(pick.model_id) ? (
           <View style={styles.infoCard}>
@@ -372,16 +371,15 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             table below carries books at a different number and the reference
             books that cannot be bet. Not for live picks: they are DraftKings
             only, and the in-play rows are no longer fetched. */}
-        {pick.signal_type === 'BET' && !preview && !retired && !paused && !voided ? (
+        {pick.signal_type === 'BET' && !preview && !retired && !voided ? (
           cta.handoff ? (
             <View style={styles.linesCard}>
               <BookLinesRow pick={pick} bookRows={bookRows} />
             </View>
           ) : null
         ) : null}
-        {/* "Game started · picked at …" — not gated on paused: it states a fact
-            about the pick, and this PR adds no paused gating (the existing
-            !paused gates flip in the paused-on-All PR). */}
+        {/* "Game started · picked at …" — a paused model's pick too: it
+            states a fact about the pick. */}
         {pick.signal_type === 'BET' && !preview && !retired && !voided && cta.startedLine && openHere ? (
           <View
             style={styles.startedCard}
@@ -409,7 +407,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             is history, not something to slip or hand off — the board it would
             resolve against no longer carries the model. Tracking stays so the
             user can still untrack it. */}
-        {hasPricedLine(pick) && openHere && !preview && !retired && !paused
+        {hasPricedLine(pick) && openHere && !preview && !retired
           && !voided && cta.slip ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
@@ -761,6 +759,13 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
+    color: colors.textSecondary,
+  },
+  // The paused note: textSecondary (10.94:1 on bgCard), not the textTertiary
+  // of the preview note — it is the one thing a paused pick needs said.
+  pausedNote: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
     color: colors.textSecondary,
   },
   previewNote: {

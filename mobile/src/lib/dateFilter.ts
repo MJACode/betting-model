@@ -113,10 +113,10 @@ export type DayRow<T> =
  * ranking, and a header every time the day changed would chop it into pieces.
  *
  * `items` arrive already sorted by kickoff. Days are laid out earliest first
- * and each keeps the order it was given, except that `trailing` rows (paused
- * models' picks) go to the END OF THEIR OWN DAY — the board's rule that paused
- * rows sort after active ones, applied inside the day rather than after every
- * day, where a Today paused pick would land under the SAT 11/28 header.
+ * and each keeps the order it was given, except that `trailing` rows go to the
+ * END OF THEIR OWN DAY — inside the day rather than after every day, where a
+ * Today row would land under the SAT 11/28 header. The Picks board passes no
+ * `trailing` since paused picks sort like any other (Matt, 2026-09-28).
  *
  * With fewer than two days there are no headers: one "TODAY" over the whole
  * list says nothing the board's subtitle does not.
