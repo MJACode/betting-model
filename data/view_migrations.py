@@ -240,7 +240,8 @@ ACTIVE_MIGRATIONS: list[str] = [
     # parallel-seq-scanned MAX(created_at) (~22s). A timed-out statement then
     # left the transaction aborted, so pipeline_log recorded
     # "current transaction is aborted" instead of the timeout. Index plus
-    # one-row-per-athlete table; both no-op once present.
+    # one-row-per-athlete table; both no-op once present. The index is
+    # meant to be built CONCURRENTLY by hand first; a valid one is skipped.
     "injury_player_names_2026_10_01.sql",
 ]
 

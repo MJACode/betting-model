@@ -137,12 +137,28 @@ def test_the_cache_seeds_from_the_name_table_not_a_scan_of_injuries(monkeypatch)
 
 
 def test_a_dead_database_leaves_the_cache_empty_not_broken(monkeypatch):
-    """A cold cache costs the old number of requests. It must never cost a
-    wrong name, and must never raise into the ingest."""
+    """The seed never raises into the ingest. Its error is kept so the step
+    fails and ESPN is not asked for every name (#858 review)."""
     import data.db as db
     monkeypatch.setattr(db, "get_connection",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no db")))
     assert inj._seed_athlete_cache() == 0
+    assert isinstance(inj._seed_db_failure(), RuntimeError)
+
+
+def test_a_failed_seed_makes_no_espn_request(monkeypatch):
+    """A cold cache is one ESPN request per athlete, ~3x the step. With the
+    seed failed, fetch_espn_injuries returns before the first request,
+    including the teams list."""
+    import data.db as db
+    monkeypatch.setattr(db, "get_connection",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no db")))
+    calls: list[str] = []
+    monkeypatch.setattr(inj.requests, "get",
+                        lambda url, *a, **k: calls.append(url))
+    for sport in ("MLB", "NHL", "WNBA", "NBA", "NFL"):
+        assert inj.fetch_espn_injuries(sport, "2026-10-01") == []
+    assert calls == []
 
 
 # ── the pool overlaps what is left ────────────────────────────────────────────

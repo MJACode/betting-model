@@ -451,9 +451,14 @@ _ATHLETE_NAME_CACHE: dict[str, str] = {}
 # Set when the seed's own statement fails. run_injury_ingestor reads it so a
 # statement_timeout is what pipeline_log records, not the aborted-transaction
 # error the next command on that connection would raise. Cleared at the start
-# of each ingest. A non-timeout failure (no database, missing table) stays
-# here for the log line and does not fail the step: a cold cache is the
-# documented fallback.
+# of each ingest.
+#
+# ANY seed failure (timeout, missing injury_player_names table, no database)
+# is a step failure, logged at WARNING, and ESPN is NOT fetched for the rest
+# of that ingest (#858 review). An empty cache is not a cheap fallback: every
+# athlete becomes its own ESPN request, about 3x the step's requests, from a
+# worker ESPN has IP-blocked twice. The injuries already stored stay; the next
+# pass retries.
 _SEED_DB_ERROR: BaseException | None = None
 # One attempt per ingest. A timed-out seed used to be retried once per sport
 # (five full scans) because a failure leaves the in-memory cache empty.
@@ -515,12 +520,10 @@ def _error_text(exc: BaseException) -> str:
 
 
 def _seed_db_failure() -> BaseException | None:
-    """A seed timeout (or the aborted-transaction error it leaves behind) is
-    a step failure. Anything else is a cold cache."""
-    err = _SEED_DB_ERROR
-    if err is not None and (_is_statement_timeout(err) or _is_aborted_txn(err)):
-        return err
-    return None
+    """The seed's error, if it failed. Any failure is a step failure and
+    stops the ESPN fetch (see _SEED_DB_ERROR); a cold cache would fan out
+    to one ESPN request per athlete."""
+    return _SEED_DB_ERROR
 
 
 def _seed_athlete_cache(conn=None) -> int:
@@ -533,9 +536,11 @@ def _seed_athlete_cache(conn=None) -> int:
     passes measured that plan at ~63s.
 
     An empty names table is filled once from that same DISTINCT ON, which the
-    `(player_id, created_at DESC)` index turns into an index scan. Best-effort
-    otherwise: a cold cache costs the old number of requests, never a wrong
-    name. Returns how many names were loaded, for the log line.
+    `(player_id, created_at DESC)` index turns into an index scan. A failed
+    seed (timeout, missing table, no database) leaves the cache empty, sets
+    _SEED_DB_ERROR and logs a WARNING; fetch_espn_injuries then skips ESPN
+    instead of looking every athlete up one request at a time. Returns how
+    many names were loaded, for the log line.
 
     The connection is rolled back before it is closed. A timed-out SELECT
     aborts the transaction; closing without ROLLBACK is what made the next
@@ -573,10 +578,12 @@ def _seed_athlete_cache(conn=None) -> int:
     except Exception as exc:                                  # noqa: BLE001
         _SEED_DB_ERROR = exc
         _ATHLETE_NAME_CACHE = {}
-        if _is_statement_timeout(exc) or _is_aborted_txn(exc):
-            logger.warning(f"athlete-name cache seed failed ({exc})")
-        else:
-            logger.debug(f"athlete-name cache seed skipped ({exc})")
+        # WARNING for every kind, not only timeouts: a missing
+        # injury_player_names table used to log at debug and send one ESPN
+        # request per athlete (#858 review).
+        logger.warning(
+            f"athlete-name cache seed failed ({_error_text(exc)}); ESPN "
+            f"injuries skipped this pass, step marked failed")
     return len(_ATHLETE_NAME_CACHE)
 
 
@@ -767,12 +774,21 @@ def fetch_espn_injuries(sport: str, report_date: str) -> list[dict]:
     Pull all injuries for all teams in the given sport from ESPN.
     Returns a list of normalized injury dicts ready for DB insert.
     """
-    team_ids = _espn_team_ids(sport)
-    all_injuries = []
-
     seeded = _seed_athlete_cache()
+    seed_err = _seed_db_failure()
+    if seed_err is not None:
+        # No ESPN request at all, not even the teams list: without the name
+        # cache every injury costs an extra athlete request (#858 review).
+        # run_injury_ingestor records seed_err as the step's error.
+        logger.warning(
+            f"ESPN {sport} injuries not fetched: athlete-name seed failed "
+            f"({_error_text(seed_err)})")
+        return []
     if seeded:
         logger.debug(f"injury cache: {seeded} athlete name(s) known")
+
+    team_ids = _espn_team_ids(sport)
+    all_injuries = []
 
     # One team's fetch is independent of every other team's, and all of it is
     # waiting on a socket. Serially this was ~30 teams x (1 + 2N) requests.

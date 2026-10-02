@@ -290,10 +290,9 @@ def test_a_failed_name_upsert_does_not_drop_the_injury_insert(monkeypatch):
     assert _error_msgs(conn) == []
 
 
-def test_a_missing_name_table_stays_a_cold_cache_and_the_ingest_succeeds(monkeypatch):
-    """UndefinedTable is not a statement timeout. The seed rolls back and the
-    injuries still insert; failing the step here would red every pass until
-    the migration landed."""
+def _missing_names_setup(monkeypatch):
+    """Main connection works; the seed's connection has no
+    injury_player_names table (migration not applied)."""
     main = _RampConn(fail_ramp=False)
 
     class _Missing(_TimeoutConn):
@@ -312,17 +311,61 @@ def test_a_missing_name_table_stays_a_cold_cache_and_the_ingest_succeeds(monkeyp
     monkeypatch.setattr(inj, "get_connection", factory)
     import data.db as db
     monkeypatch.setattr(db, "get_connection", factory)
-    def fetch(sport, report_date):
-        inj._seed_athlete_cache()
-        return [_injury(sport)]
+    return main, seed
 
-    monkeypatch.setattr(inj, "fetch_espn_injuries", fetch)
 
-    result = inj.run_injury_ingestor(sport="NHL", report_date="2026-10-01")
-    assert result["rows_inserted"] == 1
-    assert seed.rollbacks >= 1 and seed.closed and not seed.aborted
-    assert _error_msgs(main) == []
+def test_a_missing_name_table_is_a_step_failure_and_fetches_nothing_from_espn(
+        monkeypatch):
+    """#858 review: a missing names table logged at debug and fell back to
+    one ESPN request per athlete, about 3x the step's requests, from a
+    worker ESPN has IP-blocked twice. Now it is a WARNING and the step's
+    error, and ESPN is not called at all for that ingest."""
+    from loguru import logger
+
+    main, seed = _missing_names_setup(monkeypatch)
+    espn_calls: list[str] = []
+
+    def no_espn(url, *a, **k):
+        # MLB's Stats API transactions source is not ESPN and still runs.
+        if "espn.com" in url:
+            espn_calls.append(url)
+        raise RuntimeError(f"no network in tests: {url}")
+
+    monkeypatch.setattr(inj.requests, "get", no_espn)
+    warnings: list[str] = []
+    sink = logger.add(lambda m: warnings.append(m.record["message"]),
+                      level="WARNING", filter=lambda r: r["level"].name == "WARNING")
+    try:
+        with pytest.raises(psycopg2.errors.UndefinedTable):
+            inj.run_injury_ingestor(report_date="2026-10-01")
+    finally:
+        logger.remove(sink)
+
+    assert espn_calls == []
+    # One seed attempt for all five sports, rolled back and closed.
+    assert seed.rollbacks == 1 and seed.closed and not seed.aborted
+    assert any("injury_player_names" in w and "seed failed" in w for w in warnings)
+    msgs = _error_msgs(main)
+    assert msgs and "injury_player_names" in msgs[-1]
+    assert "UndefinedTable" in msgs[-1]
     assert not any(ev[0] == "poisoned" for ev in main.events)
+
+
+def test_other_sources_still_insert_when_the_name_seed_fails(monkeypatch):
+    """Skipping ESPN does not skip the rest of the sport: rows from the
+    other sources still insert and commit before the step reports the
+    seed error."""
+    main, _seed = _missing_names_setup(monkeypatch)
+    monkeypatch.setattr(inj.requests, "get", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("ESPN called")))
+    monkeypatch.setattr(inj, "fetch_return_ramp_players",
+                        lambda conn, sport, report_date: [_injury(sport)])
+    with pytest.raises(psycopg2.errors.UndefinedTable):
+        inj.run_injury_ingestor(sport="NHL", report_date="2026-10-01")
+    injury_insert = next(
+        i for i, ev in enumerate(main.events)
+        if ev[0] == "executemany" and "INTO injuries" in ev[1])
+    assert injury_insert < _kind_index(main, "commit")
 
 
 def test_freshness_probe_rolls_back_a_timeout_before_close(monkeypatch):
