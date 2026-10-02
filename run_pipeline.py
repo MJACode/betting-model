@@ -898,19 +898,34 @@ def step_nhl_prop_odds() -> bool:
 
 
 def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
-    """NHL blocked-shots card: price DraftKings' lines, write the unders that clear.
+    """NHL prop cards: price DraftKings' lines, write the unders that clear.
 
     Runs right after `nhl-prop-odds`. A pass with no quote, or with every
-    priced player already written, is a clean no-op (scripts/nhl_prop_card.py).
+    priced player already written, is a clean no-op. Two cards -- blocked shots
+    (scripts/nhl_prop_card.py) and saves + assists (scripts/nhl_props_card.py)
+    -- and one failing does not stop the other: each model is its own bet.
     """
+    ok = True
     try:
         from scripts.nhl_prop_card import run_card
         result = run_card(do_publish=not dry_run)
         logger.success(f"✓ NHL prop card: {result}")
-        return True
     except Exception as exc:
         logger.error(f"✗ NHL prop card failed: {exc}")
-        return False
+        ok = False
+    try:
+        from scripts.nhl_props_card import run_card as run_props_card
+        result = run_props_card(do_publish=not dry_run)
+        failed = [m for m, r in result.items() if isinstance(r, dict) and "error" in r]
+        if failed:
+            logger.error(f"✗ NHL saves / assists card failed for {failed}: {result}")
+            ok = False
+        else:
+            logger.success(f"✓ NHL saves / assists card: {result}")
+    except Exception as exc:
+        logger.error(f"✗ NHL saves / assists card failed: {exc}")
+        ok = False
+    return ok
 
 
 def step_nba_game_log(run_date: str) -> bool:
