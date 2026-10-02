@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import models.wnba_prop_market as mk  # noqa: E402
 from config import MODEL_MIN_ODDS  # noqa: E402
 from data.db import get_connection  # noqa: E402
+from models.scorer import _pause_note  # noqa: E402
 
 MODEL_ID = "wnba_prop_market"
 MIN_EDGE = 0.05                                    # pre-committed; see docstring
@@ -138,6 +139,8 @@ def pick_rows(bets, games, quotes, pid_by_name, game_date: str,
             "prop_market": b.market, "player_key": b.player,
             "player_id": pid,
             "dk_bet_link": link if b.book == "draftkings" else None,
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(MODEL_ID),
         })
     return rows
 
@@ -148,14 +151,14 @@ _INSERT = """
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
                        confidence_tier, prop_market, player_key, player_id,
-                       dk_bet_link, model_probability_cal)
+                       dk_bet_link, model_probability_cal, downgrade_reason)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s,
             %(player_key)s, %(player_id)s, %(dk_bet_link)s,
-            %(model_probability_cal)s)
+            %(model_probability_cal)s, %(downgrade_reason)s)
 """
 
 

@@ -66,6 +66,7 @@ import config  # noqa: E402
 import models.nhl_props as np_  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from data.season_labels import nhl_season_label  # noqa: E402
+from models.scorer import _pause_note  # noqa: E402
 from scripts.nhl_prop_card import COHERENT_SUM, ET, _utc, slate  # noqa: E402
 
 QUOTE_COLS = ["game_id", "player", "book", "line", "over", "under", "snap", "over_link", "under_link"]
@@ -238,6 +239,8 @@ def pick_rows(spec: np_.Spec, mus: pd.DataFrame, priced: pd.DataFrame, games: di
             "best_odds": d["price"] if elsewhere else None,
             "best_implied_prob": round(implied, 4) if elsewhere else None,
             "best_edge": round(d["p"] - implied, 4) if elsewhere else None,
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(spec.model_id),
             "best_bet_link": d["link"] if elsewhere else None,
             "_ev": round(d["ev"], 4), "_mu": round(float(m.mu), 3),
         })
@@ -284,7 +287,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "kelly_fraction", "recommended_bet", "bankroll_at_pick", "signal_type", "confidence_tier",
          "prop_market", "player_key", "player_id", "dk_bet_link", "line_book",
          "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
-         "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link")
+         "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link",
+         "downgrade_reason")
 _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"VALUES ({', '.join('%(' + c + ')s' for c in _COLS)})")
 

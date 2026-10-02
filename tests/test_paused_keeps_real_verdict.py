@@ -294,11 +294,22 @@ def test_health_checks_do_not_expect_a_paused_row_to_be_delivered_or_captured():
 
 
 def test_first_signal_repair_keeps_the_marker_on_a_restored_lane(monkeypatch):
+    """Proven from the first BET's own write, never the present pause state
+    (behaviour in tests/test_first_signal_repair.py)."""
     from tracking import first_signal_repair as fsr
-    monkeypatch.setattr(config, "PAUSED_MODELS", {"m_paused"})
-    assert fsr._restore_as_paused("m_live", {"downgrade_reason": NOTE})
-    assert fsr._restore_as_paused("m_paused", None)
-    assert not fsr._restore_as_paused("m_live", {"downgrade_reason": None})
+
+    class _C:
+        def __init__(self, rows): self.rows = rows
+        def execute(self, *a): return self
+        def fetchall(self): return self.rows
+
+    first = {"model_id": "m", "game_date": "2026-10-01", "created_at": "t"}
+    live, paused = set(), {"m"}
+    assert fsr._restore_marker(_C([(NOTE,)]), first, live) == (True, True)
+    assert fsr._restore_marker(_C([(NOTE,)]), first, paused) == (True, True)
+    assert fsr._restore_marker(_C([(None,)]), first, live) == (True, False)
+    assert fsr._restore_marker(_C([(None,)]), first, paused) == (False, None)
+    assert fsr._restore_marker(_C([]), first, live) == (False, None)
     src = _src("tracking/first_signal_repair.py")
     assert 'vals["downgrade_reason"] = config.PAUSED_NOTE' in src
 

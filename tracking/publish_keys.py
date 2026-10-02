@@ -145,17 +145,37 @@ def live_lock_key(game_id: str, model_id: str, pick_side: str,
 # was POSTED as a signal -- the same join mobile's v_discord_published makes.
 DISCORD_KINDS = ("discord_signal", "discord_live")
 
+# The app's push kinds. A push IS a published signal: the reader was told to
+# take the bet, so it is locked exactly like a Discord post (post-#850
+# review, 2026-10-02). Same lock_key expressions as the Discord kinds --
+# tracking/push_notifier ledgers new_bet under lock_key_sql and live_signal
+# under live_lock_key_sql.
+PUSH_KINDS = ("new_bet", "live_signal")
+PUBLISHED_KINDS = DISCORD_KINDS + PUSH_KINDS
+
+# The free channel's ledger row is keyed by DATE (discord_free:{date}, one
+# post a day) and carries the chosen pick's real lock_key in message_id
+# (discord_notifier.notify_discord_free_pick; x_publisher reads it back). So
+# the free pick is matched on message_id, never on lock_key.
+FREE_PICK_KIND = "discord_free_pick"
+
 
 def posted_sql(alias: str = "p") -> str:
-    """EXISTS: the Discord ledger holds this pick's lock_key (pre-game or live).
+    """EXISTS: the pick was published as a signal -- Discord, push or free.
 
     Matt, 2026-09-28: "if a bet is posted as a signal it should be locked".
     scripts/void_picks.py refuses any pick this is true for. Built from the two
     key expressions above so there is one definition of the key, not two.
+    Until 2026-10-02 it read the two Discord kinds only, so a pick pushed to
+    the app, or given out as the free pick, could still be voided.
     """
-    kinds = ", ".join(f"'{k}'" for k in DISCORD_KINDS)
-    return ("EXISTS (SELECT 1 FROM push_sent s "
+    kinds = ", ".join(f"'{k}'" for k in PUBLISHED_KINDS)
+    key = (f"CASE WHEN {alias}.is_live "
+           f"THEN {live_lock_key_sql(alias)} "
+           f"ELSE {lock_key_sql(alias)} END")
+    return ("(EXISTS (SELECT 1 FROM push_sent s "
             f"WHERE s.kind IN ({kinds}) "
-            f"AND s.lock_key = CASE WHEN {alias}.is_live "
-            f"THEN {live_lock_key_sql(alias)} "
-            f"ELSE {lock_key_sql(alias)} END)")
+            f"AND s.lock_key = {key}) "
+            "OR EXISTS (SELECT 1 FROM push_sent s "
+            f"WHERE s.kind = '{FREE_PICK_KIND}' "
+            f"AND s.message_id = {key}))")

@@ -164,6 +164,35 @@ def resolve_game(conn, home_team: str | None, away_team: str | None,
     return rows[0][0], str(rows[0][1])
 
 
+# model_auto_pauses, read once per process -- the scorer's own cache rule
+# (models.scorer._AUTO_PAUSE_CACHE): a pause lands on the worker's next
+# restart. None until the first write loads it.
+_AUTO_PAUSED: set[str] | None = None
+
+
+def _load_auto_pauses(conn) -> None:
+    """Fill the auto-pause cache from `conn`, once. Fails open, like the scorer."""
+    global _AUTO_PAUSED
+    if _AUTO_PAUSED is None:
+        from tracking.threshold_review import auto_paused
+        _AUTO_PAUSED = set(auto_paused(conn))
+
+
+def _pause_note(model_id: str) -> str | None:
+    """models.scorer._pause_note, for this lane: PAUSED_NOTE when the model is
+    in config.PAUSED_MODELS or model_auto_pauses, else None.
+
+    Not imported from models.scorer: under nfl/ a bare `models` import can
+    resolve to nfl/models (tests/test_nfl_model_imports.py), so the two
+    sources are read directly. tests/test_paused_marker_writers.py pins the
+    two functions to the same answer.
+    """
+    import config
+    paused = (model_id in getattr(config, "PAUSED_MODELS", ())
+              or model_id in (_AUTO_PAUSED or ()))
+    return config.PAUSED_NOTE if paused else None
+
+
 def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> dict:
     """One `picks` row from one BET decision.
 
@@ -217,6 +246,12 @@ def build_pick(decision, game_id: str, bankroll: float, *, game_date: str) -> di
         "player_id": _norm_player(player),
         "is_live": True,
         "score_diff_at_pick": ctx.get("score_diff"),
+        # The #850 marker. A paused lane keeps its verdict and says it is
+        # paused, exactly as the scorer's builders do; the announcers, the
+        # record views and the app key on it. This lane never checked its
+        # pause state, so until 2026-10-02 a paused nfl_live_prop BET was
+        # written unmarked and announced.
+        "downgrade_reason": _pause_note(decision.model_id),
     }
 
 
@@ -238,14 +273,15 @@ _INSERT_SQL = """
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
                        confidence_tier, prop_market, player_key, player_id,
-                       is_live, score_diff_at_pick, model_probability_cal)
+                       is_live, score_diff_at_pick, model_probability_cal,
+                       downgrade_reason)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s,
             %(player_key)s, %(player_id)s, %(is_live)s, %(score_diff_at_pick)s,
-            %(model_probability_cal)s)
+            %(model_probability_cal)s, %(downgrade_reason)s)
     ON CONFLICT DO NOTHING
 """
 
@@ -449,6 +485,7 @@ class PicksRecorder:
                   AND is_live = TRUE AND result IS NULL
                   AND signal_type <> 'BET'
             """, (game_id, decision.model_id, player_key, side))
+            _load_auto_pauses(conn)
             row = build_pick(decision, game_id, self._bankroll_value(),
                              game_date=game_date)
             row["signal_type"] = "AVOID"
@@ -486,6 +523,7 @@ class PicksRecorder:
                          decision.model_id, decision.player, game_id)
                 return
 
+            _load_auto_pauses(conn)
             row = build_pick(decision, game_id, self._bankroll_value(),
                              game_date=game_date)
             conn.execute(_INSERT_SQL, row)

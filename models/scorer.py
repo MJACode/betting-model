@@ -671,6 +671,7 @@ def _score_f5_prob_only(
                 "signal_type":       "BET",
                 "confidence_tier":   _confidence_tier(synthetic_edge),
                 "game_time":         commence_time,
+                "downgrade_reason":  _pause_note(model_id),
             }
             picks.append(pick)
             logger.info(
@@ -726,6 +727,7 @@ def _score_f5_prob_only(
                 "signal_type":       "BET",
                 "confidence_tier":   _confidence_tier(synthetic_edge),
                 "game_time":         commence_time,
+                "downgrade_reason":  _pause_note(model_id),
             }
             picks.append(pick)
             logger.info(
@@ -782,6 +784,7 @@ def _score_f5_prob_only(
                 "signal_type":       "BET",
                 "confidence_tier":   _confidence_tier(synthetic_edge),
                 "game_time":         commence_time,
+                "downgrade_reason":  _pause_note(model_id),
             }
             picks.append(pick)
             logger.info(
@@ -1037,6 +1040,7 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
             "signal_type":       "BET",
             "confidence_tier":   _confidence_tier(synthetic_edge),
             "game_time":         commence_time,
+            "downgrade_reason":  _pause_note(model_id),
         }
         picks.append(pick)
         logger.info(
@@ -5458,6 +5462,8 @@ def _make_golf_pick(game_id: str, model_id: str, game_date: str,
         "confidence_tier":   _confidence_tier(edge),
         "game_time":         commence_time,
         "dk_bet_link":       None,
+        # A paused golf model keeps its verdict and says it is paused (#850).
+        "downgrade_reason":  _pause_note(model_id),
     }
 
 

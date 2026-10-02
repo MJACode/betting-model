@@ -173,6 +173,10 @@ class TestAPostedSignalIsLocked:
 
         assert "push_sent" in POSTED_SQL
         assert "'discord_signal'" in POSTED_SQL and "'discord_live'" in POSTED_SQL
+        # A push is a published signal too, and the free pick is matched on
+        # the real key it records in message_id (post-#850 review).
+        assert "'new_bet'" in POSTED_SQL and "'live_signal'" in POSTED_SQL
+        assert "s.kind = 'discord_free_pick' AND s.message_id = CASE" in POSTED_SQL
         assert lock_key_sql("p") in POSTED_SQL
         assert live_lock_key_sql("p") in POSTED_SQL
 
@@ -184,3 +188,28 @@ class TestAPostedSignalIsLocked:
     def test_the_worker_job_uses_the_same_plan(self):
         src = (ROOT / "tracking" / "job_queue.py").read_text(encoding="utf-8")
         assert "from scripts.void_picks import _select, plan_voids, void" in src
+
+
+def test_posted_sql_behaviour_on_sqlite():
+    """Every published kind locks the pick; the free pick by its real key."""
+    import sqlite3
+    from tracking.publish_keys import posted_sql
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE picks (pick_id INT, game_id TEXT, model_id TEXT, "
+               "pick_side TEXT, is_live INT, player_id TEXT, player_key TEXT, "
+               "prop_market TEXT)")
+    db.execute("CREATE TABLE push_sent (lock_key TEXT, kind TEXT, message_id TEXT)")
+    rows = [(1, "G1", "m", "over", 0), (2, "G2", "m", "over", 0),
+            (3, "G3", "m", "over", 1), (4, "G4", "m", "over", 0),
+            (5, "G5", "m", "over", 0)]
+    db.executemany("INSERT INTO picks VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL)", rows)
+    db.executemany("INSERT INTO push_sent VALUES (?, ?, ?)", [
+        ("G1:m", "discord_signal", None),
+        ("G2:m", "new_bet", None),
+        ("live:G3:m:over", "live_signal", None),
+        ("discord_free:2026-10-01", "discord_free_pick", "G4:m"),
+        ("G5:m", "dropped", None),            # not a publication
+    ])
+    got = dict(db.execute(f"SELECT pick_id, {posted_sql('p')} FROM picks p").fetchall())
+    assert got == {1: 1, 2: 1, 3: 1, 4: 1, 5: 0}

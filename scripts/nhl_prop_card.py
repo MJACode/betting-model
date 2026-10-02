@@ -44,6 +44,7 @@ import config  # noqa: E402
 import models.nhl_prop_blocked_shots as bs  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from data.season_labels import nhl_season_label  # noqa: E402
+from models.scorer import _pause_note  # noqa: E402
 
 MODEL_ID = bs.MODEL_ID
 ET = ZoneInfo("America/New_York")
@@ -189,6 +190,8 @@ def pick_rows(scored: pd.DataFrame, games: dict[str, dict], game_date: str, bank
             "dk_bet_link": r.over_link if d["side"] == "over" else r.under_link,
             "decision_book": bs.BOOK, "decision_odds": d["price"],
             "decision_implied_prob": round(implied, 4), "decision_edge": round(d["p"] - implied, 4),
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(MODEL_ID),
             "_ev": round(d["ev"], 4), "_mu": round(float(r.mu), 3),
         })
     return rows
@@ -198,7 +201,8 @@ _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", 
          "model_probability", "dk_implied_prob", "edge", "dk_odds", "scored_line", "kelly_fraction",
          "recommended_bet", "bankroll_at_pick", "signal_type", "confidence_tier", "prop_market",
          "player_key", "player_id", "dk_bet_link", "model_probability_cal",
-         "decision_book", "decision_odds", "decision_implied_prob", "decision_edge")
+         "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
+         "downgrade_reason")
 _INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
            f"VALUES ({', '.join('%(' + c + ')s' for c in _COLS)})")
 
