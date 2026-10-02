@@ -72,8 +72,17 @@
 >   book's margin on BOTH sides of the full-game number (every over -4.0%,
 >   every under -4.4%), no edge from Pinnacle against DraftKings, and a ceiling
 >   of +3% to +5% even for a bettor who knew which way the number would move.
->   `nhl_over_under` stays untrained. The total-goals markets shaped like the
->   props (team totals, period totals, alternates) have no stored price.
+>   `nhl_over_under` stays untrained.
+> - **Team totals, alternate totals and first-period totals were bought and
+>   graded on 2026-10-02** (mike: *"buy the totals data"*; 4,192 games, three
+>   seasons, 125,617 credits; `data/ingestors/nhl_totals_odds_history.py`,
+>   `scripts/nhl_totals_derivatives_lab.py`). The margin is on both sides in
+>   all three and wider than on the main total (team totals -7.6% over / -6.9%
+>   under, alternates -17.2% / -11.3%, first period -7.0% / -4.8%); the books
+>   price them off the main line, correctly; no cut clears. The prices are in
+>   `odds` (`source = 'odds_api_nhl_totals_history'`) and goals by period for
+>   every game since 2022-11-28 are in `nhl_period_scores`
+>   (`data/ingestors/nhl_period_scores_api.py`).
 > - **Player prop prices are collected from 2026-10-01**: an opening and a
 >   closing snapshot per game, six markets, ten books
 >   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step

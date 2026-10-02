@@ -2173,3 +2173,192 @@ under  1033   48.7  4.72 -0.9..+10.1 +2.9% (101)  -4.7% (219) +6.9% (227) +6.8% 
   shaped like that are the derivative ones -- team totals, period totals,
   alternate totals -- and no price for any of them is stored. The feed sells
   them (`team_totals`, `alternate_totals`, `totals_p1`; docs/nhl_market_research.md).
+
+---
+
+# Total goals, round five: team totals, alternate totals, first-period totals (2026-10-02)
+
+mike, 2026-10-01: *"buy the totals data."* Round four ended on a guess: the
+full-game total has the book's margin on both sides, the props that work have
+it on one, so the total-goals markets worth pricing would be the derivative
+ones. This is that guess, bought and graded.
+
+**Bought** (`data/ingestors/nhl_totals_odds_history.py`): one pre-game snapshot
+a game, every book at the same instant, 2023-24 to 2025-26. 4,192 games,
+264,043 rows, **125,617 credits** (30 a game and 1 a date, as a three-game
+probe measured before the run). **Also loaded, free**: goals by period for the
+5,257 games after the archive stops (`data/ingestors/nhl_period_scores_api.py`,
+the NHL's own score feed; none disagreed with the stored final), without which
+a first-period total cannot be graded.
+
+**Graded** by `python -m scripts.nhl_totals_derivatives_lab`:
+
+```
+264,043 bought quotes; 526,318 priced sides with a result, 4,192 games, by season {2024: 1400, 2025: 1398, 2026: 1394}; first-period goals known for 4,192 of 4,192 games
+```
+
+## Where the margin sits: every over and every under, blind
+
+```
+### BLIND, team_totals: every over and every under at hardrockbet (DraftKings does not list it), price floor -200
+                                     book  side number  bets  units   roi%   95% by day  win%  med price 2023-24               2024-25                 2025-26
+hardrockbet (DraftKings does not list it)  over    all  8575 -653.7  -7.62  -10.2..-5.0  44.4        105     (0) -6.2% (2764) [-10/-2]    -8.3% (5811) [-9/-7]
+hardrockbet (DraftKings does not list it) under    all  8328 -577.7  -6.94   -9.6..-4.2  45.1        105     (0)  -4.5% (2764) [-0/-9]   -8.1% (5564) [-10/-6]
+hardrockbet (DraftKings does not list it) under    1.5  1076 -215.9 -20.07 -29.1..-10.5  22.3        260     (0)                  (20) -20.6% (1056) [-24/-17]
+hardrockbet (DraftKings does not list it)  over    2.5  3335 -132.1  -3.96   -6.8..-1.2  55.4       -140     (0)  -5.1% (1480) [-8/-2]    -3.0% (1855) [-0/-6]
+hardrockbet (DraftKings does not list it) under    2.5  4138 -298.4  -7.21  -10.2..-4.2  42.1        120     (0) -5.8% (1480) [-2/-10]   -8.0% (2658) [-10/-6]
+hardrockbet (DraftKings does not list it)  over    3.5  3865 -297.7  -7.70  -10.8..-4.6  41.4        120     (0)  -6.1% (1233) [-7/-5]    -8.4% (2632) [-9/-8]
+hardrockbet (DraftKings does not list it) under    3.5  3031  -74.4  -2.45   -5.2..+0.3  56.5       -145     (0)  -4.1% (1233) [-3/-6]    -1.3% (1798) [-0/-2]
+hardrockbet (DraftKings does not list it)  over    4.5  1333 -227.7 -17.08 -23.9..-10.4  25.1        240     (0) -56.1% (31) [-55/-57]  -16.2% (1302) [-23/-9]
+
+### BLIND, alternate_totals: every over and every under at DraftKings, price floor -200
+      book  side number  bets   units   roi%   95% by day  win%  med price                 2023-24                 2024-25                 2025-26
+DraftKings  over    all 17549 -3013.1 -17.17 -20.9..-13.2  27.3        245 -16.5% (7497) [-15/-18] -15.9% (4556) [-21/-11] -19.1% (5496) [-19/-19]
+DraftKings under    all 13241 -1497.2 -11.31  -15.2..-7.5  31.6        220    -6.5% (5598) [-5/-8]  -11.1% (3458) [-3/-19] -17.9% (4185) [-20/-16]
+DraftKings  over    5.5  2139  -174.9  -8.18  -11.4..-4.9  56.8       -160    -8.9% (951) [-8/-10]    -6.9% (448) [-10/-4]    -8.1% (740) [-10/-6]
+DraftKings under    5.5  2407  -116.3  -4.83   -9.0..-0.6  42.2        125    -3.3% (1121) [-3/-3]     -4.7% (466) [-2/-7]    -7.0% (820) [-4/-10]
+DraftKings  over    6.5  2011  -142.1  -7.07  -11.9..-2.1  42.6        115   -10.8% (738) [-9/-12]    -6.5% (698) [-15/+2]     -3.0% (575) [+1/-7]
+DraftKings under    6.5  1936  -105.3  -5.44   -9.2..-1.8  57.4       -155     -3.6% (714) [-6/-1]     -3.2% (659) [+1/-7]   -10.3% (563) [-13/-7]
+
+### BLIND, totals_p1: every over and every under at DraftKings, price floor -200
+      book  side number  bets  units  roi% 95% by day  win%  med price               2023-24              2024-25              2025-26
+DraftKings  over    all  3989 -278.9 -6.99 -9.7..-4.3  53.1       -135 -9.1% (1203) [-10/-9] -6.4% (1392) [-8/-5] -5.7% (1394) [-6/-6]
+DraftKings under    all  3989 -190.6 -4.78 -7.9..-1.6  46.9        105  -1.7% (1203) [-1/-2] -5.4% (1392) [-4/-7] -6.8% (1394) [-7/-7]
+```
+
+## Pinnacle against a bettable book, same number, same snapshot
+
+```
+### SHARP-VS-SOFT, team_totals, either side: best bettable price, one bet a game per market
+ pin EV>=  bets  units  roi%   95% by day  win%  med price 2023-24              2024-25              2025-26
+     0.00   222  -14.1 -6.33  -19.1..+6.4  45.9      110.0    (16) -15.0% (51) [-26/-4] -2.9% (155) [-14/+8]
+     0.02    42   -1.6 -3.69 -29.2..+21.8  45.2      120.0     (2)                  (6) +0.7% (34) [+17/-15]
+     0.04    12    NaN   NaN          NaN   NaN        NaN     NaN                  NaN                  NaN
+     0.06     6    NaN   NaN          NaN   NaN        NaN     NaN                  NaN                  NaN
+     0.08     1    NaN   NaN          NaN   NaN        NaN     NaN                  NaN                  NaN
+     0.10     0    NaN   NaN          NaN   NaN        NaN     NaN                  NaN                  NaN
+     0.15     0    NaN   NaN          NaN   NaN        NaN     NaN                  NaN                  NaN
+
+### SHARP-VS-SOFT, alternate_totals, either side: best bettable price, one bet a game per market
+ pin EV>=  bets  units  roi%    95% by day  win%  med price              2023-24                2024-25               2025-26
+     0.00  1452   72.1  4.97   -4.3..+15.2  29.4      252.0  -3.8% (548) [-5/-3]  +12.5% (471) [-2/+27]  +7.9% (433) [+3/+12]
+     0.02   559   22.8  4.08  -12.3..+21.8  22.2      480.0 +9.0% (188) [-5/+23]  +5.3% (165) [-18/+28] -1.4% (206) [-18/+15]
+     0.04   251   13.0  5.19  -23.2..+34.9  19.5      520.0   +4.5% (77) [+3/+6]   +3.7% (73) [-34/+40]  +6.8% (101) [-1/+14]
+     0.06   117   32.9 28.12  -16.5..+76.9  23.9      525.0  +1.6% (43) [-7/+10] +97.2% (32) [+12/+182]  +2.6% (42) [-73/+79]
+     0.08    52   27.9 53.65 -11.8..+132.8  28.8      535.0                 (18)                   (12)                  (22)
+     0.10    23    NaN   NaN           NaN   NaN        NaN                  NaN                    NaN                   NaN
+     0.15     4    NaN   NaN           NaN   NaN        NaN                  NaN                    NaN                   NaN
+
+### SHARP-VS-SOFT, totals_p1, either side: best bettable price, one bet a game per market
+ pin EV>=  bets  units  roi%  95% by day  win%  med price             2023-24               2024-25              2025-26
+     0.00   664   37.7  5.68 -2.6..+13.6  49.7      115.0 +5.9% (143) [+4/+8] +8.9% (212) [+31/-13] +3.4% (309) [-4/+11]
+     0.02   160   30.9 19.33 +1.9..+37.4  53.8      126.0                (14)  +20.0% (53) [+50/-9] +21.1% (93) [-1/+42]
+     0.04    30    NaN   NaN         NaN   NaN        NaN                 NaN                   NaN                  NaN
+     0.06     1    NaN   NaN         NaN   NaN        NaN                 NaN                   NaN                  NaN
+     0.08     0    NaN   NaN         NaN   NaN        NaN                 NaN                   NaN                  NaN
+     0.10     0    NaN   NaN         NaN   NaN        NaN                 NaN                   NaN                  NaN
+     0.15     0    NaN   NaN         NaN   NaN        NaN                 NaN                   NaN                  NaN
+```
+
+## The market's own view, priced into each derivative
+
+No hockey inputs. A logistic fit on earlier seasons maps the main total, its
+no-vig over and the no-vig moneyline to the chance of each derivative outcome
+(a whole number gets a separate fit per side, because it can push).
+
+```
+main lines for the model: 7,920 games to fit on ({2021: 927, 2022: 1401, 2023: 1400, 2024: 1400, 2025: 1398, 2026: 1394}); 4,177 priced games have a main line no later than their derivative snapshot (median gap 371 min)
+
+### MODEL, team_totals: claimed against realised (the most-quoted book's sides)
+model says  sides  claimed  happened  price implies
+ 0.05-0.20    172    0.192     0.198          0.249
+ 0.20-0.35   3689    0.273     0.278          0.314
+ 0.35-0.45   4105    0.406     0.405          0.441
+ 0.45-0.55   4766    0.500     0.500          0.527
+ 0.55-0.65   4105    0.594     0.595          0.620
+ 0.65-0.80   3689    0.727     0.722          0.758
+ 0.80-0.95    172    0.808     0.802          0.820
+
+### MODEL, team_totals, either side: best bettable price, one bet a game per market, floor -200
+ EV>=  bets  units   roi%   95% by day  win%  med price               2023-24              2024-25                2025-26
+ 0.00  1828  -92.2  -5.04   -9.4..-0.9  50.1     -112.0  -7.2% (515) [+0/-15]  -0.7% (648) [+1/-3]   -7.6% (665) [-12/-4]
+ 0.02   737  -36.2  -4.91  -12.0..+2.1  49.1     -109.0 -1.4% (211) [+11/-13]  +0.4% (251) [-2/+3]  -12.4% (275) [-18/-7]
+ 0.04   281  -29.8 -10.59  -22.1..+0.3  45.2      104.0  -1.7% (81) [+20/-23]  -4.7% (95) [+9/-18] -22.8% (105) [-32/-14]
+ 0.06   127  -10.0  -7.89 -25.8..+10.5  45.7      106.0                  (27) -0.3% (51) [+27/-26]   -20.5% (49) [-39/-2]
+ 0.08    52   -7.7 -14.73 -40.4..+13.3  40.4      120.0                  (13)                 (18)                   (21)
+ 0.10    28    NaN    NaN          NaN   NaN        NaN                   NaN                  NaN                    NaN
+ 0.15     4    NaN    NaN          NaN   NaN        NaN                   NaN                  NaN                    NaN
+
+### MODEL, alternate_totals: claimed against realised (the most-quoted book's sides)
+model says  sides  claimed  happened  price implies
+ 0.05-0.20  16393    0.130     0.141          0.190
+ 0.20-0.35   9849    0.245     0.241          0.317
+ 0.35-0.45   6656    0.410     0.422          0.475
+ 0.45-0.55   8209    0.500     0.500          0.575
+ 0.55-0.65   6656    0.590     0.578          0.680
+ 0.65-0.80   9843    0.755     0.759          0.807
+ 0.80-0.95  11668    0.859     0.846          0.892
+
+### MODEL, alternate_totals, either side: best bettable price, one bet a game per market, floor -200
+ EV>=  bets  units  roi%   95% by day  win%  med price              2023-24                2024-25               2025-26
+ 0.00  1921  -10.9 -0.57   -5.4..+4.1  45.4      102.0  +0.7% (839) [+6/-4]    +0.5% (667) [-6/+7]  -4.8% (415) [-10/+0]
+ 0.02   901  -25.9 -2.87  -10.3..+4.9  42.3      108.0 -3.1% (428) [+3/-10]  +3.1% (282) [-18/+24] -11.1% (191) [-7/-15]
+ 0.04   386   38.2  9.90  -3.6..+25.0  43.0      120.0  -0.1% (193) [+4/-4]   +32.0% (98) [-0/+64]   +7.4% (95) [+24/-9]
+ 0.06   163   28.9 17.74  -5.3..+45.6  40.5      140.0  -4.5% (74) [-15/+6] +65.2% (40) [+19/+111] +12.5% (49) [+37/-11]
+ 0.08    79   18.2 23.06 -14.9..+68.4  35.4      186.0  -9.7% (34) [-21/+2]                   (21)                  (24)
+ 0.10    45    7.8 17.31 -32.4..+86.2  33.3      200.0                 (19)                   (12)                  (14)
+ 0.15     8    NaN   NaN          NaN   NaN        NaN                  NaN                    NaN                   NaN
+
+### MODEL, totals_p1: claimed against realised (the most-quoted book's sides)
+model says  sides  claimed  happened  price implies
+ 0.20-0.35    306    0.296     0.343          0.457
+ 0.35-0.45   1472    0.420     0.435          0.484
+ 0.45-0.55   5398    0.500     0.500          0.517
+ 0.55-0.65   1166    0.576     0.554          0.574
+
+### MODEL, totals_p1, either side: best bettable price, one bet a game per market, floor -200
+ EV>=  bets  units  roi%   95% by day  win%  med price              2023-24              2024-25               2025-26
+ 0.00  2029   -4.9 -0.24   -4.5..+4.2  50.9     -105.0 +5.2% (743) [+10/+1]  -0.5% (691) [+7/-8]  -6.7% (595) [-10/-3]
+ 0.02  1016  -17.7 -1.75   -8.0..+4.4  49.5     -102.0  +2.7% (361) [+6/-1]  -3.3% (406) [-3/-3]   -5.6% (249) [-8/-3]
+ 0.04   332   -2.1 -0.64 -11.6..+10.6  48.8      101.0 +1.7% (97) [-11/+14]  -0.2% (144) [+2/-2]    -3.8% (91) [+2/-9]
+ 0.06   106   10.7 10.07 -10.3..+29.7  51.9      105.0                 (17) -1.5% (50) [+16/-19] +10.3% (39) [-13/+32]
+ 0.08    28    NaN   NaN          NaN   NaN        NaN                  NaN                  NaN                   NaN
+ 0.10    13    NaN   NaN          NaN   NaN        NaN                  NaN                  NaN                   NaN
+ 0.15     0    NaN   NaN          NaN   NaN        NaN                  NaN                  NaN                   NaN
+```
+
+## Read, round five
+
+- **The guess was wrong, and that is the finding.** The margin is on both
+  sides in all three markets and WIDER than on the main total: team totals
+  lose 7.6% on every over and 6.9% on every under, alternate totals 17.2% and
+  11.3%, first-period totals 7.0% and 4.8%. Nothing here is shaped like the
+  props, where every under blind loses 0-3.5%.
+- **The books price these off the main line, correctly.** The market-implied
+  fit says what happens (claimed against realised agree in every bucket of
+  all three markets) and the book's price sits above it in every bucket.
+  A calibrated view of the market cannot beat a price that charges more than
+  the main line does: team totals -5.0% on 1,828 bets at any positive EV,
+  first period -0.2% on 2,029, alternates -0.6% on 1,921.
+- **Three cells are positive, and none is a result** by the standard the prop
+  models were held to (every season positive, interval clear of zero, a
+  neighbourhood of cuts, bets in the thousands):
+  - Alternates, Pinnacle against a soft book at 6%: +28.1% on 117 bets,
+    interval -16.5 to +76.9, median price +525, and 2024-25 alone is +97% on
+    32. A few five-to-one winners.
+  - Alternates, the model at 4%: +9.9% on 386, interval through zero,
+    2023-24 flat, and 2024-25's +32.0% is -0 in its first half and +64 in its
+    second.
+  - First period, Pinnacle against a soft book at 2%: +19.3% on 160 -- the
+    only interval in the run clear of zero (+1.9 to +37.4). But 2023-24 has 14
+    bets, the two seasons that carry it split +50 / -9 and -1 / +42 by half,
+    and at 4% there are 30 bets. One cell, not a neighbourhood. It is the one
+    thing worth reading again when 2026-27 has been priced; it is not a model.
+- **Verdict: no cut clears in any of the three, and no total-goals model is
+  built.** What would have to change is information the market does not have
+  -- a confirmed starting goalie before the number moves is the obvious
+  candidate -- and four rounds on the main total found none in the logs.
+- The one caveat on the model rows: the main line used is the newest STORED
+  one at or before the derivative snapshot, and the stored series is sparse
+  (a median of about six hours older). A fresher main line would make the
+  model agree with the books more, not less.

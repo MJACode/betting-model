@@ -99,6 +99,8 @@ jobs:
             tests/test_nhl_prop_odds_gate.py \
             tests/test_nhl_prop_blocked_shots.py \
             tests/test_nhl_props.py \
+            tests/test_nhl_totals_odds_history.py \
+            tests/test_nhl_period_scores_api.py \
             tests/test_nfl_prop_two_sharps.py \
             tests/test_nfl_prop_one_read_per_game.py \
             ncaaf_live/tests/test_cfbd_yardline.py \

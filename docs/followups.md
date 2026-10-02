@@ -110,20 +110,34 @@ bills. Blocked shots were not posted by any book at 18:08Z, five hours before
 the first puck; whether the closing snapshot carries them is the first thing to
 read off the stored rows.
 
-## [ ] NHL total goals — the derivative markets are the only place left to look
+## [x] NHL total goals — the derivative markets were bought and graded: nothing clears (2026-10-02)
 
-mike, 2026-10-01: *"we need total goals."* The full-game total has nothing in
-it (four rounds; `docs/nhl_market_lab.md`, "Total goals, round four"): the
-book's margin is on both sides and Pinnacle agrees with DraftKings. Every NHL
-result that holds is in a market where the margin sits on one side. For total
-goals those are **team totals, period totals and alternate totals**, and no
-price for any of them is stored. The feed sells all three (`team_totals`,
-`alternate_totals`, `totals_p1`). One pre-game snapshot a game for the three
-priced seasons is about 4,200 games x 3 markets x 10 credits = **about 126,000
-credits** (the historical endpoint bills 10 a market returned; the count is an
-estimate until a probe measures it). Not bought: his call.
+mike, 2026-10-01: *"buy the totals data."* Team totals, alternate totals and
+first-period totals, one pre-game snapshot a game, 2023-24 to 2025-26: 4,192
+games, 264,043 rows, 125,617 credits. The margin is on both sides in all three
+and the books price them off the main line, correctly
+(`docs/nhl_market_lab.md`, "Total goals, round five"). No model is built.
+Still open under this heading:
+
+- **One cell to read again on 2026-27 prices**: first-period totals when
+  Pinnacle makes a bettable book's price positive by 2% or more (+19.3% on 160
+  bets, interval +1.9 to +37.4, but one cell and unstable by half-season). It
+  needs first-period prices collected live, which nothing does yet (about one
+  credit a game a snapshot on the live endpoint).
+- **`nhl_period_scores` has no daily top-up.** The importer has `--recent N`;
+  nothing runs it, because nothing reads a period score yet.
+- **What could move the full-game total** is information the market lacks. A
+  confirmed starting goalie ahead of the number moving is the one candidate
+  named and not tested: no as-of history of confirmations is stored.
 
 ## [ ] NHL prop models — what to watch now that four are live
+
+- **PR #861 must be in before each slate** (open at the time of writing). The
+  game scorer deleted every unstarted BET with no DraftKings price, on every
+  20-minute pass. On 2026-10-02 four saves picks priced at Hard Rock at a
+  number DraftKings did not hang were posted to Discord and push and then
+  deleted; all four were restored with their original ids and times once
+  their games had started.
 
 - **Volume on shots on goal.** 8.9 bets a priced game day in the backtest, 54
   on the busiest, 32 on the first real slate. The floor is 0.10; 0.15 is +8.0%
