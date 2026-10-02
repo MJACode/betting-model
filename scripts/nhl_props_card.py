@@ -37,6 +37,11 @@ Deliberate, and load-bearing:
   and the closing-line capture already read rows of that shape; a row with
   another book's price in `dk_odds` is one the betslip would call DraftKings'.
 
+  A LIMIT PER GAME (Spec.max_per_game; shots on goal: 3, mike 2026-10-01).
+  The best-EV bets in a game are kept up to the limit, and a pick an earlier
+  pass already wrote counts against it: a later pass adds only what is left
+  and never replaces a pick that exists.
+
   A GOALIE A BOOK PRICES IS TAKEN AS STARTING. That is the bet: the books void
   saves when he does not start, and settlement does the same.
 
@@ -239,6 +244,41 @@ def pick_rows(spec: np_.Spec, mus: pd.DataFrame, priced: pd.DataFrame, games: di
     return rows
 
 
+def existing_picks(conn, model_id: str, game_ids: list[str]) -> dict[str, set[str]]:
+    """The players this model has already picked in each game: {game_id: {player_id}}."""
+    if not game_ids:
+        return {}
+    out: dict[str, set[str]] = {}
+    for gid, pid in conn.execute(
+            "SELECT game_id, player_id FROM picks WHERE model_id = %s AND game_id = ANY(%s)",
+            (model_id, list(game_ids))).fetchall():
+        out.setdefault(gid, set()).add(str(pid))
+    return out
+
+
+def limit_per_game(spec: np_.Spec, rows: list[dict], existing: dict[str, set[str]] | None = None) -> list[dict]:
+    """At most `spec.max_per_game` picks a game, best EV first, counting the picks already written.
+
+    A row for a player already picked is dropped (publish would skip it, and
+    it holds its slot already). Pure, so it is testable.
+    """
+    if spec.max_per_game is None:
+        return rows
+    existing = existing or {}
+    left = {}
+    kept = []
+    for r in sorted(rows, key=lambda r: (-r["_ev"], r["player_id"])):
+        have = existing.get(r["game_id"], set())
+        if r["player_id"] in have:
+            continue
+        n = left.setdefault(r["game_id"], spec.max_per_game - len(have))
+        if n <= 0:
+            continue
+        left[r["game_id"]] = n - 1
+        kept.append(r)
+    return kept
+
+
 _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", "pick_label",
          "model_probability", "model_probability_cal", "dk_implied_prob", "edge", "dk_odds", "scored_line",
          "kelly_fraction", "recommended_bet", "bankroll_at_pick", "signal_type", "confidence_tier",
@@ -320,6 +360,11 @@ def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
         from models.scorer import _get_current_bankroll
         rows = pick_rows(spec, mus, priced, games, game_date, _get_current_bankroll(conn),
                          float(art.get("dispersion", 0.0)))
+        n_clear = len(rows)
+        rows = limit_per_game(spec, rows, existing_picks(conn, spec.model_id, sorted(games)))
+        if len(rows) < n_clear:
+            logger.info(f"nhl-props-card: {spec.model_id} kept {len(rows)} of {n_clear} that clear "
+                        f"(at most {spec.max_per_game} a game, picks already written included)")
     out.update(mus=mus, quotes=priced, rows=rows, skipped=skipped)
     logger.info("\n" + render(spec, len(mus), rows, skipped))
     return out

@@ -136,16 +136,19 @@ def sides(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def card(s: pd.DataFrame, cut: float, which: tuple[str, ...] = ("over", "under"),
-         ev_col: str = "ev", floor: float | None = FLOOR) -> pd.DataFrame:
-    """The bets a rule places: one per player per game, the best EV among the sides it may take."""
+         ev_col: str = "ev", floor: float | None = FLOOR, per_game: int | None = None) -> pd.DataFrame:
+    """The bets a rule places: one per player per game, the best EV among the sides it may take,
+    and (`per_game`) at most that many a game, best EV first -- as the card's limit_per_game."""
     b = s[(s[ev_col] >= cut) & s.side.isin(which)]
     if floor is not None:
         b = b[b.price >= floor]
     rank = {bk: i for i, bk in enumerate(np_.books())}          # a tie goes to the earlier book, as the card's does
     b = b.assign(_rank=b.book.map(rank).fillna(len(rank)) if "book" in b.columns else 0)
-    return (b.sort_values([ev_col, "_rank"], ascending=[False, True], kind="mergesort")
-            .drop_duplicates(["game_id", "pkey"]).drop(columns="_rank")
-            .sort_values(["game_date", "game_id", "pkey"]))
+    b = (b.sort_values([ev_col, "_rank"], ascending=[False, True], kind="mergesort")
+         .drop_duplicates(["game_id", "pkey"]).drop(columns="_rank"))
+    if per_game is not None:
+        b = b.groupby("game_id", sort=False).head(per_game)
+    return b.sort_values(["game_date", "game_id", "pkey"])
 
 
 def day_interval(b: pd.DataFrame, n: int = 5000) -> str:
@@ -220,9 +223,15 @@ def report(spec: np_.Spec, data: dict, frame: pd.DataFrame, dump: str | None) ->
 
     rule = "/".join(spec.sides)
     other = tuple(x for x in ("over", "under") if x not in spec.sides)
+    cap = spec.max_per_game
     show(f"THE RULE: {rule} only, the best price among the books shopped, the model's OWN probability, "
-         f"floor {FLOOR}; per season as return (bets) [first half / second half]",
-         [line({"EV>=": c}, card(s, c, spec.sides)) for c in EV_CUTS])
+         f"floor {FLOOR}, {'no limit' if cap is None else f'at most {cap} a game'}; "
+         f"per season as return (bets) [first half / second half]",
+         [line({"EV>=": c}, card(s, c, spec.sides, per_game=cap)) for c in EV_CUTS])
+    if cap is not None:
+        show("The rule by bets allowed per game (best EV first)",
+             [line({"EV>=": c, "per game": n}, card(s, c, spec.sides, per_game=n))
+              for c in (0.08, 0.10, 0.12) for n in (1, 2, 3, 4, 5, None)])
     show("The same rule at DraftKings alone",
          [line({"EV>=": c}, card(dk, c, spec.sides)) for c in EV_CUTS])
     if other:
@@ -234,7 +243,7 @@ def report(spec: np_.Spec, data: dict, frame: pd.DataFrame, dump: str | None) ->
     show("The rule by price floor",
          [line({"EV>=": c, "floor": f}, card(s, c, spec.sides, floor=f)) for c in (0.06, 0.10) for f in (None, -250, -200, -150)])
     floor = config.MODEL_OWN_EV_FLOOR.get(spec.model_id, 0.10)
-    b = card(s, floor, spec.sides)
+    b = card(s, floor, spec.sides, per_game=spec.max_per_game)
     days = s.game_date.nunique()
     if len(b):
         show(f"Where the bets land at EV >= {floor:.2f}",

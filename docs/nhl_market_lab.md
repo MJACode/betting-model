@@ -2074,8 +2074,11 @@ published 17 shots-on-goal unders on 2026-10-01, eleven of them in one game
   +4.5% / +4.3% / +4.6%, against +5.7% uncapped. The 0.65-0.70 bets return
   +6.0%.
 
-No change was made to the model. A per-game cap is a model update and is
-mike's call.
+**Shipped: at most 3 shots-on-goal bets a game** (mike: *"Limit 3"*), best EV
+first, a pick an earlier pass wrote holding its slot (`Spec.max_per_game`,
+`limit_per_game` in the card, `per_game` in the backtest). The backtest under
+the limit: +5.4% on 4,210 (227.6 units; +7.9% / +3.0% / +5.7% by season)
+against +5.7% on 4,707 (270.3 units) without. That night's 17 picks stand.
 
 ---
 
