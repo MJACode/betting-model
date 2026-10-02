@@ -14,9 +14,24 @@
 -- Nullable on purpose: every row written before this exists keeps NULL, and the
 -- delete path skips those rather than guessing.
 --
--- IDEMPOTENT: ADD COLUMN IF NOT EXISTS. Safe on every pass.
+-- IDEMPOTENT, AND A NO-OP ONCE THE COLUMN EXISTS. ALTER TABLE ... ADD COLUMN
+-- IF NOT EXISTS still takes AccessExclusiveLock before it notices the column
+-- (PostgreSQL locks first, then checks). Hourly run
+-- b22f8e4fb9e34d27858c341e46ce635c on 2026-10-01 waited on push_sent
+-- (oid 25944) until statement_timeout (2min) cancelled it. The catalog check
+-- below reads pg_attribute and returns without opening push_sent.
 
 DO $mig$
 BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'push_sent'
+       AND column_name = 'message_id'
+  ) THEN
+    RAISE NOTICE 'push_sent.message_id already present - skipping';
+    RETURN;
+  END IF;
+
   ALTER TABLE public.push_sent ADD COLUMN IF NOT EXISTS message_id TEXT;
 END $mig$;
