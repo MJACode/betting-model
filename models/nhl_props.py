@@ -45,6 +45,13 @@ line with an under from another (2,556 of its shots rows fail the coherent-
 quote check in the bought history; no other book has more than 11). The
 filter drops the pairs it can see, not the ones that happen to sum plausibly.
 
+AT MOST THREE SHOTS-ON-GOAL BETS IN ONE GAME (mike, 2026-10-01: "Limit 3").
+Its first live night bet 11 unders in one game; the three priced seasons never
+bet more than 9, and nights betting 20%+ of the board lost money. Keeping the
+three best-EV bets a game returns +5.4% on 4,210 against +5.7% on 4,707 with
+no limit: it bounds a night like that one and does not buy return
+(docs/nhl_market_lab.md). Saves and assists carry no limit.
+
 THE DISTRIBUTION. A Poisson count has variance equal to its mean. Saves do
 not: a goalie's night swings with the shot volume he faces, so the spread
 around the predicted mean is wider. `fit` measures that excess on the training
@@ -89,13 +96,15 @@ class Spec:
     features: tuple[str, ...]
     overdispersed: bool = False
     sides: tuple[str, ...] = ("under",)
+    max_per_game: int | None = None   # the most bets in one game, best EV first; None = no limit
 
 
 SAVES = Spec("nhl_prop_saves", "player_total_saves", "saves", "Saves", "goalie",
              ("saves_l", "saves_s", "sa_l", "opp_sf", "own_sa", "gp",
               "is_home", "rest", "own_rest", "opp_rest"), overdispersed=True)
 SHOTS = Spec("nhl_prop_shots_on_goal", "player_shots_on_goal", "shots", "Shots on Goal", "skater",
-             ("shots_l", "shots_s", "shot_attempts_l", "shot_attempts_s", "opp_sa") + SKATER_USAGE)
+             ("shots_l", "shots_s", "shot_attempts_l", "shot_attempts_s", "opp_sa") + SKATER_USAGE,
+             max_per_game=3)
 ASSISTS = Spec("nhl_prop_assists", "player_assists", "assists", "Assists", "skater",
                ("assists_l", "assists_s", "points_l", "opp_ga", "opp_pk_opps") + SKATER_USAGE)
 SPECS: dict[str, Spec] = {s.model_id: s for s in (SAVES, SHOTS, ASSISTS)}

@@ -261,10 +261,77 @@ class TestTheCard:
                     and r["decision_odds"] >= config.min_odds_for(r["model_id"]))
 
 
+def _row(gid: str, pid: str, ev: float) -> dict:
+    return {"game_id": gid, "player_id": pid, "_ev": ev}
+
+
+class TestTheLimitPerGame:
+    """Shots on goal: at most three bets a game (mike, 2026-10-01: "Limit 3")."""
+
+    def test_shots_on_goal_is_limited_to_three_and_the_others_are_not(self):
+        assert P.SHOTS.max_per_game == 3
+        assert P.SAVES.max_per_game is None and P.ASSISTS.max_per_game is None
+
+    def test_it_keeps_the_three_best_in_each_game(self):
+        rows = [_row("A", str(i), ev) for i, ev in enumerate([0.11, 0.30, 0.12, 0.25, 0.20])] + \
+               [_row("B", "9", 0.10), _row("B", "8", 0.40)]
+        kept = card.limit_per_game(P.SHOTS, rows)
+        assert sorted(r["player_id"] for r in kept if r["game_id"] == "A") == ["1", "3", "4"]
+        assert sorted(r["player_id"] for r in kept if r["game_id"] == "B") == ["8", "9"]
+
+    def test_picks_already_written_hold_their_slots(self):
+        """Two written on an earlier pass: one slot left, and a player already
+        picked is not a new pick however much better his EV now looks."""
+        rows = [_row("A", "1", 0.50), _row("A", "2", 0.30), _row("A", "3", 0.20)]
+        kept = card.limit_per_game(P.SHOTS, rows, {"A": {"1", "7"}})
+        assert [r["player_id"] for r in kept] == ["2"]
+        assert card.limit_per_game(P.SHOTS, rows, {"A": {"5", "6", "7"}}) == []
+
+    def test_an_unlimited_market_passes_every_row(self):
+        rows = [_row("A", str(i), 0.2) for i in range(8)]
+        assert card.limit_per_game(P.ASSISTS, rows, {"A": {"x", "y", "z"}}) == rows
+
+    def test_the_card_applies_it_with_the_written_picks(self):
+        src = (ROOT / "scripts" / "nhl_props_card.py").read_text(encoding="utf-8")
+        assert "rows = limit_per_game(spec, rows, existing_picks(conn, spec.model_id, sorted(games)))" in src
+
+    def test_the_eleven_pick_game_becomes_three(self):
+        """2026-10-01, EDM at VAN: eleven shots-on-goal unders cleared. Through
+        the limit, the three best by EV are the picks."""
+        evs = [0.305, 0.285, 0.262, 0.256, 0.246, 0.226, 0.298, 0.157, 0.158, 0.157, 0.117]
+        rows = [_row("NHL_2026-10-01_EDM_VAN", str(i), ev) for i, ev in enumerate(evs)]
+        kept = card.limit_per_game(P.SHOTS, rows)
+        assert sorted(r["_ev"] for r in kept) == [0.285, 0.298, 0.305]
+
+
 class TestTheBacktestGradesTheRuleTheCardPlays:
+    def test_one_slate_both_ways_with_the_limit(self):
+        """The 40-player slate below, through both, with the shots limit on: the same three."""
+        rows, mus = [], []
+        rng = np.random.default_rng(5)
+        for pid in range(1, 41):
+            mu = float(rng.uniform(0.8, 3.2))
+            mus.append((pid, mu))
+            for book in ("draftkings", "betmgm", "hardrockbet", "fanduel"):
+                line = float(rng.choice([1.5, 2.5, 3.5]))
+                u = int(rng.choice([-320, -260, -230, -150, -125, -110, 100, 115, 130]))
+                rows.append((pid, book, line, -u - 20 if u > 0 else 100, u))
+        q = _quotes(rows)
+        live = card.limit_per_game(P.SHOTS, card.pick_rows(
+            P.SHOTS, _mus(mus), q[q.book.isin(P.books())], GAMES, "2026-10-01", 1000.0, 0.0))
+        df = q.merge(_mus(mus), on=["player_id", "game_id"]).assign(
+            pkey=lambda d: d.player_id.astype(str), alpha=0.0, actual=0, season=2026, game_date="2026-10-01")
+        s = bt.sides(df[df.book.isin(P.books())])
+        graded = bt.card(s, config.MODEL_OWN_EV_FLOOR[P.SHOTS.model_id], P.SHOTS.sides,
+                         per_game=P.SHOTS.max_per_game)
+        want = {(r.pkey, r.book, r.line, r.price) for r in graded.itertuples()}
+        got = {(r["player_id"], r["decision_book"], r["scored_line"], r["decision_odds"]) for r in live}
+        assert got == want and len(got) == 3
+
     def test_one_slate_both_ways(self):
         """The same priced slate through the backtest's `card` and the live card's
-        `pick_rows`: the same players, at the same book, line and price."""
+        `pick_rows`: the same players, at the same book, line and price (before
+        the per-game limit, which the test above covers)."""
         rng = np.random.default_rng(5)
         rows, mus = [], []
         for pid in range(1, 41):

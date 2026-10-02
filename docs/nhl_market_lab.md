@@ -2040,6 +2040,46 @@ first 4 weeks   130                          NaN         NaN   19.0 14.64  -2.7.
   side), and a name two players on one team share. 24 of 142 on 2026-10-01,
   each named in the log.
 
+## Shots on goal, the first live night: 17 bets, all unders (2026-10-01)
+
+mike: *"Wayyyy too many prop picks for nhl and they are all under."* The card
+published 17 shots-on-goal unders on 2026-10-01, eleven of them in one game
+(EDM at VAN). What was measured, against the bought history in the backtest
+(`scripts/nhl_prop_backtest.py`, cut 0.10, unders, best price, floor -200):
+
+- **Not preseason.** The NHL schedule API marks every game from 2026-09-29 as
+  game type 2 (regular season).
+- **Not a stale book.** Ten of the seventeen were decided at Hard Rock. Its
+  quotes that night hold the same margin as DraftKings' (median 7.0% against
+  7.4%), and its no-vig under sits 0.8 points below DraftKings' on average.
+- **Not the artifact.** A refit through 2025-26 scores the slate identically
+  (correlation 1.000); the walk-forward fit through 2024-25 bets 19 of 60.
+- **Not the time the price was taken.** The backtest's prices sit 1-13 hours
+  before puck drop and its bet rate is flat across that range (8.5-9.0%).
+- **Not the opening weeks.** The backtest bets 10.1% of priced players in each
+  season's first seven days (141 of 1,392) and 10.9% in the first 28.
+- **The night is an outlier.** 17 of 60 scored (28%) against 8.7% over three
+  seasons (4,707 of 53,971). The most bets the backtest ever placed in one game
+  is 9 (3 of 3,936 games); this night placed 11. Only 2.6% of backtest nights
+  with 40+ priced players bet a quarter of the board.
+- **Heavy nights are where it stops earning.** Nights that bet 20-30% of the
+  board returned -0.1% on 475 bets; above 30%, -13.8% on 129. Nights under 20%
+  returned +5.4% and +8.6%.
+- **A per-game cap is a plateau, not a gain.** Keeping the N best-EV bets in a
+  game, at EV >= 0.10: N=1 +6.8% on 2,367 (161 units); N=2 +5.5% on 3,596;
+  N=3 +5.4% on 4,210; N=5 +5.9% on 4,606 (270 units); no cap +5.7% on 4,707
+  (270 units). The same shape at 0.08 and 0.12. A cap of 3-5 costs nothing and
+  bounds a night like this one; it does not buy return.
+- **Capping the claimed probability hurts.** p <= 0.60 / 0.65 / 0.70 at 0.10:
+  +4.5% / +4.3% / +4.6%, against +5.7% uncapped. The 0.65-0.70 bets return
+  +6.0%.
+
+**Shipped: at most 3 shots-on-goal bets a game** (mike: *"Limit 3"*), best EV
+first, a pick an earlier pass wrote holding its slot (`Spec.max_per_game`,
+`limit_per_game` in the card, `per_game` in the backtest). The backtest under
+the limit: +5.4% on 4,210 (227.6 units; +7.9% / +3.0% / +5.7% by season)
+against +5.7% on 4,707 (270.3 units) without. That night's 17 picks stand.
+
 ---
 
 # Total goals, round four: nothing in the full-game number (2026-10-01)

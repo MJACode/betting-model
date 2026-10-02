@@ -59,7 +59,9 @@
 >   (`scripts/nhl_prop_backtest.py`): saves +7.8% on 1,755 bets, shots on goal
 >   +5.7% on 4,707, assists +10.9% on 1,063, every season positive in each.
 >   Shots on goal needs the best price: at DraftKings alone it is +3.3% with a
->   flat 2024-25. Card: `scripts/nhl_props_card.py`, in the same
+>   flat 2024-25. **Shots on goal bets at most 3 a game**, best EV first, picks
+>   already written included (mike, 2026-10-01, after an 11-bet game): +5.4% on
+>   4,210 with the limit (`docs/nhl_market_lab.md`). Card: `scripts/nhl_props_card.py`, in the same
 >   `nhl-prop-scoring` step. A goalie who does not start is NO_ACTION (the
 >   books void it), a relief appearance included. The row is the scorer's
 >   shape for a pick decided away from DraftKings: `decision_*` is the book
