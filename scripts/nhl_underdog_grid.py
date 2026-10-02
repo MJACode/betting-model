@@ -13,7 +13,15 @@ the bought history (`odds.source = 'odds_api_historical'`), one unit on a side:
          (config.BEST_LINE_BOOKMAKERS)
 
 "Underdog" is the side DraftKings prices longer at the open; a game priced the
-same both ways has none and is left out. Closing-line value is Pinnacle's last
+same both ways has none and is left out.
+
+READ THE `best` ROWS AND THE PINNACLE TABLES AS AN UPPER BOUND, NOT A RULE.
+"Open" is each book's FIRST stored quote, and books are first seen in different
+snapshots, so the best price across books and the comparison with Pinnacle mix
+moments a bettor could not have traded at together. Forced to simultaneous
+quotes, the "best price beats Pinnacle" grid this script prints is nothing
+(scripts/nhl_moneyline_market_lab.py). The DraftKings `open` and `close` rows
+are one book and are sound. Closing-line value is Pinnacle's last
 pre-game no-vig probability minus its first, on the side taken.
 
     python -m scripts.nhl_underdog_grid

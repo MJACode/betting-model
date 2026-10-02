@@ -39,19 +39,55 @@
 > - Graded at real 2025-26 prices, neither live artifact made money at any cut
 >   (`scripts/nhl_live_artifact_grade.py`).
 > - Blind underdogs lost in five of the last six seasons at DraftKings
->   (`scripts/nhl_underdog_grid.py`); the one rule in that grid that is positive
->   at every cut takes the best bettable price when it beats Pinnacle's no-vig
->   price, and most of those bets are underdogs.
+>   (`scripts/nhl_underdog_grid.py`). The "best price against Pinnacle" grid in
+>   the same script is NOT a rule: it compared quotes taken at different
+>   moments, and with simultaneous quotes there is nothing
+>   (`scripts/nhl_moneyline_market_lab.py`).
+> - **`nhl_prop_blocked_shots` is live** (mike, 2026-10-01: *"just build
+>   profitable models"*): a Poisson model of a skater's blocked shots priced
+>   against DraftKings, unders, EV >= 0.10 on its own probability. Walk-forward
+>   on three priced seasons: +6.2% on 2,054 bets, every season positive.
+>   `models/nhl_prop_blocked_shots.py`, `scripts/nhl_prop_card.py` (step
+>   `nhl-prop-scoring`, right after the prop prices). Settles from
+>   `nhl_skater_game_log`; a scratched player is NO_ACTION.
+> - **`nhl_prop_saves`, `nhl_prop_shots_on_goal` and `nhl_prop_assists` are
+>   live** (mike, 2026-10-01: *"build saves, shots on goal and assists models
+>   and we need total goals"*). One engine, a Spec per market
+>   (`models/nhl_props.py`); unders only, EV >= 0.10 on the model's own
+>   probability, **at the best price among the bettable books** (FanDuel left
+>   out), one pick per player per game. Walk-forward on three priced seasons
+>   (`scripts/nhl_prop_backtest.py`): saves +7.8% on 1,755 bets, shots on goal
+>   +5.7% on 4,707, assists +10.9% on 1,063, every season positive in each.
+>   Shots on goal needs the best price: at DraftKings alone it is +3.3% with a
+>   flat 2024-25. **Shots on goal bets at most 3 a game**, best EV first, picks
+>   already written included (mike, 2026-10-01, after an 11-bet game): +5.4% on
+>   4,210 with the limit (`docs/nhl_market_lab.md`). Card: `scripts/nhl_props_card.py`, in the same
+>   `nhl-prop-scoring` step. A goalie who does not start is NO_ACTION (the
+>   books void it), a relief appearance included. The row is the scorer's
+>   shape for a pick decided away from DraftKings: `decision_*` is the book
+>   and price bet, the DraftKings columns hold DraftKings' own number at that
+>   line or nothing, `line_book` says whose line it is when DraftKings has
+>   none, `best_*` carries the deciding book's betslip link. No book in the
+>   label.
+> - **Total goals: still no model, on purpose.** A fourth round
+>   (`scripts/nhl_totals_lab.py`, six seasons, simultaneous quotes) found the
+>   book's margin on BOTH sides of the full-game number (every over -4.0%,
+>   every under -4.4%), no edge from Pinnacle against DraftKings, and a ceiling
+>   of +3% to +5% even for a bettor who knew which way the number would move.
+>   `nhl_over_under` stays untrained. The total-goals markets shaped like the
+>   props (team totals, period totals, alternates) have no stored price.
 > - **Player prop prices are collected from 2026-10-01**: an opening and a
 >   closing snapshot per game, six markets, ten books
 >   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step
 >   `nhl-prop-odds`, kill switch `RUN_NHL_PROP_ODDS=0`). Measured on the live
->   endpoint: 5 credits a game per snapshot. No NHL prop model exists yet.
+>   endpoint: 5 credits a game per snapshot. Four of the six markets now have a
+>   model; points and anytime scorer do not.
 > - A returning starter is now matched to his own history before his first
 >   game of the season (`GoalieBook.player_named`); until 2026-10-01, 28 of 32
 >   probable starters carried the league-average line.
-> - `nhl_over_under` and `nhl_puckline` are still untrained; their stated
->   blocker (no historical lines) ended 2026-09-21.
+> - `nhl_puckline` is still untrained; its stated blocker (no historical
+>   lines) ended 2026-09-21. `nhl_over_under` is untrained because four rounds
+>   found nothing to train toward (above).
 > - The month's odds-feed allowance ran out on 2026-09-26 and reset on 10-01
 >   (mike: it refreshes every month; nothing to diagnose). No NHL price was
 >   stored between 09-26 22:59Z and 10-01 00:02Z, so opening night has no
