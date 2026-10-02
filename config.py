@@ -1940,15 +1940,19 @@ MODEL_OWN_EV_FLOOR: dict = {
     "nhl_puckline":              0.20,   # n=0, no written bet
     # Its own sweep, not a written record: 0.10 is the cut the three priced
     # seasons were graded at (ACTION_THRESHOLDS has the neighbourhood).
-    "nhl_prop_blocked_shots":    0.10,
-    # Each on its own sweep (ACTION_THRESHOLDS has the three neighbourhoods).
-    # 0.10 sits inside each model's own range where every season is positive
-    # and the interval is clear of zero: saves 0.08-0.20, shots on goal
-    # 0.10-0.20 (0.03-0.08 are positive too, with the last season under 2%),
-    # assists 0.08-0.20.
-    "nhl_prop_saves":            0.10,
-    "nhl_prop_shots_on_goal":    0.10,
-    "nhl_prop_assists":          0.10,
+    # mike, 2026-10-02: one NHL prop bet a game across all four prop models,
+    # "the best of the best" (scripts/nhl_props_card.one_per_game). Graded
+    # together on three priced seasons (scripts/nhl_prop_combined_cap.py), one
+    # a game, every floor the same: 0.14 +12.2% (2,479), 0.16 +16.0% (2,040),
+    # 0.18 +16.2% (1,659), 0.20 +19.1% (1,325), 0.22 +19.2% (1,034) -- every
+    # season positive across that range. 0.18 is its middle. Each model's own
+    # sweep at 0.18 (the others at 0.10): shots +18.8% (570), saves +16.7%
+    # (623), assists +26.2% (131), blocked shots +7.2% (335; flat at every cut).
+    # Chosen on the same seasons it is graded on.
+    "nhl_prop_blocked_shots":    0.18,
+    "nhl_prop_saves":            0.18,
+    "nhl_prop_shots_on_goal":    0.18,
+    "nhl_prop_assists":          0.18,
     "ufc_moneyline":             0.13,   # n=5, min written EV +0.131
     "ufc_total_rounds":          0.15,   # n=8, min written EV +0.150
     "wnba_moneyline":            0.06,   # n=31, min written EV +0.069
