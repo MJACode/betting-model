@@ -316,7 +316,7 @@ def render(spec: np_.Spec, n_scored: int, rows: list[dict], skipped: list[str]) 
 
 
 def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
-                 artifact: dict | None = None) -> dict:
+                 artifact: dict | None = None, log_cache: dict | None = None) -> dict:
     """One market's card: the model's mean for each priced player, the picks that clear, who was skipped."""
     out = {"priced": 0, "mus": pd.DataFrame(), "quotes": pd.DataFrame(), "rows": [], "skipped": []}
     quotes = latest_quotes(conn, games, spec.market)
@@ -337,8 +337,8 @@ def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
     cand = candidates(conn, spec.kind, teams, [season, season - 1])
     named = cand[cand.pkey.isin({np_.name_key(p) for p in quotes.player})]
     cols = list(np_.GOALIE_COLS if spec.kind == "goalie" else np_.SKATER_COLS)
-    pl = (np_.load_players(conn, spec.kind, sorted(named.player_id.unique())) if len(named)
-          else pd.DataFrame(columns=cols))
+    pl = (np_.load_players(conn, spec.kind, sorted(named.player_id.unique()), cache=log_cache)
+          if len(named) else pd.DataFrame(columns=cols))
     # Strictly before tonight. Nothing is logged for a game that has not been
     # played, but a replay of a past slate would otherwise read it.
     pl = pl[pl.game_date.astype(str) < game_date]
@@ -383,13 +383,18 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     game_date = game_date or now.astimezone(ET).strftime("%Y-%m-%d")
     out: dict = {"date": game_date}
     conn = get_connection()
+    # One log cache for the card. Shots and assists price overlapping skaters;
+    # the shots load is what statement_timeout cancelled on 2026-10-02, and
+    # assists must not read those players again.
+    log_cache: dict = {}
     try:
         games = slate(conn, game_date, now)
         for spec in np_.LIVE:
             if only and spec.model_id != only:
                 continue
             try:
-                r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id))
+                r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id),
+                                 log_cache=log_cache)
                 published = publish(conn, r["rows"]) if (do_publish and r["rows"]) else 0
                 if published:
                     logger.info(f"nhl-props-card: {spec.model_id} published {published} new pick(s) "
