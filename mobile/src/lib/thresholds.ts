@@ -14,7 +14,7 @@
 
 import { decisionEdge, decisionOdds } from './decisionPrice';
 import { discordLedVisible, type DiscordPublish } from './discordPublish';
-import { todayET } from './format';
+import { parseStamp, todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
 import {
@@ -30,6 +30,7 @@ import {
   DECIDE_ON_CALIBRATED_PROB,
   PUBLISH_MAX_PRICE_GAP,
   DECIDED_ONLY_PUBLISH_WITHIN_HOURS,
+  PUBLISH_MAX_PRICE_AGE_HOURS,
 } from './thresholds.generated';
 export type { ModelThreshold } from './thresholds.generated';
 // `export { X } from` re-exports without binding X in this module, so
@@ -40,6 +41,7 @@ export {
   DECIDE_ON_CALIBRATED_PROB,
   PUBLISH_MAX_PRICE_GAP,
   DECIDED_ONLY_PUBLISH_WITHIN_HOURS,
+  PUBLISH_MAX_PRICE_AGE_HOURS,
   ACTION_THRESHOLDS,
   PAUSED_MODELS,
   PROB_ONLY_MODELS,
@@ -75,6 +77,8 @@ export type ActionFilterable = Pick<
   game_time?: string | null;
   /** ET date (YYYY-MM-DD); the window's fallback when game_time is unknown. */
   game_date?: string | null;
+  /** When the row was written, i.e. when its decision price was read. */
+  created_at?: string | null;
 };
 
 /**
@@ -348,13 +352,16 @@ function clearsCut(prob: number, edge: number, cut: Cut): boolean {
 }
 
 /**
- * THE TWO PUBLISH-TIME GUARDS — the app twin of config.price_gap_ok_sql and
+ * THE PUBLISH-TIME GUARDS — the app twin of config.price_gap_ok_sql and
  * decided_only_window_sql. Pre-game only.
  *   1. The deciding price's implied probability within PUBLISH_MAX_PRICE_GAP
  *      of DraftKings' (3101240: BetMGM +154 vs DK -125, 16pp).
  *   2. A pick that clears the cut only on the decided numbers (fails the raw
  *      cut) waits until its game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS
- *      (game_date at most tomorrow ET when the start is unknown).
+ *      (game_date at most tomorrow ET when the start is unknown)...
+ *   3. ...and its price (created_at) is at most PUBLISH_MAX_PRICE_AGE_HOURS
+ *      older than the start (than now, start unknown). Against the start so
+ *      the verdict is fixed: a posted pick never drops off the board later.
  */
 export function publishGuardsPass(p: ActionFilterable, cut: Cut, nowMs: number = Date.now()): boolean {
   if (p.is_live || isLiveModel(p.model_id)) return true;
@@ -362,13 +369,17 @@ export function publishGuardsPass(p: ActionFilterable, cut: Cut, nowMs: number =
   const dk = impliedOrNull(p.dk_implied_prob);
   if (dec != null && dk != null && Math.abs(dec - dk) > PUBLISH_MAX_PRICE_GAP + 1e-12) return false;
   if (clearsCut(Number(p.model_probability), decisionEdge(p), cut)) return true;
-  const start = p.game_time ? Date.parse(p.game_time) : NaN;
+  const priced = p.created_at ? parseStamp(p.created_at).getTime() : NaN;
+  if (Number.isNaN(priced)) return false;
+  const maxAgeMs = PUBLISH_MAX_PRICE_AGE_HOURS * 3600_000;
+  const start = p.game_time ? parseStamp(p.game_time).getTime() : NaN;
   if (!Number.isNaN(start)) {
-    return start <= nowMs + DECIDED_ONLY_PUBLISH_WITHIN_HOURS * 3600_000;
+    return start <= nowMs + DECIDED_ONLY_PUBLISH_WITHIN_HOURS * 3600_000
+      && priced >= start - maxAgeMs;
   }
   if (!p.game_date) return false;
   const tomorrow = new Date(Date.parse(`${todayET()}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
-  return p.game_date <= tomorrow;
+  return p.game_date <= tomorrow && priced >= nowMs - maxAgeMs;
 }
 
 export function passesActionFilter(p: ActionFilterable): boolean {

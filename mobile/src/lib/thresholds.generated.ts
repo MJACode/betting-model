@@ -171,6 +171,8 @@ export const DECIDE_ON_CALIBRATED_PROB = true;
 export const PUBLISH_MAX_PRICE_GAP = 0.08;
 // config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS: a decided-only pick waits until its game is this close.
 export const DECIDED_ONLY_PUBLISH_WITHIN_HOURS = 24;
+// config.PUBLISH_MAX_PRICE_AGE_HOURS: a decided-only pick's price may be at most this much older than its start.
+export const PUBLISH_MAX_PRICE_AGE_HOURS = 12;
 
 export const KELLY_MULTIPLIER = 0.1;
 export const MAX_KELLY_FRACTION = 0.05;

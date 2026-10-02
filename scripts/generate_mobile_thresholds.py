@@ -105,11 +105,13 @@ def render() -> str:
     lines.append("// config.DECIDE_ON_CALIBRATED_PROB as built. Off means every artifact model decides raw.")
     lines.append(f"export const DECIDE_ON_CALIBRATED_PROB = {'true' if config.DECIDE_ON_CALIBRATED_PROB else 'false'};")
     lines.append("")
-    # The two publish-time guards (config.publishable_cut_sql), pre-game only.
+    # The publish-time guards (config.publishable_cut_sql), pre-game only.
     lines.append("// config.PUBLISH_MAX_PRICE_GAP: max |decision implied - DK implied| to publish.")
     lines.append(f"export const PUBLISH_MAX_PRICE_GAP = {_fmt(float(config.PUBLISH_MAX_PRICE_GAP))};")
     lines.append("// config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS: a decided-only pick waits until its game is this close.")
     lines.append(f"export const DECIDED_ONLY_PUBLISH_WITHIN_HOURS = {int(config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS)};")
+    lines.append("// config.PUBLISH_MAX_PRICE_AGE_HOURS: a decided-only pick's price may be at most this much older than its start.")
+    lines.append(f"export const PUBLISH_MAX_PRICE_AGE_HOURS = {int(config.PUBLISH_MAX_PRICE_AGE_HOURS)};")
     lines.append("")
     lines.append(f"export const KELLY_MULTIPLIER = {_fmt(float(config.KELLY_MULTIPLIER))};")
     lines.append(f"export const MAX_KELLY_FRACTION = {_fmt(float(config.MAX_KELLY_FRACTION))};")

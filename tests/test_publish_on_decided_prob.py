@@ -207,12 +207,21 @@ def test_the_python_window_twin_matches_the_sql_window():
     from datetime import datetime, timezone
     now = datetime(2026, 10, 2, 20, 5, tzinfo=timezone.utc)      # 4:05 PM ET
     at = lambda s: datetime.fromisoformat(s)
-    assert config.decided_only_window_open(at("2026-10-02T22:40:00+00:00"), None, now)
-    assert config.decided_only_window_open(at("2026-10-03T20:05:00+00:00"), None, now)
-    assert not config.decided_only_window_open(at("2026-10-03T23:10:00+00:00"), None, now)
-    assert config.decided_only_window_open(None, "2026-10-03", now)
-    assert not config.decided_only_window_open(None, "2026-10-04", now)
-    assert not config.decided_only_window_open(None, None, now)
+    fresh = at("2026-10-02T20:00:00+00:00")
+    assert config.decided_only_window_open(at("2026-10-02T22:40:00+00:00"), None, fresh, now)
+    assert config.decided_only_window_open(at("2026-10-03T08:00:00+00:00"), None, fresh, now)
+    assert not config.decided_only_window_open(at("2026-10-03T23:10:00+00:00"), None, fresh, now)
+    assert config.decided_only_window_open(None, "2026-10-03", fresh, now)
+    assert not config.decided_only_window_open(None, "2026-10-04", fresh, now)
+    assert not config.decided_only_window_open(None, None, fresh, now)
+    # The price-age half (PUBLISH_MAX_PRICE_AGE_HOURS against the start).
+    tonight = at("2026-10-02T22:40:00+00:00")
+    assert not config.decided_only_window_open(
+        tonight, None, at("2026-10-01T11:24:56+00:00"), now)          # 3094775 as stored
+    assert config.decided_only_window_open(tonight, None, at("2026-10-02T11:00:00+00:00"), now)
+    assert not config.decided_only_window_open(tonight, None, at("2026-10-02T10:30:00+00:00"), now)
+    assert not config.decided_only_window_open(tonight, None, None, now)
+    assert not config.decided_only_window_open(None, "2026-10-02", at("2026-10-02T07:00:00+00:00"), now)
 
 
 def test_the_free_pick_cuts_on_the_pick_of_records_decided_numbers():
@@ -271,6 +280,9 @@ def test_the_app_applies_both_publish_guards():
     assert "if (p.is_live || isLiveModel(p.model_id)) return true;" in g
     assert "Math.abs(dec - dk) > PUBLISH_MAX_PRICE_GAP" in g
     assert "DECIDED_ONLY_PUBLISH_WITHIN_HOURS * 3600_000" in g
+    assert "PUBLISH_MAX_PRICE_AGE_HOURS * 3600_000" in g
+    assert "priced >= start - maxAgeMs" in g and "priced >= nowMs - maxAgeMs" in g
+    assert "if (Number.isNaN(priced)) return false;" in g
 
 
 def test_custom_models_compare_the_decided_numbers():
@@ -297,46 +309,59 @@ def test_the_generated_raw_decider_list_is_configs():
     assert f"export const PUBLISH_MAX_PRICE_GAP = {config.PUBLISH_MAX_PRICE_GAP:g};" in GENERATED_TS
     assert (f"export const DECIDED_ONLY_PUBLISH_WITHIN_HOURS = "
             f"{int(config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS)};") in GENERATED_TS
+    assert (f"export const PUBLISH_MAX_PRICE_AGE_HOURS = "
+            f"{int(config.PUBLISH_MAX_PRICE_AGE_HOURS)};") in GENERATED_TS
 
 
 def test_the_app_query_fetches_the_columns_the_helper_reads():
     q = (ROOT / "mobile" / "src" / "lib" / "queries.ts").read_text(encoding="utf-8")
     cols = q[q.index("const PICK_COLUMNS"):q.index("const SETTLED_PICK_COLUMNS")]
     for c in ("model_probability_cal", "decision_implied_prob", "dk_implied_prob",
-              "decision_edge", "game_time", "game_date", "is_live"):
+              "decision_edge", "game_time", "game_date", "is_live", "created_at"):
         assert c in cols, c
 
 
 # ── the publish-time guards (reviewer, 2026-10-02) ───────────────────────────
 
+FRESH = "2026-10-02T20:00:00+00:00"          # priced 5 minutes before NOW below
+
+
 def _publishable(row: dict, cut: dict, *, start: str | None, horizon: str,
-                 tomorrow: str = "2026-10-03") -> bool:
+                 tomorrow: str = "2026-10-03",
+                 now: str = "2026-10-02T20:05:00+00:00") -> bool:
     """Evaluate config.publishable_cut_sql over one row in SQLite.
 
-    NOW()/INTERVAL/to_char are Postgres; they are swapped for the literal
-    horizon (now + 24h, ISO) and tomorrow's ET date the clause computes."""
+    NOW()/INTERVAL/to_char/::timestamptz are Postgres; they are swapped for the
+    literal horizon (now + 24h, ISO), tomorrow's ET date the clause computes,
+    and julianday() arithmetic for the price-age bound. A row with no
+    created_at given is priced at FRESH."""
     db = sqlite3.connect(":memory:")
     cols = ["model_id", "model_probability", "model_probability_cal", "edge",
             "decision_edge", "decision_implied_prob", "dk_implied_prob",
-            "is_live", "game_date"]
+            "is_live", "game_date", "created_at"]
     db.execute(f"CREATE TABLE p ({', '.join(cols)})")
     db.execute("CREATE TABLE t (min_prob, min_edge, prob_only)")
     db.execute("CREATE TABLE g (commence_time)")
-    row = {"is_live": 0, "game_date": "2026-10-03", **row}
+    row = {"is_live": 0, "game_date": "2026-10-03", "created_at": FRESH, **row}
     db.execute(f"INSERT INTO p VALUES ({', '.join('?' for _ in cols)})",
                [row.get(c) for c in cols])
     db.execute("INSERT INTO t VALUES (?, ?, ?)",
                (cut["min_prob"], cut["min_edge"], cut["prob_only"]))
     db.execute("INSERT INTO g VALUES (?)", (start,))
     h = int(config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS)
+    a = int(config.PUBLISH_MAX_PRICE_AGE_HOURS)
     sql = (config.publishable_cut_sql("p", "t")
            .replace("prob_only = TRUE", "prob_only = 1")
            .replace("p.is_live = FALSE", "p.is_live = 0")
            .replace(f"g.commence_time::timestamptz <= NOW() + INTERVAL '{h} hours'",
                     f"g.commence_time <= '{horizon}'")
            .replace("to_char((NOW() AT TIME ZONE 'America/New_York')::date + 1, 'YYYY-MM-DD')",
-                    f"'{tomorrow}'"))
-    assert "NOW()" not in sql
+                    f"'{tomorrow}'")
+           .replace(f"p.created_at::timestamptz >= g.commence_time::timestamptz - INTERVAL '{a} hours'",
+                    f"julianday(p.created_at) >= julianday(g.commence_time) - {a}/24.0")
+           .replace(f"p.created_at::timestamptz >= NOW() - INTERVAL '{a} hours'",
+                    f"julianday(p.created_at) >= julianday('{now}') - {a}/24.0"))
+    assert "NOW()" not in sql and "::timestamptz" not in sql
     return bool(db.execute(f"SELECT {sql} FROM p, t, g").fetchone()[0])
 
 
@@ -389,6 +414,67 @@ def test_the_guards_are_pre_game_only():
                 model_probability_cal=0.47)
     assert _publishable(live, dict(min_prob=0.40, min_edge=0.05, prob_only=0),
                         start="2026-10-09T00:00:00+00:00", horizon=NOW_PLUS_24)
+
+
+# ── the price-age bound (review round 2) ─────────────────────────────────────
+
+TONIGHT = "2026-10-02T22:40:00+00:00"        # 3094775, 6:40 PM ET
+
+
+def test_a_decided_only_pick_priced_too_long_before_its_start_never_publishes():
+    """3094775 as stored: priced 2026-10-01 11:24Z, 35.3h before the puck drop.
+    No re-pricing exists, so the window alone would post that price."""
+    stored = dict(NYR, created_at="2026-10-01T11:24:56+00:00")
+    assert not _publishable(stored, NHL_REG_CUT, start=TONIGHT, horizon=NOW_PLUS_24)
+    # 11h40m before the start passes; 12h10m does not.
+    assert _publishable(dict(NYR, created_at="2026-10-02T11:00:00+00:00"), NHL_REG_CUT,
+                        start=TONIGHT, horizon=NOW_PLUS_24)
+    assert not _publishable(dict(NYR, created_at="2026-10-02T10:30:00+00:00"), NHL_REG_CUT,
+                            start=TONIGHT, horizon=NOW_PLUS_24)
+    # An unknown price time is never fresh.
+    assert not _publishable(dict(NYR, created_at=None), NHL_REG_CUT,
+                            start=TONIGHT, horizon=NOW_PLUS_24)
+
+
+def test_the_age_verdict_is_fixed_against_the_start_not_now():
+    """Measured against the START, so a decided-only pick the app shows and
+    Discord posted does not drop off the board as the clock runs."""
+    row = dict(NYR, created_at="2026-10-02T11:00:00+00:00")
+    for now in ("2026-10-02T12:00:00+00:00", "2026-10-02T20:05:00+00:00",
+                "2026-10-02T22:39:00+00:00"):
+        assert _publishable(row, NHL_REG_CUT, start=TONIGHT, horizon=NOW_PLUS_24, now=now)
+
+
+def test_with_no_start_the_age_is_measured_against_now():
+    nodate = dict(NYR, game_date="2026-10-02")
+    assert _publishable(dict(nodate, created_at="2026-10-02T09:00:00+00:00"), NHL_REG_CUT,
+                        start=None, horizon=NOW_PLUS_24)
+    assert not _publishable(dict(nodate, created_at="2026-10-02T07:00:00+00:00"), NHL_REG_CUT,
+                            start=None, horizon=NOW_PLUS_24)
+
+
+def test_the_price_age_bound_leaves_raw_passes_and_live_rows_alone():
+    old = "2026-09-28T00:00:00+00:00"
+    raw_ok = dict(NYR, model_probability=0.46, decision_edge=0.0864, created_at=old)
+    assert _publishable(raw_ok, NHL_REG_CUT, start=TONIGHT, horizon=NOW_PLUS_24)
+    live = dict(NYR, model_id="ncaaf_live_win_prob", is_live=1, created_at=old,
+                model_probability_cal=0.47, dk_implied_prob=0.40)
+    assert _publishable(live, dict(min_prob=0.40, min_edge=0.05, prob_only=0),
+                        start=TONIGHT, horizon=NOW_PLUS_24)
+
+
+def test_signal_delivery_applies_the_price_age_bound():
+    """The health check's Python window gets the row's created_at, so a
+    decided-only pick the publishers refuse for its age is not an undelivered
+    signal (CRIT)."""
+    src = inspect.getsource(sh)
+    assert "config.decided_only_window_open(\n                        _parse_ts(commence), game_date, _parse_ts(created_at))" in src
+
+
+def test_the_price_age_bound_is_the_measured_one():
+    """Measured 2026-10-02 over 621 posted pre-game BETs, post time minus the bet
+    of record's created_at: p99 10.4h, max 22.7h, 2 over 12h, 0 over 24h."""
+    assert config.PUBLISH_MAX_PRICE_AGE_HOURS == 12
 
 
 def test_the_gap_threshold_is_the_measured_one():

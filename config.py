@@ -2272,11 +2272,13 @@ def decided_cut_sql(alias: str = "p", thresholds: str = "t") -> str:
             f"\n                    OR {decided_edge_sql(alias)} >= COALESCE({t}.min_edge, 0)))")
 
 
-# ── Two guards on PUBLISHING (not on the record) ─────────────────────────────
+# ── Guards on PUBLISHING (not on the record) ─────────────────────────────────
 # PRE-GAME ONLY. In-play rows (is_live, or a *_live_* lane) are exempt from
 # both: an in-play quote moves in seconds, so a decision book several points
 # off DraftKings is ordinary there (ncaaf_live_win_prob decides a mean 6.2pp
 # off DK by design), and an in-play pick is by definition near its game.
+# Guards 2 and 3 apply only to a pick that clears the cut on the decided
+# numbers but not on the raw ones; both live in decided_only_window_sql.
 #
 # 1. PRICE-GAP GUARD. The stale-line cap (MAX_EDGE_CAP) is measured at
 #    DraftKings, so a deciding quote at another book that is stale or on the
@@ -2298,11 +2300,35 @@ PUBLISH_MAX_PRICE_GAP: float = 0.08
 #    pass after the switch would otherwise post all of them at once, at prices
 #    one to six days old. Nothing re-prices a pick at post time
 #    (discord_notifier.publish_price reads the bet of record's stored
-#    best/DK odds), so the window bounds how stale an announced price can be.
+#    best/DK odds); the window alone bounds WHEN it posts, guard 3 bounds how
+#    old its price can be.
 #    A pick that passes raw keeps today's behaviour (no window). A decided-only
 #    pick with no known start time is held to its game_date being at most
 #    tomorrow (ET).
 DECIDED_ONLY_PUBLISH_WITHIN_HOURS: int = 24
+
+# 3. DECIDED-ONLY PRICE AGE (review round 2). The window above bounds WHEN a
+#    decided-only pick is announced, not how old its price is: a BET row is
+#    written once (scorer._insert_picks, ON CONFLICT DO NOTHING) and never
+#    re-priced, so 3094775 NYR Reg, priced 2026-10-01 11:24Z, would have
+#    posted about 33h later at that price. A decided-only pick publishes only
+#    when its decision price -- the row's own created_at, stamped by the pass
+#    that read those odds (run_time is NULL on these rows) -- is at most
+#    PUBLISH_MAX_PRICE_AGE_HOURS older than its game's START. Measured against
+#    the start rather than NOW so the verdict never changes over time: a pick
+#    the app shows does not vanish from it after Discord posted it, and since
+#    every post is before the start, the price at post is younger than this
+#    bound. With no known start, the age is measured against NOW.
+#    Value from every pre-game BET ever posted to Discord (621, 2026-08-23..
+#    10-02), price age = post time minus the bet of record's created_at:
+#    median 0.01h, p90 0.07h, p95 1.2h, p99 10.4h, max 22.7h; 15 were over 6h,
+#    2 over 12h (both late deliveries), 0 over 24h. 12h is above the p99 of
+#    what has actually been published, so a decided-only pick is held to the
+#    freshness 99.7% of published picks already had. Picks that pass the raw
+#    cut are unaffected (today's behaviour). Nothing re-prices: a decided-only
+#    pick first written earlier than this before its start never publishes
+#    (re-pricing is the follow-up, docs/followups.md).
+PUBLISH_MAX_PRICE_AGE_HOURS: int = 12
 
 
 def _pregame_sql(alias: str) -> str:
@@ -2321,24 +2347,40 @@ def price_gap_ok_sql(alias: str = "p") -> str:
 
 def decided_only_window_sql(alias: str = "p", thresholds: str = "t",
                             commence: str = "g.commence_time") -> str:
-    """SQL: passes raw, or its game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS."""
+    """SQL: passes raw, or (decided-only) its game starts within
+    DECIDED_ONLY_PUBLISH_WITHIN_HOURS AND its decision price is at most
+    PUBLISH_MAX_PRICE_AGE_HOURS older than the start (than NOW, start unknown)."""
     h = int(DECIDED_ONLY_PUBLISH_WITHIN_HOURS)
+    a = int(PUBLISH_MAX_PRICE_AGE_HOURS)
     return (f"(NOT {_pregame_sql(alias)}"
             f"\n               OR {raw_cut_sql(alias, thresholds)}"
             f"\n               OR ({commence} IS NOT NULL"
-            f" AND {commence}::timestamptz <= NOW() + INTERVAL '{h} hours')"
+            f" AND {commence}::timestamptz <= NOW() + INTERVAL '{h} hours'"
+            f" AND {alias}.created_at IS NOT NULL"
+            f" AND {alias}.created_at::timestamptz >= {commence}::timestamptz - INTERVAL '{a} hours')"
             f"\n               OR ({commence} IS NULL"
-            f" AND {alias}.game_date <= to_char((NOW() AT TIME ZONE 'America/New_York')::date + 1, 'YYYY-MM-DD')))")
+            f" AND {alias}.game_date <= to_char((NOW() AT TIME ZONE 'America/New_York')::date + 1, 'YYYY-MM-DD')"
+            f" AND {alias}.created_at IS NOT NULL"
+            f" AND {alias}.created_at::timestamptz >= NOW() - INTERVAL '{a} hours'))")
 
 
-def decided_only_window_open(commence, game_date, now=None) -> bool:
-    """Python twin of the decided-only half of decided_only_window_sql: the
-    game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS (`commence` an aware
-    datetime), or, with no start time, its game_date is at most tomorrow ET."""
+def decided_only_window_open(commence, game_date, priced_at, now=None) -> bool:
+    """Python twin of the decided-only half of decided_only_window_sql.
+
+    `commence` and `priced_at` (the row's created_at) are aware datetimes or
+    None. Open when the game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS
+    (no start: game_date at most tomorrow ET) AND the price is at most
+    PUBLISH_MAX_PRICE_AGE_HOURS older than the start (no start: than now).
+    An unknown price time is never fresh.
+    """
     from datetime import datetime, timedelta, timezone
     now = now or datetime.now(timezone.utc)
+    if priced_at is None:
+        return False
+    age = timedelta(hours=PUBLISH_MAX_PRICE_AGE_HOURS)
     if commence is not None:
-        return commence <= now + timedelta(hours=DECIDED_ONLY_PUBLISH_WITHIN_HOURS)
+        return (commence <= now + timedelta(hours=DECIDED_ONLY_PUBLISH_WITHIN_HOURS)
+                and priced_at >= commence - age)
     if not game_date:
         return False
     try:
@@ -2347,12 +2389,13 @@ def decided_only_window_open(commence, game_date, now=None) -> bool:
                     + timedelta(days=1)).isoformat()
     except Exception:  # noqa: BLE001
         tomorrow = (now.date() + timedelta(days=1)).isoformat()
-    return str(game_date)[:10] <= tomorrow
+    return str(game_date)[:10] <= tomorrow and priced_at >= now - age
 
 
 def publishable_cut_sql(alias: str = "p", thresholds: str = "t",
                         commence: str = "g.commence_time") -> str:
-    """SQL: what every PUBLISHER applies -- the decided cut and both guards.
+    """SQL: what every PUBLISHER applies -- the decided cut and the guards
+    (price gap; decided-only 24h window and price age).
 
     Discord (new / locked / stale-pause probe), push and the signal_delivery
     health check. The app twin is passesActionFilter (lib/thresholds.ts).

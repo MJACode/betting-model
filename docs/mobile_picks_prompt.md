@@ -134,7 +134,8 @@ When I ask "what are today's picks?" or similar:
      -- somebody had to paste a fresh block into the project instructions.
      AND t.paused = FALSE
      -- The cut on the numbers the scorer DECIDED on, plus the publish-time
-     -- price-gap and decided-only 24h guards (config.publishable_cut_sql):
+     -- price-gap guard and the decided-only 24h window and 12h price-age
+     -- bound (config.publishable_cut_sql):
      -- the same clause Discord, push and the app apply. Generated text.
      AND (((CASE WHEN p.model_id IN ('mlb_spread_market', 'mlb_total_market', 'mlb_total_public_fade', 'nfl_live_prop', 'nfl_opener_spread', 'nfl_prop_market', 'nfl_wind_totals', 'nhl_prop_assists', 'nhl_prop_blocked_shots', 'nhl_prop_saves', 'nhl_prop_shots_on_goal', 'wnba_prop_market') THEN p.model_probability ELSE COALESCE(p.model_probability_cal, p.model_probability) END) >= t.min_prob
           AND (t.prob_only = TRUE
@@ -144,8 +145,8 @@ When I ask "what are today's picks?" or similar:
           OR (p.model_probability >= t.min_prob
           AND (t.prob_only = TRUE
                OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)))
-          OR (g.commence_time IS NOT NULL AND g.commence_time::timestamptz <= NOW() + INTERVAL '24 hours')
-          OR (g.commence_time IS NULL AND p.game_date <= to_char((NOW() AT TIME ZONE 'America/New_York')::date + 1, 'YYYY-MM-DD'))))
+          OR (g.commence_time IS NOT NULL AND g.commence_time::timestamptz <= NOW() + INTERVAL '24 hours' AND p.created_at IS NOT NULL AND p.created_at::timestamptz >= g.commence_time::timestamptz - INTERVAL '12 hours')
+          OR (g.commence_time IS NULL AND p.game_date <= to_char((NOW() AT TIME ZONE 'America/New_York')::date + 1, 'YYYY-MM-DD') AND p.created_at IS NOT NULL AND p.created_at::timestamptz >= NOW() - INTERVAL '12 hours')))
      AND (t.min_odds IS NULL
           OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
           OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)

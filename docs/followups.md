@@ -48,8 +48,20 @@ views get a registered, unapplied migration. Still open, for Michael:
   the 3-way calibration (every regulation pick in the 10-02 burst drops; the
   2-way moneyline picks are unaffected). Per-pick table in #865.
 - [follow-up] Nothing re-prices a pick at post time: `publish_price` posts the
-  bet of record's stored price. The 24h window bounds the staleness; a
-  re-price-before-post step is the real fix.
+  bet of record's stored price, and a BET row is never re-written. Round 2
+  bounds the age instead (below); a re-price-before-post step is the real fix,
+  and the only way decided-only NHL picks written a day or more ahead can ever
+  publish.
+
+**2026-10-02, review round 2 (#865).** The 24h window bounds WHEN a
+decided-only pick posts, not how old its price is (3094775 was priced 35h
+before its start). Added `PUBLISH_MAX_PRICE_AGE_HOURS` (12), inside
+`decided_only_window_sql` / `decided_only_window_open` / `publishGuardsPass`:
+a decided-only pick publishes only if its price (`created_at`) is at most 12h
+older than its game's start (than NOW with no start). Past posts: price age at
+post p99 10.4h, max 22.7h over 621. Effect: of the 18 decided-only NHL BETs
+since 2026-09-22, 0 were priced within 12h of the start (2 within 24h), so
+until re-pricing exists the decided-only path posts very little NHL.
 
 Found 2026-10-01 through the NHL picks. The scorer decides on the corrected
 probability (`models.scorer._decide`); the app, Discord and push filter on

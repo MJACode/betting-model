@@ -11,11 +11,15 @@
  * And the two publish-time guards (config.publishable_cut_sql): a decided-only
  * pick waits until its game is within DECIDED_ONLY_PUBLISH_WITHIN_HOURS, and a
  * deciding price more than PUBLISH_MAX_PRICE_GAP from DraftKings' is refused
- * (3101240 FLA ML, BetMGM +154 vs DK -125). Both pre-game only.
+ * (3101240 FLA ML, BetMGM +154 vs DK -125). And a decided-only pick whose
+ * price (created_at) is more than PUBLISH_MAX_PRICE_AGE_HOURS older than its
+ * start is refused (3094775 as stored: priced 35h before the puck drop).
+ * All pre-game only.
  */
 
 import {
   DECIDES_ON_RAW_MODELS,
+  PUBLISH_MAX_PRICE_AGE_HOURS,
   decidedNumbers,
   decidesOnCalibrated,
   decisionSource,
@@ -46,6 +50,8 @@ const nyr: ActionFilterable = {
   game_time: new Date(Date.now() + 3 * 3600_000).toISOString(),
   game_date: null,
   is_live: false,
+  // Priced an hour ago: fresh.
+  created_at: new Date(Date.now() - 1 * 3600_000).toISOString(),
 };
 
 const d = decidedNumbers(nyr);
@@ -77,23 +83,46 @@ check('a raw pass 72h out still shows', passesActionFilter({ ...far, model_proba
   model_probability: 0.4638, decision_edge: 0.0864 }));
 const cut = { min_prob: 0.40, min_edge: 0.05, prob_only: false };
 const now = Date.parse('2026-10-02T20:05:00Z');
+const freshAt = '2026-10-02 20:00:00.000000+00';   // the pipeline's TEXT shape
 check('window: 6:40 PM ET start is open at 4:05 PM ET',
-  publishGuardsPass({ ...nyr, game_time: '2026-10-02T22:40:00+00:00' }, cut, now));
+  publishGuardsPass({ ...nyr, game_time: '2026-10-02T22:40:00+00:00', created_at: freshAt }, cut, now));
 check('window: 10/3 7:10 PM ET start is closed at 4:05 PM ET',
-  !publishGuardsPass({ ...nyr, game_time: '2026-10-03T23:10:00+00:00' }, cut, now));
+  !publishGuardsPass({ ...nyr, game_time: '2026-10-03T23:10:00+00:00', created_at: freshAt }, cut, now));
+// ── price age ───────────────────────────────────────────────────────────────
+check('max price age is 12h', PUBLISH_MAX_PRICE_AGE_HOURS === 12);
+const tonight = '2026-10-02T22:40:00+00:00';
+check('3094775 as stored (priced 35h before start) is refused',
+  !publishGuardsPass({ ...nyr, game_time: tonight, created_at: '2026-10-01 11:24:56.056539+00' }, cut, now));
+check('priced 11h40m before start passes',
+  publishGuardsPass({ ...nyr, game_time: tonight, created_at: '2026-10-02 11:00:00+00' }, cut, now));
+check('priced 12h10m before start is refused',
+  !publishGuardsPass({ ...nyr, game_time: tonight, created_at: '2026-10-02 10:30:00+00' }, cut, now));
+check('the age verdict does not change as the start approaches',
+  publishGuardsPass({ ...nyr, game_time: tonight, created_at: '2026-10-02 11:00:00+00' }, cut,
+    Date.parse('2026-10-02T22:39:00Z')));
+check('no price time: a decided-only pick is refused',
+  !publishGuardsPass({ ...nyr, game_time: tonight, created_at: null }, cut, now));
+check('a raw pass with an old price keeps today\'s behaviour',
+  publishGuardsPass({ ...nyr, model_probability: 0.4638, decision_edge: 0.0864,
+    game_time: tonight, created_at: '2026-09-28 00:00:00+00' }, cut, now));
+check('unknown start: age measured against now',
+  publishGuardsPass({ ...nyr, game_time: null, game_date: '2026-10-02', created_at: freshAt }, cut, now)
+  && !publishGuardsPass({ ...nyr, game_time: null, game_date: '2026-10-02',
+    created_at: '2026-10-02 07:00:00+00' }, cut, now));
 const fla: ActionFilterable = {
   model_id: 'nhl_moneyline', model_probability: 0.4998, model_probability_cal: 0.5644,
   edge: -0.0558, decision_edge: 0.1061, decision_odds: 154, decision_implied_prob: 0.3937,
   dk_implied_prob: 0.5556, dk_odds: -125, signal_type: 'BET', condition_status: null,
   game_time: new Date(Date.now() + 3 * 3600_000).toISOString(), is_live: false,
+  created_at: new Date(Date.now() - 3600_000).toISOString(),
 };
 check('3101240: 16pp price gap is refused', !passesActionFilter(fla));
 check('a 7.56pp best-price gap passes', passesActionFilter({ ...fla, decision_implied_prob: 0.48 }));
 check('no DK price (0.0): the gap guard passes',
   publishGuardsPass({ ...fla, dk_implied_prob: 0 }, { min_prob: 0.55, min_edge: 0.05, prob_only: false }));
 const live = { ...fla, model_id: 'ncaaf_live_win_prob', is_live: true,
-  game_time: new Date(Date.now() + 96 * 3600_000).toISOString() };
-check('live rows skip both guards', publishGuardsPass(live, cut));
+  game_time: new Date(Date.now() + 96 * 3600_000).toISOString(), created_at: '2026-09-01 00:00:00+00' };
+check('live rows skip every guard', publishGuardsPass(live, cut));
 
 // ── who decides on what ─────────────────────────────────────────────────────
 check('ncaaf_live decides calibrated at DK', decisionSource('ncaaf_live_win_prob') === 'calibrated_at_dk');
