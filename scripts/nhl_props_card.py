@@ -28,6 +28,15 @@ Deliberate, and load-bearing:
   appears on a later pass, nothing happens to the pick that exists. The id,
   not the name, because two books spell one player two ways.
 
+  ONE NHL PROP BET A GAME, ACROSS ALL FOUR PROP MODELS (mike, 2026-10-02:
+  "1 max ... it needs to be the best of the best"). Blocked shots, saves,
+  shots on goal and assists are pooled; the single best-EV bet in a game is
+  written, and only if no NHL prop bet exists for that game already. A game
+  whose best bet does not clear its model's floor gets none. Graded on three
+  priced seasons (scripts/nhl_prop_combined_cap.py): with every floor at 0.18,
+  +16.2% on 1,659 bets, every season positive, against +6.7% on 9,082 under
+  the old per-model rules.
+
   THE DraftKings COLUMNS MEAN DraftKings. The row is written the way the
   scorer writes a pick decided away from DraftKings (CLAUDE.md 6):
   `decision_*` carry the book, price and edge the bet was DECIDED at;
@@ -279,6 +288,55 @@ def limit_per_game(spec: np_.Spec, rows: list[dict], existing: dict[str, set[str
     return kept
 
 
+# Every NHL prop model. One bet a game is shared among all of them.
+PROP_MODEL_IDS = ("nhl_prop_blocked_shots", "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists")
+MAX_PROP_BETS_PER_GAME = 1
+
+
+def games_with_a_prop_bet(conn, game_ids: list[str]) -> set[str]:
+    """The games any NHL prop model has already written a pick for."""
+    if not game_ids:
+        return set()
+    return {r[0] for r in conn.execute(
+        "SELECT DISTINCT game_id FROM picks WHERE model_id = ANY(%s) AND game_id = ANY(%s)",
+        (list(PROP_MODEL_IDS), list(game_ids))).fetchall()}
+
+
+def one_per_game(rows: list[dict], taken: set[str] | None = None) -> list[dict]:
+    """The best-EV row in each game across every prop model, none for a game already bet. Pure."""
+    taken = taken or set()
+    left: dict[str, int] = {}
+    kept = []
+    for r in sorted(rows, key=lambda r: (-r["_ev"], r["model_id"], str(r["player_id"]))):
+        if r["game_id"] in taken:
+            continue
+        n = left.setdefault(r["game_id"], MAX_PROP_BETS_PER_GAME)
+        if n <= 0:
+            continue
+        left[r["game_id"]] = n - 1
+        kept.append(r)
+    return kept
+
+
+def publish_across_models(rows: list[dict]) -> int:
+    """Write the one bet a game the four prop models' rows allow. The only door a prop pick goes through."""
+    from scripts.nhl_prop_card import publish as publish_blocked
+    if not rows:
+        return 0
+    conn = get_connection()
+    try:
+        taken = games_with_a_prop_bet(conn, sorted({r["game_id"] for r in rows}))
+        chosen = one_per_game(rows, taken)
+        logger.info(f"nhl-props: {len(chosen)} bet(s) kept of {len(rows)} that clear "
+                    f"(one a game across all four prop models; {len(taken)} game(s) already bet)")
+        written = 0
+        for r in chosen:
+            written += (publish_blocked if r["model_id"] == "nhl_prop_blocked_shots" else publish)(conn, [r])
+        return written
+    finally:
+        conn.close()
+
+
 _COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", "pick_label",
          "model_probability", "model_probability_cal", "dk_implied_prob", "edge", "dk_odds", "scored_line",
          "kelly_fraction", "recommended_bet", "bankroll_at_pick", "signal_type", "confidence_tier",
@@ -385,23 +443,23 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
     conn = get_connection()
     try:
         games = slate(conn, game_date, now)
+        pooled: list[dict] = []
         for spec in np_.LIVE:
             if only and spec.model_id != only:
                 continue
             try:
                 r = score_market(conn, spec, games, game_date, (artifacts or {}).get(spec.model_id))
-                published = publish(conn, r["rows"]) if (do_publish and r["rows"]) else 0
-                if published:
-                    logger.info(f"nhl-props-card: {spec.model_id} published {published} new pick(s) "
-                                f"of {len(r['rows'])} that clear")
+                pooled += r["rows"]
                 out[spec.model_id] = {"priced": r["priced"], "scored": len(r["mus"]), "bets": len(r["rows"]),
-                                      "published": published, "skipped": len(r["skipped"])}
+                                      "skipped": len(r["skipped"])}
                 if keep is not None:
                     keep[spec.model_id] = r
             except Exception as exc:
                 conn.rollback()
                 logger.error(f"nhl-props-card: {spec.model_id} failed: {exc}")
                 out[spec.model_id] = {"error": str(exc)}
+        # Pooled, then one a game: the best bet across the markets, not the first market's.
+        out["published"] = publish_across_models(pooled) if (do_publish and pooled) else 0
         return out
     finally:
         conn.close()
