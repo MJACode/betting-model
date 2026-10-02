@@ -1745,11 +1745,6 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             bookmaker = _book_from_label(pick_label)
             if not prop_market:
                 continue                 # no market on the row, nothing to close
-        elif model_id.startswith("nhl_prop_"):
-            # Priced at the best book on offer, named in the label the same
-            # way ("... Under 2.5 Shots on Goal (MGM)"): the close is read at
-            # that book, not at DraftKings.
-            bookmaker = _book_from_label(pick_label)
         if prop_market:
             # player_prop_odds keys on the book's name string, so the name is
             # recovered from the pick label the same way settlement does.

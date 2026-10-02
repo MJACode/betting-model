@@ -141,8 +141,20 @@ estimate until a probe measures it). Not bought: his call.
   backtest's opening weeks. The inputs check out (model mean 23.5 against 23.6
   actual on this season's first sixteen starts). Read the settled record after
   two weeks before reading anything into it.
-- **The label names an unmapped book by its raw key** ("(hardrockbet)"),
-  because that is what the closing-line lookup can read back.
+- **No closing-line value on a pick taken at a number DraftKings does not
+  hang.** The capture needs a DraftKings price on the row (`dk_odds IS NOT
+  NULL`), as it does for every scorer prop off DraftKings' line. Picks at a
+  line DraftKings also quotes are measured, from DraftKings' price.
+- **`tracking/pick_integrity.py` has no NHL stat names**, so it cannot refuse
+  a saves label on a shots pick the way it does for NFL. It is the shared
+  publishing check: an alias as short as "assists" needs its own test against
+  the NFL and NBA labels before it goes in.
+- **The betslip mislabels the two market-relative cards' legs** (found by the
+  UX review of this change, not caused by it): `nfl_prop_market` and
+  `wnba_prop_market` store the soft book's price in `dk_odds`, and
+  `mobile/src/lib/parlay.ts` `legFromPick` calls any non-null `dk_odds`
+  DraftKings'. Either move those cards to the `decision_*` / `line_book` shape
+  these NHL cards use, or key the leg on `clvLockBook`.
 - A correction fitted on each model's own bets once it has about 150.
 - Points and anytime scorer have prices and no model.
 

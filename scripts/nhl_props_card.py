@@ -28,6 +28,15 @@ Deliberate, and load-bearing:
   appears on a later pass, nothing happens to the pick that exists. The id,
   not the name, because two books spell one player two ways.
 
+  THE DraftKings COLUMNS MEAN DraftKings. The row is written the way the
+  scorer writes a pick decided away from DraftKings (CLAUDE.md 6):
+  `decision_*` carry the book, price and edge the bet was DECIDED at;
+  `dk_odds` / `dk_implied_prob` / `edge` carry DraftKings' own number for the
+  same line when it quoted one, and are empty when it did not, in which case
+  `line_book` names whose line it is. The betslip, the all-books card, Discord
+  and the closing-line capture already read rows of that shape; a row with
+  another book's price in `dk_odds` is one the betslip would call DraftKings'.
+
   A GOALIE A BOOK PRICES IS TAKEN AS STARTING. That is the bet: the books void
   saves when he does not start, and settlement does the same.
 
@@ -52,8 +61,7 @@ import config  # noqa: E402
 import models.nhl_props as np_  # noqa: E402
 from data.db import get_connection  # noqa: E402
 from data.season_labels import nhl_season_label  # noqa: E402
-from scripts.nfl_prop_market_card import _BOOK  # noqa: E402  (the label tags the close is read back through)
-from scripts.nhl_prop_card import _COLS, _INSERT, COHERENT_SUM, ET, _utc, slate  # noqa: E402
+from scripts.nhl_prop_card import COHERENT_SUM, ET, _utc, slate  # noqa: E402
 
 QUOTE_COLS = ["game_id", "player", "book", "line", "over", "under", "snap", "over_link", "under_link"]
 
@@ -168,6 +176,17 @@ def best_bet(spec: np_.Spec, mu: float, quotes: pd.DataFrame, dispersion: float)
     return best
 
 
+def draftkings_at(quotes: pd.DataFrame, line: float, side: str) -> dict | None:
+    """DraftKings' own quote for this player at THIS line and side, or None when it has none.
+
+    A DraftKings quote at a different number is not a price for this bet.
+    """
+    dk = quotes[(quotes.book == np_.BOOK) & (quotes.line == line)]
+    if dk.empty or pd.isna(dk[side].iloc[0]):
+        return None
+    return {"price": float(dk[side].iloc[0]), "link": dk[f"{side}_link"].iloc[0], "player": dk.player.iloc[0]}
+
+
 def pick_rows(spec: np_.Spec, mus: pd.DataFrame, priced: pd.DataFrame, games: dict[str, dict],
               game_date: str, bankroll: float, dispersion: float) -> list[dict]:
     """Model means + priced quotes -> one picks row per player that clears. Pure, so it is testable."""
@@ -180,28 +199,54 @@ def pick_rows(spec: np_.Spec, mus: pd.DataFrame, priced: pd.DataFrame, games: di
         g = games[m.game_id]
         side = "Over" if d["side"] == "over" else "Under"
         implied = np_.implied(d["price"])
-        tag = _BOOK.get(d["book"], d["book"])
+        dk = draftkings_at(q, d["line"], d["side"])
+        dk_implied = np_.implied(dk["price"]) if dk else None
+        elsewhere = d["book"] != np_.BOOK
+        # The name DraftKings uses when it quoted this line (that is the name
+        # the closing-line lookup searches for), else the deciding book's.
+        name = dk["player"] if dk else d["quote_player"]
         rows.append({
             "game_id": m.game_id, "model_id": spec.model_id, "sport": "NHL",
             "game_date": game_date, "game_time": g.get("commence_time"),
             "pick_side": d["side"],
-            "pick_label": f"{d['quote_player']} {side} {d['line']:g} {spec.label} ({tag})",
+            "pick_label": f"{name} {side} {d['line']:g} {spec.label}",
             "model_probability": round(d["p"], 4),
             "model_probability_cal": round(d["cal"], 4),
-            "dk_implied_prob": round(implied, 4),
-            "edge": round(d["p"] - implied, 4),
-            "dk_odds": d["price"], "scored_line": d["line"],
+            # DraftKings' number at this line, or the NOT NULL placeholders when
+            # it has none (the scorer's convention: _make_prop_pick, line_book).
+            "dk_odds": dk["price"] if dk else None,
+            "dk_implied_prob": round(dk_implied, 4) if dk else 0.0,
+            "edge": round(d["p"] - dk_implied, 4) if dk else 0.0,
+            "dk_bet_link": dk["link"] if dk else None,
+            "line_book": None if dk else d["book"],
+            "scored_line": d["line"],
             "kelly_fraction": 0.01, "recommended_bet": round(0.01 * bankroll, 2),
             "bankroll_at_pick": bankroll, "signal_type": "BET",
             "confidence_tier": "MED",
-            "prop_market": spec.market, "player_key": d["quote_player"],
+            "prop_market": spec.market, "player_key": name,
             "player_id": str(int(m.player_id)),
-            "dk_bet_link": d["link"] if d["book"] == np_.BOOK else None,
             "decision_book": d["book"], "decision_odds": d["price"],
             "decision_implied_prob": round(implied, 4), "decision_edge": round(d["p"] - implied, 4),
+            # The better-than-DraftKings price and its betslip link, for the
+            # surfaces that publish "the best book and price".
+            "best_book": d["book"] if elsewhere else None,
+            "best_odds": d["price"] if elsewhere else None,
+            "best_implied_prob": round(implied, 4) if elsewhere else None,
+            "best_edge": round(d["p"] - implied, 4) if elsewhere else None,
+            "best_bet_link": d["link"] if elsewhere else None,
             "_ev": round(d["ev"], 4), "_mu": round(float(m.mu), 3),
         })
     return rows
+
+
+_COLS = ("game_id", "model_id", "sport", "game_date", "game_time", "pick_side", "pick_label",
+         "model_probability", "model_probability_cal", "dk_implied_prob", "edge", "dk_odds", "scored_line",
+         "kelly_fraction", "recommended_bet", "bankroll_at_pick", "signal_type", "confidence_tier",
+         "prop_market", "player_key", "player_id", "dk_bet_link", "line_book",
+         "decision_book", "decision_odds", "decision_implied_prob", "decision_edge",
+         "best_book", "best_odds", "best_implied_prob", "best_edge", "best_bet_link")
+_INSERT = (f"INSERT INTO picks ({', '.join(_COLS)}) "
+           f"VALUES ({', '.join('%(' + c + ')s' for c in _COLS)})")
 
 
 def publish(conn, rows: list[dict]) -> int:
@@ -223,8 +268,8 @@ def render(spec: np_.Spec, n_scored: int, rows: list[dict], skipped: list[str]) 
     out = [f"NHL {spec.label.lower()} card — {n_scored} priced player(s) scored, {len(rows)} bet(s), "
            f"{len(skipped)} skipped"]
     for r in sorted(rows, key=lambda x: -x["_ev"]):
-        out.append(f"  {r['pick_label']:52s} {r['dk_odds']:+5.0f}  model {r['model_probability']:.3f}  "
-                   f"mean {r['_mu']:.2f}  EV {r['_ev'] * 100:+.1f}%")
+        out.append(f"  {r['pick_label']:44s} {r['decision_odds']:+5.0f} @ {r['decision_book']:14s} "
+                   f"model {r['model_probability']:.3f}  mean {r['_mu']:.2f}  EV {r['_ev'] * 100:+.1f}%")
     for s in skipped:
         out.append(f"  skipped: {s}")
     return "\n".join(out)

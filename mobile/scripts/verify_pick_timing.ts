@@ -116,6 +116,22 @@ function mkPick(over: Partial<Pick>): Pick {
   );
   check('prop note names the lineup lock', Boolean(prop?.note.includes('lineup is confirmed')));
 
+  // The NHL prop cards post off the books' prices: no lineup was confirmed,
+  // and a saves bet is void when the goalie does not start.
+  const shots = pickTimingInfo(
+    mkPick({ model_id: 'nhl_prop_shots_on_goal', player_id: '8478498', created_at: NOW }),
+  );
+  check('NHL prop note claims no confirmed lineup', Boolean(shots && !shots.note.includes('lineup')));
+  check('NHL skater prop note has no void line', Boolean(shots && !shots.note.includes('Void')));
+  const saves = pickTimingInfo(
+    mkPick({ model_id: 'nhl_prop_saves', player_id: '8478048', created_at: NOW }),
+  );
+  check('saves note says it is void if he does not start', Boolean(saves?.note.endsWith('Void if the goalie doesn’t start.')));
+  const blocks = pickTimingInfo(
+    mkPick({ model_id: 'nhl_prop_blocked_shots', player_id: '8477488', created_at: NOW }),
+  );
+  check('blocked shots takes the NHL prop note too', Boolean(blocks && !blocks.note.includes('lineup')));
+
   const yesterday = pickTimingInfo(mkPick({ created_at: THREE_DAYS_AGO }));
   check(
     'an off-day post shows its date',

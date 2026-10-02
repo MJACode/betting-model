@@ -1369,6 +1369,23 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
     };
   }
 
+  // The NHL prop cards (scripts/nhl_prop_card.py, scripts/nhl_props_card.py)
+  // post off the books' prices, not off a confirmed lineup, so the generic
+  // prop note would claim a check that was never made. For saves it would
+  // also hide the one risk particular to the bet: the books void it when the
+  // goalie does not start, and so does settlement.
+  if (pick.model_id.startsWith('nhl_prop_')) {
+    return {
+      kind: 'posted',
+      verb: 'Posted',
+      label: `Posted ${stamp}`,
+      note:
+        'Posted once and never re-priced. This is when the bet posted, at the line and price ' +
+        'shown.' +
+        (pick.model_id === 'nhl_prop_saves' ? ' Void if the goalie doesn’t start.' : ''),
+    };
+  }
+
   return {
     kind: 'posted',
     verb: 'Posted',

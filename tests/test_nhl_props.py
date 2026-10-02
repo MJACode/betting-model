@@ -178,22 +178,35 @@ class TestTheCard:
         rows = card.pick_rows(P.SHOTS, _mus([(1, 1.6)]), q, GAMES, "2026-10-01", 1000.0, 0.0)
         assert len(rows) == 1
         r = rows[0]
-        assert (r["decision_book"], r["dk_odds"], r["pick_side"], r["scored_line"]) == ("betmgm", 120.0, "under", 2.5)
-        assert r["pick_label"] == "Skater 1 Under 2.5 Shots on Goal (MGM)"
-        assert r["dk_bet_link"] is None                       # not a DraftKings bet: no DraftKings link
+        assert (r["decision_book"], r["decision_odds"], r["pick_side"], r["scored_line"]) == (
+            "betmgm", 120.0, "under", 2.5)
+        assert r["pick_label"] == "Skater 1 Under 2.5 Shots on Goal"
         assert r["player_id"] == "1" and r["prop_market"] == "player_shots_on_goal"
+        # DraftKings quoted the same line: its columns carry ITS number, not BetMGM's.
+        assert (r["dk_odds"], r["dk_bet_link"], r["line_book"]) == (105.0, "draftkings/u", None)
+        assert r["dk_implied_prob"] == round(P.implied(105), 4)
+        assert r["edge"] == round(r["model_probability"] - P.implied(105), 4) < r["decision_edge"]
+        # and the better price travels with its own betslip link
+        assert (r["best_book"], r["best_odds"], r["best_bet_link"]) == ("betmgm", 120.0, "betmgm/u")
 
     def test_the_same_price_at_two_books_names_the_earlier_one(self):
         q = _quotes([(1, "betmgm", 2.5, -150, 120), (1, "draftkings", 2.5, -150, 120)])
         r = card.pick_rows(P.SHOTS, _mus([(1, 1.6)]), q, GAMES, "2026-10-01", 1000.0, 0.0)[0]
         assert r["decision_book"] == "draftkings" and r["dk_bet_link"] == "draftkings/u"
+        assert (r["dk_odds"], r["decision_odds"], r["best_book"], r["best_bet_link"]) == (120.0, 120.0, None, None)
 
     def test_a_higher_line_can_beat_a_better_price(self):
         """Books hang different numbers. Under 3.5 at -125 is the better bet than under 2.5 at +100."""
         q = _quotes([(1, "draftkings", 2.5, -130, 100), (1, "hardrockbet", 3.5, 100, -125)])
         r = card.pick_rows(P.SHOTS, _mus([(1, 2.2)]), q, GAMES, "2026-10-01", 1000.0, 0.0)[0]
         assert (r["decision_book"], r["scored_line"], r["pick_label"]) == (
-            "hardrockbet", 3.5, "Skater 1 Under 3.5 Shots on Goal (hardrockbet)")
+            "hardrockbet", 3.5, "Skater 1 Under 3.5 Shots on Goal")
+        # DraftKings hangs 2.5, not 3.5: it has no price for THIS bet, so its
+        # columns are empty and the row says whose line it is. Its 2.5 price in
+        # dk_odds would put a different bet's number on the betslip.
+        assert (r["dk_odds"], r["dk_bet_link"], r["line_book"]) == (None, None, "hardrockbet")
+        assert (r["dk_implied_prob"], r["edge"]) == (0.0, 0.0) and r["decision_edge"] > 0.1
+        assert (r["best_book"], r["best_bet_link"]) == ("hardrockbet", "hardrockbet/u")
 
     def test_it_never_bets_an_over_however_good_it_looks(self):
         q = _quotes([(1, "draftkings", 1.5, 150, -190)])
@@ -216,7 +229,7 @@ class TestTheCard:
         """-260 clears on EV and is under the -200 price floor; the bet is the book that is not."""
         q = _quotes([(1, "draftkings", 0.5, 200, -260), (1, "betmgm", 0.5, 170, -200)])
         r = card.pick_rows(P.ASSISTS, _mus([(1, 0.10)]), q, GAMES, "2026-10-01", 1000.0, 0.0)
-        assert [(x["decision_book"], x["dk_odds"]) for x in r] == [("betmgm", -200.0)]
+        assert [(x["decision_book"], x["decision_odds"], x["dk_odds"]) for x in r] == [("betmgm", -200.0, -260.0)]
         only_short = _quotes([(1, "draftkings", 0.5, 200, -260)])
         assert card.pick_rows(P.ASSISTS, _mus([(1, 0.10)]), only_short, GAMES, "2026-10-01", 1000.0, 0.0) == []
 
@@ -239,8 +252,13 @@ class TestTheCard:
         for r in rows:
             assert pick_problems(r["pick_label"], r["pick_side"], r["scored_line"], r["model_id"],
                                  home="NYR", away="BOS", prop_market=r["prop_market"]) == []
-            assert pt._book_from_label(r["pick_label"]) == r["decision_book"]     # the close is read at that book
+            # no book suffix: the book is on the row, and a suffix is how the
+            # closing-line capture would be told dk_odds is another book's
+            assert pt._book_from_label(r["pick_label"]) == "draftkings"
             assert pt._PICK_LABEL_RE.match(r["pick_label"]).group(1) == r["player_key"]
+            # the price every surface filters and settles on is the deciding one
+            assert (r["decision_odds"] is not None and r["decision_edge"] >= 0.0
+                    and r["decision_odds"] >= config.min_odds_for(r["model_id"]))
 
 
 class TestTheBacktestGradesTheRuleTheCardPlays:
@@ -264,7 +282,7 @@ class TestTheBacktestGradesTheRuleTheCardPlays:
         s = bt.sides(df[df.book.isin(P.books())])
         graded = bt.card(s, config.MODEL_OWN_EV_FLOOR[P.SHOTS.model_id], P.SHOTS.sides)
         want = {(r.pkey, r.book, r.line, r.price) for r in graded.itertuples()}
-        got = {(r["player_id"], r["decision_book"], r["scored_line"], r["dk_odds"]) for r in live}
+        got = {(r["player_id"], r["decision_book"], r["scored_line"], r["decision_odds"]) for r in live}
         assert got == want and 3 < len(got) < 40
         assert (s[(s.side == "under") & (s.ev >= 0.10)].price < -200).any()      # the floor had something to refuse
         assert not any(b == "fanduel" for _, b, _, _ in got)
@@ -381,13 +399,17 @@ def db():
 
 
 def _bet(c, model_id: str, player_id: str, name: str, line: float, odds: float, stat: str, market: str,
-         tag: str = "DK") -> int:
+         book: str = "draftkings") -> int:
+    """A pick as the card writes it: decided at `book`; DraftKings' columns empty when it is not DraftKings."""
+    away = book != "draftkings"
     c.execute("""INSERT INTO picks (game_id, model_id, sport, game_date, pick_side, pick_label,
                  model_probability, dk_implied_prob, edge, dk_odds, scored_line, kelly_fraction,
-                 recommended_bet, bankroll_at_pick, signal_type, prop_market, player_key, player_id)
-                 VALUES (?, ?, 'NHL', '2026-10-01', 'under', ?, 0.62, 0.4878, 0.13, ?, ?, 0.01, 10.0, 1000.0,
-                         'BET', ?, ?, ?)""",
-              (GAME, model_id, f"{name} Under {line:g} {stat} ({tag})", odds, line, market, name, player_id))
+                 recommended_bet, bankroll_at_pick, signal_type, prop_market, player_key, player_id,
+                 decision_book, decision_odds, line_book)
+                 VALUES (?, ?, 'NHL', '2026-10-01', 'under', ?, 0.62, ?, ?, ?, ?, 0.01, 10.0, 1000.0,
+                         'BET', ?, ?, ?, ?, ?, ?)""",
+              (GAME, model_id, f"{name} Under {line:g} {stat}", 0.0 if away else 0.4878, 0.0 if away else 0.13,
+               None if away else odds, line, market, name, player_id, book, odds, book if away else None))
     return c.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
@@ -416,24 +438,25 @@ class TestInsertOnce:
         or the same player spelled another way must not write him again."""
         conn = _Shim(db)
         assert card.publish(conn, [self._row()]) == 1
-        moved = self._row(decision_book="hardrockbet", dk_odds=140.0, scored_line=3.5, player_key="Mitch Marner",
-                          pick_label="Mitch Marner Under 3.5 Shots on Goal (hardrockbet)")
+        moved = self._row(decision_book="hardrockbet", decision_odds=140.0, scored_line=3.5,
+                          player_key="Mitch Marner", pick_label="Mitch Marner Under 3.5 Shots on Goal")
         assert card.publish(conn, [moved]) == 0
-        rows = db.execute("SELECT pick_label, dk_odds, scored_line FROM picks").fetchall()
-        assert rows == [("Skater 1 Under 2.5 Shots on Goal (MGM)", 120.0, 2.5)]
+        rows = db.execute("SELECT pick_label, decision_book, decision_odds, scored_line, dk_odds, line_book "
+                          "FROM picks").fetchall()
+        assert rows == [("Skater 1 Under 2.5 Shots on Goal", "betmgm", 120.0, 2.5, None, "betmgm")]
 
     def test_the_same_player_in_another_market_is_another_pick(self, db):
         conn = _Shim(db)
         assert card.publish(conn, [self._row()]) == 1
         other = self._row(model_id="nhl_prop_assists", prop_market="player_assists",
-                          pick_label="Skater 1 Under 0.5 Assists (DK)")
+                          pick_label="Skater 1 Under 0.5 Assists")
         assert card.publish(conn, [other]) == 1
 
 
 class TestSettlement:
     def test_skater_unders_grade_on_the_stat_their_market_names(self, db):
         shots = _bet(db, "nhl_prop_shots_on_goal", "8479325", "Charlie McAvoy", 2.5, 120.0, "Shots on Goal",
-                     "player_shots_on_goal", tag="MGM")
+                     "player_shots_on_goal", book="betmgm")           # no DraftKings price on the row at all
         assists = _bet(db, "nhl_prop_assists", "8479325", "Charlie McAvoy", 0.5, -150.0, "Assists", "player_assists")
         _skated(db, 8479325, "Charlie McAvoy", "BOS", shots=2, assists=1)
         pt._settle_prop_picks(_Shim(db), "2026-10-01", "TS")
@@ -442,7 +465,7 @@ class TestSettlement:
 
     def test_a_starter_is_graded_on_his_saves(self, db):
         won = _bet(db, "nhl_prop_saves", "8478048", "Igor Shesterkin", 25.5, -125.0, "Saves", "player_total_saves",
-                   tag="hardrockbet")
+                   book="hardrockbet")
         lost = _bet(db, "nhl_prop_saves", "8476883", "Jeremy Swayman", 24.5, -110.0, "Saves", "player_total_saves")
         _in_goal(db, 8478048, "Igor Shesterkin", "NYR", 1, 22)
         _in_goal(db, 8476883, "Jeremy Swayman", "BOS", 1, 31)
@@ -511,11 +534,14 @@ class TestEveryLiveModelIsWiredEverywhere:
         assert "from scripts.nhl_props_card import run_card as run_props_card" in body
         assert body.count("except Exception") == 2 and "return ok" in body
 
-    def test_the_close_of_an_nhl_prop_is_read_at_the_book_it_was_bet_at(self):
-        src = (ROOT / "tracking" / "paper_tracker.py").read_text(encoding="utf-8")
-        assert 'elif model_id.startswith("nhl_prop_"):' in src
-        assert pt._book_from_label("X Under 2.5 Shots on Goal (hardrockbet)") == "hardrockbet"
-        assert pt._book_from_label("X Under 1.5 Blocked Shots (DK)") == "draftkings"
+    def test_the_row_is_written_whole(self):
+        """Every column the card computes is one it inserts: a key left out of
+        _COLS is a field every surface would read as empty."""
+        q = _quotes([(1, "draftkings", 2.5, -140, 105), (1, "betmgm", 2.5, -150, 120)])
+        r = card.pick_rows(P.SHOTS, _mus([(1, 1.6)]), q, GAMES, "2026-10-01", 1000.0, 0.0)[0]
+        assert {k for k in r if not k.startswith("_")} == set(card._COLS)
+        for col in ("line_book", "decision_book", "decision_odds", "decision_edge", "best_book", "best_bet_link"):
+            assert col in card._COLS
 
 
 def test_slate_time_is_utc_and_a_started_game_is_not_scored():

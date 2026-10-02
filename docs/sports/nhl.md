@@ -61,8 +61,12 @@
 >   Shots on goal needs the best price: at DraftKings alone it is +3.3% with a
 >   flat 2024-25. Card: `scripts/nhl_props_card.py`, in the same
 >   `nhl-prop-scoring` step. A goalie who does not start is NO_ACTION (the
->   books void it), a relief appearance included. The label names the book:
->   "... Under 2.5 Shots on Goal (MGM)", and the close is read at that book.
+>   books void it), a relief appearance included. The row is the scorer's
+>   shape for a pick decided away from DraftKings: `decision_*` is the book
+>   and price bet, the DraftKings columns hold DraftKings' own number at that
+>   line or nothing, `line_book` says whose line it is when DraftKings has
+>   none, `best_*` carries the deciding book's betslip link. No book in the
+>   label.
 > - **Total goals: still no model, on purpose.** A fourth round
 >   (`scripts/nhl_totals_lab.py`, six seasons, simultaneous quotes) found the
 >   book's margin on BOTH sides of the full-game number (every over -4.0%,

@@ -119,7 +119,7 @@ export function AllBooksCard({
 
       <Text style={styles.footnote}>
         {lineBook(pick)
-          ? `The line is ${bookName(lineBook(pick)!)}’s — DraftKings doesn’t post this one, so it can’t go in a DraftKings slip. `
+          ? `The line is ${bookName(lineBook(pick)!)}’s — DraftKings doesn’t post this line, so it can’t go in a DraftKings slip. `
           : `The line is DraftKings’. Parlays are priced at DraftKings. `}
         Edge and stake use the price the pick was decided at. Tap a book to
         open its betslip (reference books excluded).
