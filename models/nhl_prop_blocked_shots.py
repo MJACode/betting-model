@@ -65,13 +65,20 @@ def name_key(name: str | None) -> str:
 
 # ── loading ──────────────────────────────────────────────────────────────────
 
-def load_skaters(conn, player_ids: list | None = None) -> pd.DataFrame:
-    """Regular-season skater rows: all of them to train, a few players' to score."""
+def load_skaters(conn, player_ids: list | None = None, cache: dict | None = None) -> pd.DataFrame:
+    """Regular-season skater rows: all of them to train, one player at a time to score.
+
+    Same statement shape as models.nhl_props.load_players, and the same
+    timeout: one `player_id = ANY(...)` over tonight's skaters was cancelled
+    at 120s on 2026-10-02 (pipeline_log 117003 / 117073) while an index scan
+    of idx_nhl_skater_game_log_player_date. One id is one range of that index.
+    """
     sql = (f"SELECT {', '.join(SKATER_COLS)} FROM nhl_skater_game_log WHERE game_type = 2")
     if player_ids is None:
         rows = conn.execute(sql).fetchall()
     else:
-        rows = conn.execute(sql + " AND player_id = ANY(%s)", ([int(p) for p in player_ids],)).fetchall()
+        from models.nhl_props import _rows_for_players
+        rows = _rows_for_players(conn, sql, player_ids, cache, "blocked")
     return pd.DataFrame(rows, columns=list(SKATER_COLS))
 
 

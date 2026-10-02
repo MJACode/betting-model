@@ -135,16 +135,43 @@ def name_key(name: str | None) -> str:
 
 # ── loading ──────────────────────────────────────────────────────────────────
 
-def load_players(conn, kind: str, player_ids: list | None = None) -> pd.DataFrame:
-    """Regular-season rows: all of them to train, a few players' to score."""
+def load_players(conn, kind: str, player_ids: list | None = None,
+                 cache: dict | None = None) -> pd.DataFrame:
+    """Regular-season rows: all of them to train, one player at a time to score.
+
+    Scoring used to bind every priced id in one `player_id = ANY(...)`.
+    On 2026-10-02 that statement, eleven skaters for shots on goal, was
+    cancelled at statement_timeout (pipeline_log 117003 at 16:27:37Z and
+    117073 at 17:23:45Z). The plan was an index scan on
+    idx_nhl_skater_game_log_player_date (cost 3085, estimated 3,153 rows).
+    The same shape for assists' fourteen ids finished in 70,351 ms. One id
+    is one range of that index, and the rows are the same rows. `cache`
+    is {(kind, player_id): rows} so the next market on this card does not
+    read a player the previous market already read.
+    """
     table, cols = (("nhl_goalie_game_log", GOALIE_COLS) if kind == "goalie"
                    else ("nhl_skater_game_log", SKATER_COLS))
     sql = f"SELECT {', '.join(cols)} FROM {table} WHERE game_type = 2 AND player_id IS NOT NULL"
     if player_ids is None:
         rows = conn.execute(sql).fetchall()
     else:
-        rows = conn.execute(sql + " AND player_id = ANY(%s)", ([int(p) for p in player_ids],)).fetchall()
+        rows = _rows_for_players(conn, sql, player_ids, cache, kind)
     return pd.DataFrame(rows, columns=list(cols))
+
+
+def _rows_for_players(conn, sql: str, player_ids: list, cache: dict | None, kind: str) -> list:
+    """One statement per player. An empty id list reads nothing."""
+    ids = list(dict.fromkeys(int(p) for p in player_ids))
+    if not ids:
+        return []
+    store = cache if cache is not None else {}
+    rows: list = []
+    for pid in ids:
+        key = (kind, pid)
+        if key not in store:
+            store[key] = conn.execute(sql + " AND player_id = %s", (pid,)).fetchall()
+        rows.extend(store[key])
+    return rows
 
 
 def load_teams(conn) -> pd.DataFrame:
