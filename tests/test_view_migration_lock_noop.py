@@ -67,23 +67,48 @@ def test_clv_columns_return_before_alter_and_still_stamp_legacy_rows():
 
 def test_open_nonbet_index_returns_before_create_index():
     sql = _sql("picks_open_nonbet_index_2026_09_08.sql")
-    head = _before(sql, "CREATE INDEX")
-    assert "pg_indexes" in head
+    head = _before(sql, "CREATE INDEX IF NOT EXISTS")
+    assert "pg_index" in head and "indisvalid" in head and "indisready" in head
     assert "idx_picks_open_nonbet" in head
-    assert "signal_type" in head and "is_live" in head
+    # The whole definition, not keywords.
+    assert "pg_get_indexdef" in head
+    assert "(signal_type <> ''BET''::text)" in head
+    assert "(is_live IS NOT TRUE)" in head
     assert "RETURN" in head
 
 
-def test_discord_publish_state_returns_before_policy_ddl():
+def test_open_nonbet_index_that_is_invalid_or_different_is_left_alone():
+    """#857 review: an invalid or differently-defined index of that name
+    used to fall through to CREATE INDEX IF NOT EXISTS, which takes
+    ShareLock on picks and then no-ops on the name. Now it WARNs and
+    returns; only a missing index reaches the CREATE."""
+    sql = _code(_sql("picks_open_nonbet_index_2026_09_08.sql"))
+    branch = sql.split("IF def IS NOT NULL THEN", 1)[1].split("CREATE INDEX IF NOT EXISTS", 1)[0]
+    assert "RAISE WARNING" in branch
+    assert branch.rstrip().endswith("END IF;")
+    assert "RETURN;" in branch.split("RAISE WARNING", 1)[1]
+
+
+def test_discord_publish_state_compares_the_whole_view_and_policy():
+    """#857 review: keyword checks would skip a future body change."""
     sql = _sql("discord_publish_state_2026_09_23.sql")
-    head = _before(sql, "DROP POLICY")
-    assert "pg_policy" in head or "polname" in head
-    assert "RETURN" in head
-    assert "security_invoker" in head
-    # The view body itself still does not project the snowflake. The grant
-    # check names message_id above the CREATE, which is the point.
-    view = sql.split("CREATE OR REPLACE VIEW", 1)[1].split("$v$", 1)[0]
-    assert "message_id" not in view
+    head = _code(_before(sql, "DROP POLICY"))
+    assert "want_def" in head and "def IS NOT DISTINCT FROM want_def" in head
+    assert "qual IS NOT DISTINCT FROM want_qual" in head
+    assert "polcmd" in head and "cmd IS NOT DISTINCT FROM 'r'" in head
+    assert "polpermissive" in head and "permissive IS TRUE" in head
+    assert "polroles" in head
+    assert "roles IS NOT DISTINCT FROM ARRAY['anon', 'authenticated']" in head
+    # The expected strings are what PG 17 prints for the DDL in this file.
+    assert ("SELECT lock_key, kind FROM push_sent s WHERE kind = ANY "
+            in head)
+    assert "(ARRAY[''discord_signal''::text, ''discord_live''::text])" in head
+    body = sql.split("CREATE OR REPLACE VIEW", 1)[1].split("$v$", 1)[0]
+    assert "SELECT s.lock_key, s.kind" in body
+    assert "s.kind IN ('discord_signal', 'discord_live')" in body
+    policy = sql.split("CREATE POLICY", 1)[1]
+    assert "FOR SELECT TO anon, authenticated" in policy
+    assert "USING (kind IN ('discord_signal', 'discord_live'))" in policy
 
 
 def test_injuries_status_ts_returns_before_alter_and_stays_one_statement():
@@ -112,6 +137,20 @@ class _LockTimeout(Exception):
         super().__init__("canceling statement due to lock timeout")
 
 
+class _Deadlock(Exception):
+    pgcode = "40P01"
+
+    def __init__(self):
+        super().__init__("deadlock detected")
+
+
+class _StatementTimeout(Exception):
+    pgcode = "57014"
+
+    def __init__(self):
+        super().__init__("canceling statement due to statement timeout")
+
+
 class _Syntax(Exception):
     pgcode = "42601"
 
@@ -128,8 +167,6 @@ class _Conn:
 
     def execute(self, sql, params=None):
         self.executed.append(sql)
-        if sql.lstrip().upper().startswith("SET LOCAL"):
-            return None
         if self.errors:
             raise self.errors.pop(0)
         return None
@@ -149,11 +186,12 @@ def test_a_lock_timeout_is_retried_and_then_counts_as_applied(monkeypatch):
     assert err is None
     assert conn.commits == 1
     assert conn.rollbacks == 2
-    # Two failed attempts and the success: three migration statements, each
-    # preceded by SET LOCAL.
-    sets = [s for s in conn.executed if s.startswith("SET LOCAL")]
-    assert len(sets) == 3
-    assert "lock_timeout" in sets[0]
+    # Two failed attempts and the success: three executes, each the SET
+    # LOCAL and the migration together (see the reconnect test below).
+    assert len(conn.executed) == 3
+    for sent in conn.executed:
+        assert sent.startswith(f"SET LOCAL lock_timeout = '{vm.LOCK_TIMEOUT}';")
+        assert sent.endswith("SELECT 1")
 
 
 def test_a_lock_timeout_that_survives_the_retries_names_the_file(monkeypatch):
@@ -209,3 +247,116 @@ def test_the_step_error_is_the_line_pipeline_log_keeps(monkeypatch):
     assert "add_message_id_to_push_sent.sql" in last
     assert "add_clv_method_2026_09_14.sql" in last
     assert "see 'View migration FAILED'" not in last
+
+
+def test_a_deadlock_is_retried(monkeypatch):
+    import data.view_migrations as vm
+    slept: list[float] = []
+    monkeypatch.setattr(vm.time, "sleep", slept.append)
+    conn = _Conn([_Deadlock()])
+    err = vm._apply_one(conn, "pick_placement_checks_2026_09_22.sql", "SELECT 1")
+    assert err is None
+    assert conn.commits == 1 and conn.rollbacks == 1
+    assert slept == [vm.LOCK_BACKOFF_S[0]]
+
+
+def test_a_statement_timeout_is_not_retried(monkeypatch):
+    """#857 review: a statement timeout means the migration held its lock and
+    worked for the whole 2min statement_timeout. Retrying ran it three times
+    and held the lock for ~6 minutes. It fails the file on the first try."""
+    import data.view_migrations as vm
+    slept: list[float] = []
+    monkeypatch.setattr(vm.time, "sleep", slept.append)
+    conn = _Conn([_StatementTimeout(), _StatementTimeout(), _StatementTimeout()])
+    err = vm._apply_one(conn, "add_clv_method_2026_09_14.sql", "SELECT 1")
+    assert err is not None and "statement timeout" in err
+    assert len(conn.executed) == 1
+    assert conn.rollbacks == 1 and conn.commits == 0
+    assert slept == []
+    assert len(conn.errors) == 2
+
+
+def test_only_lock_timeouts_and_deadlocks_are_transient():
+    import psycopg2
+
+    import data.view_migrations as vm
+    assert vm._is_transient_lock_error(_LockTimeout())
+    assert vm._is_transient_lock_error(_Deadlock())
+    # Text only (no SQLSTATE): the lock_timeout wording retries ...
+    assert vm._is_transient_lock_error(
+        RuntimeError("canceling statement due to lock timeout"))
+    # ... and a statement timeout does not, with or without its SQLSTATE.
+    assert not vm._is_transient_lock_error(_StatementTimeout())
+    assert not vm._is_transient_lock_error(
+        psycopg2.errors.QueryCanceled("canceling statement due to statement timeout"))
+    assert not vm._is_transient_lock_error(
+        RuntimeError("canceling statement due to statement timeout"))
+    assert not vm._is_transient_lock_error(_Syntax())
+
+
+def test_a_dropped_connection_replays_the_migration_with_its_lock_timeout(monkeypatch):
+    """#857 review: SET LOCAL sent on its own counts as a write in data/db,
+    so a pooler drop during the migration raised ConnectionLost and failed
+    the file. Sent in the same execute, the transaction is clean when the
+    statement starts: the wrapper reconnects and replays both, and the
+    replay still carries the 5s lock_timeout."""
+    import psycopg2
+
+    import data.db as db
+    import data.view_migrations as vm
+
+    class _Cur:
+        def __init__(self, c):
+            self.c = c
+
+        def execute(self, sql, params=None):
+            self.c.executed.append(sql)
+            if self.c.drop_next:
+                self.c.drop_next = False
+                self.c.closed = 2
+                raise psycopg2.OperationalError(
+                    "server closed the connection unexpectedly")
+
+        def close(self):
+            pass
+
+    class _PG:
+        def __init__(self, drop_next=False):
+            self.closed = 0
+            self.drop_next = drop_next
+            self.executed: list[str] = []
+            self.commits = 0
+
+        def cursor(self):
+            if self.closed:
+                raise psycopg2.InterfaceError("connection already closed")
+            return _Cur(self)
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            self.closed = 1
+
+    opened: list[_PG] = []
+
+    def fake_open(url, options=None):
+        opened.append(_PG())
+        return opened[-1]
+
+    monkeypatch.setattr(db, "_open", fake_open)
+    monkeypatch.setattr(db.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(vm.time, "sleep", lambda _s: None)
+    first = _PG(drop_next=True)
+    conn = db.DBConnection(first, url="postgresql://x")
+    body = "DO $mig$ BEGIN RETURN; END $mig$;"
+    err = vm._apply_one(conn, "add_message_id_to_push_sent.sql", body)
+    assert err is None, err
+    assert len(opened) == 1, "one reconnect, no ConnectionLost"
+    assert opened[0].commits == 1
+    (replayed,) = opened[0].executed
+    assert replayed.startswith(f"SET LOCAL lock_timeout = '{vm.LOCK_TIMEOUT}';")
+    assert replayed.rstrip().endswith(body)

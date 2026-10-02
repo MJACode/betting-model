@@ -19,21 +19,39 @@
 -- at 2026-10-01 17:19:03Z, between the two push_sent timeouts. The catalog
 -- check returns before that lock. The index predicate is part of the
 -- property: a same-named index with a different definition is not "done".
+--
+-- 2026-10-02 (#857 review): the check is pg_index, not pg_indexes, so an
+-- INVALID index (a CONCURRENTLY build that was cancelled) is not "done".
+-- The definition is compared in full against what Postgres 17 prints for
+-- the index above (read from production 2026-10-02: valid, ready). A
+-- same-named index that is invalid or defined differently is LEFT ALONE
+-- with a WARNING: CREATE INDEX IF NOT EXISTS would only take ShareLock on
+-- picks and then no-op on the name, so falling through fixes nothing.
+-- Repair it by hand (DROP INDEX CONCURRENTLY, CREATE INDEX CONCURRENTLY).
+-- Only a missing index is created here.
 DO $mig$
 DECLARE
   def text;
+  valid boolean;
+  ready boolean;
+  want constant text :=
+    'CREATE INDEX idx_picks_open_nonbet ON picks USING btree (game_id) '
+    || 'WHERE ((result IS NULL) AND (signal_type <> ''BET''::text) '
+    || 'AND (is_live IS NOT TRUE))';
 BEGIN
-  SELECT indexdef INTO def
-    FROM pg_indexes
-   WHERE schemaname = 'public'
-     AND indexname = 'idx_picks_open_nonbet';
+  SELECT pg_get_indexdef(i.indexrelid), i.indisvalid, i.indisready
+    INTO def, valid, ready
+    FROM pg_index i
+   WHERE i.indexrelid = to_regclass('public.idx_picks_open_nonbet');
 
-  IF def IS NOT NULL
-     AND position('game_id' in def) > 0
-     AND position('signal_type' in def) > 0
-     AND position('is_live' in def) > 0
-     AND position('result' in def) > 0 THEN
-    RAISE NOTICE 'idx_picks_open_nonbet already present - skipping';
+  IF def IS NOT NULL THEN
+    IF valid AND ready
+       AND regexp_replace(replace(def, 'public.', ''), '\s+', ' ', 'g') = want THEN
+      RAISE NOTICE 'idx_picks_open_nonbet already present - skipping';
+    ELSE
+      RAISE WARNING 'idx_picks_open_nonbet exists but is not the expected valid index (valid=%, ready=%, def=%) - not touching it; rebuild it CONCURRENTLY by hand',
+        valid, ready, def;
+    END IF;
     RETURN;
   END IF;
 

@@ -260,9 +260,13 @@ LOCK_ATTEMPTS = 3
 # Sleep after attempt 1 and attempt 2. The third failure does not sleep.
 LOCK_BACKOFF_S = (0.5, 1.5)
 
-# 55P03 lock_not_available (lock_timeout), 40P01 deadlock_detected.
-# 57014 query_canceled is also admin cancel; only the timeout wording retries.
+# 55P03 lock_not_available (lock_timeout), 40P01 deadlock_detected. Those
+# are the only retries. NOT 57014 (query_canceled: statement_timeout or an
+# admin cancel): a statement timeout means the migration already held its
+# lock and worked for the full 2 minutes, so a retry runs it three times and
+# holds the lock for ~6 minutes (#857 review).
 _TRANSIENT_PGCODES = frozenset({"55P03", "40P01"})
+_STATEMENT_TIMEOUT_PGCODE = "57014"
 
 
 @dataclass(frozen=True)
@@ -278,23 +282,23 @@ class ViewMigrationResult:
 
 
 def _is_transient_lock_error(exc: BaseException) -> bool:
-    """True for a lock timeout, a statement timeout, or a deadlock.
+    """True for a lock timeout (55P03) or a deadlock (40P01) only.
 
-    Anything else (missing column, syntax, a guard that raised) fails the
-    file on the first attempt. Retrying those would hide a real migration
-    bug behind three identical errors.
+    A statement timeout (57014, "canceling statement due to statement
+    timeout") is NOT retried: the statement got its lock and ran for the
+    whole server statement_timeout, and running it twice more would hold
+    that lock for three times as long. Anything else (missing column,
+    syntax, a guard that raised) fails the file on the first attempt too.
+    Retrying those would hide a real migration bug behind three identical
+    errors.
     """
     code = getattr(exc, "pgcode", None)
-    msg = str(exc).lower()
     if code in _TRANSIENT_PGCODES:
         return True
-    if code == "57014":
-        return "timeout" in msg
-    return (
-        "lock timeout" in msg
-        or "canceling statement due to statement timeout" in msg
-        or "deadlock detected" in msg
-    )
+    if code == _STATEMENT_TIMEOUT_PGCODE:
+        return False
+    # No SQLSTATE (a wrapped error): only the lock_timeout wording retries.
+    return "lock timeout" in str(exc).lower()
 
 
 def format_view_migration_failure(
@@ -319,6 +323,22 @@ def format_view_migration_failure(
     return head
 
 
+def _with_lock_timeout(sql: str) -> str:
+    """The migration with its SET LOCAL lock_timeout in the SAME execute.
+
+    data/db counts any statement that is not plainly a read as a write, so
+    a SET LOCAL sent on its own marked the clean transaction dirty. A pooler
+    drop during the migration then raised ConnectionLost (the file failed)
+    instead of reconnecting and re-running it. Sent together, the
+    connection is still clean when the statement starts, so a drop
+    reconnects and replays BOTH: the replayed migration keeps its 5s
+    lock_timeout instead of waiting behind the 2min statement_timeout on
+    the new backend. SET LOCAL dies with the transaction, so a passed-in
+    connection does not keep the short timeout after we return.
+    """
+    return f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}';\n{sql}"
+
+
 def _apply_one(conn, name: str, sql: str) -> str | None:
     """Run one file. None means it committed. A string is the error that
     survived the retries. Never raises.
@@ -329,15 +349,13 @@ def _apply_one(conn, name: str, sql: str) -> str | None:
     last = ""
     for attempt in range(1, LOCK_ATTEMPTS + 1):
         try:
-            # SET LOCAL dies with the transaction, so a passed-in connection
-            # does not keep the short timeout after we return.
-            conn.execute(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
             # conn.execute, NOT conn.executescript: executescript splits on
             # ";" and would shred a dollar-quoted DO $$...$$ block into
             # fragments at every semicolon in its body. Each migration here
             # must therefore be a SINGLE statement (a DO block), which is
-            # also what makes the idempotency check atomic.
-            conn.execute(sql)
+            # also what makes the idempotency check atomic. The only other
+            # statement in this execute is the SET LOCAL in front of it.
+            conn.execute(_with_lock_timeout(sql))
             conn.commit()
             return None
         except Exception as exc:
