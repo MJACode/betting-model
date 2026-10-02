@@ -435,44 +435,228 @@ def _espn_team_ids(sport: str) -> dict:
 #
 # Roughly two thirds of those calls asked the same question every hour: what is
 # athlete 12345 called. A display name does not change. So the cheapest fix is
-# not to make the calls faster but to stop making them, and the answers are
-# already sitting in our own `injuries` table from previous runs.
+# not to make the calls faster but to stop making them. The names live in
+# `injury_player_names` (one row per athlete, maintained on insert). Reading
+# them out of `injuries` with DISTINCT ON was a sort of the whole log.
+# EXPLAIN on 2026-10-01 planned 822,508 rows (cost 145558); auto-explain in
+# the 21:00 UTC window measured that plan at ~63s. The hourly passes at
+# 20:17 and 20:58 UTC then logged the aborted-transaction follow-on
+# (pipeline_log 115154, 115196), not the timeout that caused it.
 #
 # This matters more than raw speed: ESPN has IP-blocked this worker TWICE
 # (CLAUDE.md §7), so removing requests is strictly safer than issuing the same
 # number of them concurrently.
 _ATHLETE_NAME_CACHE: dict[str, str] = {}
 
+# Set when the seed's own statement fails. run_injury_ingestor reads it so a
+# statement_timeout is what pipeline_log records, not the aborted-transaction
+# error the next command on that connection would raise. Cleared at the start
+# of each ingest.
+#
+# ANY seed failure (timeout, missing injury_player_names table, no database)
+# is a step failure, logged at WARNING, and ESPN is NOT fetched for the rest
+# of that ingest (#858 review). An empty cache is not a cheap fallback: every
+# athlete becomes its own ESPN request, about 3x the step's requests, from a
+# worker ESPN has IP-blocked twice. The injuries already stored stay; the next
+# pass retries.
+_SEED_DB_ERROR: BaseException | None = None
+# One attempt per ingest. A timed-out seed used to be retried once per sport
+# (five full scans) because a failure leaves the in-memory cache empty.
+_SEED_ATTEMPTED = False
+
+
+def _rollback_quietly(conn) -> None:
+    """Clear an aborted transaction. Postgres ignores every later command on
+    the connection until ROLLBACK; close() alone does not send one before the
+    pooler can hand the backend out again."""
+    rollback = getattr(conn, "rollback", None)
+    if rollback is None:
+        return
+    try:
+        rollback()
+    except Exception:                                         # noqa: BLE001
+        logger.exception("injury ingestor: rollback failed")
+
+
+def _is_aborted_txn(exc: BaseException | None) -> bool:
+    if exc is None:
+        return False
+    if type(exc).__name__ == "InFailedSqlTransaction":
+        return True
+    return "current transaction is aborted" in str(exc).lower()
+
+
+def _is_statement_timeout(exc: BaseException | None) -> bool:
+    if exc is None:
+        return False
+    if type(exc).__name__ == "QueryCanceled":
+        return True
+    return "statement timeout" in str(exc).lower() or "canceling statement" in str(exc).lower()
+
+
+def _prefer_primary(current: BaseException | None,
+                    new: BaseException | None) -> BaseException | None:
+    """Keep the statement that failed, not the follow-on aborted-transaction
+    error the next command raises on the same connection."""
+    if new is None:
+        return current
+    if current is None:
+        return new
+    if _is_aborted_txn(new) and not _is_aborted_txn(current):
+        return current
+    if _is_aborted_txn(current) and not _is_aborted_txn(new):
+        return new
+    return current
+
+
+def _error_text(exc: BaseException) -> str:
+    name = type(exc).__name__
+    text = str(exc).strip()
+    if not text:
+        return name
+    if text.startswith(name):
+        return text
+    return f"{name}: {text}"
+
+
+def _seed_db_failure() -> BaseException | None:
+    """The seed's error, if it failed. Any failure is a step failure and
+    stops the ESPN fetch (see _SEED_DB_ERROR); a cold cache would fan out
+    to one ESPN request per athlete."""
+    return _SEED_DB_ERROR
+
 
 def _seed_athlete_cache(conn=None) -> int:
-    """Warm the name cache from injuries we have already stored.
+    """Warm the name cache from names we have already stored.
 
-    Best-effort: a cold cache costs the old number of requests, never a wrong
-    name. Returns how many names were loaded, for the log line."""
-    global _ATHLETE_NAME_CACHE
+    The read is `injury_player_names` — one row per athlete, written when the
+    injury row is. DISTINCT ON (player_id) over `injuries` was a seq scan plus
+    a sort of the whole log: EXPLAIN on 2026-10-01 planned 822,508 rows
+    (cost 145558). Auto-explain in the same window as the failed hourly
+    passes measured that plan at ~63s.
+
+    An empty names table is filled once from that same DISTINCT ON, which the
+    `(player_id, created_at DESC)` index turns into an index scan. A failed
+    seed (timeout, missing table, no database) leaves the cache empty, sets
+    _SEED_DB_ERROR and logs a WARNING; fetch_espn_injuries then skips ESPN
+    instead of looking every athlete up one request at a time. Returns how
+    many names were loaded, for the log line.
+
+    The connection is rolled back before it is closed. A timed-out SELECT
+    aborts the transaction; closing without ROLLBACK is what made the next
+    statement on that backend raise InFailedSqlTransaction."""
+    global _ATHLETE_NAME_CACHE, _SEED_DB_ERROR, _SEED_ATTEMPTED
     if _ATHLETE_NAME_CACHE:
         return len(_ATHLETE_NAME_CACHE)
+    if _SEED_ATTEMPTED:
+        return 0
+    _SEED_ATTEMPTED = True
+    _SEED_DB_ERROR = None
+    own = conn is None
     try:
-        own = conn is None
         if own:
             from data.db import get_connection
             conn = get_connection()
         try:
-            rows = conn.execute("""
-                SELECT DISTINCT ON (player_id) player_id, player_name
-                FROM injuries
-                WHERE player_id IS NOT NULL AND player_id <> ''
-                  AND player_name IS NOT NULL AND player_name <> 'Unknown'
-                ORDER BY player_id, created_at DESC
-            """).fetchall()
+            rows = conn.execute(
+                "SELECT player_id, player_name FROM injury_player_names"
+            ).fetchall()
+            if not rows:
+                # Commit the fill before the finally-rollback. That rollback
+                # is what ends the read-only transaction (and what clears a
+                # timed-out one); it must not discard the fill that just worked.
+                rows = _backfill_player_names(conn)
+                if own:
+                    conn.commit()
         finally:
-            if own:
+            if own and conn is not None:
+                _rollback_quietly(conn)
                 conn.close()
-        _ATHLETE_NAME_CACHE = {str(r[0]): r[1] for r in rows}
+        _ATHLETE_NAME_CACHE = {
+            str(r[0]): r[1] for r in rows if r[0] and r[1] and r[1] != "Unknown"
+        }
     except Exception as exc:                                  # noqa: BLE001
-        logger.debug(f"athlete-name cache seed skipped ({exc})")
+        _SEED_DB_ERROR = exc
         _ATHLETE_NAME_CACHE = {}
+        # WARNING for every kind, not only timeouts: a missing
+        # injury_player_names table used to log at debug and send one ESPN
+        # request per athlete (#858 review).
+        logger.warning(
+            f"athlete-name cache seed failed ({_error_text(exc)}); ESPN "
+            f"injuries skipped this pass, step marked failed")
     return len(_ATHLETE_NAME_CACHE)
+
+
+def _backfill_player_names(conn):
+    """One-time fill when `injury_player_names` exists and is empty.
+
+    Same predicate the partial index `idx_injuries_player_id_created` was
+    built for. Without that index this is the 63s sort; with it the planner
+    walks the index in ORDER BY order and does not sort."""
+    rows = conn.execute("""
+        SELECT DISTINCT ON (player_id) player_id, player_name
+        FROM injuries
+        WHERE player_id IS NOT NULL AND player_id <> ''
+          AND player_name IS NOT NULL AND player_name <> 'Unknown'
+        ORDER BY player_id, created_at DESC
+    """).fetchall()
+    payload = _name_rows_from_pairs(rows)
+    if payload:
+        conn.executemany("""
+            INSERT INTO injury_player_names (player_id, player_name)
+            VALUES (%(player_id)s, %(player_name)s)
+            ON CONFLICT (player_id) DO NOTHING
+        """, payload)
+    return rows
+
+
+def _name_rows_from_pairs(rows) -> list[dict]:
+    by_id: dict[str, str] = {}
+    for player_id, player_name in rows:
+        pid = str(player_id or "").strip()
+        name = player_name or ""
+        if pid and name and name != "Unknown":
+            by_id[pid] = name
+    return [{"player_id": pid, "player_name": name} for pid, name in by_id.items()]
+
+
+def _name_rows(injuries: list[dict]) -> list[dict]:
+    return _name_rows_from_pairs(
+        (r.get("player_id"), r.get("player_name")) for r in injuries
+    )
+
+
+def _remember_player_names(conn, injuries: list[dict]) -> None:
+    """Upsert this batch's names into the state table.
+
+    A missing table (migration not applied yet) must not abort the injury
+    insert that already ran in this transaction, so the write sits in a
+    savepoint. ROLLBACK TO SAVEPOINT is what clears the aborted state.
+    """
+    rows = _name_rows(injuries)
+    if not rows:
+        return
+    conn.execute("SAVEPOINT injury_player_names")
+    try:
+        conn.executemany("""
+            INSERT INTO injury_player_names (player_id, player_name)
+            VALUES (%(player_id)s, %(player_name)s)
+            ON CONFLICT (player_id) DO UPDATE
+              SET player_name = EXCLUDED.player_name
+            WHERE injury_player_names.player_name IS DISTINCT FROM EXCLUDED.player_name
+        """, rows)
+        conn.execute("RELEASE SAVEPOINT injury_player_names")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"injury player-name cache write skipped ({exc})")
+        try:
+            conn.execute("ROLLBACK TO SAVEPOINT injury_player_names")
+            conn.execute("RELEASE SAVEPOINT injury_player_names")
+        except Exception:                                     # noqa: BLE001
+            # The savepoint itself is gone. The injury rows in this
+            # transaction are gone with the full rollback; the caller must
+            # not commit a success line over that.
+            _rollback_quietly(conn)
+            raise
 
 
 def _athlete_name(athlete_id: str, ref_url: str) -> str:
@@ -590,12 +774,21 @@ def fetch_espn_injuries(sport: str, report_date: str) -> list[dict]:
     Pull all injuries for all teams in the given sport from ESPN.
     Returns a list of normalized injury dicts ready for DB insert.
     """
-    team_ids = _espn_team_ids(sport)
-    all_injuries = []
-
     seeded = _seed_athlete_cache()
+    seed_err = _seed_db_failure()
+    if seed_err is not None:
+        # No ESPN request at all, not even the teams list: without the name
+        # cache every injury costs an extra athlete request (#858 review).
+        # run_injury_ingestor records seed_err as the step's error.
+        logger.warning(
+            f"ESPN {sport} injuries not fetched: athlete-name seed failed "
+            f"({_error_text(seed_err)})")
+        return []
     if seeded:
         logger.debug(f"injury cache: {seeded} athlete name(s) known")
+
+    team_ids = _espn_team_ids(sport)
+    all_injuries = []
 
     # One team's fetch is independent of every other team's, and all of it is
     # waiting on a socket. Serially this was ~30 teams x (1 + 2N) requests.
@@ -888,7 +1081,22 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     start  = datetime.now()
     total_inserted = 0
 
+    global _SEED_DB_ERROR, _SEED_ATTEMPTED
+    _SEED_DB_ERROR = None
+    _SEED_ATTEMPTED = False
+
     conn = get_connection()
+    primary: BaseException | None = None
+    recorded = False
+
+    def _record(exc: BaseException) -> None:
+        nonlocal recorded
+        _rollback_quietly(conn)
+        total_duration = (datetime.now() - start).total_seconds()
+        _log_pipeline(conn, report_date, "error", 0, 0, total_duration,
+                      _error_text(exc))
+        conn.commit()
+        recorded = True
 
     try:
         for sp in sports:
@@ -901,6 +1109,7 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
                 all_injuries.extend(espn_rows)
             except Exception as exc:
                 logger.error(f"ESPN {sp} ingestion error: {exc}")
+            primary = _prefer_primary(primary, _seed_db_failure())
 
             # ── Source 2: MLB Stats API transactions (MLB only) ───────────────
             if sp == "MLB":
@@ -917,29 +1126,53 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
                     logger.error(f"MLB Stats API transactions error: {exc}")
 
             # ── Scenario B: return ramp ───────────────────────────────────────
+            # This SELECT runs on `conn`. A statement_timeout aborts the
+            # transaction; catching it and continuing is what turned the
+            # 2026-10-01 hourly failures into pipeline_log
+            # "current transaction is aborted..." (log_id 115154, 115196).
             try:
                 ramp_rows = fetch_return_ramp_players(conn, sp, report_date)
                 all_injuries.extend(ramp_rows)
             except Exception as exc:
+                primary = _prefer_primary(primary, exc)
+                _rollback_quietly(conn)
                 logger.error(f"{sp} return ramp computation error: {exc}")
 
             # ── Insert ────────────────────────────────────────────────────────
-            n = _upsert_injuries(conn, all_injuries)
-            total_inserted += n
+            # Commit per sport so a later timeout cannot roll back rows that
+            # already landed, and so a rollback here has nothing earlier to lose.
+            try:
+                n = _upsert_injuries(conn, all_injuries)
+                _remember_player_names(conn, all_injuries)
+                total_inserted += n
+                duration = (datetime.now() - sp_start).total_seconds()
+                _log_pipeline(conn, report_date, "success",
+                              records_in=n, records_out=n, duration_s=duration)
+                conn.commit()
+                logger.success(f"{sp} injuries: {n} rows inserted ({duration:.1f}s)")
+            except Exception as exc:
+                primary = _prefer_primary(primary, exc)
+                _rollback_quietly(conn)
+                logger.error(f"{sp} injury write failed: {exc}")
 
-            duration = (datetime.now() - sp_start).total_seconds()
-            _log_pipeline(conn, report_date, "success",
-                          records_in=n, records_out=n, duration_s=duration)
-            logger.success(f"{sp} injuries: {n} rows inserted ({duration:.1f}s)")
-
-        conn.commit()
+        primary = _prefer_primary(primary, _seed_db_failure())
+        if primary is not None:
+            _record(primary)
+            raise primary
 
     except Exception as exc:
-        conn.rollback()
-        total_duration = (datetime.now() - start).total_seconds()
-        _log_pipeline(conn, report_date, "error", 0, 0, total_duration, str(exc))
-        conn.commit()
-        logger.error(f"Injury ingestor failed: {exc}")
+        logged = _prefer_primary(primary, exc)
+        if not recorded:
+            try:
+                _record(logged)
+            except Exception as log_exc:                      # noqa: BLE001
+                _rollback_quietly(conn)
+                logger.error(
+                    f"injury error row failed ({log_exc}); primary was {logged}"
+                )
+        logger.error(f"Injury ingestor failed: {logged}")
+        if logged is not exc:
+            raise logged from exc
         raise
     finally:
         conn.close()
