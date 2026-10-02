@@ -1,10 +1,11 @@
 /**
  * GENERATED FILE — do not edit by hand.
  * Source of truth: config.py (ACTION_THRESHOLDS, PAUSED_MODELS,
- * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).
+ * PROB_ONLY_MODELS, RETIRED_MODELS, decides_on_raw_models(),
+ * DECIDE_ON_CALIBRATED_PROB, KELLY_*).
  * Regenerate: python -m scripts.generate_mobile_thresholds
  * Check (CI):  python -m scripts.generate_mobile_thresholds --check
- * Last generated: 2026-10-01
+ * Last generated: 2026-10-02
  */
 
 export interface ModelThreshold {
@@ -142,6 +143,26 @@ export const RETIRED_MODELS = new Set<string>([
   'mlb_prop_batter_hr',
   'mlb_prop_batter_rbi',
 ]);
+
+export const DECIDES_ON_RAW_MODELS = new Set<string>([
+  'mlb_spread_market',
+  'mlb_total_market',
+  'mlb_total_public_fade',
+  'ncaaf_live_total',
+  'ncaaf_live_win_prob',
+  'nfl_live_prop',
+  'nfl_opener_spread',
+  'nfl_prop_market',
+  'nfl_wind_totals',
+  'nhl_prop_assists',
+  'nhl_prop_blocked_shots',
+  'nhl_prop_saves',
+  'nhl_prop_shots_on_goal',
+  'wnba_prop_market',
+]);
+
+// config.DECIDE_ON_CALIBRATED_PROB as built. Off means every model decides raw.
+export const DECIDE_ON_CALIBRATED_PROB = true;
 
 export const KELLY_MULTIPLIER = 0.1;
 export const MAX_KELLY_FRACTION = 0.05;

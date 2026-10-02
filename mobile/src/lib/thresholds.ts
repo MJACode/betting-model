@@ -25,11 +25,15 @@ import {
   RETIRED_MODELS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
+  DECIDES_ON_RAW_MODELS,
+  DECIDE_ON_CALIBRATED_PROB,
 } from './thresholds.generated';
 export type { ModelThreshold } from './thresholds.generated';
 // `export { X } from` re-exports without binding X in this module, so
 // isProbOnlyModel / thresholdFor / etc. cannot see the names (TS2304).
 export {
+  DECIDES_ON_RAW_MODELS,
+  DECIDE_ON_CALIBRATED_PROB,
   ACTION_THRESHOLDS,
   PAUSED_MODELS,
   PROB_ONLY_MODELS,
@@ -50,6 +54,11 @@ export type ActionFilterable = Pick<
 > & {
   decision_odds?: number | null;
   decision_edge?: number | null;
+  /** The scorer's calibrated probability (picks.model_probability_cal). */
+  model_probability_cal?: number | null;
+  /** Implied probability of the deciding price; DraftKings' before 2026-09-09. */
+  decision_implied_prob?: number | null;
+  dk_implied_prob?: number | null;
   /** Set by attachDiscordPublish. Omitted means the ledger was not read. */
   discordPublish?: DiscordPublish;
   /** 'model paused' on a pick written while its model was paused. */
@@ -266,6 +275,35 @@ export function isUnlockedPreview(
   return UNLOCKED_LOOKAHEAD_SPORTS.has(p.sport) && p.game_date > today;
 }
 
+/** Does the scorer decide this model's BET on the calibrated probability? */
+export function decidesOnCalibrated(modelId: string): boolean {
+  return DECIDE_ON_CALIBRATED_PROB && !DECIDES_ON_RAW_MODELS.has(modelId);
+}
+
+/**
+ * THE NUMBERS THE SCORER DECIDED ON — the app twin of config.decided_prob_sql /
+ * decided_edge_sql, which Discord, push and the health check filter on.
+ *
+ * models.scorer._decide decides on the calibrated probability and on that
+ * number minus the implied probability of the deciding price; it STORES the
+ * raw pair. Filtering on the raw pair hid every BET the calibration had lifted
+ * over the cut (18 NHL underdog BETs, 2026-09-22..10-02): written, shown
+ * nowhere. Raw when the model decides raw (DECIDES_ON_RAW_MODELS, or the flag
+ * off), when the row has no calibrated number, and — edge only — when the row
+ * has no price to subtract.
+ */
+export function decidedNumbers(p: ActionFilterable): { prob: number; edge: number } {
+  const rawEdge = decisionEdge(p);
+  const cal = p.model_probability_cal;
+  if (!decidesOnCalibrated(p.model_id) || cal == null) {
+    return { prob: Number(p.model_probability), edge: rawEdge };
+  }
+  const prob = Number(cal);
+  const implied = p.decision_implied_prob ?? p.dk_implied_prob;
+  if (implied == null) return { prob, edge: rawEdge };
+  return { prob, edge: prob - Number(implied) };
+}
+
 export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
   // A VOIDED pick is not an action either (CLAUDE.md §1c). It is a row the
@@ -300,12 +338,14 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   // The cut is applied at the price the pick was DECIDED at (2026-09-09):
   // decision_* since the flip, DraftKings before it. Same clause the scorer,
   // the Discord and push producers and the record views apply.
+  // ...on the numbers the scorer DECIDED on (decidedNumbers): calibrated
+  // where it decides calibrated, raw otherwise.
   const odds = decisionOdds(p);
-  const edge = decisionEdge(p);
+  const { prob, edge } = decidedNumbers(p);
   const sv = serverThresholds?.[p.model_id];
   if (sv) {
     if (sv.paused) return false;
-    if (p.model_probability < sv.min_prob) return false;
+    if (prob < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
     return edge >= sv.min_edge;
@@ -314,7 +354,7 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
-  if (p.model_probability < t.min_prob) return false;
+  if (prob < t.min_prob) return false;
   if (!passesMinOdds(odds, t.min_odds)) return false;
   if (PROB_ONLY_MODELS.has(p.model_id)) return true;
   return edge >= t.min_edge;

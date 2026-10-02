@@ -43,12 +43,22 @@ def emit(prefix: str = "", include_paused_comments: bool = True,
             if include_paused_comments:
                 lines.append(f"-- {model_id} PAUSED (cut kept {cut['min_prob']}/{cut['min_edge']})")
             continue
-        clause = f"({prefix}model_id = {quoted} AND {prefix}model_probability >= {cut['min_prob']}"
+        # On the numbers the scorer DECIDED on (config.decided_prob_sql /
+        # decided_edge_sql): calibrated where it decides on the calibrated
+        # number, raw otherwise. Resolved per model here, so the block stays
+        # one flat clause per model.
+        prob_col = f"{prefix}model_probability"
+        if config.decides_on_calibrated(model_id):
+            prob_col = f"COALESCE({prefix}model_probability_cal, {prefix}model_probability)"
+        clause = f"({prefix}model_id = {quoted} AND {prob_col} >= {cut['min_prob']}"
         # The cut is applied at the price the pick was DECIDED at (2026-09-09,
         # mike: "remove DK only"): decision_* since the flip, DraftKings before
         # it (NULL, so COALESCE is exact). Same clause as the Discord and push
         # producers and the app's passesActionFilter.
         edge_col = f"COALESCE({prefix}decision_edge, {prefix}edge)"
+        if config.decides_on_calibrated(model_id):
+            implied = f"COALESCE({prefix}decision_implied_prob, {prefix}dk_implied_prob)"
+            edge_col = f"COALESCE({prefix}model_probability_cal - {implied}, {edge_col})"
         odds_col = f"COALESCE({prefix}decision_odds, {prefix}dk_odds)"
         # Prob-only models ignore edge entirely (config.PROB_ONLY_MODELS).
         if model_id not in config.PROB_ONLY_MODELS:

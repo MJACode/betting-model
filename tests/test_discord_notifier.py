@@ -1453,10 +1453,11 @@ def test_the_restate_producer_applies_the_apps_action_filter():
     """Same cut as the slate it corrects, off the same row. A restatement that
     selected differently would be a third board, not a correction."""
     sql = _sql_for("_locked_signals")
+    import config
     for clause in ("model_action_thresholds", "t.paused = FALSE",
-                   "p.model_probability >= t.min_prob",
-                   # At the price the pick was DECIDED at (2026-09-09).
-                   "OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
+                   # On the numbers the scorer DECIDED on (config.decided_cut_sql),
+                   # at the price the pick was DECIDED at (2026-09-09).
+                   config.decided_cut_sql("p", "t"),
                    "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds"):
         assert clause in sql, clause
 

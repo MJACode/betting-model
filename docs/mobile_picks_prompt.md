@@ -133,9 +133,11 @@ When I ask "what are today's picks?" or similar:
      -- went stale on every threshold change, pause, unpause or new model, and
      -- somebody had to paste a fresh block into the project instructions.
      AND t.paused = FALSE
-     AND p.model_probability >= t.min_prob
-     AND (t.prob_only = TRUE
-          OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+     -- The cut on the numbers the scorer DECIDED on (config.decided_cut_sql):
+     -- calibrated where it decides calibrated, raw for the listed models.
+     AND ((CASE WHEN p.model_id IN ('mlb_spread_market', 'mlb_total_market', 'mlb_total_public_fade', 'ncaaf_live_total', 'ncaaf_live_win_prob', 'nfl_live_prop', 'nfl_opener_spread', 'nfl_prop_market', 'nfl_wind_totals', 'nhl_prop_assists', 'nhl_prop_blocked_shots', 'nhl_prop_saves', 'nhl_prop_shots_on_goal', 'wnba_prop_market') THEN p.model_probability ELSE COALESCE(p.model_probability_cal, p.model_probability) END) >= t.min_prob
+          AND (t.prob_only = TRUE
+               OR (CASE WHEN p.model_id IN ('mlb_spread_market', 'mlb_total_market', 'mlb_total_public_fade', 'ncaaf_live_total', 'ncaaf_live_win_prob', 'nfl_live_prop', 'nfl_opener_spread', 'nfl_prop_market', 'nfl_wind_totals', 'nhl_prop_assists', 'nhl_prop_blocked_shots', 'nhl_prop_saves', 'nhl_prop_shots_on_goal', 'wnba_prop_market') THEN COALESCE(p.decision_edge, p.edge) ELSE COALESCE(p.model_probability_cal - COALESCE(p.decision_implied_prob, p.dk_implied_prob), COALESCE(p.decision_edge, p.edge)) END) >= COALESCE(t.min_edge, 0)))
      AND (t.min_odds IS NULL
           OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
           OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)

@@ -2098,6 +2098,105 @@ def scoring_method(model_id: str) -> str:
     """
     return SCORING_METHODS.get(model_id, SCORING_ARTIFACT)
 
+
+# ── The cut a PUBLISHER applies: on the number the scorer DECIDED on ─────────
+# The scorer decides on the calibrated probability (models.scorer._decide, flag
+# DECIDE_ON_CALIBRATED_PROB): decision_prob = the promoted map applied, and
+# decision_edge = that number minus the implied probability of the price the
+# pick was decided at. It STORES the raw numbers (model_probability,
+# decision_edge) and the calibrated one beside them (model_probability_cal,
+# stamped through the same scorer._calibrated). Every publisher and the app used
+# to filter on the raw pair, so where the map RAISES a probability (every side
+# under 50%) a row could be written as a BET and shown nowhere: 18 NHL BETs
+# between 2026-09-22 and 10-02 (docs/followups.md, "A BET the scorer writes on
+# the corrected probability..."). These helpers are the one definition of the
+# decided pair, so the scorer, Discord, push, the health check and the app agree.
+#
+# WHO DECIDES ON THE RAW NUMBER, and so is filtered on it here:
+#   * everything, when DECIDE_ON_CALIBRATED_PROB is off (the scorer then
+#     decides on model_probability and the raw edge);
+#   * MODELS_ON_OWN_PROBABILITY (models.honest_ev.honest_probability returns
+#     the raw number for them);
+#   * every non-artifact model (scoring_method "rule" / "engine"): a rule card's
+#     selection IS the bet, made on its own number, and only the EV floor reads
+#     the map (models.honest_ev). Its model_probability_cal can differ from raw
+#     (wnba_prop_market) and must not move its edge cut.
+# The mobile mirror is DECIDES_ON_RAW_MODELS in thresholds.generated.ts
+# (scripts/generate_mobile_thresholds.py).
+
+
+def decides_on_raw_models() -> frozenset:
+    """Models whose BET is decided on model_probability, not the calibrated one."""
+    return frozenset(MODELS_ON_OWN_PROBABILITY) | frozenset(
+        m for m in set(SCORING_METHODS) | set(ACTION_THRESHOLDS)
+        if scoring_method(m) != SCORING_ARTIFACT)
+
+
+def decides_on_calibrated(model_id: str) -> bool:
+    """True when the scorer decides this model's BET on the calibrated number."""
+    return bool(DECIDE_ON_CALIBRATED_PROB) and model_id not in decides_on_raw_models()
+
+
+def decided_prob_sql(alias: str = "p") -> str:
+    """SQL: the probability the scorer decided this `picks` row on."""
+    raw = f"{alias}.model_probability"
+    if not DECIDE_ON_CALIBRATED_PROB:
+        return raw
+    own = ", ".join(f"'{m}'" for m in sorted(decides_on_raw_models()))
+    return (f"(CASE WHEN {alias}.model_id IN ({own}) THEN {raw} "
+            f"ELSE COALESCE({alias}.model_probability_cal, {raw}) END)")
+
+
+def decided_edge_sql(alias: str = "p") -> str:
+    """SQL: the edge the scorer decided this `picks` row on.
+
+    Calibrated: model_probability_cal minus the implied probability of the
+    DECIDING price (decision_implied_prob; DraftKings' before 2026-09-09, when
+    the column was NULL) -- _decide's `cal - implied_prob` at the same quote.
+    With no price (a prob-only model whose market no book lists) _decide keeps
+    the stored edge, and so does this: the NULL arithmetic falls through to
+    COALESCE(decision_edge, edge). So does a row with no calibrated number
+    (decided raw), a raw-deciding model, and everything with the flag off.
+    """
+    raw = f"COALESCE({alias}.decision_edge, {alias}.edge)"
+    if not DECIDE_ON_CALIBRATED_PROB:
+        return raw
+    own = ", ".join(f"'{m}'" for m in sorted(decides_on_raw_models()))
+    implied = f"COALESCE({alias}.decision_implied_prob, {alias}.dk_implied_prob)"
+    return (f"(CASE WHEN {alias}.model_id IN ({own}) THEN {raw} "
+            f"ELSE COALESCE({alias}.model_probability_cal - {implied}, {raw}) END)")
+
+
+def decided_cut_sql(alias: str = "p", thresholds: str = "t") -> str:
+    """SQL: `<alias>` clears its model's prob / edge cut on the decided numbers.
+
+    The min_odds floor is NOT here: it is a price test, unchanged, and each
+    caller keeps its own clause. Returns a bare boolean expression (no AND).
+    """
+    t = thresholds
+    return (f"({decided_prob_sql(alias)} >= {t}.min_prob"
+            f"\n               AND ({t}.prob_only = TRUE"
+            f"\n                    OR {decided_edge_sql(alias)} >= COALESCE({t}.min_edge, 0)))")
+
+
+def decided_numbers(row: dict) -> tuple[float | None, float | None]:
+    """Python twin of decided_prob_sql / decided_edge_sql over one picks row."""
+    raw_p = row.get("model_probability")
+    raw_e = row.get("decision_edge")
+    if raw_e is None:
+        raw_e = row.get("edge")
+    if not decides_on_calibrated(row.get("model_id") or ""):
+        return raw_p, raw_e
+    cal = row.get("model_probability_cal")
+    if cal is None:
+        return raw_p, raw_e
+    implied = row.get("decision_implied_prob")
+    if implied is None:
+        implied = row.get("dk_implied_prob")
+    if implied is None:
+        return cal, raw_e
+    return cal, float(cal) - float(implied)
+
 # Per-model BET edge thresholds (override the global default above).
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.

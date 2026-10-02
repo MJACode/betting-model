@@ -23,6 +23,18 @@
 
 ## [ ] [needs-decision] A BET the scorer writes on the corrected probability can fail the publishers' cut on the model's own
 
+**2026-10-02: built as a DRAFT PR, branch `coder/publish-on-decided-prob`
+(Michael-gated, not merged).** The first state below: `config.decided_cut_sql`
+(SQL) and `decidedNumbers` (mobile `lib/thresholds.ts`) are the one definition
+of the numbers the scorer decided on, used by Discord (`_new_signals`,
+`_locked_signals`, the stale-pause probe, the free pick), push, the
+signal_delivery health check, `scripts/emit_threshold_sql.py`, the Claude-mobile
+prompt and the app's `passesActionFilter`. Raw for rule cards, engines and
+`MODELS_ON_OWN_PROBABILITY`, and for everything with
+`DECIDE_ON_CALIBRATED_PROB` off. Measured at build time: 11 pre-game BETs
+would post on deploy, all NHL, and none would stop publishing. Burst table and
+risks are in the PR.
+
 Found 2026-10-01 through the NHL picks. The scorer decides on the corrected
 probability (`models.scorer._decide`); the app, Discord and push filter on
 `picks.model_probability`, the model's own number (`scripts.emit_threshold_sql`,

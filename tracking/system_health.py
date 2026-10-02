@@ -1258,9 +1258,9 @@ def run_system_health(run_date: str | None = None) -> dict:
                   -- 2026-09-28): keyed on the row's own marker, so a pick written
                   -- while paused is never announced, even after an unpause.
                   {config.paused_row_exclusion_sql("p")}
-                  AND p.model_probability >= t.min_prob
-                  AND (t.prob_only = TRUE
-                       OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+                  -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql):
+                  -- calibrated where the scorer decides on it, raw otherwise.
+                  AND {config.decided_cut_sql("p", "t")}
                   AND (t.min_odds IS NULL
                        OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                        OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)

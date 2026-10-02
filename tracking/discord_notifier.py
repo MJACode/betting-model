@@ -631,9 +631,9 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
               -- 2026-09-28): keyed on the row's own marker, so a pick written
               -- while paused is never announced, even after an unpause.
               {config.paused_row_exclusion_sql("p")}
-              AND p.model_probability >= t.min_prob
-              AND (t.prob_only = TRUE
-                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql):
+              -- calibrated where the scorer decides on it, raw otherwise.
+              AND {config.decided_cut_sql("p", "t")}
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
               AND NOT EXISTS (
@@ -739,11 +739,11 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               -- 2026-09-28): keyed on the row's own marker, so a pick written
               -- while paused is never announced, even after an unpause.
               {config.paused_row_exclusion_sql("p")}
-              AND p.model_probability >= t.min_prob
+              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql):
+              -- calibrated where the scorer decides on it, raw otherwise.
               -- The cut is applied at the price the pick was DECIDED at
               -- (2026-09-09): decision_* since the flip, DraftKings before.
-              AND (t.prob_only = TRUE
-                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              AND {config.decided_cut_sql("p", "t")}
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
@@ -857,11 +857,11 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
               -- 2026-09-28): keyed on the row's own marker, so a pick written
               -- while paused is never announced, even after an unpause.
               {config.paused_row_exclusion_sql("p")}
-              AND p.model_probability >= t.min_prob
+              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql):
+              -- calibrated where the scorer decides on it, raw otherwise.
               -- The cut is applied at the price the pick was DECIDED at
               -- (2026-09-09): decision_* since the flip, DraftKings before.
-              AND (t.prob_only = TRUE
-                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+              AND {config.decided_cut_sql("p", "t")}
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
@@ -1641,7 +1641,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     free channel is a different audience, and the pick of the day is expected to
     also appear in the full feed.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
                pk.created_at, pk.best_book, pk.best_odds,
@@ -1651,7 +1651,10 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
         LEFT JOIN LATERAL (
-            SELECT p.created_at, p.best_book, p.best_odds
+            SELECT p.created_at, p.best_book, p.best_odds,
+                   -- The pick of record's DECIDED numbers, for the cut below.
+                   {config.decided_prob_sql("p")} AS decided_prob,
+                   {config.decided_edge_sql("p")} AS decided_edge
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -1664,8 +1667,12 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         WHERE os.game_date = %s
           AND os.lock_key NOT LIKE '%%:early'
           AND t.paused = FALSE
-          AND os.model_probability >= t.min_prob
-          AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
+          -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql),
+          -- read off the pick of record; the capture snapshot's own raw pair
+          -- only when that pick is gone (os outlives a deleted picks row).
+          AND COALESCE(pk.decided_prob, os.model_probability) >= t.min_prob
+          AND (t.prob_only = TRUE
+               OR COALESCE(pk.decided_edge, os.edge) >= COALESCE(t.min_edge, 0))
           AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
         ORDER BY os.lock_key
     """, (target_date,)).fetchall()

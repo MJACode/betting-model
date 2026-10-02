@@ -39,7 +39,8 @@ def render() -> str:
         "/**",
         " * GENERATED FILE — do not edit by hand.",
         " * Source of truth: config.py (ACTION_THRESHOLDS, PAUSED_MODELS,",
-        " * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).",
+        " * PROB_ONLY_MODELS, RETIRED_MODELS, decides_on_raw_models(),",
+        " * DECIDE_ON_CALIBRATED_PROB, KELLY_*).",
         " * Regenerate: python -m scripts.generate_mobile_thresholds",
         " * Check (CI):  python -m scripts.generate_mobile_thresholds --check",
         f" * Last generated: {date.today().isoformat()}",
@@ -83,6 +84,18 @@ def render() -> str:
     for m in sorted(config.RETIRED_MODELS):
         lines.append(f"  '{m}',")
     lines.append("]);")
+    lines.append("")
+    # The models whose BET is decided on the RAW probability
+    # (config.decides_on_raw_models): the app's passesActionFilter filters
+    # them on model_probability and every other model on the calibrated one,
+    # exactly as config.decided_cut_sql does for Discord / push / health.
+    lines.append("export const DECIDES_ON_RAW_MODELS = new Set<string>([")
+    for m in sorted(config.decides_on_raw_models()):
+        lines.append(f"  '{m}',")
+    lines.append("]);")
+    lines.append("")
+    lines.append("// config.DECIDE_ON_CALIBRATED_PROB as built. Off means every model decides raw.")
+    lines.append(f"export const DECIDE_ON_CALIBRATED_PROB = {'true' if config.DECIDE_ON_CALIBRATED_PROB else 'false'};")
     lines.append("")
     lines.append(f"export const KELLY_MULTIPLIER = {_fmt(float(config.KELLY_MULTIPLIER))};")
     lines.append(f"export const MAX_KELLY_FRACTION = {_fmt(float(config.MAX_KELLY_FRACTION))};")
