@@ -26,7 +26,7 @@ import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, pnlColor, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { roundsToZero } from '@/lib/tone';
-import { isModelPaused, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
+import { isModelPaused, isPausedRow, isUnlockedPreview, passesRecordFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT, MIN_PICKS_FOR_COLOURED_ROI, thinSampleCaption } from '@/lib/recordStart';
@@ -68,6 +68,9 @@ export function BuiltInModelDetailScreen() {
         (d) =>
           d.pick.model_id === modelId &&
           d.pick.signal_type === 'BET' &&
+          // A BET written while the model was paused is not a signal (#850),
+          // and the header already says a paused model has no picks today.
+          !isPausedRow(d.pick) &&
           // Future-dated UFC/golf picks are unlocked previews, not signals.
           !isUnlockedPreview(d.pick),
       ),

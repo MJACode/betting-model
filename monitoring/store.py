@@ -348,7 +348,10 @@ def pick_counts(conn, hours: int = 24) -> list[dict]:
     sql = """
         SELECT sport,
                COUNT(*)                                                AS scored,
-               SUM(CASE WHEN signal_type = 'BET' THEN 1 ELSE 0 END)    AS bets,
+               -- A signal, so never a paused model's BET (#850 marker).
+               SUM(CASE WHEN signal_type = 'BET'
+                         AND downgrade_reason IS DISTINCT FROM 'model paused'
+                        THEN 1 ELSE 0 END)                             AS bets,
                SUM(CASE WHEN is_live THEN 1 ELSE 0 END)                AS live
         FROM picks
         WHERE game_date >= to_char(NOW() - (? || ' hours')::interval
@@ -549,6 +552,8 @@ def model_performance(conn) -> list[dict]:
                    MAX(p.game_date)                             AS last_date
             FROM picks p
             WHERE p.signal_type = 'BET' AND p.result IN ('WIN', 'LOSS', 'PUSH')
+              -- Never a paused model's BET: it was not "told us to bet" (#850).
+              AND p.downgrade_reason IS DISTINCT FROM 'model paused'
               AND NOT EXISTS (SELECT 1 FROM mv_scored_pick_outcomes m
                                WHERE m.model_id = p.model_id)
             GROUP BY p.model_id, p.sport
@@ -592,7 +597,8 @@ def picks_over_time(conn, days: int = 14) -> list[dict]:
     sql = """
         SELECT game_date, model_id,
                COUNT(*)                                           AS scored,
-               COUNT(*) FILTER (WHERE signal_type = 'BET')        AS bets
+               COUNT(*) FILTER (WHERE signal_type = 'BET'
+                   AND downgrade_reason IS DISTINCT FROM 'model paused') AS bets
         FROM picks
         WHERE game_date >= to_char(NOW() - (? || ' days')::interval, 'YYYY-MM-DD')
           AND game_date <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')

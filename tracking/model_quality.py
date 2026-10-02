@@ -38,7 +38,7 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import record_exclusion_sql, today_et
+from config import paused_row_exclusion_sql, record_exclusion_sql, today_et
 from data.db import get_connection
 from data.ddl_guard import schema_is_current
 
@@ -635,6 +635,11 @@ def _result_row(run_date: str, check_name: str, model_key: str, sport: str,
 
 # ── Loaders ──────────────────────────────────────────────────────────────────
 
+# A paused model's BET (#850, downgrade_reason = PAUSED_NOTE) was never posted
+# or staked: it is not exposure, not volume and not the published record this
+# monitor watches. Keyed on the row, like every record query.
+_PAUSED = paused_row_exclusion_sql("p")
+
 _OPEN_BET_SQL = """
     SELECT p.model_id, p.sport, p.game_id, p.pick_side,
            p.public_bet_pct, p.public_money_pct, p.recommended_bet,
@@ -643,6 +648,7 @@ _OPEN_BET_SQL = """
     WHERE p.signal_type = 'BET'
       AND p.game_date = ?
       AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
+      {paused}
 """
 
 _SETTLED_BET_SQL = """
@@ -654,7 +660,7 @@ _SETTLED_BET_SQL = """
       AND p.game_date >= ? AND p.game_date < ?
       AND p.result IN ('WIN', 'LOSS', 'PUSH', 'W', 'L')
       AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
-      {excl}
+      {excl}{paused}
 """
 
 _VOLUME_HISTORY_SQL = """
@@ -665,6 +671,7 @@ _VOLUME_HISTORY_SQL = """
     WHERE p.signal_type = 'BET'
       AND p.game_date >= ? AND p.game_date < ?
       AND (p.condition_status IS NULL OR p.condition_status <> 'VOID')
+      {paused}
     GROUP BY p.model_id, p.game_date
 """
 
@@ -739,7 +746,7 @@ def run_model_quality(run_date: str | None = None) -> dict:
         ensure_schema(conn)
         try:
             open_rows = [_row_open(r) for r in conn.execute(
-                _OPEN_BET_SQL, (run_date,)).fetchall()]
+                _OPEN_BET_SQL.format(paused=_PAUSED), (run_date,)).fetchall()]
         except Exception as exc:                            # noqa: BLE001
             getattr(conn, "rollback", lambda: None)()
             logger.error(f"model_quality: open-BET query failed: {exc}")
@@ -753,7 +760,7 @@ def run_model_quality(run_date: str | None = None) -> dict:
 
         excl = record_exclusion_sql("p")
         try:
-            settled_sql = _SETTLED_BET_SQL.format(excl=excl)
+            settled_sql = _SETTLED_BET_SQL.format(excl=excl, paused=_PAUSED)
             recent_rows = [_row_settled(r) for r in conn.execute(
                 settled_sql, (recent_start, run_date)).fetchall()]
             baseline_rows = [_row_settled(r) for r in conn.execute(
@@ -772,7 +779,8 @@ def run_model_quality(run_date: str | None = None) -> dict:
 
         try:
             hist_rows = conn.execute(
-                _VOLUME_HISTORY_SQL, (volume_start, run_date)).fetchall()
+                _VOLUME_HISTORY_SQL.format(paused=_PAUSED),
+                (volume_start, run_date)).fetchall()
         except Exception as exc:                            # noqa: BLE001
             getattr(conn, "rollback", lambda: None)()
             logger.error(f"model_quality: volume query failed: {exc}")

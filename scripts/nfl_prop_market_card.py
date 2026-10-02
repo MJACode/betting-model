@@ -38,6 +38,7 @@ from config import (NFL_PROP_MAX_LEAD_HOURS, NFL_PROP_PUBLISH_HOUR_UTC,
 from data.db import get_connection
 from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_quotes
 from models.nfl_prop_backtest import _as_dt
+from models.scorer import _pause_note
 
 # The pre-committed threshold. See the module docstring before changing it.
 MIN_EDGE = 0.05
@@ -385,6 +386,8 @@ def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
             "bankroll_at_pick": bankroll, "signal_type": "BET",
             "confidence_tier": "MED",
             "prop_market": b.market, "player_key": b.player,
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(MODEL_ID),
         })
     return rows
 
@@ -395,13 +398,13 @@ _INSERT = """
                        edge, dk_odds, scored_line, kelly_fraction,
                        recommended_bet, bankroll_at_pick, signal_type,
                        confidence_tier, prop_market, player_key,
-                       model_probability_cal)
+                       model_probability_cal, downgrade_reason)
     VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
             %(pick_side)s, %(pick_label)s, %(model_probability)s,
             %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s,
-            %(model_probability_cal)s)
+            %(model_probability_cal)s, %(downgrade_reason)s)
     ON CONFLICT DO NOTHING
 """
 

@@ -135,18 +135,65 @@ def _standing(conn: DBConnection, game_id: str, model_id: str,
             "pick_label": r[3], "created_at": r[4], "downgrade_reason": r[5]}
 
 
-def _restore_as_paused(model_id: str, standing: dict | None) -> bool:
-    """Should a restored lane carry config.PAUSED_NOTE?
+def _paused_at_first_signal(conn: DBConnection, first: dict) -> bool | None:
+    """Was the model paused when the first BET was written? None = unprovable.
 
-    picks_log has no downgrade_reason column, so a restored row would lose the
-    marker that keeps a paused model's BET off Discord, push and the record
-    (scorer._paused_signal, 2026-09-28) -- and come back as an announceable
-    BET. Keep it when the row being displaced carried it, or when the model is
-    paused now (what the scorer would stamp on the same pick today).
+    picks_log has no downgrade_reason column (checked against production
+    2026-10-02), so the restored row's own marker is gone. The scorer stamps
+    the marker from the pause state AT WRITE TIME (config.PAUSED_MODELS and
+    model_auto_pauses, scorer._pause_note), and every row of one write shares
+    `created_at` -- a text now(), the transaction's clock. So a row of the SAME
+    model from the SAME write that is still in `picks` (another game in that
+    pass, or a lane the churn never touched) carries the marker the first BET
+    had. That is proof; the model's present pause state is not.
+
+    Until 2026-10-02 this guessed from the present state instead: a model
+    paused at the first signal and unpaused since came back UNMARKED and
+    announceable, a model live then and paused since came back wrongly
+    marked, and model_auto_pauses was ignored. No surviving sibling, or
+    siblings that disagree, is None: the caller leaves the lane alone.
     """
-    if standing is not None and standing.get("downgrade_reason") == config.PAUSED_NOTE:
-        return True
-    return model_id in config.PAUSED_MODELS
+    rows = conn.execute("""
+        SELECT downgrade_reason FROM picks
+        WHERE model_id = %(m)s AND game_date = %(d)s AND created_at = %(t)s
+    """, {"m": first["model_id"], "d": first["game_date"],
+          "t": first["created_at"]}).fetchall()
+    states = {r[0] == config.PAUSED_NOTE for r in rows}
+    return states.pop() if len(states) == 1 else None
+
+
+def _paused_now(conn: DBConnection) -> set[str]:
+    """Every model paused right now, for either reason (scorer._is_paused).
+
+    Read ONCE, before the first write: auto_paused rolls the connection back
+    when the table is unreadable, which mid-loop would discard lanes already
+    restored in this transaction.
+    """
+    from tracking.threshold_review import auto_paused
+    return set(config.PAUSED_MODELS) | set(auto_paused(conn))
+
+
+def _restore_marker(conn: DBConnection, first: dict,
+                    paused_now: set[str]) -> tuple[bool, bool | None]:
+    """(restore?, paused marker) for a lane -- the CONSERVATIVE rule.
+
+    - paused at the first signal (proven): restore WITH the marker. It was
+      never a signal and still is not, whatever the model's state is now.
+    - live at the first signal and live now: restore unmarked.
+    - live then, paused now: skip. The row would be a real signal of record,
+      but re-announcing it now (renotify clears the ledger) speaks for a model
+      someone has since paused -- a person's call, not this job's.
+    - unprovable: skip. A lane this job does not restore stays as it is; one
+      it restores wrongly is announced or hidden wrongly.
+    """
+    then = _paused_at_first_signal(conn, first)
+    if then is None:
+        return False, None
+    if then:
+        return True, True
+    if first["model_id"] in paused_now:
+        return False, None
+    return True, False
 
 
 def _lane_voided(conn: DBConnection, game_id: str, model_id: str,
@@ -196,6 +243,7 @@ def restore_first_signals(game_date: str | None = None,
     conn = get_connection()
     repaired = 0
     try:
+        paused_now = _paused_now(conn)
         for first in _first_bets(conn, game_date, models):
             gid, mid, side = first["game_id"], first["model_id"], first["pick_side"]
             standing = _standing(conn, gid, mid, side)
@@ -205,6 +253,14 @@ def restore_first_signals(game_date: str | None = None,
                 logger.info(f"first-signal repair: {gid}/{mid}/{side} — "
                             f"voided, left alone")
                 continue                      # struck from the record (1c)
+
+            restore, paused_lane = _restore_marker(conn, first, paused_now)
+            if not restore:
+                logger.warning(
+                    f"first-signal repair: {gid}/{mid}/{side} — pause state "
+                    f"at the first signal not provable or changed since; "
+                    f"left alone")
+                continue
 
             was = (f"{standing['pick_label']} @ {standing['dk_odds']}"
                    if standing else "nothing standing")
@@ -217,7 +273,6 @@ def restore_first_signals(game_date: str | None = None,
                 repaired += 1
                 continue
 
-            paused_lane = _restore_as_paused(mid, standing)
             # Remove only the rows that exist BECAUSE the original was deleted.
             # Settled rows are never touched: a graded pick is history.
             conn.execute("""

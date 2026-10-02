@@ -45,9 +45,15 @@ CHURNED = {"pick_id": 1409709, "scored_line": 54.5, "dk_odds": -120.0,
 class _Conn:
     """Records every statement so the repair's writes can be asserted."""
 
-    def __init__(self, first_bets, standing, siblings=()):
+    def __init__(self, first_bets, standing, siblings=(), same_pass=((None,),),
+                 auto_paused=()):
         self._first_bets, self._standing = first_bets, standing
         self._siblings = list(siblings)
+        # downgrade_reason of the model's rows still in `picks` from the first
+        # BET's write (same created_at) -- the proof of its pause state. The
+        # default is one live sibling, so the churn tests restore as before.
+        self._same_pass = [tuple(r) for r in same_pass]
+        self._auto_paused = [(m,) for m in auto_paused]
         self.statements: list[tuple[str, dict]] = []
         self.committed = False
 
@@ -64,6 +70,10 @@ class _Conn:
             # .get: a picks_log row from before 2026-09-09 has NULL in the
             # decision_* columns _COPY_COLS now carries.
             return [tuple(b.get(c) for c in cols) for b in src]
+        if "SELECT downgrade_reason FROM picks" in self._last:
+            return self._same_pass
+        if "FROM model_auto_pauses" in self._last:
+            return self._auto_paused
         return []
 
     def fetchone(self):
@@ -84,8 +94,8 @@ class _Conn:
 
 @pytest.fixture
 def patch_conn(monkeypatch):
-    def _make(first_bets, standing, siblings=()):
-        conn = _Conn(first_bets, standing, siblings)
+    def _make(first_bets, standing, siblings=(), **kw):
+        conn = _Conn(first_bets, standing, siblings, **kw)
         monkeypatch.setattr(fsr, "get_connection", lambda: conn)
         return conn
     return _make
@@ -285,3 +295,75 @@ def test_an_unvoided_lane_with_nothing_standing_is_still_restored(patch_conn):
     conn = patch_conn([FIRST], None)
     assert fsr.restore_first_signals("2026-08-29") == 1
     assert len(_sql_of(conn, "INSERT", "picks")) == 1
+
+
+# ── The pause marker on a restored lane (post-#850 review, 2026-10-02) ───────
+#
+# picks_log has no downgrade_reason, so the marker the first BET carried is
+# proven from the model's rows that share its write (same created_at) and are
+# still in `picks`. The model's PRESENT pause state is never the answer.
+
+from config import PAUSED_NOTE  # noqa: E402
+
+
+def _inserted(conn):
+    return [p for _, p in _sql_of(conn, "INSERT", "picks")]
+
+
+def test_paused_at_the_first_signal_comes_back_marked_even_after_an_unpause(
+        patch_conn, monkeypatch):
+    """The old guess read the present state: paused then, unpaused now came
+    back UNMARKED -- an announceable BET the model never published."""
+    monkeypatch.setattr(fsr.config, "PAUSED_MODELS", set())
+    conn = patch_conn([FIRST], CHURNED, same_pass=[(PAUSED_NOTE,)])
+    assert fsr.restore_first_signals("2026-08-29") == 1
+    assert _inserted(conn)[0]["downgrade_reason"] == PAUSED_NOTE
+
+
+def test_live_at_the_first_signal_and_paused_now_is_left_alone(patch_conn, monkeypatch):
+    """The old guess marked it (wrong: it was a real signal). Restoring it
+    unmarked would re-announce it for a model someone has since paused."""
+    monkeypatch.setattr(fsr.config, "PAUSED_MODELS", {FIRST["model_id"]})
+    conn = patch_conn([FIRST], CHURNED, same_pass=[(None,)])
+    assert fsr.restore_first_signals("2026-08-29") == 0
+    assert not _sql_of(conn, "INSERT", "picks")
+    assert not _sql_of(conn, "DELETE", "picks")
+
+
+def test_an_auto_pause_counts_as_paused_now(patch_conn, monkeypatch):
+    """model_auto_pauses was ignored by the old guess."""
+    monkeypatch.setattr(fsr.config, "PAUSED_MODELS", set())
+    conn = patch_conn([FIRST], CHURNED, same_pass=[(None,)],
+                      auto_paused=[FIRST["model_id"]])
+    assert fsr.restore_first_signals("2026-08-29") == 0
+    assert not _sql_of(conn, "INSERT", "picks")
+
+
+def test_live_then_and_now_restores_unmarked(patch_conn, monkeypatch):
+    monkeypatch.setattr(fsr.config, "PAUSED_MODELS", set())
+    conn = patch_conn([FIRST], CHURNED, same_pass=[(None,), ("ev floor",)])
+    assert fsr.restore_first_signals("2026-08-29") == 1
+    assert "downgrade_reason" not in _inserted(conn)[0]
+
+
+@pytest.mark.parametrize("same_pass", [[], [(None,), (PAUSED_NOTE,)]])
+def test_an_unprovable_pause_state_is_left_alone(patch_conn, monkeypatch, same_pass):
+    """No surviving row from that write, or rows that disagree: skip, never
+    guess. Dry run counts the same lanes the real run would touch."""
+    monkeypatch.setattr(fsr.config, "PAUSED_MODELS", set())
+    conn = patch_conn([FIRST], CHURNED, same_pass=same_pass)
+    assert fsr.restore_first_signals("2026-08-29") == 0
+    assert not _sql_of(conn, "INSERT", "picks")
+    assert not _sql_of(conn, "DELETE", "picks")
+    assert fsr.restore_first_signals("2026-08-29", dry_run=True) == 0
+
+
+def test_the_proof_is_the_same_write_of_the_same_model(patch_conn, monkeypatch):
+    monkeypatch.setattr(fsr.config, "PAUSED_MODELS", set())
+    conn = patch_conn([FIRST], CHURNED)
+    fsr.restore_first_signals("2026-08-29")
+    (sql, params), = [(q, p) for q, p in conn.statements
+                      if "SELECT downgrade_reason FROM picks" in q]
+    assert "created_at = %(t)s" in sql and "model_id = %(m)s" in sql
+    assert params == {"m": FIRST["model_id"], "d": FIRST["game_date"],
+                      "t": FIRST["created_at"]}

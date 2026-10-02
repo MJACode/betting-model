@@ -35,9 +35,10 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LIVE_MODELS, MODELS, RETIRED_MODELS, SHARP_BOOKMAKERS
+from config import (LIVE_MODELS, MODELS, RETIRED_MODELS, SHARP_BOOKMAKERS,
+                    paused_row_exclusion_sql)
 from data.db import get_connection, DBConnection
-from models.scorer import american_to_decimal
+from models.scorer import _get_current_bankroll, american_to_decimal
 from tracking.clv_math import (
     CLV_METHOD_RAW_LEGACY,
     close_book_candidates,
@@ -2573,7 +2574,7 @@ def print_performance_summary(days: int = 30) -> dict:
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
-              AND {_NOT_RETIRED}
+              AND {_NOT_RETIRED}{paused_row_exclusion_sql("picks")}
         """, (cutoff,)).fetchone()
 
         # Per-model breakdown
@@ -2588,19 +2589,16 @@ def print_performance_summary(days: int = 30) -> dict:
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
-              AND {_NOT_RETIRED}
+              AND {_NOT_RETIRED}{paused_row_exclusion_sql("picks")}
             GROUP BY model_id
             ORDER BY flat_pnl DESC
         """, (cutoff,)).fetchall()
 
-        # Current bankroll
-        current_bankroll = conn.execute("""
-            SELECT bankroll_at_pick + COALESCE(profit_kelly, 0)
-            FROM picks
-            WHERE result IS NOT NULL
-            ORDER BY settled_at DESC
-            LIMIT 1
-        """).fetchone()
+        # Current bankroll -- the number every model sizes from, so the same
+        # read as models.scorer._get_current_bankroll: a paused model's
+        # settled BET was never staked and never moves it.
+        b = _get_current_bankroll(conn)
+        current_bankroll = (b,)
 
         # Running bankroll history (for chart)
         bankroll_history = conn.execute(f"""
@@ -2610,7 +2608,7 @@ def print_performance_summary(days: int = 30) -> dict:
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
-              AND {_NOT_RETIRED}
+              AND {_NOT_RETIRED}{paused_row_exclusion_sql("picks")}
             ORDER BY settled_at
         """, (cutoff,)).fetchall()
 

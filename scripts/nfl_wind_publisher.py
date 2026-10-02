@@ -62,6 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
 from models.honest_ev import gate
+from models.scorer import _pause_note
 
 NFL_WIND_MODEL_ID = "nfl_wind_totals"
 NFL_OPENER_MODEL_ID = "nfl_opener_spread"
@@ -247,6 +248,8 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
             "recommended_bet": round(kelly_fraction * bankroll, 2),
             "bankroll_at_pick": bankroll,
             "signal_type": "BET",
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(NFL_WIND_MODEL_ID),
         })
     return games, picks
 
@@ -371,6 +374,8 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             "recommended_bet": round(kelly_fraction * bankroll, 2),
             "bankroll_at_pick": bankroll,
             "signal_type": "BET",
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(NFL_OPENER_MODEL_ID),
         })
     return games, picks
 
@@ -735,13 +740,13 @@ def publish(run_date: str | None = None) -> int:
                                    pick_side, pick_label, model_probability,
                                    dk_implied_prob, edge, dk_odds, scored_line,
                                    kelly_fraction, recommended_bet, bankroll_at_pick,
-                                   signal_type, model_probability_cal)
+                                   signal_type, model_probability_cal, downgrade_reason)
                 VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
                         %(game_time)s, %(pick_side)s, %(pick_label)s,
                         %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
                         %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
                         %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
-                        %(model_probability_cal)s)
+                        %(model_probability_cal)s, %(downgrade_reason)s)
             """, p)
         conn.commit()
     finally:
@@ -811,13 +816,13 @@ def publish_opener(run_date: str | None = None) -> int:
                                    pick_side, pick_label, model_probability,
                                    dk_implied_prob, edge, dk_odds, scored_line,
                                    kelly_fraction, recommended_bet, bankroll_at_pick,
-                                   signal_type, model_probability_cal)
+                                   signal_type, model_probability_cal, downgrade_reason)
                 VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s,
                         %(game_time)s, %(pick_side)s, %(pick_label)s,
                         %(model_probability)s, %(dk_implied_prob)s, %(edge)s,
                         %(dk_odds)s, %(scored_line)s, %(kelly_fraction)s,
                         %(recommended_bet)s, %(bankroll_at_pick)s, %(signal_type)s,
-                        %(model_probability_cal)s)
+                        %(model_probability_cal)s, %(downgrade_reason)s)
             """, p)
             written += 1
         conn.commit()
@@ -936,7 +941,10 @@ def build_scored_rows(latest: dict[tuple[str, str], dict],
             "recommended_bet": 0.0,
             "bankroll_at_pick": bankroll,
             "signal_type": "NONE",
-            "downgrade_reason": (r.get("reason") or "")[:500] or None,
+            # PAUSED_NOTE wins over the card's reason, as in the scorer's
+            # builders (`_pause_note(model_id) or why.get("floor")`).
+            "downgrade_reason": (_pause_note(model_id)
+                                 or (r.get("reason") or "")[:500] or None),
         })
     return out
 

@@ -58,6 +58,7 @@ from models.scorer import (
     _build_pick_label,
     _get_current_bankroll,
     _insert_picks,
+    _pause_note,
 )
 from scripts.mlb_game_market_card import _BOOK, slate
 from tracking.pick_integrity import pick_problems
@@ -137,6 +138,8 @@ def pick_rows(bets, games, quotes, bankroll: float) -> list[dict]:
             "dk_bet_link": link if b.book == "draftkings" else None,
             "best_bet_link": link,
             "public_bet_pct": round(100.0 - b.over_ticket_pct, 1),
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(MODEL_ID),
             "public_money_pct": (
                 None if b.over_money_pct is None
                 else round(100.0 - b.over_money_pct, 1)

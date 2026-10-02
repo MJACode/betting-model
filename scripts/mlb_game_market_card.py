@@ -45,6 +45,7 @@ from models.scorer import (
     _get_current_bankroll,
     _get_public_betting,
     _insert_picks,
+    _pause_note,
     quarter_kelly,
 )
 from tracking.pick_integrity import pick_problems
@@ -169,6 +170,8 @@ def pick_rows(bets, games, quotes, bankroll: float,
             "line_book": b.book,
             "dk_bet_link": link if b.book == "draftkings" else None,
             "best_bet_link": link,
+            # A paused model keeps its verdict and says it is paused (#850).
+            "downgrade_reason": _pause_note(model_id),
             "_quote_snapshot_at": b.snap,
         })
     return rows
