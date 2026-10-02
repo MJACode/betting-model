@@ -66,9 +66,7 @@ export function SegmentTabs<T extends string>({
             accessibilityRole="tab"
             // The visible label, never the raw key: without a labelFor fallback the
             // Stats tabs read 'hitRate' and 'totals' to VoiceOver (#848).
-            accessibilityLabel={
-              accessibilityLabelFor ? accessibilityLabelFor(item) : labelFor ? labelFor(item) : item
-            }
+            accessibilityLabel={accessibilityLabelFor ? accessibilityLabelFor(item) : labelFor ? labelFor(item) : item}
             accessibilityState={{ selected: isActive }}
             // The tabs are 33-38pt tall, under the 44pt HIG floor, and adding
             // height is the one thing this screen cannot spend (UX review,
