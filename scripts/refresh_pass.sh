@@ -143,6 +143,14 @@ step probables-refresh
 # its own connection, and group 1 is already nine concurrent ones against a
 # pool of fifteen. One schedule call per unfilled date, a second or two.
 step umpires
+# NHL player prop prices: an opening and a closing snapshot per game (mike,
+# 2026-10-01). SEQUENTIAL for the same pool reason as the two lines above. On
+# all but two passes a game it is one free event-list call and one query — the
+# ingestor buys only what is due (data/ingestors/nhl_prop_odds_ingestor.py).
+step nhl-prop-odds
+# The blocked-shots card reads the quotes the step above just stored. Must
+# follow it; insert-once per player per game, so every later pass is a no-op.
+step nhl-prop-scoring
 
 # GROUP 2 — scoring. Reads everything above, so it MUST come after the wait.
 # The four scorers touch different model families and different pick rows, but

@@ -342,7 +342,8 @@ def test_wind_and_opener_carry_their_own_floor_below_the_global_one(monkeypatch)
     # every model off the calibration map.
     assert {"nfl_wind_totals", "nfl_opener_spread"} <= set(config.MODEL_OWN_EV_FLOOR)
     assert config.MODELS_ON_OWN_PROBABILITY == frozenset(
-        {"nfl_wind_totals", "nfl_opener_spread"}
+        {"nfl_wind_totals", "nfl_opener_spread", "nhl_prop_blocked_shots",
+         "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists"}
     )
     assert config.MODELS_ON_OWN_PROBABILITY != frozenset(config.MODEL_OWN_EV_FLOOR)
 

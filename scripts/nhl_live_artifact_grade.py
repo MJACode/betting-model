@@ -27,7 +27,13 @@ interval of several points either side -- this can show a loss, not prove an
 edge.
 
     python -m scripts.nhl_live_artifact_grade
+    python -m scripts.nhl_live_artifact_grade --artifact nhl_moneyline=models/saved/x.pkl
+
+`--artifact` grades a file instead of the registry's live version (a retrain
+candidate before it is switched on). Each artifact is scored on the frame its
+OWN feature list builds, so an old one and a new one can be read side by side.
 """
+import pickle
 import sys
 from datetime import datetime, timezone
 
@@ -58,12 +64,27 @@ MIN_ODDS = {m: config.min_odds_for(m) for m in MODELS}
 CUTS = {m: (config.MODEL_PROB_THRESHOLDS[m], config.MODEL_EDGE_THRESHOLDS[m]) for m in MODELS}
 EDGE_CAP = config.MAX_EDGE_CAP
 _FRAMES: dict = {}
+_ARTIFACT_FILES: dict = {}       # model_id -> path, from --artifact
+_ARTIFACTS: dict = {}
+
+
+def artifact(model_id: str) -> dict:
+    """The registry's live version, or the file named on the command line."""
+    if model_id not in _ARTIFACTS:
+        path = _ARTIFACT_FILES.get(model_id)
+        if path:
+            with open(path, "rb") as fh:
+                _ARTIFACTS[model_id] = pickle.load(fh)
+        else:
+            _ARTIFACTS[model_id] = load_model(model_id)
+    return _ARTIFACTS[model_id]
 
 
 def frame(model_id: str) -> pd.DataFrame:
-    """The holdout season's feature rows, as the trainer builds them."""
+    """The holdout season's feature rows, built for THIS artifact's feature list."""
     if model_id not in _FRAMES:
-        f = build_training_dataset(model_id, seasons=[SEASON])
+        f = build_training_dataset(model_id, seasons=[SEASON],
+                                   feature_cols=artifact(model_id)["feature_cols"])
         _FRAMES[model_id] = f[0] if isinstance(f, tuple) else f
     return _FRAMES[model_id]
 
@@ -139,7 +160,7 @@ def ml_prices(conn):
 
 def moneyline(conn):
     mid = "nhl_moneyline"
-    art = load_model(mid)
+    art = artifact(mid)
     f = frame(mid).copy()
     f["p"] = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
     df = f[["game_id", "p", "is_early_season"]].merge(ml_prices(conn), on="game_id", how="inner")
@@ -242,7 +263,7 @@ def moneyline(conn):
 
 def regulation(conn):
     mid = "nhl_moneyline_regulation"
-    art = load_model(mid)
+    art = artifact(mid)
     f = frame(mid).copy()
     P = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))
     pred = pd.DataFrame({"game_id": f.game_id.values, "away": P[:, 0], "draw": P[:, 1], "home": P[:, 2]})
@@ -256,6 +277,9 @@ def regulation(conn):
     px = px.dropna(subset=["home", "away", "draw"]).drop_duplicates(["game_id", "book"], keep="last")
     px["result"] = np.where(px.ot == 1, "draw", np.where(px.hs > px.as_, "home", "away"))
     px = px.merge(pred, on="game_id", how="inner", suffixes=("", "_p"))
+    # The query has no ORDER BY, and a sum of floats depends on its order: two
+    # runs differed by 0.1 unit in the same cells until the rows were sorted.
+    px = px.sort_values(["game_id", "book"]).reset_index(drop=True)
     dk = px[px.book == "draftkings"]
     y = dk.result.map({"away": 0, "draw": 1, "home": 2}).values
     Pm = dk[["away_p", "draw_p", "home_p"]].values
@@ -324,7 +348,7 @@ def regulation(conn):
 
 def bands() -> None:
     """Claimed, corrected and realised, on every side of every holdout game."""
-    art = load_model("nhl_moneyline")
+    art = artifact("nhl_moneyline")
     f = frame("nhl_moneyline")
     p = art["model"].predict_proba(f[art["feature_cols"]].values.astype(float))[:, 1]
     y = f.target.values.astype(int)
@@ -339,7 +363,7 @@ def bands() -> None:
     print(t.to_string())
 
     mid = "nhl_moneyline_regulation"
-    art = load_model(mid)
+    art = artifact(mid)
     g = frame(mid)
     P = art["model"].predict_proba(g[art["feature_cols"]].values.astype(float))
     y3 = g.target.values.astype(int)
@@ -353,6 +377,10 @@ def bands() -> None:
 
 
 if __name__ == "__main__":
+    for i, a in enumerate(sys.argv):
+        if a == "--artifact" and i + 1 < len(sys.argv):
+            k, _, v = sys.argv[i + 1].partition("=")
+            _ARTIFACT_FILES[k] = v
     c = get_connection()
     try:
         maps = load_calibrations(c)

@@ -12,28 +12,84 @@
 > market key, the missing 2025-26 season) were fixed the same day; the
 > sections below marked **(2026-09-20)** describe the pipeline as it is now.
 
+> **THE NHL MODELS ARE LIVE, WITH THE GO-LIVE GATE NOT MET** (mike,
+> 2026-10-01: *"this is a live model"*). Raised with the grade below in front
+> of him, restated, his call. Do not describe them as paper-only, do not hold
+> their picks back, and do not restore the gate without asking him.
+>
+> **NHL HAS NO 10-GAME HOLD** (mike, same day, on a proposal to hold picks until
+> both teams had played ten games: *"no, this is fucking why we have back testing
+> and seasons worth of data frmo out data sources"*). **Backtested the same day,
+> and he was right:** over five seasons the live inputs do no worse in the
+> early weeks than in the rest of the season, and the alternative built to
+> replace them (every team number blended toward last season) graded worse.
+> Nothing was switched. `docs/nhl_market_lab.md`, "The early weeks, backtested".
+>
+> **THE PROBABILITY CORRECTION STAYS AS IT IS** (mike, same day: underdog
+> plus-money bets are wanted). What it does to these two models is measured in
+> `docs/nhl_market_lab.md` ("The live artifacts, graded"); that is a record,
+> not an open question.
+>
 > **State at 2026-10-01, three days into 2026-27** (queries and tables:
-> `docs/nhl_market_lab.md`, "The live artifacts, graded"; open items:
-> `docs/followups.md`).
-> - **Both models are writing BETs and nothing holds a paper-only model back.**
->   11 BETs in `picks` (4 moneyline, 7 regulation). One was published to push
->   and Discord: "CAR ML", written 2026-09-22 for 09-29, a loss, -1.0 unit. The
->   other ten clear the scorer and fail the publishers' cut, because the scorer
->   decides on the corrected probability and the publishers filter on the
->   model's own.
-> - **Graded at real 2025-26 prices, neither live artifact made money** at any
->   cut (`scripts/nhl_live_artifact_grade.py`).
-> - **The probability correction is what is producing the bets**, by raising
->   every probability under 50%. Ten of the eleven BETs fail the stated cuts on
->   the model's own number.
-> - **Week-one inputs are not rows the model trained on** (last season's running
->   totals before a team's first game; raw one-game numbers after it), and 28 of
->   32 probable starters carry the league-average goalie line.
-> - **No NHL prop price has been collected this season** (`player_prop_odds`,
->   game_date >= 2026-09-29: 0 rows), so the lab's prop candidates have no paper
->   record accruing. `nhl_over_under` and `nhl_puckline` are still untrained;
->   their stated blocker (no historical lines) ended 2026-09-21.
-> - **The odds feed read 0 credits from 2026-09-26 to 09-30.** No NHL price was
+> `docs/nhl_market_lab.md`; open items: `docs/followups.md`).
+> - 11 BETs in `picks` (4 moneyline, 7 regulation). One reached push and
+>   Discord: "CAR ML", written 2026-09-22 for 09-29, a loss, -1.0 unit. The
+>   other ten clear the scorer and fail the publishers' cut: the scorer decides
+>   on the corrected probability, the publishers filter on the model's own.
+> - Graded at real 2025-26 prices, neither live artifact made money at any cut
+>   (`scripts/nhl_live_artifact_grade.py`).
+> - Blind underdogs lost in five of the last six seasons at DraftKings
+>   (`scripts/nhl_underdog_grid.py`). The "best price against Pinnacle" grid in
+>   the same script is NOT a rule: it compared quotes taken at different
+>   moments, and with simultaneous quotes there is nothing
+>   (`scripts/nhl_moneyline_market_lab.py`).
+> - **`nhl_prop_blocked_shots` is live** (mike, 2026-10-01: *"just build
+>   profitable models"*): a Poisson model of a skater's blocked shots priced
+>   against DraftKings, unders, EV >= 0.10 on its own probability. Walk-forward
+>   on three priced seasons: +6.2% on 2,054 bets, every season positive.
+>   `models/nhl_prop_blocked_shots.py`, `scripts/nhl_prop_card.py` (step
+>   `nhl-prop-scoring`, right after the prop prices). Settles from
+>   `nhl_skater_game_log`; a scratched player is NO_ACTION.
+> - **`nhl_prop_saves`, `nhl_prop_shots_on_goal` and `nhl_prop_assists` are
+>   live** (mike, 2026-10-01: *"build saves, shots on goal and assists models
+>   and we need total goals"*). One engine, a Spec per market
+>   (`models/nhl_props.py`); unders only, EV >= 0.10 on the model's own
+>   probability, **at the best price among the bettable books** (FanDuel left
+>   out), one pick per player per game. Walk-forward on three priced seasons
+>   (`scripts/nhl_prop_backtest.py`): saves +7.8% on 1,755 bets, shots on goal
+>   +5.7% on 4,707, assists +10.9% on 1,063, every season positive in each.
+>   Shots on goal needs the best price: at DraftKings alone it is +3.3% with a
+>   flat 2024-25. **Shots on goal bets at most 3 a game**, best EV first, picks
+>   already written included (mike, 2026-10-01, after an 11-bet game): +5.4% on
+>   4,210 with the limit (`docs/nhl_market_lab.md`). Card: `scripts/nhl_props_card.py`, in the same
+>   `nhl-prop-scoring` step. A goalie who does not start is NO_ACTION (the
+>   books void it), a relief appearance included. The row is the scorer's
+>   shape for a pick decided away from DraftKings: `decision_*` is the book
+>   and price bet, the DraftKings columns hold DraftKings' own number at that
+>   line or nothing, `line_book` says whose line it is when DraftKings has
+>   none, `best_*` carries the deciding book's betslip link. No book in the
+>   label.
+> - **Total goals: still no model, on purpose.** A fourth round
+>   (`scripts/nhl_totals_lab.py`, six seasons, simultaneous quotes) found the
+>   book's margin on BOTH sides of the full-game number (every over -4.0%,
+>   every under -4.4%), no edge from Pinnacle against DraftKings, and a ceiling
+>   of +3% to +5% even for a bettor who knew which way the number would move.
+>   `nhl_over_under` stays untrained. The total-goals markets shaped like the
+>   props (team totals, period totals, alternates) have no stored price.
+> - **Player prop prices are collected from 2026-10-01**: an opening and a
+>   closing snapshot per game, six markets, ten books
+>   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step
+>   `nhl-prop-odds`, kill switch `RUN_NHL_PROP_ODDS=0`). Measured on the live
+>   endpoint: 5 credits a game per snapshot. Four of the six markets now have a
+>   model; points and anytime scorer do not.
+> - A returning starter is now matched to his own history before his first
+>   game of the season (`GoalieBook.player_named`); until 2026-10-01, 28 of 32
+>   probable starters carried the league-average line.
+> - `nhl_puckline` is still untrained; its stated blocker (no historical
+>   lines) ended 2026-09-21. `nhl_over_under` is untrained because four rounds
+>   found nothing to train toward (above).
+> - The month's odds-feed allowance ran out on 2026-09-26 and reset on 10-01
+>   (mike: it refreshes every month; nothing to diagnose). No NHL price was
 >   stored between 09-26 22:59Z and 10-01 00:02Z, so opening night has no
 >   closing line and "CAR ML" was graded against a three-day-old price.
 
@@ -68,9 +124,9 @@
   the logs do (130 games).
 
 ## 24. NHL — Pipeline Operations
-### Models (2026-09-20: moneyline + regulation RETRAINED on honest inputs — PAPER ONLY until the §2 gate; O/U + puckline blocked)
+### Models (2026-09-20: moneyline + regulation RETRAINED on honest inputs; LIVE since 2026-10-01, gate not met — mike; O/U + puckline untrained)
 
-**Retrained 2026-09-20 (mike), train 2018-19 → 2024-25, holdout 2025-26, 1,352 games.** A retrain resets the go-live gate: both are paper-only until ≥ 50 settled picks, positive flat ROI and calibration ≤ 5%.
+**Retrained 2026-09-20 (mike), train 2018-19 → 2024-25, holdout 2025-26, 1,352 games.** A retrain resets the go-live gate (≥ 50 settled picks, positive flat ROI, calibration ≤ 5%); **mike made both LIVE on 2026-10-01 with the gate not met** (top of this file).
 
 | Model | Holdout 2025-26 | The do-nothing baseline on the same season |
 |---|---|---|
