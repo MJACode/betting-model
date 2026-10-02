@@ -393,3 +393,55 @@ def test_the_app_filters_the_paused_row_out_of_signals_and_the_record():
         block = q.split(const)[1].split(";")[0]
         assert "downgrade_reason" in block, const
     assert "const KEY = 'settledPicks.v7';" in _src("mobile/src/lib/settledPickCache.ts")
+
+
+# ── post-#850 review: the leaks the first pass missed ────────────────────────
+
+def _fn(src: str, sig: str) -> str:
+    m = re.search(re.escape(sig) + r".*?\n\}\n", src, re.S)
+    assert m, f"{sig} is missing"
+    return m.group(0)
+
+
+def test_the_team_and_player_pick_records_drop_the_paused_row_on_the_server():
+    """Aaron Nola's page showed three paused 10/1 BETs, and ATL/PHI a paused
+    Over 7.5: both record reads pulled settled BETs with no paused clause."""
+    q = _src("mobile/src/lib/queries.ts")
+    assert (
+        "export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq.${PAUSED_NOTE}`;"
+        in q
+    ), "NULL must pass explicitly: neq alone drops every unmarked row"
+    for sig in (
+        "export async function fetchSettledGamePicksForGames(",
+        "export async function fetchSettledPropPicksForPlayer(",
+    ):
+        body = _fn(q, sig)
+        assert ".or(NOT_PAUSED_ROW)" in body, sig
+        assert "isPausedRow(p)" in body, f"{sig}: belt and braces, filter the rows too"
+
+
+def test_the_team_and_player_record_reductions_skip_the_paused_row():
+    team = _fn(_src("mobile/src/lib/teamDetail.ts"), "export function teamPickRecords(")
+    player = _fn(_src("mobile/src/lib/playerDetail.ts"), "export function playerPickRecord(")
+    for name, body in (("teamPickRecords", team), ("playerPickRecord", player)):
+        assert "if (isPausedRow(p)) continue;" in body, name
+
+
+def test_every_settled_bet_read_carries_the_paused_clause():
+    """Any server read pinned to settled BETs is a record read; it must say
+    which rows are not bets. Reads that feed passesRecordFilter (all-signal
+    reads) are not pinned to BET and are filtered on the client."""
+    q = _src("mobile/src/lib/queries.ts")
+    for m in re.finditer(r"export async function (\w+)\(.*?\n\}\n", q, re.S):
+        body = m.group(0)
+        if ".eq('signal_type', 'BET')" in body and ".in('result', ['WIN', 'LOSS', 'PUSH'])" in body:
+            assert ".or(NOT_PAUSED_ROW)" in body, m.group(1)
+
+
+def test_the_live_board_drops_the_paused_row():
+    """The #850 guard the Live board missed: a BET written while its lane was
+    paused stays not-a-signal after an unpause."""
+    src = _src("mobile/src/screens/PicksHomeScreen.tsx")
+    block = src.split("const liveInProgress = useMemo(")[1].split("[allLiveData, liveStates]")[0]
+    assert "!isModelPaused(d.pick.model_id)" in block
+    assert "!isPausedRow(d.pick)" in block
