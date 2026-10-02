@@ -26,14 +26,20 @@ import {
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
   DECIDES_ON_RAW_MODELS,
+  DECIDES_CALIBRATED_AT_DK_MODELS,
   DECIDE_ON_CALIBRATED_PROB,
+  PUBLISH_MAX_PRICE_GAP,
+  DECIDED_ONLY_PUBLISH_WITHIN_HOURS,
 } from './thresholds.generated';
 export type { ModelThreshold } from './thresholds.generated';
 // `export { X } from` re-exports without binding X in this module, so
 // isProbOnlyModel / thresholdFor / etc. cannot see the names (TS2304).
 export {
   DECIDES_ON_RAW_MODELS,
+  DECIDES_CALIBRATED_AT_DK_MODELS,
   DECIDE_ON_CALIBRATED_PROB,
+  PUBLISH_MAX_PRICE_GAP,
+  DECIDED_ONLY_PUBLISH_WITHIN_HOURS,
   ACTION_THRESHOLDS,
   PAUSED_MODELS,
   PROB_ONLY_MODELS,
@@ -63,6 +69,12 @@ export type ActionFilterable = Pick<
   discordPublish?: DiscordPublish;
   /** 'model paused' on a pick written while its model was paused. */
   downgrade_reason?: string | null;
+  /** In-play row; the publish-time guards are pre-game only. */
+  is_live?: boolean | null;
+  /** Game start (picks.game_time, UTC ISO). The decided-only window reads it. */
+  game_time?: string | null;
+  /** ET date (YYYY-MM-DD); the window's fallback when game_time is unknown. */
+  game_date?: string | null;
 };
 
 /**
@@ -275,9 +287,23 @@ export function isUnlockedPreview(
   return UNLOCKED_LOOKAHEAD_SPORTS.has(p.sport) && p.game_date > today;
 }
 
+/** What decided this model's BET -- config.decision_source. */
+export function decisionSource(modelId: string): 'raw' | 'calibrated' | 'calibrated_at_dk' {
+  if (DECIDES_CALIBRATED_AT_DK_MODELS.has(modelId)) return 'calibrated_at_dk';
+  if (!DECIDE_ON_CALIBRATED_PROB || DECIDES_ON_RAW_MODELS.has(modelId)) return 'raw';
+  return 'calibrated';
+}
+
 /** Does the scorer decide this model's BET on the calibrated probability? */
 export function decidesOnCalibrated(modelId: string): boolean {
-  return DECIDE_ON_CALIBRATED_PROB && !DECIDES_ON_RAW_MODELS.has(modelId);
+  return decisionSource(modelId) !== 'raw';
+}
+
+/** An implied probability of 0 (or none) is a missing price (config NULLIF). */
+function impliedOrNull(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return n === 0 || Number.isNaN(n) ? null : n;
 }
 
 /**
@@ -288,20 +314,61 @@ export function decidesOnCalibrated(modelId: string): boolean {
  * number minus the implied probability of the deciding price; it STORES the
  * raw pair. Filtering on the raw pair hid every BET the calibration had lifted
  * over the cut (18 NHL underdog BETs, 2026-09-22..10-02): written, shown
- * nowhere. Raw when the model decides raw (DECIDES_ON_RAW_MODELS, or the flag
- * off), when the row has no calibrated number, and — edge only — when the row
- * has no price to subtract.
+ * nowhere. The NCAAF live engine (calibrated_at_dk) subtracts DraftKings'
+ * implied instead. Raw when the model decides raw, when the row has no
+ * calibrated number, and — edge only — when the row has no price to subtract
+ * (an implied of 0 counts as none).
  */
-export function decidedNumbers(p: ActionFilterable): { prob: number; edge: number } {
+export type DecidedInput = Pick<
+  ActionFilterable,
+  'model_id' | 'model_probability' | 'edge' | 'decision_edge'
+  | 'model_probability_cal' | 'decision_implied_prob' | 'dk_implied_prob'
+>;
+
+export function decidedNumbers(p: DecidedInput): { prob: number; edge: number } {
   const rawEdge = decisionEdge(p);
   const cal = p.model_probability_cal;
-  if (!decidesOnCalibrated(p.model_id) || cal == null) {
+  const src = decisionSource(p.model_id);
+  if (src === 'raw' || cal == null) {
     return { prob: Number(p.model_probability), edge: rawEdge };
   }
   const prob = Number(cal);
-  const implied = p.decision_implied_prob ?? p.dk_implied_prob;
+  const dk = impliedOrNull(p.dk_implied_prob);
+  const implied = src === 'calibrated_at_dk' ? dk : (impliedOrNull(p.decision_implied_prob) ?? dk);
   if (implied == null) return { prob, edge: rawEdge };
-  return { prob, edge: prob - Number(implied) };
+  return { prob, edge: prob - implied };
+}
+
+type Cut = { min_prob: number; min_edge: number | null; prob_only: boolean };
+
+function clearsCut(prob: number, edge: number, cut: Cut): boolean {
+  if (prob < cut.min_prob) return false;
+  if (cut.prob_only) return true;
+  return edge >= (cut.min_edge ?? 0);
+}
+
+/**
+ * THE TWO PUBLISH-TIME GUARDS — the app twin of config.price_gap_ok_sql and
+ * decided_only_window_sql. Pre-game only.
+ *   1. The deciding price's implied probability within PUBLISH_MAX_PRICE_GAP
+ *      of DraftKings' (3101240: BetMGM +154 vs DK -125, 16pp).
+ *   2. A pick that clears the cut only on the decided numbers (fails the raw
+ *      cut) waits until its game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS
+ *      (game_date at most tomorrow ET when the start is unknown).
+ */
+export function publishGuardsPass(p: ActionFilterable, cut: Cut, nowMs: number = Date.now()): boolean {
+  if (p.is_live || isLiveModel(p.model_id)) return true;
+  const dec = impliedOrNull(p.decision_implied_prob);
+  const dk = impliedOrNull(p.dk_implied_prob);
+  if (dec != null && dk != null && Math.abs(dec - dk) > PUBLISH_MAX_PRICE_GAP + 1e-12) return false;
+  if (clearsCut(Number(p.model_probability), decisionEdge(p), cut)) return true;
+  const start = p.game_time ? Date.parse(p.game_time) : NaN;
+  if (!Number.isNaN(start)) {
+    return start <= nowMs + DECIDED_ONLY_PUBLISH_WITHIN_HOURS * 3600_000;
+  }
+  if (!p.game_date) return false;
+  const tomorrow = new Date(Date.parse(`${todayET()}T12:00:00Z`) + 86400_000).toISOString().slice(0, 10);
+  return p.game_date <= tomorrow;
 }
 
 export function passesActionFilter(p: ActionFilterable): boolean {
@@ -347,8 +414,8 @@ export function passesActionFilter(p: ActionFilterable): boolean {
     if (sv.paused) return false;
     if (prob < sv.min_prob) return false;
     if (!passesMinOdds(odds, sv.min_odds)) return false;
-    if (sv.prob_only) return true;
-    return edge >= sv.min_edge;
+    if (!sv.prob_only && !(edge >= sv.min_edge)) return false;
+    return publishGuardsPass(p, { min_prob: sv.min_prob, min_edge: sv.min_edge, prob_only: !!sv.prob_only });
   }
 
   if (PAUSED_MODELS.has(p.model_id)) return false;
@@ -356,8 +423,9 @@ export function passesActionFilter(p: ActionFilterable): boolean {
   if (!t) return false;
   if (prob < t.min_prob) return false;
   if (!passesMinOdds(odds, t.min_odds)) return false;
-  if (PROB_ONLY_MODELS.has(p.model_id)) return true;
-  return edge >= t.min_edge;
+  const probOnly = PROB_ONLY_MODELS.has(p.model_id);
+  if (!probOnly && !(edge >= t.min_edge)) return false;
+  return publishGuardsPass(p, { min_prob: t.min_prob, min_edge: t.min_edge, prob_only: probOnly });
 }
 
 /**

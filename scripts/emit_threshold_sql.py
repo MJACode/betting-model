@@ -47,18 +47,13 @@ def emit(prefix: str = "", include_paused_comments: bool = True,
         # decided_edge_sql): calibrated where it decides on the calibrated
         # number, raw otherwise. Resolved per model here, so the block stays
         # one flat clause per model.
-        prob_col = f"{prefix}model_probability"
-        if config.decides_on_calibrated(model_id):
-            prob_col = f"COALESCE({prefix}model_probability_cal, {prefix}model_probability)"
+        prob_col = config.decided_prob_col(model_id, prefix)
         clause = f"({prefix}model_id = {quoted} AND {prob_col} >= {cut['min_prob']}"
         # The cut is applied at the price the pick was DECIDED at (2026-09-09,
         # mike: "remove DK only"): decision_* since the flip, DraftKings before
         # it (NULL, so COALESCE is exact). Same clause as the Discord and push
         # producers and the app's passesActionFilter.
-        edge_col = f"COALESCE({prefix}decision_edge, {prefix}edge)"
-        if config.decides_on_calibrated(model_id):
-            implied = f"COALESCE({prefix}decision_implied_prob, {prefix}dk_implied_prob)"
-            edge_col = f"COALESCE({prefix}model_probability_cal - {implied}, {edge_col})"
+        edge_col = config.decided_edge_col(model_id, prefix)
         odds_col = f"COALESCE({prefix}decision_odds, {prefix}dk_odds)"
         # Prob-only models ignore edge entirely (config.PROB_ONLY_MODELS).
         if model_id not in config.PROB_ONLY_MODELS:

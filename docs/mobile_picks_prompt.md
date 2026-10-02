@@ -133,11 +133,19 @@ When I ask "what are today's picks?" or similar:
      -- went stale on every threshold change, pause, unpause or new model, and
      -- somebody had to paste a fresh block into the project instructions.
      AND t.paused = FALSE
-     -- The cut on the numbers the scorer DECIDED on (config.decided_cut_sql):
-     -- calibrated where it decides calibrated, raw for the listed models.
-     AND ((CASE WHEN p.model_id IN ('mlb_spread_market', 'mlb_total_market', 'mlb_total_public_fade', 'ncaaf_live_total', 'ncaaf_live_win_prob', 'nfl_live_prop', 'nfl_opener_spread', 'nfl_prop_market', 'nfl_wind_totals', 'nhl_prop_assists', 'nhl_prop_blocked_shots', 'nhl_prop_saves', 'nhl_prop_shots_on_goal', 'wnba_prop_market') THEN p.model_probability ELSE COALESCE(p.model_probability_cal, p.model_probability) END) >= t.min_prob
+     -- The cut on the numbers the scorer DECIDED on, plus the publish-time
+     -- price-gap and decided-only 24h guards (config.publishable_cut_sql):
+     -- the same clause Discord, push and the app apply. Generated text.
+     AND (((CASE WHEN p.model_id IN ('mlb_spread_market', 'mlb_total_market', 'mlb_total_public_fade', 'nfl_live_prop', 'nfl_opener_spread', 'nfl_prop_market', 'nfl_wind_totals', 'nhl_prop_assists', 'nhl_prop_blocked_shots', 'nhl_prop_saves', 'nhl_prop_shots_on_goal', 'wnba_prop_market') THEN p.model_probability ELSE COALESCE(p.model_probability_cal, p.model_probability) END) >= t.min_prob
           AND (t.prob_only = TRUE
-               OR (CASE WHEN p.model_id IN ('mlb_spread_market', 'mlb_total_market', 'mlb_total_public_fade', 'ncaaf_live_total', 'ncaaf_live_win_prob', 'nfl_live_prop', 'nfl_opener_spread', 'nfl_prop_market', 'nfl_wind_totals', 'nhl_prop_assists', 'nhl_prop_blocked_shots', 'nhl_prop_saves', 'nhl_prop_shots_on_goal', 'wnba_prop_market') THEN COALESCE(p.decision_edge, p.edge) ELSE COALESCE(p.model_probability_cal - COALESCE(p.decision_implied_prob, p.dk_implied_prob), COALESCE(p.decision_edge, p.edge)) END) >= COALESCE(t.min_edge, 0)))
+               OR (CASE WHEN p.model_id IN ('mlb_spread_market', 'mlb_total_market', 'mlb_total_public_fade', 'nfl_live_prop', 'nfl_opener_spread', 'nfl_prop_market', 'nfl_wind_totals', 'nhl_prop_assists', 'nhl_prop_blocked_shots', 'nhl_prop_saves', 'nhl_prop_shots_on_goal', 'wnba_prop_market') THEN COALESCE(p.decision_edge, p.edge) WHEN p.model_id IN ('ncaaf_live_total', 'ncaaf_live_win_prob') THEN COALESCE(p.model_probability_cal - NULLIF(p.dk_implied_prob, 0), COALESCE(p.decision_edge, p.edge)) ELSE COALESCE(p.model_probability_cal - COALESCE(NULLIF(p.decision_implied_prob, 0), NULLIF(p.dk_implied_prob, 0)), COALESCE(p.decision_edge, p.edge)) END) >= COALESCE(t.min_edge, 0)))
+          AND (NOT ((p.is_live IS NULL OR p.is_live = FALSE) AND p.model_id NOT LIKE '%%_live_%%') OR NULLIF(p.decision_implied_prob, 0) IS NULL OR NULLIF(p.dk_implied_prob, 0) IS NULL OR ABS(p.decision_implied_prob - p.dk_implied_prob) <= 0.08)
+          AND (NOT ((p.is_live IS NULL OR p.is_live = FALSE) AND p.model_id NOT LIKE '%%_live_%%')
+          OR (p.model_probability >= t.min_prob
+          AND (t.prob_only = TRUE
+               OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)))
+          OR (g.commence_time IS NOT NULL AND g.commence_time::timestamptz <= NOW() + INTERVAL '24 hours')
+          OR (g.commence_time IS NULL AND p.game_date <= to_char((NOW() AT TIME ZONE 'America/New_York')::date + 1, 'YYYY-MM-DD'))))
      AND (t.min_odds IS NULL
           OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
           OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)

@@ -1457,7 +1457,7 @@ def test_the_restate_producer_applies_the_apps_action_filter():
     for clause in ("model_action_thresholds", "t.paused = FALSE",
                    # On the numbers the scorer DECIDED on (config.decided_cut_sql),
                    # at the price the pick was DECIDED at (2026-09-09).
-                   config.decided_cut_sql("p", "t"),
+                   config.publishable_cut_sql("p", "t"),
                    "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds"):
         assert clause in sql, clause
 

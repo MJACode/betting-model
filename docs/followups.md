@@ -33,7 +33,23 @@ prompt and the app's `passesActionFilter`. Raw for rule cards, engines and
 `MODELS_ON_OWN_PROBABILITY`, and for everything with
 `DECIDE_ON_CALIBRATED_PROB` off. Measured at build time: 11 pre-game BETs
 would post on deploy, all NHL, and none would stop publishing. Burst table and
-risks are in the PR.
+risks are in the PR (#865).
+
+**2026-10-02, review round 1 (#865).** Added the two publish-time guards
+(`config.publishable_cut_sql`, app `publishGuardsPass`): a deciding price more
+than `PUBLISH_MAX_PRICE_GAP` (0.08) from DraftKings' is refused, and a pick that
+clears only on the decided numbers waits until its game is within
+`DECIDED_ONLY_PUBLISH_WITHIN_HOURS` (24). The ncaaf_live engines are classified
+`calibrated_at_dk` (their real decision source). The three per-model record
+views get a registered, unapplied migration. Still open, for Michael:
+- [needs-decision] NHL's borrowed map inflates the 3-way regulation market
+  (outcomes sum to ~1.175). Either put the two NHL moneyline models in
+  `MODELS_ON_OWN_PROBABILITY` (every decided-only NHL pick drops) or normalize
+  the 3-way calibration (every regulation pick in the 10-02 burst drops; the
+  2-way moneyline picks are unaffected). Per-pick table in #865.
+- [follow-up] Nothing re-prices a pick at post time: `publish_price` posts the
+  bet of record's stored price. The 24h window bounds the staleness; a
+  re-price-before-post step is the real fix.
 
 Found 2026-10-01 through the NHL picks. The scorer decides on the corrected
 probability (`models.scorer._decide`); the app, Discord and push filter on

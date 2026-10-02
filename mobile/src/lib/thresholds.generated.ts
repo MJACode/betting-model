@@ -148,8 +148,6 @@ export const DECIDES_ON_RAW_MODELS = new Set<string>([
   'mlb_spread_market',
   'mlb_total_market',
   'mlb_total_public_fade',
-  'ncaaf_live_total',
-  'ncaaf_live_win_prob',
   'nfl_live_prop',
   'nfl_opener_spread',
   'nfl_prop_market',
@@ -161,8 +159,18 @@ export const DECIDES_ON_RAW_MODELS = new Set<string>([
   'wnba_prop_market',
 ]);
 
-// config.DECIDE_ON_CALIBRATED_PROB as built. Off means every model decides raw.
+export const DECIDES_CALIBRATED_AT_DK_MODELS = new Set<string>([
+  'ncaaf_live_total',
+  'ncaaf_live_win_prob',
+]);
+
+// config.DECIDE_ON_CALIBRATED_PROB as built. Off means every artifact model decides raw.
 export const DECIDE_ON_CALIBRATED_PROB = true;
+
+// config.PUBLISH_MAX_PRICE_GAP: max |decision implied - DK implied| to publish.
+export const PUBLISH_MAX_PRICE_GAP = 0.08;
+// config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS: a decided-only pick waits until its game is this close.
+export const DECIDED_ONLY_PUBLISH_WITHIN_HOURS = 24;
 
 export const KELLY_MULTIPLIER = 0.1;
 export const MAX_KELLY_FRACTION = 0.05;

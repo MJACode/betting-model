@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 
+import config
 from data.db import get_connection
 
 SQL = """
@@ -78,8 +79,8 @@ clears AS (
   FROM picks p JOIN model_action_thresholds m ON m.model_id = p.model_id
   WHERE p.signal_type='BET' AND p.result IN ('WIN','LOSS','PUSH')
     AND p.is_live IS NOT TRUE
-    AND p.model_probability >= m.min_prob
-    AND (m.prob_only OR p.edge >= COALESCE(m.min_edge, 0))
+    -- On the numbers the scorer DECIDED on (config.decided_cut_sql).
+    AND __DECIDED_CUT__
     AND (m.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= m.min_odds)
   GROUP BY 1
 )
@@ -91,7 +92,7 @@ FROM issued i
 FULL JOIN board  b ON b.model_id = i.model_id
 FULL JOIN clears c ON c.model_id = i.model_id
 ORDER BY i.n DESC NULLS LAST
-"""
+""".replace("__DECIDED_CUT__", config.decided_cut_sql("p", "m"))
 
 
 def main() -> int:

@@ -41,7 +41,7 @@ def test_the_prompt_carries_no_per_model_cut():
 def test_the_prompt_joins_the_thresholds_table_and_applies_every_gate():
     assert "JOIN model_action_thresholds t ON t.model_id = p.model_id" in PROMPT
     import config
-    cut = (config.decided_cut_sql("p", "t")
+    cut = (config.publishable_cut_sql("p", "t")
            .replace("\n               ", "\n          ")
            .replace("\n                    ", "\n               "))
     for gate in ("t.paused = FALSE",

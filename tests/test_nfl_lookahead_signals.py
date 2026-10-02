@@ -132,7 +132,7 @@ def test_both_publishers_apply_the_apps_action_filter():
         # calibrated. The raw edge, COALESCE(decision_edge, edge), is still
         # the fallback inside it -- exact, a NULL decision column means dk_*.
         import config
-        assert config.decided_cut_sql("p", "t") in sql
+        assert config.publishable_cut_sql("p", "t") in sql
         assert "COALESCE(p.decision_edge, p.edge)" in sql
         assert "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds" in sql, (
             "min_odds was missing from the push producer until 2026-09-05, so "

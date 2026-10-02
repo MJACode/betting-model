@@ -17,8 +17,8 @@
  */
 
 import { MODEL_META } from './modelMeta';
-import { isModelRetired } from './thresholds';
-import { decisionEdge, decisionOdds } from '@/lib/decisionPrice';
+import { decidedNumbers, isModelRetired, type DecidedInput } from './thresholds';
+import { decisionOdds } from '@/lib/decisionPrice';
 import type {
   BetKind,
   ConfidenceTier,
@@ -582,10 +582,15 @@ export function describeFilters(filters: CustomModelFilters | undefined): string
  * with no DK price (prob-only markets) cannot clear an EV floor.
  */
 export function pickMatchesModel(
-  pick: FilterablePick & { model_probability: number; edge: number },
+  pick: FilterablePick & { model_probability: number; edge: number }
+    & Partial<Pick<DecidedInput, 'model_probability_cal' | 'decision_implied_prob' | 'dk_implied_prob'>>,
   model: CustomModel,
 ): boolean {
   if (model.rules.length === 0) return false;
+  // On the numbers the scorer DECIDED on (thresholds.decidedNumbers), as the
+  // action filter, Discord and push: calibrated where the model decides
+  // calibrated. A row without model_probability_cal reads raw, as before.
+  const { prob, edge } = decidedNumbers(pick);
   const passesRule = model.rules.some((r) => {
     // A rule on a retired bet type never matches: the backtest
     // (splitRulesByCoverage) already drops it, and the two must agree or the
@@ -594,10 +599,10 @@ export function pickMatchesModel(
     if (pick.model_id !== r.model_id) return false;
     // An absent floor is "Any" — the builder leaves every field blank, so a
     // rule can qualify on bet type alone.
-    if (r.min_prob != null && pick.model_probability < r.min_prob) return false;
-    if (r.min_edge != null && decisionEdge(pick) < r.min_edge) return false;
+    if (r.min_prob != null && prob < r.min_prob) return false;
+    if (r.min_edge != null && edge < r.min_edge) return false;
     if (r.min_ev != null) {
-      const ev = evOf(pick.model_probability, decisionOdds(pick));
+      const ev = evOf(prob, decisionOdds(pick));
       if (ev == null || ev < r.min_ev) return false;
     }
     return true;

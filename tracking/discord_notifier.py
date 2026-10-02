@@ -631,9 +631,10 @@ def _log_stale_pause_hiding_bets(conn, target_date: str) -> None:
               -- 2026-09-28): keyed on the row's own marker, so a pick written
               -- while paused is never announced, even after an unpause.
               {config.paused_row_exclusion_sql("p")}
-              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql):
+              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON, plus the publish-time
+              -- price-gap and decided-only 24h guards (config.publishable_cut_sql):
               -- calibrated where the scorer decides on it, raw otherwise.
-              AND {config.decided_cut_sql("p", "t")}
+              AND {config.publishable_cut_sql("p", "t")}
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
               AND NOT EXISTS (
@@ -739,11 +740,12 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               -- 2026-09-28): keyed on the row's own marker, so a pick written
               -- while paused is never announced, even after an unpause.
               {config.paused_row_exclusion_sql("p")}
-              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql):
+              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON, plus the publish-time
+              -- price-gap and decided-only 24h guards (config.publishable_cut_sql):
               -- calibrated where the scorer decides on it, raw otherwise.
               -- The cut is applied at the price the pick was DECIDED at
               -- (2026-09-09): decision_* since the flip, DraftKings before.
-              AND {config.decided_cut_sql("p", "t")}
+              AND {config.publishable_cut_sql("p", "t")}
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
@@ -857,11 +859,12 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
               -- 2026-09-28): keyed on the row's own marker, so a pick written
               -- while paused is never announced, even after an unpause.
               {config.paused_row_exclusion_sql("p")}
-              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON (config.decided_cut_sql):
+              -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON, plus the publish-time
+              -- price-gap and decided-only 24h guards (config.publishable_cut_sql):
               -- calibrated where the scorer decides on it, raw otherwise.
               -- The cut is applied at the price the pick was DECIDED at
               -- (2026-09-09): decision_* since the flip, DraftKings before.
-              AND {config.decided_cut_sql("p", "t")}
+              AND {config.publishable_cut_sql("p", "t")}
               AND (t.min_odds IS NULL OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                    OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
             ORDER BY {key_partition_sql()}, p.created_at
@@ -1654,7 +1657,10 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
             SELECT p.created_at, p.best_book, p.best_odds,
                    -- The pick of record's DECIDED numbers, for the cut below.
                    {config.decided_prob_sql("p")} AS decided_prob,
-                   {config.decided_edge_sql("p")} AS decided_edge
+                   {config.decided_edge_sql("p")} AS decided_edge,
+                   -- ...and the two publish-time guards (config.publishable_cut_sql).
+                   ({config.price_gap_ok_sql("p")}
+                    AND {config.decided_only_window_sql("p", "t", "g.commence_time")}) AS publish_ok
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -1673,6 +1679,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
           AND COALESCE(pk.decided_prob, os.model_probability) >= t.min_prob
           AND (t.prob_only = TRUE
                OR COALESCE(pk.decided_edge, os.edge) >= COALESCE(t.min_edge, 0))
+          AND COALESCE(pk.publish_ok, TRUE)
           AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
         ORDER BY os.lock_key
     """, (target_date,)).fetchall()

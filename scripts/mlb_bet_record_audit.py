@@ -81,6 +81,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.db import get_connection  # noqa: E402
+import config  # noqa: E402
 
 # Every MLB pick the models have ever issued as a BET, with the flags the three
 # populations are cut on. `qualifies_today` mirrors the action filter exactly:
@@ -105,8 +106,8 @@ SELECT p.pick_id,
        g.home_score_f5, g.away_score_f5,
        pl.actual,
        (t.paused IS NOT TRUE
-         AND p.model_probability >= t.min_prob
-         AND (t.prob_only OR p.edge >= t.min_edge)
+         -- On the numbers the scorer DECIDED on (config.decided_cut_sql).
+         AND __DECIDED_CUT__
          AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
          AND p.game_date >= '2026-04-14')                  AS qualifies_today
   FROM picks p
@@ -134,7 +135,7 @@ SELECT p.pick_id,
  WHERE p.signal_type = 'BET'
    AND (p.sport = 'MLB' OR p.model_id LIKE 'mlb%')
  ORDER BY p.game_date, p.pick_id
-"""
+""".replace("__DECIDED_CUT__", config.decided_cut_sql("p", "t"))
 
 # The wrapped cursor in data/db.py mimics sqlite3 and exposes no `.description`,
 # so the column names are named here and must stay in step with PICKS_SQL.

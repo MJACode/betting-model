@@ -2112,65 +2112,158 @@ def scoring_method(model_id: str) -> str:
 # the corrected probability..."). These helpers are the one definition of the
 # decided pair, so the scorer, Discord, push, the health check and the app agree.
 #
-# WHO DECIDES ON THE RAW NUMBER, and so is filtered on it here:
-#   * everything, when DECIDE_ON_CALIBRATED_PROB is off (the scorer then
-#     decides on model_probability and the raw edge);
-#   * MODELS_ON_OWN_PROBABILITY (models.honest_ev.honest_probability returns
-#     the raw number for them);
-#   * every non-artifact model (scoring_method "rule" / "engine"): a rule card's
-#     selection IS the bet, made on its own number, and only the EV floor reads
-#     the map (models.honest_ev). Its model_probability_cal can differ from raw
-#     (wnba_prop_market) and must not move its edge cut.
-# The mobile mirror is DECIDES_ON_RAW_MODELS in thresholds.generated.ts
-# (scripts/generate_mobile_thresholds.py).
+# WHO DECIDES ON WHICH NUMBER -- config.decision_source(model_id), one of:
+#   "raw"        model_probability and the stored edge;
+#   "calibrated" models.scorer._decide: the promoted map (scorer._calibrated,
+#                rounded to 4 dp and stored as model_probability_cal) minus
+#                the implied probability of the DECIDING price
+#                (decision_implied_prob). Every artifact model, under
+#                DECIDE_ON_CALIBRATED_PROB;
+#   "calibrated_at_dk"  ncaaf_live.serve.LiveEngine.decide_honest: the same
+#                map through models.honest_ev.honest_probability, gated on the
+#                DRAFTKINGS implied probability (serve.py "the GATE reads the
+#                DK numbers") and NOT behind DECIDE_ON_CALIBRATED_PROB --
+#                decide_honest never reads the flag.
+# Raw: MODELS_ON_OWN_PROBABILITY (honest_probability returns the raw number
+# for them), every artifact model when DECIDE_ON_CALIBRATED_PROB is off, and
+# every "rule" model: a rule card's selection IS the bet, made on its own
+# number, and only its EV floor reads the map (models.honest_ev). Its
+# model_probability_cal can differ from raw (wnba_prop_market) and must not
+# move its edge cut. A non-artifact model is "raw" unless it is listed in
+# NON_ARTIFACT_DECISION_SOURCE -- tests/test_publish_on_decided_prob.py pins
+# that list against the engines' own decision code.
+# The mobile mirror is DECIDES_ON_RAW_MODELS / DECIDES_CALIBRATED_AT_DK_MODELS
+# in thresholds.generated.ts (scripts/generate_mobile_thresholds.py).
+#
+# ROUNDING. _decide compares the 4-dp _calibrated value, the very number
+# stored in model_probability_cal, so the PROBABILITY cut is exact. Its edge
+# subtracts the UNROUNDED implied probability; the stored
+# decision_implied_prob is rounded to 4 dp, so a decided edge within 5e-5 of
+# min_edge can land on the other side of the cut from the scorer. Accepted and
+# documented rather than re-derived from the price: the stored pair is what
+# every reader has.
+#
+# A ZERO IMPLIED PROBABILITY IS A MISSING PRICE. Rows written before the
+# 2026-09-09 flip with no DraftKings quote carry dk_implied_prob = 0.0 (9,763
+# mlb_prop_batter_hr rows, 2026-05-17..09-01) and some later prob-only rows do
+# too; cal - 0.0 would publish the whole probability as edge. NULLIF(...,0)
+# sends them down the no-price path _decide takes: the stored edge.
+
+NON_ARTIFACT_DECISION_SOURCE: dict = {
+    # ncaaf_live/serve.py LiveEngine.decide_honest (both lanes, `cuts`).
+    "ncaaf_live_win_prob": "calibrated_at_dk",
+    "ncaaf_live_total":    "calibrated_at_dk",
+}
+
+
+def decision_source(model_id: str) -> str:
+    """"raw", "calibrated" or "calibrated_at_dk": what decided this BET."""
+    if model_id in MODELS_ON_OWN_PROBABILITY:
+        return "raw"
+    if scoring_method(model_id) != SCORING_ARTIFACT:
+        return NON_ARTIFACT_DECISION_SOURCE.get(model_id, "raw")
+    return "calibrated" if DECIDE_ON_CALIBRATED_PROB else "raw"
+
+
+def _known_models() -> set:
+    return set(SCORING_METHODS) | set(ACTION_THRESHOLDS) | set(MODELS_ON_OWN_PROBABILITY)
 
 
 def decides_on_raw_models() -> frozenset:
-    """Models whose BET is decided on model_probability, not the calibrated one."""
-    return frozenset(MODELS_ON_OWN_PROBABILITY) | frozenset(
-        m for m in set(SCORING_METHODS) | set(ACTION_THRESHOLDS)
-        if scoring_method(m) != SCORING_ARTIFACT)
+    """Known models whose BET is decided on model_probability, not the calibrated one."""
+    return frozenset(m for m in _known_models() if decision_source(m) == "raw")
+
+
+def decides_calibrated_at_dk_models() -> frozenset:
+    """Models that decide calibrated but gate on the DraftKings implied probability."""
+    return frozenset(m for m in _known_models() if decision_source(m) == "calibrated_at_dk")
 
 
 def decides_on_calibrated(model_id: str) -> bool:
-    """True when the scorer decides this model's BET on the calibrated number."""
-    return bool(DECIDE_ON_CALIBRATED_PROB) and model_id not in decides_on_raw_models()
+    """True when this model's BET is decided on the calibrated number."""
+    return decision_source(model_id) != "raw"
+
+
+def _in_list(models) -> str:
+    return ", ".join(f"'{m}'" for m in sorted(models))
 
 
 def decided_prob_sql(alias: str = "p") -> str:
-    """SQL: the probability the scorer decided this `picks` row on."""
+    """SQL: the probability this `picks` row was decided on."""
     raw = f"{alias}.model_probability"
+    cal = f"COALESCE({alias}.model_probability_cal, {raw})"
+    at_dk = decides_calibrated_at_dk_models()
     if not DECIDE_ON_CALIBRATED_PROB:
-        return raw
-    own = ", ".join(f"'{m}'" for m in sorted(decides_on_raw_models()))
-    return (f"(CASE WHEN {alias}.model_id IN ({own}) THEN {raw} "
-            f"ELSE COALESCE({alias}.model_probability_cal, {raw}) END)")
+        if not at_dk:
+            return raw
+        return (f"(CASE WHEN {alias}.model_id IN ({_in_list(at_dk)}) THEN {cal} "
+                f"ELSE {raw} END)")
+    return (f"(CASE WHEN {alias}.model_id IN ({_in_list(decides_on_raw_models())}) THEN {raw} "
+            f"ELSE {cal} END)")
 
 
 def decided_edge_sql(alias: str = "p") -> str:
-    """SQL: the edge the scorer decided this `picks` row on.
+    """SQL: the edge this `picks` row was decided on.
 
     Calibrated: model_probability_cal minus the implied probability of the
     DECIDING price (decision_implied_prob; DraftKings' before 2026-09-09, when
     the column was NULL) -- _decide's `cal - implied_prob` at the same quote.
-    With no price (a prob-only model whose market no book lists) _decide keeps
-    the stored edge, and so does this: the NULL arithmetic falls through to
-    COALESCE(decision_edge, edge). So does a row with no calibrated number
-    (decided raw), a raw-deciding model, and everything with the flag off.
+    calibrated_at_dk (the NCAAF live engine): minus DraftKings' implied.
+    With no price (a prob-only model whose market no book lists, or an implied
+    of 0.0 -- see above) _decide keeps the stored edge, and so does this: the
+    NULL arithmetic falls through to COALESCE(decision_edge, edge). So does a
+    row with no calibrated number, a raw-deciding model, and every artifact
+    model with the flag off.
     """
     raw = f"COALESCE({alias}.decision_edge, {alias}.edge)"
+    dk = f"NULLIF({alias}.dk_implied_prob, 0)"
+    deciding = f"COALESCE(NULLIF({alias}.decision_implied_prob, 0), {dk})"
+    at_dk = decides_calibrated_at_dk_models()
+    at_dk_arm = (f"WHEN {alias}.model_id IN ({_in_list(at_dk)}) "
+                 f"THEN COALESCE({alias}.model_probability_cal - {dk}, {raw}) ") if at_dk else ""
     if not DECIDE_ON_CALIBRATED_PROB:
+        if not at_dk:
+            return raw
+        return f"(CASE {at_dk_arm}ELSE {raw} END)"
+    return (f"(CASE WHEN {alias}.model_id IN ({_in_list(decides_on_raw_models())}) THEN {raw} "
+            f"{at_dk_arm}"
+            f"ELSE COALESCE({alias}.model_probability_cal - {deciding}, {raw}) END)")
+
+
+def decided_prob_col(model_id: str, prefix: str = "") -> str:
+    """SQL for ONE known model: decided_prob_sql with the CASE resolved."""
+    raw = f"{prefix}model_probability"
+    if decision_source(model_id) == "raw":
         return raw
-    own = ", ".join(f"'{m}'" for m in sorted(decides_on_raw_models()))
-    implied = f"COALESCE({alias}.decision_implied_prob, {alias}.dk_implied_prob)"
-    return (f"(CASE WHEN {alias}.model_id IN ({own}) THEN {raw} "
-            f"ELSE COALESCE({alias}.model_probability_cal - {implied}, {raw}) END)")
+    return f"COALESCE({prefix}model_probability_cal, {raw})"
+
+
+def decided_edge_col(model_id: str, prefix: str = "") -> str:
+    """SQL for ONE known model: decided_edge_sql with the CASE resolved."""
+    raw = f"COALESCE({prefix}decision_edge, {prefix}edge)"
+    src = decision_source(model_id)
+    if src == "raw":
+        return raw
+    dk = f"NULLIF({prefix}dk_implied_prob, 0)"
+    implied = dk if src == "calibrated_at_dk" else \
+        f"COALESCE(NULLIF({prefix}decision_implied_prob, 0), {dk})"
+    return f"COALESCE({prefix}model_probability_cal - {implied}, {raw})"
+
+
+def raw_cut_sql(alias: str = "p", thresholds: str = "t") -> str:
+    """SQL: the cut every publisher applied before 2026-10-02, on the RAW pair."""
+    t = thresholds
+    return (f"({alias}.model_probability >= {t}.min_prob"
+            f"\n               AND ({t}.prob_only = TRUE"
+            f"\n                    OR COALESCE({alias}.decision_edge, {alias}.edge) >= COALESCE({t}.min_edge, 0)))")
 
 
 def decided_cut_sql(alias: str = "p", thresholds: str = "t") -> str:
     """SQL: `<alias>` clears its model's prob / edge cut on the decided numbers.
 
-    The min_odds floor is NOT here: it is a price test, unchanged, and each
+    The bare cut: what the record views and reports count. A PUBLISHER applies
+    publishable_cut_sql, which adds the two publish-time guards below. The
+    min_odds floor is NOT here: it is a price test, unchanged, and each
     caller keeps its own clause. Returns a bare boolean expression (no AND).
     """
     t = thresholds
@@ -2179,23 +2272,123 @@ def decided_cut_sql(alias: str = "p", thresholds: str = "t") -> str:
             f"\n                    OR {decided_edge_sql(alias)} >= COALESCE({t}.min_edge, 0)))")
 
 
+# ── Two guards on PUBLISHING (not on the record) ─────────────────────────────
+# PRE-GAME ONLY. In-play rows (is_live, or a *_live_* lane) are exempt from
+# both: an in-play quote moves in seconds, so a decision book several points
+# off DraftKings is ordinary there (ncaaf_live_win_prob decides a mean 6.2pp
+# off DK by design), and an in-play pick is by definition near its game.
+#
+# 1. PRICE-GAP GUARD. The stale-line cap (MAX_EDGE_CAP) is measured at
+#    DraftKings, so a deciding quote at another book that is stale or on the
+#    wrong side passes it: 3101240 FLA ML (2026-10-04) decided at BetMGM +154
+#    against DK -125, a 16.2pp implied gap. Refuse to publish when the
+#    deciding price's implied probability is more than PUBLISH_MAX_PRICE_GAP
+#    from DraftKings'. Measured 2026-10-02 over every pre-game BET ever posted
+#    to Discord (621, 2026-08-23..10-02; 250 with both prices, 141 decided
+#    away from DK): median off-DK gap 0.96pp, p95 4.55pp, p99 6.63pp, max
+#    6.72pp. 0.08 would have blocked none of them; of every pre-game BET
+#    written since 2026-09-09, only 3101240 exceeds it. With no DK price
+#    (NULL or 0.0) there is nothing to compare and the guard passes.
+PUBLISH_MAX_PRICE_GAP: float = 0.08
+
+# 2. DECIDED-ONLY FRESHNESS WINDOW. A pick that clears the cut ONLY on the
+#    decided numbers (fails the raw cut every publisher applied until
+#    2026-10-02) publishes only once its game starts within this many hours.
+#    Those rows were written up to days ahead and never announced; the first
+#    pass after the switch would otherwise post all of them at once, at prices
+#    one to six days old. Nothing re-prices a pick at post time
+#    (discord_notifier.publish_price reads the bet of record's stored
+#    best/DK odds), so the window bounds how stale an announced price can be.
+#    A pick that passes raw keeps today's behaviour (no window). A decided-only
+#    pick with no known start time is held to its game_date being at most
+#    tomorrow (ET).
+DECIDED_ONLY_PUBLISH_WITHIN_HOURS: int = 24
+
+
+def _pregame_sql(alias: str) -> str:
+    return (f"(({alias}.is_live IS NULL OR {alias}.is_live = FALSE) "
+            f"AND {alias}.model_id NOT LIKE '%%_live_%%')")
+
+
+def price_gap_ok_sql(alias: str = "p") -> str:
+    """SQL: the deciding price is within PUBLISH_MAX_PRICE_GAP of DraftKings'."""
+    return (f"(NOT {_pregame_sql(alias)}"
+            f" OR NULLIF({alias}.decision_implied_prob, 0) IS NULL"
+            f" OR NULLIF({alias}.dk_implied_prob, 0) IS NULL"
+            f" OR ABS({alias}.decision_implied_prob - {alias}.dk_implied_prob)"
+            f" <= {PUBLISH_MAX_PRICE_GAP})")
+
+
+def decided_only_window_sql(alias: str = "p", thresholds: str = "t",
+                            commence: str = "g.commence_time") -> str:
+    """SQL: passes raw, or its game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS."""
+    h = int(DECIDED_ONLY_PUBLISH_WITHIN_HOURS)
+    return (f"(NOT {_pregame_sql(alias)}"
+            f"\n               OR {raw_cut_sql(alias, thresholds)}"
+            f"\n               OR ({commence} IS NOT NULL"
+            f" AND {commence}::timestamptz <= NOW() + INTERVAL '{h} hours')"
+            f"\n               OR ({commence} IS NULL"
+            f" AND {alias}.game_date <= to_char((NOW() AT TIME ZONE 'America/New_York')::date + 1, 'YYYY-MM-DD')))")
+
+
+def decided_only_window_open(commence, game_date, now=None) -> bool:
+    """Python twin of the decided-only half of decided_only_window_sql: the
+    game starts within DECIDED_ONLY_PUBLISH_WITHIN_HOURS (`commence` an aware
+    datetime), or, with no start time, its game_date is at most tomorrow ET."""
+    from datetime import datetime, timedelta, timezone
+    now = now or datetime.now(timezone.utc)
+    if commence is not None:
+        return commence <= now + timedelta(hours=DECIDED_ONLY_PUBLISH_WITHIN_HOURS)
+    if not game_date:
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+        tomorrow = (now.astimezone(ZoneInfo("America/New_York")).date()
+                    + timedelta(days=1)).isoformat()
+    except Exception:  # noqa: BLE001
+        tomorrow = (now.date() + timedelta(days=1)).isoformat()
+    return str(game_date)[:10] <= tomorrow
+
+
+def publishable_cut_sql(alias: str = "p", thresholds: str = "t",
+                        commence: str = "g.commence_time") -> str:
+    """SQL: what every PUBLISHER applies -- the decided cut and both guards.
+
+    Discord (new / locked / stale-pause probe), push and the signal_delivery
+    health check. The app twin is passesActionFilter (lib/thresholds.ts).
+    """
+    return (f"({decided_cut_sql(alias, thresholds)}"
+            f"\n               AND {price_gap_ok_sql(alias)}"
+            f"\n               AND {decided_only_window_sql(alias, thresholds, commence)})")
+
+
+def _num(v):
+    return None if v is None else float(v)
+
+
 def decided_numbers(row: dict) -> tuple[float | None, float | None]:
     """Python twin of decided_prob_sql / decided_edge_sql over one picks row."""
-    raw_p = row.get("model_probability")
+    raw_p = _num(row.get("model_probability"))
     raw_e = row.get("decision_edge")
     if raw_e is None:
         raw_e = row.get("edge")
-    if not decides_on_calibrated(row.get("model_id") or ""):
+    raw_e = _num(raw_e)
+    src = decision_source(row.get("model_id") or "")
+    if src == "raw":
         return raw_p, raw_e
-    cal = row.get("model_probability_cal")
+    cal = _num(row.get("model_probability_cal"))
     if cal is None:
         return raw_p, raw_e
-    implied = row.get("decision_implied_prob")
-    if implied is None:
-        implied = row.get("dk_implied_prob")
+    dk = _num(row.get("dk_implied_prob")) or None
+    if src == "calibrated_at_dk":
+        implied = dk
+    else:
+        implied = _num(row.get("decision_implied_prob")) or None
+        if implied is None:
+            implied = dk
     if implied is None:
         return cal, raw_e
-    return cal, float(cal) - float(implied)
+    return cal, cal - implied
 
 # Per-model BET edge thresholds (override the global default above).
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
