@@ -3194,6 +3194,17 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
         #
         # Scoped to games that have not started, so nothing settleable is ever
         # touched.
+        #
+        # "NO PRICE AT ALL" MEANS NO DECIDING PRICE EITHER (2026-10-02). Since
+        # 2026-09-12 a pick taken at a number DraftKings does not hang carries
+        # NULL in dk_odds BY DESIGN, with the price it was decided at in
+        # decision_odds and the book in line_book. Keyed on dk_odds alone, this
+        # statement deleted exactly those picks: on 2026-10-02 three
+        # nhl_prop_saves bets priced at Hard Rock were written at 00:21:06Z,
+        # posted to Discord at 00:21:08Z and deleted here at 00:21:18Z -- a
+        # published pick with no row to settle (CLAUDE.md 1c). They were the
+        # first off-DraftKings-line BETs any model had written; picks_log holds
+        # the insert and the delete.
         if not dry_run:
             _sc, _sp = _scope()
             conn.execute("""
@@ -3201,6 +3212,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False,
                  WHERE result IS NULL
                    AND signal_type = 'BET'
                    AND dk_odds IS NULL
+                   AND decision_odds IS NULL
                    AND game_date >= %s
                    AND game_id IN (
                        SELECT game_id FROM games
