@@ -2503,7 +2503,7 @@ export async function fetchNflTeamGameStats(team: string, season: number): Promi
  * logic), and almost every row is NULL. Same clause as the server's
  * paused_row_exclusion_sql.
  */
-export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq.${PAUSED_NOTE}`;
+export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq."${PAUSED_NOTE}"`;
 
 /**
  * Settled game-level BET rows in a set of games — the team page's "our

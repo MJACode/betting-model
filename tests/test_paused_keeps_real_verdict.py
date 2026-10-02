@@ -408,7 +408,7 @@ def test_the_team_and_player_pick_records_drop_the_paused_row_on_the_server():
     Over 7.5: both record reads pulled settled BETs with no paused clause."""
     q = _src("mobile/src/lib/queries.ts")
     assert (
-        "export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq.${PAUSED_NOTE}`;"
+        "export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq.\"${PAUSED_NOTE}\"`;"
         in q
     ), "NULL must pass explicitly: neq alone drops every unmarked row"
     for sig in (
