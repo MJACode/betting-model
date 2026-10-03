@@ -152,6 +152,12 @@ SELECT (ts AT TIME ZONE 'America/New_York')::date AS day,
        avg(duration_ms)::int                 AS avg_ms,
        NOW()
 FROM api_call_log
+-- Yesterday and today (ET) only, read through idx_api_call_ts. Older days were
+-- folded on an earlier run and their totals are final; re-aggregating all
+-- seven retained days scanned the whole table (2.2M rows, 926 MB) on every
+-- call and was the database's largest disk reader (2026-10-03).
+WHERE ts >= ((date_trunc('day', NOW() AT TIME ZONE 'America/New_York')
+              - INTERVAL '1 day') AT TIME ZONE 'America/New_York')
 GROUP BY 1, 2, 3
 ON CONFLICT (day, api, source) DO UPDATE SET
     calls      = EXCLUDED.calls,
