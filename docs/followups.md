@@ -110,18 +110,29 @@ bills. Blocked shots were not posted by any book at 18:08Z, five hours before
 the first puck; whether the closing snapshot carries them is the first thing to
 read off the stored rows.
 
-## [ ] NHL total goals — the derivative markets are the only place left to look
+## [ ] NHL derivative totals — grade is in, the missing games are not bought yet
 
 mike, 2026-10-01: *"we need total goals."* The full-game total has nothing in
-it (four rounds; `docs/nhl_market_lab.md`, "Total goals, round four"): the
-book's margin is on both sides and Pinnacle agrees with DraftKings. Every NHL
-result that holds is in a market where the margin sits on one side. For total
-goals those are **team totals, period totals and alternate totals**, and no
-price for any of them is stored. The feed sells all three (`team_totals`,
-`alternate_totals`, `totals_p1`). One pre-game snapshot a game for the three
-priced seasons is about 4,200 games x 3 markets x 10 credits = **about 126,000
-credits** (the historical endpoint bills 10 a market returned; the count is an
-estimate until a probe measures it). Not bought: his call.
+it (four rounds; `docs/nhl_market_lab.md`). Michael, 2026-10-02: buy
+`team_totals`, `alternate_totals`, `totals_p1` and build the models. Michael,
+2026-10-03: no credit cap; buy the priced seasons in full.
+
+Graded on the rows already stored at `odds.source =
+odds_api_nhl_totals_history` (264,043 pre-game quotes, 4,192 games, ending
+seasons 2024–2026). **Nothing cleared. Not publishing.**
+`docs/nhl_derivative_totals.md`. The 16 scored 2027 games in that extract
+have no derivative rows.
+
+The buyer is `data/ingestors/nhl_derivative_odds_history.py`. It skips a game
+that already has that source or a `nhl_derivative_odds_pulls` row, and
+`--apply` does not stop for a credit ceiling. It has not been run: this
+environment has no `ODDS_API_KEY`. The command, where the key and
+`DATABASE_URL` are set:
+
+```
+python -m data.ingestors.nhl_derivative_odds_history            # plan + 3-game measured probe
+python -m data.ingestors.nhl_derivative_odds_history --apply    # every remaining game
+```
 
 ## [ ] NHL prop models — what to watch now that four are live
 
