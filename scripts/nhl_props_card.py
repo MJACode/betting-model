@@ -291,6 +291,15 @@ def limit_per_game(spec: np_.Spec, rows: list[dict], existing: dict[str, set[str
 # Every NHL prop model. One bet a game is shared among all of them.
 PROP_MODEL_IDS = ("nhl_prop_blocked_shots", "nhl_prop_saves", "nhl_prop_shots_on_goal", "nhl_prop_assists")
 MAX_PROP_BETS_PER_GAME = 1
+# mike, 2026-10-03: "Too many fucking unders nhl props." At most two NHL prop
+# bets a night (one game_date), best EV first, the picks already written that
+# night included. Three priced seasons at EV >= 0.18, one a game
+# (scripts/nhl_prop_combined_cap.py cache): no nightly limit 1,659 bets +16.2%
+# (3.6 a night, at most 14); 3 a night 1,103 +18.2%; 2 a night 832 bets
+# +20.9% (+173.8 units; every season +12% or better); 1 a night 464 +26.0%.
+# The backtest keeps each night's best; live, a pass writes what has cleared
+# by then, and a later better bet does not replace an earlier one.
+MAX_PROP_BETS_PER_NIGHT = 2
 
 
 def games_with_a_prop_bet(conn, game_ids: list[str]) -> set[str]:
@@ -300,6 +309,30 @@ def games_with_a_prop_bet(conn, game_ids: list[str]) -> set[str]:
     return {r[0] for r in conn.execute(
         "SELECT DISTINCT game_id FROM picks WHERE model_id = ANY(%s) AND game_id = ANY(%s)",
         (list(PROP_MODEL_IDS), list(game_ids))).fetchall()}
+
+
+def prop_bets_by_night(conn, game_dates: list[str]) -> dict[str, int]:
+    """How many NHL prop picks are already written for each game_date."""
+    if not game_dates:
+        return {}
+    return {str(d): int(n) for d, n in conn.execute(
+        "SELECT game_date, count(*) FROM picks WHERE model_id = ANY(%s) AND game_date = ANY(%s) "
+        "GROUP BY game_date", (list(PROP_MODEL_IDS), list(game_dates))).fetchall()}
+
+
+def per_night(rows: list[dict], written: dict[str, int] | None = None) -> list[dict]:
+    """At most MAX_PROP_BETS_PER_NIGHT a game_date, best EV first, written picks counted. Pure."""
+    written = written or {}
+    left: dict[str, int] = {}
+    kept = []
+    for r in sorted(rows, key=lambda r: (-r["_ev"], r["model_id"], str(r["player_id"]))):
+        d = str(r["game_date"])
+        n = left.setdefault(d, MAX_PROP_BETS_PER_NIGHT - written.get(d, 0))
+        if n <= 0:
+            continue
+        left[d] = n - 1
+        kept.append(r)
+    return kept
 
 
 def one_per_game(rows: list[dict], taken: set[str] | None = None) -> list[dict]:
@@ -326,9 +359,11 @@ def publish_across_models(rows: list[dict]) -> int:
     conn = get_connection()
     try:
         taken = games_with_a_prop_bet(conn, sorted({r["game_id"] for r in rows}))
-        chosen = one_per_game(rows, taken)
+        written = prop_bets_by_night(conn, sorted({str(r["game_date"]) for r in rows}))
+        chosen = per_night(one_per_game(rows, taken), written)
         logger.info(f"nhl-props: {len(chosen)} bet(s) kept of {len(rows)} that clear "
-                    f"(one a game across all four prop models; {len(taken)} game(s) already bet)")
+                    f"(one a game, {MAX_PROP_BETS_PER_NIGHT} a night, across all four prop models; "
+                    f"{len(taken)} game(s) already bet; already written by night {written})")
         written = 0
         for r in chosen:
             written += (publish_blocked if r["model_id"] == "nhl_prop_blocked_shots" else publish)(conn, [r])
