@@ -1459,6 +1459,116 @@ def _locked_other_prices(snap: dict | None, pick_side: str, locked_price) -> lis
 # picked up by the following runs, which is why it converges rather than needing
 # a one-shot script (the umpire / UFC-results pattern).
 _CLV_BACKFILL_DATES_PER_RUN = 40
+# One statement covers this many game_dates. The unbounded
+# `ORDER BY game_date LIMIT 40` is an index scan of idx_picks_date with the
+# CLV predicates as a Filter, not an Index Cond. On 2026-10-03 that statement
+# was cancelled at the 120s statement_timeout (pipeline_log 119709, pid
+# 3837081, sqlstate 57014): 22 dates pass the commence_time join, so LIMIT 40
+# never stops the scan. A 7-day predicate is an Index Cond on idx_picks_date.
+_CLV_BACKFILL_WINDOW_DAYS = 7
+_CLV_SAVE_POINT = "clv_backfill_window"
+
+
+def _is_statement_timeout(exc: BaseException) -> bool:
+    """True for Postgres 57014 / `canceling statement due to statement timeout`."""
+    if getattr(exc, "pgcode", None) == "57014":
+        return True
+    return "statement timeout" in str(exc).lower()
+
+
+def _rollback_clv_savepoint(conn) -> None:
+    """Undo the aborted statement and drop the savepoint.
+
+    Postgres rejects every later command on the connection until the
+    transaction is restored. ROLLBACK TO SAVEPOINT is allowed in that state;
+    a full rollback is the fallback when the savepoint itself is gone, so
+    the rest of settle is not stuck on `current transaction is aborted`.
+    """
+    try:
+        conn.execute(f"ROLLBACK TO SAVEPOINT {_CLV_SAVE_POINT}")
+        conn.execute(f"RELEASE SAVEPOINT {_CLV_SAVE_POINT}")
+    except Exception:                                          # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:                                      # noqa: BLE001
+            logger.exception("CLV backfill: rollback failed")
+
+
+def _in_clv_savepoint(conn, fn):
+    """Run fn(). On failure, restore the transaction and re-raise."""
+    try:
+        conn.execute(f"SAVEPOINT {_CLV_SAVE_POINT}")
+    except Exception:
+        _rollback_clv_savepoint(conn)
+        raise
+    try:
+        result = fn()
+    except Exception:
+        _rollback_clv_savepoint(conn)
+        raise
+    try:
+        conn.execute(f"RELEASE SAVEPOINT {_CLV_SAVE_POINT}")
+    except Exception:
+        _rollback_clv_savepoint(conn)
+        raise
+    return result
+
+
+def _clv_attempt(conn, label: str, fn):
+    """Run fn in a savepoint. A statement timeout is rolled back and retried
+    once. Any other error, or a second timeout, is logged and returns None
+    with the transaction usable again."""
+    try:
+        return _in_clv_savepoint(conn, fn)
+    except Exception as exc:                                   # noqa: BLE001
+        if not _is_statement_timeout(exc):
+            logger.warning(f"{label} failed (non-fatal): {exc}")
+            return None
+        logger.warning(f"{label} hit statement timeout; retrying once")
+        try:
+            return _in_clv_savepoint(conn, fn)
+        except Exception as exc2:                              # noqa: BLE001
+            logger.warning(f"{label} failed (non-fatal): {exc2}")
+            return None
+
+
+def _clv_backfill_dates(conn: DBConnection, sql: str) -> list[str]:
+    """Oldest capturable dates, one game_date window per statement.
+
+    Stops at _CLV_BACKFILL_DATES_PER_RUN. A window that fails after its
+    retry ends the walk: later windows are not a substitute for an older
+    one that did not answer.
+    """
+    span = _clv_attempt(
+        conn,
+        "CLV backfill date bounds",
+        lambda: conn.execute(
+            "SELECT MIN(game_date), MAX(game_date) FROM picks"
+        ).fetchone(),
+    )
+    if not span or span[0] is None or span[1] is None:
+        return []
+    start = datetime.strptime(str(span[0])[:10], "%Y-%m-%d")
+    end = datetime.strptime(str(span[1])[:10], "%Y-%m-%d")
+    found: list[str] = []
+    cursor = start
+    while cursor <= end and len(found) < _CLV_BACKFILL_DATES_PER_RUN:
+        hi = cursor + timedelta(days=_CLV_BACKFILL_WINDOW_DAYS)
+        lo_s = cursor.strftime("%Y-%m-%d")
+        hi_s = hi.strftime("%Y-%m-%d")
+        remaining = _CLV_BACKFILL_DATES_PER_RUN - len(found)
+
+        def _window(lo_s=lo_s, hi_s=hi_s, remaining=remaining):
+            return conn.execute(
+                sql, (lo_s, hi_s, CLV_METHOD_RAW_LEGACY, remaining)
+            ).fetchall()
+
+        rows = _clv_attempt(conn, f"CLV backfill {lo_s}", _window)
+        if rows is None:
+            break
+        found.extend(str(r[0])[:10] for r in rows)
+        cursor = hi
+    return found[:_CLV_BACKFILL_DATES_PER_RUN]
 
 
 def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
@@ -1501,11 +1611,15 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
     first pitch, and the guard above is what keeps them out.
 
     Returns picks filled."""
-    rows = conn.execute("""
+    # game_date bounds are the Index Cond. Without them this is the statement
+    # pipeline_log 119709 cancelled (see _CLV_BACKFILL_WINDOW_DAYS).
+    sql = """
         SELECT DISTINCT p.game_date
         FROM picks p
         JOIN games g ON g.game_id = p.game_id
-        WHERE p.signal_type = 'BET'
+        WHERE p.game_date >= %s
+          AND p.game_date < %s
+          AND p.signal_type = 'BET'
           AND p.dk_odds IS NOT NULL
           AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
@@ -1516,17 +1630,22 @@ def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
                OR p.clv_method = %s)
         ORDER BY p.game_date
         LIMIT %s
-    """, (CLV_METHOD_RAW_LEGACY, _CLV_BACKFILL_DATES_PER_RUN)).fetchall()
-    if not rows:
+    """
+    dates = _clv_backfill_dates(conn, sql)
+    if not dates:
         return 0
     filled = 0
-    for (d,) in rows:
-        try:
-            filled += _capture_clv(conn, d, captured_at)
-        except Exception as exc:                     # noqa: BLE001
-            logger.warning(f"CLV backfill {d} failed (non-fatal): {exc}")
+    for d in dates:
+        n = _clv_attempt(
+            conn, f"CLV backfill {d}",
+            lambda d=d: _capture_clv(conn, d, captured_at),
+        )
+        if n is None:
+            logger.warning(f"CLV backfill {d} failed (non-fatal)")
+            continue
+        filled += n
     if filled:
-        logger.info(f"CLV backfill: {filled} pick(s) across {len(rows)} date(s)")
+        logger.info(f"CLV backfill: {filled} pick(s) across {len(dates)} date(s)")
     return filled
 
 
