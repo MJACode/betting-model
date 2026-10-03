@@ -39,7 +39,8 @@ def render() -> str:
         "/**",
         " * GENERATED FILE — do not edit by hand.",
         " * Source of truth: config.py (ACTION_THRESHOLDS, PAUSED_MODELS,",
-        " * PROB_ONLY_MODELS, RETIRED_MODELS, KELLY_*).",
+        " * PROB_ONLY_MODELS, RETIRED_MODELS, decides_on_raw_models(),",
+        " * DECIDE_ON_CALIBRATED_PROB, KELLY_*).",
         " * Regenerate: python -m scripts.generate_mobile_thresholds",
         " * Check (CI):  python -m scripts.generate_mobile_thresholds --check",
         f" * Last generated: {date.today().isoformat()}",
@@ -83,6 +84,34 @@ def render() -> str:
     for m in sorted(config.RETIRED_MODELS):
         lines.append(f"  '{m}',")
     lines.append("]);")
+    lines.append("")
+    # The models whose BET is decided on the RAW probability
+    # (config.decides_on_raw_models): the app's passesActionFilter filters
+    # them on model_probability and every other model on the calibrated one,
+    # exactly as config.decided_cut_sql does for Discord / push / health.
+    lines.append("export const DECIDES_ON_RAW_MODELS = new Set<string>([")
+    for m in sorted(config.decides_on_raw_models()):
+        lines.append(f"  '{m}',")
+    lines.append("]);")
+    lines.append("")
+    # Engines that decide calibrated but gate on the DRAFTKINGS implied
+    # probability, regardless of DECIDE_ON_CALIBRATED_PROB
+    # (config.decision_source "calibrated_at_dk": ncaaf_live decide_honest).
+    lines.append("export const DECIDES_CALIBRATED_AT_DK_MODELS = new Set<string>([")
+    for m in sorted(config.decides_calibrated_at_dk_models()):
+        lines.append(f"  '{m}',")
+    lines.append("]);")
+    lines.append("")
+    lines.append("// config.DECIDE_ON_CALIBRATED_PROB as built. Off means every artifact model decides raw.")
+    lines.append(f"export const DECIDE_ON_CALIBRATED_PROB = {'true' if config.DECIDE_ON_CALIBRATED_PROB else 'false'};")
+    lines.append("")
+    # The publish-time guards (config.publishable_cut_sql), pre-game only.
+    lines.append("// config.PUBLISH_MAX_PRICE_GAP: max |decision implied - DK implied| to publish.")
+    lines.append(f"export const PUBLISH_MAX_PRICE_GAP = {_fmt(float(config.PUBLISH_MAX_PRICE_GAP))};")
+    lines.append("// config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS: a decided-only pick waits until its game is this close.")
+    lines.append(f"export const DECIDED_ONLY_PUBLISH_WITHIN_HOURS = {int(config.DECIDED_ONLY_PUBLISH_WITHIN_HOURS)};")
+    lines.append("// config.PUBLISH_MAX_PRICE_AGE_HOURS: a decided-only pick's price may be at most this much older than its start.")
+    lines.append(f"export const PUBLISH_MAX_PRICE_AGE_HOURS = {int(config.PUBLISH_MAX_PRICE_AGE_HOURS)};")
     lines.append("")
     lines.append(f"export const KELLY_MULTIPLIER = {_fmt(float(config.KELLY_MULTIPLIER))};")
     lines.append(f"export const MAX_KELLY_FRACTION = {_fmt(float(config.MAX_KELLY_FRACTION))};")

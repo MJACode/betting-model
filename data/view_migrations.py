@@ -235,6 +235,13 @@ ACTIVE_MIGRATIONS: list[str] = [
     # after team_stats_board_line_probe_2026_09_28, which owns the function
     # and would otherwise restore the unbounded scan on the next pass.
     "team_stats_board_commence_bound_2026_09_30.sql",
+    # 2026-10-02 (Matt via CoS; Michael-gated, PR #865): the three per-model
+    # record views (v_model_full_record, v_model_full_outcome_record,
+    # v_model_full_outcome_picks) cut on the numbers the scorer DECIDED on
+    # (config.decided_cut_sql), as Discord, push and the app now do. GENERATED
+    # by scripts/emit_record_views_decided_cut.py; guards on
+    # 'model_probability_cal' in each definition, so it runs once.
+    "record_views_decided_cut_2026_10_02.sql",
 ]
 
 

@@ -126,13 +126,14 @@ def test_both_publishers_apply_the_apps_action_filter():
         sql = _sql_for(producer).sql
         assert "model_action_thresholds" in sql
         assert "t.paused = FALSE" in sql
-        assert "p.model_probability >= t.min_prob" in sql
         # The cut is applied at the price the pick was DECIDED at (2026-09-09,
-        # mike: "remove DK only"): decision_* since the flip, DraftKings before
-        # it. COALESCE is exact, not a fallback -- a NULL decision column means
-        # the pick was decided at dk_*.
-        assert ("t.prob_only = TRUE\n"
-                "                   OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)") in sql
+        # mike: "remove DK only"), on the probability the scorer DECIDED on
+        # (config.decided_cut_sql, 2026-10-02): calibrated where it decides
+        # calibrated. The raw edge, COALESCE(decision_edge, edge), is still
+        # the fallback inside it -- exact, a NULL decision column means dk_*.
+        import config
+        assert config.publishable_cut_sql("p", "t") in sql
+        assert "COALESCE(p.decision_edge, p.edge)" in sql
         assert "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds" in sql, (
             "min_odds was missing from the push producer until 2026-09-05, so "
             "the phone could buzz on a price the app filtered out")

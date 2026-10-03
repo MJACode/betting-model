@@ -1245,7 +1245,11 @@ def run_system_health(run_date: str | None = None) -> dict:
             # as a string compare (§7). LEFT JOIN: a missing commence_time is
             # treated as deliverable so a NULL cannot silence the check.
             undelivered_rows = conn.execute(f"""
-                SELECT p.created_at, g.commence_time, p.game_date
+                SELECT p.created_at, g.commence_time, p.game_date,
+                       -- Passes the RAW cut: a pick that clears only on the
+                       -- decided numbers waits for the 24h window and must
+                       -- carry a fresh price, below.
+                       CASE WHEN {config.raw_cut_sql("p", "t")} THEN 1 ELSE 0 END AS raw_ok
                 FROM picks p
                 JOIN model_action_thresholds t ON t.model_id = p.model_id
                 LEFT JOIN games g ON g.game_id = p.game_id
@@ -1258,9 +1262,14 @@ def run_system_health(run_date: str | None = None) -> dict:
                   -- 2026-09-28): keyed on the row's own marker, so a pick written
                   -- while paused is never announced, even after an unpause.
                   {config.paused_row_exclusion_sql("p")}
-                  AND p.model_probability >= t.min_prob
-                  AND (t.prob_only = TRUE
-                       OR COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0))
+                  -- THE CUT ON THE NUMBERS THE SCORER DECIDED ON and the
+                  -- price-gap guard, as Discord applies them
+                  -- (config.publishable_cut_sql). The decided-only 24h window
+                  -- and price-age bound are the third part of that clause;
+                  -- applied in Python below (config.decided_only_window_open) because
+                  -- commence_time is TEXT in mixed shapes here (§7).
+                  AND {config.decided_cut_sql("p", "t")}
+                  AND {config.price_gap_ok_sql("p")}
                   AND (t.min_odds IS NULL
                        OR COALESCE(p.decision_odds, p.dk_odds) IS NULL
                        OR COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds)
@@ -1273,7 +1282,10 @@ def run_system_health(run_date: str | None = None) -> dict:
             """, tuple(params)).fetchall()
             grace_dt = datetime.now(timezone.utc) - timedelta(minutes=90)
             pending = 0
-            for created_at, commence, game_date in undelivered_rows:
+            for created_at, commence, game_date, raw_ok in undelivered_rows:
+                if not raw_ok and not config.decided_only_window_open(
+                        _parse_ts(commence), game_date, _parse_ts(created_at)):
+                    continue
                 created = _parse_ts(created_at)
                 if created is not None and created >= grace_dt:
                     continue

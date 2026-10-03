@@ -40,9 +40,13 @@ def test_the_prompt_carries_no_per_model_cut():
 
 def test_the_prompt_joins_the_thresholds_table_and_applies_every_gate():
     assert "JOIN model_action_thresholds t ON t.model_id = p.model_id" in PROMPT
+    import config
+    cut = (config.publishable_cut_sql("p", "t")
+           .replace("\n               ", "\n          ")
+           .replace("\n                    ", "\n               "))
     for gate in ("t.paused = FALSE",
-                 "p.model_probability >= t.min_prob",
-                 "COALESCE(p.decision_edge, p.edge) >= COALESCE(t.min_edge, 0)",
+                 # The cut on the numbers the scorer DECIDED on, generated text.
+                 cut,
                  "COALESCE(p.decision_odds, p.dk_odds) >= t.min_odds",
                  "p.condition_status IS NULL OR p.condition_status <> 'VOID'"):
         assert gate in PROMPT, f"the prompt lost the gate: {gate}"

@@ -55,6 +55,8 @@ from config import (
     MODEL_MIN_ODDS,
     PAPER_TRADING_START,
     PROB_ONLY_MODELS,
+    decided_edge_col,
+    decided_prob_col,
 )
 
 # Per-model action filter SQL fragment — inlined float constants, safe (no user input).
@@ -66,15 +68,18 @@ for _mid, _t in ACTION_THRESHOLDS.items():
     _odds_clause = ""
     if _mid in MODEL_MIN_ODDS:
         _odds_clause = f" AND (dk_odds IS NULL OR dk_odds >= {MODEL_MIN_ODDS[_mid]})"
+    # On the numbers the scorer DECIDED on (config.decided_prob_col /
+    # decided_edge_col): calibrated where the model decides calibrated.
+    _prob = decided_prob_col(_mid)
     if _mid in PROB_ONLY_MODELS:
         # Prob-only models: edge is not part of the BET decision (see config.PROB_ONLY_MODELS).
         _ACTION_CLAUSES.append(
-            f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']}{_odds_clause})"
+            f"(model_id = '{_mid}' AND {_prob} >= {_t['min_prob']}{_odds_clause})"
         )
     else:
         _ACTION_CLAUSES.append(
-            f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']}"
-            f" AND edge >= {_t['min_edge']}{_odds_clause})"
+            f"(model_id = '{_mid}' AND {_prob} >= {_t['min_prob']}"
+            f" AND {decided_edge_col(_mid)} >= {_t['min_edge']}{_odds_clause})"
         )
     _action_covered.add(_mid)
 # Fallback for any model not in ACTION_THRESHOLDS. A RETIRED model is not in
@@ -84,8 +89,8 @@ for _mid, _t in ACTION_THRESHOLDS.items():
 _action_covered |= set(RETIRED_MODELS)
 _ACTION_CLAUSES.append(
     f"(model_id NOT IN ({','.join(repr(m) for m in sorted(_action_covered))})"
-    f" AND model_probability >= {ACTION_MIN_PROB}"
-    f" AND edge >= {ACTION_MIN_EDGE})"
+    f" AND {decided_prob_col('')} >= {ACTION_MIN_PROB}"
+    f" AND {decided_edge_col('')} >= {ACTION_MIN_EDGE})"
 )
 _ACTION_FILTER = "(" + " OR ".join(_ACTION_CLAUSES) + ")"
 from data.db import get_connection
