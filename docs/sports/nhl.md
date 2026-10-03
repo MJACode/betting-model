@@ -74,8 +74,12 @@
 >   book's margin on BOTH sides of the full-game number (every over -4.0%,
 >   every under -4.4%), no edge from Pinnacle against DraftKings, and a ceiling
 >   of +3% to +5% even for a bettor who knew which way the number would move.
->   `nhl_over_under` stays untrained. The total-goals markets shaped like the
->   props (team totals, period totals, alternates) have no stored price.
+>   `nhl_over_under` stays untrained. The derivative totals (team, alternate,
+>   first period) were graded on the stored `odds_api_nhl_totals_history` rows
+>   and nothing cleared (`docs/nhl_derivative_totals.md`). They are not
+>   registered and not in the pipeline. The buyer has no credit cap; `--apply`
+>   had not been run as of 2026-10-03 because this environment had no
+>   `ODDS_API_KEY`.
 > - **Player prop prices are collected from 2026-10-01**: an opening and a
 >   closing snapshot per game, six markets, ten books
 >   (`data/ingestors/nhl_prop_odds_ingestor.py`, refresh-pass step
