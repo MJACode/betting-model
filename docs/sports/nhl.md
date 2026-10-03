@@ -50,6 +50,13 @@
 >   `models/nhl_prop_blocked_shots.py`, `scripts/nhl_prop_card.py` (step
 >   `nhl-prop-scoring`, right after the prop prices). Settles from
 >   `nhl_skater_game_log`; a scratched player is NO_ACTION.
+>   **2026-10-02** (Michael Alksninis): both sides remeasured
+>   (`docs/nhl_market_lab.md`, "Both sides"). No over cell cleared. The card
+>   had been keeping the better EV side (at 0.10 that was 2,006 unders and 8
+>   overs); the published card is unders only, and an over that clears the
+>   same floor is paper (`nhl_prop_paper_overs`), not a pick. The floor stays
+>   0.10. The remeasure of the unders is +4.00% on 2,006, interval +0.1..+7.9,
+>   every season positive.
 > - **`nhl_prop_saves`, `nhl_prop_shots_on_goal` and `nhl_prop_assists` are
 >   live** (mike, 2026-10-01: *"build saves, shots on goal and assists models
 >   and we need total goals"*). One engine, a Spec per market
@@ -61,7 +68,13 @@
 >   Shots on goal needs the best price: at DraftKings alone it is +3.3% with a
 >   flat 2024-25. **Shots on goal bets at most 3 a game**, best EV first, picks
 >   already written included (mike, 2026-10-01, after an 11-bet game): +5.4% on
->   4,210 with the limit (`docs/nhl_market_lab.md`). Card: `scripts/nhl_props_card.py`, in the same
+>   4,210 with the limit (`docs/nhl_market_lab.md`).
+>   **2026-10-02** (Michael Alksninis): both sides remeasured at EV 0.06, 0.10,
+>   0.15 and 0.20. No over cell cleared, including shots on goal with the cap
+>   of 3 and without it. Unders stay at 0.10 (assists at 0.06 does not clear,
+>   so the floor is not loosened). An over that clears the same floor is paper
+>   (`nhl_prop_paper_overs`), not a pick, and the shots-on-goal paper overs are
+>   uncapped. Card: `scripts/nhl_props_card.py`, in the same
 >   `nhl-prop-scoring` step. A goalie who does not start is NO_ACTION (the
 >   books void it), a relief appearance included. The row is the scorer's
 >   shape for a pick decided away from DraftKings: `decision_*` is the book

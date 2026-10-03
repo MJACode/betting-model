@@ -444,6 +444,9 @@ ACTION_THRESHOLDS: dict = {
     #     0.12   1,547  +6.8%   +1.7..+11.9    +6.9%    +4.2%    +9.6%
     # 0.10 sits inside that plateau with both halves positive (+6.1% / +6.2%).
     # 99-100% of the bets are unders; the median price is +105.
+    # 2026-10-02: the card had been taking the better side. At 0.10 that was
+    # 2,006 unders and 8 overs. Overs did not clear a side sweep, so the
+    # published card is unders only and the overs are paper.
     "nhl_prop_blocked_shots":   {"min_prob": 0.0, "min_edge": 0.0},
     # NHL goalie saves, skater shots on goal and skater assists
     # (models/nhl_props.py, mike 2026-10-01: "build saves, shots on goal and
@@ -469,6 +472,10 @@ ACTION_THRESHOLDS: dict = {
     # At DraftKings alone saves (+8.0% on 1,110) and assists (+11.3% on 975)
     # hold; shots on goal does NOT (+3.3% on 3,606, +0.3% in 2024-25), which
     # is why the best price is the rule and not an option.
+    # 2026-10-02 (Michael Alksninis): both sides remeasured at EV 0.06/0.10/
+    # 0.15/0.20. No over cell cleared (interval clear of zero, and not one
+    # season). Unders stay at 0.10. Overs are paper, not published.
+    # docs/nhl_market_lab.md.
     "nhl_prop_saves":           {"min_prob": 0.0, "min_edge": 0.0},
     "nhl_prop_shots_on_goal":   {"min_prob": 0.0, "min_edge": 0.0},
     "nhl_prop_assists":         {"min_prob": 0.0, "min_edge": 0.0},

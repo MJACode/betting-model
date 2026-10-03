@@ -2213,3 +2213,126 @@ under  1033   48.7  4.72 -0.9..+10.1 +2.9% (101)  -4.7% (219) +6.9% (227) +6.8% 
   shaped like that are the derivative ones -- team totals, period totals,
   alternate totals -- and no price for any of them is stored. The feed sells
   them (`team_totals`, `alternate_totals`, `totals_p1`; docs/nhl_market_research.md).
+
+## Both sides, 2026-10-02
+
+Michael Alksninis asked for the all-under board to be remeasured, not left
+as a preference. Same walk-forward as `scripts/nhl_prop_backtest.py` and
+`scripts/nhl_prop_blocked_shots_backtest.py`: seasons 2024, 2025 and 2026
+(2023-24, 2024-25, 2025-26) scored by a Poisson model fit only on earlier
+seasons. Production books and prices: best price among the bettable books
+with FanDuel out for saves, shots on goal and assists (`models/nhl_props.books()`);
+DraftKings only for blocked shots. Coherent two-way quotes, quotes after
+puck drop dropped, price floor −200, the model's own probability. One bet
+per player-game. Shots-on-goal unders use the live cap of 3 a game. Overs
+are reported uncapped, which is the population the existing backtest grades
+as the side the rule does not bet; the cap of 3 was also run and does not
+change the over decision.
+
+The interval resamples whole game days, 5,000 times, seed 7, 2.5 and 97.5
+percentiles (`scripts/nhl_prop_backtest.day_interval`). A cell clears only
+when it has at least 30 bets, the interval's low end is above zero, at
+least two seasons have 30 or more bets, and every such season is positive.
+ROI is units divided by bets. The fit ran on xgboost 3.4.1 (scikit-learn
+1.9.1). Blind DraftKings ROI matches the 2026-10-01 lab. Model bet counts
+move by tens against that day's fit (saves unders at 0.10 are 1,770 here
+and 1,755 there). The side decision does not move with them.
+
+### Blind DraftKings, every quoted line
+
+| Market | Side | Bets | Units | ROI | Day interval |
+|---|---|---:|---:|---:|---|
+| Saves | Over | 3,341 | −413.8 | −12.39% | −15.6..−9.2 |
+| Saves | Under | 3,339 | −10.7 | −0.32% | −3.5..+2.9 |
+| Shots on goal | Over | 51,444 | −4,636.2 | −9.01% | −9.9..−8.1 |
+| Shots on goal | Under | 51,448 | −1,501.3 | −2.92% | −3.9..−2.0 |
+| Assists | Over | 57,213 | −5,932.1 | −10.37% | −11.6..−9.2 |
+| Assists | Under | 57,210 | −1,991.1 | −3.48% | −4.2..−2.8 |
+| Blocked shots | Over | 10,415 | −1,011.4 | −9.71% | −11.7..−7.8 |
+| Blocked shots | Under | 10,418 | −242.1 | −2.32% | −4.4..−0.2 |
+
+The book's margin sits on the over. Every blind over loses about 9–12% and
+the interval is clear of zero on the loss. Blind unders lose 0–3.5%.
+
+### Model, EV floor × side
+
+Unders. Shots on goal are capped at 3 a game. The others are not.
+
+| Market | Floor | Bets | Units | ROI | Day interval | 2023-24 | 2024-25 | 2025-26 | Clears |
+|---|---:|---:|---:|---:|---|---|---|---|---|
+| Saves | 0.06 | 2,418 | +108.4 | +4.48% | +0.5..+8.5 | +4.68% / 617 | +7.32% / 1,004 | +0.75% / 797 | yes |
+| Saves | 0.10 | 1,770 | +131.3 | +7.42% | +2.6..+12.0 | +6.83% / 443 | +10.25% / 786 | +3.78% / 541 | yes |
+| Saves | 0.15 | 1,072 | +133.0 | +12.41% | +6.3..+18.1 | +15.34% / 246 | +12.02% / 563 | +10.50% / 263 | yes |
+| Saves | 0.20 | 623 | +104.1 | +16.71% | +9.1..+24.3 | +18.41% / 127 | +16.05% / 373 | +16.96% / 123 | yes |
+| Shots on goal | 0.06 | 7,176 | +267.9 | +3.73% | +1.3..+6.2 | +6.73% / 2,349 | +2.31% / 2,412 | +2.24% / 2,415 | yes |
+| Shots on goal | 0.10 | 4,139 | +241.9 | +5.84% | +2.6..+9.1 | +9.04% / 1,248 | +3.18% / 1,440 | +5.74% / 1,451 | yes |
+| Shots on goal | 0.15 | 1,663 | +158.9 | +9.56% | +4.6..+14.4 | +7.33% / 436 | +5.75% / 569 | +14.33% / 658 | yes |
+| Shots on goal | 0.20 | 628 | +133.8 | +21.31% | +13.2..+29.2 | +10.67% / 135 | +16.10% / 221 | +30.82% / 272 | yes |
+| Assists | 0.06 | 2,473 | +89.1 | +3.60% | −0.4..+7.5 | +6.46% / 1,211 | +2.54% / 449 | −0.06% / 813 | no |
+| Assists | 0.10 | 1,066 | +135.1 | +12.68% | +6.6..+18.9 | +12.65% / 607 | +10.54% / 142 | +13.68% / 317 | yes |
+| Assists | 0.15 | 430 | +88.1 | +20.50% | +11.2..+29.5 | +16.69% / 269 | +25.61% / 41 | +27.28% / 120 | yes |
+| Assists | 0.20 | 209 | +53.8 | +25.76% | +11.2..+40.6 | +15.31% / 125 | −19.05% / 15 | +54.42% / 69 | yes |
+| Blocked shots | 0.06 | 3,346 | +157.5 | +4.71% | +1.4..+7.9 | +2.66% / 1,565 | +5.25% / 792 | +7.51% / 989 | yes |
+| Blocked shots | 0.10 | 2,006 | +80.3 | +4.00% | +0.1..+7.9 | +4.05% / 963 | +1.52% / 540 | +6.58% / 503 | yes |
+| Blocked shots | 0.15 | 900 | +81.3 | +9.03% | +2.6..+15.2 | +7.29% / 433 | +5.17% / 291 | +19.68% / 176 | yes |
+| Blocked shots | 0.20 | 361 | +31.0 | +8.58% | −2.3..+19.6 | +1.54% / 169 | +6.38% / 129 | +31.97% / 63 | no |
+
+Assists unders at 0.06 do not clear (2025-26 is flat, interval through zero),
+so the live floor is not loosened. Blocked-shot unders at 0.10 are weaker
+than the 2026-10-01 write-up (+6.2% on 2,054, interval +1.8..+10.5) and
+still clear: +4.00% on 2,006, every season positive. The floor stays 0.10.
+2024-25 splits +3.22% / −0.19%.
+
+Overs, uncapped.
+
+| Market | Floor | Bets | Units | ROI | Day interval | 2023-24 | 2024-25 | 2025-26 | Clears |
+|---|---:|---:|---:|---:|---|---|---|---|---|
+| Saves | 0.06 | 144 | −4.5 | −3.15% | −19.9..+12.9 | +4.52% / 72 | −9.69% / 35 | −11.86% / 37 | no |
+| Saves | 0.10 | 75 | +8.9 | +11.83% | −10.1..+33.9 | +2.55% / 45 | +19.02% / 14 | +31.63% / 16 | no |
+| Saves | 0.15 | 36 | +6.7 | +18.56% | −13.6..+48.4 | +6.63% / 26 | +85.14% / 7 | −33.33% / 3 | no |
+| Saves | 0.20 | 22 | −1.7 | −7.66% | −52.2..+34.8 | −23.51% / 17 | +82.79% / 4 | −100% / 1 | no |
+| Shots on goal | 0.06 | 2,804 | −49.8 | −1.78% | −5.4..+1.9 | −4.07% / 1,980 | +4.79% / 403 | +2.73% / 421 | no |
+| Shots on goal | 0.10 | 1,179 | −72.9 | −6.18% | −12.0..+0.0 | −9.59% / 976 | +0.91% / 89 | +17.41% / 114 | no |
+| Shots on goal | 0.15 | 405 | −31.6 | −7.80% | −18.0..+2.4 | −12.05% / 359 | +32.34% / 14 | +22.30% / 32 | no |
+| Shots on goal | 0.20 | 137 | −5.7 | −4.15% | −22.3..+14.3 | −9.35% / 123 | −37.43% / 3 | +63.00% / 11 | no |
+| Assists | 0.06 | 2,710 | −72.2 | −2.67% | −8.2..+2.6 | +4.34% / 1,361 | −10.93% / 670 | −8.55% / 679 | no |
+| Assists | 0.10 | 1,222 | −32.8 | −2.69% | −11.2..+5.0 | +3.36% / 661 | −4.03% / 270 | −15.16% / 291 | no |
+| Assists | 0.15 | 407 | −5.0 | −1.23% | −17.3..+14.9 | +9.62% / 231 | −5.10% / 78 | −23.72% / 98 | no |
+| Assists | 0.20 | 130 | +13.0 | +10.01% | −18.8..+40.3 | +12.95% / 75 | +24.23% / 26 | −10.34% / 29 | no |
+| Blocked shots | 0.06 | 51 | +14.5 | +28.45% | +6.2..+50.6 | +53.76% / 20 | +81.67% / 2 | +7.32% / 29 | no |
+| Blocked shots | 0.10 | 8 | +3.2 | +40.09% | −26.0..+90.3 | +39.60% / 4 | — / 0 | +40.59% / 4 | no |
+| Blocked shots | 0.15 | 2 | +0.1 | +7.50% | −100..+115 | — / 0 | — / 0 | +7.50% / 2 | no |
+| Blocked shots | 0.20 | 0 | — | — | — | — | — | — | no |
+
+Shots on goal with the live cap of 3, overs: 0.06 is −1.41% on 2,535
+(−5.3..+2.6); 0.10 is −6.08% on 1,107 (−12.1..+0.2); 0.15 is −7.91% on 395;
+0.20 is −4.06% on 134. The cap does not save the over.
+
+### The one interval that clears zero
+
+Blocked-shot overs at EV >= 0.06: 51 bets, +14.5 units, +28.45%, interval
++6.2..+50.6. It does not clear the rule. No season has 30 bets (20, 2, 29).
+2025-26 is +7.32% and its late half is −19.06% (early +35.6%). The next
+floors are 8, 2 and 0 bets. That is a peak, not a plateau, so it is not a
+live side.
+
+### Read
+
+Raising the EV floor does not save the overs. On shots on goal the over gets
+worse as the floor rises (−1.78% at 0.06, −6.18% at 0.10, −7.80% at 0.15).
+The Poisson mean is not handing the over a price the book has mis-set; the
+loss lines up with the blind over, which is the book's juice. Model unders
+at 0.10 beat the blind under in every market, which is the skill, and that
+is the side the cards keep.
+
+No over cell is published. `MODEL_OWN_EV_FLOOR` stays 0.10 for all four.
+Unders are not loosened. An over that clears the same floor, on the same
+books and the same −200 price floor, is written to `nhl_prop_paper_overs`
+(`scripts/nhl_prop_over_paper.py`) and is not a pick: no `signal_type`, no
+Discord, no push. Shots-on-goal paper overs are uncapped.
+
+Blocked shots had been keeping whichever side had the higher EV. At 0.10
+that mix is 2,014 bets, 99.6% unders: the 2,006 unders above plus 8 overs,
++3.2 units. Those 8 do not clear, so the published card is unders only from
+2026-10-02. That is a tightening of what can fire, not an allowance of an
+over. Reversing it puts those 8-bet overs back on the live card.

@@ -31,7 +31,10 @@ betting every over blind loses 9-12% and every under 0-3.5% (three priced
 seasons). The model's overs lose in all three markets here and its unders are
 where the return is, so a Spec names the sides it may bet and all three name
 the under. That restriction was chosen on the same three seasons the cut was,
-which is said out loud in docs/nhl_market_lab.md.
+which is said out loud in docs/nhl_market_lab.md. Re-measured on both sides
+2026-10-02 (Michael Alksninis): no over cell cleared, so the Specs stay
+unders and an over that clears the same floor is paper only
+(`scripts/nhl_prop_over_paper.py`).
 
 THE BEST PRICE, NOT ONE BOOK. A pick is decided at the best price among the
 bettable books (CLAUDE.md 6), and here that is not a detail: the model says

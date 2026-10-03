@@ -6,7 +6,10 @@ positive in every season at every cut (12 of 12 cells), with intervals clear of
 zero, and it was picked out on 2025-26 and then held on two seasons bought
 afterwards. The bets are unders: DraftKings' margin on this market sits on the
 over (blind overs -10.7%, blind unders -1.0% in 2025-26), Pinnacle does not
-quote it, and the model's job is to say which unders.
+quote it, and the model's job is to say which unders. From 2026-10-02 the
+card publishes unders only — it had been keeping whichever side had the higher
+EV, which at the live floor was 8 overs in three seasons. An over that clears
+the same floor is a paper row, not a pick (`scripts/nhl_prop_over_paper.py`).
 
 THE MODEL. scripts/nhl_prop_lab.py's, moved here so the backtest, the trainer
 and tonight's card run ONE function. A gradient-boosted Poisson mean from:

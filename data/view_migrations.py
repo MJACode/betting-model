@@ -235,6 +235,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # after team_stats_board_line_probe_2026_09_28, which owns the function
     # and would otherwise restore the unbounded scan on the next pass.
     "team_stats_board_commence_bound_2026_09_30.sql",
+    # 2026-10-02 (Michael Alksninis): NHL prop overs are paper. The side sweep
+    # did not clear an over cell, so this table records them and the cards
+    # do not write them to picks. Recording only.
+    "add_nhl_prop_paper_overs.sql",
 ]
 
 
