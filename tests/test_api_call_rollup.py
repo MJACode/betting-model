@@ -115,3 +115,20 @@ def test_the_daily_table_keys_on_day_api_and_source():
     lose the per-source split the question asks for."""
     ddl = store.DAILY_DDL.upper()
     assert "PRIMARY KEY (DAY, API, SOURCE)" in ddl.replace("\n", " "), store.DAILY_DDL
+
+
+def test_the_rollup_reads_only_yesterday_and_today():
+    """2026-10-03: unbounded, the fold scanned all of api_call_log (2.2M rows)
+    on every run and was the database's largest disk reader. It reads the two
+    ET days whose totals can still change, through the ts index."""
+    sql = " ".join(store.ROLLUP_SQL.split())
+    assert "WHERE ts >= ((date_trunc('day', NOW() AT TIME ZONE 'America/New_York') - INTERVAL '1 day')" in sql, sql
+
+
+def test_a_new_process_does_not_prune_on_its_first_flush():
+    """At last_prune = 0 every short-lived step ran prune() -- and the rollup --
+    the first time it logged a call."""
+    from monitoring import probe
+    src = inspect.getsource(probe._writer_loop)
+    assert "last_prune = time.time()" in src, src
+    assert "last_prune = 0" not in src, src
