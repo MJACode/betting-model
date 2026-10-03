@@ -443,6 +443,70 @@ def _validate_nhl_odds_history(args: dict) -> dict:
     return {"max_credits": cap}
 
 
+# Keys this job will read. Anything else — including max_credits, credit_cap,
+# reserve_days — is a malformed request and fails in the validator, before the
+# module is imported and before any Odds API call. Michael, 2026-10-03: there
+# is no credit cap on this purchase, so the job must not grow one.
+_NHL_DERIVATIVE_ODDS_ARGS = frozenset({"apply", "probe", "seasons"})
+
+
+def _job_nhl_derivative_odds_history(**kw):
+    """Historical NHL team totals, alternate totals, and first-period totals.
+
+    Runs data.ingestors.nhl_derivative_odds_history. That module skips a game
+    already stored under odds_api_nhl_totals_history (or in its pull ledger)
+    and, on --apply, buys every remaining scored game. It does not stop for
+    credits. Dry run is argv with no --apply: the plan, plus a three-game
+    measured probe when the key is set.
+    """
+    argv: list[str] = []
+    seasons = kw.get("seasons")
+    if seasons:
+        argv.extend(["--seasons", str(seasons[0]), str(seasons[1])])
+    if kw.get("probe"):
+        argv.extend(["--probe", str(kw["probe"])])
+    elif kw.get("apply"):
+        argv.append("--apply")
+    return _run_script_main(
+        "data.ingestors.nhl_derivative_odds_history", argv)[-4000:]
+
+
+def _validate_nhl_derivative_odds_history(args: dict) -> dict:
+    """Dry run unless apply is true. No credit-ceiling argument is accepted."""
+    extra = sorted(set(args) - _NHL_DERIVATIVE_ODDS_ARGS)
+    if extra:
+        raise ValueError(
+            f"unknown args {extra}; this job takes apply, probe, and seasons, "
+            "and it has no credit ceiling")
+    if "apply" in args and not isinstance(args["apply"], bool):
+        raise ValueError("apply must be true or false")
+    apply = bool(args.get("apply", False))
+    probe = args.get("probe")
+    if probe is not None:
+        probe = str(probe)
+        datetime.strptime(probe, "%Y-%m-%d")  # ValueError if it is not a date
+    if apply and probe:
+        raise ValueError("pass apply or probe, not both")
+    seasons = args.get("seasons")
+    if seasons is None:
+        cleaned: tuple[int, int] | None = None
+    else:
+        if not isinstance(seasons, (list, tuple)) or len(seasons) != 2:
+            raise ValueError("seasons must be two ending years")
+        try:
+            start, end = int(seasons[0]), int(seasons[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"seasons must be two ending years, got {seasons!r}") from exc
+        if start > end:
+            raise ValueError(f"seasons out of order: {start}-{end}")
+        # A year that is not an NHL ending year is a typo. Omitting seasons
+        # leaves the module's own window, which is the full purchase.
+        if not (2020 <= start <= end <= datetime.now().year + 2):
+            raise ValueError(f"seasons out of range: {start}-{end}")
+        cleaned = (start, end)
+    return {"apply": apply, "probe": probe, "seasons": cleaned}
+
+
 def _job_relabel_in_play(**kw):
     from data.ingestors.odds_ingestor import relabel_in_play
     return relabel_in_play(sport=kw["sport"], since=kw["since"])
@@ -1477,6 +1541,11 @@ JOBS = {
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
     "nhl_odds_history": (_job_nhl_odds_history, _validate_nhl_odds_history),
+    # Derivative totals (team, alternate, first period). No credit ceiling:
+    # Michael, 2026-10-03. Dry run is apply=false. See
+    # _job_nhl_derivative_odds_history.
+    "nhl_derivative_odds_history": (_job_nhl_derivative_odds_history,
+                                    _validate_nhl_derivative_odds_history),
     "game_log_backfill": (_job_game_log_backfill, _validate_game_log_backfill),
     "ncaaf_player_backfill": (_job_ncaaf_player_backfill,
                               _validate_ncaaf_player_backfill),
