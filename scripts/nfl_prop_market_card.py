@@ -174,7 +174,12 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     kw = {"before": before}
     if snapshot_types:          # replay only; live takes the pre-game default
         kw["snapshot_types"] = snapshot_types
-    quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS), **kw)
+    # SHARP + SOFT only. The 15:52:53Z cancel had no bookmaker predicate, so
+    # it read every book on the game (betparx, fanatics, ...) and find_bets
+    # ignores those rows. Same bets, a shorter index range per slice.
+    quotes = load_nfl_prop_quotes(
+        conn, open_games, list(mk.SHARP_MARKETS),
+        books=tuple(mk.SHARP_BOOKS) + tuple(SOFT_BOOKS), **kw)
     # Exchange reference. None means "fetch now" on a LIVE run; a replay must
     # not mix today's Kalshi board with a past soft book (fail closed -> {}).
     # Explicit {} / a passed dict skips the network (tests, offline).
