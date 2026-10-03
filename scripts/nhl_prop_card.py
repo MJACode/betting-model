@@ -1,4 +1,4 @@
-"""Tonight's NHL blocked-shots card: price DraftKings' lines with the model, bet the unders that clear.
+"""Tonight's NHL blocked-shots card: price DraftKings' lines with the model, publish the unders that clear.
 
 Deployment of models/nhl_prop_blocked_shots. This script is plumbing: read the
 newest pre-game DraftKings quote for each player in tonight's unstarted games,
@@ -12,6 +12,9 @@ Deliberate, and load-bearing:
   The cut was measured on that number. The correction a model with no record
   is given turned the same three seasons from +6.2% into a loss
   (scripts/nhl_prop_blocked_shots_backtest.py).
+
+  UNDERS ONLY ON THE PUBLISHED CARD. An over that clears the same floor is
+  written to nhl_prop_paper_overs and is not a pick (2026-10-02 side sweep).
 
   INSERT-ONCE PER PLAYER PER GAME. A pick is a pick (CLAUDE.md 1c): when the
   line or the price moves after it is written, nothing happens to it.
@@ -143,12 +146,17 @@ def upcoming_rows(quotes: pd.DataFrame, games: dict[str, dict], who: pd.DataFram
     return pd.DataFrame(rows), skipped
 
 
-def decide(mu: float, line: float, over, under) -> dict | None:
-    """The better side at DraftKings' prices, or None when neither is priced."""
+def decide(mu: float, line: float, over, under, sides: tuple[str, ...] = ("under",)) -> dict | None:
+    """The best price among `sides` at DraftKings, or None when none of them is priced.
+
+    The published card passes the default, unders. An over that clears is a
+    paper row (`scripts/nhl_prop_over_paper.py`), not a pick: the 2026-10-02
+    side sweep did not clear an over cell.
+    """
     po = float(bs.p_over(mu, line))
     best = None
     for side, price, p in (("over", over, po), ("under", under, 1 - po)):
-        if price is None or pd.isna(price):
+        if side not in sides or price is None or pd.isna(price):
             continue
         ev = bs.expected_value(p, float(price))
         if best is None or ev > best["ev"]:
@@ -162,7 +170,7 @@ def pick_rows(scored: pd.DataFrame, games: dict[str, dict], game_date: str, bank
     floor = config.min_odds_for(MODEL_ID)
     rows = []
     for r in scored.itertuples():
-        d = decide(r.mu, r.line, r.over, r.under)
+        d = decide(r.mu, r.line, r.over, r.under, sides=("under",))
         if d is None:
             continue
         ev = gate(MODEL_ID, d["p"], d["price"])
@@ -284,16 +292,33 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
                                  on=["game_id", "quote_player"]))
         out["scored"], out["skipped"] = len(scored), len(skipped)
         rows = []
+        paper: list[dict] = []
         if len(scored):
             from models.scorer import _get_current_bankroll
+            from scripts.nhl_prop_over_paper import blocked_paper_overs
             rows = pick_rows(scored, games, game_date, _get_current_bankroll(conn))
+            paper = blocked_paper_overs(scored, games, game_date)
         out["bets"] = len(rows)
+        out["paper_overs"] = 0
         if keep is not None:
-            keep.update(scored=scored, rows=rows, skipped=skipped)
+            keep.update(scored=scored, rows=rows, skipped=skipped, paper=paper)
         logger.info("\n" + render(scored, rows, skipped))
+        if paper:
+            logger.info(f"nhl-prop-card: {len(paper)} paper over(s), not a bet")
         if do_publish and rows:
             out["published"] = publish(conn, rows)
             logger.info(f"nhl-prop-card: published {out['published']} new pick(s) of {len(rows)} that clear")
+        if do_publish and paper:
+            try:
+                from scripts.nhl_prop_over_paper import record_paper, settle_paper
+                out["paper_overs"] = record_paper(conn, paper)
+                settle_paper(conn, game_date)
+            except Exception as exc:
+                logger.error(f"nhl-prop-card: paper overs not recorded: {exc}")
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
         return out
     finally:
         conn.close()

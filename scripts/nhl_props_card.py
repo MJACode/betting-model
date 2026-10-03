@@ -15,7 +15,8 @@ model's own floor (config.MODEL_OWN_EV_FLOOR).
 Deliberate, and load-bearing:
 
   UNDERS ONLY, THE MODEL'S OWN PROBABILITY, THE BEST PRICE. All three are how
-  the cut was measured (scripts/nhl_prop_backtest.py).
+  the cut was measured (scripts/nhl_prop_backtest.py). An over that clears the
+  same floor is paper (`scripts/nhl_prop_over_paper.py`), not a second bet.
 
   ONLY THE NEWEST FETCH OF A GAME IS SHOPPED. Every book in one fetch is
   quoted at the same instant, so "the best price" is one a bettor could take.
@@ -358,16 +359,42 @@ def score_market(conn, spec: np_.Spec, games: dict[str, dict], game_date: str,
     rows = []
     if len(mus):
         from models.scorer import _get_current_bankroll
+        dispersion = float(art.get("dispersion", 0.0))
         rows = pick_rows(spec, mus, priced, games, game_date, _get_current_bankroll(conn),
-                         float(art.get("dispersion", 0.0)))
+                         dispersion)
         n_clear = len(rows)
         rows = limit_per_game(spec, rows, existing_picks(conn, spec.model_id, sorted(games)))
         if len(rows) < n_clear:
             logger.info(f"nhl-props-card: {spec.model_id} kept {len(rows)} of {n_clear} that clear "
                         f"(at most {spec.max_per_game} a game, picks already written included)")
-    out.update(mus=mus, quotes=priced, rows=rows, skipped=skipped)
+    paper: list[dict] = []
+    if len(mus):
+        from scripts.nhl_prop_over_paper import props_paper_overs
+        paper = props_paper_overs(spec, mus, priced, games, game_date,
+                                  float(art.get("dispersion", 0.0)) if art else 0.0)
+    out.update(mus=mus, quotes=priced, rows=rows, skipped=skipped, paper=paper)
     logger.info("\n" + render(spec, len(mus), rows, skipped))
+    if paper:
+        logger.info(f"nhl-props-card: {spec.model_id} {len(paper)} paper over(s), not a bet")
     return out
+
+
+def _record_paper(conn, model_id: str, rows: list[dict], game_date: str) -> int:
+    """Write paper overs. A failure here does not unpublish an under already committed."""
+    try:
+        from scripts.nhl_prop_over_paper import record_paper, settle_paper
+        n = record_paper(conn, rows)
+        settle_paper(conn, game_date)
+        if n:
+            logger.info(f"nhl-props-card: {model_id} recorded {n} paper over(s)")
+        return n
+    except Exception as exc:
+        logger.error(f"nhl-props-card: {model_id} paper overs not recorded: {exc}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return 0
 
 
 def run_card(game_date: str | None = None, do_publish: bool = False, now: datetime | None = None,
@@ -394,8 +421,12 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
                 if published:
                     logger.info(f"nhl-props-card: {spec.model_id} published {published} new pick(s) "
                                 f"of {len(r['rows'])} that clear")
+                paper_n = 0
+                if do_publish and r.get("paper"):
+                    paper_n = _record_paper(conn, spec.model_id, r["paper"], game_date)
                 out[spec.model_id] = {"priced": r["priced"], "scored": len(r["mus"]), "bets": len(r["rows"]),
-                                      "published": published, "skipped": len(r["skipped"])}
+                                      "published": published, "paper_overs": paper_n,
+                                      "skipped": len(r["skipped"])}
                 if keep is not None:
                     keep[spec.model_id] = r
             except Exception as exc:
