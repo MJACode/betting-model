@@ -292,7 +292,8 @@ def run_card(game_date: str | None = None, do_publish: bool = False, now: dateti
             keep.update(scored=scored, rows=rows, skipped=skipped)
         logger.info("\n" + render(scored, rows, skipped))
         if do_publish and rows:
-            out["published"] = publish(conn, rows)
+            from scripts.nhl_props_card import publish_across_models   # one prop bet a game, all four models
+            out["published"] = publish_across_models(rows)
             logger.info(f"nhl-prop-card: published {out['published']} new pick(s) of {len(rows)} that clear")
         return out
     finally:

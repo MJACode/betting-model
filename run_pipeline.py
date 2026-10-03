@@ -898,32 +898,47 @@ def step_nhl_prop_odds() -> bool:
 
 
 def step_nhl_prop_scoring(dry_run: bool = False) -> bool:
-    """NHL prop cards: price DraftKings' lines, write the unders that clear.
+    """NHL prop cards: price tonight's lines, write at most ONE prop bet a game.
 
-    Runs right after `nhl-prop-odds`. A pass with no quote, or with every
-    priced player already written, is a clean no-op. Two cards -- blocked shots
-    (scripts/nhl_prop_card.py) and saves + assists (scripts/nhl_props_card.py)
-    -- and one failing does not stop the other: each model is its own bet.
+    Runs right after `nhl-prop-odds`. Both cards -- blocked shots
+    (scripts/nhl_prop_card.py) and saves / shots on goal / assists
+    (scripts/nhl_props_card.py) -- score without writing; their rows are then
+    pooled and the single best-EV bet in each game not already bet is written
+    (mike, 2026-10-02: one a game, the best of the best). One card failing
+    does not stop the other's rows from being considered.
     """
     ok = True
+    rows: list[dict] = []
     try:
         from scripts.nhl_prop_card import run_card
-        result = run_card(do_publish=not dry_run)
-        logger.success(f"✓ NHL prop card: {result}")
+        keep: dict = {}
+        result = run_card(do_publish=False, keep=keep)
+        rows += keep.get("rows", [])
+        logger.success(f"✓ NHL blocked-shots card: {result}")
     except Exception as exc:
         logger.error(f"✗ NHL prop card failed: {exc}")
         ok = False
     try:
         from scripts.nhl_props_card import run_card as run_props_card
-        result = run_props_card(do_publish=not dry_run)
+        keep = {}
+        result = run_props_card(do_publish=False, keep=keep)
+        rows += [r for k in keep.values() for r in k.get("rows", [])]
         failed = [m for m, r in result.items() if isinstance(r, dict) and "error" in r]
         if failed:
-            logger.error(f"✗ NHL saves / assists card failed for {failed}: {result}")
+            logger.error(f"✗ NHL saves / shots / assists card failed for {failed}: {result}")
             ok = False
         else:
-            logger.success(f"✓ NHL saves / assists card: {result}")
+            logger.success(f"✓ NHL saves / shots / assists card: {result}")
     except Exception as exc:
-        logger.error(f"✗ NHL saves / assists card failed: {exc}")
+        logger.error(f"✗ NHL saves / shots / assists card failed: {exc}")
+        ok = False
+    if dry_run:
+        return ok
+    try:
+        from scripts.nhl_props_card import publish_across_models
+        logger.success(f"✓ NHL prop bets written: {publish_across_models(rows)} (one a game, all four models)")
+    except Exception as exc:
+        logger.error(f"✗ NHL prop publish failed: {exc}")
         ok = False
     return ok
 
