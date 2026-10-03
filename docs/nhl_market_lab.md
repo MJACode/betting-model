@@ -2211,5 +2211,5 @@ under  1033   48.7  4.72 -0.9..+10.1 +2.9% (101)  -4.7% (219) +6.9% (227) +6.8% 
   have to change is the market, not the model. The NHL results that hold are
   all in markets where the book's margin is one-sided. The total-goals markets
   shaped like that are the derivative ones -- team totals, period totals,
-  alternate totals -- and no price for any of them is stored. The feed sells
-  them (`team_totals`, `alternate_totals`, `totals_p1`; docs/nhl_market_research.md).
+  alternate totals. Graded 2026-10-02 on the stored prices: nothing cleared,
+  not publishing (`docs/nhl_derivative_totals.md`).

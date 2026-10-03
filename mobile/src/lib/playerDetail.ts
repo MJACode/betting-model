@@ -22,6 +22,7 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
+import { isPausedRow } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropModel, type StatDef } from '@/lib/statCatalog';
@@ -403,6 +404,8 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
   const total: PlayerPickRecord = { lines: [], settled: 0, wins: 0, losses: 0, pushes: 0, units: null, unpriced: 0 };
   for (const p of picks) {
     if (p.signal_type !== 'BET') continue;
+    // Paused-model BETs were never bet (#850); same rule as passesRecordFilter.
+    if (isPausedRow(p)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
     let line = by.get(p.model_id);
     if (!line) {

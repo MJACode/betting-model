@@ -20,7 +20,7 @@ import {
   type BookPrice,
 } from './markets';
 import { normalizePlayerName } from './playerNews';
-import type { ServerThreshold } from './thresholds';
+import { isPausedRow, PAUSED_NOTE, type ServerThreshold } from './thresholds';
 import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
 import { sanitizeFilters } from './customModelFilters';
 
@@ -2497,6 +2497,15 @@ export async function fetchNflTeamGameStats(team: string, season: number): Promi
 }
 
 /**
+ * The record's paused-row exclusion as a PostgREST or= filter (#850): a BET a
+ * paused model wrote carries downgrade_reason = PAUSED_NOTE and was never a
+ * bet. NULL must pass explicitly — `neq` alone drops it (SQL three-valued
+ * logic), and almost every row is NULL. Same clause as the server's
+ * paused_row_exclusion_sql.
+ */
+export const NOT_PAUSED_ROW = `downgrade_reason.is.null,downgrade_reason.neq."${PAUSED_NOTE}"`;
+
+/**
  * Settled game-level BET rows in a set of games — the team page's "our
  * record on this team". The RECORD filter, on the server: `signal_type =
  * 'BET'` and a real result, which is what the pick WAS (CLAUDE.md §1c — never
@@ -2522,9 +2531,10 @@ export async function fetchSettledGamePicksForGames(gameIds: string[]): Promise<
       .in('result', ['WIN', 'LOSS', 'PUSH'])
       .is('player_id', null)
       .in('pick_side', ['home', 'away', 'over', 'under'])
-      .not('model_id', 'ilike', '%prop%');
+      .not('model_id', 'ilike', '%prop%')
+      .or(NOT_PAUSED_ROW);
     if (error) throw error;
-    out.push(...((data ?? []) as unknown as SettledPick[]));
+    out.push(...((data ?? []) as unknown as SettledPick[]).filter((p) => !isPausedRow(p)));
   }
   return out;
 }
@@ -2557,13 +2567,15 @@ export async function fetchSettledPropPicksForPlayer(args: {
     .eq('signal_type', 'BET')
     .in('result', ['WIN', 'LOSS', 'PUSH'])
     .or(clauses.join(','))
+    // A second or= is ANDed with the first by PostgREST.
+    .or(NOT_PAUSED_ROW)
     .order('game_date', { ascending: false })
     .limit(200);
   if (error) throw error;
   // A game-level pick can never match a player_id; the label match could in
   // theory catch a team whose name starts a label, so keep prop rows only.
   return ((data ?? []) as unknown as SettledPick[]).filter(
-    (p) => p.player_id != null || p.model_id.includes('prop'),
+    (p) => (p.player_id != null || p.model_id.includes('prop')) && !isPausedRow(p),
   );
 }
 

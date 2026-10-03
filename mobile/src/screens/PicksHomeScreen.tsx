@@ -115,6 +115,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import {
   isModelPaused,
   isPausedForDisplay,
+  isPausedRow,
   isModelRetired,
   isUnlockedPreview,
   passesActionFilter,
@@ -213,6 +214,10 @@ export function PicksHomeScreen() {
         (d) =>
           !isModelPaused(d.pick.model_id) &&
           !isModelRetired(d.pick.model_id) &&
+          // The ROW's marker too (#850): a BET written while its lane was
+          // paused was never posted or staked, and stays not-a-signal after
+          // an unpause. isModelPaused alone only reads the present state.
+          !isPausedRow(d.pick) &&
           gameStatus(d.game, liveStates.get(d.pick.game_id) ?? null).kind === 'live',
       ),
     [allLiveData, liveStates],
