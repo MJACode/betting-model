@@ -2011,6 +2011,17 @@ MODELS_ON_OWN_PROBABILITY: frozenset = frozenset({
     "nhl_prop_saves",
     "nhl_prop_shots_on_goal",
     "nhl_prop_assists",
+    # 2026-10-03 (mike: "fix that's broken in nhl"; this reverses his 10-01
+    # "the correction stays"). The correction is a TWO-way map: a side under
+    # 0.5 becomes 1 - f(1 - p). In a three-way market 1 - p is not the other
+    # side, so every regulation outcome under 50% gained ~6 points and the
+    # three probabilities summed to 1.144 on average (2025-26, 1,352 games,
+    # scripts/nhl_live_artifact_grade.py). 0.380 -> 0.443 on "NYR
+    # (Regulation)" 2026-10-02. Graded on 2025-26 at the best price: as it
+    # ran, 447 bets -20.5 units (-4.6%); on its own probability, 47 bets
+    # -6.0 units (-12.7%). Neither makes money; this removes the arithmetic
+    # error, it does not make the model profitable.
+    "nhl_moneyline_regulation",
 })
 
 

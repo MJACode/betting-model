@@ -322,6 +322,35 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
+## NHL — every model's cut and the backtest behind it (2026-10-03)
+
+The grids live in `docs/nhl_market_lab.md`; this is the summary. Units are flat
+bets at the price the rule decides at.
+
+**Prop models** (three priced seasons, walk-forward,
+`scripts/nhl_prop_combined_cap.py`): one bet a game across all four, best EV
+first. Every floor 0.18 (mike, 2026-10-02: "1 max ... the best of the best").
+
+| EV floor | bets | units | return | bets a night (avg / max) |
+|---|---|---|---|---|
+| old rules (0.10, no shared limit) | 9,082 | +606.6 | +6.68% | 17.4 / 77 |
+| 0.10, one a game | 3,258 | +301.4 | +9.25% | 6.3 / 16 |
+| 0.14 | 2,479 | +301.8 | +12.18% | 5.0 / 14 |
+| 0.16 | 2,040 | +325.6 | +15.96% | 4.2 / 14 |
+| **0.18 (live)** | **1,659** | **+269.2** | **+16.23%** | **3.6 / 14** |
+| 0.20 | 1,325 | +252.4 | +19.05% | 3.0 / 11 |
+| 0.22 | 1,034 | +198.3 | +19.18% | 2.6 / 10 |
+
+Every season positive across 0.14-0.22. Chosen on the seasons it is graded on.
+
+**Team models** (`scripts/nhl_live_artifact_grade.py`, the live artifacts on
+2025-26, the one season neither saw, 1,352 games). Neither makes money at any
+cut. `nhl_moneyline` as it runs (corrected probability, 0.55 / 0.05, EV 0.20):
+41 bets, +5.0 units (+12.2%, interval -23.5..+47.9) at the best price; on its
+own probability, edge cuts 0.02-0.10 all lose (-0.3% to -19.5%).
+`nhl_moneyline_regulation` as it ran: 447 bets, -20.5 units (-4.6%); on its own
+probability (live from 2026-10-03): 47 bets, -6.0 units (-12.7%).
+
 ## Dated review criteria (2026-09-08, mike)
 
 mike: *"also yes on n=75 critera."* Written BEFORE the data arrives, which is the
