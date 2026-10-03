@@ -254,13 +254,21 @@ def apply_calibration(prob: float, params: dict | None) -> float:
     (p >= 0.5) and the other side is defined as 1 - f(1 - p). Without that a
     prop's over and under would not sum to 1, and the app would publish two
     probabilities for one proposition that disagree.
+
+    NEVER ACROSS 0.5 (mike, 2026-10-03). The map is fitted on bets claiming
+    0.65-0.78 and has never seen a pick near 0.5. With a negative offset the
+    mirror put f(0.5) at ~0.43 from above and ~0.57 from below, so every side
+    the model rated 0.43-0.50 came out as the FAVOURITE and its opponent as
+    the dog: Florida 0.479 -> 0.546 and Illinois 0.468 -> 0.535 were bet live
+    on 2026-10-03 off that flip alone. A side the model rates under 0.5 stays
+    under 0.5; the preferred side shrinks to 0.5 at most, never past it.
     """
     if not params or params.get("method") != "platt":
         return prob
     a, b = float(params["a"]), float(params["b"])
     if prob >= 0.5:
-        return _sigmoid(a * _logit(prob) + b)
-    return 1.0 - _sigmoid(a * _logit(1.0 - prob) + b)
+        return max(0.5, _sigmoid(a * _logit(prob) + b))
+    return min(0.5, 1.0 - _sigmoid(a * _logit(1.0 - prob) + b))
 
 
 def invert_calibration(cal_prob: float, params: dict | None) -> float:
@@ -276,6 +284,10 @@ def invert_calibration(cal_prob: float, params: dict | None) -> float:
     a, b = float(params["a"]), float(params["b"])
     if a == 0:
         return cal_prob
+    if cal_prob == 0.5:
+        # every raw >= 0.5 that a negative offset shrinks past 0.5 is held AT
+        # 0.5, so the lowest raw number that reaches it is 0.5 itself
+        return 0.5
     if cal_prob >= 0.5:
         return _sigmoid((_logit(cal_prob) - b) / a)
     return 1.0 - _sigmoid((_logit(1.0 - cal_prob) - b) / a)

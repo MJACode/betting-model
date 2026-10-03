@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, why Illinois and Florida were bet live: the calibration map's mirror flipped every side rated 0.43-0.50 into a favourite (0.479 -> 0.546). Map now clamped at 0.5. 25 such BETs over 8 models; ncaaf live win-prob cut needs a re-sweep |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, NFL prop odds loads are one (game, market) statement. The 15:56Z hourly cancelled the fourteen-game DraftKings scan (pipeline_log 119483, 2026-10-04) and the card's one-game all-books scan. A cancel rollbacks before the next slice. NHL shots/assists ANY() left to draft #864 |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, worker job `nhl_derivative_odds_history` runs the derivative-totals buyer. Dry run is the default. `--apply` has no credit ceiling. A credit-cap argument fails validation before any Odds API call. Grade unchanged, nothing queued |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, NHL derivative totals (team, alternate, 1st period) graded on the stored prices: nothing cleared, not registered, not in the pipeline. Buyer has no credit cap and skips games already stored. Odds API not called — no key in this environment |

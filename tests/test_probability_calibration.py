@@ -37,6 +37,31 @@ def test_the_map_is_monotone():
     assert all(b >= a - 1e-12 for a, b in zip(vals, vals[1:]))
 
 
+def test_the_map_is_monotone_across_the_whole_range_including_0_5():
+    """The test above only walked 0.5 -> 0.99, which is the half the map was
+    fitted on, so it passed while the mirror flipped every side just under 0.5
+    into a favourite (mike, 2026-10-03: Florida 0.479 -> 0.546 and Illinois
+    0.468 -> 0.535 were bet live off it). Walk BOTH halves."""
+    for params in ({"method": "platt", "a": 1.0, "b": -0.269531},   # ncaaf live, promoted
+                   {"method": "platt", "a": 0.7, "b": -0.5},
+                   {"method": "platt", "a": 0.76, "b": 0.47}):
+        grid = np.linspace(0.01, 0.99, 197)
+        vals = [pc.apply_calibration(float(p), params) for p in grid]
+        assert all(b >= a - 1e-12 for a, b in zip(vals, vals[1:])), params
+
+
+def test_a_side_under_0_5_never_comes_out_as_the_favourite():
+    """The two live NCAAF bets of 2026-10-03, on the promoted map that made them."""
+    params = {"method": "platt", "a": 1.0, "b": -0.269531}
+    for own in (0.4791, 0.4676, 0.4845, 0.4958, 0.4533):
+        assert pc.apply_calibration(own, params) <= 0.5
+        assert pc.apply_calibration(1 - own, params) >= 0.5
+    # the map still does its job where it was fitted: a 0.75 claim shrinks
+    assert pc.apply_calibration(0.75, params) == pytest.approx(0.6962, abs=1e-3)
+    # and 0.5 inverts to 0.5, so a cut of 0.5 in calibrated space is 0.5 raw
+    assert pc.invert_calibration(0.5, params) == 0.5
+
+
 def test_platt_recovers_a_known_overconfidence():
     """A model claiming 0.75 that wins 0.60 must map ~0.75 -> ~0.60."""
     rng = np.random.RandomState(0)
