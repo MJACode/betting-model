@@ -10,6 +10,7 @@ toolchain is installed and pins the source-level shape either way.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -95,3 +96,13 @@ def test_segment_labels_cap_only_on_fit():
 def test_runs_in_pr_ci():
     ci = _read(ROOT / ".github/workflows/pr-ci.yml")
     assert "tests/test_mobile_stat_segments.py" in ci
+
+
+def test_tabs_speak_the_visible_label_not_the_key():
+    """#848 regression: with no accessibilityLabelFor the tab fell back to the
+    raw item, so VoiceOver read 'hitRate' and 'totals'."""
+    src = (ROOT / "mobile" / "src" / "components" / "GroupTabs.tsx").read_text(encoding="utf-8")
+    assert re.search(
+        r"accessibilityLabel=\{\s*accessibilityLabelFor \? accessibilityLabelFor\(item\) : labelFor \? labelFor\(item\) : item\s*\}",
+        src,
+    )
