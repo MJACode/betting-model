@@ -159,6 +159,14 @@ class TestTheDistribution:
         assert P.SAVES.overdispersed and not P.SHOTS.overdispersed and not P.ASSISTS.overdispersed
 
 
+def _edges_that_clear(s: pd.DataFrame, model_id: str) -> pd.DataFrame:
+    """The backtest's `card` cuts on expected value. The live card also refuses a
+    stored decision_edge under the same floor, before the per-game limit."""
+    from models.honest_ev import published_edge_clears
+    keep = [published_edge_clears(model_id, p, price) for p, price in zip(s.p, s.price)]
+    return s.iloc[[i for i, ok in enumerate(keep) if ok]].reset_index(drop=True)
+
+
 def _quotes(rows: list[tuple]) -> pd.DataFrame:
     """(player_id, book, line, over, under)"""
     return pd.DataFrame([{"game_id": GAME, "player": f"Skater {pid}", "player_id": pid, "book": book,
@@ -220,10 +228,28 @@ class TestTheCard:
             assert spec.model_id in config.MODELS_ON_OWN_PROBABILITY
         p = 1 - float(P.p_over(0.42, 0.5))                     # P(no assist) = exp(-0.42) = 0.657
         just_under = _quotes([(1, "draftkings", 0.5, 130, -150)])   # EV = 0.657 * 1.667 - 1 = +0.095
-        just_over = _quotes([(1, "draftkings", 0.5, 130, -145)])    # EV = 0.657 * 1.690 - 1 = +0.110
-        assert P.expected_value(p, -150) < 0.10 < P.expected_value(p, -145)
+        both = _quotes([(1, "draftkings", 0.5, 130, -125)])         # EV +0.183, decision_edge +0.101
+        assert P.expected_value(p, -150) < 0.10 < P.expected_value(p, -125)
+        assert round(p - P.implied(-125), 4) >= 0.10
         assert card.pick_rows(P.ASSISTS, _mus([(1, 0.42)]), just_under, GAMES, "2026-10-01", 1000.0, 0.0) == []
-        assert len(card.pick_rows(P.ASSISTS, _mus([(1, 0.42)]), just_over, GAMES, "2026-10-01", 1000.0, 0.0)) == 1
+        got = card.pick_rows(P.ASSISTS, _mus([(1, 0.42)]), both, GAMES, "2026-10-01", 1000.0, 0.0)
+        assert len(got) == 1 and got[0]["signal_type"] == "BET" and got[0]["decision_edge"] >= 0.10
+
+    def test_an_ev_the_old_gate_would_publish_with_decision_edge_under_the_floor_is_not_a_bet(self):
+        """gate.clears is expected value. The card stores decision_edge = p - implied.
+
+        P(no assist) at mean 0.42 is 0.657. Under 0.5 at -145 has EV +0.110, so
+        the old gate publishes it, and the stored edge is +0.065, under the 0.10
+        floor. That quote is not a BET.
+        """
+        from models.honest_ev import gate
+        p = 1 - float(P.p_over(0.42, 0.5))
+        price = -145
+        assert P.expected_value(p, price) > 0.10
+        assert round(p - P.implied(price), 4) < config.min_ev_for(P.ASSISTS.model_id)
+        assert gate(P.ASSISTS.model_id, p, price).clears
+        q = _quotes([(1, "draftkings", 0.5, 130, price)])
+        assert card.pick_rows(P.ASSISTS, _mus([(1, 0.42)]), q, GAMES, "2026-10-01", 1000.0, 0.0) == []
 
     def test_a_price_shorter_than_the_floor_is_passed_for_the_next_best(self):
         """-260 clears on EV and is under the -200 price floor; the bet is the book that is not."""
@@ -321,7 +347,7 @@ class TestTheBacktestGradesTheRuleTheCardPlays:
             P.SHOTS, _mus(mus), q[q.book.isin(P.books())], GAMES, "2026-10-01", 1000.0, 0.0))
         df = q.merge(_mus(mus), on=["player_id", "game_id"]).assign(
             pkey=lambda d: d.player_id.astype(str), alpha=0.0, actual=0, season=2026, game_date="2026-10-01")
-        s = bt.sides(df[df.book.isin(P.books())])
+        s = _edges_that_clear(bt.sides(df[df.book.isin(P.books())]), P.SHOTS.model_id)
         graded = bt.card(s, config.MODEL_OWN_EV_FLOOR[P.SHOTS.model_id], P.SHOTS.sides,
                          per_game=P.SHOTS.max_per_game)
         want = {(r.pkey, r.book, r.line, r.price) for r in graded.itertuples()}
@@ -346,7 +372,7 @@ class TestTheBacktestGradesTheRuleTheCardPlays:
 
         df = q.merge(_mus(mus), on=["player_id", "game_id"]).assign(
             pkey=lambda d: d.player_id.astype(str), alpha=0.0, actual=0, season=2026, game_date="2026-10-01")
-        s = bt.sides(df[df.book.isin(P.books())])
+        s = _edges_that_clear(bt.sides(df[df.book.isin(P.books())]), P.SHOTS.model_id)
         graded = bt.card(s, config.MODEL_OWN_EV_FLOOR[P.SHOTS.model_id], P.SHOTS.sides)
         want = {(r.pkey, r.book, r.line, r.price) for r in graded.itertuples()}
         got = {(r["player_id"], r["decision_book"], r["scored_line"], r["decision_odds"]) for r in live}

@@ -65,3 +65,32 @@ def gate(model_id: str, prob: float, odds) -> Gate:
                 odds=None if odds is None else float(odds),
                 ev=config.expected_value(cal, odds),
                 floor=config.min_ev_for(model_id))
+
+
+def stored_decision_edge(prob: float, american: float) -> float | None:
+    """The decision_edge a pick stores: model probability minus implied, at 4 d.p.
+
+    This is not expected value. EV is prob times the decimal price, minus one
+    (`config.expected_value`). decision_edge = EV times the implied probability,
+    and that implied probability is under 1, so an EV of 0.10 stores an edge
+    near 0.05. The NHL prop cards write this rounded number on the row.
+    """
+    try:
+        p, a = float(prob), float(american)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return None
+    implied = 100.0 / (a + 100.0) if a > 0 else abs(a) / (abs(a) + 100.0)
+    return round(p - implied, 4)
+
+
+def published_edge_clears(model_id: str, prob: float, american: float) -> bool:
+    """True when the edge the row will store is at least the model's own EV floor.
+
+    `gate().clears` tests expected value. A quote can clear that gate and still
+    store a decision_edge under `config.min_ev_for`. The NHL prop cards require
+    both, because the floor they name is the number on the card.
+    """
+    edge = stored_decision_edge(prob, american)
+    return edge is not None and edge >= config.min_ev_for(model_id)

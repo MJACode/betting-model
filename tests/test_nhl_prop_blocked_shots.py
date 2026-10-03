@@ -116,6 +116,22 @@ class TestTheCard:
         # mean 1.55 -> P(under 1.5) about 0.54; at +105 the EV is about 0.11... at -110 it is ~0.03
         assert card.pick_rows(_scored(mu=1.55, under=-110, over=-110), GAMES, "2026-10-01", 1000.0) == []
 
+    def test_an_ev_the_old_gate_would_publish_with_decision_edge_under_the_floor_is_not_a_bet(self):
+        """Mean 1.40, under 1.5 at -110: EV is about +0.13, so the old gate
+        publishes it, and the stored decision_edge is about +0.068. Not a BET.
+        The same player's over at +300 has the higher EV and still is not a BET.
+        """
+        from models.honest_ev import gate
+        p = 1 - float(bs.p_over(1.40, 1.5))
+        assert gate(bs.MODEL_ID, p, -110).clears
+        assert round(p - (110 / 210), 4) < config.min_ev_for(bs.MODEL_ID)
+        assert card.pick_rows(_scored(mu=1.40, under=-110, over=300), GAMES, "2026-10-01", 1000.0) == []
+
+    def test_an_over_that_clears_the_floor_is_not_a_bet(self):
+        """Live publishing stays unders. A mean of 3.0 at under 1.5 -110 is an
+        over the old card would take, and it is not a BET."""
+        assert card.pick_rows(_scored(mu=3.0, under=-110, over=-110), GAMES, "2026-10-01", 1000.0) == []
+
     def test_the_floor_is_the_models_own_and_is_the_swept_number(self):
         assert config.MODEL_OWN_EV_FLOOR[bs.MODEL_ID] == 0.10
         assert config.min_ev_for(bs.MODEL_ID) == 0.10          # not the global 0.20

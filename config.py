@@ -435,7 +435,9 @@ ACTION_THRESHOLDS: dict = {
     # NHL blocked shots at DraftKings (models/nhl_prop_blocked_shots.py, mike
     # 2026-10-01: "just build profitable models"). THE CUT IS EV, in
     # MODEL_OWN_EV_FLOOR, on the model's OWN probability; prob / edge are 0.0
-    # here so the publishers show exactly what the card wrote. Walk-forward on
+    # here so the publishers show exactly what the card wrote. The card also
+    # refuses a stored decision_edge under that same floor (an EV of 0.10 is
+    # not a decision_edge of 0.10), and it publishes unders only. Walk-forward on
     # three priced seasons at DraftKings (scripts/nhl_prop_blocked_shots_backtest.py):
     #     EV>=   bets   ROI     95% interval   2023-24  2024-25  2025-26
     #     0.06   3,468  +4.9%   +1.5..+8.2     +3.3%    +5.3%    +7.0%
@@ -448,8 +450,12 @@ ACTION_THRESHOLDS: dict = {
     # NHL goalie saves, skater shots on goal and skater assists
     # (models/nhl_props.py, mike 2026-10-01: "build saves, shots on goal and
     # assists models"). Same shape as blocked shots -- THE CUT IS EV, in
-    # MODEL_OWN_EV_FLOOR, on the model's OWN probability, UNDERS ONLY -- and
-    # one difference: the bet is taken at the BEST PRICE among the bettable
+    # MODEL_OWN_EV_FLOOR, on the model's OWN probability, UNDERS ONLY. The
+    # card also refuses a quote whose stored decision_edge (model probability
+    # minus the price's implied probability) is under that same floor:
+    # gate().clears is expected value, and an EV of 0.10 stores an edge near
+    # 0.05. The number stays 0.10. One difference from blocked shots: the bet
+    # is taken at the BEST PRICE among the bettable
     # books (FanDuel left out), not at DraftKings alone. Walk-forward on three
     # priced seasons (scripts/nhl_prop_backtest.py; the interval resamples
     # whole game days):

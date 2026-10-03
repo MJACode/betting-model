@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, NHL prop card: a published BET must store decision_edge at or above the model's own EV floor (0.10). gate().clears is expected value, and an EV of 0.10 was storing an edge near 0.05. 10 of 19 live unders that day were under 0.10 on the stored edge and at least 0.1036 on EV. Overs stay off. Floor not moved. PR 869 not merged |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, worker job `nhl_derivative_odds_history` runs the derivative-totals buyer. Dry run is the default. `--apply` has no credit ceiling. A credit-cap argument fails validation before any Odds API call. Grade unchanged, nothing queued |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, NHL derivative totals (team, alternate, 1st period) graded on the stored prices: nothing cleared, not registered, not in the pipeline. Buyer has no credit cap and skips games already stored. Odds API not called — no key in this environment |
 | 2026-10-01 | [2026-10](./2026-10.md) | 2026-10-01, first live NHL shots-on-goal night: 17 unders (28% of the board vs 8.7% backtest; 11 in one game vs a backtest max of 9); preseason, stale book, artifact, price timing and early-season inputs ruled out; heavy nights lose in the backtest; a per-game cap of 3-5 is a plateau, not a gain; mike: limit 3 -- shipped (`Spec.max_per_game`), +5.4% on 4,210 with it |

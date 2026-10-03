@@ -45,7 +45,8 @@
 >   (`scripts/nhl_moneyline_market_lab.py`).
 > - **`nhl_prop_blocked_shots` is live** (mike, 2026-10-01: *"just build
 >   profitable models"*): a Poisson model of a skater's blocked shots priced
->   against DraftKings, unders, EV >= 0.10 on its own probability. Walk-forward
+>   against DraftKings, unders only, EV >= 0.10 on its own probability, and
+>   the stored decision_edge also >= 0.10. Walk-forward
 >   on three priced seasons: +6.2% on 2,054 bets, every season positive.
 >   `models/nhl_prop_blocked_shots.py`, `scripts/nhl_prop_card.py` (step
 >   `nhl-prop-scoring`, right after the prop prices). Settles from
@@ -54,7 +55,10 @@
 >   live** (mike, 2026-10-01: *"build saves, shots on goal and assists models
 >   and we need total goals"*). One engine, a Spec per market
 >   (`models/nhl_props.py`); unders only, EV >= 0.10 on the model's own
->   probability, **at the best price among the bettable books** (FanDuel left
+>   probability, and the stored `decision_edge` (model probability minus the
+>   price's implied probability) also >= 0.10. Those are different tests: an
+>   EV of 0.10 stores an edge near 0.05. The floor is not raised. The bet is
+>   taken at the best price among the bettable books (FanDuel left
 >   out), one pick per player per game. Walk-forward on three priced seasons
 >   (`scripts/nhl_prop_backtest.py`): saves +7.8% on 1,755 bets, shots on goal
 >   +5.7% on 4,707, assists +10.9% on 1,063, every season positive in each.

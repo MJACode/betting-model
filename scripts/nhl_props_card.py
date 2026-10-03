@@ -10,7 +10,10 @@ For each live market: read the newest pre-game quote at each bettable book for
 each player in tonight's unstarted games, build his inputs through the SAME
 function the model was fitted and backtested on, and write ONE pick -- the
 book, line and price with the best expected value -- when that clears the
-model's own floor (config.MODEL_OWN_EV_FLOOR).
+model's own floor (config.MODEL_OWN_EV_FLOOR) twice: the honest-EV gate, and
+the decision_edge the row stores (model probability minus the price's implied
+probability). Those are not the same test. An EV of 0.10 stores an edge near
+0.05, and a published bet cannot carry a decision_edge under the floor.
 
 Deliberate, and load-bearing:
 
@@ -158,11 +161,17 @@ def best_bet(spec: np_.Spec, mu: float, quotes: pd.DataFrame, dispersion: float)
     """The one bet to make on a player: the best expected value among every book, line and side the
     Spec may take that clears the model's floor and the price floor. None when nothing does.
 
+    Clearing means both halves of the floor. `gate` is expected value
+    (probability times the decimal price, minus one). The row stores
+    `decision_edge` as probability minus implied probability, and that stored
+    number has to clear the same floor. A quote the EV gate would publish with
+    a decision_edge under the floor is not a bet.
+
     Two books at the same line and price are the same bet; the one named is the
     earlier in `books()` (DraftKings first), so the pick does not depend on the
     order rows came back in.
     """
-    from models.honest_ev import gate
+    from models.honest_ev import gate, published_edge_clears
     floor = config.min_odds_for(spec.model_id)
     rank = {b: i for i, b in enumerate(np_.books())}
     best = None
@@ -172,7 +181,7 @@ def best_bet(spec: np_.Spec, mu: float, quotes: pd.DataFrame, dispersion: float)
             if side not in spec.sides or price is None or pd.isna(price) or float(price) < floor:
                 continue
             ev = gate(spec.model_id, p, float(price))
-            if not ev.clears:
+            if not ev.clears or not published_edge_clears(spec.model_id, p, float(price)):
                 continue
             raw = np_.expected_value(p, float(price))
             if best is None or raw > best["ev"]:

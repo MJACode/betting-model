@@ -3,8 +3,9 @@
 Deployment of models/nhl_prop_blocked_shots. This script is plumbing: read the
 newest pre-game DraftKings quote for each player in tonight's unstarted games,
 build each player's inputs through the SAME function the model was fitted and
-backtested on, and write a pick when the expected value at DraftKings' price
-clears the model's own floor (config.MODEL_OWN_EV_FLOOR).
+backtested on, and write a pick when DraftKings' price clears the model's own
+floor (config.MODEL_OWN_EV_FLOOR) on both the expected value and the
+decision_edge the row stores. An EV of 0.10 is not a decision_edge of 0.10.
 
 Deliberate, and load-bearing:
 
@@ -143,31 +144,47 @@ def upcoming_rows(quotes: pd.DataFrame, games: dict[str, dict], who: pd.DataFram
     return pd.DataFrame(rows), skipped
 
 
-def decide(mu: float, line: float, over, under) -> dict | None:
-    """The better side at DraftKings' prices, or None when neither is priced."""
+def decide(mu: float, line: float, over, under, accept=None) -> dict | None:
+    """The better side at DraftKings' prices, or None when neither is priced.
+
+    `accept(side, price, p)` drops a side before it can be the one kept. The
+    card passes the floor there, so a side that fails it cannot take the bet
+    away from a side that clears.
+    """
     po = float(bs.p_over(mu, line))
     best = None
     for side, price, p in (("over", over, po), ("under", under, 1 - po)):
         if price is None or pd.isna(price):
             continue
-        ev = bs.expected_value(p, float(price))
+        price = float(price)
+        if accept is not None and not accept(side, price, p):
+            continue
+        ev = bs.expected_value(p, price)
         if best is None or ev > best["ev"]:
-            best = {"side": side, "price": float(price), "p": p, "ev": ev}
+            best = {"side": side, "price": price, "p": p, "ev": ev}
     return best
 
 
 def pick_rows(scored: pd.DataFrame, games: dict[str, dict], game_date: str, bankroll: float) -> list[dict]:
     """Scored players -> picks rows for the ones that clear. Pure, so it is testable."""
-    from models.honest_ev import gate
+    from models.honest_ev import gate, published_edge_clears
     floor = config.min_odds_for(MODEL_ID)
+
+    def accept(side, price, p):
+        if price < floor:
+            return False
+        # Unders only. No over cell cleared the bar used in the 2026-10-02
+        # write-up (draft PR 869). This card does not publish an over.
+        if side != "under":
+            return False
+        return gate(MODEL_ID, p, price).clears and published_edge_clears(MODEL_ID, p, price)
+
     rows = []
     for r in scored.itertuples():
-        d = decide(r.mu, r.line, r.over, r.under)
+        d = decide(r.mu, r.line, r.over, r.under, accept)
         if d is None:
             continue
         ev = gate(MODEL_ID, d["p"], d["price"])
-        if not ev.clears or d["price"] < floor:
-            continue
         g = games[r.game_id]
         side = "Over" if d["side"] == "over" else "Under"
         implied = bs_implied(d["price"])
