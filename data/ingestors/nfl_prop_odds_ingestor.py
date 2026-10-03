@@ -618,6 +618,132 @@ def _odds_from_frame(df, game_ids, markets, bookmaker, before,
     return out
 
 
+def statement_timeout_error(exc: BaseException) -> bool:
+    """True for the cancel itself (57014) and for the aborted-txn follow-on (25P02).
+
+    Postgres aborts the transaction when it cancels a statement. The next
+    execute on that connection is InFailedSqlTransaction until rollback.
+    """
+    code = getattr(exc, "pgcode", None)
+    if code in ("57014", "25P02"):
+        return True
+    text = str(exc).lower()
+    return "statement timeout" in text or "current transaction is aborted" in text
+
+
+def _reset_after_timeout(conn) -> None:
+    """ROLLBACK so the next slice is not 'commands ignored until end of transaction'."""
+    rollback = getattr(conn, "rollback", None)
+    if rollback is None:
+        return
+    try:
+        rollback()
+    except Exception:
+        logger.exception("nfl prop odds: rollback after statement timeout failed")
+
+
+def _prop_slice_query(game_id: str, *, market: str | None, bookmaker: str | None,
+                      books, snapshot_types, before: str | None) -> tuple[str, list]:
+    """One game, and one market when the caller named markets.
+
+    `idx_prop_odds_line_snap` is (game_id, market, player_name, bookmaker,
+    snapshot_at). Equality on the two leading columns is one range of that
+    index. `game_id = ANY(<the slate>)` is not: on 2026-10-03 15:56:56Z that
+    statement, fourteen 2026-10-04 games at DraftKings, was cancelled at
+    statement_timeout (pipeline_log 119483). One game of those twelve markets
+    is 4,100 open DraftKings rows; the slate is that scan fourteen times.
+    """
+    sql = """
+        SELECT game_id, player_name, market, line, over_price, under_price,
+               over_link, under_link, snapshot_at, bookmaker
+        FROM player_prop_odds
+        WHERE game_id = %s
+    """
+    params: list = [game_id]
+    if bookmaker is not None:
+        sql += " AND bookmaker = %s"
+        params.append(bookmaker)
+    if books is not None:
+        sql += " AND bookmaker = ANY(%s)"
+        params.append(list(books))
+    if snapshot_types:
+        sql += " AND snapshot_type = ANY(%s)"
+        params.append(list(snapshot_types))
+    if market is not None:
+        sql += " AND market = %s"
+        params.append(market)
+    if before:
+        sql += " AND snapshot_at < %s"
+        params.append(before)
+    sql += " ORDER BY snapshot_at ASC"     # later rows overwrite earlier ones
+    return sql, params
+
+
+def _fetch_slice(conn, sql: str, params: list) -> tuple[list, BaseException | None]:
+    """Run one slice. A cancel is rolled back and retried once.
+
+    The retry is the same statement: the 2026-10-03 cancels landed while the
+    hourly's other steps were also being cancelled, and a slice that lost
+    that race can finish once the transaction is reset. A second cancel
+    returns no rows and the error, and the caller moves on. A non-timeout
+    error propagates with the transaction untouched.
+    """
+    last: BaseException | None = None
+    for attempt in (1, 2):
+        try:
+            return list(conn.execute(sql, tuple(params)).fetchall()), None
+        except Exception as exc:
+            if not statement_timeout_error(exc):
+                raise
+            last = exc
+            logger.warning(
+                f"nfl prop odds: statement timeout (attempt {attempt}): {exc}")
+            _reset_after_timeout(conn)
+    return [], last
+
+
+def _iter_prop_rows(conn, game_ids: list[str], markets: list[str] | None, *,
+                    bookmaker: str | None = None, books=None,
+                    snapshot_types=None, before: str | None = None) -> list:
+    """The rows the old single statement returned, one (game, market) at a time.
+
+    Raises only when every slice was cancelled, so a hot game does not drop
+    the rest of the slate and a fully cancelled load is still a failed date.
+    """
+    if not game_ids:
+        return []
+    if books is not None and len(list(books)) == 0:
+        return []
+    slices: list[str | None] = list(markets) if markets is not None else [None]
+    if markets is not None and not slices:
+        return []
+    rows: list = []
+    failed = 0
+    attempted = 0
+    last: BaseException | None = None
+    for game_id in game_ids:
+        for market in slices:
+            attempted += 1
+            sql, params = _prop_slice_query(
+                game_id, market=market, bookmaker=bookmaker, books=books,
+                snapshot_types=snapshot_types, before=before)
+            got, err = _fetch_slice(conn, sql, params)
+            if err is not None:
+                failed += 1
+                last = err
+                logger.error(
+                    f"nfl prop odds: skipped {game_id} {market or 'all markets'} "
+                    f"after statement timeout: {err}")
+                continue
+            rows.extend(got)
+    if attempted and failed == attempted:
+        raise RuntimeError(
+            "canceling statement due to statement timeout"
+            f" (every prop-odds slice: {last})"
+        ) from last
+    return rows
+
+
 def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
                        markets: list[str] | None = None,
                        bookmaker: str = ODDS_API_BOOKMAKER,
@@ -637,6 +763,11 @@ def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
     how the backtest enforces its timestamp rule; the live scorer leaves it None
     and takes the newest. Either way the LATEST qualifying snapshot per
     (game, player, market) wins.
+
+    One statement per (game, market). The slate-wide `game_id = ANY(...)` was
+    cancelled at statement_timeout on 2026-10-03 (pipeline_log 119483). The
+    rows are the same rows; a cancelled slice is rolled back so the next
+    slice is not an aborted transaction.
     """
     if not game_ids:
         return {}
@@ -644,26 +775,9 @@ def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
     if cached is not None:
         return _odds_from_frame(cached, game_ids, markets, bookmaker, before,
                                 snapshot_types)
-    sql = """
-        SELECT game_id, player_name, market, line, over_price, under_price,
-               over_link, under_link, snapshot_at, bookmaker
-        FROM player_prop_odds
-        WHERE game_id = ANY(%s) AND bookmaker = %s
-    """
-    params: list = [list(game_ids), bookmaker]
-    if snapshot_types:
-        sql += " AND snapshot_type = ANY(%s)"
-        params.append(list(snapshot_types))
-    if markets:
-        sql += " AND market = ANY(%s)"
-        params.append(list(markets))
-    if before:
-        sql += " AND snapshot_at < %s"
-        params.append(before)
-    sql += " ORDER BY snapshot_at ASC"     # later rows overwrite earlier ones
-
     out: dict = {}
-    for r in conn.execute(sql, tuple(params)).fetchall():
+    for r in _iter_prop_rows(conn, list(game_ids), markets, bookmaker=bookmaker,
+                             snapshot_types=snapshot_types, before=before):
         key = (r[0], norm_player_name(r[1]), r[2])
         out[key] = {"line": r[3], "over_price": r[4], "under_price": r[5],
                     "over_link": r[6], "under_link": r[7], "snapshot_at": r[8],
@@ -775,29 +889,13 @@ def load_nfl_prop_quotes(conn: DBConnection, game_ids: list[str],
             }
         return out
 
-    sql = """
-        SELECT game_id, player_name, market, line, over_price, under_price,
-               over_link, under_link, snapshot_at, bookmaker
-        FROM player_prop_odds
-        WHERE game_id = ANY(%s)
-    """
-    params: list = [list(game_ids)]
-    if snapshot_types:
-        sql += " AND snapshot_type = ANY(%s)"
-        params.append(list(snapshot_types))
-    if markets:
-        sql += " AND market = ANY(%s)"
-        params.append(list(markets))
-    if books:
-        sql += " AND bookmaker = ANY(%s)"
-        params.append(list(books))
-    if before:
-        sql += " AND snapshot_at < %s"
-        params.append(before)
-    sql += " ORDER BY snapshot_at ASC"
-
+    # Same slices as load_nfl_prop_odds. The card's statement on 2026-10-03
+    # 15:52:53Z was ONE game, eight markets, every bookmaker, and it was
+    # cancelled at statement_timeout. One market is one range of
+    # idx_prop_odds_line_snap; `books` drops the books the card never reads.
     out = {}
-    for r in conn.execute(sql, tuple(params)).fetchall():
+    for r in _iter_prop_rows(conn, list(game_ids), markets, books=books,
+                             snapshot_types=snapshot_types, before=before):
         out[(r[0], norm_player_name(r[1]), r[2], r[9])] = {
             "line": r[3], "over_price": r[4], "under_price": r[5],
             "over_link": r[6], "under_link": r[7], "snapshot_at": r[8],

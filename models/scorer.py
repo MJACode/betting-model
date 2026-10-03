@@ -5210,6 +5210,19 @@ def _nfl_pregame_cutoff_map(conn: DBConnection, game_date: str) -> dict[str, str
             for r in rows}
 
 
+
+def _rollback_nfl_prop_conn(conn) -> None:
+    """Full reset after statement_timeout. Best-effort: a rollback that
+    itself raises must not hide the cancel that made it necessary."""
+    rollback = getattr(conn, "rollback", None)
+    if rollback is None:
+        return
+    try:
+        rollback()
+    except Exception:
+        logger.exception("NFL prop scorer: rollback after statement timeout failed")
+
+
 def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     """
     Score the NFL player-prop markets.
@@ -5219,7 +5232,8 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     an NFL prop's whole question is whether we beat the quote.
     """
     from features.nfl_prop_feature_engine import build_nfl_prop_scoring_rows
-    from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_odds
+    from data.ingestors.nfl_prop_odds_ingestor import (
+        load_nfl_prop_odds, statement_timeout_error)
     from data.ingestors.nfl_props_data_ingestor import norm_player_name
     from models.nfl_prop_injury_veto import load_nfl_injury_index, player_is_vetoed
 
@@ -5229,47 +5243,56 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     logger.info(f"NFL Prop Scorer — {target_date}")
 
     conn = get_connection()
-    bankroll = _get_current_bankroll(conn)
-    kickoffs = _nfl_kickoff_map(conn, target_date)
-    cutoffs  = _nfl_pregame_cutoff_map(conn, target_date)
-    # One prefetch for the whole slate, keyed on the NORMALISED player name.
-    # The platform's _get_prop_dk_odds matches the name exactly, which is right
-    # for MLB (one canonical spelling on both sides) and wrong for NFL, where
-    # the odds feed and nflverse disagree on suffixes and accents.
-    prop_odds_by_key = load_nfl_prop_odds(conn, list(kickoffs.keys()),
+    try:
+        bankroll = _get_current_bankroll(conn)
+        kickoffs = _nfl_kickoff_map(conn, target_date)
+        cutoffs  = _nfl_pregame_cutoff_map(conn, target_date)
+        # One prefetch for the whole slate, keyed on the NORMALISED player name.
+        # The platform's _get_prop_dk_odds matches the name exactly, which is right
+        # for MLB (one canonical spelling on both sides) and wrong for NFL, where
+        # the odds feed and nflverse disagree on suffixes and accents.
+        prop_odds_by_key = load_nfl_prop_odds(conn, list(kickoffs.keys()),
                                           list(PROP_MARKETS_NFL))
-    # NO DUPLICATE PROPOSITIONS (mike, 2026-09-06: "no dupes"). The twelve
-    # distributional models and nfl_prop_market trade the SAME board, so the
-    # same player/market can qualify under both and reach the app and Discord
-    # twice as two different picks on one bet.
-    #
-    # nfl_prop_market WINS, and not arbitrarily: it is the only NFL prop
-    # approach with a measured positive record (+10.33% over 954 bets, positive
-    # in all three seasons, docs/nfl_props_model.md §5c), while these twelve
-    # lost to the hold in eleven of twelve markets (§5b). Where both have an
-    # opinion on one proposition, the one with evidence is the one that ships.
-    #
-    # Claimed at the PROPOSITION level (game, player, market) rather than by
-    # side: two models taking opposite sides of the same line is the worst
-    # version of this, not an exception to it.
-    #
-    # This is a WRITE-TIME skip, not a delete — §1c: a pick that exists is never
-    # removed. The scheduler runs the card before this scorer in the same tick
-    # so the claim is already in place; on a tick where the card wrote nothing,
-    # nothing is skipped.
-    claimed = {(r[0], r[1], r[2]) for r in conn.execute("""
+        # NO DUPLICATE PROPOSITIONS (mike, 2026-09-06: "no dupes"). The twelve
+        # distributional models and nfl_prop_market trade the SAME board, so the
+        # same player/market can qualify under both and reach the app and Discord
+        # twice as two different picks on one bet.
+        #
+        # nfl_prop_market WINS, and not arbitrarily: it is the only NFL prop
+        # approach with a measured positive record (+10.33% over 954 bets, positive
+        # in all three seasons, docs/nfl_props_model.md §5c), while these twelve
+        # lost to the hold in eleven of twelve markets (§5b). Where both have an
+        # opinion on one proposition, the one with evidence is the one that ships.
+        #
+        # Claimed at the PROPOSITION level (game, player, market) rather than by
+        # side: two models taking opposite sides of the same line is the worst
+        # version of this, not an exception to it.
+        #
+        # This is a WRITE-TIME skip, not a delete — §1c: a pick that exists is never
+        # removed. The scheduler runs the card before this scorer in the same tick
+        # so the claim is already in place; on a tick where the card wrote nothing,
+        # nothing is skipped.
+        claimed = {(r[0], r[1], r[2]) for r in conn.execute("""
         SELECT game_id, player_key, prop_market FROM picks
         WHERE sport = 'NFL' AND model_id = 'nfl_prop_market'
           AND game_date = %s AND player_key IS NOT NULL
-    """, (target_date,)).fetchall()}
-    if claimed:
-        logger.info(f"  nfl_prop_market holds {len(claimed)} proposition(s) "
-                    f"on {target_date} — the twelve will not re-price them")
-    # Same Out/Doubtful gate the market card applies. Paused distributional
-    # models still SCORE NONE rows; a live sibling (tackles_assists) would
-    # otherwise bet a scratched player. Fail-open if the table has no NFL
-    # rows yet (status_ts column lands on the next worker migration pass).
-    injury_index = load_nfl_injury_index(conn, target_date)
+        """, (target_date,)).fetchall()}
+        if claimed:
+            logger.info(f"  nfl_prop_market holds {len(claimed)} proposition(s) "
+                        f"on {target_date} — the twelve will not re-price them")
+        # Same Out/Doubtful gate the market card applies. Paused distributional
+        # models still SCORE NONE rows; a live sibling (tackles_assists) would
+        # otherwise bet a scratched player. Fail-open if the table has no NFL
+        # rows yet (status_ts column lands on the next worker migration pass).
+        injury_index = load_nfl_injury_index(conn, target_date)
+    except Exception:
+        # These reads used to sit outside the try/finally below. A cancel
+        # there left the connection open and aborted for the rest of the
+        # process; the next date opens its own connection, this one must not
+        # stay poisoned.
+        _rollback_nfl_prop_conn(conn)
+        conn.close()
+        raise
     total_picks = total_bets = 0
     skipped_dupes = 0
 
@@ -5283,100 +5306,118 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 """, (target_date, mid))
             conn.commit()
 
+        timed_out: list[str] = []
         for model_id, cfg in _NFL_PROP_CONFIG.items():
-            market     = cfg["market"]
-            stat_label = cfg["stat_label"]
-            over_only  = cfg.get("over_only", False)
+            try:
+                market     = cfg["market"]
+                stat_label = cfg["stat_label"]
+                over_only  = cfg.get("over_only", False)
 
-            artifact = load_model(model_id)
-            if artifact is None:
-                logger.debug(f"  No trained model for {model_id} — skipping")
-                continue
-            feature_cols = artifact["feature_cols"]
-            model_obj    = artifact["model"]
-            model_type   = artifact.get("model_type", "poisson")
-
-            df = build_nfl_prop_scoring_rows(target_date, model_id)
-            if df.empty:
-                logger.info(f"  {model_id}: no scoring rows for {target_date}")
-                continue
-
-            for c in [c for c in feature_cols if c not in df.columns]:
-                df[c] = np.nan
-            X = df[feature_cols].values.astype(float)
-            preds = (model_obj.predict_proba(X)[:, 1] if model_type == "logistic"
-                     else np.clip(model_obj.predict(X), 1e-6, None))
-
-            model_picks = []
-            for i, row in df.iterrows():
-                player_name = row["player_name"]
-                game_id     = row["game_id"]
-                player_id   = row.get("player_id")
-                if (game_id, model_id, player_id) in locked:
+                artifact = load_model(model_id)
+                if artifact is None:
+                    logger.debug(f"  No trained model for {model_id} — skipping")
                     continue
-                if _game_started(cutoffs.get(game_id)):
-                    continue   # kicked off — any quote now is an in-play price
-                if _nfl_prop_too_early(kickoffs.get(game_id)):
-                    continue   # > NFL_PROP_MAX_LEAD_HOURS out — waits for a later tick
+                feature_cols = artifact["feature_cols"]
+                model_obj    = artifact["model"]
+                model_type   = artifact.get("model_type", "poisson")
 
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              cutoffs.get(game_id))
-                _best_ctx = (game_id,
-                             (prop_odds or {}).get("player_name") or player_name,
-                             market, cutoffs.get(game_id))
-                if prop_odds is None or prop_odds.get("line") is None:
-                    continue
-                # See `claimed` above. norm_player_name is the same key the
-                # card writes, so this compares like with like rather than the
-                # book's spelling against nflverse's.
-                if (game_id, norm_player_name(player_name), market) in claimed:
-                    skipped_dupes += 1
-                    continue
-                quote_row = prop_odds_by_key.get(
-                    (game_id, norm_player_name(player_name), market))
-                if player_is_vetoed(
-                    player_name,
-                    (quote_row or {}).get("snapshot_at"),
-                    injury_index,
-                ):
+                df = build_nfl_prop_scoring_rows(target_date, model_id)
+                if df.empty:
+                    logger.info(f"  {model_id}: no scoring rows for {target_date}")
                     continue
 
-                line = float(prop_odds["line"])
-                p_over, p_under, p_push = _nfl_prop_probs(artifact, float(preds[i]), line)
+                for c in [c for c in feature_cols if c not in df.columns]:
+                    df[c] = np.nan
+                X = df[feature_cols].values.astype(float)
+                preds = (model_obj.predict_proba(X)[:, 1] if model_type == "logistic"
+                         else np.clip(model_obj.predict(X), 1e-6, None))
 
-                for side, raw_p, price, link in (
-                    ("over",  p_over,  prop_odds.get("over_price"),  prop_odds.get("over_link")),
-                    ("under", p_under, prop_odds.get("under_price"), prop_odds.get("under_link")),
-                ):
-                    if side == "under" and over_only:
+                model_picks = []
+                for i, row in df.iterrows():
+                    player_name = row["player_name"]
+                    game_id     = row["game_id"]
+                    player_id   = row.get("player_id")
+                    if (game_id, model_id, player_id) in locked:
                         continue
-                    if price is None:
-                        continue
-                    dk_ip = american_to_implied_prob(price)
-                    if not dk_ip:
-                        continue
-                    p_cond = _push_adjusted(raw_p, p_push)
-                    pick = _make_prop_pick(
-                            line_book=(prop_odds or {}).get('line_book'),
-                        game_id=game_id, model_id=model_id, game_date=target_date,
-                        player_name=player_name, pick_side=side,
-                        model_prob=p_cond, dk_implied_prob=dk_ip,
-                        edge=p_cond - dk_ip, dk_odds=price, line=line,
-                        bankroll=bankroll, stat_label=stat_label,
-                        player_id=player_id, sport="NFL", dk_bet_link=link,
-                        commence_time=kickoffs.get(game_id),
-                    )
-                    if pick:
-                        model_picks.append(_tag_prop(pick, _best_ctx, conn))
+                    if _game_started(cutoffs.get(game_id)):
+                        continue   # kicked off — any quote now is an in-play price
+                    if _nfl_prop_too_early(kickoffs.get(game_id)):
+                        continue   # > NFL_PROP_MAX_LEAD_HOURS out — waits for a later tick
 
-            bets = [p for p in model_picks if p["signal_type"] == "BET"]
-            logger.info(f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} "
-                        f"non-BET ({len(df)} players evaluated)")
-            if model_picks and not dry_run:
-                _insert_picks(conn, model_picks)
-                conn.commit()
-            total_picks += len(model_picks)
-            total_bets  += len(bets)
+                    prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
+                                                  cutoffs.get(game_id))
+                    _best_ctx = (game_id,
+                                 (prop_odds or {}).get("player_name") or player_name,
+                                 market, cutoffs.get(game_id))
+                    if prop_odds is None or prop_odds.get("line") is None:
+                        continue
+                    # See `claimed` above. norm_player_name is the same key the
+                    # card writes, so this compares like with like rather than the
+                    # book's spelling against nflverse's.
+                    if (game_id, norm_player_name(player_name), market) in claimed:
+                        skipped_dupes += 1
+                        continue
+                    quote_row = prop_odds_by_key.get(
+                        (game_id, norm_player_name(player_name), market))
+                    if player_is_vetoed(
+                        player_name,
+                        (quote_row or {}).get("snapshot_at"),
+                        injury_index,
+                    ):
+                        continue
+
+                    line = float(prop_odds["line"])
+                    p_over, p_under, p_push = _nfl_prop_probs(artifact, float(preds[i]), line)
+
+                    for side, raw_p, price, link in (
+                        ("over",  p_over,  prop_odds.get("over_price"),  prop_odds.get("over_link")),
+                        ("under", p_under, prop_odds.get("under_price"), prop_odds.get("under_link")),
+                    ):
+                        if side == "under" and over_only:
+                            continue
+                        if price is None:
+                            continue
+                        dk_ip = american_to_implied_prob(price)
+                        if not dk_ip:
+                            continue
+                        p_cond = _push_adjusted(raw_p, p_push)
+                        pick = _make_prop_pick(
+                                line_book=(prop_odds or {}).get('line_book'),
+                            game_id=game_id, model_id=model_id, game_date=target_date,
+                            player_name=player_name, pick_side=side,
+                            model_prob=p_cond, dk_implied_prob=dk_ip,
+                            edge=p_cond - dk_ip, dk_odds=price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id, sport="NFL", dk_bet_link=link,
+                            commence_time=kickoffs.get(game_id),
+                        )
+                        if pick:
+                            model_picks.append(_tag_prop(pick, _best_ctx, conn))
+
+                bets = [p for p in model_picks if p["signal_type"] == "BET"]
+                logger.info(f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} "
+                            f"non-BET ({len(df)} players evaluated)")
+                if model_picks and not dry_run:
+                    _insert_picks(conn, model_picks)
+                    conn.commit()
+                total_picks += len(model_picks)
+                total_bets  += len(bets)
+
+            except Exception as exc:
+                # A cancel aborts this connection. Without the rollback the
+                # next model is "current transaction is aborted" and the date
+                # ends on the cascade instead of the statement that timed out.
+                if not statement_timeout_error(exc):
+                    raise
+                logger.error(f"  {model_id}: statement timeout — later models "
+                             f"still score: {exc}")
+                _rollback_nfl_prop_conn(conn)
+                timed_out.append(model_id)
+
+        if timed_out:
+            raise RuntimeError(
+                "canceling statement due to statement timeout"
+                f" ({', '.join(timed_out)})")
 
         logger.success(f"NFL props: {total_bets} BETs / {total_picks} picks"
                        + (f" ({skipped_dupes} skipped — nfl_prop_market holds them)"
