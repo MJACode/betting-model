@@ -125,14 +125,11 @@ have no derivative rows.
 
 The buyer is `data/ingestors/nhl_derivative_odds_history.py`. It skips a game
 that already has that source or a `nhl_derivative_odds_pulls` row, and
-`--apply` does not stop for a credit ceiling. It has not been run: this
-environment has no `ODDS_API_KEY`. The command, where the key and
-`DATABASE_URL` are set:
-
-```
-python -m data.ingestors.nhl_derivative_odds_history            # plan + 3-game measured probe
-python -m data.ingestors.nhl_derivative_odds_history --apply    # every remaining game
-```
+`--apply` does not stop for a credit ceiling. The worker job type is
+`nhl_derivative_odds_history` (`tracking/job_queue.py`). A row with no args is
+the dry run. `{"apply": true}` buys every remaining scored game and does not
+take `max_credits`, `credit_cap`, or `reserve_days` — those fail validation
+before the module is imported. Nothing has been queued yet.
 
 ## [ ] NHL prop models — what to watch now that four are live
 
