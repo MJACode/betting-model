@@ -25,6 +25,12 @@
 > replace them (every team number blended toward last season) graded worse.
 > Nothing was switched. `docs/nhl_market_lab.md`, "The early weeks, backtested".
 >
+> **2026-10-03 (mike): `nhl_moneyline_regulation` decides on its OWN
+> probability** (`config.MODELS_ON_OWN_PROBABILITY`). The correction is a
+> two-way map and made the three regulation outcomes sum to 1.144; it lifted
+> every outcome under 50% by ~6 points. `nhl_moneyline` keeps it. The note
+> below is the 10-01 decision this partly reverses.
+>
 > **THE PROBABILITY CORRECTION STAYS AS IT IS** (mike, same day: underdog
 > plus-money bets are wanted). What it does to these two models is measured in
 > `docs/nhl_market_lab.md` ("The live artifacts, graded"); that is a record,

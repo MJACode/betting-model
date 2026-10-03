@@ -2539,6 +2539,11 @@ def _calibrated(model_id, prob):
     global _CAL_CACHE
     if prob is None or model_id is None:
         return None
+    # A model listed in config.MODELS_ON_OWN_PROBABILITY decides on its own
+    # number, here exactly as in models.honest_ev.honest_probability -- the two
+    # paths must agree on what probability a pick was decided on.
+    if model_id in config.MODELS_ON_OWN_PROBABILITY:
+        return float(prob)
     try:
         if _CAL_CACHE is None:
             from models.probability_calibration import load_calibrations
