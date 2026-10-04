@@ -16,7 +16,9 @@ may legitimately show a few pending feeds).
 
 Checks are CADENCE-AWARE: each sport's checks only apply when that sport had
 games in the relevant window (offseason/off-day → SKIPPED), so NBA in July or
-UFC midweek never false-alarm.
+UFC midweek never false-alarm. The three MLB feeds dated by the game
+(bullpen, player game log, umpires) use the newest final on or before the
+cadence ceiling, so a dark day inside the window is not itself a miss.
 
 Severity:
   CRIT — a load-bearing feed is stale → the step returns False → the daily
@@ -288,6 +290,28 @@ def _games_count(conn, sport, start, end, finals_only=False):
     return _scalar(conn, sql, (sport, start, end)) or 0
 
 
+def _last_mlb_finals_on_or_before(conn, ceiling: str) -> str | None:
+    """Newest MLB game_date with a final score on or before `ceiling`.
+
+    Bullpen rows exist only for completed game dates (`run_bullpen_ingestor`
+    selects `home_score IS NOT NULL`). The health-check ceiling is a calendar
+    day — yesterday, or the day before while the 6am run is still pending.
+    A ceiling that lands on a dark day (playoff off-day) can never grow a
+    row, so the floor is the last finals date the ingestor could have
+    written, not the empty calendar day and not "did yesterday have a final".
+    """
+    latest = _scalar(
+        conn,
+        """SELECT MAX(game_date) FROM games
+           WHERE sport = 'MLB' AND home_score IS NOT NULL
+             AND game_date <= ?""",
+        (ceiling,),
+    )
+    if latest is None:
+        return None
+    return str(latest)[:10]
+
+
 # ── Why a check is in the state it is, in one word ──────────────────────────
 # `detail` is a sentence and gets clamped in every table that renders it, so the
 # ANSWER to "why is this one skipped?" was three lines down inside a truncated
@@ -544,22 +568,28 @@ def run_system_health(run_date: str | None = None) -> dict:
         mlb_yday_finals = _games_count(conn, "MLB", yday, yday, finals_only=True) > 0
         any_today = _scalar(conn, "SELECT COUNT(*) FROM games WHERE game_date = ? AND sport <> 'GOLF'", (run_date,)) or 0
 
-        # mlb_team_stats / mlb_bullpen_workload / mlb_player_game_log / umpires
-        # are written ONLY by the once-daily 6am ET run (Steps 0d/3/3b/5c) --
-        # refresh_pass.sh's hourly steps never touch them (odds/lineups/weather/
-        # public-betting do run hourly; these four do not). This health check
-        # itself runs on EVERY hourly pass too, so between midnight ET and the
-        # daily run's completion (~6:20am ET, measured 2026-09-08) "today" /
-        # "yesterday" genuinely has no row yet, and every one of these four
-        # CRIT/WARN checks fired STALE on all 6 overnight hourly passes --
-        # 2026-09-08's own report caught exactly this and all four self-healed
-        # within minutes of the 10:00 UTC run reaching their step. Not a feed
-        # problem; a cadence mismatch between when this check runs (hourly,
-        # around the clock) and when the data it reads is expected to exist
-        # (once daily, after ~6:20am ET). Relax the expectation by one day
-        # during that window, mirroring `in_pass_window` below -- a feed that
-        # is ALSO behind the relaxed date is still genuinely stale and still
-        # fires. Does not touch team_stats_asof_integrity (#714-#716).
+        # mlb_team_stats and mlb_bullpen_workload are written by the 6am ET
+        # daily (step_mlb_stats / step_bullpen). refresh_pass.sh does not run
+        # them. `umpires` and `game-log-today` do run on every refresh pass;
+        # the three date_checks below still share this pre-7am ceiling,
+        # because a row newer than the ceiling is fine and a missing dark
+        # day is not a miss. This health check itself runs on EVERY hourly
+        # pass too, so between midnight ET and the daily run's completion
+        # (~6:20am ET, measured 2026-09-08) "today" / "yesterday" genuinely
+        # has no row yet, and these checks fired STALE on all 6 overnight
+        # hourly passes -- 2026-09-08's own report caught exactly this and
+        # they self-healed within minutes of the 10:00 UTC run reaching
+        # their step. Not a feed problem; a cadence mismatch. Relax the
+        # ceiling by one day during that window. A feed that is ALSO behind
+        # the last finals date on or before that ceiling is still stale.
+        # Does not touch team_stats_asof_integrity (#714-#716).
+        #
+        # The ceiling is a calendar day. It is not a promise that MLB played.
+        # 2026-10-04 01:33 ET: pending, ceiling 2026-10-02, and 10-02 was a
+        # playoff off-day (finals on 10-01 and 10-03, bullpen max 10-01).
+        # The gate was "yesterday had finals" (10-03 did), so the check
+        # opened and demanded a 10-02 row the ingestor will never write.
+        # Floor is _last_mlb_finals_on_or_before(ceiling).
         daily_pipeline_pending = datetime.now(ZoneInfo("America/New_York")).hour < 7
 
         # ── Odds feeds (The Odds API) ────────────────────────────────────────
@@ -689,24 +719,32 @@ def run_system_health(run_date: str | None = None) -> dict:
             getattr(conn, "rollback", lambda: None)()
             r.add("team_stats_asof_integrity", ERROR, "CRIT",
                   f"query failed: {exc}")
+        # Shared by mlb_bullpen_workload, mlb_player_game_log and umpires.
+        # Before 7am ET the ceiling is day2 (yesterday not ingested yet);
+        # after the daily has had its chance it is yesterday. The floor is
+        # the newest final on or before that ceiling — a dark ceiling is
+        # not a date any of these tables can hold.
+        mlb_feed_ceiling = day2 if daily_pipeline_pending else yday
+        mlb_feed_floor = _last_mlb_finals_on_or_before(conn, mlb_feed_ceiling)
+        mlb_feed_note = f"no MLB finals on or before {mlb_feed_ceiling}"
         r.date_check(conn, "mlb_bullpen_workload", "CRIT", "mlb_bullpen_stats", "game_date",
-                     day2 if daily_pipeline_pending else yday,
-                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     mlb_feed_floor or mlb_feed_ceiling,
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note)
         r.date_check(conn, "mlb_pitcher_stats", "WARN", "mlb_pitcher_stats", "game_date",
                      d3, gate_ok=_games_count(conn, "MLB", d3, yday, finals_only=True) > 0,
                      gate_note="no MLB finals in last 3 days")
         r.date_check(conn, "mlb_weather", "CRIT", "game_weather", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
         r.date_check(conn, "mlb_player_game_log", "CRIT", "player_game_log", "game_date",
-                     day2 if daily_pipeline_pending else yday,
-                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     mlb_feed_floor or mlb_feed_ceiling,
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note)
         r.date_check(conn, "injuries", "WARN", "injuries", "report_date",
                      yday, gate_ok=any_today > 0, gate_note="no games today")
         r.date_check(conn, "lineups", "WARN", "lineup_slots", "game_date",
                      yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "umpires", "WARN", "umpires", "game_date",
-                     day2 if daily_pipeline_pending else yday,
-                     gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
+                     mlb_feed_floor or mlb_feed_ceiling,
+                     gate_ok=mlb_feed_floor is not None, gate_note=mlb_feed_note)
         r.date_check(conn, "public_betting", "WARN", "public_betting", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
 
