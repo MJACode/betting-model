@@ -30,12 +30,13 @@ ROOT = Path(__file__).resolve().parents[1]
 RETIRED_PROPS = ("mlb_prop_batter_hr", "mlb_prop_batter_rbi")
 
 
-def test_the_set_holds_exactly_the_nine_retirements():
+def test_the_set_holds_exactly_the_ten_retirements():
     assert set(config.RETIRED_MODELS) == {
         "mlb_live_win_prob", "mlb_live_runline",
         "mlb_prop_batter_hr", "mlb_prop_batter_rbi",
         "golf_outright", "golf_top10", "golf_top20",
         "golf_make_cut", "golf_matchup",
+        "nfl_live_prop",
     }
 
 
@@ -211,9 +212,9 @@ NFL_KEEP_LIVE = frozenset({
     "nfl_prop_tackles_assists",
     "nfl_prop_market",
     "nfl_wind_totals",
-    "nfl_live_prop",
     "nfl_opener_spread",
 })
+# nfl_live_prop left this set 2026-10-04: RETIRED (mike), not paused.
 
 
 def test_ten_nfl_distributional_props_are_paused():

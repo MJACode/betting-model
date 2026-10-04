@@ -146,11 +146,12 @@ RUN_MODEL_QUALITY = os.environ.get("RUN_MODEL_QUALITY", "1") != "0"
 # it reads first is free (measured: credits null).
 RUN_NCAAF_PROP_ODDS = os.environ.get("RUN_NCAAF_PROP_ODDS", "0") == "1"
 
-# NFL in-play gameday worker (nfl/live_model). Polls ESPN state every 10s and
-# prices the one validated lane, live pass attempts. Set RUN_NFL_LIVE=0 to
-# disable without a redeploy. It is PAPER ONLY: the executor records decisions
-# to a JSONL audit log and alerts nobody, so a bad tick costs a poll.
-RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "1") != "0"
+# NFL in-play gameday worker (nfl/live_model), the loop that wrote
+# nfl_live_prop. That model was RETIRED 2026-10-04 (mike: "Remove this model"),
+# so the loop is OFF unless RUN_NFL_LIVE=1 is set explicitly. Setting it would
+# write picks for a model in config.RETIRED_MODELS -- do not, without a new
+# model id and the go-live gate (CLAUDE.md §2).
+RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "0") == "1"
 
 # Hours before kickoff inside which the NFL prop tick runs. 240 = 10 days,
 # matching NFL_POLL_HORIZON_DAYS, so props start when the wind and opener cards

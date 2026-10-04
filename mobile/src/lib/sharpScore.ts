@@ -152,8 +152,7 @@ export function sharpScore(pick: Pick): SharpScore | null {
     // 0.04, so ANY edge of 4pp or more scores a full 40/40, the same as an
     // mlb_moneyline pick 33pp past its 11pp bar. The pill is what users rank
     // cards by, so that is a flattering number rather than a missing one.
-    // nfl_live_prop is the case (0/0): its cut is EV, in
-    // nfl/live_model/config.EV_THRESHOLDS, and it is now in the bundle.
+    // nfl_live_prop was the case (0/0) until it was retired 2026-10-04.
     //
     // NOT a fix for the wider degenerate case, deliberately. Five live models
     // carry min_edge 0 with a real PROBABILITY floor — ncaaf_spread,

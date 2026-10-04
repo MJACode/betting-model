@@ -214,7 +214,7 @@ def test_the_models_the_global_floor_silently_removed_can_bet_again():
         for model_id, smallest_written in (
             ("mlb_spread_market", 0.00),  # negative min, floored at zero
             ("mlb_total_public_fade", 0.00),
-            ("nfl_live_prop", 0.062),
+            # nfl_live_prop (0.062) retired 2026-10-04 (mike).
         ):
             assert config.min_ev_for(model_id) <= smallest_written, (
                 f"{model_id} cannot place the smallest bet it has ever written"
