@@ -498,15 +498,15 @@ class _FrozenDatetime(datetime):
 
 
 class TestDailyOnlyFeedsOvernightWindow:
-    """mlb_team_stats, mlb_bullpen_workload and umpires are written ONLY by
-    the once-daily 6am ET run (Steps 0d/3/3b/5c) — refresh_pass.sh's hourly
-    steps never touch them. This health check runs on every hourly pass too,
-    so before the daily run has had a chance to complete, checking "today" /
-    "yesterday" against a table that has not been touched yet is checking
-    something that cannot possibly be true. Measured 2026-09-08: all three
-    fired STALE/CRIT on 6 straight overnight hourly passes, self-healing
-    within minutes of the 6am run reaching their step every single time —
-    a false alarm, not a feed problem.
+    """Before 7am ET the bullpen / player-game-log / umpire checks demand
+    the day before yesterday, because the 6am run has not ingested yesterday
+    yet. Measured 2026-09-08: that ceiling was missing and the checks fired
+    STALE on every overnight pass.
+
+    The ceiling is a calendar day. A playoff off-day under it has no row to
+    expect (2026-10-04 01:33 ET: ceiling 2026-10-02, no games that day,
+    bullpen correctly stopped at 2026-10-01, gate opened because 10-03 had
+    finals). The floor is the newest MLB final on or before the ceiling.
     """
 
     def _freeze(self, monkeypatch, et_hour: int):
@@ -520,35 +520,57 @@ class TestDailyOnlyFeedsOvernightWindow:
 
     def _seed_yesterday_finals(self, db, today):
         yday = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-        db.execute(
-            "INSERT INTO games (game_id, sport, season, game_date, home_team,"
-            " away_team, home_score, away_score) VALUES (?,'MLB',2026,?,?,?,4,2)",
-            ("g1", yday, "NYY", "BOS"))
+        self._seed_final(db, "g1", yday)
         db.commit()
         return yday
 
-    def test_bullpen_stale_two_days_is_not_an_overnight_false_alarm(self, db, monkeypatch):
-        """Data genuinely 3+ days behind must still CRIT, even inside the
-        overnight window — the relaxation covers exactly one day, not staleness
-        in general."""
-        today = self._freeze(monkeypatch, et_hour=3)
-        yday = self._seed_yesterday_finals(db, today)
-        stale_date = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=4)).strftime("%Y-%m-%d")
+    def _seed_final(self, db, game_id, game_date):
         db.execute(
-            "INSERT INTO mlb_bullpen_stats (game_date, season, team, game_pk,"
-            " player_id, ip) VALUES (?,2026,'NYY',1,100,1.0)", (stale_date,))
+            "INSERT INTO games (game_id, sport, season, game_date, home_team,"
+            " away_team, home_score, away_score) VALUES (?,'MLB',2026,?,?,?,4,2)",
+            (game_id, game_date, "NYY", "BOS"))
+
+    def _insert_daily_feed(self, db, check, game_date):
+        """One row in the table the named check reads, dated `game_date`."""
+        if check == "mlb_bullpen_workload":
+            db.execute(
+                "INSERT INTO mlb_bullpen_stats (game_date, season, team, game_pk,"
+                " player_id, ip) VALUES (?,2026,'NYY',1,100,1.0)", (game_date,))
+        elif check == "mlb_player_game_log":
+            db.execute(
+                "INSERT INTO player_game_log (player_id, player_name, team,"
+                " player_type, game_date, season) VALUES (?,?,?,?,?,?)",
+                ("p1", "Test Player", "NYY", "batter", game_date, 2026))
+        elif check == "umpires":
+            db.execute(
+                "INSERT INTO umpires (game_id, game_date, umpire_name)"
+                " VALUES (?,?,?)",
+                (f"g-ump-{game_date}", game_date, "Test Ump"))
+        else:
+            raise AssertionError(check)
+
+    def test_bullpen_stale_two_days_is_not_an_overnight_false_alarm(self, db, monkeypatch):
+        """Data genuinely behind the last finals date on or before the
+        relaxed ceiling must still CRIT. The relaxation covers exactly one
+        calendar day, and only when that day had a game is the miss real."""
+        today = self._freeze(monkeypatch, et_hour=3)
+        self._seed_yesterday_finals(db, today)
+        day2 = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
+        self._seed_final(db, "g-day2", day2)
+        stale_date = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=4)).strftime("%Y-%m-%d")
+        self._insert_daily_feed(db, "mlb_bullpen_workload", stale_date)
         db.commit()
         assert _results("mlb_bullpen_workload")["status"] == sh.STALE
 
     def test_bullpen_one_day_behind_is_ok_before_the_daily_run(self, db, monkeypatch):
         """3am ET: yesterday's bullpen data has not been ingested yet (the 6am
-        run owns that), so 'the day before yesterday' is the honest floor."""
+        run owns that). The day before yesterday had a final, and the feed
+        is on that date, so the overnight floor is met."""
         today = self._freeze(monkeypatch, et_hour=3)
         self._seed_yesterday_finals(db, today)
         day2 = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
-        db.execute(
-            "INSERT INTO mlb_bullpen_stats (game_date, season, team, game_pk,"
-            " player_id, ip) VALUES (?,2026,'NYY',1,100,1.0)", (day2,))
+        self._seed_final(db, "g-day2", day2)
+        self._insert_daily_feed(db, "mlb_bullpen_workload", day2)
         db.commit()
         assert _results("mlb_bullpen_workload")["status"] == sh.OK
 
@@ -579,7 +601,76 @@ class TestDailyOnlyFeedsOvernightWindow:
         today = self._freeze(monkeypatch, et_hour=3)
         self._seed_yesterday_finals(db, today)
         day2 = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=2)).strftime("%Y-%m-%d")
-        db.execute("INSERT INTO umpires (game_id, game_date, umpire_name)"
-                   " VALUES ('g-ump',?,'Test Ump')", (day2,))
+        self._seed_final(db, "g-day2", day2)
+        self._insert_daily_feed(db, "umpires", day2)
         db.commit()
         assert _results("umpires")["status"] == sh.OK
+
+    @pytest.mark.parametrize("check", [
+        "mlb_bullpen_workload",
+        "mlb_player_game_log",
+        "umpires",
+    ])
+    def test_dark_day_under_the_overnight_ceiling_is_not_stale(
+            self, db, monkeypatch, check):
+        """Pending window, yesterday had finals, the ceiling (day2) had
+        none, and the feed's newest row is the last game day before that
+        dark day.
+
+        Observed 2026-10-04 01:33 ET: mlb_bullpen_stats max was 2026-10-01,
+        2026-10-02 had no MLB games, 2026-10-03 had finals. The check's
+        ceiling was 2026-10-02 and its gate was "yesterday had finals", so
+        it demanded a row for a date the ingestor never writes.
+        """
+        today = self._freeze(monkeypatch, et_hour=3)
+        d = datetime.strptime(today, "%Y-%m-%d")
+        yday = (d - timedelta(days=1)).strftime("%Y-%m-%d")
+        day3 = (d - timedelta(days=3)).strftime("%Y-%m-%d")
+        self._seed_final(db, "g-yday", yday)
+        self._seed_final(db, "g-prior", day3)
+        self._insert_daily_feed(db, check, day3)
+        db.commit()
+        row = _results(check)
+        assert row["status"] == sh.OK, row
+
+    def test_dark_day_does_not_hide_a_feed_behind_the_last_final(self, db, monkeypatch):
+        """Same slate as the gap-day case, but bullpen is older than the
+        last finals date on or before the ceiling. The dark day is not an
+        excuse for missing a game that was played. The expected date in
+        the detail is that game day, not the empty calendar day."""
+        today = self._freeze(monkeypatch, et_hour=3)
+        d = datetime.strptime(today, "%Y-%m-%d")
+        yday = (d - timedelta(days=1)).strftime("%Y-%m-%d")
+        day2 = (d - timedelta(days=2)).strftime("%Y-%m-%d")
+        day3 = (d - timedelta(days=3)).strftime("%Y-%m-%d")
+        older = (d - timedelta(days=5)).strftime("%Y-%m-%d")
+        self._seed_final(db, "g-yday", yday)
+        self._seed_final(db, "g-prior", day3)
+        self._insert_daily_feed(db, "mlb_bullpen_workload", older)
+        db.commit()
+        row = _results("mlb_bullpen_workload")
+        assert row["status"] == sh.STALE, row
+        assert f"expected >= {day3}" in row["detail"], row
+        assert day2 not in row["detail"], row
+
+    def test_no_mlb_finals_on_or_before_the_ceiling_skips(self, db, monkeypatch):
+        """An empty slate has nothing to be late for. The gate shuts instead
+        of demanding a calendar day that has no final."""
+        today = self._freeze(monkeypatch, et_hour=3)
+        d = datetime.strptime(today, "%Y-%m-%d")
+        day2 = (d - timedelta(days=2)).strftime("%Y-%m-%d")
+        row = _results("mlb_bullpen_workload")
+        assert row["status"] == sh.SKIPPED, row
+        assert row["detail"] == f"no MLB finals on or before {day2}", row
+
+    def test_gap_yesterday_after_the_daily_expects_the_prior_final(self, db, monkeypatch):
+        """9am ET, yesterday was dark, the day before had a final, bullpen
+        is on that final. The floor is the prior final."""
+        today = self._freeze(monkeypatch, et_hour=9)
+        d = datetime.strptime(today, "%Y-%m-%d")
+        day2 = (d - timedelta(days=2)).strftime("%Y-%m-%d")
+        self._seed_final(db, "g-day2", day2)
+        self._insert_daily_feed(db, "mlb_bullpen_workload", day2)
+        db.commit()
+        row = _results("mlb_bullpen_workload")
+        assert row["status"] == sh.OK, row
