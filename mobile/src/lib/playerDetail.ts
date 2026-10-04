@@ -22,7 +22,7 @@
  */
 import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
-import { isPausedRow } from '@/lib/thresholds';
+import { isPausedRow, RECORD_EXCLUDED_MODELS } from '@/lib/thresholds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { logStatValue, type PlayerLogEntry } from '@/lib/playerLog';
 import { statForPropModel, type StatDef } from '@/lib/statCatalog';
@@ -406,6 +406,8 @@ export function playerPickRecord(picks: SettledPick[]): PlayerPickRecord {
     if (p.signal_type !== 'BET') continue;
     // Paused-model BETs were never bet (#850); same rule as passesRecordFilter.
     if (isPausedRow(p)) continue;
+    // Struck from the record (config.RECORD_EXCLUSIONS); same rule as passesRecordFilter.
+    if (RECORD_EXCLUDED_MODELS.has(p.model_id)) continue;
     if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
     let line = by.get(p.model_id);
     if (!line) {
