@@ -23,6 +23,7 @@ import {
   PROB_ONLY_MODELS,
   RETIRED_PROB_ONLY_MODELS,
   RETIRED_MODELS,
+  RECORD_EXCLUDED_MODELS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
 } from './thresholds.generated';
@@ -35,6 +36,7 @@ export {
   PROB_ONLY_MODELS,
   RETIRED_PROB_ONLY_MODELS,
   RETIRED_MODELS,
+  RECORD_EXCLUDED_MODELS,
   KELLY_MULTIPLIER,
   MAX_KELLY_FRACTION,
 };
@@ -358,6 +360,9 @@ export function passesRecordFilter(p: RecordFilterable): boolean {
   // state: a live model's settled bets stay in the record after a pause.
   // Same clause as v_public_track_record and the Discord recap.
   if (isPausedRow(p)) return false;
+  // Struck from the record on an explicit instruction (config.RECORD_EXCLUSIONS,
+  // CLAUDE.md 1c) -- the same clause the record views and the Discord recap add.
+  if (RECORD_EXCLUDED_MODELS.has(p.model_id)) return false;
   // A pre-game model's in-play pick does not count; a dedicated live lane does.
   // Pre-game and in-play prices never mix (CLAUDE.md 6). Same helper the rest
   // of the record path uses, so this cannot drift from the DB views.

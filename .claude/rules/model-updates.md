@@ -71,6 +71,10 @@ is the shape.
 This applies to model MECHANICS, not to model CUTS: a threshold is measured per
 model on its own record and must never be copied across.
 
+**`nfl_live_prop` WAS RETIRED 2026-10-04 (mike) AND ITS RECORD STRUCK** — 7-17,
+-10.27 units over 24 settled bets across both markets below. What follows is
+the history of how it got there; none of it is a live model any more.
+
 **Live player props are a priority and an UNTESTED HYPOTHESIS — not a proven
 market.** (Downgraded 2026-09-03 by mike, after measurement.) The thesis: NOT
 beating line movement, but a statistical model for live prop over/unders priced

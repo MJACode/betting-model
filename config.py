@@ -125,6 +125,18 @@ RECORD_EXCLUSIONS: tuple[dict[str, str], ...] = (
             "greppable rather than buried in a view definition."
         ),
     },
+    {
+        "model_id": "nfl_live_prop",
+        "asked_by": "mike, 2026-10-04",
+        "reason": (
+            "\"I want these stricken from the record. It was never a good model. "
+            "Remove this model.\" Whole model, both markets (pass attempts and "
+            "carries): 7-17, -10.27 units over 24 settled bets in the published "
+            "window. Retired the same day (RETIRED_MODELS). The views drop it "
+            "via data/migrations/record_strikes_nfl_live_prop_2026_10_04.sql; "
+            "the app via RECORD_EXCLUDED_MODELS in thresholds.generated.ts."
+        ),
+    },
 )
 
 
@@ -677,26 +689,8 @@ ACTION_THRESHOLDS: dict = {
     # mlb_over_under stays paused. Not mlb_total_market (Pin-vs-soft).
     # docs/mlb_total_public_fade.md.
     "mlb_total_public_fade":      {"min_prob": 0.0, "min_edge": 0.0},
-    # NFL LIVE props (nfl/live_model, MODEL_ID nfl_live_prop). LIVE from
-    # 2026-09-05 (matt: "NFL should be live out of the gate...") -- taken with
-    # the §2 go-live gate NOT met, deliberately. Market as of 2026-09-21 is
-    # player_rush_attempts UNDER (rush_attempt_pace); the previous
-    # player_pass_attempts OVER path was a CONSTANT probability (0.600344 /
-    # 0.642) that read neither line, accrued nor clock -- see
-    # docs/nfl_live_prop_assessment.md. Pass overs are kill-switched
-    # (NFL_LIVE_ALLOW_PASS_ATTEMPT_BIAS default off) and refused at publish.
-    # Do NOT add this model to PAUSED_MODELS to "fix" pass overs.
-    #
-    # Floors of 0.0 are not placeholders, they are the design: this lane's cut
-    # is EV, enforced in nfl/live_model/config.EV_THRESHOLDS and applied by the
-    # executor BEFORE a decision is ever recorded as a bet. A second, different
-    # cut here would silently re-filter bets the model already took -- picks
-    # written and never shown, which is exactly the app/Discord divergence this
-    # release removes. Same reasoning as ncaaf_spread's 0.0 edge floor.
-    # min_prob/min_edge 0.0 did NOT cause the pass-over card by themselves: the
-    # constant p made the EV cut a pure price filter. Raising these floors
-    # without fixing the probability would have hidden bets, not corrected them.
-    "nfl_live_prop": {"min_prob": 0.0, "min_edge": 0.0},
+    # nfl_live_prop (NFL in-play props) was RETIRED 2026-10-04 (mike) -- see
+    # RETIRED_MODELS and RECORD_EXCLUSIONS.
     "nfl_prop_pass_yards": {"min_prob": 0.68, "min_edge": 0.15},
     "nfl_prop_pass_attempts": {"min_prob": 0.73, "min_edge": 0.19},
     "nfl_prop_pass_completions": {"min_prob": 0.68, "min_edge": 0.16},
@@ -765,6 +759,15 @@ RETIRED_MODELS: frozenset = frozenset({
     "golf_top20",
     "golf_make_cut",
     "golf_matchup",
+    # 2026-10-04 (mike): "I want these stricken from the record. It was never a
+    # good model. Remove this model." The NFL in-play prop model -- pass-attempt
+    # overs 09-09 -> 09-20 (a constant probability, docs/nfl_live_prop_assessment.md),
+    # then rushing-attempt unders ("Under N Carries") from 09-21. Published
+    # record at retirement: 7-17, -10.27 units over 24 settled bets (passes 6-16,
+    # carries 1-1). Its settled record is ALSO struck (RECORD_EXCLUSIONS), on
+    # the same instruction. The worker loop is off (scheduler RUN_NFL_LIVE
+    # defaults to 0 since this change; Railway RUN_NFL_LIVE=0 set the same day).
+    "nfl_live_prop",
 })
 # Models temporarily PAUSED — never emit a BET signal. They are still scored and
 # written as NONE rows (so the website can still show the game), but with no
@@ -1741,29 +1744,7 @@ MODEL_MIN_ODDS: dict = {
     # slate is priced -1000 or worse where no realistic model edge survives
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
-    # NFL LIVE pass attempts. Every other entry in this dict TIGHTENS the house
-    # default; this one loosens it, and it has to.
-    #
-    # This lane's cut is EV (nfl/live_model/config.EV_THRESHOLDS), applied by
-    # the executor BEFORE a decision is ever recorded as a bet. The -200 default
-    # would re-cut that after the fact: a live prop the lane bet at -250 gets
-    # written to `picks` and then hidden by the app's passesActionFilter and the
-    # Discord card's threshold join. Written but not shown is precisely the
-    # divergence #489 removed, and it would have been reintroduced for the one
-    # lane that release took live -- by a default nobody chose for it.
-    #
-    # The ceiling now EXISTS, in the executor: nfl/live_model/config.MIN_PRICE
-    # is -140 (Matt, 2026-09-05), and the lane refuses a worse quote before the
-    # EV test rather than betting it and letting the board hide it. So this
-    # entry matches that number instead of being non-binding: the two agree, and
-    # nothing the lane writes can be filtered out here. -140 is also the blanket
-    # prop floor every MLB and WNBA prop model carries.
-    #
-    # KEEP THE TWO IN STEP. If the executor ceiling moves, move this with it --
-    # a display floor TIGHTER than the executor's is how a taken bet gets
-    # concealed (#491), and one looser is dead config that reads as a rule.
-    # tests/test_nfl_live_pick_writer.py asserts they match.
-    "nfl_live_prop":             -140,
+    # nfl_live_prop's -140 entry left with the model (retired 2026-10-04).
 }
 
 
@@ -1910,7 +1891,6 @@ MODEL_OWN_EV_FLOOR: dict = {
     "mlb_total_public_fade":    -0.01,   # n=37, EV -0.0001..+0.0001 by design
     "ncaaf_over_under":          0.20,   # n=20, min +0.218, never bet under 0.20
     "ncaaf_spread":              0.06,   # n=1, min written EV +0.065
-    "nfl_live_prop":             0.06,   # n=12, min written EV +0.062
     # DELIBERATELY AT THE GLOBAL NUMBER, not at its own +0.009. #794 left
     # nfl_prop_market under the global floor on its record (19-20, -2.49u over
     # 39) and that was a decision, not an oversight. Written out rather than
@@ -2080,7 +2060,6 @@ SCORING_METHODS: dict = {
     # Frozen rules — see each module's header for the measurement behind it.
     "nfl_wind_totals":     "rule",    # nfl/models/wind_totals.py — CALIBRATED_UNDER_RATE lookup
     "nfl_opener_spread":   "rule",    # nfl/models/opener_spread.py — soft-vs-Pinnacle deviation
-    "nfl_live_prop":       "rule",    # nfl/live_model/models/rush_attempt_pace.py — pace-ratio under
     "nfl_prop_market":     "rule",    # models/nfl_prop_market.py — de-vig Pinnacle, bet the outlier
     "wnba_prop_market":    "rule",    # models/wnba_prop_market.py — the same rule, pointed at WNBA
     "mlb_spread_market":   "rule",    # models/mlb_game_market.py — the same rule, pointed at MLB run lines
@@ -2132,7 +2111,6 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_prop_shots_on_goal":   0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nhl_prop_assists":         0.0,    # cut is EV, in MODEL_OWN_EV_FLOOR; see ACTION_THRESHOLDS
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
-    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.00,   # card gates on |dev| >= 2.0; edge >= 0 drops juice-eaten quotes
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.08,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
@@ -2232,7 +2210,6 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_prop_assists":         0.0,    # cut is EV; see ACTION_THRESHOLDS
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
                                        # 2026 paper-track: MAX_FIRE_LEAD stays 4; no unit bump
-    "nfl_live_prop":            0.0,    # cut is EV, in nfl/live_model/config.EV_THRESHOLDS
     "nfl_opener_spread":        0.55,   # mirrors the card's |dev| >= 2.0 (2026-09-11, mike): 0.5557 at
                                     # 2.0 clears, 0.5470 at 1.0 does not. Was lowered to 0.52 on
                                     # 2026-08-22, which let the 1-point picks through (§28)

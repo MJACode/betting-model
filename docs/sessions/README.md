@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-04 | [2026-10](./2026-10.md) | 2026-10-04, nfl_live_prop (NFL in-play carries/pass attempts) RETIRED and its record STRUCK on mike's instruction: 7-17, -10.27 units over 24. Worker loop off, views patched, app record filter |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, why Illinois and Florida were bet live: the calibration map's mirror flipped every side rated 0.43-0.50 into a favourite (0.479 -> 0.546). Map now clamped at 0.5. 25 such BETs over 8 models; ncaaf live win-prob cut needs a re-sweep |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, NFL prop odds loads are one (game, market) statement. The 15:56Z hourly cancelled the fourteen-game DraftKings scan (pipeline_log 119483, 2026-10-04) and the card's one-game all-books scan. A cancel rollbacks before the next slice. NHL shots/assists ANY() left to draft #864 |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, worker job `nhl_derivative_odds_history` runs the derivative-totals buyer. Dry run is the default. `--apply` has no credit ceiling. A credit-cap argument fails validation before any Odds API call. Grade unchanged, nothing queued |

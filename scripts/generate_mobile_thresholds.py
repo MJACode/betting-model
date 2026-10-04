@@ -84,6 +84,15 @@ def render() -> str:
         lines.append(f"  '{m}',")
     lines.append("]);")
     lines.append("")
+    # Whole-model entries of config.RECORD_EXCLUSIONS: struck from the settled
+    # record on an explicit instruction (CLAUDE.md 1c). Date-bounded entries
+    # are not mirrored -- the app's record starts after every one of them.
+    lines.append("export const RECORD_EXCLUDED_MODELS = new Set<string>([")
+    for m in sorted({e["model_id"] for e in config.RECORD_EXCLUSIONS
+                     if not e.get("before")}):
+        lines.append(f"  '{m}',")
+    lines.append("]);")
+    lines.append("")
     lines.append(f"export const KELLY_MULTIPLIER = {_fmt(float(config.KELLY_MULTIPLIER))};")
     lines.append(f"export const MAX_KELLY_FRACTION = {_fmt(float(config.MAX_KELLY_FRACTION))};")
     lines.append("")

@@ -338,12 +338,10 @@ model is paper-only — surfaced but not backed — until it clears:
 Models currently in that state are flagged as PAPER ONLY in their own section
 (e.g. `ncaaf_spread` — see `docs/sports/ncaaf.md`). Everything else is live.
 
-**`nfl_live_prop` is LIVE with the gate deliberately NOT met** (Matt,
-2026-09-05). Settled record at go-live: zero — it wrote to a JSONL file, so it
-could never have cleared the gate by waiting. Raised, restated, his call. **Do
-not pause it or restore the gate without asking him.** Re-sweep its cut at ~50
-settled bets; it runs 0.0/0.0 because the cut is EV, in
-`nfl/live_model/config.EV_THRESHOLDS`. Detail: `docs/rules_evidence.md`.
+**`nfl_live_prop` (NFL in-play props) was RETIRED 2026-10-04 and its record
+STRUCK** (mike: *"It was never a good model. Remove this model."*) — 7-17,
+-10.27 units over 24 settled bets. `config.RETIRED_MODELS` + `RECORD_EXCLUSIONS`;
+the worker loop is off unless `RUN_NFL_LIVE=1`. Do not revive it under that id.
 
 **Both NHL models are LIVE the same way** (mike, 2026-10-01): `docs/sports/nhl.md`.
 
