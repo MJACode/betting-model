@@ -238,7 +238,11 @@ export function usePlayerDetail(args: {
   // The rows are tagged with the stat they were read for: useSection keeps the
   // previous data while it refetches, so without the tag a chip tap would draw
   // last stat's numbers under the new stat's label for one round trip (UX
-  // review, 2026-10-05). A mismatch is treated as "still loading".
+  // review, 2026-10-05). A mismatch is "still loading" only while the read
+  // has not failed. The catch resets the payload to the untagged initial
+  // (`statKey: ''`), and the card's error line sits behind
+  // `loading && rows.length === 0` — counting that reset as loading leaves
+  // the spinner up and the error never shows.
   const pvo = useSection<{ statKey: string; rows: PositionVsOpponentRow[] }>(
     { statKey: '', rows: [] },
     opponent && stat && posGroup && pvoSeason != null
@@ -287,7 +291,7 @@ export function usePlayerDetail(args: {
             group: posGroup,
             seasonThis: pvoSeason,
             rows: pvo.data.statKey === String(stat?.key ?? '') ? pvo.data.rows : [],
-            loading: pvo.loading || pvo.data.statKey !== String(stat?.key ?? ''),
+            loading: pvo.loading || (pvo.error == null && pvo.data.statKey !== String(stat?.key ?? '')),
             error: pvo.error,
           }
         : null,

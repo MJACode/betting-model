@@ -124,3 +124,23 @@ def test_the_card_is_about_other_players_and_is_mounted():
     card = CARD.read_text(encoding="utf-8")
     # The rank is described in words; a bare "#9" reads either way round.
     assert "most of ${card.teamsRanked}" in card
+
+
+def test_a_failed_read_is_not_held_on_the_spinner():
+    """useSection's catch replaces the payload with the untagged initial
+    `{ statKey: '' }`. The card spins while `loading` is true and the rows
+    are empty, and the error line sits behind that. A stat-key mismatch
+    during a refetch is still loading; the same mismatch after a failure is
+    the failure. Counting it as loading leaves the spinner up forever."""
+    hook = HOOK.read_text(encoding="utf-8")
+    m = re.search(
+        r"rows: pvo\.data\.statKey === String\(stat\?\.key \?\? ''\) \? pvo\.data\.rows : \[\],\n"
+        r"\s*loading: pvo\.loading \|\| \(pvo\.error == null && "
+        r"pvo\.data\.statKey !== String\(stat\?\.key \?\? ''\)\),",
+        hook,
+    )
+    assert m, "a failed position-vs-opponent read must not stay loading"
+    card = CARD.read_text(encoding="utf-8")
+    # The error line is reachable once loading is false: spinner, then error.
+    assert "{loading && rows.length === 0 ? (" in card
+    assert "Couldn't load" in card
