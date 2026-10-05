@@ -933,6 +933,28 @@ export interface SeasonStatValuesRow {
  * `values` — the RPC filters both on the same non-null condition, so `dates[i]`
  * is the date `values[i]` was recorded on.
  */
+/**
+ * One QUALIFYING player-game against a defence, from position_vs_opponent_nfl
+ * (data/migrations/add_position_vs_opponent_nfl.sql). The last four fields are
+ * the defence's season standing, repeated on every row of that season.
+ */
+export interface PositionVsOpponentRow {
+  season: number;
+  player_id: string;
+  player_name: string;
+  team: string;
+  pos: string | null;
+  game_id: string;
+  game_date: string;
+  week: number | null;
+  value: number | string;
+  avg_allowed: number | string;
+  player_games: number;
+  /** 1 = allows the most per qualifying player-game. */
+  rank_most_allowed: number;
+  teams_ranked: number;
+}
+
 export interface H2HStatValuesRow {
   player_id: string;
   player_name: string;

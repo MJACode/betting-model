@@ -16,11 +16,13 @@ import { useNow } from '@/hooks/useNow';
 import { errorText, isAbortError } from '@/lib/errors';
 import { addDays, todayET, yearET } from '@/lib/format';
 import { MODEL_BOOK } from '@/lib/markets';
-import type { PlayerLogEntry, PlayerLogSport } from '@/lib/playerLog';
+import { positionOf, type PlayerLogEntry, type PlayerLogSport } from '@/lib/playerLog';
+import { nflPositionGroup, nflSeasonInProgress, type NflPositionGroup } from '@/lib/positionVsOpponent';
 import {
   fetchGamesByIds,
   fetchH2HStatValues,
   fetchLineupSlot,
+  fetchPositionVsOpponent,
   fetchPropLineRows,
   fetchPropOddsHistory,
   fetchSavantStats,
@@ -47,6 +49,7 @@ import type {
   GameRow,
   H2HStatValuesRow,
   LineupSlotRow,
+  PositionVsOpponentRow,
   PlayerType,
   PropOddsByBookRow,
   PropOddsSnapshotRow,
@@ -225,6 +228,21 @@ export function usePlayerDetail(args: {
     return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], selection.line, selection.side);
   }, [h2hRow.data, opponent, threshold, selection.line, selection.side]);
 
+  // ── Same position vs the next opponent (Matt, 2026-10-05) ────────────────
+  // "How other players at the same position have done against that team",
+  // this season and last in one read; the card toggles between them and
+  // computes the hit rate at the page's line itself, so neither the toggle nor
+  // the ruler refetches. NFL only for now (lib/positionVsOpponent).
+  const posGroup: NflPositionGroup | null = sport === 'NFL' ? nflPositionGroup(positionOf(games)) : null;
+  const pvoSeason = sport === 'NFL' ? nflSeasonInProgress(today) : null;
+  const pvo = useSection<PositionVsOpponentRow[]>(
+    [],
+    opponent && stat && posGroup && pvoSeason != null
+      ? () => fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent)
+      : null,
+    [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
+  );
+
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(
     [] as Awaited<ReturnType<typeof fetchSettledPropPicksForPlayer>>,
@@ -255,6 +273,10 @@ export function usePlayerDetail(args: {
     nextGame,
     h2h,
     h2hLoading: h2hRow.loading,
+    positionVsOpponent:
+      opponent && posGroup && pvoSeason != null
+        ? { opponent, group: posGroup, seasonThis: pvoSeason, rows: pvo.data, loading: pvo.loading, error: pvo.error }
+        : null,
     slateLoading: slate.loading,
     tonight,
     move,

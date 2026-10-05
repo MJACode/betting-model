@@ -1,0 +1,281 @@
+/**
+ * SAME POSITION vs THE NEXT OPPONENT — "WRs vs ATL" on the player page.
+ *
+ * Matt, 2026-10-05: "When you click into a user stat. We should show how other
+ * players at the same position have done against that team." What he chose:
+ * a player-by-player list, the defence's rank vs the league, and a hit-rate
+ * summary at the page's line; a This season / Last season toggle; and "real
+ * role only" — a depth player's 0 on one target does not count as a miss for
+ * the defence. The cut is printed on the card so the count is never a mystery.
+ *
+ * Numbers come from lib/positionVsOpponent; this file only draws them.
+ */
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SectionTitle } from '@/components/SectionTitle';
+import { StatTile } from '@/components/StatTile';
+import { formatPct } from '@/lib/format';
+import type { HitDirection } from '@/lib/hitRate';
+import { HIT_RATE_GOOD, HIT_RATE_WEAK } from '@/lib/playerDetail';
+import {
+  groupPlural,
+  positionVsOpponent,
+  roleCutText,
+  type NflPositionGroup,
+  type SeasonChoice,
+} from '@/lib/positionVsOpponent';
+import { ordinal } from '@/lib/teamDetail';
+import { colors, font, radii, spacing } from '@/lib/theme';
+import type { PositionVsOpponentRow } from '@/types';
+
+/** Rows before "Show all". A full season vs one defence is ~45 WR games. */
+const ROWS_SHOWN = 6;
+
+function fmt(v: number): string {
+  return String(Math.round(v * 10) / 10);
+}
+
+export function PositionVsOpponentCard({
+  opponent,
+  group,
+  seasonThis,
+  rows,
+  loading,
+  error,
+  playerId,
+  statLabel,
+  betLabel,
+  selection,
+}: {
+  opponent: string;
+  group: NflPositionGroup;
+  /** The season label in progress; "Last season" is the one before it. */
+  seasonThis: number;
+  rows: PositionVsOpponentRow[];
+  loading: boolean;
+  error: string | null;
+  /** The page's own player — left out: the card is about the OTHERS. */
+  playerId: string | null;
+  statLabel: string;
+  /** The page's bet in its own idiom — "70+" or "Under 2.5". */
+  betLabel: string;
+  /** The RESOLVED bet, so a row's ✓/✗ agrees with the game log's dots. */
+  selection: { line: number; side: HitDirection };
+}) {
+  const [choice, setChoice] = useState<SeasonChoice>('this');
+  const season = choice === 'this' ? seasonThis : seasonThis - 1;
+  const [showAll, setShowAll] = useState(false);
+  const card = useMemo(
+    () =>
+      positionVsOpponent(rows, {
+        opponent,
+        group,
+        season,
+        excludePlayerId: playerId,
+        line: selection.line,
+        side: selection.side,
+      }),
+    [rows, opponent, group, season, playerId, selection.line, selection.side],
+  );
+  const plural = groupPlural(group);
+  const shown = showAll ? card.entries : card.entries.slice(0, ROWS_SHOWN);
+  const seasonText = choice === 'this' ? 'this season' : 'last season';
+
+  return (
+    <>
+      <SectionTitle
+        title={`${plural} vs ${opponent}`}
+        tooltip={{
+          title: `How ${plural.toLowerCase()} have done against ${opponent}`,
+          body:
+            `Every game a ${group} with a real role played against ${opponent} ${seasonText}, ` +
+            `and how often ${betLabel} ${statLabel} won in them. "Real role" means ${roleCutText(group)} ` +
+            'in that game, so a depth player who barely played does not count as a miss. ' +
+            `The rank compares ${opponent} with every defence on the average ${statLabel} per ${group}: ` +
+            '1st = allows the most.',
+        }}
+      />
+
+      <View style={styles.segment} accessibilityRole="tablist">
+        {(['this', 'last'] as const).map((c) => {
+          const active = c === choice;
+          return (
+            <Pressable
+              key={c}
+              onPress={() => {
+                setChoice(c);
+                setShowAll(false);
+              }}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={c === 'this' ? 'This season' : 'Last season'}
+              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
+              style={[styles.chip, active && styles.chipActive]}
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                {c === 'this' ? 'This season' : 'Last season'}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {loading && rows.length === 0 ? (
+        <View style={styles.card}>
+          <ActivityIndicator />
+        </View>
+      ) : error ? (
+        <View style={styles.card}>
+          <Text style={styles.muted}>Couldn't load {plural} vs {opponent}. Pull down to retry.</Text>
+        </View>
+      ) : card.total === 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.muted}>
+            No {group} games vs {opponent} {seasonText} yet
+            {choice === 'this' ? ' — try Last season.' : '.'}
+          </Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.tileRow}>
+            <StatTile
+              label={`${betLabel} ${statLabel}`}
+              value={card.hitRate == null ? '—' : formatPct(card.hitRate, 0)}
+              caption={`${card.hits} of ${card.total} ${group} games`}
+              tint={
+                card.hitRate == null || card.total < 3
+                  ? undefined
+                  : card.hitRate >= HIT_RATE_GOOD
+                    ? colors.gradeGood
+                    : card.hitRate < HIT_RATE_WEAK
+                      ? colors.gradeBad
+                      : undefined
+              }
+            />
+            <StatTile
+              label={`Avg ${statLabel} allowed`}
+              value={card.avgAllowed == null ? '—' : fmt(card.avgAllowed)}
+              caption={
+                card.rankMostAllowed != null && card.teamsRanked != null
+                  ? `${ordinal(card.rankMostAllowed)} most of ${card.teamsRanked}`
+                  : undefined
+              }
+            />
+          </View>
+
+          {shown.map((e) => (
+            <View
+              key={`${e.date}:${e.playerId}`}
+              style={styles.row}
+              accessible
+              accessibilityLabel={
+                `${e.playerName}, ${e.team}, ${e.date}: ${fmt(e.value)} ${statLabel}, ` +
+                (e.hit ? 'hit' : 'missed')
+              }
+            >
+              <View style={styles.dotCol}>
+                <View style={[styles.dot, { backgroundColor: e.hit ? colors.bet : colors.avoid }]} />
+              </View>
+              <View style={styles.rowMain}>
+                <Text style={styles.name} numberOfLines={1}>
+                  {e.playerName}
+                </Text>
+                <Text style={styles.meta}>
+                  {e.team} · {e.date}
+                </Text>
+              </View>
+              <View style={styles.valueCol}>
+                <Text style={styles.value}>{fmt(e.value)}</Text>
+                <Text style={styles.valueLabel}>{statLabel}</Text>
+              </View>
+            </View>
+          ))}
+
+          {card.entries.length > ROWS_SHOWN ? (
+            <Pressable
+              onPress={() => setShowAll((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={showAll ? 'Show fewer games' : `Show all ${card.entries.length} games`}
+              style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.more}>
+                {showAll ? 'Show fewer' : `Show all ${card.entries.length} games`}
+              </Text>
+            </Pressable>
+          ) : null}
+
+          <Text style={styles.footnote}>
+            Counts {plural.toLowerCase()} with {roleCutText(group)} in the game.
+          </Text>
+        </>
+      )}
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  segment: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  chipActive: { backgroundColor: colors.tint, borderColor: colors.tint },
+  chipText: { fontSize: font.size.footnote, color: colors.textSecondary, fontWeight: font.weight.semibold },
+  chipTextActive: { color: colors.textInverse },
+  card: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  muted: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18 },
+  tileRow: { flexDirection: 'row', gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.sm },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: 44,
+  },
+  dotCol: { width: 16, alignItems: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  rowMain: { flex: 1, minWidth: 0, marginLeft: spacing.xs },
+  name: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  meta: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
+  valueCol: { alignItems: 'flex-end', marginLeft: spacing.sm },
+  value: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  valueLabel: { fontSize: font.size.nano, color: colors.textTertiary, marginTop: 1 },
+  more: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  footnote: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    lineHeight: 16,
+  },
+});

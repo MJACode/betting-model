@@ -263,7 +263,7 @@ export function positionGroups(pos: string | null | undefined): StatGroup[] {
 }
 
 /** The player's position from their log, newest game that names one. */
-function positionOf(games: PlayerLogEntry[]): string | null {
+export function positionOf(games: PlayerLogEntry[]): string | null {
   for (const g of games) {
     if (g.pos) return String(g.pos);
   }

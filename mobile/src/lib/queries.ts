@@ -62,6 +62,7 @@ import type {
   RecentGameRow,
   SavantStatsRow,
   H2HStatValuesRow,
+  PositionVsOpponentRow,
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
@@ -542,6 +543,43 @@ export async function fetchH2HStatValues(
     if (rows.length) return rows;
   }
   return [];
+}
+
+/**
+ * Every qualifying player-game at one NFL position group against one defence,
+ * this season and last, with the defence's league rank on each row. Backs the
+ * player page's "WRs vs ATL" card (Matt, 2026-10-05).
+ *
+ * ROW COUNT, measured on production 2026-10-05 for the largest group (WR,
+ * receiving_yards vs ATL, seasons 2025-2026): 55 rows. A full 17-game season of
+ * a defensive group is a few hundred at most, so one page — but paged anyway,
+ * because the 1,000-row cap is a property of every read
+ * (.claude/rules/frontend.md), on an order the REQUEST names.
+ *
+ * NFL only for now; other sports return [] without a request.
+ */
+export async function fetchPositionVsOpponent(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  seasons: number[],
+  statKey: string,
+  posGroup: string,
+  opponent: string,
+): Promise<PositionVsOpponentRow[]> {
+  if (sport !== 'NFL') return [];
+  return fetchAllPages<PositionVsOpponentRow>(
+    (from, to) =>
+      supabase
+        .rpc('position_vs_opponent_nfl', {
+          p_seasons: seasons,
+          p_stat: statKey,
+          p_pos_group: posGroup,
+          p_opponent: opponent,
+        })
+        .order('game_id')
+        .order('player_id')
+        .range(from, to),
+    (r) => `${r.game_id}:${r.player_id}`,
+  );
 }
 
 const PICK_COLUMNS =
