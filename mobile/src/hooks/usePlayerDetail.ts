@@ -235,10 +235,17 @@ export function usePlayerDetail(args: {
   // the ruler refetches. NFL only for now (lib/positionVsOpponent).
   const posGroup: NflPositionGroup | null = sport === 'NFL' ? nflPositionGroup(positionOf(games)) : null;
   const pvoSeason = sport === 'NFL' ? nflSeasonInProgress(today) : null;
-  const pvo = useSection<PositionVsOpponentRow[]>(
-    [],
+  // The rows are tagged with the stat they were read for: useSection keeps the
+  // previous data while it refetches, so without the tag a chip tap would draw
+  // last stat's numbers under the new stat's label for one round trip (UX
+  // review, 2026-10-05). A mismatch is treated as "still loading".
+  const pvo = useSection<{ statKey: string; rows: PositionVsOpponentRow[] }>(
+    { statKey: '', rows: [] },
     opponent && stat && posGroup && pvoSeason != null
-      ? () => fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent)
+      ? async () => ({
+          statKey: String(stat.key),
+          rows: await fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
+        })
       : null,
     [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
   );
@@ -275,7 +282,14 @@ export function usePlayerDetail(args: {
     h2hLoading: h2hRow.loading,
     positionVsOpponent:
       opponent && posGroup && pvoSeason != null
-        ? { opponent, group: posGroup, seasonThis: pvoSeason, rows: pvo.data, loading: pvo.loading, error: pvo.error }
+        ? {
+            opponent,
+            group: posGroup,
+            seasonThis: pvoSeason,
+            rows: pvo.data.statKey === String(stat?.key ?? '') ? pvo.data.rows : [],
+            loading: pvo.loading || pvo.data.statKey !== String(stat?.key ?? ''),
+            error: pvo.error,
+          }
         : null,
     slateLoading: slate.loading,
     tonight,

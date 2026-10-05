@@ -58,6 +58,21 @@ const ROLE_CUT: Record<NflPositionGroup, string> = {
   DB: '2+ tackles, sacks or QB hits',
 };
 
+/** With its article, for prose: "an RB", "a WR", "a defensive back". */
+const GROUP_SINGULAR: Record<NflPositionGroup, string> = {
+  QB: 'a QB',
+  RB: 'an RB',
+  WR: 'a WR',
+  TE: 'a TE',
+  DL: 'a defensive lineman',
+  LB: 'a linebacker',
+  DB: 'a defensive back',
+};
+
+export function groupSingular(g: NflPositionGroup): string {
+  return GROUP_SINGULAR[g];
+}
+
 export function groupPlural(g: NflPositionGroup): string {
   return GROUP_PLURAL[g];
 }
@@ -85,6 +100,8 @@ export interface PositionVsOpponentEntry {
   playerName: string;
   team: string;
   date: string;
+  /** NFL week, when the log carries it. */
+  week: number | null;
   value: number;
   hit: boolean;
 }
@@ -138,6 +155,7 @@ export function positionVsOpponent(
       playerName: r.player_name,
       team: r.team,
       date: r.game_date,
+      week: r.week == null ? null : Number(r.week),
       value: v,
       hit: isHit(v, opts.line, opts.side),
     });

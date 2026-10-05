@@ -12,13 +12,14 @@
  */
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SectionTitle } from '@/components/SectionTitle';
 import { StatTile } from '@/components/StatTile';
-import { formatPct } from '@/lib/format';
+import { dayLabelET, dayLabelSpokenET, formatPct } from '@/lib/format';
 import type { HitDirection } from '@/lib/hitRate';
-import { HIT_RATE_GOOD, HIT_RATE_WEAK } from '@/lib/playerDetail';
 import {
   groupPlural,
+  groupSingular,
   positionVsOpponent,
   roleCutText,
   type NflPositionGroup,
@@ -80,6 +81,10 @@ export function PositionVsOpponentCard({
   const plural = groupPlural(group);
   const shown = showAll ? card.entries : card.entries.slice(0, ROWS_SHOWN);
   const seasonText = choice === 'this' ? 'this season' : 'last season';
+  const pick = (c: SeasonChoice) => {
+    setChoice(c);
+    setShowAll(false);
+  };
 
   return (
     <>
@@ -88,9 +93,9 @@ export function PositionVsOpponentCard({
         tooltip={{
           title: `How ${plural.toLowerCase()} have done against ${opponent}`,
           body:
-            `Every game a ${group} with a real role played against ${opponent} ${seasonText}, ` +
-            `and how often ${betLabel} ${statLabel} won in them. "Real role" means ${roleCutText(group)} ` +
-            'in that game, so a depth player who barely played does not count as a miss. ' +
+            `Every game ${groupSingular(group)} with a real role played against ${opponent} ${seasonText}, ` +
+            `and how often they reached ${betLabel} ${statLabel} — this player's line, applied to each of ` +
+            `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group)} in that game. ` +
             `The rank compares ${opponent} with every defence on the average ${statLabel} per ${group}: ` +
             '1st = allows the most.',
         }}
@@ -102,10 +107,7 @@ export function PositionVsOpponentCard({
           return (
             <Pressable
               key={c}
-              onPress={() => {
-                setChoice(c);
-                setShowAll(false);
-              }}
+              onPress={() => pick(c)}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
               accessibilityLabel={c === 'this' ? 'This season' : 'Last season'}
@@ -131,33 +133,41 @@ export function PositionVsOpponentCard({
       ) : card.total === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>
-            No {group} games vs {opponent} {seasonText} yet
-            {choice === 'this' ? ' — try Last season.' : '.'}
+            No {group} games vs {opponent} {seasonText}
+            {choice === 'this' ? ' yet.' : '.'}
           </Text>
+          {choice === 'this' ? (
+            <Pressable
+              onPress={() => pick('last')}
+              accessibilityRole="button"
+              accessibilityLabel="Show last season"
+              hitSlop={{ top: 10, bottom: 10, left: 0, right: 0 }}
+              style={({ pressed }) => [styles.emptyAction, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.more}>Show last season</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : (
         <>
+          {/* Two tiles, no tilePad: the labels are longer than H2H's and need
+              the width. The hit-rate tile is deliberately UNTINTED — it applies
+              this player's line to every qualifying player at the position, so
+              it partly measures their roles, and a grade colour would read as a
+              verdict on the defence (UX review, 2026-10-05). The rank tile is
+              the defence's verdict. */}
           <View style={styles.tileRow}>
             <StatTile
               label={`${betLabel} ${statLabel}`}
               value={card.hitRate == null ? '—' : formatPct(card.hitRate, 0)}
-              caption={`${card.hits} of ${card.total} ${group} games`}
-              tint={
-                card.hitRate == null || card.total < 3
-                  ? undefined
-                  : card.hitRate >= HIT_RATE_GOOD
-                    ? colors.gradeGood
-                    : card.hitRate < HIT_RATE_WEAK
-                      ? colors.gradeBad
-                      : undefined
-              }
+              caption={`${card.hits} of ${card.total} ${group} games at this line`}
             />
             <StatTile
-              label={`Avg ${statLabel} allowed`}
+              label={`Avg ${statLabel} per ${group}`}
               value={card.avgAllowed == null ? '—' : fmt(card.avgAllowed)}
               caption={
                 card.rankMostAllowed != null && card.teamsRanked != null
-                  ? `${ordinal(card.rankMostAllowed)} most of ${card.teamsRanked}`
+                  ? `${ordinal(card.rankMostAllowed)}-most of ${card.teamsRanked} defenses`
                   : undefined
               }
             />
@@ -169,19 +179,24 @@ export function PositionVsOpponentCard({
               style={styles.row}
               accessible
               accessibilityLabel={
-                `${e.playerName}, ${e.team}, ${e.date}: ${fmt(e.value)} ${statLabel}, ` +
+                `${e.playerName}, ${e.team}, ${e.week != null ? `week ${e.week}, ` : ''}` +
+                `${dayLabelSpokenET(e.date)}: ${fmt(e.value)} ${statLabel}, ` +
                 (e.hit ? 'hit' : 'missed')
               }
             >
-              <View style={styles.dotCol}>
-                <View style={[styles.dot, { backgroundColor: e.hit ? colors.bet : colors.avoid }]} />
-              </View>
+              {/* Shape as well as colour carries hit / miss (UX_REVIEW §5). */}
+              <Ionicons
+                name={e.hit ? 'checkmark-circle' : 'close-circle'}
+                size={16}
+                color={e.hit ? colors.bet : colors.avoid}
+              />
               <View style={styles.rowMain}>
                 <Text style={styles.name} numberOfLines={1}>
                   {e.playerName}
                 </Text>
                 <Text style={styles.meta}>
-                  {e.team} · {e.date}
+                  {e.week != null ? `Wk ${e.week} · ` : ''}
+                  {e.team} · {dayLabelET(e.date)}
                 </Text>
               </View>
               <View style={styles.valueCol}>
@@ -251,8 +266,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     minHeight: 44,
   },
-  dotCol: { width: 16, alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4 },
   rowMain: { flex: 1, minWidth: 0, marginLeft: spacing.xs },
   name: { fontSize: font.size.body, fontWeight: font.weight.semibold, color: colors.textPrimary },
   meta: { fontSize: font.size.caption, color: colors.textSecondary, marginTop: 2 },
@@ -271,6 +284,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.tint,
   },
+  emptyAction: { marginTop: spacing.sm, alignSelf: 'flex-start' },
   footnote: {
     fontSize: font.size.caption,
     color: colors.textSecondary,
