@@ -141,7 +141,7 @@ export function PositionVsOpponentCard({
               onPress={() => pick('last')}
               accessibilityRole="button"
               accessibilityLabel="Show last season"
-              hitSlop={{ top: 10, bottom: 10, left: 0, right: 0 }}
+              hitSlop={{ top: 15, bottom: 15, left: 0, right: 0 }}
               style={({ pressed }) => [styles.emptyAction, pressed && { opacity: 0.7 }]}
             >
               <Text style={styles.more}>Show last season</Text>
@@ -188,7 +188,7 @@ export function PositionVsOpponentCard({
               <Ionicons
                 name={e.hit ? 'checkmark-circle' : 'close-circle'}
                 size={16}
-                color={e.hit ? colors.bet : colors.avoid}
+                color={e.hit ? colors.betInk : colors.avoidInk}
               />
               <View style={styles.rowMain}>
                 <Text style={styles.name} numberOfLines={1}>
