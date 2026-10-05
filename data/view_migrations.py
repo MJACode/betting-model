@@ -165,6 +165,12 @@ ACTIVE_MIGRATIONS: list[str] = [
     # this file runs on every refresh pass and each DDL statement forces a
     # PostgREST schema reload.
     "add_player_h2h_stat_values_rpcs.sql",
+    # 2026-10-05 (Matt): the player page's "WRs vs ATL" card — how other
+    # players at the same position have done against tonight's opponent, with
+    # the defence's league rank. NFL first (the only log with pos + opponent);
+    # MLB and the basketball/NCAAF position ingest follow. Guards on the
+    # function existing, so the DDL fires once.
+    "add_position_vs_opponent_nfl.sql",
     # 2026-09-14 (mike): leftover nfl_wind_totals opening_signals rows whose
     # picks were VOIDED 09-07 / DELETED 09-11 after MAX_FIRE_LEAD. Capture
     # stayed (ON CONFLICT DO NOTHING). Deletes captures with no standing

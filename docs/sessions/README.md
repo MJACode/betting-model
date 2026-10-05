@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
+| 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, player page "WRs vs ATL" card (NFL phase 1): position_vs_opponent_nfl RPC with real-role cut and league rank, This/Last season toggle, player list. MLB and basketball/NCAAF phases next |
 | 2026-10-04 | [2026-10](./2026-10.md) | 2026-10-04, nfl_live_prop (NFL in-play carries/pass attempts) RETIRED and its record STRUCK on mike's instruction: 7-17, -10.27 units over 24. Worker loop off, views patched, app record filter |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, why Illinois and Florida were bet live: the calibration map's mirror flipped every side rated 0.43-0.50 into a favourite (0.479 -> 0.546). Map now clamped at 0.5. 25 such BETs over 8 models; ncaaf live win-prob cut needs a re-sweep |
 | 2026-10-03 | [2026-10](./2026-10.md) | 2026-10-03, NFL prop odds loads are one (game, market) statement. The 15:56Z hourly cancelled the fourteen-game DraftKings scan (pipeline_log 119483, 2026-10-04) and the card's one-game all-books scan. A cancel rollbacks before the next slice. NHL shots/assists ANY() left to draft #864 |

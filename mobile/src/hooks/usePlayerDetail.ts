@@ -16,11 +16,13 @@ import { useNow } from '@/hooks/useNow';
 import { errorText, isAbortError } from '@/lib/errors';
 import { addDays, todayET, yearET } from '@/lib/format';
 import { MODEL_BOOK } from '@/lib/markets';
-import type { PlayerLogEntry, PlayerLogSport } from '@/lib/playerLog';
+import { positionOf, type PlayerLogEntry, type PlayerLogSport } from '@/lib/playerLog';
+import { nflPositionGroup, nflSeasonInProgress, type NflPositionGroup } from '@/lib/positionVsOpponent';
 import {
   fetchGamesByIds,
   fetchH2HStatValues,
   fetchLineupSlot,
+  fetchPositionVsOpponent,
   fetchPropLineRows,
   fetchPropOddsHistory,
   fetchSavantStats,
@@ -47,6 +49,7 @@ import type {
   GameRow,
   H2HStatValuesRow,
   LineupSlotRow,
+  PositionVsOpponentRow,
   PlayerType,
   PropOddsByBookRow,
   PropOddsSnapshotRow,
@@ -225,6 +228,32 @@ export function usePlayerDetail(args: {
     return playerHeadToHead(opponent, row?.values ?? [], row?.dates ?? [], selection.line, selection.side);
   }, [h2hRow.data, opponent, threshold, selection.line, selection.side]);
 
+  // ── Same position vs the next opponent (Matt, 2026-10-05) ────────────────
+  // "How other players at the same position have done against that team",
+  // this season and last in one read; the card toggles between them and
+  // computes the hit rate at the page's line itself, so neither the toggle nor
+  // the ruler refetches. NFL only for now (lib/positionVsOpponent).
+  const posGroup: NflPositionGroup | null = sport === 'NFL' ? nflPositionGroup(positionOf(games)) : null;
+  const pvoSeason = sport === 'NFL' ? nflSeasonInProgress(today) : null;
+  // The rows are tagged with the stat they were read for: useSection keeps the
+  // previous data while it refetches, so without the tag a chip tap would draw
+  // last stat's numbers under the new stat's label for one round trip (UX
+  // review, 2026-10-05). A mismatch is "still loading" only while the read
+  // has not failed. The catch resets the payload to the untagged initial
+  // (`statKey: ''`), and the card's error line sits behind
+  // `loading && rows.length === 0` — counting that reset as loading leaves
+  // the spinner up and the error never shows.
+  const pvo = useSection<{ statKey: string; rows: PositionVsOpponentRow[] }>(
+    { statKey: '', rows: [] },
+    opponent && stat && posGroup && pvoSeason != null
+      ? async () => ({
+          statKey: String(stat.key),
+          rows: await fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
+        })
+      : null,
+    [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
+  );
+
   // ── Our record on this player ────────────────────────────────────────────
   const picks = useSection(
     [] as Awaited<ReturnType<typeof fetchSettledPropPicksForPlayer>>,
@@ -255,6 +284,17 @@ export function usePlayerDetail(args: {
     nextGame,
     h2h,
     h2hLoading: h2hRow.loading,
+    positionVsOpponent:
+      opponent && posGroup && pvoSeason != null
+        ? {
+            opponent,
+            group: posGroup,
+            seasonThis: pvoSeason,
+            rows: pvo.data.statKey === String(stat?.key ?? '') ? pvo.data.rows : [],
+            loading: pvo.loading || (pvo.error == null && pvo.data.statKey !== String(stat?.key ?? '')),
+            error: pvo.error,
+          }
+        : null,
     slateLoading: slate.loading,
     tonight,
     move,
