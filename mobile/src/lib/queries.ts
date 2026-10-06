@@ -1,4 +1,5 @@
 import { fetchAllPages } from '@/lib/paging';
+import { sampleOpenToNow, type LineHistoryWindow, type SampledSeries } from './lineHistory';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -1962,6 +1963,13 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   return (data ?? []) as unknown as FullOutcomePickRow[];
 }
 
+/**
+ * Recent finished games for a team with no sport filter.
+ *
+ * Do not use this for a form strip. 'PHI' is the Phillies, the Eagles and the
+ * Flyers, and the newest rows mix all three. The pick-detail strip uses
+ * fetchTeamRecentGamesForSport.
+ */
 export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
   const { data, error } = await supabase
     .from('games')
@@ -2198,42 +2206,99 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
 
 // ── Line movement ───────────────────────────────────────────────────────────
 
-/** Snapshots for one game+market at one book, oldest first (line movement history). */
+const ODDS_HISTORY_COLUMNS =
+  'market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price';
+
+/**
+ * Snapshots for one game+market at one book, oldest first, open through the
+ * latest row the window allows.
+ *
+ * The `.from('odds')` literal stays in this function. The player-page tripwire
+ * matches an exported function only up to its first unindented close
+ * (tests/test_mobile_player_detail.py), so a helper defined outside it is invisible.
+ *
+ * `bounds.until` is the game's commence_time, even when the lock is later.
+ * It is applied as `snapshot_at <= commence_time` on the open, the gap probes and the latest
+ * page, after the equality filters, so idx_odds_book_snap can serve it.
+ * snapshot_at is text, so the sampler first reads one newest row with no
+ * range and stamps that cap in the same offset. snapshot_type is not a
+ * filter: post-start rows are still tagged 'open'. When the start is
+ * unknown, `bounds.until` is absent and this read is not capped.
+ */
 export async function fetchOddsHistory(
   gameId: string,
   market: string,
   bookmaker: string,
-): Promise<OddsSnapshotRow[]> {
-  const { data, error } = await supabase
-    .from('odds')
-    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
-    .eq('game_id', gameId)
-    .eq('market', market)
-    .eq('bookmaker', bookmaker)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
-  if (error) throw error;
-  return (data ?? []) as OddsSnapshotRow[];
+  bounds?: LineHistoryWindow,
+  quote?: (row: OddsSnapshotRow) => string,
+): Promise<SampledSeries<OddsSnapshotRow>> {
+  return sampleOpenToNow(async (probe) => {
+    let request = supabase
+      .from('odds')
+      .select(ODDS_HISTORY_COLUMNS)
+      .eq('game_id', gameId)
+      .eq('market', market)
+      .eq('bookmaker', bookmaker);
+    // The offset sample is the newest row and no range. A UTC cap on that
+    // read sorts after a -04:00 in-game row.
+    if (!probe.unbounded) {
+      request = request
+        .gte('snapshot_at', probe.gte ?? '1970-01-01T00:00:00.000Z')
+        .lt('snapshot_at', probe.lt ?? '9999-01-01T00:00:00.000Z');
+      // Inclusive kickoff cap, already in this series' text form.
+      // Omitted when the start is unknown — the query is then the same
+      // unbounded read as before.
+      if (probe.lte) request = request.lte('snapshot_at', probe.lte);
+    }
+    const { data, error } = await request
+      .order('snapshot_at', { ascending: probe.ascending })
+      .limit(probe.limit);
+    if (error) throw error;
+    return (data ?? []) as unknown as OddsSnapshotRow[];
+  }, bounds, quote);
 }
 
-/** Prop-line snapshots for one player+market in a game at one book, oldest first. */
+/**
+ * Prop-line snapshots for one player+market in a game at one book, oldest first,
+ * open through the latest row the window allows. `.from('player_prop_odds')`
+ * stays in this function for the same tripwire as fetchOddsHistory.
+ *
+ * Same commence_time cap as fetchOddsHistory (`snapshot_at <= commence_time`
+ * after the equality filters; idx_prop_odds_line_snap), in the series' own
+ * text form. No snapshot_type filter. Unknown start: `bounds.until` is
+ * absent and this read is not capped.
+ */
 export async function fetchPropOddsHistory(
   gameId: string,
   market: string,
   playerName: string,
   bookmaker: string,
-): Promise<PropOddsSnapshotRow[]> {
-  const { data, error } = await supabase
-    .from('player_prop_odds')
-    .select('snapshot_at, line, over_price, under_price')
-    .eq('game_id', gameId)
-    .eq('market', market)
-    .eq('bookmaker', bookmaker)
-    .eq('player_name', playerName)
-    .order('snapshot_at', { ascending: true })
-    .limit(50);
-  if (error) throw error;
-  return (data ?? []) as PropOddsSnapshotRow[];
+  bounds?: LineHistoryWindow,
+  quote?: (row: PropOddsSnapshotRow) => string,
+): Promise<SampledSeries<PropOddsSnapshotRow>> {
+  return sampleOpenToNow(async (probe) => {
+    let request = supabase
+      .from('player_prop_odds')
+      .select('snapshot_at, line, over_price, under_price')
+      .eq('game_id', gameId)
+      .eq('market', market)
+      .eq('bookmaker', bookmaker)
+      .eq('player_name', playerName);
+    if (!probe.unbounded) {
+      request = request
+        .gte('snapshot_at', probe.gte ?? '1970-01-01T00:00:00.000Z')
+        .lt('snapshot_at', probe.lt ?? '9999-01-01T00:00:00.000Z');
+      // Inclusive kickoff cap, already in this series' text form.
+      // Omitted when the start is unknown — the query is then the same
+      // unbounded read as before.
+      if (probe.lte) request = request.lte('snapshot_at', probe.lte);
+    }
+    const { data, error } = await request
+      .order('snapshot_at', { ascending: probe.ascending })
+      .limit(probe.limit);
+    if (error) throw error;
+    return (data ?? []) as unknown as PropOddsSnapshotRow[];
+  }, bounds, quote);
 }
 
 // ── Prop matchup context ────────────────────────────────────────────────────

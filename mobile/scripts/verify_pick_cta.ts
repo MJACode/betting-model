@@ -243,21 +243,23 @@ check('reasons name the rule(s)', JSON.stringify(priceCheck({ edge: 0.548, locke
 // ── M13: line history ───────────────────────────────────────────────────────
 {
   const t = (hh: number, mm: number, ss = 0) => `2026-09-25T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}Z`;
+  const clock = new Date('2026-09-25T21:00:00.000Z');
+  const nb = '\u00A0';
   const runs = collapseLineHistory([
     { at: t(19, 50, 1), line: 8.5, price: -110 },
     { at: t(19, 50, 20), line: 8.5, price: -110 },
     { at: t(19, 50, 40), line: 8.5, price: -110 },
     { at: t(20, 5), line: 8.5, price: -115 },
     { at: t(20, 30), line: 9, price: -105 },
-  ]);
+  ], clock);
   check('repeated line + price collapse into one row', runs.length === 3 && runs[0].count === 3, JSON.stringify(runs.map((r) => r.count)));
-  check('distinct minutes print minute precision in ET', runs[0].label === '3:50 PM ET' && runs[1].label === '4:05 PM ET', runs.map((r) => r.label).join(' | '));
+  check('distinct minutes print minute precision in ET', runs[0].label === `3:50${nb}PM` && runs[1].label === `4:05${nb}PM`, runs.map((r) => r.label).join(' | '));
   const flicker = collapseLineHistory([
     { at: t(19, 50, 5), line: null, price: -105 },
     { at: t(19, 50, 25), line: null, price: -115 },
     { at: t(19, 50, 45), line: null, price: -105 },
-  ]);
-  check('rows sharing a minute get seconds', flicker.every((r) => /^3:50:\d\d PM ET$/.test(r.label)), flicker.map((r) => r.label).join(' | '));
+  ], clock);
+  check('rows sharing a minute get seconds', flicker.every((r) => new RegExp(`^3:50:\\d\\d${nb}PM$`).test(r.label)), flicker.map((r) => r.label).join(' | '));
   const many = Array.from({ length: 20 }, (_, i) => ({ at: t(18, i), line: null, price: i % 2 ? -110 : -112 }));
   const rc = recentChanges(many, 8);
   check('the card shows the last 8 rows and counts every CHANGE (the opening row is not one)',
@@ -313,7 +315,7 @@ const card = read('src/components/PickCard.tsx');
 check('PickCard: cta = pickCtaFor(pick, game, liveState) (game_time fallback, postponed, in-play tag)',
   /const cta = pickCtaFor\(pick, game, liveState\);/.test(card) && !/gameHasStarted\(game, liveState\)\s*;/.test(card));
 check('PickCard: the price check reads the live snapshot', /priceCheckForItem\(item, liveState\)/.test(card));
-check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length\)/.test(read('src/components/LineMovementCard.tsx')));
+check('LineMovementCard: footer is changesFooter (no "Last 8 of 8")', /changesFooter\(\{ changes, shownChanges, hidden \}, snaps\.length, partial\)/.test(read('src/components/LineMovementCard.tsx')));
 check('PickCard: hand-off only while cta.handoff', /offersBook && cta\.handoff\s*\?\s*bestHandoffForPick/.test(card));
 check('PickCard: canSlip ends with cta.slip, canTrack with cta.track',
   /const canSlip =[^;]*&& cta\.slip;/.test(card) && /const canTrack = [^;]*&& open && cta\.track;/.test(card));

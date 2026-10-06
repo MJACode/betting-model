@@ -19,6 +19,16 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: VoiceOver says Eastern with the time first. A short form window says how many games were played. The visible final cell is Final price |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a non-live lock after the stored start shows only the pick's own number. No arrow, no close, no new copy |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: non-live history is capped at stored commence_time again. A row between kickoff and a later lock is not Close. The max(commence, lock) cap is reverted |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a live history row is Final only when the game is final, otherwise Latest. A lock after the stored start has no colored verdict. A cross-season short window says "available" |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a non-live cap is the later of commence_time and the lock, so a rewritten start does not drop the pick's own row. 3218758's +100 is the pregame close |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a pick is live only when is_live is set. Late pregame history stops at the close. Live picks say "In-play prices since your pick" and end on Final. Short form-strip counts moved into the note |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: history bounds follow the series timestamp text (Z, +00:00, -04:00, -05:00). Post-start rows cannot be labelled Close. created_at space form normalized. Prop UTC backfill left for Matt |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail form strip: one VoiceOver label per cell, games spelled out only when the window is short, season note under the strip. Movement verdict says "against your pick" |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: pregame line history stops at commence_time (post-start rows stay tagged open). Close label after the start. Gap times bisected, cap 24. Footer says intermediate moves aren't listed |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: line movement was the oldest 50 snapshots (JAX/PHI DK spreads, 3,939 rows, page ended at home −3, latest was −7); form strip mixed PHI across MLB/NHL/NFL and labelled every sport runs. Open-to-now sample, sport-scoped games, points for football |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions: shared names settled by most recent game (never skipped); MLB position card becomes a per-player summary |

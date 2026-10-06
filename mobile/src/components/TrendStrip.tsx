@@ -1,5 +1,11 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import {
+  TEAM_WINDOW_SIZE,
+  teamCellAccessibilityLabel,
+  teamSeasonNote,
+  teamShortWindowNote,
+} from '@/lib/teamForm';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { TrendBuckets } from '@/types';
 
@@ -7,7 +13,12 @@ interface Props {
   title: string;
   trends: TrendBuckets;
   mode: 'team' | 'player';
-  unit?: string; // e.g. "Ks", "Hits"
+  /** Team strip: "R", "pts" or "goals". Player strip: the stat name ("Ks", "Hits"). */
+  unit?: string;
+  /** Team strip: "runs", "points" or "goals". What VoiceOver speaks. */
+  spokenUnit?: string;
+  /** Games in the fetched window from the pick's season. Null when the season is unknown. */
+  seasonGames?: number | null;
 }
 
 const KEYS: Array<{ key: keyof TrendBuckets; label: string }> = [
@@ -18,13 +29,30 @@ const KEYS: Array<{ key: keyof TrendBuckets; label: string }> = [
   { key: 'season', label: 'Season' },
 ];
 
-export function TrendStrip({ title, trends, mode, unit }: Props) {
+export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames }: Props) {
+  const counts = {
+    l3: trends.l3.games,
+    l5: trends.l5.games,
+    l10: trends.l10.games,
+    l20: trends.l20.games,
+    l25: trends.season.games,
+  };
+  const note =
+    mode === 'team'
+      ? [teamShortWindowNote(counts, seasonGames), teamSeasonNote(seasonGames, counts)]
+          .filter((s) => s != null)
+          .join(' ')
+      : null;
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{title}</Text>
       <View style={styles.row}>
         {KEYS.map((k) => {
           const t = trends[k.key];
+          // Team "season" is the last 25 finished games in that sport, and it
+          // crosses into the previous season once that window is full. The
+          // player strip keeps "Season": its window is 25 or 50 by sport.
+          const label = mode === 'team' && k.key === 'season' ? 'L25' : k.label;
           const primary =
             mode === 'team'
               ? t.winPct != null
@@ -36,19 +64,43 @@ export function TrendStrip({ title, trends, mode, unit }: Props) {
           const secondary =
             mode === 'team'
               ? t.avg != null
-                ? `${t.avg.toFixed(1)} R`
+                ? unit
+                  ? `${t.avg.toFixed(1)} ${unit}`
+                  : t.avg.toFixed(1)
                 : '—'
               : unit ?? '';
+          const windowSize = TEAM_WINDOW_SIZE[k.key] ?? t.games;
+          // Team cells do not print a games count. At large text it ran into
+          // the next column; the note under the strip says how many games
+          // the short windows share. Player keeps "G" and still hides a zero.
+          const gamesLabel = mode === 'player' && t.games > 0 ? `${t.games} G` : null;
           return (
-            <View key={k.key} style={styles.cell}>
-              <Text style={styles.cellLabel}>{k.label}</Text>
+            <View
+              key={k.key}
+              style={styles.cell}
+              accessible={mode === 'team'}
+              accessibilityLabel={
+                mode === 'team'
+                  ? teamCellAccessibilityLabel({
+                      window: windowSize,
+                      games: t.games,
+                      winPct: t.winPct,
+                      avg: t.avg,
+                      spokenUnit: spokenUnit ?? '',
+                      seasonGames,
+                    })
+                  : undefined
+              }
+            >
+              <Text style={styles.cellLabel}>{label}</Text>
               <Text style={styles.cellValue}>{primary}</Text>
               <Text style={styles.cellSecondary}>{secondary}</Text>
-              <Text style={styles.cellGames}>{t.games} G</Text>
+              {gamesLabel ? <Text style={styles.cellGames}>{gamesLabel}</Text> : null}
             </View>
           );
         })}
       </View>
+      {note ? <Text style={styles.note}>{note}</Text> : null}
     </View>
   );
 }
@@ -78,22 +130,31 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
+  note: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
+  },
   cellLabel: {
+    textAlign: 'center',
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginBottom: 2,
   },
   cellValue: {
+    textAlign: 'center',
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
   cellSecondary: {
+    textAlign: 'center',
     fontSize: font.size.caption,
     color: colors.textSecondary,
     marginTop: 2,
   },
   cellGames: {
+    textAlign: 'center',
     fontSize: font.size.micro,
     color: colors.textTertiary,
     marginTop: 1,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchTeamRecentGames } from '@/lib/queries';
+import { fetchTeamRecentGamesForSport } from '@/lib/queries';
 import { errorText, isAbortError } from '@/lib/errors';
 import type { GameRow, TeamGameStat, TrendBuckets } from '@/types';
 
@@ -24,20 +24,21 @@ function reduce(games: TeamGameStat[]): TrendBuckets {
   };
 }
 
-export function useTeamTrends(team: string | null, beforeDate: string | null) {
+export function useTeamTrends(sport: string | null, team: string | null, beforeDate: string | null) {
   const [games, setGames] = useState<TeamGameStat[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!team || !beforeDate) {
+    if (!sport || !team || !beforeDate) {
       setGames([]);
       return;
     }
     let mounted = true;
     setLoading(true);
     setError(null);
-    fetchTeamRecentGames(team, beforeDate, 25)
+    // Sport-scoped: 'PHI' is the Phillies, the Eagles and the Flyers.
+    fetchTeamRecentGamesForSport(sport, team, beforeDate, 25)
       .then((rows: GameRow[]) => {
         if (!mounted) return;
         const mapped = rows.map((g) => {
@@ -59,6 +60,7 @@ export function useTeamTrends(team: string | null, beforeDate: string | null) {
             runs_for,
             runs_against,
             opponent,
+            season: g.season,
           };
         });
         setGames(mapped);
@@ -73,7 +75,7 @@ export function useTeamTrends(team: string | null, beforeDate: string | null) {
     return () => {
       mounted = false;
     };
-  }, [team, beforeDate]);
+  }, [sport, team, beforeDate]);
 
   return { games, trends: reduce(games), loading, error };
 }

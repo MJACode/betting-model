@@ -34,12 +34,13 @@ import type { Sport } from '@/hooks/useSportFilter';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
+import { countThisSeason, teamScoringUnit, teamScoringUnitSpoken } from '@/lib/teamForm';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameHasStarted, gameStatus } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
@@ -255,11 +256,14 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   const isGolf = game?.sport === 'GOLF' || pick.sport === 'GOLF';
   const showTeamTrends = isGameModel && !isUfc && !isGolf;
 
+  const trendSport = showTeamTrends ? (game?.sport ?? null) : null;
   const homeTrends = useTeamTrends(
+    trendSport,
     showTeamTrends ? game?.home_team ?? null : null,
     pick.game_date,
   );
   const awayTrends = useTeamTrends(
+    trendSport,
     showTeamTrends ? game?.away_team ?? null : null,
     pick.game_date,
   );
@@ -365,7 +369,13 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           </View>
         ) : null}
 
-        <LineMovementCard pick={pick} playerName={playerName} />
+        <LineMovementCard
+          pick={pick}
+          playerName={playerName}
+          commenceTime={game?.commence_time || pick.game_time}
+          gameStarted={gameHasStarted(game, liveState, pick.game_time)}
+          gameFinal={gameStatus(game, liveState).kind === 'final'}
+        />
 
         {/* Where to place it, then every book and line — one section, action
             first (UX review): the chips are the bettable same-line subset, the
@@ -488,8 +498,22 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
 
         {showTeamTrends && game ? (
           <>
-            <TrendStrip title={`${game.home_team} (home) form`} trends={homeTrends.trends} mode="team" />
-            <TrendStrip title={`${game.away_team} (away) form`} trends={awayTrends.trends} mode="team" />
+            <TrendStrip
+              title={`${game.home_team} (home) form`}
+              trends={homeTrends.trends}
+              mode="team"
+              unit={teamScoringUnit(game.sport)}
+              spokenUnit={teamScoringUnitSpoken(game.sport)}
+              seasonGames={countThisSeason(homeTrends.games, game.season)}
+            />
+            <TrendStrip
+              title={`${game.away_team} (away) form`}
+              trends={awayTrends.trends}
+              mode="team"
+              unit={teamScoringUnit(game.sport)}
+              spokenUnit={teamScoringUnitSpoken(game.sport)}
+              seasonGames={countThisSeason(awayTrends.games, game.season)}
+            />
           </>
         ) : null}
 
