@@ -34,7 +34,7 @@ import type { Sport } from '@/hooks/useSportFilter';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
-import { teamScoringUnit } from '@/lib/teamForm';
+import { countThisSeason, teamScoringUnit, teamScoringUnitSpoken } from '@/lib/teamForm';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
@@ -502,12 +502,16 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
               trends={homeTrends.trends}
               mode="team"
               unit={teamScoringUnit(game.sport)}
+              spokenUnit={teamScoringUnitSpoken(game.sport)}
+              seasonGames={countThisSeason(homeTrends.games, game.season)}
             />
             <TrendStrip
               title={`${game.away_team} (away) form`}
               trends={awayTrends.trends}
               mode="team"
               unit={teamScoringUnit(game.sport)}
+              spokenUnit={teamScoringUnitSpoken(game.sport)}
+              seasonGames={countThisSeason(awayTrends.games, game.season)}
             />
           </>
         ) : null}

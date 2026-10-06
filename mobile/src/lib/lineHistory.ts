@@ -161,19 +161,18 @@ export function movementHeadline(lock: string, end: string, atClose: boolean): s
 
 export type MovementVerdictKind = 'steady' | 'against' | 'favor' | 'steamed' | 'eased';
 
-/** Verdict under the headline. Unstarted copy is unchanged. */
+/** Verdict under the headline. The against-line names the pick, not the side key. */
 export function movementVerdict(opts: {
   kind: MovementVerdictKind;
   atClose: boolean;
   lock?: string;
   end?: string;
-  side?: string;
   pp?: number | null;
 }): string {
   const { kind, atClose } = opts;
   if (kind === 'steady') return atClose ? 'Line steady through the close' : 'Line steady since pick';
   if (kind === 'against') {
-    const base = `Line moved ${opts.lock} → ${opts.end} against your ${opts.side}`;
+    const base = `Line moved ${opts.lock} → ${opts.end} against your pick`;
     return atClose ? `${base} by the close` : base;
   }
   if (kind === 'favor') {

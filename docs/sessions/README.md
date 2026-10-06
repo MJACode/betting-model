@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail form strip: one VoiceOver label per cell, games spelled out only when the window is short, season note under the strip. Movement verdict says "against your pick" |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: pregame line history stops at commence_time (post-start rows stay tagged open). Close label after the start. Gap times bisected, cap 24. Footer says intermediate moves aren't listed |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: line movement was the oldest 50 snapshots (JAX/PHI DK spreads, 3,939 rows, page ended at home −3, latest was −7); form strip mixed PHI across MLB/NHL/NFL and labelled every sport runs. Open-to-now sample, sport-scoped games, points for football |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |

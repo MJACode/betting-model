@@ -60,6 +60,7 @@ export function useTeamTrends(sport: string | null, team: string | null, beforeD
             runs_for,
             runs_against,
             opponent,
+            season: g.season,
           };
         });
         setGames(mapped);

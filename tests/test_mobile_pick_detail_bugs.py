@@ -402,17 +402,20 @@ eq(
   'close steady',
 );
 eq(
-  movementVerdict({ kind: 'against', atClose: false, lock: '+6', end: '+3', side: 'away' }),
-  'Line moved +6 → +3 against your away',
+  movementVerdict({ kind: 'against', atClose: false, lock: '+6', end: '+3' }),
+  'Line moved +6 → +3 against your pick',
   'unstarted against',
 );
 eq(
-  movementVerdict({ kind: 'against', atClose: true, lock: '+6', end: '+3', side: 'away' }),
-  'Line moved +6 → +3 against your away by the close',
+  movementVerdict({ kind: 'against', atClose: true, lock: '+6', end: '+3' }),
+  'Line moved +6 → +3 against your pick by the close',
   'close against',
 );
+if (movementVerdict({ kind: 'against', atClose: true, lock: '+6', end: '+3' }).includes('away')) {
+  throw new Error('the side key is still in the verdict');
+}
 eq(
-  movementVerdict({ kind: 'favor', atClose: true, lock: '+6', end: '+7', side: 'away' }),
+  movementVerdict({ kind: 'favor', atClose: true, lock: '+6', end: '+7' }),
   'Line moved +6 → +7 in your favor by the close',
   'close favor',
 );
@@ -450,6 +453,9 @@ def test_the_card_uses_the_close_copy():
     assert "movementVerdict(" in card
     assert "historyTimeLabel(" in card
     assert "gameStarted && historyWindow.until != null" in card
+    history = _read(HISTORY)
+    assert "against your pick" in history
+    assert "against your ${" not in history
 
 
 # ── form strip ─────────────────────────────────────────────────────────────
@@ -462,6 +468,9 @@ def test_team_form_reads_one_sport_and_does_not_say_runs_for_football():
     screen = _read(SCREEN)
     assert "game?.sport" in screen
     assert "teamScoringUnit(game.sport)" in screen
+    assert "teamScoringUnitSpoken(game.sport)" in screen
+    assert "countThisSeason(homeTrends.games, game.season)" in screen
+    assert "countThisSeason(awayTrends.games, game.season)" in screen
     assert "useTeamTrends('NFL'" not in screen, "NCAAF uses the same strip; the sport comes from the game"
     strip = _read(STRIP)
     assert "toFixed(1)} R`" not in strip, "the team average was hardcoded as runs"
@@ -470,12 +479,18 @@ def test_team_form_reads_one_sport_and_does_not_say_runs_for_football():
     # Player mode keeps "Season": its window is 25 or 50 depending on sport.
     assert "mode === 'team' && k.key === 'season' ? 'L25'" in strip
     assert "label: 'Season'" in strip
+    assert "teamCellAccessibilityLabel(" in strip
+    assert "teamGamesRow(" in strip
+    assert "teamSeasonNote(" in strip
+    assert "accessible={mode === 'team'}" in strip
+    assert strip.count("textAlign: 'center'") >= 4
+    assert "season: g.season" in hook
 
 
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_scoring_unit_is_points_for_football_and_runs_for_baseball(tmp_path):
     script = PRELUDE + """
-import { teamScoringUnit } from './teamForm.ts';
+import { teamScoringUnit, teamScoringUnitSpoken, teamGamesRow, teamSeasonNote, teamCellAccessibilityLabel, countThisSeason } from './teamForm.ts';
 eq(teamScoringUnit('MLB'), 'R', 'mlb');
 eq(teamScoringUnit('NFL'), 'pts', 'nfl');
 eq(teamScoringUnit('NCAAF'), 'pts', 'ncaaf');
@@ -483,6 +498,71 @@ eq(teamScoringUnit('NBA'), 'pts', 'nba');
 eq(teamScoringUnit('WNBA'), 'pts', 'wnba');
 eq(teamScoringUnit('NHL'), 'goals', 'nhl');
 eq(teamScoringUnit(null), '', 'unknown is not runs');
+eq(teamScoringUnitSpoken('MLB'), 'runs', 'spoken mlb');
+eq(teamScoringUnitSpoken('NFL'), 'points', 'spoken nfl');
+eq(teamScoringUnitSpoken('NCAAF'), 'points', 'spoken ncaaf');
+eq(teamScoringUnitSpoken('NBA'), 'points', 'spoken nba');
+eq(teamScoringUnitSpoken('WNBA'), 'points', 'spoken wnba');
+eq(teamScoringUnitSpoken('NHL'), 'goals', 'spoken nhl');
+eq(teamScoringUnitSpoken(null), '', 'spoken unknown');
+eq(teamGamesRow(0, 5), null, 'no data is not 0 games');
+eq(teamGamesRow(5, 5), null, 'a full window hides the count');
+eq(teamGamesRow(4, 5), '4 games', 'short window');
+eq(teamGamesRow(1, 3), '1 game', 'one game');
+eq(teamGamesRow(25, 25), null, 'L25 full');
+eq(
+  teamSeasonNote(4, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }),
+  'This season: 4 games. L5–L25 include earlier seasons.',
+  'smallest window that crosses',
+);
+eq(
+  teamSeasonNote(1, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }),
+  'This season: 1 game. L3–L25 include earlier seasons.',
+  'singular game',
+);
+eq(
+  teamSeasonNote(20, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }),
+  'This season: 20 games. L25 includes earlier seasons.',
+  'only L25 crosses',
+);
+eq(
+  teamSeasonNote(0, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }),
+  'No games yet this season. Every column is from earlier seasons.',
+  'none this season',
+);
+eq(teamSeasonNote(25, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }), null, 'all this season');
+eq(teamSeasonNote(null, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }), null, 'unknown season');
+eq(teamSeasonNote(0, { l3: 0, l5: 0, l10: 0, l20: 0, l25: 0 }), null, 'empty fetch is not a season note');
+eq(
+  teamCellAccessibilityLabel({
+    window: 5, games: 5, winPct: 0.4, avg: 18.8, spokenUnit: 'points', seasonGames: 4,
+  }),
+  'Last 5 games, including earlier seasons: won 40 percent, 18.8 points a game',
+  'voiceover',
+);
+eq(
+  teamCellAccessibilityLabel({
+    window: 5, games: 5, winPct: 0.4, avg: 18.8, spokenUnit: 'points', seasonGames: 5,
+  }),
+  'Last 5 games: won 40 percent, 18.8 points a game',
+  'voiceover this season only',
+);
+eq(
+  teamCellAccessibilityLabel({
+    window: 5, games: 4, winPct: 0.5, avg: 3.2, spokenUnit: 'goals', seasonGames: 2,
+  }),
+  'Last 5 games, 4 games played, including earlier seasons: won 50 percent, 3.2 goals a game',
+  'short window is in the label',
+);
+eq(
+  teamCellAccessibilityLabel({
+    window: 3, games: 0, winPct: null, avg: null, spokenUnit: 'runs', seasonGames: 0,
+  }),
+  'Last 3 games: won not available, average not available',
+  'empty cell does not say 0 games',
+);
+eq(countThisSeason([{ season: 2027 }, { season: 2027 }, { season: 2026 }], 2027), 2, 'this season');
+eq(countThisSeason([{ season: 2026 }], null), null, 'unknown season count');
 """
     proc = _run(tmp_path, ["teamForm.ts"], script)
     assert proc.returncode == 0, proc.stderr or proc.stdout

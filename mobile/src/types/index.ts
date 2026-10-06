@@ -448,6 +448,8 @@ export interface TeamGameStat {
   runs_for: number | null;
   runs_against: number | null;
   opponent: string;
+  /** games.season. The form strip uses it to say when a window crosses seasons. */
+  season: number | null;
 }
 
 export interface TrendBuckets {

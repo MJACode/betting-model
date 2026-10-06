@@ -115,7 +115,6 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
       atClose,
       lock: formatSideLine(movement?.scoredLine ?? pick.scored_line, pick.pick_side, market),
       end: formatSideLine(movement?.currentLine ?? currentLine, pick.pick_side, market),
-      side: pick.pick_side,
       pp: movement?.priceShiftPp,
     }),
     color:
