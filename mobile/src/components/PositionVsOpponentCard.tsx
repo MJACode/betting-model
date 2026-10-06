@@ -24,11 +24,13 @@ import {
   footnoteText,
   groupSingular,
   isMlbGroup,
+  nextSeasonChoice,
   opponentNoun,
   playerSummaries,
   rankPhrase,
   positionVsOpponent,
   roleCutText,
+  seasonSubjectKey,
   type PositionGroup,
   type SeasonChoice,
 } from '@/lib/positionVsOpponent';
@@ -94,22 +96,38 @@ export function PositionVsOpponentCard({
   selection: { line: number; side: HitDirection };
 }) {
   const [choice, setChoice] = useState<SeasonChoice>('this');
+  const [visible, setVisible] = useState(ROWS_SHOWN);
   const season = choice === 'this' ? seasonThis : seasonThis - 1;
   // Open on LAST season when this one has no games yet and last season does
   // — the NBA in October, the NFL and NCAAF in their off-seasons — so the
-  // card is not an empty state plus a tap for every player. Once only, and
-  // never after the reader has picked a season themselves (UX review,
-  // 2026-10-06).
-  const picked = useRef(false);
+  // card is not an empty state plus a tap for every player. Once per
+  // player+opponent, and never over a season this reader already tapped
+  // for the same player (UX review, 2026-10-06). The screen keeps this
+  // card mounted when the player or the opponent changes, so the flag has
+  // to reset with that key — a sticky ref opened the previous player and
+  // then refused to open the next one.
+  const subjectKey = seasonSubjectKey(playerId, opponent);
+  const decided = useRef(false);
+  const readerPicked = useRef(false);
+  const seenKey = useRef<string | null>(null);
   useEffect(() => {
-    if (picked.current || loading || rows.length === 0) return;
-    const others = rows.filter((r) => !playerId || r.player_id !== playerId);
-    const hasThis = others.some((r) => Number(r.season) === seasonThis);
-    const hasLast = others.some((r) => Number(r.season) === seasonThis - 1);
-    if (!hasThis && hasLast) setChoice('last');
-    picked.current = true;
-  }, [loading, rows, playerId, seasonThis]);
-  const [visible, setVisible] = useState(ROWS_SHOWN);
+    const next = nextSeasonChoice({
+      subjectKey,
+      seenKey: seenKey.current,
+      decided: decided.current,
+      readerPicked: readerPicked.current,
+      choice,
+      loading,
+      rows,
+      playerId,
+      seasonThis,
+    });
+    seenKey.current = next.seenKey;
+    decided.current = next.decided;
+    readerPicked.current = next.readerPicked;
+    if (next.subjectChanged) setVisible(ROWS_SHOWN);
+    if (next.choice !== choice) setChoice(next.choice);
+  }, [subjectKey, choice, loading, rows, playerId, seasonThis]);
   const card = useMemo(
     () =>
       positionVsOpponent(rows, {
@@ -137,7 +155,8 @@ export function PositionVsOpponentCard({
   const unit = summary ? 'players' : 'games';
   const seasonText = choice === 'this' ? 'this season' : 'last season';
   const pick = (c: SeasonChoice) => {
-    picked.current = true;
+    readerPicked.current = true;
+    decided.current = true;
     setChoice(c);
     setVisible(ROWS_SHOWN);
   };

@@ -12,11 +12,14 @@
  */
 import {
   footnoteText,
+  nextSeasonChoice,
   playerSummaries,
   positionVsOpponent,
   roleCutText,
   rosterGroup,
   rosterSeasonInProgress,
+  seasonSubjectKey,
+  type SeasonChoiceInput,
 } from '../src/lib/positionVsOpponent';
 import type { PositionVsOpponentRow } from '../src/types';
 
@@ -103,6 +106,73 @@ check('footnote keeps abbreviations upper case', footnoteText('WR', 'NCAAF').sta
   footnoteText('WR', 'NCAAF'));
 check('footnote lower-cases words', footnoteText('G', 'NBA') === 'Counts guards with 15+ minutes in the game.',
   footnoteText('G', 'NBA'));
+
+// ── the once-only "open on last season" flag ─────────────────────────────
+// The card stays mounted when the reader opens another player. The flag
+// has to reset with the player or the opponent, and a season they tapped
+// for this same player has to stay put.
+function choiceInput(over: Partial<SeasonChoiceInput>): SeasonChoiceInput {
+  return {
+    subjectKey: seasonSubjectKey('p1', 'ATL'),
+    seenKey: null,
+    decided: false,
+    readerPicked: false,
+    choice: 'this',
+    loading: false,
+    rows: [{ player_id: 'other', season: 2025 }],
+    playerId: 'p1',
+    seasonThis: 2026,
+    ...over,
+  };
+}
+const opened = nextSeasonChoice(choiceInput({}));
+check('empty this season opens on last, once', opened.choice === 'last' && opened.decided,
+  `${opened.choice} decided=${opened.decided}`);
+const held = nextSeasonChoice(choiceInput({
+  seenKey: opened.seenKey, decided: opened.decided, choice: opened.choice,
+  rows: [{ player_id: 'other', season: 2025 }],
+}));
+check('same player and opponent does not decide again', held.choice === 'last' && held.subjectChanged === false);
+const reader = nextSeasonChoice(choiceInput({
+  seenKey: seasonSubjectKey('p1', 'ATL'),
+  decided: true,
+  readerPicked: true,
+  choice: 'this',
+  rows: [{ player_id: 'other', season: 2025 }],
+}));
+check('a season the reader picked for this player stays', reader.choice === 'this' && reader.readerPicked);
+const otherOpponent = nextSeasonChoice(choiceInput({
+  subjectKey: seasonSubjectKey('p1', 'BUF'),
+  seenKey: seasonSubjectKey('p1', 'ATL'),
+  decided: true,
+  readerPicked: true,
+  choice: 'this',
+  rows: [{ player_id: 'other', season: 2025 }],
+}));
+check('a new opponent does not override the reader\'s season for the same player',
+  otherOpponent.choice === 'this' && otherOpponent.readerPicked && otherOpponent.subjectChanged);
+const nextPlayer = nextSeasonChoice(choiceInput({
+  subjectKey: seasonSubjectKey('p2', 'ATL'),
+  seenKey: seasonSubjectKey('p1', 'ATL'),
+  decided: true,
+  readerPicked: true,
+  choice: 'this',
+  playerId: 'p2',
+  rows: [{ player_id: 'other', season: 2025 }],
+}));
+check('a new player resets the flag and can open on last season',
+  nextPlayer.choice === 'last' && nextPlayer.decided && nextPlayer.readerPicked === false
+  && nextPlayer.subjectChanged);
+const autoThenOpponent = nextSeasonChoice(choiceInput({
+  subjectKey: seasonSubjectKey('p1', 'BUF'),
+  seenKey: seasonSubjectKey('p1', 'ATL'),
+  decided: true,
+  readerPicked: false,
+  choice: 'last',
+  rows: [{ player_id: 'other', season: 2026 }],
+}));
+check('an auto choice re-decides when only the opponent changes',
+  autoThenOpponent.choice === 'this' && autoThenOpponent.decided && autoThenOpponent.readerPicked === false);
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
 process.exit(failed ? 1 : 0);

@@ -358,14 +358,17 @@ def step_player_positions(run_date: str) -> bool:
     """NBA / WNBA / NCAAF positions for the player page's "same position vs
     the next opponent" card (data/ingestors/player_positions_ingestor.py).
 
-    Once a day is enough: rosters change slowly, and the ESPN half re-fetches
-    only athletes not stored in the last 7 days, so a steady-state pass is the
-    ~45 roster-list calls plus that week's signings (ESPN has IP-blocked this
-    worker twice). CFBD /roster is one call. Verified on the worker
-    2026-10-06 by dry runs 405765 / 406072 before this was scheduled."""
+    Once a day is enough: rosters change slowly. The ESPN half re-fetches an
+    athlete only after a 7-day window plus a per-id jitter, skips unmatched
+    ids it has already cached, and stops at MAX_ATHLETE_HTTP so a cold morning
+    cannot walk every roster (ESPN has IP-blocked this worker twice). NCAAF
+    uses the fall-year season of `run_date` — January through July belong to
+    the previous season — so a January run still reads the roster that has
+    game logs. CFBD /roster is one call. Verified on the worker 2026-10-06
+    by dry runs 405765 / 406072 before this was scheduled."""
     try:
         from data.ingestors.player_positions_ingestor import ingest_player_positions
-        result = ingest_player_positions(dry_run=False)
+        result = ingest_player_positions(dry_run=False, run_date=run_date)
         logger.success(f"✓ Player positions: {result}")
         return True
     except Exception as exc:

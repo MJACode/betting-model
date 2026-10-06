@@ -141,9 +141,10 @@ def test_a_failed_read_is_not_held_on_the_spinner():
     the failure. Counting it as loading leaves the spinner up forever."""
     hook = HOOK.read_text(encoding="utf-8")
     assert (
-        "const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '');"
+        "const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '')\n"
+        "    && pvo.data.opponent === opponent;"
         in hook
-    ), "rows must be tagged with BOTH the stat and the group they were read for"
+    ), "rows must be tagged with the stat, the group and the opponent they were read for"
     assert "rows: pvoFresh ? pvo.data.rows : []," in hook
     assert "loading: pvo.loading || (pvo.error == null && !pvoFresh)," in hook, (
         "a failed position-vs-opponent read must not stay loading"
@@ -337,8 +338,13 @@ def test_a_failed_position_read_is_said_not_hidden():
 
 def test_the_card_opens_on_last_season_when_this_one_is_empty():
     card = CARD.read_text(encoding="utf-8")
-    assert "if (!hasThis && hasLast) setChoice('last');" in card
-    # Once only, and never over the reader's own choice.
-    assert "if (picked.current || loading || rows.length === 0) return;" in card
-    assert "const pick = (c: SeasonChoice) => {\n    picked.current = true;" in card
+    ts = TS
+    assert "if (!hasThis && hasLast) choice = 'last';" in ts
+    # The screen reuses this card for the next player. The once-only flag
+    # lives in nextSeasonChoice, keyed on player + opponent, and a tap sets
+    # readerPicked so that choice is not overwritten for the same player.
+    assert "nextSeasonChoice(" in card
+    assert "seasonSubjectKey(playerId, opponent)" in card
+    assert "readerPicked.current = true;" in card
+    assert "picked.current" not in card
     assert "toLowerCase()" not in card

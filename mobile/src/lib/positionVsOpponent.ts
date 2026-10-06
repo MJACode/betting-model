@@ -275,6 +275,65 @@ export function rosterSeasonInProgress(sport: RosterSport, todayIso: string): nu
 
 export type SeasonChoice = 'this' | 'last';
 
+/** Player and opponent, so a reused card can tell a new subject from a
+ *  refresh of the same one. NUL is not in a player id or an opponent abbrev. */
+export function seasonSubjectKey(playerId: string | null, opponent: string): string {
+  return `${playerId ?? ''}\0${opponent}`;
+}
+
+export interface SeasonChoiceInput {
+  subjectKey: string;
+  seenKey: string | null;
+  /** The once-only auto-open has already run for this subject. */
+  decided: boolean;
+  /** The reader tapped This season / Last season for this player. */
+  readerPicked: boolean;
+  choice: SeasonChoice;
+  loading: boolean;
+  rows: { player_id: string; season: number | string }[];
+  playerId: string | null;
+  seasonThis: number;
+}
+
+export interface SeasonChoiceNext {
+  seenKey: string;
+  decided: boolean;
+  readerPicked: boolean;
+  choice: SeasonChoice;
+  subjectChanged: boolean;
+}
+
+/**
+ * Open on last season when this one has no games yet and last season does,
+ * once per player + opponent. A different player or opponent starts that
+ * decision again. A season the reader tapped for this same player is left
+ * alone, including when the opponent changes.
+ */
+export function nextSeasonChoice(state: SeasonChoiceInput): SeasonChoiceNext {
+  const playerId = state.playerId ?? '';
+  let decided = state.decided;
+  let readerPicked = state.readerPicked;
+  let choice = state.choice;
+  const subjectChanged = state.seenKey !== state.subjectKey;
+  if (subjectChanged) {
+    const prevPlayer = state.seenKey == null ? null : state.seenKey.split('\0')[0];
+    const samePlayer = prevPlayer !== null && prevPlayer === playerId;
+    decided = false;
+    if (!(samePlayer && readerPicked)) {
+      choice = 'this';
+      readerPicked = false;
+    }
+  }
+  if (readerPicked || decided || state.loading || state.rows.length === 0) {
+    return { seenKey: state.subjectKey, decided, readerPicked, choice, subjectChanged };
+  }
+  const others = state.rows.filter((r) => !state.playerId || r.player_id !== state.playerId);
+  const hasThis = others.some((r) => Number(r.season) === state.seasonThis);
+  const hasLast = others.some((r) => Number(r.season) === state.seasonThis - 1);
+  if (!hasThis && hasLast) choice = 'last';
+  return { seenKey: state.subjectKey, decided: true, readerPicked, choice, subjectChanged };
+}
+
 export interface PositionVsOpponentEntry {
   playerId: string;
   playerName: string;
