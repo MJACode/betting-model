@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -20,8 +21,11 @@ import pytest
 from data.ingestors.player_positions_ingestor import (
     FOOTBALL_GROUP,
     EspnClient,
+    _upsert,
     basketball_group,
+    basketball_season_start,
     coverage_from_games,
+    espn_basketball_season,
     ingest_player_positions,
     match_to_log,
     ncaaf_season_or_derived,
@@ -163,12 +167,28 @@ def test_the_job_defaults_to_a_dry_run_and_one_sport():
 
 
 def test_every_declared_player_positions_job_is_a_dry_run():
+    """WNBA is not declared (offseason). NCAAF waits on run_after so it
+    does not start the moment the NBA ESPN pass ends."""
     jobs = json.loads((ROOT / "jobs/declared_jobs.json").read_text(encoding="utf-8"))
     ours = [j for j in jobs if j["job_type"] == "player_positions"]
     assert len(ours) >= 1
+    sports = []
     for job in ours:
         assert job["args"].get("dry_run") is True, job["key"]
         assert job["args"].get("sports") and len(job["args"]["sports"]) == 1, job["key"]
+        sports.append(job["args"]["sports"][0])
+    assert "WNBA" not in sports
+    assert "player-positions-dry-run-wnba-2026-10-06" not in {j["key"] for j in ours}
+    nba = next(j for j in ours if j["key"] == "player-positions-dry-run-nba-2026-10-06")
+    ncaaf = next(j for j in ours if j["key"] == "player-positions-dry-run-ncaaf-2026-10-06")
+    assert nba["args"]["sports"] == ["NBA"]
+    assert "run_after" not in nba
+    assert ncaaf["args"]["sports"] == ["NCAAF"]
+    # A timezone offset is what enqueue requires. A few hours after a
+    # 2026-10-06 morning merge, not the same instant as the NBA job.
+    start = datetime.fromisoformat(ncaaf["run_after"])
+    assert start.tzinfo is not None
+    assert start == datetime.fromisoformat("2026-10-06T18:00:00+00:00")
 
 
 # ── review fixes: burst, match, coverage, isolation ──────────────────────────
@@ -255,6 +275,22 @@ def test_inline_roster_position_does_not_fetch_the_athlete():
     assert calls == [pos]
 
 
+def test_espn_season_year_is_the_nba_end_year_and_the_wnba_calendar_year():
+    """2026-10-06 is the NBA 2026-27 season (ESPN 2027). WNBA stays 2026."""
+    assert espn_basketball_season("NBA", "2026-10-06") == 2027
+    assert espn_basketball_season("NBA", "2026-04-12") == 2026
+    assert espn_basketball_season("NBA", "2025-12-15") == 2026
+    assert espn_basketball_season("WNBA", "2026-10-06") == 2026
+    assert espn_basketball_season("WNBA", "2026-07-25") == 2026
+    url, via = roster_url(
+        {}, "nba", "1", espn_basketball_season("NBA", "2026-10-06"))
+    assert via == "season_path"
+    assert "/seasons/2027/teams/1/athletes?limit=200" in url
+    wnba, _ = roster_url(
+        {}, "wnba", "5", espn_basketball_season("WNBA", "2026-10-06"))
+    assert "/seasons/2026/teams/5/athletes?limit=200" in wnba
+
+
 def test_roster_url_uses_the_team_doc_link_not_the_path_that_404d():
     """worker_jobs 405765: /teams/{id}/athletes 404'd for every team."""
     bare = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams/1/athletes?limit=200"
@@ -268,6 +304,11 @@ def test_roster_url_uses_the_team_doc_link_not_the_path_that_404d():
     fallback, via2 = roster_url({}, "nba", "1", 2026)
     assert via2 == "season_path"
     assert "/seasons/2026/teams/1/athletes" in fallback
+    # The derived year, not the job's NCAAF season. 2026-10-06 is 2026-27.
+    derived, via3 = roster_url(
+        {}, "nba", "1", espn_basketball_season("NBA", "2026-10-06"))
+    assert via3 == "season_path"
+    assert "/seasons/2027/teams/1/athletes" in derived
     assert fallback != bare
     bumped, _ = roster_url(
         {"athletes": {"$ref": "https://x/athletes?limit=25"}}, "nba", "1", 2026)
@@ -343,12 +384,64 @@ def test_team_codes_normalize_to_the_log():
 
 
 def test_a_unique_name_on_the_wrong_team_is_not_a_match():
-    """A rookie with no log row must not inherit the only veteran of that name."""
+    """No game date: a team mismatch cannot be shown to be a prior season."""
     index = {norm_player_name("John Smith"): [("999", "LAL")]}
-    assert match_to_log("John Smith", "BOS", index) is None
+    how: dict = {}
+    assert match_to_log("John Smith", "BOS", index, how) is None
+    assert how["method"] == "team_conflict"
     assert match_to_log("John Smith", "LAL", index) == "999"
     # No ESPN team: nothing to conflict with. The Jokic case stays a match.
     assert match_to_log("John Smith", None, index) == "999"
+
+
+def test_a_summer_mover_matches_under_prior_season_team_change():
+    """NBA log ends 2026-04-12. On 2026-10-06 that game is last season.
+
+    The shared-name path would still pick someone. A unique name must too,
+    and say it was a prior-season team change.
+    """
+    assert basketball_season_start("NBA", "2026-10-06") == "2026-10-01"
+    index = {norm_player_name("Paul George"): [("202331", "LAC", "2026-04-12")]}
+    how: dict = {}
+    assert match_to_log(
+        "Paul George", "PHI", index, how, sport="NBA", as_of="2026-10-06",
+    ) == "202331"
+    assert how["method"] == "prior_season_team_change"
+    # WNBA is a calendar year: a 2025 game is prior on 2026-10-06.
+    assert basketball_season_start("WNBA", "2026-10-06") == "2026-01-01"
+    wnba = {norm_player_name("A'ja Wilson"): [("162", "LV", "2025-09-15")]}
+    how = {}
+    assert match_to_log(
+        "A'ja Wilson", "NY", wnba, how, sport="WNBA", as_of="2026-10-06",
+    ) == "162"
+    assert how["method"] == "prior_season_team_change"
+
+
+def test_a_team_change_inside_the_current_season_stays_unmatched():
+    index = {norm_player_name("Paul George"): [("202331", "PHI", "2026-10-22")]}
+    how: dict = {}
+    assert match_to_log(
+        "Paul George", "LAC", index, how, sport="NBA", as_of="2026-10-25",
+    ) is None
+    assert how["method"] == "team_conflict"
+    # Same calendar year is the WNBA current season, even in October.
+    wnba = {norm_player_name("A'ja Wilson"): [("162", "LV", "2026-07-25")]}
+    how = {}
+    assert match_to_log(
+        "A'ja Wilson", "NY", wnba, how, sport="WNBA", as_of="2026-10-06",
+    ) is None
+    assert how["method"] == "team_conflict"
+
+
+def test_a_rookie_with_no_history_does_not_inherit_a_veteran():
+    """No log row means method none, not the only other id in the index."""
+    index = {norm_player_name("John Smith"): [("999", "LAL", "2026-04-12")]}
+    how: dict = {}
+    assert match_to_log(
+        "Brand New", "BOS", index, how, sport="NBA", as_of="2026-10-06",
+    ) is None
+    assert how["method"] == "none"
+    assert match_to_log("Brand New", "BOS", {}) is None
 
 
 def test_shared_name_team_rule_uses_the_espn_to_log_map():
@@ -539,7 +632,7 @@ def test_basketball_dry_run_reports_coverage_duplicates_and_cache(tmp_path):
     assert cache.exists()
     saved = json.loads(cache.read_text(encoding="utf-8"))
     assert pos in saved["docs"]
-    assert "12" in saved["unmatched"]["NBA"]
+    assert "unmatched" not in saved
 
 
 def test_ncaaf_maps_the_requested_season_and_the_one_before(monkeypatch):
@@ -696,3 +789,80 @@ def test_a_tiebreak_guess_does_not_overwrite_a_claimed_id():
         assert owned[0][4] == "PG"
         assert owned[0][7] == "9001"
         assert all(p[7] != "9002" for p in inserts)
+
+
+def test_dry_run_counts_a_mover_and_a_current_season_conflict():
+    from data.ingestors.player_positions_ingestor import _basketball
+
+    teams_url = ("https://sports.core.api.espn.com/v2/sports/basketball/"
+                 "leagues/nba/teams?limit=50")
+    team = "https://sports.core.api.espn.com/teams/1"
+    roster = "https://sports.core.api.espn.com/seasons/2027/teams/1/athletes?limit=200"
+    docs = {
+        teams_url: {"items": [{"$ref": team}]},
+        team: {"id": "1", "abbreviation": "PHI",
+               "athletes": {"$ref": roster}},
+        roster: {"items": [
+            {"id": "1", "displayName": "Paul George",
+             "position": {"abbreviation": "SF"}},
+            {"id": "2", "displayName": "In Season",
+             "position": {"abbreviation": "PG"}},
+        ]},
+    }
+    log_rows = [
+        ("202331", "Paul George", "LAC", 60, ["LAC"], "2026-04-12"),
+        ("999", "In Season", "LAL", 10, ["LAL"], "2026-10-04"),
+    ]
+
+    class Conn:
+        def execute(self, sql, params=None):
+            if "nba_player_game_log" in sql:
+                return _Rows(log_rows)
+            return _Rows([])
+
+        def commit(self):
+            raise AssertionError("dry run")
+
+        def rollback(self):
+            pass
+
+    client, _, _ = _client(docs, cap=10)
+    stats = _basketball(Conn(), "NBA", True, client=client, cache_path=None,
+                        as_of="2026-10-06")
+    assert stats["espn_season"] == 2027
+    assert stats["prior_season_team_change"] == 1
+    assert stats["team_conflict"] == 1
+    assert stats["match_method"]["prior_season_team_change"] == 1
+    assert stats["match_method"]["team_conflict"] == 1
+    assert stats["matched"] == 1
+    assert stats["unmatched"] == 1
+    assert stats["written"] == 0
+
+
+def test_a_later_match_deletes_the_unmatched_sentinel_before_commit():
+    """Same transaction: the DELETE is after the INSERT and before COMMIT."""
+    statements = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            statements.append((sql.strip().split()[0].upper(), params))
+
+        def commit(self):
+            statements.append(("COMMIT", None))
+
+    _upsert(Conn(), [{
+        "sport": "NBA", "player_id": "201939", "player_name": "Stephen Curry",
+        "team": "GSW", "position": "PG", "pos_group": "G",
+        "source": "espn_core", "source_athlete_id": "55",
+    }])
+    kinds = [s[0] for s in statements]
+    assert kinds == ["INSERT", "DELETE", "COMMIT"]
+    assert statements[1][1] == ("NBA", "unmatched:55")
+    # An unmatched row does not delete itself.
+    statements.clear()
+    _upsert(Conn(), [{
+        "sport": "NBA", "player_id": "unmatched:55", "player_name": "Nobody",
+        "team": "BOS", "position": "SG", "pos_group": "G",
+        "source": "espn_core_unmatched", "source_athlete_id": "55",
+    }])
+    assert [s[0] for s in statements] == ["INSERT", "COMMIT"]

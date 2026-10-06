@@ -29,14 +29,25 @@ PLAYER IDS (load-bearing). The basketball logs key on the nba_api PLAYER_ID,
 not ESPN's athlete id. Each ESPN athlete is mapped by normalised name
 (norm_player_name), narrowed by team. The team rule compares log codes:
 ESPN GS/NO/NY/SA/UTAH/WSH are GSW/NOP/NYK/SAS/UTA/WAS, and the WNBA map is
-applied the same way. A unique name on a different team is not a match.
-A name still shared after the team rule goes to the player with the most
-recent game (Matt, 2026-10-06: "don't skip names"), counted as
+applied the same way. A unique name whose ESPN team is absent from that
+player's log is `prior_season_team_change` when their latest game is older
+than the current season start (NBA: October 1 of the ending-year season;
+WNBA: January 1 of the calendar year). The NBA log ends 2026-04-12, so a
+summer move would otherwise be stored unmatched for 7 days. The same
+mismatch inside the current season is `team_conflict` and stays unmatched.
+A name with no log row is `none` — a rookie does not inherit a veteran's
+id. A name still shared after the team rule goes to the player with the
+most recent game (Matt, 2026-10-06: "don't skip names"), counted as
 tiebreak_recent. When the ESPN team matches nobody, that guess can be
 another player's id. It is still returned, and the run will not let it
-overwrite an id already claimed by a name or team match in the same run.
+overwrite an id already claimed by a name, team, or prior-season match.
 That collision, and any second claim of the same id, is duplicate_ids.
-An athlete with no log history is counted unmatched.
+
+ESPN SEASON YEAR on the fallback roster path. NBA seasons are the ending
+year (2026-10-06 is the 2026-27 season, ESPN 2027 — the same rule as
+nba_stats_ingestor._nba_season_for_date). WNBA seasons are the calendar
+year (wnba_stats_ingestor uses the date's year). The job's `season` argument
+is the NCAAF roster year; it is not the basketball fallback year.
 
 ONE SPORT PER JOB. A cold NBA pass is on the order of 1 team list + 30 team
 docs + 30 roster lists + ~450 athlete docs + a handful of position docs
@@ -256,6 +267,32 @@ def _link(doc: dict | None, key: str) -> str | None:
     return None
 
 
+def espn_basketball_season(sport: str, today: str) -> int:
+    """ESPN core season year for `sport` on `today` (YYYY-MM-DD).
+
+    NBA is the ending year: October–December belong to next year's season,
+    so 2026-10-06 is 2027 (the 2026-27 season) and 2026-04-12 is 2026.
+    WNBA is the calendar year of `today`.
+    """
+    year = int(today[:4])
+    month = int(today[5:7])
+    if str(sport).upper() == "WNBA":
+        return year
+    return year + 1 if month >= 10 else year
+
+
+def basketball_season_start(sport: str, today: str) -> str:
+    """First day of the season `today` falls in, YYYY-MM-DD.
+
+    A unique-name team mismatch whose latest log game is strictly before
+    this date is a prior-season move. NBA season start is October 1 before
+    the ending year. WNBA season start is January 1 of the calendar year.
+    """
+    if str(sport).upper() == "WNBA":
+        return f"{int(today[:4])}-01-01"
+    return f"{espn_basketball_season('NBA', today) - 1}-10-01"
+
+
 def roster_url(team_doc: dict | None, league: str, team_id: str,
                season: int) -> tuple[str, str]:
     """(url, via) for one team's roster.
@@ -392,7 +429,9 @@ class EspnClient:
 
 
 def _read_cache(path: Path | None) -> dict:
-    empty = {"docs": {}, "unmatched": {}}
+    """HTTP bodies only. An older file may still carry `unmatched`; it is
+    not a skip list (the 7-day skip is the `player_positions` row)."""
+    empty = {"docs": {}}
     if path is None or not path.exists():
         return empty
     try:
@@ -403,8 +442,7 @@ def _read_cache(path: Path | None) -> dict:
     if not isinstance(data, dict):
         return empty
     docs = data.get("docs") if isinstance(data.get("docs"), dict) else {}
-    unmatched = data.get("unmatched") if isinstance(data.get("unmatched"), dict) else {}
-    return {"docs": docs, "unmatched": unmatched}
+    return {"docs": docs}
 
 
 def _fresh_docs(path: Path | None, now: datetime | None = None) -> dict:
@@ -430,8 +468,7 @@ def _fresh_docs(path: Path | None, now: datetime | None = None) -> dict:
     return out
 
 
-def _write_cache(path: Path | None, client: EspnClient,
-                 unmatched: dict | None = None) -> None:
+def _write_cache(path: Path | None, client: EspnClient) -> None:
     """Persist bodies fetched this run. Hits keep the timestamp they had."""
     if path is None:
         return
@@ -446,13 +483,9 @@ def _write_cache(path: Path | None, client: EspnClient,
             docs[url] = {"at": now, "body": body}
         else:
             docs[url] = old[url]
-    merged_unmatched = dict(previous["unmatched"])
-    for sport, rows in (unmatched or {}).items():
-        merged_unmatched[sport] = rows
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps({"docs": docs, "unmatched": merged_unmatched}),
-                   encoding="utf-8")
+    tmp.write_text(json.dumps({"docs": docs}), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -635,22 +668,41 @@ def _candidate(cand, sport: str) -> tuple[str, set[str], str]:
     return pid, teams, gdate
 
 
+def _before_season(gdate: str, season_start: str) -> bool:
+    """True when `gdate` is a real date strictly before `season_start`.
+
+    Both are compared on their first 10 characters, so a timestamp and a
+    date share the ISO day. An empty date is not a prior season.
+    """
+    day = str(gdate)[:10]
+    start = str(season_start)[:10]
+    if len(day) < 10 or len(start) < 10:
+        return False
+    return day < start
+
+
 def match_to_log(name: str, team: str | None, index: dict,
-                 how: dict | None = None, *, sport: str = "NBA") -> str | None:
+                 how: dict | None = None, *, sport: str = "NBA",
+                 as_of: str | None = None) -> str | None:
     """Our player_id for an ESPN athlete, by normalised name.
 
     `index` maps norm_name -> candidate tuples (see `_candidate`). A unique
-    name matches only when we have no ESPN team, the log has no team, or the
-    ESPN team (after normalisation) appears in that player's history. A
-    unique name on a different team is a conflict — a rookie must not inherit
-    a veteran's id. A shared name is settled by that same team check. One
-    still shared after that, or a team that matches nobody, goes to the
-    candidate with the most recent game (Matt, 2026-10-06: "don't skip
-    names"). `how["method"]` is name, team, tiebreak_recent, or none.
+    name matches when we have no ESPN team, the log has no team, or the
+    ESPN team (after normalisation) appears in that player's history.
+    A unique name on a different team is `prior_season_team_change` when
+    `as_of` is set and their latest log game is older than this season's
+    start, and `team_conflict` (no id) when the mismatch is inside the
+    current season or the game date is missing. No log row at all is
+    `none`: a rookie does not inherit a veteran's id.
+
+    A shared name is settled by the team check. One still shared after
+    that, or a team that matches nobody, goes to the candidate with the
+    most recent game (Matt, 2026-10-06: "don't skip names").
+    `how["method"]` records which rule decided.
 
     A tiebreak_recent result is a guess when the ESPN team matched nobody.
-    The caller must not let that guess overwrite an id already claimed by a
-    name or team match in the same run.
+    The caller must not let that guess overwrite an id already claimed by
+    a name, team, or prior-season match in the same run.
     """
     def _set(m: str) -> None:
         if isinstance(how, dict):
@@ -671,11 +723,14 @@ def match_to_log(name: str, team: str | None, index: dict,
         return None
     espn = normalize_team(sport, team)
     if len(by_id) == 1:
-        pid, (teams, _) = next(iter(by_id.items()))
+        pid, (teams, gdate) = next(iter(by_id.items()))
         if espn is None or not teams or espn in teams:
             _set("name")
             return pid
-        _set("none")
+        if as_of and _before_season(gdate, basketball_season_start(sport, as_of)):
+            _set("prior_season_team_change")
+            return pid
+        _set("team_conflict")
         return None
     if espn:
         on_team = {pid: info for pid, info in by_id.items() if espn in info[0]}
@@ -789,6 +844,26 @@ def _upsert(conn, rows: list[dict]) -> int:
         """, (r["sport"], r["player_id"], r["player_name"], r.get("team"),
               r["position"], r.get("pos_group"), r["source"],
               r.get("source_athlete_id"), now))
+    # A prior run may have stored this espn id as unmatched:{id}. Drop that
+    # sentinel in the same transaction as the real row, or the 7-day skip
+    # keeps hiding a player we can now match.
+    seen: set[tuple[str, str]] = set()
+    for r in rows:
+        if r.get("source") == "espn_core_unmatched":
+            continue
+        espn_id = r.get("source_athlete_id")
+        if not espn_id:
+            continue
+        key = (r["sport"], str(espn_id))
+        if key in seen:
+            continue
+        seen.add(key)
+        conn.execute("""
+            DELETE FROM player_positions
+            WHERE sport = %s
+              AND player_id = %s
+              AND source = 'espn_core_unmatched'
+        """, (r["sport"], UNMATCHED_PREFIX + str(espn_id)))
     conn.commit()
     return len(rows)
 
@@ -804,13 +879,18 @@ def _empty_basketball_stats() -> dict:
         "positions": {}, "sample": [], "unmatched_sample": [],
         "teams_seen": [], "roster_via": {}, "requests": 0, "cache_hits": 0,
         "aborted_reason": None, "coverage": None, "written": 0,
+        "prior_season_team_change": 0, "team_conflict": 0,
+        "espn_season": None,
     }
 
 
-def _basketball(conn, sport: str, dry_run: bool, *, season: int,
+def _basketball(conn, sport: str, dry_run: bool, *, season: int | None = None,
+                as_of: str | None = None,
                 client: EspnClient | None = None,
                 cache_path: Path | None = None) -> dict:
     league = LEAGUE_OF[sport]
+    as_of = as_of or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    espn_season = int(season) if season is not None else espn_basketball_season(sport, as_of)
     rows = _log_players(conn, sport)
     index, games, latest = _index_from_rows(rows, sport)
     fresh = set() if dry_run else _fresh_source_ids(conn, sport)
@@ -818,15 +898,15 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
         client = EspnClient(cold=not fresh, docs=_fresh_docs(cache_path))
     stats = _empty_basketball_stats()
     stats["log_players_last_2_seasons"] = len(games)
+    stats["espn_season"] = espn_season
     out: list[dict] = []
     unmatched_rows: list[dict] = []
     seen: set[str] = set()
     # player_id -> the method that currently owns the row in `out`.
     # A tiebreak guess must not be the row that _upsert's ON CONFLICT keeps
-    # when a name or team match for that id also happened this run.
+    # when a name, team, or prior-season match for that id also happened.
     claimed: dict[str, str] = {}
     row_at: dict[str, int] = {}
-    file_unmatched: dict[str, dict] = {}
 
     teams = []
     listing = client.get_json(f"{CORE}/{league}/teams?limit=50")
@@ -851,7 +931,7 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
             stats["teams_seen"].append({
                 "espn_id": team_id, "espn": raw_abbrev, "log": log_team,
             })
-        url, via = roster_url(tdoc, league, team_id, season)
+        url, via = roster_url(tdoc, league, team_id, espn_season)
         stats["roster_via"][via] = stats["roster_via"].get(via, 0) + 1
         if client.aborted_reason:
             break
@@ -891,7 +971,8 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
             stats["positions"][person["position"]] = (
                 stats["positions"].get(person["position"], 0) + 1)
             how: dict = {}
-            pid = match_to_log(person["name"], raw_abbrev, index, how, sport=sport)
+            pid = match_to_log(person["name"], raw_abbrev, index, how,
+                               sport=sport, as_of=as_of)
             method = how.get("method", "none")
             stats["match_method"][method] = stats["match_method"].get(method, 0) + 1
             if method == "tiebreak_recent" and len(stats["tiebreak_sample"]) < SAMPLE:
@@ -906,10 +987,6 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
                         {"name": person["name"], "team": log_team,
                          "espn_team": raw_abbrev})
                 sentinel = UNMATCHED_PREFIX + person["espn_id"]
-                file_unmatched[person["espn_id"]] = {
-                    "name": person["name"], "team": log_team,
-                    "position": person["position"], "pos_group": grp,
-                }
                 unmatched_rows.append({
                     "sport": sport, "player_id": sentinel,
                     "player_name": person["name"], "team": log_team,
@@ -929,9 +1006,9 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
             if prior is not None:
                 # ON CONFLICT (sport, player_id) would let whichever row is
                 # inserted last win. A tiebreak guess must not be that row
-                # when a name or team match already owns the id, and a later
-                # name or team match replaces a guess so the guess does not
-                # stick. Either way the collision is counted.
+                # when a name, team, or prior-season match already owns the
+                # id, and a later one of those replaces a guess so the guess
+                # does not stick. Either way the collision is counted.
                 stats["duplicate_ids"] += 1
                 if method == "tiebreak_recent" or prior != "tiebreak_recent":
                     continue
@@ -953,11 +1030,14 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
     stats["requests"] = client.calls
     stats["cache_hits"] = client.cache_hits
     stats["aborted_reason"] = client.aborted_reason
+    stats["prior_season_team_change"] = stats["match_method"].get(
+        "prior_season_team_change", 0)
+    stats["team_conflict"] = stats["match_method"].get("team_conflict", 0)
     if dry_run:
         stats["written"] = 0
     else:
         stats["written"] = _upsert(conn, out + unmatched_rows)
-    _write_cache(cache_path, client, {sport: file_unmatched} if file_unmatched else None)
+    _write_cache(cache_path, client)
     return stats
 
 
@@ -1043,8 +1123,9 @@ def ingest_player_positions(sports=None, season: int | None = None,
 
     Default sport is NBA — one sport per call. Pass `sports` to run several;
     each sport has its own request cap and a failed sport rollbacks so the
-    next one still runs. `season` is the NCAAF roster year and the fallback
-    year in the basketball season-path URL. The job passes one sport.
+    next one still runs. `season` is the NCAAF roster year. The basketball
+    fallback roster path uses `espn_basketball_season`, not this year.
+    The job passes one sport.
     """
     own_conn = conn is None
     if conn is None:
@@ -1063,8 +1144,8 @@ def ingest_player_positions(sports=None, season: int | None = None,
                     if client_factory is not None:
                         client = client_factory(sport)
                     summary[sport] = _basketball(
-                        conn, sport, dry_run, season=ncaaf_season,
-                        client=client, cache_path=cache_path)
+                        conn, sport, dry_run, client=client,
+                        cache_path=cache_path)
                 elif sport == "NCAAF":
                     summary[sport] = _ncaaf(conn, ncaaf_season, dry_run)
                 else:

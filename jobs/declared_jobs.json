@@ -854,7 +854,7 @@
     "key": "player-positions-dry-run-2026-10-06",
     "job_type": "player_positions",
     "requested_by": "matt",
-    "note": "ALREADY RAN. worker_jobs 405765 finished 2026-10-06 10:50Z with the original three-sport args: NBA and WNBA team lists came back (30 and 17) and every /teams/{id}/athletes GET was HTTP 404, so athletes_listed was 0. NCAAF matched 11153 of 11641 season-2026 log players and wrote nothing. The key is kept so it is not queued again. sports is one element because the job now rejects a list. The replacement dry runs are the three keys below.",
+    "note": "ALREADY RAN. worker_jobs 405765 finished 2026-10-06 10:50Z with the original three-sport args: NBA and WNBA team lists came back (30 and 17) and every /teams/{id}/athletes GET was HTTP 404, so athletes_listed was 0. NCAAF matched 11153 of 11641 season-2026 log players and wrote nothing. The key is kept so it is not queued again. sports is one element because the job now rejects a list. The replacement dry runs are the NBA key and the NCAAF key below. WNBA is not declared: it is the offseason, and a second ESPN pass must not start the moment the NBA one finishes.",
     "args": {
       "sports": ["NBA"],
       "season": 2026,
@@ -873,21 +873,11 @@
     }
   },
   {
-    "key": "player-positions-dry-run-wnba-2026-10-06",
-    "job_type": "player_positions",
-    "requested_by": "matt",
-    "note": "DRY RUN, one sport, writes no player_positions rows. Same contract as the NBA replacement. WNBA log coverage denominator was 267 players over two seasons on 2026-10-06, including the COOP and SPO all-star squads (WNBA_2026-07-25_SPO_COOP). Queued separately so it cannot share an ESPN burst with NBA.",
-    "args": {
-      "sports": ["WNBA"],
-      "season": 2026,
-      "dry_run": true
-    }
-  },
-  {
     "key": "player-positions-dry-run-ncaaf-2026-10-06",
     "job_type": "player_positions",
     "requested_by": "matt",
-    "note": "DRY RUN, one sport, writes no player_positions rows. CFBD /roster for the requested season and the season before it (405765 matched season 2026 only: 11153 of 11641). Reports the same coverage block as the basketball jobs. One or two CFBD calls, not an ESPN pass.",
+    "note": "DRY RUN, one sport, writes no player_positions rows. CFBD /roster for the requested season and the season before it (405765 matched season 2026 only: 11153 of 11641). Reports the same coverage block as the basketball jobs. One or two CFBD calls, not an ESPN pass. run_after keeps it off the worker until a few hours after a 2026-10-06 merge, so it does not start the moment the NBA dry run ends. If this instant has already passed when the worker syncs, the job is eligible immediately and the NBA job is still claimed first (no run_after, created first).",
+    "run_after": "2026-10-06T18:00:00+00:00",
     "args": {
       "sports": ["NCAAF"],
       "season": 2026,
