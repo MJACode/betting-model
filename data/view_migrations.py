@@ -171,6 +171,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     # MLB and the basketball/NCAAF position ingest follow. Guards on the
     # function existing, so the DDL fires once.
     "add_position_vs_opponent_nfl.sql",
+    # 2026-10-05 (Matt): phase 2 — MLB batters by lineup spot (1-3/4-6/7-9)
+    # and starting pitchers, same row shape as the NFL function.
+    "add_position_vs_opponent_mlb.sql",
     # 2026-09-14 (mike): leftover nfl_wind_totals opening_signals rows whose
     # picks were VOIDED 09-07 / DELETED 09-11 after MAX_FIRE_LEAD. Capture
     # stayed (ON CONFLICT DO NOTHING). Deletes captures with no standing

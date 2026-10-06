@@ -550,13 +550,15 @@ export async function fetchH2HStatValues(
  * this season and last, with the defence's league rank on each row. Backs the
  * player page's "WRs vs ATL" card (Matt, 2026-10-05).
  *
- * ROW COUNT, measured on production 2026-10-05 for the largest group (WR,
- * receiving_yards vs ATL, seasons 2025-2026): 55 rows. A full 17-game season of
+ * ROW COUNT, from each function's query run read-only against production
+ * data: NFL WR receiving_yards vs ATL, seasons 2025-2026, 55 rows
+ * (2026-10-05); MLB 1-3 hitters' hits vs NYY, 883 rows (2026-10-06, before
+ * position_vs_opponent_mlb was deployed) — the largest, and why it is paged. A full 17-game season of
  * a defensive group is a few hundred at most, so one page — but paged anyway,
  * because the 1,000-row cap is a property of every read
  * (.claude/rules/frontend.md), on an order the REQUEST names.
  *
- * NFL only for now; other sports return [] without a request.
+ * NFL and MLB; other sports return [] without a request.
  */
 export async function fetchPositionVsOpponent(
   sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
@@ -565,21 +567,25 @@ export async function fetchPositionVsOpponent(
   posGroup: string,
   opponent: string,
 ): Promise<PositionVsOpponentRow[]> {
-  if (sport !== 'NFL') return [];
-  return fetchAllPages<PositionVsOpponentRow>(
-    (from, to) =>
-      supabase
-        .rpc('position_vs_opponent_nfl', {
-          p_seasons: seasons,
-          p_stat: statKey,
-          p_pos_group: posGroup,
-          p_opponent: opponent,
-        })
-        .order('game_id')
-        .order('player_id')
-        .range(from, to),
-    (r) => `${r.game_id}:${r.player_id}`,
-  );
+  const args = { p_seasons: seasons, p_stat: statKey, p_pos_group: posGroup, p_opponent: opponent };
+  const key = (r: PositionVsOpponentRow) => `${r.game_id}:${r.player_id}`;
+  // Two literal .rpc() names, never one picked by a variable: the read-surface
+  // tripwire parses the name out of the literal (tests/test_anon_readable.py).
+  if (sport === 'NFL') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_nfl', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  if (sport === 'MLB') {
+    return fetchAllPages<PositionVsOpponentRow>(
+      (from, to) =>
+        supabase.rpc('position_vs_opponent_mlb', args).order('game_id').order('player_id').range(from, to),
+      key,
+    );
+  }
+  return [];
 }
 
 const PICK_COLUMNS =
