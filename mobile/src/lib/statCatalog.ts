@@ -82,7 +82,8 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'receptions', label: 'Receptions', sport: 'NFL', group: 'Receiving', defaultLine: 3.5 },
   { key: 'receiving_yards', label: 'Rec Yards', sport: 'NFL', group: 'Receiving', defaultLine: 49.5 },
   { key: 'rush_rec_tds', label: 'Anytime TD', sport: 'NFL', group: 'Receiving', defaultLine: 0.5 },
-  { key: 'targets', label: 'Targets', sport: 'NFL', group: 'Receiving', defaultLine: 5.5 },
+  // Targets removed (Matt, 2026-10-06: "Remove targets"). The log still
+  // stores the column; the position-vs-opponent card's NFL role cut reads it.
   { key: 'def_sacks', label: 'Sacks', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_interceptions', label: 'Interceptions', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
   // ── NCAAF (CFBD box scores — same column keys as the NFL log wherever the
@@ -244,8 +245,7 @@ const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
  * A stat with no entry has no market we pull, and its column correctly stays
  * blank rather than borrowing a neighbouring market's number: solo tackles,
  * TFL, passes defended and defensive INTs (no book prices them), rushing and
- * receiving TDs separately (the book sells the combined "anytime" instead),
- * and NFL targets.
+ * and receiving TDs separately (the book sells the combined "anytime" instead).
  *
  * NOT HERE, DELIBERATELY: `def_tackles`. The book's `player_tackles_assists`
  * counts solo + assists at FULL credit, while CFBD charges a shared tackle as
