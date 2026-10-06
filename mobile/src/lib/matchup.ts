@@ -389,7 +389,7 @@ const DEFENCE_ANCHORS: Record<
   },
   NCAAF: {
     key: 'epa_def', median: 0.155, sigma: 0.0778, dp: 3,
-    label: 'EPA/play Def', spoken: 'EPA per play allowed', verb: 'allows', unit: 'EPA/play',
+    label: 'Pts added/play Def', spoken: 'points added per play allowed', verb: 'allows', unit: 'pts added/play',
   },
   NBA: {
     key: 'def_rating', median: 112.395, sigma: 3.807, dp: 1,

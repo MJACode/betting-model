@@ -17,14 +17,21 @@ import {
   tertileCuts,
   tierFor,
 } from '../src/lib/teamBoard';
+import { teamRanks } from '../src/lib/teamDetail';
 import {
+  EXPLAIN_PTS_ADDED,
+  EXPLAIN_SUCCESS,
   TEAM_STAT_CATALOG,
+  boardValueSpeech,
   defaultTeamStatFor,
   formatRecord,
   formatTeamStat,
+  spokenTeamStat,
   supportsTeamBoard,
+  teamGroupLabel,
   teamGroupsForSport,
   teamStatValue,
+  teamStatsForBoard,
   teamStatsForSport,
   type TeamStatDef,
 } from '../src/lib/teamStatCatalog';
@@ -215,6 +222,74 @@ eq('pace carries no direction', TEAM_STAT_CATALOG.find((s) => s.key === 'pace')?
 // Every betting split that can be thin must declare a sample column or a record.
 for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   check(`betting stat ${String(s.key)} is auditable (record or sample)`, Boolean(s.record || s.sample || String(s.key).includes('ats_') || String(s.key).includes('over_')));
+}
+
+// ── plain labels, signed numbers, VoiceOver, football tab name ─────────────
+{
+  const epaOff = TEAM_STAT_CATALOG.find((s) => s.key === 'epa_off')!;
+  const epaDef = TEAM_STAT_CATALOG.find((s) => s.key === 'epa_def')!;
+  const sucOff = TEAM_STAT_CATALOG.find((s) => s.key === 'success_off')!;
+  eq('points-added chip', epaOff.label, 'Pts added/play Off');
+  eq('points-added header', epaOff.header, 'Pts added/play');
+  eq('points-added sheet label', epaOff.explain?.a11y, 'About points added per play');
+  eq('points-added copy', epaOff.explain?.body, EXPLAIN_PTS_ADDED.body);
+  eq('success chip', sucOff.label, 'Successful plays Off');
+  eq('success header', sucOff.header, 'Successful plays');
+  eq('success sheet label', sucOff.explain?.a11y, 'About successful plays');
+  eq('success copy', sucOff.explain?.body, EXPLAIN_SUCCESS.body);
+  eq('success is a percent of a 0..1 rate', sucOff.format, 'pct3');
+  check('both football sports share the points-added row',
+    epaOff.sports.includes('NFL') && epaOff.sports.includes('NCAAF') && epaDef.sports.includes('NFL'));
+  eq('NFL tab', teamGroupLabel('Efficiency', 'NFL'), 'Offense & defense');
+  eq('NCAAF tab', teamGroupLabel('Efficiency', 'NCAAF'), 'Offense & defense');
+  eq('NBA keeps Efficiency', teamGroupLabel('Efficiency', 'NBA'), 'Efficiency');
+  eq('NFL record tab is unchanged', teamGroupLabel('Record', 'NFL'), 'Record');
+  eq('MLB tab is unchanged', teamGroupLabel('Efficiency', 'MLB'), 'Efficiency');
+
+  const MINUS = '\u2212';
+  eq('positive points-added', formatTeamStat(0.21, 'sdec2'), '+0.21');
+  eq('negative points-added uses a true minus', formatTeamStat(-0.08, 'sdec2'), `${MINUS}0.08`);
+  eq('rounds before the sign, positive side', formatTeamStat(0.004, 'sdec2'), '0.00');
+  eq('rounds before the sign, negative side', formatTeamStat(-0.004, 'sdec2'), '0.00');
+  eq('a real hundredth still signs', formatTeamStat(-0.005, 'sdec2'), `${MINUS}0.01`);
+  eq('null is a dash, not zero', formatTeamStat(null, 'sdec2'), '—');
+  eq('success rate 0.467 prints 46.7%', formatTeamStat(0.467, 'pct3'), '46.7%');
+  eq('spoken plus', spokenTeamStat(0.21, 'sdec2'), 'plus 0.21');
+  eq('spoken minus', spokenTeamStat(-0.08, 'sdec2'), 'minus 0.08');
+  eq('spoken zero has no sign word', spokenTeamStat(0.004, 'sdec2'), '0.00');
+  eq('spoken percent', spokenTeamStat(0.467, 'pct3'), '46.7 percent');
+  eq('board VoiceOver, offense',
+    boardValueSpeech(epaOff, 0.21, 1),
+    'Points added per play, offense, plus 0.21, ranks 1st');
+  eq('board VoiceOver, defense',
+    boardValueSpeech(epaDef, -0.08, 2),
+    'Points added per play, defense, minus 0.08, ranks 2nd');
+  eq('11th not 11st', boardValueSpeech(epaOff, 0.01, 11),
+    'Points added per play, offense, plus 0.01, ranks 11th');
+
+  // Defense ranks lowest-first, so 1st is the best defense.
+  const ranked = rankTeams([
+    team({ team: 'LEAK', epa_def: 0.2 }),
+    team({ team: 'STINGY', epa_def: -0.08 }),
+    team({ team: 'MID', epa_def: 0.05 }),
+  ], epaDef);
+  eq('best defense is rank 1', ranked.rows[0].team, 'STINGY');
+  eq('worst defense is last', ranked.rows[2].team, 'LEAK');
+
+  const emptyNfl = [team({ team: 'JAX' }), team({ team: 'PHI' })];
+  check('NFL hides points-added chips when every value is null',
+    !teamStatsForBoard('NFL', emptyNfl).some((s) => s.key === 'epa_off' || s.key === 'success_off'));
+  check('NFL team page hides the same empty rows',
+    !teamRanks(emptyNfl, 'JAX', 'NFL', 'Efficiency').some((r) => r.def.untilData));
+  check('NFL still offers yards/play',
+    teamStatsForBoard('NFL', emptyNfl).some((s) => s.key === 'yards_per_play'));
+  const liveNcaaf = [team({ team: 'ALA', epa_off: 0.21, epa_def: -0.08, success_off: 0.467, success_def: 0.4 })];
+  check('NCAAF shows points-added once a value exists',
+    teamStatsForBoard('NCAAF', liveNcaaf).some((s) => s.key === 'epa_off')
+    && teamStatsForBoard('NCAAF', liveNcaaf).some((s) => s.key === 'success_def'));
+  check('NCAAF team page lists the same rows',
+    teamRanks(liveNcaaf, 'ALA', 'NCAAF', 'Efficiency').some((r) => r.def.key === 'epa_off'));
+  eq('NFL still opens on yards/play', defaultTeamStatFor('NFL')?.key, 'yards_per_play');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -28,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AddLineSheet } from '@/components/AddLineSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { GroupTabs } from '@/components/GroupTabs';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
@@ -62,11 +63,14 @@ import {
   type Tier,
 } from '@/lib/teamBoard';
 import {
+  boardValueSpeech,
   defaultTeamStatFor,
   formatRecord,
   formatTeamStat,
+  teamGroupLabel,
   teamGroupsForSport,
   teamStatValue,
+  teamStatsForBoard,
   teamStatsForSport,
   type TeamStatDef,
   type TeamStatGroup,
@@ -208,9 +212,18 @@ export function TeamsBoard({
   }, [load]);
 
   const activeGroup = stat?.group ?? groups[0];
+  // untilData stats (NFL points-added, while the ingest is empty) stay off
+  // the chip row. The catalog still lists them.
+  const offered = useMemo(() => teamStatsForBoard(sport, rows), [sport, rows]);
+  useEffect(() => {
+    if (!stat) return;
+    if (offered.some((s) => s.key === stat.key)) return;
+    const fallback = offered.find((s) => s.group === stat.group) ?? defaultTeamStatFor(sport);
+    if (fallback) setStat(fallback);
+  }, [offered, stat, sport]);
   const pickGroup = (g: TeamStatGroup) => {
     if (g === activeGroup) return;
-    const first = teamStatsForSport(sport).find((s) => s.group === g);
+    const first = offered.find((s) => s.group === g) ?? teamStatsForSport(sport).find((s) => s.group === g);
     if (first) setStat(first);
   };
 
@@ -312,7 +325,13 @@ export function TeamsBoard({
     <>
       {/* Group tabs — Efficiency first by design, and the same two-level tab
           bar the Players board uses (Matt, 2026-09-04). */}
-      <GroupTabs groups={groups} active={activeGroup} onChange={pickGroup} />
+      <GroupTabs
+        groups={groups}
+        active={activeGroup}
+        onChange={pickGroup}
+        labelFor={(g) => teamGroupLabel(g, sport)}
+        fit={sport === 'NFL' || sport === 'NCAAF'}
+      />
 
       <ScrollView
         horizontal
@@ -321,7 +340,7 @@ export function TeamsBoard({
         contentContainerStyle={styles.chipRow}
         keyboardShouldPersistTaps="handled"
       >
-        {teamStatsForSport(sport)
+        {offered
           .filter((s) => s.group === activeGroup)
           .map((s) => (
             <FilterChip
@@ -333,6 +352,22 @@ export function TeamsBoard({
           ))}
       </ScrollView>
 
+      {/* Full name, which way is good, and the ⓘ. The chip stays short. */}
+      {stat.explain ? (
+        <View style={styles.explainRow}>
+          <View style={styles.explainText}>
+            <Text style={styles.explainName}>{stat.explain.name}</Text>
+            {stat.direction ? <Text style={styles.hintText}>{stat.direction}</Text> : null}
+          </View>
+          <View style={styles.infoSlot}>
+            <InfoTooltip
+              title={stat.explain.title}
+              body={stat.explain.body}
+              accessibilityLabel={stat.explain.a11y}
+            />
+          </View>
+        </View>
+      ) : null}
       {/* What this number is, and — for the betting group — what it isn't. */}
       {stat.hint ? (
         <View style={styles.hintRow}>
@@ -392,8 +427,13 @@ export function TeamsBoard({
           <Text style={styles.colHeaderName}>
             TEAM{season ? ` · ${season}` : ''}
           </Text>
-          <Text style={styles.colHeaderRight} numberOfLines={1}>
-            {stat.label.toUpperCase()}
+          <Text
+            style={styles.colHeaderRight}
+            numberOfLines={2}
+            adjustsFontSizeToFit
+            minimumFontScale={0.75}
+          >
+            {(stat.header ?? stat.label).toUpperCase()}
           </Text>
           {showLines ? (
             <Text style={[styles.colHeaderRight, styles.colHeaderLine]} numberOfLines={1}>
@@ -500,7 +540,13 @@ function TeamRow({
 
   return (
     <View style={[styles.row, subline ? styles.rowWithGame : null]}>
-      <Text style={styles.rank}>{rank}</Text>
+      <Text
+        style={styles.rank}
+        accessibilityElementsHidden={Boolean(def.spoken)}
+        importantForAccessibility={def.spoken ? 'no' : 'auto'}
+      >
+        {rank}
+      </Text>
       {/* The name + record block is the tap target for the team page. It is
           the row's flex:1 column, so the target is the full row width minus
           the value and the pill, and taller than 44pt on any row with a game
@@ -553,7 +599,10 @@ function TeamRow({
         </Text>
       </Pressable>
       <View style={styles.valueWrap}>
-        <Text style={[styles.value, color ? { color } : null]}>
+        <Text
+          style={[styles.value, color ? { color } : null]}
+          accessibilityLabel={boardValueSpeech(def, value, rank) ?? undefined}
+        >
           {formatTeamStat(value, def.format)}
         </Text>
         {record ? (
@@ -643,6 +692,21 @@ const styles = StyleSheet.create({
   listFlex: { flex: 1 },
   list: { paddingBottom: spacing.xl },
   chipRow: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingVertical: 2 },
+  explainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: 2,
+  },
+  explainText: { flex: 1, minWidth: 0 },
+  explainName: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  infoSlot: { flexShrink: 0 },
   hintRow: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: 2 },
   hintText: { fontSize: font.size.micro, color: colors.textTertiary, lineHeight: 15 },
   searchWrap: {

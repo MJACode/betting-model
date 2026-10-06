@@ -85,8 +85,11 @@ export function SegmentTabs<T extends string>({
                 second && styles.textSecond,
                 compact && styles.textCompact,
                 isActive && (second || compact ? styles.textActiveSecond : styles.textActive),
+                fit && styles.textFit,
               ]}
-              numberOfLines={1}
+              // `fit` labels ("Offense & defense") wrap to two lines. One line
+              // plus the shrink floor still ellipsizes them at the 2× cap.
+              numberOfLines={fit ? 2 : 1}
               adjustsFontSizeToFit={fit}
               minimumFontScale={fit ? 0.75 : undefined}
               // Segmented-control labels cap at 2x, as iOS caps its native
@@ -112,11 +115,16 @@ export function GroupTabs<T extends string>({
    *  first level, so its group row needs the top rule and the full size or it
    *  is exactly the "floating to nowhere" this component was built to end. */
   second = true,
+  labelFor,
+  /** Shrink a long label ("Offense & defense") instead of truncating it. */
+  fit = false,
 }: {
   groups: readonly T[];
   active: T;
   onChange: (g: T) => void;
   second?: boolean;
+  labelFor?: (item: T) => string;
+  fit?: boolean;
 }) {
   return (
     <SegmentTabs
@@ -124,6 +132,8 @@ export function GroupTabs<T extends string>({
       active={active}
       onChange={onChange}
       second={second}
+      labelFor={labelFor}
+      fit={fit}
     />
   );
 }
@@ -189,6 +199,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
     color: colors.textSecondary,
+  },
+  textFit: {
+    alignSelf: 'stretch',
+    textAlign: 'center',
+    width: '100%',
+    paddingHorizontal: spacing.xs,
   },
   textSecond: {
     fontSize: font.size.footnote,

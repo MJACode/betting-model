@@ -24,7 +24,8 @@ import { americanImplied, formatSignedUnits } from '@/lib/format';
 import { hasPricedLine } from '@/lib/decisionPrice';
 import { isPausedRow } from '@/lib/thresholds';
 import {
-  teamStatsForSport,
+  ordinal,
+  teamStatsForBoard,
   teamStatValue,
   type TeamStatDef,
 } from '@/lib/teamStatCatalog';
@@ -39,6 +40,8 @@ import type {
   SettledPick,
   TeamStatsRow,
 } from '@/types';
+
+export { ordinal };
 
 // ── Prices ──────────────────────────────────────────────────────────────────
 
@@ -524,12 +527,14 @@ export interface TeamStatRank {
 /**
  * The team's league rank on every stat in a group, from the board's rows. A
  * stat with no direction (pace, over rate) is listed with its value and no
- * rank; a thin split is listed and left untinted, as on the board.
+ * rank; a thin split is listed and left untinted, as on the board. A stat
+ * flagged untilData (NFL points-added, while the ingest is empty) stays off
+ * this list the same way it stays off the chip row.
  */
 export function teamRanks(rows: TeamStatsRow[], team: string, sport: Sport, group: TeamStatDef['group']): TeamStatRank[] {
   const mine = rows.find((r) => r.team === team) ?? null;
   const out: TeamStatRank[] = [];
-  for (const def of teamStatsForSport(sport).filter((d) => d.group === group)) {
+  for (const def of teamStatsForBoard(sport, rows).filter((d) => d.group === group)) {
     const value = mine ? teamStatValue(mine, def) : null;
     const ranked = rows
       .filter((r) => !isThinSample(r, def))
@@ -551,18 +556,6 @@ export function teamRanks(rows: TeamStatsRow[], team: string, sport: Sport, grou
     });
   }
   return out;
-}
-
-/** "3rd of 32" */
-export function ordinal(n: number): string {
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
-  switch (n % 10) {
-    case 1: return `${n}st`;
-    case 2: return `${n}nd`;
-    case 3: return `${n}rd`;
-    default: return `${n}th`;
-  }
 }
 
 // ── Small shared bits ───────────────────────────────────────────────────────

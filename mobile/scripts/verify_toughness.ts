@@ -126,11 +126,11 @@ function main() {
   // The visible label is the Teams board's own wording for the same number, so
   // one stat is not two idioms on one tab.
   check('the column label matches teamStatCatalog', defenceMetricLabel('NFL') === 'Allowed/G');
-  check('NCAAF too', defenceMetricLabel('NCAAF') === 'EPA/play Def');
+  check('NCAAF too', defenceMetricLabel('NCAAF') === 'Pts added/play Def');
   check('and NBA', defenceMetricLabel('NBA') === 'Def Rtg');
   check('the tooltip gets a sentence, not an abbreviation',
     defenceMetricSpoken('NFL') === 'points allowed per game'
-    && defenceMetricSpoken('NCAAF') === 'EPA per play allowed'
+    && defenceMetricSpoken('NCAAF') === 'points added per play allowed'
     && defenceMetricSpoken('NBA') === 'defensive rating');
 
   // ── the colour ramp goes quiet when it cannot discriminate ─────────────────

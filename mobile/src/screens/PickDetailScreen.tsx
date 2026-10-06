@@ -63,6 +63,7 @@ import { detailPresentation } from '@/lib/loadState';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
+import { OffenseDefenseCard } from '@/components/OffenseDefenseCard';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -254,6 +255,16 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
   // no run-based team form to show, so skip the trend strips like UFC.
   const isGolf = game?.sport === 'GOLF' || pick.sport === 'GOLF';
   const showTeamTrends = isGameModel && !isUfc && !isGolf;
+  // Offense-vs-defense is a football card. Props have no two-team matchup.
+  const showOffenseDefense =
+    isGameModel && game != null && (game.sport === 'NFL' || game.sport === 'NCAAF');
+  const ourTeam = !game
+    ? null
+    : pick.pick_side === 'home'
+      ? game.home_team
+      : pick.pick_side === 'away'
+        ? game.away_team
+        : null;
 
   const homeTrends = useTeamTrends(
     showTeamTrends ? game?.home_team ?? null : null,
@@ -350,23 +361,8 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
 
         <ReasoningCard pick={pick} paused={paused} />
 
-        {paused ? null : <PickTimingCard pick={pick} />}
-
-        {paused ? null : <SharpScoreCard pick={pick} />}
-
-        {isProbOnlyModel(pick.model_id) ? (
-          <View style={styles.infoCard}>
-            <Text style={styles.infoHeading}>Why no edge number?</Text>
-            <Text style={styles.infoBody}>
-              This market is priced on model probability alone. DraftKings doesn’t post a
-              reliable line for it (or juices it heavily), so we flag the pick when the model is
-              confident rather than comparing it to a book price.
-            </Text>
-          </View>
-        ) : null}
-
-        <LineMovementCard pick={pick} playerName={playerName} />
-
+        {/* Where to bet, then Track, then the context cards. Fair price is
+            not on this screen — that card is on hold. */}
         {/* Where to place it, then every book and line — one section, action
             first (UX review): the chips are the bettable same-line subset, the
             table below carries books at a different number and the reference
@@ -451,6 +447,23 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           </View>
         ) : null}
 
+        {paused ? null : <PickTimingCard pick={pick} />}
+
+        {paused ? null : <SharpScoreCard pick={pick} />}
+
+        {isProbOnlyModel(pick.model_id) ? (
+          <View style={styles.infoCard}>
+            <Text style={styles.infoHeading}>Why no edge number?</Text>
+            <Text style={styles.infoBody}>
+              This market is priced on model probability alone. DraftKings doesn’t post a
+              reliable line for it (or juices it heavily), so we flag the pick when the model is
+              confident rather than comparing it to a book price.
+            </Text>
+          </View>
+        ) : null}
+
+        <LineMovementCard pick={pick} playerName={playerName} />
+
         <PublicBettingCard pick={pick} />
 
         <ClvCard pick={pick} />
@@ -474,6 +487,10 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
                 : `${weather.temp_f ?? '—'}°F · Wind ${weather.wind_mph ?? '—'} mph (out ${weather.wind_out_component != null ? weather.wind_out_component.toFixed(1) : '—'})${weather.venue ? ` · ${weather.venue}` : ''}`}
             </Text>
           </View>
+        ) : null}
+
+        {showOffenseDefense && game ? (
+          <OffenseDefenseCard game={game} ourTeam={ourTeam} />
         ) : null}
 
         <PropContextCard pick={pick} context={propContext} />

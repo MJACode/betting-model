@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, plain labels for points added and successful plays on the Teams board and Pick Detail matchup. NFL rows stay hidden until a value exists. Fair price, injuries, weather, splits, referee, and the play-by-play ingest were not built |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card phase 2 (MLB): batters by lineup spot 1-3/4-6/7-9, starting pitchers; position_vs_opponent_mlb. 2025 log missing ARI/CWS/OAK/WSH games flagged |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, player page "WRs vs ATL" card (NFL phase 1): position_vs_opponent_nfl RPC with real-role cut and league rank, This/Last season toggle, player list. MLB and basketball/NCAAF phases next |
