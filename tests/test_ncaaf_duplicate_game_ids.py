@@ -101,8 +101,8 @@ def _memphis_parsed():
     "2026-08-30T02:30:00Z",   # 10:30pm ET = next-day UTC
 ])
 def test_late_kickoff_reuses_the_utc_row_both_ingestors_share(commence, monkeypatch):
-    """The UTC row is the only one stored and it has team logs. CFBD keeps
-    it; the odds path looks it up instead of minting the ET id."""
+    """The UTC row is the only one stored. CFBD keeps it because it exists
+    in games; the odds path reuses it instead of minting the ET id."""
     _schools(monkeypatch)
     rows = _memphis_parsed()
     retain_existing_cfbd_ids(rows, {MEMPHIS_UTC})
@@ -186,21 +186,14 @@ def test_swapped_home_away_at_a_neutral_site_matches_the_existing_row(monkeypatc
 
 def test_when_both_orientations_exist_the_exact_order_wins():
     """Both Army/Navy rows are already stored. The odds event matches
-    army_navy exactly and navy_army swapped. Exact order wins, and the
-    ambiguity is logged."""
+    army_navy exactly and navy_army swapped. Exact order wins. The
+    ambiguity warning is once per run, not once per call of the matcher."""
     games = [
         _row(ARMY_NAVY_CFBD, "2026-12-12", "Army", "Navy"),
         _row(ARMY_NAVY_ODDS, "2026-12-12", "Navy", "Army"),
     ]
-    seen = []
-    sink = logger.add(lambda m: seen.append(m.record["message"]),
-                      level="WARNING", format="{message}")
-    try:
-        chosen = resolve_ncaaf_game_id(games, "Navy", "Army", "2026-12-12")
-    finally:
-        logger.remove(sink)
+    chosen = resolve_ncaaf_game_id(games, "Navy", "Army", "2026-12-12")
     assert chosen == ARMY_NAVY_ODDS
-    assert seen and ARMY_NAVY_CFBD in seen[0] and ARMY_NAVY_ODDS in seen[0]
 
 
 def test_exact_orientation_beats_a_nearer_swapped_row():
@@ -243,23 +236,14 @@ def test_a_different_opponent_inside_the_window_does_not_match():
     ) is None
 
 
-def test_two_exact_rows_prefer_the_nearest_date_and_log_it():
+def test_two_exact_rows_prefer_the_nearest_date():
     """Both Memphis rows. ET kickoff date is the 29th. The 29th wins over
-    the 30th, and the warning names both."""
+    the 30th. The matcher itself does not warn; the run does, once."""
     games = [
         _row(MEMPHIS_UTC, "2026-08-30", "UNLV", "Memphis"),
         _row(MEMPHIS_ET, "2026-08-29", "UNLV", "Memphis"),
     ]
-    seen = []
-    sink = logger.add(lambda m: seen.append(m.record["message"]),
-                      level="WARNING", format="{message}")
-    try:
-        chosen = resolve_ncaaf_game_id(games, "UNLV", "Memphis", "2026-08-29")
-    finally:
-        logger.remove(sink)
-    assert chosen == MEMPHIS_ET
-    assert len(seen) == 1
-    assert MEMPHIS_UTC in seen[0] and MEMPHIS_ET in seen[0]
+    assert resolve_ncaaf_game_id(games, "UNLV", "Memphis", "2026-08-29") == MEMPHIS_ET
 
 
 def test_a_single_match_is_not_logged_as_ambiguous():
@@ -512,3 +496,244 @@ def test_one_warning_counts_every_swapped_reuse_in_the_run(monkeypatch):
         "reused games row(s) stored with home/away reversed from the "
         f"book: [{ARMY_NAVY_CFBD!r}, {ARMY_NAVY_CFBD!r}]"
     ]
+
+
+def test_ambiguity_is_one_warning_with_a_count_and_a_sample(monkeypatch):
+    """Two matchups each hit two rows. One warning names the count and a sample,
+    not one warning per cluster."""
+    _schools(monkeypatch)
+    conn = _Conn([
+        (MEMPHIS_UTC, "2026-08-30", "UNLV", "Memphis"),
+        (MEMPHIS_ET, "2026-08-29", "UNLV", "Memphis"),
+        (ARMY_NAVY_CFBD, "2026-12-12", "Army", "Navy"),
+        (ARMY_NAVY_ODDS, "2026-12-12", "Navy", "Army"),
+    ])
+    reuse = oi._ncaaf_resolver(conn, "2026-08-29")
+    seen = []
+    sink = logger.add(lambda m: seen.append(m.record["message"]),
+                      level="WARNING", format="{message}")
+    try:
+        games, _odds = oi._process_events(
+            [_event("UNLV Rebels", "Memphis Tigers", "2026-08-30T02:19:00Z"),
+             _army_navy_event()],
+            "NCAAF", "open", "2026-08-29T12:00:00Z",
+            reuse_game_id=reuse,
+        )
+    finally:
+        logger.remove(sink)
+    assert {g["game_id"] for g in games} == {MEMPHIS_ET, ARMY_NAVY_ODDS}
+    ambiguity = [m for m in seen if "more than one games row" in m]
+    assert len(ambiguity) == 1
+    assert "2 matchup(s)" in ambiguity[0]
+    assert MEMPHIS_ET in ambiguity[0] and MEMPHIS_UTC in ambiguity[0]
+    assert ARMY_NAVY_ODDS in ambiguity[0] and ARMY_NAVY_CFBD in ambiguity[0]
+
+
+def test_a_non_numeric_spread_skips_that_event_and_not_the_pull(monkeypatch):
+    """Army/Navy is stored reversed, so the spread has to be negated. 'PK'
+    cannot be. That event is dropped. Memphis, in the same call, is kept."""
+    _schools(monkeypatch)
+    conn = _Conn([(ARMY_NAVY_CFBD, "2026-12-12", "Army", "Navy")])
+    reuse = oi._ncaaf_resolver(conn, "2026-09-01")
+    bad = _army_navy_event()
+    for market in bad["bookmakers"][0]["markets"]:
+        if market["key"] == "spreads":
+            for outcome in market["outcomes"]:
+                outcome["point"] = "PK"
+    seen = []
+    sink = logger.add(lambda m: seen.append(m.record["message"]),
+                      level="WARNING", format="{message}")
+    try:
+        games, odds = oi._process_events(
+            [bad, _event("UNLV Rebels", "Memphis Tigers", "2026-08-30T02:19:00Z")],
+            "NCAAF", "open", "2026-09-01T12:00:00Z",
+            reuse_game_id=reuse,
+        )
+    finally:
+        logger.remove(sink)
+    assert ARMY_NAVY_CFBD not in {g["game_id"] for g in games}
+    assert ARMY_NAVY_CFBD not in {o["game_id"] for o in odds}
+    assert {g["game_id"] for g in games} == {MEMPHIS_ET}
+    assert any(o["game_id"] == MEMPHIS_ET for o in odds)
+    assert any("skipping the event" in m and "PK" in m for m in seen)
+
+
+class _Board:
+    """The games rows and team logs these two ingestors would write.
+
+    Answers the three SELECTs the walk uses and applies the real upserts:
+    an odds stub does not change home/away, game_date or the score; a CFBD
+    upsert fills a score onto the existing id and inserts only a new id.
+    """
+
+    def __init__(self, games):
+        self.games = {g["game_id"]: dict(g) for g in games}
+        self.logs = []
+
+    def execute(self, sql, params=None):
+        compact = " ".join(sql.split())
+
+        class _Cur:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+            def fetchone(self):
+                return self._rows[0] if self._rows else None
+
+        if "game_id = ANY" in compact:
+            ids = (params or {}).get("ids") or []
+            return _Cur([(i,) for i in ids if i in self.games])
+        if "DISTINCT season" in compact:
+            lo, hi = params["lo"], params["hi"]
+            seasons = sorted({
+                g["season"] for g in self.games.values()
+                if g.get("home_score") is None and lo <= g["game_date"] <= hi
+            })
+            return _Cur([(s,) for s in seasons])
+        if "home_score IS NULL" in compact and "home_team" in compact:
+            lo, hi = params["lo"], params["hi"]
+            rows = [
+                (g["game_id"], g["game_date"], g["home_team"], g["away_team"],
+                 g.get("home_score"))
+                for g in self.games.values()
+                if g.get("home_score") is None and lo <= g["game_date"] <= hi
+            ]
+            return _Cur(rows)
+        if "FROM games" in compact and "BETWEEN %s" in compact:
+            start, end = params
+            rows = [
+                (g["game_id"], g["game_date"], g["home_team"], g["away_team"])
+                for g in self.games.values()
+                if start <= g["game_date"] <= end
+            ]
+            return _Cur(rows)
+        if compact.startswith("UPDATE games"):
+            gid = params["game_id"]
+            row = self.games.get(gid)
+            if row is not None and row.get("home_score") is None:
+                row["home_score"] = params["home_score"]
+                row["away_score"] = params["away_score"]
+                row["home_win"] = params["home_win"]
+            return _Cur([])
+        return _Cur([])
+
+    def executemany(self, sql, rows):
+        if "ncaaf_team_game_log" in sql:
+            self.logs.extend(rows)
+            return
+        if "INSERT INTO games" not in sql:
+            return
+        for r in rows:
+            gid = r["game_id"]
+            if gid not in self.games:
+                self.games[gid] = {
+                    "game_id": gid, "sport": r.get("sport", "NCAAF"),
+                    "season": r.get("season"), "game_date": r.get("game_date"),
+                    "home_team": r.get("home_team"), "away_team": r.get("away_team"),
+                    "home_score": r.get("home_score"), "away_score": r.get("away_score"),
+                    "home_win": r.get("home_win"),
+                }
+                continue
+            if "home_score" in sql and r.get("home_score") is not None:
+                self.games[gid]["home_score"] = r["home_score"]
+                self.games[gid]["away_score"] = r["away_score"]
+                self.games[gid]["home_win"] = r["home_win"]
+
+    def commit(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _memphis_preload():
+    return {
+        "game_id": MEMPHIS_UTC, "sport": "NCAAF", "season": 2026,
+        "game_date": "2026-08-30", "home_team": "UNLV", "away_team": "Memphis",
+        "home_score": None, "away_score": None,
+    }
+
+
+def _memphis_cfbd(played: bool) -> dict:
+    row = {
+        "id": 99, "season": 2026, "week": 1,
+        "startDate": "2026-08-30T02:19:00.000Z",
+        "homeTeam": "UNLV", "awayTeam": "Memphis",
+        "homeClassification": "fbs", "awayClassification": "fbs",
+        "completed": played,
+    }
+    if played:
+        row["homePoints"] = 31
+        row["awayPoints"] = 24
+    return row
+
+
+def _cfbd_get(game):
+    def fake_get(path, **params):
+        if path == "/games" and params.get("seasonType") == "regular":
+            return [game]
+        if (path == "/games/teams" and params.get("seasonType") == "regular"
+                and params.get("week") == 1):
+            return [{
+                "id": 99,
+                "teams": [
+                    {"school": "Memphis", "homeAway": "away", "points": 24, "stats": []},
+                    {"school": "UNLV", "homeAway": "home", "points": 31, "stats": []},
+                ],
+            }]
+        return []
+    return fake_get
+
+
+def test_an_unplayed_utc_preload_stays_one_scored_row_with_its_team_logs(
+        monkeypatch):
+    """Odds reuses the UTC preload. Results day must score THAT row.
+
+    A retain rule that required team logs would re-date the game to the ET
+    id, insert a second scored row, and land the team logs there. The board
+    and the picks are already on the UTC id.
+    """
+    _schools(monkeypatch)
+    board = _Board([_memphis_preload()])
+    reuse = oi._ncaaf_resolver(board, "2026-08-29")
+    games, _odds = oi._process_events(
+        [_event("UNLV Rebels", "Memphis Tigers", "2026-08-30T02:19:00Z")],
+        "NCAAF", "open", "2026-08-29T12:00:00Z",
+        reuse_game_id=reuse,
+    )
+    assert games[0]["game_id"] == MEMPHIS_UTC
+    oi._upsert_games(board, games)
+    assert set(board.games) == {MEMPHIS_UTC}
+    assert board.games[MEMPHIS_UTC]["home_score"] is None
+
+    monkeypatch.setattr(cf, "_get", _cfbd_get(_memphis_cfbd(played=True)))
+    written = cf.ingest_ncaaf_results_for_date("2026-08-30", conn=board)
+    assert written == 1
+    scored = [g for g in board.games.values() if g.get("home_score") is not None]
+    assert set(board.games) == {MEMPHIS_UTC}
+    assert len(scored) == 1
+    assert scored[0]["game_id"] == MEMPHIS_UTC
+    assert scored[0]["home_score"] == 31.0
+    assert scored[0]["away_score"] == 24.0
+
+    id_map, games_by_id = cf._schedule_maps(2026, board)
+    assert id_map[99] == MEMPHIS_UTC
+    n_logs = cf.ingest_ncaaf_game_log(2026, id_map, games_by_id, board)
+    assert n_logs == 2
+    assert {row["game_id"] for row in board.logs} == {MEMPHIS_UTC}
+
+
+def test_a_cfbd_refresh_before_kickoff_does_not_create_an_et_row(monkeypatch):
+    """The UTC preload has no score and no team logs. A season refresh
+    upserts that id. It does not insert the ET id beside it."""
+    board = _Board([_memphis_preload()])
+    monkeypatch.setattr(cf, "_get", _cfbd_get(_memphis_cfbd(played=False)))
+    n, id_map, _games_by_id = cf.ingest_ncaaf_games(2026, board)
+    assert n == 1
+    assert set(board.games) == {MEMPHIS_UTC}
+    assert id_map[99] == MEMPHIS_UTC
+    assert board.games[MEMPHIS_UTC]["home_score"] is None
+    assert MEMPHIS_ET not in board.games

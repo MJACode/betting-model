@@ -413,13 +413,17 @@ class NcaafGameMatch:
     every side-specific value has to be flipped before it is written —
     `spread_home`, the prices, and settlement all read relative to
     `games.home_team`.
+
+    `ambiguous_ids` is every candidate id when more than one row matched.
+    The warning for that is one line per run, not one line per cluster.
     """
 
-    __slots__ = ("game_id", "swapped")
+    __slots__ = ("game_id", "swapped", "ambiguous_ids")
 
-    def __init__(self, game_id: str, swapped: bool):
+    def __init__(self, game_id: str, swapped: bool, ambiguous_ids=()):
         self.game_id = game_id
         self.swapped = swapped
+        self.ambiguous_ids = tuple(ambiguous_ids)
 
 
 def _choose_ncaaf_game(games: list[dict], home: str, away: str,
@@ -465,14 +469,30 @@ def _choose_ncaaf_game(games: list[dict], home: str, away: str,
         return None
     cands.sort(key=lambda t: (t[0], t[1], t[2]))
     rank, _delta, _gid, chosen = cands[0]
-    if len(cands) > 1:
-        logger.warning(
-            f"NCAAF: {len(cands)} games rows match {away} @ {home} "
-            f"within a day of {game_date[:10]} "
-            f"({[c[2] for c in cands]}); using {chosen['game_id']} "
-            f"(exact home/away, then nearest date)"
-        )
-    return NcaafGameMatch(chosen.get("game_id"), swapped=rank != 0)
+    ambiguous = tuple(c[2] for c in cands) if len(cands) > 1 else ()
+    return NcaafGameMatch(chosen.get("game_id"), swapped=rank != 0,
+                          ambiguous_ids=ambiguous)
+
+
+_NCAAF_AMBIGUITY_SAMPLE = 3
+
+
+def _warn_ncaaf_ambiguities(items: list) -> None:
+    """One warning for the run: how many matchups had more than one row, plus a sample.
+
+    `items` are `(away, home, et_date, kept_id, candidate_ids)`.
+    """
+    if not items:
+        return
+    sample = [
+        {"away": away, "home": home, "date": et_date, "kept": kept, "rows": list(rows)}
+        for away, home, et_date, kept, rows in items[:_NCAAF_AMBIGUITY_SAMPLE]
+    ]
+    logger.warning(
+        f"NCAAF: {len(items)} matchup(s) had more than one games row "
+        f"within a day; kept exact home/away, then nearest date. "
+        f"sample ({len(sample)} of {len(items)}): {sample}"
+    )
 
 
 def resolve_ncaaf_game_id(games: list[dict], home: str, away: str,
@@ -503,13 +523,17 @@ def _side_partner(column: str) -> str | None:
     return None
 
 
+class _UnflippableSpread(ValueError):
+    """A spread point that cannot be negated. One event, not the whole pull."""
+
+
 def _negate_line(value):
     """Home −3.5 stored against the other team is +3.5. None stays None."""
     if value is None:
         return None
     from decimal import Decimal
     if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
-        raise TypeError(f"spread point {value!r} is not a number")
+        raise _UnflippableSpread(f"spread point {value!r} is not a number")
     return -value
 
 
@@ -601,37 +625,59 @@ _GAMES_WRITE_COLS = insert_columns(_UPSERT_GAMES_SQL)
 _ODDS_WRITE_COLS = insert_columns(_INSERT_ODDS_SQL)
 
 
-def _ncaaf_resolver(conn, around_date: str):
-    """A `reuse_game_id` for `_process_events`, or None when the lookup can't run.
+def _ncaaf_resolver_between(conn, start: str, end: str):
+    """A `reuse_game_id` over games with `game_date` in [start, end].
 
-    Mirrors `_nfl_resolver`: load a window, return a closure over the matcher.
     None means the lookup failed and the caller mints ids — it does not skip
     the sport. An empty window is a working resolver that misses every event.
 
-    The closure is `(home_team, away_team, et_game_date) -> NcaafGameMatch | None`
-    with the names `_process_events` has already normalized and the ET date it
-    has already computed. The NFL closure takes raw names and the UTC instant
-    because that matcher owns both; this one does not re-derive either.
-    `swapped` on the match is the signal to flip side-specific values onto
-    `games.home_team` before the write.
+    The closure is `(home_team, away_team, et_game_date) -> NcaafGameMatch | None`.
+    `swapped` is the signal to flip side-specific values onto `games.home_team`.
+    Ambiguous matches accumulate on `reuse.ambiguous` so a multi-day backfill
+    can warn once for the range instead of once per cluster per day.
     """
     try:
-        anchor = date.fromisoformat(around_date[:10])
-        games = _load_ncaaf_games(
-            conn,
-            (anchor - timedelta(days=_NCAAF_REUSE_LOOKBACK_DAYS)).isoformat(),
-            (anchor + timedelta(days=_NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat(),
-        )
+        games = _load_ncaaf_games(conn, start, end)
     except Exception as exc:                                   # noqa: BLE001
         logger.warning(
             f"NCAAF: could not load games to reuse an existing id ({exc}); "
             f"minting ids")
         return None
 
-    def reuse(home_team: str, away_team: str, game_date: str):
-        return _choose_ncaaf_game(games, home_team, away_team, game_date)
+    ambiguous: list = []
 
+    def reuse(home_team: str, away_team: str, game_date: str):
+        match = _choose_ncaaf_game(games, home_team, away_team, game_date)
+        if match is not None and match.ambiguous_ids:
+            ambiguous.append((
+                away_team, home_team, str(game_date)[:10],
+                match.game_id, match.ambiguous_ids,
+            ))
+        return match
+
+    reuse.ambiguous = ambiguous
     return reuse
+
+
+def _ncaaf_resolver(conn, around_date: str):
+    """A `reuse_game_id` for one pull, or None when the lookup can't run.
+
+    Loads `_NCAAF_REUSE_LOOKBACK_DAYS` before `around_date` through
+    `_NCAAF_REUSE_LOOKAHEAD_DAYS` after it. A historical range uses
+    `_ncaaf_resolver_between` once for the whole range instead.
+    """
+    try:
+        anchor = date.fromisoformat(around_date[:10])
+    except (ValueError, TypeError):
+        logger.warning(
+            f"NCAAF: could not load games to reuse an existing id "
+            f"(bad date {around_date!r}); minting ids")
+        return None
+    return _ncaaf_resolver_between(
+        conn,
+        (anchor - timedelta(days=_NCAAF_REUSE_LOOKBACK_DAYS)).isoformat(),
+        (anchor + timedelta(days=_NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat(),
+    )
 
 
 # ── Game ID Builder ───────────────────────────────────────────────────────────
@@ -1100,7 +1146,8 @@ def _process_events(events: list[dict], sport: str,
                     snapshot_type: str, snapshot_at: str,
                     include_3way: bool = False,
                     resolve_game_id=None,
-                    reuse_game_id=None) -> tuple[list[dict], list[dict]]:
+                    reuse_game_id=None,
+                    report_ambiguity: bool = True) -> tuple[list[dict], list[dict]]:
     """
     Parse a list of Odds API event dicts.
     Returns (game_rows, odds_rows) ready for DB insert.
@@ -1120,11 +1167,14 @@ def _process_events(events: list[dict], sport: str,
 
     A swapped-only hit (`match.swapped`) flips every side-specific value
     onto the stored home team before the rows are returned. Totals are left.
-    One warning per call names how many rows were flipped.
+    One warning per call names how many rows were flipped. A spread that
+    cannot be negated skips that event. `report_ambiguity` logs this call's
+    multi-row matches; a range backfill turns it off and logs once at the end.
     """
     game_rows = []
     odds_rows = []
     swapped_ids: list[str] = []
+    ambiguous: list = []
 
     _ET = ZoneInfo("America/New_York")
     for event in events:
@@ -1174,6 +1224,7 @@ def _process_events(events: list[dict], sport: str,
             season = year
 
         swapped = False
+        game_row = None
         if resolve_game_id is not None:
             # Read-only against the schedule. The resolver owns the date match
             # too (a prime-time kickoff lands on the NEXT day in UTC), so the
@@ -1197,6 +1248,11 @@ def _process_events(events: list[dict], sport: str,
                 if match and match.game_id:
                     game_id = match.game_id
                     swapped = match.swapped
+                    if match.ambiguous_ids:
+                        ambiguous.append((
+                            away_team, home_team, game_date,
+                            match.game_id, match.ambiguous_ids,
+                        ))
             if not game_id:
                 game_id = _build_game_id(sport, game_date, away_team, home_team)
 
@@ -1218,70 +1274,86 @@ def _process_events(events: list[dict], sport: str,
             }
             if swapped:
                 game_row = flip_sides(game_row, _GAMES_WRITE_COLS)
-                swapped_ids.append(game_id)
-            game_rows.append(game_row)
 
         # Bookmaker odds. Store a row per line-shop book (DraftKings is the book
         # the models score against; the others are kept for line shopping only).
         # Require DK to be present — if DK doesn't list a game we don't score it.
         bookmakers = event.get("bookmakers", [])
         if not any(b.get("key") == ODDS_API_BOOKMAKER for b in bookmakers):
+            if game_row is not None:
+                if swapped:
+                    swapped_ids.append(game_id)
+                game_rows.append(game_row)
             continue
 
-        for book in bookmakers:
-            book_key = book.get("key")
-            if book_key not in LINE_SHOP_BOOKMAKERS:
-                continue
-
-            for mkt in book.get("markets", []):
-                market_key = mkt.get("key")
-                if market_key == NHL_3WAY_API_KEY:
-                    market_key = NHL_3WAY_MARKET   # the feed's name -> ours
-                outcomes   = mkt.get("outcomes", [])
-                last_update = mkt.get("last_update", snapshot_at)
-
-                base_row = {
-                    "game_id":       game_id,
-                    "sport":         sport,
-                    "bookmaker":     book_key,
-                    "snapshot_type": snapshot_type,
-                    "snapshot_at":   last_update,
-                    "home_price":    None,
-                    "away_price":    None,
-                    "draw_price":    None,
-                    "spread_home":   None,
-                    "total_line":    None,
-                    "over_price":    None,
-                    "under_price":   None,
-                    # Betslip deep links + selection ids (includeLinks/includeSids)
-                    "home_link":     None,
-                    "away_link":     None,
-                    "draw_link":     None,
-                    "over_link":     None,
-                    "under_link":    None,
-                    "home_sid":      None,
-                    "away_sid":      None,
-                    "draw_sid":      None,
-                    "over_sid":      None,
-                    "under_sid":     None,
-                    # NULL for the live poll; the historical backfill overwrites.
-                    "source":        None,
-                }
-
-                if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
-                    parsed = _parse_outcomes(outcomes, sport, home_name)
-                    row = {**base_row, **parsed, "market": market_key}
-                elif market_key in ("spreads", "spreads_1st_5_innings"):
-                    parsed = _parse_spread_outcomes(outcomes, home_name)
-                    row = {**base_row, **parsed, "market": market_key}
-                elif market_key in ("totals", "totals_1st_5_innings"):
-                    parsed = _parse_total_outcomes(outcomes)
-                    row = {**base_row, **parsed, "market": market_key}
-                else:
+        event_odds: list[dict] = []
+        try:
+            for book in bookmakers:
+                book_key = book.get("key")
+                if book_key not in LINE_SHOP_BOOKMAKERS:
                     continue
-                if swapped:
-                    row = flip_sides(row, _ODDS_WRITE_COLS)
-                odds_rows.append(row)
+
+                for mkt in book.get("markets", []):
+                    market_key = mkt.get("key")
+                    if market_key == NHL_3WAY_API_KEY:
+                        market_key = NHL_3WAY_MARKET   # the feed's name -> ours
+                    outcomes   = mkt.get("outcomes", [])
+                    last_update = mkt.get("last_update", snapshot_at)
+
+                    base_row = {
+                        "game_id":       game_id,
+                        "sport":         sport,
+                        "bookmaker":     book_key,
+                        "snapshot_type": snapshot_type,
+                        "snapshot_at":   last_update,
+                        "home_price":    None,
+                        "away_price":    None,
+                        "draw_price":    None,
+                        "spread_home":   None,
+                        "total_line":    None,
+                        "over_price":    None,
+                        "under_price":   None,
+                        # Betslip deep links + selection ids (includeLinks/includeSids)
+                        "home_link":     None,
+                        "away_link":     None,
+                        "draw_link":     None,
+                        "over_link":     None,
+                        "under_link":    None,
+                        "home_sid":      None,
+                        "away_sid":      None,
+                        "draw_sid":      None,
+                        "over_sid":      None,
+                        "under_sid":     None,
+                        # NULL for the live poll; the historical backfill overwrites.
+                        "source":        None,
+                    }
+
+                    if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
+                        parsed = _parse_outcomes(outcomes, sport, home_name)
+                        row = {**base_row, **parsed, "market": market_key}
+                    elif market_key in ("spreads", "spreads_1st_5_innings"):
+                        parsed = _parse_spread_outcomes(outcomes, home_name)
+                        row = {**base_row, **parsed, "market": market_key}
+                    elif market_key in ("totals", "totals_1st_5_innings"):
+                        parsed = _parse_total_outcomes(outcomes)
+                        row = {**base_row, **parsed, "market": market_key}
+                    else:
+                        continue
+                    if swapped:
+                        row = flip_sides(row, _ODDS_WRITE_COLS)
+                    event_odds.append(row)
+        except _UnflippableSpread as exc:
+            logger.warning(
+                f"NCAAF: {away_team} @ {home_team} ({game_id}) {exc}; "
+                f"skipping the event rather than writing an unflipped line"
+            )
+            continue
+
+        if game_row is not None:
+            if swapped:
+                swapped_ids.append(game_id)
+            game_rows.append(game_row)
+        odds_rows.extend(event_odds)
 
     if swapped_ids:
         logger.warning(
@@ -1289,6 +1361,8 @@ def _process_events(events: list[dict], sport: str,
             f"reused games row(s) stored with home/away reversed from the "
             f"book: {swapped_ids}"
         )
+    if report_ambiguity and ambiguous:
+        _warn_ncaaf_ambiguities(ambiguous)
     return game_rows, odds_rows
 
 
@@ -1812,6 +1886,15 @@ def run_historical_odds_range(sport: str, start: str, end: str,
         # fires no DDL once the table is already closed.
         lock_down(conn, "odds_history_pulls")
         conn.commit()
+        # One games window for the whole range. Loading [day-2, day+200] on
+        # every snapshot re-reads the same span once per day.
+        reuse = None
+        if sport == "NCAAF":
+            reuse = _ncaaf_resolver_between(
+                conn,
+                (d0 - _td(days=_NCAAF_REUSE_LOOKBACK_DAYS)).isoformat(),
+                (d1 + _td(days=_NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat(),
+            )
         day = d0
         while day <= d1:
             for hour in hours:
@@ -1840,6 +1923,8 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                         f"would spend {spent + per_call} of a {credit_cap} cap")
                     stats["credits_spent"] = spent
                     stats["last_date"] = day.isoformat()
+                    if reuse is not None and reuse.ambiguous:
+                        _warn_ncaaf_ambiguities(reuse.ambiguous)
                     return stats
                 try:
                     events = _get_historical_odds(sport_key, markets,
@@ -1847,11 +1932,9 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     spent += per_call
                     stats["calls"] += 1
                     time.sleep(REQUEST_SLEEP)
-                    reuse = (_ncaaf_resolver(conn, day.isoformat())
-                             if sport == "NCAAF" else None)
                     game_rows, odds_rows = _process_events(
                         events, sport, "open", snapshot_at,
-                        reuse_game_id=reuse)
+                        reuse_game_id=reuse, report_ambiguity=False)
                     for r in odds_rows:
                         r["source"] = HISTORICAL_ODDS_SOURCE
                     flipped = _mark_in_play(game_rows, odds_rows)
@@ -1877,6 +1960,8 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                         pass
             stats["last_date"] = day.isoformat()
             day += _td(days=1)
+        if reuse is not None and reuse.ambiguous:
+            _warn_ncaaf_ambiguities(reuse.ambiguous)
     finally:
         conn.close()
 

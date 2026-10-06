@@ -165,9 +165,9 @@ def test_parse_lines_dates_a_night_kick_by_et_not_utc():
     assert rows[0]["_utc_game_id"] == "NCAAF_2026-08-30_memphis_unlv"
 
 
-def test_retain_keeps_the_historical_utc_id_when_that_row_has_team_logs():
-    """Memphis @ UNLV, 10:19pm ET 2026-08-29. The UTC row has team logs, so
-    re-dating it would orphan ncaaf_team_game_log."""
+def test_retain_keeps_the_historical_utc_id_when_that_row_already_exists():
+    """Memphis @ UNLV, 10:19pm ET 2026-08-29. The UTC row is already in
+    `games`, played or not. Re-dating it would insert an ET twin."""
     rows = parse_games([{
         "id": 99, "season": 2026,
         "startDate": "2026-08-30T02:19:00.000Z",
@@ -179,10 +179,7 @@ def test_retain_keeps_the_historical_utc_id_when_that_row_has_team_logs():
     assert rows[0]["game_date"] == "2026-08-30"
 
 
-def test_retain_drops_a_utc_id_that_has_no_team_logs():
-    """The 2026-08-29 preload wrote this id before the game was played.
-    Existence in `games` is not the set this function reads — no team log
-    means the ET id, which is the one the odds ingestor mints."""
+def test_retain_leaves_the_et_id_when_the_utc_row_does_not_exist():
     rows = parse_games([{
         "id": 99, "season": 2026,
         "startDate": "2026-08-30T02:19:00.000Z",
@@ -191,27 +188,6 @@ def test_retain_drops_a_utc_id_that_has_no_team_logs():
     retain_existing_cfbd_ids(rows, set())
     assert rows[0]["game_id"] == "NCAAF_2026-08-29_memphis_unlv"
     assert rows[0]["game_date"] == "2026-08-29"
-
-
-def test_retain_keeps_a_played_utc_id_and_drops_an_unplayed_one():
-    """One call, two real 2026 twins. Memphis has logs; Fresno State @ USC
-    (9:00pm ET 2026-09-04 = 01:00Z on the 5th) stands in for a preload."""
-    memphis = parse_games([{
-        "id": 1, "season": 2026,
-        "startDate": "2026-08-30T02:19:00.000Z",
-        "homeTeam": "UNLV", "awayTeam": "Memphis",
-    }])
-    fresno = parse_games([{
-        "id": 2, "season": 2026,
-        "startDate": "2026-09-05T01:00:00.000Z",
-        "homeTeam": "USC", "awayTeam": "Fresno State",
-    }])
-    rows = memphis + fresno
-    retain_existing_cfbd_ids(rows, {"NCAAF_2026-08-30_memphis_unlv"})
-    assert rows[0]["game_id"] == "NCAAF_2026-08-30_memphis_unlv"
-    assert rows[0]["game_date"] == "2026-08-30"
-    assert rows[1]["game_id"] == "NCAAF_2026-09-04_fresno-state_usc"
-    assert rows[1]["game_date"] == "2026-09-04"
 
 
 def test_retain_is_a_noop_when_et_and_utc_already_agree():
@@ -234,21 +210,12 @@ def test_retain_moves_archive_line_snapshot_with_the_historical_id():
 
 
 class _GamesConn:
-    """Returns a logged id only when the SQL actually reads the team log.
-
-    A query against `games` alone used to satisfy retain. That is the bug:
-    the 2026-08-29 preload exists in `games` and has no logs.
-    """
-
-    def __init__(self, logged_ids):
-        self.logged_ids = logged_ids
+    def __init__(self, existing_ids):
+        self.existing_ids = existing_ids
         self.upserts = []
         self.commits = 0
-        self.queries = []
 
     def execute(self, sql, params=None):
-        self.queries.append(sql)
-
         class _Cur:
             def __init__(self, rows):
                 self._rows = rows
@@ -256,10 +223,8 @@ class _GamesConn:
             def fetchall(self):
                 return self._rows
 
-        if "ncaaf_team_game_log" not in sql:
-            return _Cur([])
         ids = (params or {}).get("ids") or []
-        return _Cur([(i,) for i in ids if i in self.logged_ids])
+        return _Cur([(i,) for i in ids if i in self.existing_ids])
 
     def executemany(self, sql, rows):
         self.upserts.extend(rows)
@@ -268,11 +233,10 @@ class _GamesConn:
         self.commits += 1
 
 
-def test_ingest_games_retains_a_utc_id_with_team_logs_and_uses_et_without(
+def test_ingest_games_retains_a_historical_utc_id_and_uses_et_for_a_new_row(
         monkeypatch):
     """The writer — not just the helper — is what would orphan the FKs.
-    The mock answers the team-log query only, so a `games` existence check
-    cannot keep the UTC id."""
+    The set is ids already in `games`, including an unplayed UTC preload."""
     from data.ingestors import cfbd_ingestor as cf
 
     night = {
@@ -298,7 +262,6 @@ def test_ingest_games_retains_a_utc_id_with_team_logs_and_uses_et_without(
     assert conn.upserts[0]["game_date"] == "2026-08-30"
     assert id_map[1] == historical
     assert historical in games_by_id
-    assert any("ncaaf_team_game_log" in q for q in conn.queries)
 
     fresh = _GamesConn(set())
     n, id_map, games_by_id = cf.ingest_ncaaf_games(2026, fresh)
@@ -306,7 +269,6 @@ def test_ingest_games_retains_a_utc_id_with_team_logs_and_uses_et_without(
     assert fresh.upserts[0]["game_id"] == "NCAAF_2026-08-29_memphis_unlv"
     assert fresh.upserts[0]["game_date"] == "2026-08-29"
     assert id_map[1] == "NCAAF_2026-08-29_memphis_unlv"
-    assert any("ncaaf_team_game_log" in q for q in fresh.queries)
 
 
 # ── Lines (the reason this sport is buildable) ────────────────────────────────
