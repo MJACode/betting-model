@@ -1578,9 +1578,9 @@ def _day_before(date_str: str) -> str:
 # Night games ingested BEFORE the 2026-09-13 ET dating policy have TWO games
 # rows under two ids — e.g. a 10:19pm ET kick is NCAAF_2026-08-29_memphis_unlv
 # (odds, Eastern date) and NCAAF_2026-08-30_memphis_unlv (CFBD, UTC prefix).
-# New CFBD rows date by ET. A UTC id is kept only when it already has team
-# logs; re-keying a played row would orphan ncaaf_team_game_log /
-# ncaaf_qb_game FKs 2015–2025. A UTC preload with no logs is left on the ET id.
+# New rows date by ET. A UTC id is kept whenever that games row already
+# exists, whether or not it has team logs, until Night Watch Part B rekeys
+# the unplayed 2026 UTC rows.
 #
 # Picks always attach to the ODDS row: it is the one that exists when the board
 # is priced. CFBD wrote the final to its OWN row. So without this the generic
