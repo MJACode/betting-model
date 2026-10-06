@@ -4,8 +4,13 @@
  *
  *   npx tsx scripts/verify_offense_defense.ts
  */
-import { aggregateBox, buildMatchup, playCellSpeech, playRowsAvailable, rankIn, type OffenseBoxLine } from '../src/lib/offenseDefense';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { aggregateBox, boxBefore, buildMatchup, playCellSpeech, playRowsAvailable, rankIn, type OffenseBoxLine } from '../src/lib/offenseDefense';
 import type { TeamStatsRow } from '../src/types';
+
+const read = (p: string) => readFileSync(join(import.meta.dirname, '..', p), 'utf-8');
 
 let fail = 0;
 function check(name: string, cond: boolean, extra?: unknown) {
@@ -114,7 +119,7 @@ eq(
 eq(
   'matchup VoiceOver, offense',
   playCellSpeech('PHI', 'offense', 'points-added', 0.21, 1),
-  'PHI offense, points added per play, plus 0.21, ranks 1st',
+  'PHI offense, points added per play, 0.21, ranks 1st',
 );
 eq(
   'missing points-added is not a zero',
@@ -181,12 +186,70 @@ eq(
   eq('NCAAF rows are points plus the two play metrics', keys.join(','), 'pts,points-added,success');
   eq('NCAAF game count comes from that team', model.sections[0].offenseGames, 4);
   const added = model.sections[0].rows.find((r) => r.key === 'points-added')!;
-  eq('NCAAF points-added prints signed', added.displayOff, '+0.21');
+  eq('NCAAF points-added prints unsigned', added.displayOff, '0.21');
   const alaDef = model.sections[1].rows.find((r) => r.key === 'points-added')!;
   eq('NCAAF defense prints a true minus', alaDef.displayDef, '\u22120.08');
   eq('defense rank is 1st when it allows the least', alaDef.defRank, 1);
   const success = model.sections[0].rows.find((r) => r.key === 'success')!;
   eq('successful plays print as a percent', success.displayOff, '46.7%');
+}
+
+// A settled pick must not absorb games played after it. 2025's box includes
+// 13 playoff games; those, and the pick's own game, stay out of the average
+// and out of that side's game count.
+{
+  const week1 = [
+    box({
+      game_id: 'w1', game_date: '2025-09-07', team: 'KC', opponent: 'BAL',
+      plays: 60, pass_yards: 200, rush_yards: 100, points_for: 20, points_against: 17,
+    }),
+    box({
+      game_id: 'w1', game_date: '2025-09-07', team: 'BAL', opponent: 'KC',
+      plays: 55, pass_yards: 180, rush_yards: 80, points_for: 17, points_against: 20,
+    }),
+  ];
+  const ownGame = [
+    box({
+      game_id: 'w2', game_date: '2025-09-14', team: 'KC', opponent: 'PHI',
+      plays: 60, pass_yards: 300, rush_yards: 100, points_for: 40, points_against: 10,
+    }),
+    box({
+      game_id: 'w2', game_date: '2025-09-14', team: 'PHI', opponent: 'KC',
+      plays: 60, pass_yards: 100, rush_yards: 40, points_for: 10, points_against: 40,
+    }),
+  ];
+  const playoff = [
+    box({
+      game_id: 'sb', game_date: '2026-02-08', team: 'KC', opponent: 'PHI',
+      plays: 70, pass_yards: 400, rush_yards: 100, points_for: 35, points_against: 28,
+    }),
+    box({
+      game_id: 'sb', game_date: '2026-02-08', team: 'PHI', opponent: 'KC',
+      plays: 65, pass_yards: 250, rush_yards: 90, points_for: 28, points_against: 35,
+    }),
+  ];
+  const all = [...week1, ...ownGame, ...playoff];
+  eq('the cap drops the pick date and everything after it', boxBefore(all, '2025-09-14').length, 2);
+  eq('a row with no date cannot be shown to be earlier', boxBefore([
+    box({ game_id: 'x', team: 'KC', opponent: 'BAL', points_for: 3 }),
+  ], '2025-09-14').length, 0);
+  const model = buildMatchup({
+    season: 2025, away: 'BAL', home: 'KC', ourTeam: 'KC', beforeDate: '2025-09-14',
+    box: all,
+    board: [board({ team: 'KC' }), board({ team: 'BAL' })],
+  });
+  eq('KC points are week 1 only', model.sections[0].rows[0].displayOff, '20.0');
+  eq('KC game count is the games before the pick', model.sections[0].offenseGames, 1);
+  eq('BAL game count matches its own earlier games', model.sections[0].defenseGames, 1);
+  const q = read('src/lib/queries.ts');
+  check('the season box read stops before the pick date',
+    /export async function fetchNflSeasonBox\(season: number, beforeDate: string\)[\s\S]{0,500}\.lt\('game_date', beforeDate\)/.test(q));
+  const card = read('src/components/OffenseDefenseCard.tsx');
+  check('the card passes the pick date into that read',
+    /fetchNflSeasonBox\(season, beforeDate\)/.test(card));
+  const screen = read('src/screens/PickDetailScreen.tsx');
+  check('the date is the pick’s game_date',
+    /beforeDate=\{pick\.game_date\}/.test(screen));
 }
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILED`);

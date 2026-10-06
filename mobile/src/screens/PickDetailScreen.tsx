@@ -435,7 +435,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
         ) : null}
 
         {showOffenseDefense && game ? (
-          <OffenseDefenseCard game={game} ourTeam={ourTeam} />
+          <OffenseDefenseCard game={game} ourTeam={ourTeam} beforeDate={pick.game_date} />
         ) : null}
 
         <PropContextCard pick={pick} context={propContext} />

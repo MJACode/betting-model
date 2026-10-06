@@ -337,7 +337,7 @@ export function TeamStatsScreen() {
                 key={String(r.def.key)}
                 label={r.def.label}
                 value={formatTeamStat(r.value, r.def.format)}
-                speech={boardValueSpeech(r.def, r.value, r.rank)}
+                speech={boardValueSpeech(r.def, r.value, r.rank, r.of)}
                 rank={r.rank}
                 of={r.of}
                 tier={r.tier}

@@ -26,11 +26,24 @@ export interface OffenseBoxLine {
   game_id: string;
   team: string;
   opponent: string;
+  /** Kickoff date. Absent on a fixture that is not being date-capped. */
+  game_date?: string | null;
   plays: number | null;
   pass_yards: number | null;
   rush_yards: number | null;
   points_for: number | null;
   points_against: number | null;
+}
+
+/**
+ * Box lines from before a pick's game date. The pick's own game and every
+ * later game (a settled 2025 pick must not absorb that season's playoffs)
+ * stay out. A row with no date cannot be shown to be earlier, so it stays out
+ * too. No date means no cap.
+ */
+export function boxBefore(rows: readonly OffenseBoxLine[], beforeDate: string | null | undefined): OffenseBoxLine[] {
+  if (!beforeDate) return [...rows];
+  return rows.filter((row) => typeof row.game_date === 'string' && row.game_date < beforeDate);
 }
 
 export interface TeamRates {
@@ -389,8 +402,11 @@ export function buildMatchup(args: {
   ourTeam: string | null;
   box: readonly OffenseBoxLine[];
   board: readonly TeamStatsRow[];
+  /** Count only games before this date. The pick's game_date. */
+  beforeDate?: string | null;
 }): MatchupModel {
-  const rates = args.box.length ? aggregateBox(args.box) : null;
+  const box = boxBefore(args.box, args.beforeDate);
+  const rates = box.length ? aggregateBox(box) : null;
   const plays = playRowsAvailable(args.board);
   const lead = args.ourTeam === args.home || args.ourTeam === args.away ? args.ourTeam : args.away;
   const other = lead === args.home ? args.away : args.home;
@@ -404,7 +420,7 @@ export function buildMatchup(args: {
     return typeof n === 'number' && n > 0 ? n : null;
   };
   const completed = rates
-    ? new Set(args.box.filter((r) => num(r.points_for) != null).map((r) => r.game_id)).size
+    ? new Set(box.filter((r) => num(r.points_for) != null).map((r) => r.game_id)).size
     : null;
   const teamsWithGames = rates
     ? [...rates.values()].filter((r) => r.games > 0).length

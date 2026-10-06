@@ -261,25 +261,28 @@ for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   eq('MLB tab is unchanged', teamGroupLabel('Efficiency', 'MLB'), 'Efficiency');
 
   const MINUS = '\u2212';
-  eq('positive points-added', formatTeamStat(0.21, 'sdec2'), '+0.21');
+  eq('positive points-added has no plus', formatTeamStat(0.21, 'sdec2'), '0.21');
   eq('negative points-added uses a true minus', formatTeamStat(-0.08, 'sdec2'), `${MINUS}0.08`);
   eq('rounds before the sign, positive side', formatTeamStat(0.004, 'sdec2'), '0.00');
   eq('rounds before the sign, negative side', formatTeamStat(-0.004, 'sdec2'), '0.00');
   eq('a real hundredth still signs', formatTeamStat(-0.005, 'sdec2'), `${MINUS}0.01`);
   eq('null is a dash, not zero', formatTeamStat(null, 'sdec2'), '—');
   eq('success rate 0.467 prints 46.7%', formatTeamStat(0.467, 'pct3'), '46.7%');
-  eq('spoken plus', spokenTeamStat(0.21, 'sdec2'), 'plus 0.21');
+  eq('spoken positive has no plus', spokenTeamStat(0.21, 'sdec2'), '0.21');
   eq('spoken minus', spokenTeamStat(-0.08, 'sdec2'), 'minus 0.08');
   eq('spoken zero has no sign word', spokenTeamStat(0.004, 'sdec2'), '0.00');
   eq('spoken percent', spokenTeamStat(0.467, 'pct3'), '46.7 percent');
   eq('board VoiceOver, offense',
     boardValueSpeech(epaOff, 0.21, 1),
-    'Points added per play, offense, plus 0.21, ranks 1st');
+    'Points added per play, offense, 0.21, ranks 1st');
+  eq('team page VoiceOver names how many teams were ranked',
+    boardValueSpeech(epaOff, 0.21, 1, 32),
+    'Points added per play, offense, 0.21, ranks 1st of 32');
   eq('board VoiceOver, defense',
     boardValueSpeech(epaDef, -0.08, 2),
     'Points added per play, defense, minus 0.08, ranks 2nd');
-  eq('11th not 11st', boardValueSpeech(epaOff, 0.01, 11),
-    'Points added per play, offense, plus 0.01, ranks 11th');
+  eq('11th not 11st', boardValueSpeech(epaOff, 0.01, 11, 32),
+    'Points added per play, offense, 0.01, ranks 11th of 32');
 
   // Defense ranks lowest-first, so 1st is the best defense.
   const ranked = rankTeams([

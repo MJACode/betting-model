@@ -23,10 +23,13 @@ const STACK_AT = 1.3;
 export function OffenseDefenseCard({
   game,
   ourTeam,
+  beforeDate,
 }: {
   game: GameRow;
   /** The picked side's team, or null on a total. That offense leads. */
   ourTeam: string | null;
+  /** The pick's game date. NFL box lines on or after it are not counted. */
+  beforeDate: string | null;
 }) {
   const { fontScale } = useWindowDimensions();
   const stacked = fontScale >= STACK_AT;
@@ -45,7 +48,7 @@ export function OffenseDefenseCard({
         const sport = game.sport === 'NCAAF' ? 'NCAAF' : 'NFL';
         const board = await fetchTeamStats(sport, game.season);
         const season = board.season ?? game.season;
-        const box = sport === 'NFL' ? await fetchNflSeasonBox(season) : [];
+        const box = sport === 'NFL' && beforeDate ? await fetchNflSeasonBox(season, beforeDate) : [];
         if (!live) return;
         setModel(buildMatchup({
           season,
@@ -54,6 +57,7 @@ export function OffenseDefenseCard({
           ourTeam,
           box,
           board: board.rows,
+          beforeDate,
         }));
       } catch (e: unknown) {
         if (live && !isAbortError(e)) setFailure(errorText(e));
@@ -64,7 +68,7 @@ export function OffenseDefenseCard({
     return () => {
       live = false;
     };
-  }, [game.game_id, game.season, game.sport, game.away_team, game.home_team, ourTeam, reload]);
+  }, [game.game_id, game.season, game.sport, game.away_team, game.home_team, ourTeam, beforeDate, reload]);
 
   const teams = model?.teams ?? 0;
   const subtitle = model?.season != null ? `${model.season} season` : '';

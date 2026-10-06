@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, points added prints with no plus (true minus only when negative); team-page VoiceOver says "ranks 1st of 32"; NFL matchup box stops before the pick's game date. The two sheet sentences still need Matt's sign-off |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, reviewer copy on #887: points-added sheet compares by rank, successful plays use the 50/70/100 definition, a failed Teams load keeps the selected stat, NCAAF toughness prints signed two decimals. Matt still has to sign off the two sentences |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, plain labels for points added and successful plays. NFL rows stay hidden. Pick Detail bet-then-Track order is NFL and NCAAF only. Fair price, injuries, weather, splits, referee, and the play-by-play ingest were not built |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |

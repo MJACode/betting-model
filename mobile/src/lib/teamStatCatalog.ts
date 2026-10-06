@@ -35,8 +35,9 @@ export const TEAM_GROUP_ORDER: TeamStatGroup[] = ['Efficiency', 'Record', 'Betti
 /**
  * `pct3` is a 0..1 rate shown as a percentage (success rate lives here —
  * measured 2026-10-06, NCAAF 2026 success_off is 0.34–0.52, not 34–52).
- * `sdec2` is a signed two-decimal number: round first, then sign, so a value
- * that rounds to zero is `0.00` and never `−0.00`. Positives carry `+`.
+ * `sdec2` is two decimals that only sign a negative. Round first, so a value
+ * that rounds to zero is `0.00` and never `−0.00`. A leading `+` is not used:
+ * these numbers are not centred on 0, so a plus would read as "above average".
  */
 export type TeamStatFormat = 'int' | 'dec1' | 'dec2' | 'dec3' | 'pct3' | 'sdec2';
 
@@ -330,14 +331,15 @@ export function ordinal(n: number): string {
 }
 
 /**
- * Signed two decimals. Round to the displayed precision BEFORE choosing a
- * sign, so −0.004 and +0.004 both print `0.00` and never `−0.00`.
+ * Two decimals. Round to the displayed precision BEFORE choosing a sign, so
+ * −0.004 and +0.004 both print `0.00` and never `−0.00`. A positive prints
+ * with no sign. A negative uses a true minus.
  */
 export function formatSignedDec2(value: number): string {
   const rounded = Number(value.toFixed(2));
   if (rounded === 0) return '0.00';
   const body = Math.abs(rounded).toFixed(2);
-  return rounded > 0 ? `+${body}` : `\u2212${body}`;
+  return rounded < 0 ? `\u2212${body}` : body;
 }
 
 export function formatTeamStat(value: number | null, format: TeamStatFormat): string {
@@ -352,13 +354,14 @@ export function formatTeamStat(value: number | null, format: TeamStatFormat): st
   }
 }
 
-/** A value in full words for VoiceOver ("plus 0.21", "46.7 percent"). */
+/** A value in full words for VoiceOver ("0.21", "minus 0.08", "46.7 percent"). */
 export function spokenTeamStat(value: number | null, format: TeamStatFormat): string {
   if (value == null) return 'not available';
   if (format === 'sdec2') {
     const rounded = Number(value.toFixed(2));
     if (rounded === 0) return '0.00';
-    return `${rounded > 0 ? 'plus' : 'minus'} ${Math.abs(rounded).toFixed(2)}`;
+    const body = Math.abs(rounded).toFixed(2);
+    return rounded < 0 ? `minus ${body}` : body;
   }
   if (format === 'pct3') return `${(value * 100).toFixed(1)} percent`;
   return formatTeamStat(value, format);
@@ -367,13 +370,20 @@ export function spokenTeamStat(value: number | null, format: TeamStatFormat): st
 /**
  * VoiceOver for one board value. The team name is a separate button, so this
  * is the stat, the number, and the rank: "Points added per play, offense,
- * plus 0.21, ranks 1st". Null when the stat has no spoken form.
+ * 0.21, ranks 1st". Pass `of` (the teams that were ranked) to say
+ * "ranks 1st of 32". Null when the stat has no spoken form.
  */
-export function boardValueSpeech(def: TeamStatDef, value: number | null, rank: number | null): string | null {
+export function boardValueSpeech(
+  def: TeamStatDef,
+  value: number | null,
+  rank: number | null,
+  of?: number | null,
+): string | null {
   if (!def.spoken) return null;
   const num = spokenTeamStat(value, def.format);
   if (value == null || rank == null) return `${def.spoken}, ${num}`;
-  return `${def.spoken}, ${num}, ranks ${ordinal(rank)}`;
+  const place = of != null && of > 0 ? `${ordinal(rank)} of ${of}` : ordinal(rank);
+  return `${def.spoken}, ${num}, ranks ${place}`;
 }
 
 /** "67-42" or "67-42-3" when the split can push. */
