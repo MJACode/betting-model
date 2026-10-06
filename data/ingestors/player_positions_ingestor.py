@@ -63,9 +63,10 @@ season path from `espn_basketball_season` is fetched. A real run raises
 if player_positions does not exist yet, so the queue retries it.
 
 ONE SPORT PER JOB. A cold NBA pass is on the order of 1 team list + 30 team
-docs + 30 roster lists + ~450 athlete docs + a handful of position docs
-(about 520 HTTP calls). Both leagues in one invocation was the 1,000–2,000
-call burst. The job rejects a list of sports; queue one job per sport.
+docs + 30 roster lists + 609 athlete docs + a handful of position docs
+(about 675 HTTP calls; worker_jobs 406072 fetched 609 NBA athlete docs).
+Both leagues in one invocation was the 1,000–2,000 call burst. The job
+rejects a list of sports; queue one job per sport.
 `ingest_player_positions` still isolates a multi-sport call (its own cap,
 its own rollback) so a direct caller cannot poison the next sport.
 
@@ -73,7 +74,7 @@ POLITENESS. ESPN has IP-blocked the worker twice; a third block also takes
 out player news and WNBA results.
   * Cold pass (no athlete stored inside REFRESH_DAYS): pause 0.50s.
     A warm pass keeps 0.15s. Cache hits do not pause.
-  * Hard cap REQUEST_CAP (750) HTTP calls per sport. The sport stops, logs
+  * Hard cap REQUEST_CAP (900) HTTP calls per sport. The sport stops, logs
     a WARNING, and returns aborted_reason. It does not raise.
   * Three consecutive 403, 429, or 404 responses stop that sport the same
     way. 404 is in the streak because 405765 logged 47 of them and kept
@@ -85,10 +86,10 @@ out player news and WNBA results.
 
 STEADY STATE, HONEST COUNT. Not "~45 calls".
 
-  * Cold NBA, empty table, no cache file: about 520 HTTP calls (1 team
-    list + 30 team docs + 30 roster lists + ~450 athlete docs + a handful
-    of position docs). One sport, under the 750 cap. WNBA is the same
-    shape with 17 teams.
+  * Cold NBA, empty table, no cache file: about 675 HTTP calls (1 team
+    list + 30 team docs + 30 roster lists + 609 athlete docs + a handful
+    of position docs; worker_jobs 406072). That was about 90% of the old
+    750 cap, so the cap is 900. WNBA is the same shape with 17 teams.
   * Same worker, cache file still inside 7 days: team docs, roster lists,
     athlete docs and position docs are cache hits. Those URLs are not
     requested again. A new signing shows up when that roster entry expires.
@@ -155,9 +156,10 @@ REFRESH_DAYS = 7
 ESPN_PAUSE = 0.15
 #: Pause on a cold pass — nothing in `player_positions` inside REFRESH_DAYS.
 ESPN_PAUSE_COLD = 0.50
-#: Hard HTTP cap per sport per run. A cold NBA pass is ~520; 750 finishes
-#: one sport and stops a runaway before the second thousand calls.
-REQUEST_CAP = 750
+#: Hard HTTP cap per sport per run. A cold NBA pass is about 675
+#: (worker_jobs 406072 fetched 609 athlete docs, about 90% of the old
+#: 750 cap). 900 leaves headroom and still stops a runaway.
+REQUEST_CAP = 900
 #: Consecutive 403 / 429 / 404 responses that stop the sport.
 BLOCK_STREAK = 3
 #: Retry-After is honoured up to this many seconds, then we give up the retry.

@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, cold NBA player-positions pass is about 675 calls (406072 fetched 609 athlete docs); per-sport cap raised from 750 to 900 |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, removed the two-sport basketball positions job from declared_jobs; roster_candidates uses the season argument; NCAAF real run kept as on master |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, merge #889 into #888: one roster year from espn_basketball_season, empty-roster team count, #889 jobs 406072 and 406073 kept as historical exemptions |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, #888 review: prior-season team change vs in-season conflict; WNBA dry run not declared; NCAAF run_after 18:00Z; NBA ESPN season is the ending year; unmatched sentinel deleted on a later match |

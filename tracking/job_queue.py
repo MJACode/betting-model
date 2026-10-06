@@ -382,8 +382,9 @@ def _job_player_positions(**kw):
     `dry_run: true` writes nothing to `player_positions` and returns counts,
     the name-match rate, coverage against the two-season log (players and
     games), duplicate_ids, requests, and aborted_reason. One sport per job:
-    a cold basketball pass is a few hundred ESPN calls and the cap is per
-    sport. Read worker_jobs.result before any real run is queued.
+    a cold NBA pass is about 675 ESPN calls (worker_jobs 406072 fetched
+    609 athlete docs) and the cap is per sport. Read worker_jobs.result
+    before any real run is queued.
 
     The 2026-10-06 run (worker_jobs 405765) listed the teams and then 404'd
     every `/teams/{id}/athletes` URL, so it stored no basketball positions.
