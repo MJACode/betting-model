@@ -108,6 +108,7 @@ jobs:
             tests/test_mobile_pick_detail_bugs.py \
             tests/test_mobile_player_detail.py \
             tests/test_position_vs_opponent.py \
+            tests/test_player_positions.py \
             tests/test_mobile_betslip_combine.py \
             tests/test_mobile_contrast_tokens.py \
             tests/test_mobile_error_states.py \
