@@ -219,6 +219,59 @@ export interface PositionVsOpponentEntry {
   hit: boolean;
 }
 
+/** MLB groups show a per-player summary instead of every game (Matt,
+ *  2026-10-06: "Sure in summary" — ~440 player-games a season vs one team). */
+export function isMlbGroup(g: PositionGroup): g is MlbGroup {
+  return g === 'TOP' || g === 'MID' || g === 'BOT' || g === 'SP';
+}
+
+export interface PlayerSummary {
+  playerId: string;
+  playerName: string;
+  /** His team in his most recent game against this opponent. */
+  team: string;
+  games: number;
+  /** Games that cleared the page's line, the same isHit as the list rows. */
+  hits: number;
+  avg: number;
+  lastDate: string;
+}
+
+/**
+ * One row per player: how often each cleared the page's line against this
+ * opponent, most games first (the steadiest evidence on top), then by hit
+ * rate, then by name so the order is stable.
+ */
+export function playerSummaries(entries: readonly PositionVsOpponentEntry[]): PlayerSummary[] {
+  const by = new Map<string, PlayerSummary & { sum: number }>();
+  for (const e of entries) {
+    const cur = by.get(e.playerId);
+    if (!cur) {
+      by.set(e.playerId, {
+        playerId: e.playerId, playerName: e.playerName, team: e.team,
+        games: 1, hits: e.hit ? 1 : 0, avg: e.value, sum: e.value, lastDate: e.date,
+      });
+      continue;
+    }
+    cur.games += 1;
+    cur.hits += e.hit ? 1 : 0;
+    cur.sum += e.value;
+    if (e.date > cur.lastDate) {
+      cur.lastDate = e.date;
+      cur.team = e.team;
+      cur.playerName = e.playerName;
+    }
+  }
+  return [...by.values()]
+    .map(({ sum, ...p }) => ({ ...p, avg: sum / p.games }))
+    .sort(
+      (a, b) =>
+        b.games - a.games ||
+        b.hits / b.games - a.hits / a.games ||
+        a.playerName.localeCompare(b.playerName),
+    );
+}
+
 export interface PositionVsOpponent {
   opponent: string;
   group: PositionGroup;
