@@ -185,6 +185,9 @@ def all_readable() -> tuple[str, ...]:
 # v_latest_prop_odds_all_books, v_latest_dk_odds and v_live_game_state_latest
 # (data/migrations/latest_line_state_tables.sql).
 VIEW_BASE_TABLES: tuple[str, ...] = (
+    # NBA/WNBA/NCAAF positions, read only through the security-invoker
+    # position_vs_opponent_* functions (data/migrations/add_player_positions.sql).
+    "player_positions",
     "latest_odds",
     "latest_prop_odds",
     "latest_live_game_state",

@@ -371,6 +371,42 @@ def _validate_player_news(args: dict) -> dict:
     return {"sports": sports, "run_date": run_date}
 
 
+def _job_player_positions(**kw):
+    """Fetch NBA / WNBA / NCAAF positions into `player_positions`, on the worker.
+
+    WHY HERE. The position-vs-opponent card's phase 3 (Matt, 2026-10-05) needs
+    a position per player, and both sources -- ESPN core rosters for
+    basketball, CFBD /roster for NCAAF -- 403 from the dev sandbox's egress
+    proxy (requests and WebFetch, 2026-10-06), while CFBD_API_KEY is set on
+    the worker only. So the response shapes are unverified until this runs:
+    `dry_run: true` writes nothing and returns counts, the name-match rate, the
+    positions seen and a sample, and is read back from worker_jobs.result
+    before any real run is queued.
+    """
+    from data.ingestors.player_positions_ingestor import ingest_player_positions
+    return ingest_player_positions(
+        sports=kw["sports"], season=kw["season"], dry_run=kw["dry_run"])
+
+
+def _validate_player_positions(args: dict) -> dict:
+    from data.ingestors.player_positions_ingestor import SPORTS
+    sports = args.get("sports") or list(SPORTS)
+    if not isinstance(sports, list) or not sports:
+        raise ValueError("sports must be a non-empty list")
+    sports = [str(s).upper() for s in sports]
+    bad = sorted(set(sports) - set(SPORTS))
+    if bad:
+        raise ValueError(f"unknown sport {bad}; known {list(SPORTS)}")
+    season = args.get("season")
+    season = int(season) if season not in (None, "") else None
+    if season is not None and not (2014 <= season <= datetime.now().year + 1):
+        raise ValueError(f"season out of range: {season}")
+    dry = args.get("dry_run", True)
+    if not isinstance(dry, bool):
+        raise ValueError("dry_run must be true or false")
+    return {"sports": sports, "season": season, "dry_run": dry}
+
+
 def _validate_ncaaf_prop_odds(args: dict) -> dict:
     """College props, measured before they are scheduled.
 
@@ -1554,6 +1590,9 @@ JOBS = {
     # Read-mostly: writes only player_news. Forces a real ESPN fetch (no
     # max-age skip) and returns per-sport diagnostics. See _job_player_news.
     "player_news": (_job_player_news, _validate_player_news),
+    # Writes only player_positions (dry_run: nothing). ESPN core + CFBD, both
+    # unreachable from the dev sandbox. See _job_player_positions.
+    "player_positions": (_job_player_positions, _validate_player_positions),
 }
 
 
