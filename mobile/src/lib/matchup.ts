@@ -1,4 +1,5 @@
 import type { TonightMatchupRow } from '@/types';
+import { formatSignedDec2 } from '@/lib/teamStatCatalog';
 
 /**
  * Tonight-matchup grading for the Stats tab's MATCHUP column.
@@ -374,6 +375,8 @@ const DEFENCE_ANCHORS: Record<
   string,
   {
     key: string; median: number; sigma: number; dp: number;
+    /** Board formatter: signed two decimals. Grade math still uses median and sigma. */
+    signed?: boolean;
     /** Column wording, matching teamStatCatalog for the same number. */
     label: string;
     /** The metric as a sentence, for the tooltip and for VoiceOver. */
@@ -388,7 +391,7 @@ const DEFENCE_ANCHORS: Record<
     label: 'Allowed/G', spoken: 'points allowed per game', verb: 'allows', unit: 'pts/g',
   },
   NCAAF: {
-    key: 'epa_def', median: 0.155, sigma: 0.0778, dp: 3,
+    key: 'epa_def', median: 0.155, sigma: 0.0778, dp: 2, signed: true,
     label: 'Pts added/play Def', spoken: 'points added per play allowed', verb: 'allows', unit: 'pts added/play',
   },
   NBA: {
@@ -440,7 +443,7 @@ export function gradeOpponentDefence(
     };
   }
   const score = normalCdf(z(value, anchor));
-  const shown = value.toFixed(anchor.dp);
+  const shown = anchor.signed ? formatSignedDec2(value) : value.toFixed(anchor.dp);
   // SUBJECT, then number, then the season it came from. MLB's version names a
   // person ("S. Gray 5.90 ERA") so its subject is obvious; a bare team-season
   // rate under a header reading "Tonight's matchup" can be taken for the

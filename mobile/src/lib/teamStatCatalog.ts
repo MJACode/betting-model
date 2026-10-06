@@ -91,7 +91,7 @@ export const EXPLAIN_PTS_ADDED: StatExplain = {
   name: 'Points added per play',
   title: 'Points added per play',
   body:
-    'How much each play helps a team score, compared with an average play in the same down, distance and field position. Above 0 is better than average. For an offense higher is better; for a defense lower is better.',
+    'How much each play helps a team score, compared with an average play in the same down, distance and field position. Higher means more points per play. Compare teams by rank. For a defense, lower is better.',
   a11y: 'About points added per play',
 };
 
@@ -99,7 +99,7 @@ export const EXPLAIN_SUCCESS: StatExplain = {
   name: 'Successful plays',
   title: 'Successful plays',
   body:
-    'The share of plays that keep a drive on track: at least 40% of the yards needed on 1st down, 60% on 2nd, and all of them on 3rd or 4th down. Higher is better for an offense, lower for a defense.',
+    'The share of plays that gain 50% of the yards to go on 1st down, 70% on 2nd, and 100% on 3rd or 4th. Higher is better for an offense. For a defense, lower is better.',
   a11y: 'About successful plays',
 };
 
@@ -208,6 +208,44 @@ export function teamStatsForSport(sport: Sport): TeamStatDef[] {
  */
 export function teamStatsForBoard(sport: Sport, rows: readonly TeamStatsRow[]): TeamStatDef[] {
   return teamStatsForSport(sport).filter((s) => !s.untilData || columnHasValue(rows, s.key));
+}
+
+/**
+ * Which stat to show after the offered set changes.
+ *
+ * A failed load clears the rows, and that hides every `untilData` chip. Falling
+ * back in that window moves a user off Points added per play onto the group
+ * default, and a later retry leaves them there. Hold the selection while the
+ * load is in flight or the error banner is up. A successful load that truly
+ * lacks the column (NFL, while the ingest is empty) still falls back.
+ */
+export function teamStatAfterOffer(
+  stat: TeamStatDef | null,
+  offered: readonly TeamStatDef[],
+  sport: Sport,
+  holdSelection: boolean,
+): TeamStatDef | null {
+  if (!stat || holdSelection) return stat;
+  if (offered.some((s) => s.key === stat.key)) return stat;
+  return offered.find((s) => s.group === stat.group) ?? defaultTeamStatFor(sport);
+}
+
+/**
+ * Chip row while a load is failing or still running. The selected stat stays
+ * visible even when empty rows have dropped it from `offered`, so the user
+ * can see the choice the error did not change. Other empty `untilData` stats
+ * stay hidden.
+ */
+export function teamStatsShown(
+  offered: readonly TeamStatDef[],
+  sport: Sport,
+  selected: TeamStatDef | null,
+  holdSelection: boolean,
+): readonly TeamStatDef[] {
+  if (!holdSelection || !selected || offered.some((s) => s.key === selected.key)) return offered;
+  const full = teamStatsForSport(sport);
+  if (!full.some((s) => s.key === selected.key)) return offered;
+  return full.filter((s) => s.key === selected.key || offered.some((o) => o.key === s.key));
 }
 
 /** Groups that actually have a stat for this sport (so no empty tabs render). */

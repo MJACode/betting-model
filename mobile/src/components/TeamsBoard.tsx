@@ -70,8 +70,10 @@ import {
   teamGroupLabel,
   teamGroupsForSport,
   teamStatValue,
+  teamStatAfterOffer,
   teamStatsForBoard,
   teamStatsForSport,
+  teamStatsShown,
   type TeamStatDef,
   type TeamStatGroup,
 } from '@/lib/teamStatCatalog';
@@ -215,12 +217,18 @@ export function TeamsBoard({
   // untilData stats (NFL points-added, while the ingest is empty) stay off
   // the chip row. The catalog still lists them.
   const offered = useMemo(() => teamStatsForBoard(sport, rows), [sport, rows]);
+  // Hold the chip across a failed load and across the retry that clears the
+  // error before the next rows arrive. A successful empty column still falls
+  // back once `loading` and `error` are both clear.
+  const holdStat = error != null || loading;
   useEffect(() => {
-    if (!stat) return;
-    if (offered.some((s) => s.key === stat.key)) return;
-    const fallback = offered.find((s) => s.group === stat.group) ?? defaultTeamStatFor(sport);
-    if (fallback) setStat(fallback);
-  }, [offered, stat, sport]);
+    const next = teamStatAfterOffer(stat, offered, sport, holdStat);
+    if (next && next !== stat) setStat(next);
+  }, [offered, stat, sport, holdStat]);
+  const chips = useMemo(
+    () => teamStatsShown(offered, sport, stat, holdStat),
+    [offered, sport, stat, holdStat],
+  );
   const pickGroup = (g: TeamStatGroup) => {
     if (g === activeGroup) return;
     const first = offered.find((s) => s.group === g) ?? teamStatsForSport(sport).find((s) => s.group === g);
@@ -340,7 +348,7 @@ export function TeamsBoard({
         contentContainerStyle={styles.chipRow}
         keyboardShouldPersistTaps="handled"
       >
-        {offered
+        {chips
           .filter((s) => s.group === activeGroup)
           .map((s) => (
             <FilterChip

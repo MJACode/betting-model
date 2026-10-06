@@ -31,8 +31,10 @@ import {
   teamGroupLabel,
   teamGroupsForSport,
   teamStatValue,
+  teamStatAfterOffer,
   teamStatsForBoard,
   teamStatsForSport,
+  teamStatsShown,
   type TeamStatDef,
 } from '../src/lib/teamStatCatalog';
 import type { TeamStatsRow } from '../src/types';
@@ -233,10 +235,22 @@ for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   eq('points-added header', epaOff.header, 'Pts added/play');
   eq('points-added sheet label', epaOff.explain?.a11y, 'About points added per play');
   eq('points-added copy', epaOff.explain?.body, EXPLAIN_PTS_ADDED.body);
+  check('points-added copy does not treat 0 as average',
+    !EXPLAIN_PTS_ADDED.body.includes('Above 0') && !EXPLAIN_PTS_ADDED.body.toLowerCase().includes('better than average'));
+  check('points-added copy says higher means more and to compare by rank',
+    EXPLAIN_PTS_ADDED.body.includes('Higher means more points per play.')
+    && EXPLAIN_PTS_ADDED.body.includes('Compare teams by rank.')
+    && EXPLAIN_PTS_ADDED.body.includes('For a defense, lower is better.'));
   eq('success chip', sucOff.label, 'Successful plays Off');
   eq('success header', sucOff.header, 'Successful plays');
   eq('success sheet label', sucOff.explain?.a11y, 'About successful plays');
   eq('success copy', sucOff.explain?.body, EXPLAIN_SUCCESS.body);
+  check('success copy uses the CFBD 50/70/100 definition',
+    EXPLAIN_SUCCESS.body.includes('50% of the yards to go on 1st down')
+    && EXPLAIN_SUCCESS.body.includes('70% on 2nd')
+    && EXPLAIN_SUCCESS.body.includes('100% on 3rd or 4th')
+    && !EXPLAIN_SUCCESS.body.includes('40%')
+    && !EXPLAIN_SUCCESS.body.includes('60%'));
   eq('success is a percent of a 0..1 rate', sucOff.format, 'pct3');
   check('both football sports share the points-added row',
     epaOff.sports.includes('NFL') && epaOff.sports.includes('NCAAF') && epaDef.sports.includes('NFL'));
@@ -290,6 +304,22 @@ for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   check('NCAAF team page lists the same rows',
     teamRanks(liveNcaaf, 'ALA', 'NCAAF', 'Efficiency').some((r) => r.def.key === 'epa_off'));
   eq('NFL still opens on yards/play', defaultTeamStatFor('NFL')?.key, 'yards_per_play');
+
+  const epa = TEAM_STAT_CATALOG.find((s) => s.key === 'epa_off')!;
+  const emptyOffered = teamStatsForBoard('NCAAF', []);
+  check('a failed load does not move the user off points added',
+    teamStatAfterOffer(epa, emptyOffered, 'NCAAF', true)?.key === 'epa_off');
+  eq('a successful empty column still falls back',
+    teamStatAfterOffer(epa, emptyOffered, 'NCAAF', false)?.key, 'sp_overall');
+  eq('a populated column keeps the selection',
+    teamStatAfterOffer(epa, teamStatsForBoard('NCAAF', liveNcaaf), 'NCAAF', false)?.key, 'epa_off');
+  const held = teamStatsShown(emptyOffered, 'NCAAF', epa, true);
+  check('the held chip stays on the row during the error', held.some((s) => s.key === 'epa_off'));
+  check('other empty untilData chips stay hidden during the error',
+    !held.some((s) => s.key === 'success_off'));
+  const nflOffered = teamStatsForBoard('NFL', emptyNfl);
+  check('initial NFL load does not flash the empty points-added chip',
+    !teamStatsShown(nflOffered, 'NFL', defaultTeamStatFor('NFL'), true).some((s) => s.key === 'epa_off'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
