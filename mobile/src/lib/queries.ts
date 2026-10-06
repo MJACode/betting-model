@@ -1,4 +1,5 @@
 import { fetchAllPages } from '@/lib/paging';
+import type { OffenseBoxLine } from '@/lib/offenseDefense';
 import { alternateMarketFor, foldAlternateRows, propLineRowKey } from '@/lib/propLines';
 import { attachDiscordPublish, discordLedVisible } from './discordPublish';
 import { supabase } from './supabase';
@@ -2526,6 +2527,30 @@ export async function fetchPublicSplits(gameId: string): Promise<PublicBettingRo
     .eq('book', 'consensus');
   if (error) throw error;
   return (data ?? []) as unknown as PublicBettingRow[];
+}
+
+/**
+ * Every team's box line for one NFL season, strictly before `beforeDate`
+ * (the pick's game date) — the Matchup card's counting rows (points, yards
+ * per play, pass yards, rush yards). The pick's own game and every later
+ * game stay out, including a settled season's playoffs. One season is a few
+ * hundred rows (544 in 2026, measured 2026-10-06); paging is still the read,
+ * because the cap is silent. Ordered so a row inserted mid-drain cannot
+ * duplicate or skip a team.
+ */
+export async function fetchNflSeasonBox(season: number, beforeDate: string): Promise<OffenseBoxLine[]> {
+  return fetchAllPages<OffenseBoxLine>(
+    (from, to) =>
+      supabase
+        .from('nfl_team_game_stats')
+        .select('game_id, team, opponent, game_date, plays, pass_yards, rush_yards, points_for, points_against')
+        .eq('season', season)
+        .lt('game_date', beforeDate)
+        .order('game_id', { ascending: true })
+        .order('team', { ascending: true })
+        .range(from, to),
+    (row) => `${row.game_id}|${row.team}`,
+  );
 }
 
 /** nflverse's per-team box lines for one team-season, with the closing spread and total. */

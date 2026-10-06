@@ -126,11 +126,24 @@ function main() {
   // The visible label is the Teams board's own wording for the same number, so
   // one stat is not two idioms on one tab.
   check('the column label matches teamStatCatalog', defenceMetricLabel('NFL') === 'Allowed/G');
-  check('NCAAF too', defenceMetricLabel('NCAAF') === 'EPA/play Def');
+  check('NCAAF too', defenceMetricLabel('NCAAF') === 'Pts added/play Def');
+  const ncaafMedian = grade('NCAAF', { epa_def: 0.155 }, 'ALA', 2025);
+  // 0.155 is not exact in IEEE (0.15499…), so the board’s toFixed(2) path
+  // prints +0.15. That is the same formatter, not a third decimal.
+  check('NCAAF toughness prints the board’s two decimals, with no plus',
+    ncaafMedian?.text === 'vs ALA · ALA allows 0.15 pts added/play (2025)', `${ncaafMedian?.text}`);
+  check('and the spoken cell uses that same number',
+    ncaafMedian?.fact === 'ALA 0.15 points added per play allowed (2025)', `${ncaafMedian?.fact}`);
+  const ncaafUp = grade('NCAAF', { epa_def: 0.164 }, 'UGA', 2025);
+  check('a value that rounds up stays unsigned',
+    ncaafUp?.text === 'vs UGA · UGA allows 0.16 pts added/play (2025)', `${ncaafUp?.text}`);
+  const ncaafNeg = grade('NCAAF', { epa_def: -0.084 }, 'OSU', 2026);
+  check('a negative NCAAF anchor uses a true minus',
+    ncaafNeg?.text === `vs OSU · OSU allows ${'\u2212'}0.08 pts added/play (2026)`, `${ncaafNeg?.text}`);
   check('and NBA', defenceMetricLabel('NBA') === 'Def Rtg');
   check('the tooltip gets a sentence, not an abbreviation',
     defenceMetricSpoken('NFL') === 'points allowed per game'
-    && defenceMetricSpoken('NCAAF') === 'EPA per play allowed'
+    && defenceMetricSpoken('NCAAF') === 'points added per play allowed'
     && defenceMetricSpoken('NBA') === 'defensive rating');
 
   // ── the colour ramp goes quiet when it cannot discriminate ─────────────────

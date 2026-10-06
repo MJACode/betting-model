@@ -59,7 +59,7 @@ import {
   type PickRecord,
   type TeamMarket,
 } from '@/lib/teamDetail';
-import { formatTeamStat, TEAM_STAT_CATALOG, type TeamStatDef } from '@/lib/teamStatCatalog';
+import { boardValueSpeech, formatTeamStat, TEAM_STAT_CATALOG, teamGroupLabel, type TeamStatDef } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { ErrorBanner } from '@/components/ErrorState';
 import { friendlyCause } from '@/lib/errors';
@@ -329,18 +329,29 @@ export function TeamStatsScreen() {
         )}
 
         {/* ── 6. League ranks ────────────────────────────────────────────── */}
-        <SectionTitle title="Efficiency" />
+        <SectionTitle title={teamGroupLabel('Efficiency', sport)} />
         {efficiency.length > 0 && row ? (
           <Card>
             {efficiency.map((r) => (
-              <RankRow key={String(r.def.key)} label={r.def.label} value={formatTeamStat(r.value, r.def.format)} rank={r.rank} of={r.of} tier={r.tier} hint={r.def.hint} />
+              <RankRow
+                key={String(r.def.key)}
+                label={r.def.label}
+                value={formatTeamStat(r.value, r.def.format)}
+                speech={boardValueSpeech(r.def, r.value, r.rank, r.of)}
+                rank={r.rank}
+                of={r.of}
+                tier={r.tier}
+                hint={r.def.hint}
+              />
             ))}
           </Card>
         ) : d.board.loading ? (
           <ActivityIndicator style={styles.loading} />
         ) : (
           <Card>
-            <Text style={styles.muted}>No efficiency metrics stored for {team} yet.</Text>
+            <Text style={styles.muted}>
+              No {teamGroupLabel('Efficiency', sport).toLowerCase()} metrics stored for {team} yet.
+            </Text>
           </Card>
         )}
         <BetslipBarSpacer />
@@ -756,6 +767,7 @@ function SplitsTiles({ row, sport }: { row: TeamStatsRow; sport: TeamSport }) {
 function RankRow({
   label,
   value,
+  speech,
   rank,
   of,
   tier,
@@ -763,6 +775,8 @@ function RankRow({
 }: {
   label: string;
   value: string;
+  /** Full-word VoiceOver when the stat has one. Falls back to the visible label. */
+  speech: string | null;
   rank: number | null;
   of: number;
   tier: Tier;
@@ -774,7 +788,7 @@ function RankRow({
     <View
       style={styles.rankRow}
       accessible
-      accessibilityLabel={`${label} ${value}${rank != null ? `, ${ordinal(rank)} of ${of}` : ''}`}
+      accessibilityLabel={speech ?? `${label} ${value}${rank != null ? `, ${ordinal(rank)} of ${of}` : ''}`}
     >
       <View style={styles.rankMain}>
         <Text style={styles.rankLabel}>{label}</Text>

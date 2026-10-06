@@ -20,9 +20,9 @@
  * Deliberately NOT here:
  *  - NHL expected-goals share (xGF%). The free NHL API does not expose it and
  *    our column is 0% populated, so it would be a column of dashes.
- *  - NFL DVOA / PFF grades. Proprietary and licensed; EPA per play is the
- *    standard free substitute, but that needs play-by-play we do not ingest
- *    for the NFL, so NFL efficiency is yards-per-play based and says so.
+ *  - NFL DVOA / PFF grades. Proprietary and licensed. Points added per play is
+ *    the free substitute; the NFL rows are in the catalog and stay hidden
+ *    until a play-by-play ingest writes them. NFL still opens on yards/play.
  *  - MLB rest splits. Baseball plays daily, so a rest-day cut is noise.
  */
 import type { Sport } from '@/hooks/useSportFilter';
@@ -32,8 +32,16 @@ export type TeamStatGroup = 'Efficiency' | 'Record' | 'Betting';
 
 export const TEAM_GROUP_ORDER: TeamStatGroup[] = ['Efficiency', 'Record', 'Betting'];
 
-/** How a value is rendered. `pct3` is a 0..1 rate shown as a percentage. */
-export type TeamStatFormat = 'int' | 'dec1' | 'dec2' | 'dec3' | 'pct3';
+/**
+ * `pct3` is a 0..1 rate shown as a percentage (success rate lives here —
+ * measured 2026-10-06, NCAAF 2026 success_off is 0.34–0.52, not 34–52).
+ * `dec2` is two decimals, minus only. Round first, so a value that rounds to
+ * zero is `0.00` and never `−0.00`. A leading `+` is not used: these numbers
+ * are not centred on 0, so a plus would read as "above average".
+ * `fixed2` is `toFixed(2)`, ASCII hyphen included. ERA, margin, yards per play
+ * and the other counting stats stay on it, so their glyphs do not change.
+ */
+export type TeamStatFormat = 'int' | 'dec1' | 'fixed2' | 'dec2' | 'dec3' | 'pct3';
 
 export interface TeamStatDef {
   key: keyof TeamStatsRow;
@@ -55,7 +63,48 @@ export interface TeamStatDef {
   /** Sample-size column, so a split built on 4 games reads as one. */
   sample?: keyof TeamStatsRow;
   hint?: string;
+  /** Short column header ("Pts added/play"). The chip uses `label`. */
+  header?: string;
+  /** Full words for VoiceOver ("Points added per play, offense"). */
+  spoken?: string;
+  /** Info sheet behind the ⓘ next to the label. */
+  explain?: StatExplain;
+  /** Which way is good, in words, under the chips. */
+  direction?: string;
+  /**
+   * Hide the chip (and the matchup row that shares it) until at least one
+   * team has a real value. NFL points-added and successful-plays are catalogued
+   * so the row support exists, and stay hidden while the play-by-play ingest
+   * has written nothing — a column of dashes would look like a measured zero.
+   */
+  untilData?: boolean;
 }
+
+/** The ⓘ sheet shared by the Teams board and the Matchup card. */
+export interface StatExplain {
+  /** The line next to the button ("Points added per play · offense"). */
+  name: string;
+  title: string;
+  body: string;
+  /** Accessibility label on the button. */
+  a11y: string;
+}
+
+export const EXPLAIN_PTS_ADDED: StatExplain = {
+  name: 'Points added per play',
+  title: 'Points added per play',
+  body:
+    'How much each play helps a team score, compared with an average play in the same down, distance and field position. For an offense higher is better; for a defense lower is better. Compare teams by rank, not against 0.',
+  a11y: 'About points added per play',
+};
+
+export const EXPLAIN_SUCCESS: StatExplain = {
+  name: 'Successful plays',
+  title: 'Successful plays',
+  body:
+    'The share of plays that keep a drive on track: at least 50% of the yards needed on 1st down, 70% on 2nd, and all of them on 3rd or 4th down. Higher is better for an offense, lower for a defense.',
+  a11y: 'About successful plays',
+};
 
 const BALL: Sport[] = ['MLB', 'NBA', 'WNBA', 'NHL', 'NFL', 'NCAAF'];
 const HOOPS: Sport[] = ['NBA', 'WNBA'];
@@ -68,10 +117,10 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
   { key: 'wrc_plus', label: 'wRC+', group: 'Efficiency', sports: ['MLB'], format: 'int', better: 'high',
     hint: 'Park- and league-adjusted offense. 100 is average.' },
   { key: 'ops', label: 'OPS', group: 'Efficiency', sports: ['MLB'], format: 'dec3', better: 'high' },
-  { key: 'team_era', label: 'Team ERA', group: 'Efficiency', sports: ['MLB'], format: 'dec2', better: 'low' },
-  { key: 'bullpen_era', label: 'Bullpen ERA', group: 'Efficiency', sports: ['MLB'], format: 'dec2', better: 'low',
+  { key: 'team_era', label: 'Team ERA', group: 'Efficiency', sports: ['MLB'], format: 'fixed2', better: 'low' },
+  { key: 'bullpen_era', label: 'Bullpen ERA', group: 'Efficiency', sports: ['MLB'], format: 'fixed2', better: 'low',
     hint: 'Relief corps only — the half of the staff the market prices least efficiently.' },
-  { key: 'team_whip', label: 'WHIP', group: 'Efficiency', sports: ['MLB'], format: 'dec2', better: 'low' },
+  { key: 'team_whip', label: 'WHIP', group: 'Efficiency', sports: ['MLB'], format: 'fixed2', better: 'low' },
   // Basketball
   { key: 'net_rating', label: 'Net Rtg', group: 'Efficiency', sports: HOOPS, format: 'dec1', better: 'high',
     hint: 'Points scored minus allowed per 100 possessions — pace-adjusted margin.' },
@@ -89,21 +138,42 @@ export const TEAM_STAT_CATALOG: TeamStatDef[] = [
   // College football
   { key: 'sp_overall', label: 'SP+', group: 'Efficiency', sports: ['NCAAF'], format: 'dec1', better: 'high',
     hint: "Bill Connelly's opponent-adjusted rating — the standard public CFB power number." },
-  { key: 'epa_off', label: 'EPA/play Off', group: 'Efficiency', sports: ['NCAAF'], format: 'dec3', better: 'high' },
-  { key: 'epa_def', label: 'EPA/play Def', group: 'Efficiency', sports: ['NCAAF'], format: 'dec3', better: 'low' },
-  { key: 'success_off', label: 'Success% Off', group: 'Efficiency', sports: ['NCAAF'], format: 'dec1', better: 'high' },
-  { key: 'success_def', label: 'Success% Def', group: 'Efficiency', sports: ['NCAAF'], format: 'dec1', better: 'low' },
-  { key: 'explosiveness_off', label: 'Explosiveness', group: 'Efficiency', sports: ['NCAAF'], format: 'dec2', better: 'high' },
+  // Points added and successful plays. NCAAF is populated from CFBD; NFL is
+  // listed so the same rows exist, and `untilData` hides them while every
+  // value is null (no NFL play-by-play ingest yet — measured 2026-10-06,
+  // team_stats_board_cache NFL 2025 and 2026: epa_off and success_off are 0
+  // of 32). Never a fake 0.
+  { key: 'epa_off', label: 'Pts added/play Off', header: 'Pts added/play', group: 'Efficiency', sports: ['NCAAF', 'NFL'], format: 'dec2', better: 'high',
+    spoken: 'Points added per play, offense',
+    explain: { ...EXPLAIN_PTS_ADDED, name: 'Points added per play · offense' },
+    direction: 'Higher is better. Rank 1 = best offense.',
+    untilData: true },
+  { key: 'epa_def', label: 'Pts added/play Def', header: 'Pts added/play', group: 'Efficiency', sports: ['NCAAF', 'NFL'], format: 'dec2', better: 'low',
+    spoken: 'Points added per play, defense',
+    explain: { ...EXPLAIN_PTS_ADDED, name: 'Points added per play · defense' },
+    direction: 'Lower is better. Rank 1 = best defense (allows the least).',
+    untilData: true },
+  { key: 'success_off', label: 'Successful plays Off', header: 'Successful plays', group: 'Efficiency', sports: ['NCAAF', 'NFL'], format: 'pct3', better: 'high',
+    spoken: 'Successful plays, offense',
+    explain: { ...EXPLAIN_SUCCESS, name: 'Successful plays · offense' },
+    direction: 'Higher is better. Rank 1 = best offense.',
+    untilData: true },
+  { key: 'success_def', label: 'Successful plays Def', header: 'Successful plays', group: 'Efficiency', sports: ['NCAAF', 'NFL'], format: 'pct3', better: 'low',
+    spoken: 'Successful plays, defense',
+    explain: { ...EXPLAIN_SUCCESS, name: 'Successful plays · defense' },
+    direction: 'Lower is better. Rank 1 = best defense (allows the fewest).',
+    untilData: true },
+  { key: 'explosiveness_off', label: 'Explosiveness', group: 'Efficiency', sports: ['NCAAF'], format: 'fixed2', better: 'high' },
   { key: 'havoc_rate', label: 'Havoc%', group: 'Efficiency', sports: ['NCAAF'], format: 'dec1', better: 'high',
     hint: 'Share of plays with a TFL, forced fumble, interception or pass breakup.' },
-  // NFL — yards-based, because we do not ingest NFL play-by-play for EPA.
-  { key: 'yards_per_play', label: 'Yards/Play', group: 'Efficiency', sports: ['NFL'], format: 'dec2', better: 'high' },
+  // NFL counting stats. Points added per play is above, hidden until data exists.
+  { key: 'yards_per_play', label: 'Yards/Play', group: 'Efficiency', sports: ['NFL'], format: 'fixed2', better: 'high' },
   { key: 'pass_yards_pg', label: 'Pass Yds/G', group: 'Efficiency', sports: ['NFL'], format: 'dec1', better: 'high' },
   { key: 'rush_yards_pg', label: 'Rush Yds/G', group: 'Efficiency', sports: ['NFL'], format: 'dec1', better: 'high' },
   // Every sport
-  { key: 'point_diff_pg', label: 'Margin/G', group: 'Efficiency', sports: BALL, format: 'dec2', better: 'high' },
-  { key: 'points_for_pg', label: 'Scored/G', group: 'Efficiency', sports: BALL, format: 'dec2', better: 'high' },
-  { key: 'points_against_pg', label: 'Allowed/G', group: 'Efficiency', sports: BALL, format: 'dec2', better: 'low' },
+  { key: 'point_diff_pg', label: 'Margin/G', group: 'Efficiency', sports: BALL, format: 'fixed2', better: 'high' },
+  { key: 'points_for_pg', label: 'Scored/G', group: 'Efficiency', sports: BALL, format: 'fixed2', better: 'high' },
+  { key: 'points_against_pg', label: 'Allowed/G', group: 'Efficiency', sports: BALL, format: 'fixed2', better: 'low' },
 
   // ── Record ──────────────────────────────────────────────────────────────
   { key: 'win_pct', label: 'Win%', group: 'Record', sports: BALL, format: 'pct3', better: 'high',
@@ -134,10 +204,66 @@ export function teamStatsForSport(sport: Sport): TeamStatDef[] {
   return TEAM_STAT_CATALOG.filter((s) => s.sports.includes(sport));
 }
 
+/**
+ * Stats the board should offer. A stat flagged `untilData` stays off the chip
+ * row until some team has a number, so NFL points-added does not render a
+ * column of dashes while the ingest is absent.
+ */
+export function teamStatsForBoard(sport: Sport, rows: readonly TeamStatsRow[]): TeamStatDef[] {
+  return teamStatsForSport(sport).filter((s) => !s.untilData || columnHasValue(rows, s.key));
+}
+
+/**
+ * Which stat to show after the offered set changes.
+ *
+ * A failed load clears the rows, and that hides every `untilData` chip. Falling
+ * back in that window moves a user off Points added per play onto the group
+ * default, and a later retry leaves them there. Hold the selection while the
+ * load is in flight or the error banner is up. A successful load that truly
+ * lacks the column (NFL, while the ingest is empty) still falls back.
+ */
+export function teamStatAfterOffer(
+  stat: TeamStatDef | null,
+  offered: readonly TeamStatDef[],
+  sport: Sport,
+  holdSelection: boolean,
+): TeamStatDef | null {
+  if (!stat || holdSelection) return stat;
+  if (offered.some((s) => s.key === stat.key)) return stat;
+  return offered.find((s) => s.group === stat.group) ?? defaultTeamStatFor(sport);
+}
+
+/**
+ * Chip row while a load is failing or still running. The selected stat stays
+ * visible even when empty rows have dropped it from `offered`, so the user
+ * can see the choice the error did not change. Other empty `untilData` stats
+ * stay hidden.
+ */
+export function teamStatsShown(
+  offered: readonly TeamStatDef[],
+  sport: Sport,
+  selected: TeamStatDef | null,
+  holdSelection: boolean,
+): readonly TeamStatDef[] {
+  if (!holdSelection || !selected || offered.some((s) => s.key === selected.key)) return offered;
+  const full = teamStatsForSport(sport);
+  if (!full.some((s) => s.key === selected.key)) return offered;
+  return full.filter((s) => s.key === selected.key || offered.some((o) => o.key === s.key));
+}
+
 /** Groups that actually have a stat for this sport (so no empty tabs render). */
 export function teamGroupsForSport(sport: Sport): TeamStatGroup[] {
   const present = new Set(teamStatsForSport(sport).map((s) => s.group));
   return TEAM_GROUP_ORDER.filter((g) => present.has(g));
+}
+
+/**
+ * What the group tab says. Football's efficiency group is offense and defense
+ * rates; every other sport keeps the word "Efficiency".
+ */
+export function teamGroupLabel(group: TeamStatGroup, sport: Sport): string {
+  if (group === 'Efficiency' && (sport === 'NFL' || sport === 'NCAAF')) return 'Offense & defense';
+  return group;
 }
 
 /**
@@ -176,15 +302,115 @@ export function teamStatValue(row: TeamStatsRow, def: TeamStatDef): number | nul
   return null;
 }
 
+/** True when at least one row holds a finite number for `key`. Null and '' are absent, never zero. */
+export function columnHasValue(rows: readonly TeamStatsRow[], key: keyof TeamStatsRow): boolean {
+  return rows.some((row) => {
+    const raw = row[key];
+    if (raw == null || raw === '') return false;
+    return teamStatValue(row, { ...PLACEHOLDER, key }) != null;
+  });
+}
+
+const PLACEHOLDER: TeamStatDef = {
+  key: 'games_played',
+  label: '',
+  group: 'Efficiency',
+  sports: [],
+  format: 'dec1',
+  better: null,
+};
+
+/**
+ * Width of the Teams stat column. 72pt at normal type, growing with the
+ * reader's font scale and stopping at 1.8. A word at 2× is wider than the
+ * old 1.6 cap, so the header was truncating.
+ */
+export function teamStatColumnWidth(fontScale: number): number {
+  return Math.round(72 * Math.min(Math.max(fontScale, 1), 1.8));
+}
+
+/**
+ * Visible Teams column header. At fontScale 1.3 and above, a zero-width space
+ * after each slash is a wrap point ("PTS ADDED/\u200BPLAY"). VoiceOver must
+ * not read this string — the spoken label is separate and has no zero-width space.
+ */
+export function teamStatHeaderText(label: string, fontScale: number): string {
+  const upper = label.toUpperCase();
+  if (fontScale < 1.3) return upper;
+  return upper.split('/').join('/\u200B');
+}
+
+/** Header line count. Three lines once type is large enough to need the slash break. */
+export function teamStatHeaderLines(fontScale: number): number {
+  return fontScale >= 1.3 ? 3 : 2;
+}
+
+/** "1st", "2nd", "3rd", "11th". */
+export function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+/**
+ * Two decimals, minus only. Round to the displayed precision BEFORE choosing
+ * a sign, so −0.004 and +0.004 both print `0.00` and never `−0.00`. A
+ * positive prints with no sign. A negative uses a true minus.
+ */
+export function formatDec2(value: number): string {
+  const rounded = Number(value.toFixed(2));
+  if (rounded === 0) return '0.00';
+  const body = Math.abs(rounded).toFixed(2);
+  return rounded < 0 ? `\u2212${body}` : body;
+}
+
 export function formatTeamStat(value: number | null, format: TeamStatFormat): string {
   if (value == null) return '—';
   switch (format) {
     case 'int': return String(Math.round(value));
     case 'dec1': return value.toFixed(1);
-    case 'dec2': return value.toFixed(2);
+    case 'fixed2': return value.toFixed(2);
+    case 'dec2': return formatDec2(value);
     case 'dec3': return value.toFixed(3);
     case 'pct3': return `${(value * 100).toFixed(1)}%`;
   }
+}
+
+/** A value in full words for VoiceOver ("0.21", "minus 0.08", "46.7 percent"). */
+export function spokenTeamStat(value: number | null, format: TeamStatFormat): string {
+  if (value == null) return 'not available';
+  if (format === 'dec2') {
+    const rounded = Number(value.toFixed(2));
+    if (rounded === 0) return '0.00';
+    const body = Math.abs(rounded).toFixed(2);
+    return rounded < 0 ? `minus ${body}` : body;
+  }
+  if (format === 'pct3') return `${(value * 100).toFixed(1)} percent`;
+  return formatTeamStat(value, format);
+}
+
+/**
+ * VoiceOver for one board value. The team name is a separate button, so this
+ * is the stat, the number, and the rank: "Points added per play, offense,
+ * 0.21, ranks 1st". Pass `of` (the teams that were ranked) to say
+ * "ranks 1st of 32". Null when the stat has no spoken form.
+ */
+export function boardValueSpeech(
+  def: TeamStatDef,
+  value: number | null,
+  rank: number | null,
+  of?: number | null,
+): string | null {
+  if (!def.spoken) return null;
+  const num = spokenTeamStat(value, def.format);
+  if (value == null || rank == null) return `${def.spoken}, ${num}`;
+  const place = of != null && of > 0 ? `${ordinal(rank)} of ${of}` : ordinal(rank);
+  return `${def.spoken}, ${num}, ranks ${place}`;
 }
 
 /** "67-42" or "67-42-3" when the split can push. */

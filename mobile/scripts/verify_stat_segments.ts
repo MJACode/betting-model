@@ -376,6 +376,14 @@ check('SegmentTabs: fit labels cap at 2x and floor at 0.75, nothing else is capp
   /maxFontSizeMultiplier=\{fit \? 2 : undefined\}/.test(groupTabs) &&
     /minimumFontScale=\{fit \? 0\.75 : undefined\}/.test(groupTabs) &&
     (groupTabs.match(/maxFontSizeMultiplier/g) ?? []).length === 1);
+check('SegmentTabs: two-line wrap is opt-in, so fit stays one line',
+  /numberOfLines=\{wrap \? 2 : 1\}/.test(groupTabs) && /wrap && styles\.textFit/.test(groupTabs));
+{
+  const rowSrc = stats.slice(stats.indexOf('function StatSegmentRow'));
+  const tabs = rowSrc.slice(0, rowSrc.indexOf('/>') + 2);
+  const wraps = /\bwrap\b/.test(tabs);
+  check('StatSegmentRow does not opt into wrap', !wraps, wraps ? tabs.replace(/\s+/g, ' ') : '');
+}
 {
   // At the 2x cap and the 0.75 floor, the widest label still fits its tab:
   // 393pt / 5 tabs = 78.6pt; "WR/TE" ≈ 5 glyphs × 0.66em × (15pt × 2 × 0.75).
