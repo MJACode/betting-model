@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions: shared names settled by most recent game (never skipped); MLB position card becomes a per-player summary |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, player_positions table + ESPN/CFBD ingestor for NBA/WNBA/NCAAF; sources unreachable from sandbox, so a declared worker dry run measures shapes and match rate first |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card phase 2 (MLB): batters by lineup spot 1-3/4-6/7-9, starting pitchers; position_vs_opponent_mlb. 2025 log missing ARI/CWS/OAK/WSH games flagged |
