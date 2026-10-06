@@ -355,9 +355,10 @@ export interface HistoryProbe {
 /**
  * What one history read is allowed to see.
  *
- * `until` is commence_time for a pregame pick: every probe, including the
- * latest page, is `snapshot_at <= commence_time`. `from` is the lock time
- * for a live pick, which may read past the start.
+ * `until` caps a pregame pick. It is the later of commence_time and the
+ * lock, so a commence_time rewritten earlier than the pick does not drop
+ * the row the pick was priced from, and the window is never inverted.
+ * `from` is the lock time for a live pick, which may read past the start.
  */
 export interface LineHistoryWindow {
   from?: string;
@@ -467,14 +468,17 @@ export function formatBoundLike(sampleTs: string, instant: number | Date): strin
  * cap is the timestamp.
  *
  * A live pick is `is_live === true` only. It reads from its lock and may
- * continue past the start. A pick written after the start with `is_live`
- * unset is still pregame: the read stops at commence_time and the last
- * row is the close. Treating that pick as live priced the card off
- * in-play odds and painted a loss green.
+ * continue past the start. Any other pick is pregame. Its cap is the
+ * later of commence_time and the lock: a lock before the start still
+ * stops at the start, and a lock after the stored start — commence_time
+ * rewritten earlier than the pick — still includes the row the pick was
+ * priced from and nothing after the lock. The last row is the close.
+ * Capping at commence_time alone makes [lock, commence] empty.
  *
  * Both instants come back normalized. An unparseable lock on a live pick
  * is unknown, not a pregame cap: capping it would hide the in-play rows
- * it was written on. An unparseable lock on any other pick still caps.
+ * it was written on. An unparseable lock on any other pick still caps
+ * at commence_time.
  */
 export function lineHistoryWindow(input: {
   commenceTime: string | null | undefined;
@@ -497,7 +501,13 @@ export function lineHistoryWindow(input: {
     }
     return { from: created };
   }
-  return { until: start };
+  const createdRaw = input.createdAt ?? '';
+  const created = createdRaw ? normalizeTimestamp(createdRaw) : null;
+  const locked = created ? Date.parse(created) : Number.NaN;
+  // Later of the two. A lock that does not parse stays at the start,
+  // which is still a cap, not an inverted [lock, commence] window.
+  if (!created || Number.isNaN(locked) || locked <= kick) return { until: start };
+  return { until: created };
 }
 
 /**
