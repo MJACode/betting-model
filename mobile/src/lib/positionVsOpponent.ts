@@ -115,11 +115,32 @@ const ROLE_CUT: Record<PositionGroup, string> = {
   DL: '2+ tackles, sacks or QB hits',
   LB: '2+ tackles, sacks or QB hits',
   DB: '2+ tackles, sacks or QB hits',
-  TOP: 'a start batting 1st–3rd',
-  MID: 'a start batting 4th–6th',
-  BOT: 'a start batting 7th–9th',
-  SP: 'the start on the mound',
+  TOP: 'starting the game batting 1st–3rd',
+  MID: 'starting the game batting 4th–6th',
+  BOT: 'starting the game batting 7th–9th',
+  SP: 'starting the game',
 };
+
+/** The footnote under the list: the cut, in a sentence the reader did not
+ *  already know (UX review, 2026-10-06 — "a start batting 1st–3rd" restated
+ *  the title). */
+export function footnoteText(g: PositionGroup): string {
+  switch (g) {
+    case 'TOP':
+    case 'MID':
+    case 'BOT':
+      return `Counts lineup starters in that spot only; pinch hitters and late subs don't count.`;
+    case 'SP':
+      return `Counts starts only; relief outings don't count.`;
+    default:
+      return `Counts ${GROUP_PLURAL[g].toLowerCase()} with ${ROLE_CUT[g]} in the game.`;
+  }
+}
+
+/** How the rank reads: a lineup does not "allow" a pitcher's strikeouts. */
+export function rankPhrase(g: PositionGroup): string {
+  return g === 'SP' ? '1st = the most per opposing starter' : '1st = allows the most';
+}
 
 /** With its article, for prose: "an RB", "a WR", "a defensive back". */
 const GROUP_SINGULAR: Record<PositionGroup, string> = {
@@ -189,6 +210,11 @@ export interface PositionVsOpponentEntry {
   week: number | null;
   /** MLB batting spot that game ("2"), or 'SP'; the NFL position otherwise. */
   pos: string | null;
+  gameId: string;
+  /** 1 or 2 when this player has two games on this date (an MLB
+   *  doubleheader: 192 same-day pairs in the 2026 log, measured 2026-10-06);
+   *  null otherwise. */
+  gameOfDay: number | null;
   value: number;
   hit: boolean;
 }
@@ -244,6 +270,8 @@ export function positionVsOpponent(
       date: r.game_date,
       week: r.week == null ? null : Number(r.week),
       pos: r.pos ?? null,
+      gameId: r.game_id,
+      gameOfDay: null,
       value: v,
       hit: isHit(v, opts.line, opts.side),
     });
@@ -251,6 +279,17 @@ export function positionVsOpponent(
   // Newest game first; inside one game, the bigger number first so the
   // defence's worst day reads at the top of its group.
   entries.sort((a, b) => (a.date === b.date ? b.value - a.value : a.date < b.date ? 1 : -1));
+  // Doubleheaders: number a player's two games on one date by game id, so
+  // two rows with the same name and date say which game each was.
+  const sameDay = new Map<string, PositionVsOpponentEntry[]>();
+  for (const e of entries) {
+    const k = `${e.playerId}:${e.date}`;
+    sameDay.set(k, [...(sameDay.get(k) ?? []), e]);
+  }
+  for (const list of sameDay.values()) {
+    if (list.length < 2) continue;
+    [...list].sort((a, b) => (a.gameId < b.gameId ? -1 : 1)).forEach((e, i) => (e.gameOfDay = i + 1));
+  }
   const { hits, total, pct } = computeHitRate(entries.map((e) => e.value), opts.line, opts.side);
   return {
     opponent: opts.opponent,

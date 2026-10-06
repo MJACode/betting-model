@@ -89,6 +89,11 @@ BEGIN
                    WHEN 'p_earned_runs'   THEN g.p_earned_runs::numeric
                    WHEN 'p_home_runs'     THEN g.p_home_runs::numeric
                    WHEN 'innings_pitched' THEN g.innings_pitched::numeric
+                   -- The player page replaces Innings with Outs
+                   -- (playerLog.OUTS_STAT); same arithmetic as ipToOuts:
+                   -- 5.2 innings = 5*3 + 2 = 17 outs.
+                   WHEN 'outs'            THEN (floor(g.innings_pitched) * 3
+                                                + round((g.innings_pitched - floor(g.innings_pitched)) * 10))::numeric
                    WHEN 'pitches'         THEN g.pitches::numeric
                    ELSE NULL
                END AS val

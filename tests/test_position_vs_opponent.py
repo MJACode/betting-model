@@ -139,13 +139,14 @@ def test_a_failed_read_is_not_held_on_the_spinner():
     during a refetch is still loading; the same mismatch after a failure is
     the failure. Counting it as loading leaves the spinner up forever."""
     hook = HOOK.read_text(encoding="utf-8")
-    m = re.search(
-        r"rows: pvo\.data\.statKey === String\(stat\?\.key \?\? ''\) \? pvo\.data\.rows : \[\],\n"
-        r"\s*loading: pvo\.loading \|\| \(pvo\.error == null && "
-        r"pvo\.data\.statKey !== String\(stat\?\.key \?\? ''\)\),",
-        hook,
+    assert (
+        "const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '');"
+        in hook
+    ), "rows must be tagged with BOTH the stat and the group they were read for"
+    assert "rows: pvoFresh ? pvo.data.rows : []," in hook
+    assert "loading: pvo.loading || (pvo.error == null && !pvoFresh)," in hook, (
+        "a failed position-vs-opponent read must not stay loading"
     )
-    assert m, "a failed position-vs-opponent read must not stay loading"
     card = CARD.read_text(encoding="utf-8")
     # The error line is reachable once loading is false: spinner, then error.
     assert "{loading && rows.length === 0 ? (" in card
@@ -187,6 +188,12 @@ def test_every_mlb_stat_chip_has_a_branch():
     catalog = CATALOG.read_text(encoding="utf-8")
     keys = set(re.findall(r"\{ key: '(\w+)', label: '[^']*', sport: 'MLB'", catalog))
     assert keys, "could not parse the MLB stat chips"
+    # The player page swaps Innings for its own Outs chip (playerLog.OUTS_STAT),
+    # which is not in the catalog — the key the page actually sends.
+    log = (ROOT / "mobile/src/lib/playerLog.ts").read_text(encoding="utf-8")
+    m = re.search(r"const OUTS_STAT: StatDef = \{\s*key: '(\w+)'", log)
+    assert m, "could not parse OUTS_STAT"
+    keys.add(m.group(1))
     for k in keys:
         assert f"WHEN '{k}'" in MLB_SQL, f"MLB chip {k} has no branch in position_vs_opponent_mlb"
 

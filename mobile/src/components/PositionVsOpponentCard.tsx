@@ -20,8 +20,10 @@ import type { HitDirection } from '@/lib/hitRate';
 import {
   groupPlural,
   groupShort,
+  footnoteText,
   groupSingular,
   opponentNoun,
+  rankPhrase,
   positionVsOpponent,
   roleCutText,
   type PositionGroup,
@@ -31,15 +33,20 @@ import { ordinal } from '@/lib/teamDetail';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { PositionVsOpponentRow } from '@/types';
 
-/** Rows before "Show all". A full season vs one defence is ~45 WR games. */
+/** Rows before the first "Show more". */
 const ROWS_SHOWN = 6;
+/** Rows each "Show more" adds. MLB is ~440 player-games a season vs one team
+ *  and the page's ScrollView does not virtualise, so the list grows in steps
+ *  rather than all at once (UX review, 2026-10-06). */
+const ROWS_STEP = 20;
 
 /** "Wk 5 · " in the NFL, "Batting 2nd · " for an MLB hitter, else nothing. */
-function metaPrefix(e: { week: number | null; pos: string | null }): string {
+function metaPrefix(e: { week: number | null; pos: string | null; gameOfDay: number | null }): string {
   if (e.week != null) return `Wk ${e.week} · `;
+  const game = e.gameOfDay != null ? `G${e.gameOfDay} · ` : '';
   const spot = Number(e.pos);
-  if (e.pos != null && Number.isInteger(spot) && spot >= 1 && spot <= 9) return `Batting ${ordinal(spot)} · `;
-  return '';
+  if (e.pos != null && Number.isInteger(spot) && spot >= 1 && spot <= 9) return `${game}Batting ${ordinal(spot)} · `;
+  return game;
 }
 
 function fmt(v: number): string {
@@ -57,6 +64,7 @@ export function PositionVsOpponentCard({
   statLabel,
   betLabel,
   selection,
+  groupBasis,
 }: {
   opponent: string;
   group: PositionGroup;
@@ -65,6 +73,12 @@ export function PositionVsOpponentCard({
   rows: PositionVsOpponentRow[];
   loading: boolean;
   error: string | null;
+  /**
+   * MLB hitters: why this group — tonight's posted slot, or (lineup not out)
+   * the slot of his last start. Said on the card, because the title changes
+   * when the lineup posts (UX review, 2026-10-06). null elsewhere.
+   */
+  groupBasis?: { source: 'tonight' | 'last_start'; slot: number } | null;
   /** The page's own player — left out: the card is about the OTHERS. */
   playerId: string | null;
   statLabel: string;
@@ -75,7 +89,7 @@ export function PositionVsOpponentCard({
 }) {
   const [choice, setChoice] = useState<SeasonChoice>('this');
   const season = choice === 'this' ? seasonThis : seasonThis - 1;
-  const [showAll, setShowAll] = useState(false);
+  const [visible, setVisible] = useState(ROWS_SHOWN);
   const card = useMemo(
     () =>
       positionVsOpponent(rows, {
@@ -90,11 +104,12 @@ export function PositionVsOpponentCard({
   );
   const plural = groupPlural(group);
   const short = groupShort(group);
-  const shown = showAll ? card.entries : card.entries.slice(0, ROWS_SHOWN);
+  const shown = card.entries.slice(0, visible);
+  const left = card.entries.length - shown.length;
   const seasonText = choice === 'this' ? 'this season' : 'last season';
   const pick = (c: SeasonChoice) => {
     setChoice(c);
-    setShowAll(false);
+    setVisible(ROWS_SHOWN);
   };
 
   return (
@@ -109,7 +124,7 @@ export function PositionVsOpponentCard({
             `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group)} in that game. ` +
             `The rank compares ${opponent} with the other ${opponentNoun(group)} on the average ` +
             `${statLabel} per ${short}: ` +
-            '1st = allows the most.',
+            `${rankPhrase(group)}.`,
         }}
       />
 
@@ -145,8 +160,12 @@ export function PositionVsOpponentCard({
       ) : card.total === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>
-            No {short} games vs {opponent} {seasonText}
-            {choice === 'this' ? ' yet.' : '.'}
+            {choice === 'this'
+              ? `No ${short} games vs ${opponent} this season yet.`
+              : // "in our data", not a flat "none": the 2025 MLB log is missing
+                // every ARI, CWS, OAK and WSH game (measured 2026-10-06), so an
+                // empty last season can be a gap, not a fact (UX_REVIEW §3).
+                `No ${short} games vs ${opponent} in our ${seasonThis - 1} data.`}
           </Text>
           {choice === 'this' ? (
             <Pressable
@@ -187,7 +206,7 @@ export function PositionVsOpponentCard({
 
           {shown.map((e) => (
             <View
-              key={`${e.date}:${e.playerId}`}
+              key={`${e.gameId}:${e.playerId}`}
               style={styles.row}
               accessible
               accessibilityLabel={
@@ -218,21 +237,40 @@ export function PositionVsOpponentCard({
             </View>
           ))}
 
-          {card.entries.length > ROWS_SHOWN ? (
-            <Pressable
-              onPress={() => setShowAll((v) => !v)}
-              accessibilityRole="button"
-              accessibilityLabel={showAll ? 'Show fewer games' : `Show all ${card.entries.length} games`}
-              style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
-            >
-              <Text style={styles.more}>
-                {showAll ? 'Show fewer' : `Show all ${card.entries.length} games`}
-              </Text>
-            </Pressable>
+          {left > 0 || visible > ROWS_SHOWN ? (
+            <View style={styles.moreRow}>
+              {left > 0 ? (
+                <Pressable
+                  onPress={() => setVisible((v) => v + ROWS_STEP)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show ${Math.min(ROWS_STEP, left)} more games, ${left} left`}
+                  style={({ pressed }) => [styles.moreButton, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={styles.moreText}>
+                    Show {Math.min(ROWS_STEP, left)} more · {left} left
+                  </Text>
+                </Pressable>
+              ) : null}
+              {visible > ROWS_SHOWN ? (
+                <Pressable
+                  onPress={() => setVisible(ROWS_SHOWN)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show fewer games"
+                  style={({ pressed }) => [styles.moreButton, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={styles.moreText}>Show fewer</Text>
+                </Pressable>
+              ) : null}
+            </View>
           ) : null}
 
           <Text style={styles.footnote}>
-            Counts {plural.toLowerCase()} with {roleCutText(group)} in the game.
+            {footnoteText(group)}
+            {groupBasis
+              ? groupBasis.source === 'tonight'
+                ? ` Grouped by tonight's lineup: batting ${ordinal(groupBasis.slot)}.`
+                : ` Lineup not posted; grouped by his last start (batting ${ordinal(groupBasis.slot)}).`
+              : ''}
           </Text>
         </>
       )}
@@ -295,6 +333,20 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     color: colors.tint,
+  },
+  moreText: {
+    textAlign: 'center',
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  moreRow: { flexDirection: 'row', gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.xs },
+  moreButton: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
   },
   emptyAction: { marginTop: spacing.sm, alignSelf: 'flex-start' },
   footnote: {

@@ -268,26 +268,50 @@ export function usePlayerDetail(args: {
       : sport === 'MLB'
         ? mlbGroup({ playerType, lineupSlot: lineup.data?.batting_order, games })
         : null;
+  // Said on the card for MLB hitters: the group can change when the lineup
+  // posts, so the reader is told which slot it was built from.
+  const lastStartSlot = useMemo(() => {
+    for (const g of games) {
+      const b = Number(g.batting_order);
+      if (g.batting_order != null && Number.isInteger(b) && b >= 1 && b <= 9) return b;
+    }
+    return null;
+  }, [games]);
+  const groupBasis =
+    sport === 'MLB' && posGroup != null && posGroup !== 'SP'
+      ? lineup.data?.batting_order != null
+        ? { source: 'tonight' as const, slot: lineup.data.batting_order }
+        : lastStartSlot != null
+          ? { source: 'last_start' as const, slot: lastStartSlot }
+          : null
+      : null;
   const pvoSeason =
     sport === 'NFL' ? nflSeasonInProgress(today) : sport === 'MLB' ? mlbSeasonInProgress(today) : null;
   // The rows are tagged with the stat they were read for: useSection keeps the
   // previous data while it refetches, so without the tag a chip tap would draw
   // last stat's numbers under the new stat's label for one round trip (UX
-  // review, 2026-10-05). A mismatch is "still loading" only while the read
+  // review, 2026-10-05). The GROUP is in the tag too: an MLB hitter's group
+  // moves when tonight's lineup lands after the log, and without it the new
+  // title drew over the old group's rows (UX review, 2026-10-06).
+  // A mismatch is "still loading" only while the read
   // has not failed. The catch resets the payload to the untagged initial
   // (`statKey: ''`), and the card's error line sits behind
   // `loading && rows.length === 0` — counting that reset as loading leaves
   // the spinner up and the error never shows.
-  const pvo = useSection<{ statKey: string; rows: PositionVsOpponentRow[] }>(
-    { statKey: '', rows: [] },
+  const pvo = useSection<{ statKey: string; group: string; rows: PositionVsOpponentRow[] }>(
+    { statKey: '', group: '', rows: [] },
     opponent && stat && posGroup && pvoSeason != null
       ? async () => ({
           statKey: String(stat.key),
+          group: posGroup,
           rows: await fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
         })
       : null,
     [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
   );
+
+  // The rows on screen are the rows for THIS stat and THIS group, or none.
+  const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '');
 
   return {
     reload,
@@ -304,9 +328,10 @@ export function usePlayerDetail(args: {
             opponent,
             group: posGroup,
             seasonThis: pvoSeason,
-            rows: pvo.data.statKey === String(stat?.key ?? '') ? pvo.data.rows : [],
-            loading: pvo.loading || (pvo.error == null && pvo.data.statKey !== String(stat?.key ?? '')),
+            rows: pvoFresh ? pvo.data.rows : [],
+            loading: pvo.loading || (pvo.error == null && !pvoFresh),
             error: pvo.error,
+            groupBasis,
           }
         : null,
     slateLoading: slate.loading,
