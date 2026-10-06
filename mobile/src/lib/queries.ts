@@ -2217,8 +2217,8 @@ const ODDS_HISTORY_COLUMNS =
  * matches an exported function only up to its first unindented close
  * (tests/test_mobile_player_detail.py), so a helper defined outside it is invisible.
  *
- * `bounds.until` is the later of the game's commence_time and the lock.
- * It is applied as `snapshot_at <=` that instant on the open, the gap probes and the latest
+ * `bounds.until` is the game's commence_time, even when the lock is later.
+ * It is applied as `snapshot_at <= commence_time` on the open, the gap probes and the latest
  * page, after the equality filters, so idx_odds_book_snap can serve it.
  * snapshot_at is text, so the sampler first reads one newest row with no
  * range and stamps that cap in the same offset. snapshot_type is not a
@@ -2263,7 +2263,7 @@ export async function fetchOddsHistory(
  * open through the latest row the window allows. `.from('player_prop_odds')`
  * stays in this function for the same tripwire as fetchOddsHistory.
  *
- * Same cap as fetchOddsHistory (`snapshot_at <=` the later of commence_time and the lock
+ * Same commence_time cap as fetchOddsHistory (`snapshot_at <= commence_time`
  * after the equality filters; idx_prop_odds_line_snap), in the series' own
  * text form. No snapshot_type filter. Unknown start: `bounds.until` is
  * absent and this read is not capped.

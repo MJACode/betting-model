@@ -80,6 +80,9 @@ export function LineMovementCard({
     createdAt: pick.created_at,
     isLive: pick.is_live,
   });
+  // The arrow would run from a later lock back to an earlier close.
+  // The last row still says Close. The title does not call that a move.
+  const headlineAtClose = atClose && !lockAfterStart;
 
   useEffect(() => {
     let mounted = true;
@@ -198,7 +201,7 @@ export function LineMovementCard({
             kind: lineOnly ? 'line' : 'price',
             lock: lineOnly ? lineForSide(pick.scored_line, pick.pick_side, market) : lockedPrice,
             end: lineOnly ? lineForSide(currentLine, pick.pick_side, market) : currentPrice,
-            atClose,
+            atClose: headlineAtClose,
             signedLine: signLine,
           })}
         >
@@ -209,7 +212,7 @@ export function LineMovementCard({
             lineOnly
               ? formatHistoryLine(lineForSide(currentLine, pick.pick_side, market), signLine)
               : formatHistoryAmerican(currentPrice),
-            atClose,
+            headlineAtClose,
           )}
         </Text>
         {verdict ? (
@@ -265,7 +268,7 @@ export function LineMovementCard({
             `It doesn't change the pick or how it settles.`
           : `Your pick was decided at ${book} ${formatHistoryAmerican(lockedPrice)}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatHistoryLine(lineForSide(movement.scoredLine, pick.pick_side, market), signLine)})` : ''}. ` +
-            (atClose && !lockAfterStart
+            (headlineAtClose
               ? `The second number is the closing line, the last price before the game started. `
               : '') +
             (partial

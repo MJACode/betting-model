@@ -287,9 +287,8 @@ const openEnded = await sampleOpenToNow(readFactory().read);
 eq(openEnded.rows[openEnded.rows.length - 1].spread_home, 21.5, 'uncapped still sees the in-game line');
 
 const latePregame = lineHistoryWindow({ commenceTime: KICK, createdAt: LOCK, isLive: false });
-eq(latePregame, { until: LOCK }, 'written after the stored start is capped at the lock');
+eq(latePregame, { until: KICK }, 'written after the stored start is still capped at commence');
 if (latePregame.from) throw new Error('a non-live window must not start at the lock');
-if (Date.parse(latePregame.until) < Date.parse(KICK)) throw new Error('cap is before the start');
 const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: LOCK, isLive: true });
 eq(liveWindow, { from: LOCK }, 'is_live starts at the lock');
 eq(lineHistoryWindow({ commenceTime: KICK, createdAt: '2026-10-04T18:00:00.000Z', isLive: true }), { from: '2026-10-04T18:00:00.000Z' }, 'is_live before the start still starts at the lock');
@@ -466,7 +465,8 @@ def test_the_card_uses_the_close_copy():
     assert "atLatestLast: inPlay && !gameFinal && i === recent.length - 1" in card
     assert "nonLiveLockAfterStart(" in card
     assert "lockAfterStart" in card
-    assert "atClose && !lockAfterStart" in card
+    assert "headlineAtClose = atClose && !lockAfterStart" in card
+    assert "movementHeadline(" in card
     assert "inPlay || lockAfterStart" in card
     screen = _read(SCREEN)
     assert "gameFinal={gameStatus(game, liveState).kind === 'final'}" in screen
@@ -500,7 +500,7 @@ eq(formatBoundLike('2026-10-04T22:00:00-05:00', Date.parse('2026-10-04T22:00:00-
 const lock = normalizeTimestamp('2026-10-05 01:00:00.123+00');
 eq(lock, '2026-10-05T01:00:00.123+00:00', 'space form');
 if (Date.parse(lock) !== Date.parse('2026-10-05T01:00:00.123Z')) throw new Error('normalized lock drifted');
-eq(lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: false }), { until: lock }, 'late pregame space lock is capped at the lock');
+eq(lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: false }), { until: KICK }, 'late pregame space lock is capped at commence');
 eq(lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: true }), { from: lock }, 'live space lock is normalized');
 eq(lineHistoryWindow({ createdAt: 'not-a-timestamp', commenceTime: KICK, isLive: false }), { until: KICK }, 'unparseable pregame lock is still capped');
 eq(lineHistoryWindow({ createdAt: 'not-a-timestamp', commenceTime: KICK, isLive: true }), {}, 'unparseable live lock is unknown');
@@ -711,10 +711,10 @@ if (firstSeven.snapshot_at === new Date(otherTick).toISOString()) {
 
 @pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
 def test_a_late_pregame_pick_stops_at_the_close_and_a_live_pick_ends_on_final(tmp_path):
-    """is_live false and the lock after the stored commence_time. Capping at
-    commence alone drops the row the pick was priced from. The cap is the
-    lock: open through that row, Close on it, and the later in-play row
-    stays out. A true live pick may pass the start and ends on Final."""
+    """is_live false and the lock six minutes after commence_time. A DK row
+    between the start and the lock must not appear, and must not be Close.
+    Close is the last row at or before commence_time. A true live pick may
+    pass the start. Final only when the game is final; otherwise Latest."""
     script = PRELUDE + r"""
 import {
   sampleOpenToNow, lineHistoryWindow, historyTimeLabel, inPlayMovementLabel,
@@ -724,14 +724,14 @@ import {
 
 const KICK = '2026-10-06T00:00:00.000Z';
 const CREATED = '2026-10-06T00:06:00.000Z';
+const BETWEEN = '2026-10-06T00:03:00.000Z';
 const late = lineHistoryWindow({ commenceTime: KICK, createdAt: CREATED, isLive: false });
-eq(late, { until: CREATED }, 'cap is the lock, not the earlier commence');
-if (late.from != null) throw new Error('non-live window is inverted');
-if (Date.parse(late.until) < Date.parse(KICK)) throw new Error('negative window');
+eq(late, { until: KICK }, 'non-live cap is commence, not the later lock');
+if (late.from != null) throw new Error('non-live window starts at the lock');
 const rows = [
   { snapshot_at: '2026-10-05T23:40:00.000Z', home_price: 100, away_price: -120 },
   { snapshot_at: '2026-10-05T23:59:00.000Z', home_price: 105, away_price: -125 },
-  { snapshot_at: CREATED, home_price: 100, away_price: -120 },
+  { snapshot_at: BETWEEN, home_price: 250, away_price: -300 },
   { snapshot_at: '2026-10-06T00:06:30.000Z', home_price: 400, away_price: -500 },
   { snapshot_at: '2026-10-06T01:20:00.000Z', home_price: 1400, away_price: -2500 },
 ];
@@ -749,18 +749,19 @@ const read = async (probe) => {
   return xs.slice(0, probe.limit);
 };
 const capped = await sampleOpenToNow(read, late);
-if (capped.rows.some((r) => Date.parse(r.snapshot_at) > Date.parse(CREATED))) {
-  throw new Error('a row after the lock reached the card');
+if (capped.rows.some((r) => Date.parse(r.snapshot_at) > Date.parse(KICK))) {
+  throw new Error('a row after commence reached the card');
+}
+if (capped.rows.some((r) => r.snapshot_at === BETWEEN || r.home_price === 250)) {
+  throw new Error('the row between kickoff and the lock was labelled into the history');
 }
 if (capped.rows.some((r) => r.home_price === 1400 || r.home_price === 400)) {
   throw new Error('in-play price reached the card');
 }
-if (!capped.rows.some((r) => r.home_price === 105)) {
-  throw new Error('open-through-lock dropped the pregame row');
-}
 const closeRow = capped.rows[capped.rows.length - 1];
-eq(closeRow.snapshot_at, CREATED, 'close is the lock row');
-eq(closeRow.home_price, 100, 'the pick price stays');
+eq(closeRow.snapshot_at, '2026-10-05T23:59:00.000Z', 'close is the last row at or before commence');
+eq(closeRow.home_price, 105, 'close price');
+if (Date.parse(closeRow.snapshot_at) > Date.parse(KICK)) throw new Error('close is after commence');
 eq(historyTimeLabel('8:00 PM', { atCloseLast: true, bounded: false }), 'Close', 'close label');
 
 const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: CREATED, isLive: true });
