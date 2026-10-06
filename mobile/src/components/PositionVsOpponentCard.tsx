@@ -153,6 +153,13 @@ export function PositionVsOpponentCard({
   const plural = groupPlural(group);
   const short = groupShort(group);
   const hasAnySeason = hasOtherPositionGames(rows, playerId);
+  const emptyLine = emptySeasonMessage({
+    short,
+    opponent,
+    choice,
+    seasonThis,
+    hasAnySeason,
+  });
   // MLB: one row per player (Matt, 2026-10-06: "Sure in summary"); the NFL
   // keeps one row per game — ~45 a season, where each game is worth seeing.
   const summary = useMemo(
@@ -220,14 +227,8 @@ export function PositionVsOpponentCard({
         </View>
       ) : card.total === 0 ? (
         <View style={styles.card}>
-          <Text style={styles.muted}>
-            {emptySeasonMessage({
-              short,
-              opponent,
-              choice,
-              seasonThis,
-              hasAnySeason,
-            })}
+          <Text style={styles.muted} accessibilityLabel={emptyLine}>
+            {emptyLine}
           </Text>
           {choice === 'this' && hasAnySeason ? (
             <Pressable

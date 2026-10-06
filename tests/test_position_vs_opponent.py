@@ -360,4 +360,5 @@ def test_the_card_opens_on_last_season_only_when_the_season_has_not_started():
     assert "toLowerCase()" not in card
     assert "emptySeasonMessage(" in card
     assert "choice === 'this' && hasAnySeason" in card
-    assert "No ${opts.short} games vs ${opts.opponent} in our data, this season or last." in ts
+    assert "No ${opts.short} games vs ${opponentDisplay} this season or last." in ts
+    assert "accessibilityLabel={emptyLine}" in card

@@ -357,11 +357,12 @@ export function hasOtherPositionGames(
 /**
  * The empty-state line. "this season yet" is a first meeting: last season
  * has games against this opponent and this one does not. An opponent with
- * no row in either season is a gap in the log, said once for both seasons
- * — the same "in our data" hedge the last-season line already uses (the
- * 2025 MLB log is missing every ARI, CWS, OAK and WSH game, measured
- * 2026-10-06). The This season / Last season chips still open the
- * year-stamped line.
+ * no row in either season is named once, for both seasons, with the same
+ * opponent string the title and the tooltip already use — the games
+ * display name ("Samford"), not an uppercased feed token. The This season
+ * / Last season chips still open the year-stamped line. Last season keeps
+ * the "in our data" hedge (the 2025 MLB log is missing every ARI, CWS, OAK
+ * and WSH game, measured 2026-10-06).
  */
 export function emptySeasonMessage(opts: {
   short: string;
@@ -374,7 +375,8 @@ export function emptySeasonMessage(opts: {
     return `No ${opts.short} games vs ${opts.opponent} in our ${opts.seasonThis - 1} data.`;
   }
   if (!opts.hasAnySeason) {
-    return `No ${opts.short} games vs ${opts.opponent} in our data, this season or last.`;
+    const opponentDisplay = opts.opponent;
+    return `No ${opts.short} games vs ${opponentDisplay} this season or last.`;
   }
   return `No ${opts.short} games vs ${opts.opponent} this season yet.`;
 }

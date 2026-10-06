@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, none-ever empty line is "No WR games vs Samford this season or last"; VoiceOver reads that sentence |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position card opens last season only when the sport has no final game yet; none-ever empty line names both seasons |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position refresh: jittered 7–13 day window, unmatched-id cache, 320 athlete-call cap, NCAAF fall season on the daily step; card flag resets per player/opponent |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |

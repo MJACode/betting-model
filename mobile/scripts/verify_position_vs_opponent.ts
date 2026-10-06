@@ -189,11 +189,11 @@ check('an auto choice re-decides when only the opponent changes',
 // An opponent absent from both seasons must not be told the gap is only
 // "this season yet". Rank and hit rate stay null, so the card draws no rank tile.
 const noneEver = emptySeasonMessage({
-  short: 'WR', opponent: 'SAMFORD', choice: 'this', seasonThis: 2026, hasAnySeason: false,
+  short: 'WR', opponent: 'Samford', choice: 'this', seasonThis: 2026, hasAnySeason: false,
 });
-check('no rows in any season names both seasons',
-  noneEver === 'No WR games vs SAMFORD in our data, this season or last.'
-  && !/this season yet/.test(noneEver), noneEver);
+check('no rows in any season uses the display name and both seasons',
+  noneEver === 'No WR games vs Samford this season or last.'
+  && !/in our data/.test(noneEver) && !/SAMFORD/.test(noneEver), noneEver);
 const firstMeetingCopy = emptySeasonMessage({
   short: 'WR', opponent: 'ATL', choice: 'this', seasonThis: 2026, hasAnySeason: true,
 });
