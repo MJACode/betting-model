@@ -174,6 +174,10 @@ ACTIVE_MIGRATIONS: list[str] = [
     # 2026-10-05 (Matt): phase 2 — MLB batters by lineup spot (1-3/4-6/7-9)
     # and starting pitchers, same row shape as the NFL function.
     "add_position_vs_opponent_mlb.sql",
+    # 2026-10-06 (Matt, phase 3): NBA/WNBA/NCAAF positions for the same card,
+    # written by data/ingestors/player_positions_ingestor.py. Guards on the
+    # table existing.
+    "add_player_positions.sql",
     # 2026-09-14 (mike): leftover nfl_wind_totals opening_signals rows whose
     # picks were VOIDED 09-07 / DELETED 09-11 after MAX_FIRE_LEAD. Capture
     # stayed (ON CONFLICT DO NOTHING). Deletes captures with no standing
