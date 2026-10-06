@@ -171,22 +171,27 @@ def _stamp_game_identity(row: dict, start, away: str, home: str) -> None:
     row["_utc_game_id"] = build_ncaaf_game_id(utc_date, away, home)
 
 
-def retain_existing_cfbd_ids(rows: list[dict], existing_ids: set[str]) -> list[dict]:
+def retain_existing_cfbd_ids(rows: list[dict], ids_with_team_logs: set[str]) -> list[dict]:
     """
-    Keep the historical UTC-dated game_id when that row already exists.
+    Keep a historical UTC-dated game_id only when that row already has team logs.
 
     parse_games / parse_lines date by ET so a NEW night game shares the odds
-    ingestor's id. Re-deriving an already-written CFBD id would insert a
+    ingestor's id. Re-deriving an already-played CFBD id would insert a
     second row and orphan ncaaf_team_game_log / ncaaf_qb_game FKs. If the
-    UTC id is already in `games`, put the row back on it. New rows (UTC id
-    absent) keep the ET id. In-place; returns the same list.
+    UTC id is in `ids_with_team_logs`, put the row back on it.
+
+    A UTC id with no team log was preloaded and never played (the 2026-08-29
+    season load built ids from the UTC date). Keeping that id is how the next
+    odds pull, which dates by ET, twins the game. Those rows stay on the ET
+    id. This function does not delete the UTC row — that is the separate
+    data fix. In-place; returns the same list.
     """
     for r in rows:
         utc_id = r.get("_utc_game_id")
         utc_date = r.get("_utc_date")
         if not utc_id or not utc_date or utc_id == r.get("game_id"):
             continue
-        if utc_id not in existing_ids:
+        if utc_id not in ids_with_team_logs:
             continue
         if r.get("snapshot_at") == r.get("game_date"):
             r["snapshot_at"] = utc_date
@@ -196,13 +201,24 @@ def retain_existing_cfbd_ids(rows: list[dict], existing_ids: set[str]) -> list[d
     return rows
 
 
-def _existing_ncaaf_ids(conn, rows: list[dict]) -> set[str]:
+def _utc_ids_with_team_logs(conn, rows: list[dict]) -> set[str]:
+    """UTC game ids in `rows` that already have an ncaaf_team_game_log row.
+
+    Existence in `games` is not enough. The 2026-08-29 preload wrote a UTC-dated
+    row for every game that season, including ones that had not been played.
+    A team-log row is the evidence the id was actually used; a preload with
+    no logs must not pin CFBD to the UTC id.
+    """
     ids = [r["_utc_game_id"] for r in rows if r.get("_utc_game_id")]
     if not ids:
         return set()
     found = conn.execute(
-        "SELECT game_id FROM games WHERE sport = %(s)s AND game_id = ANY(%(ids)s)",
-        {"s": SPORT, "ids": ids},
+        """
+        SELECT DISTINCT game_id
+        FROM ncaaf_team_game_log
+        WHERE game_id = ANY(%(ids)s)
+        """,
+        {"ids": ids},
     ).fetchall()
     return {r[0] for r in found}
 
@@ -1146,9 +1162,10 @@ def ingest_ncaaf_games(season: int, conn=None) -> tuple[int, dict, dict]:
         keep = [g for g in parsed
                 if "fbs" in {str(g.get("_home_classification") or "fbs").lower(),
                              str(g.get("_away_classification") or "fbs").lower()}]
-        # New rows get the ET id parse_games just built. A UTC id that already
-        # exists stays — rewriting it would orphan the 2015–2025 box-score FKs.
-        retain_existing_cfbd_ids(keep, _existing_ncaaf_ids(conn, keep))
+        # New rows, and a UTC preload that was never played, keep the ET id.
+        # A UTC id that already has team logs stays — rewriting it would
+        # orphan the 2015–2025 box-score FKs.
+        retain_existing_cfbd_ids(keep, _utc_ids_with_team_logs(conn, keep))
 
         conn.executemany(_GAME_UPSERT, _norm(keep, _GAME_FIELDS))
         conn.commit()
@@ -1260,7 +1277,7 @@ def ingest_ncaaf_lines(season: int, conn=None) -> int:
         for stype in _SEASON_TYPES:
             payload = _get("/lines", year=season, seasonType=stype)
             rows.extend(parse_lines(payload, config.CFBD_LINES_PROVIDERS))
-        retain_existing_cfbd_ids(rows, _existing_ncaaf_ids(conn, rows))
+        retain_existing_cfbd_ids(rows, _utc_ids_with_team_logs(conn, rows))
         if rows:
             conn.executemany(_ODDS_INSERT, _norm(rows, _ODDS_FIELDS))
             conn.commit()
@@ -1566,8 +1583,9 @@ def _day_before(date_str: str) -> str:
 # Night games ingested BEFORE the 2026-09-13 ET dating policy have TWO games
 # rows under two ids — e.g. a 10:19pm ET kick is NCAAF_2026-08-29_memphis_unlv
 # (odds, Eastern date) and NCAAF_2026-08-30_memphis_unlv (CFBD, UTC prefix).
-# New CFBD rows date by ET and share the odds id; those historical twins stay.
-# Re-keying them would orphan ncaaf_team_game_log / ncaaf_qb_game FKs 2015–2025.
+# New CFBD rows date by ET. A UTC id is kept only when it already has team
+# logs; re-keying a played row would orphan ncaaf_team_game_log /
+# ncaaf_qb_game FKs 2015–2025. A UTC preload with no logs is left on the ET id.
 #
 # Picks always attach to the ODDS row: it is the one that exists when the board
 # is priced. CFBD wrote the final to its OWN row. So without this the generic
@@ -1854,7 +1872,7 @@ def ingest_ncaaf_results_for_date(run_date: str | None = None,
         for season in seasons:
             for stype in _SEASON_TYPES:
                 parsed = parse_games(_get("/games", year=season, seasonType=stype))
-                retain_existing_cfbd_ids(parsed, _existing_ncaaf_ids(conn, parsed))
+                retain_existing_cfbd_ids(parsed, _utc_ids_with_team_logs(conn, parsed))
                 rows = [g for g in parsed
                         if g["home_score"] is not None and lo <= g["game_date"] <= run_date]
                 if rows:
@@ -2070,7 +2088,7 @@ def _schedule_maps(season: int, conn=None) -> tuple[dict, dict]:
     and it is never persisted — so any box-score pull has to rebuild the map
     from a fresh /games call. Two API calls, and it guarantees the ids line up
     with what the games table already holds (including a historical UTC id
-    that parse_games would now date by ET).
+    that parse_games would now date by ET, kept only when that row has team logs).
     """
     own = conn is None
     conn = conn or get_connection()
@@ -2084,7 +2102,7 @@ def _schedule_maps(season: int, conn=None) -> tuple[dict, dict]:
         keep = [g for g in parsed
                 if "fbs" in {str(g.get("_home_classification") or "fbs").lower(),
                              str(g.get("_away_classification") or "fbs").lower()}]
-        retain_existing_cfbd_ids(keep, _existing_ncaaf_ids(conn, keep))
+        retain_existing_cfbd_ids(keep, _utc_ids_with_team_logs(conn, keep))
         id_map = {g["_cfbd_id"]: g["game_id"]
                   for g in keep if g.get("_cfbd_id") is not None}
         games_by_id = {

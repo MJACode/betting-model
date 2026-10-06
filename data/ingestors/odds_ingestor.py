@@ -359,6 +359,134 @@ def _nfl_resolver(conn, around_date: str):
     return resolve
 
 
+# ── Existing-row reuse (NCAAF) ───────────────────────────────────────────────
+#
+# Same shape as the NFL block above: load a window, match, hand `_process_events`
+# a closure. The difference is what a miss means. The NFL schedule is not ours,
+# so a miss is a skip. For NCAAF this ingestor still mints an id — a game CFBD
+# has not written yet has no row to reuse. A hit reuses the row that is already
+# there instead of minting a second one.
+#
+# The split this closes (measured 2026-10-06, 59 of the 112 duplicate clusters):
+# CFBD preloaded 2026 on 8/29 with ids built from the UTC date, and this file
+# builds the id from the ET date. A 10:30pm ET kickoff is the next calendar day
+# in UTC, so the same game landed on two ids. Home/away swapped at a neutral
+# site is the same lookup (3 clusters: Army/Navy, Kansas/Arizona State,
+# Virginia/West Virginia).
+
+# The match itself. Two days apart is a different game; one day is the UTC twin.
+_NCAAF_GAME_DATE_SKEW_DAYS = 1
+# How far around the pull to LOAD rows for that match. Army-Navy (2026-12-12)
+# was already on the board on 2026-09-01, 102 days out, and a late-August pull
+# has to reach the January bowls. The NFL's +10 days would miss both and mint.
+_NCAAF_REUSE_LOOKBACK_DAYS = 2
+_NCAAF_REUSE_LOOKAHEAD_DAYS = 200
+
+
+def _load_ncaaf_games(conn, start: str, end: str) -> list[dict]:
+    """NCAAF `games` rows with game_date in [start, end], inclusive."""
+    rows = conn.execute("""
+        SELECT game_id, game_date, home_team, away_team
+        FROM games
+        WHERE sport = 'NCAAF'
+          AND game_date BETWEEN %s AND %s
+    """, (start, end)).fetchall()
+    out = []
+    for game_id, game_date, home, away in rows:
+        d = game_date.isoformat() if hasattr(game_date, "isoformat") else str(game_date)[:10]
+        out.append({
+            "game_id": game_id,
+            "game_date": d,
+            "home_team": home,
+            "away_team": away,
+        })
+    return out
+
+
+def resolve_ncaaf_game_id(games: list[dict], home: str, away: str,
+                          game_date: str) -> str | None:
+    """Existing NCAAF games row for this matchup, or None.
+
+    Same two schools in either home/away order, `game_date` within
+    +/- `_NCAAF_GAME_DATE_SKEW_DAYS` of the ET kickoff date. Teams are
+    compared by `ncaaf_slug`, so an accent the normalizer already folded
+    does not split the row.
+
+    More than one row in the window: exact home/away order first, then the
+    nearest date, then the game_id (stable). The ambiguity is logged; the
+    choice is not a guess about which game it is — a college team does not
+    play the same opponent twice inside two days.
+    """
+    from data.ingestors.cfbd_ingestor import ncaaf_slug
+
+    h, a = ncaaf_slug(home), ncaaf_slug(away)
+    if not h or not a or h == a:
+        return None
+    try:
+        target = datetime.strptime(game_date[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+    pair = frozenset((h, a))
+    cands = []
+    for g in games:
+        gh = ncaaf_slug(g.get("home_team") or "")
+        ga = ncaaf_slug(g.get("away_team") or "")
+        if not gh or not ga or frozenset((gh, ga)) != pair:
+            continue
+        try:
+            gd = datetime.strptime(str(g.get("game_date"))[:10], "%Y-%m-%d")
+        except (ValueError, TypeError):
+            continue
+        delta = abs((gd - target).days)
+        if delta > _NCAAF_GAME_DATE_SKEW_DAYS:
+            continue
+        exact = gh == h and ga == a
+        cands.append((0 if exact else 1, delta, g.get("game_id") or "", g))
+    if not cands:
+        return None
+    cands.sort(key=lambda t: (t[0], t[1], t[2]))
+    chosen = cands[0][3]
+    if len(cands) > 1:
+        logger.warning(
+            f"NCAAF: {len(cands)} games rows match {away} @ {home} "
+            f"within a day of {game_date[:10]} "
+            f"({[c[2] for c in cands]}); using {chosen['game_id']} "
+            f"(exact home/away, then nearest date)"
+        )
+    return chosen.get("game_id")
+
+
+def _ncaaf_resolver(conn, around_date: str):
+    """A `reuse_game_id` for `_process_events`, or None when the lookup can't run.
+
+    Mirrors `_nfl_resolver`: load a window, return a closure over the matcher.
+    None means the lookup failed and the caller mints ids — it does not skip
+    the sport. An empty window is a working resolver that misses every event.
+
+    The closure is `(home_team, away_team, et_game_date) -> game_id | None`
+    with the names `_process_events` has already normalized and the ET date it
+    has already computed. The NFL closure takes raw names and the UTC instant
+    because that matcher owns both; this one does not re-derive either.
+    """
+    try:
+        anchor = date.fromisoformat(around_date[:10])
+        games = _load_ncaaf_games(
+            conn,
+            (anchor - timedelta(days=_NCAAF_REUSE_LOOKBACK_DAYS)).isoformat(),
+            (anchor + timedelta(days=_NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat(),
+        )
+    except Exception as exc:                                   # noqa: BLE001
+        logger.warning(
+            f"NCAAF: could not load games to reuse an existing id ({exc}); "
+            f"minting ids")
+        return None
+
+    def reuse(home_team: str, away_team: str, game_date: str):
+        return resolve_ncaaf_game_id(games, home_team, away_team, game_date)
+
+    return reuse
+
+
 # ── Game ID Builder ───────────────────────────────────────────────────────────
 
 def _build_game_id(sport: str, game_date: str, away: str, home: str) -> str:
@@ -824,7 +952,8 @@ def _get_historical_odds(sport_key: str, markets: list[str],
 def _process_events(events: list[dict], sport: str,
                     snapshot_type: str, snapshot_at: str,
                     include_3way: bool = False,
-                    resolve_game_id=None) -> tuple[list[dict], list[dict]]:
+                    resolve_game_id=None,
+                    reuse_game_id=None) -> tuple[list[dict], list[dict]]:
     """
     Parse a list of Odds API event dicts.
     Returns (game_rows, odds_rows) ready for DB insert.
@@ -833,8 +962,14 @@ def _process_events(events: list[dict], sport: str,
     makes this read-only against `games` for the sport that passes one: the id
     comes from the schedule, NO game row is emitted, and an event that does not
     resolve is dropped. The NFL is the only caller today and must stay one
-    (NFL_GAMES_ARE_NOT_OURS); everything else still mints its own id, which is
-    correct because for those sports this ingestor IS the schedule.
+    (NFL_GAMES_ARE_NOT_OURS).
+
+    `reuse_game_id(home_team, away_team, et_game_date) -> game_id | None` is
+    the NCAAF twin of that hook. A hit uses the existing row's id. A miss
+    mints one. Either way a game row is still emitted — for NCAAF this
+    ingestor is the schedule when CFBD has not written the game yet. The two
+    hooks are not combined: a sport that passes `resolve_game_id` must not
+    also mint.
     """
     game_rows = []
     odds_rows = []
@@ -900,9 +1035,19 @@ def _process_events(events: list[dict], sport: str,
             game_id = resolved
             # DELIBERATELY NO game_rows.append: see NFL_GAMES_ARE_NOT_OURS.
         else:
-            game_id = _build_game_id(sport, game_date, away_team, home_team)
+            # NCAAF: an existing row for these two teams within a day (either
+            # home/away order) keeps its id. Minting here is what wrote the
+            # ET twin next to CFBD's UTC row.
+            game_id = None
+            if reuse_game_id is not None:
+                game_id = reuse_game_id(home_team, away_team, game_date)
+            if not game_id:
+                game_id = _build_game_id(sport, game_date, away_team, home_team)
 
-            # Game row (upsert-safe — will not overwrite scores)
+            # Game row (upsert-safe — will not overwrite scores or home/away).
+            # Reusing an id still emits the stub: `odds` FKs to `games`, and
+            # the ON CONFLICT clause does not touch home_team, away_team,
+            # game_date or the score.
             game_rows.append({
                 "game_id":       game_id,
                 "sport":         sport,
@@ -1085,6 +1230,7 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
         if not events:
             continue
         resolve = None
+        reuse = None
         if sp == "NFL":
             try:
                 conn = conn or get_connection()
@@ -1094,8 +1240,18 @@ def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
                 resolve = None
             if resolve is None:
                 continue        # never fall back to minting NFL game ids
+        elif sp == "NCAAF":
+            try:
+                conn = conn or get_connection()
+                reuse = _ncaaf_resolver(conn, snapshot_at)
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(
+                    f"pregame fetch: NCAAF game lookup unavailable ({exc}); "
+                    f"minting ids")
+                reuse = None
         game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at,
-                                               resolve_game_id=resolve)
+                                               resolve_game_id=resolve,
+                                               reuse_game_id=reuse)
         if sp == "UFC":
             try:
                 conn = conn or get_connection()
@@ -1184,12 +1340,16 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 continue
 
             resolve = None
+            reuse = None
             if sp == "NFL":
                 resolve = _nfl_resolver(conn, target_date)
                 if resolve is None:
                     continue    # never fall back to minting NFL game ids
+            elif sp == "NCAAF":
+                reuse = _ncaaf_resolver(conn, target_date)
             game_rows, odds_rows = _process_events(
-                events, sp, snapshot_type, snapshot_at, resolve_game_id=resolve
+                events, sp, snapshot_type, snapshot_at, resolve_game_id=resolve,
+                reuse_game_id=reuse,
             )
 
             # The MMA feed mixes every promotion; drop events where no fighter
@@ -1312,14 +1472,14 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     events = _get_historical_odds(sport_key, markets, snapshot_date)
     time.sleep(REQUEST_SLEEP)
 
-    game_rows, odds_rows = _process_events(
-        events, sport, "open", snapshot_at
-    )
-    for r in odds_rows:
-        r["source"] = HISTORICAL_ODDS_SOURCE
-
     conn = get_connection()
     try:
+        reuse = _ncaaf_resolver(conn, snapshot_date) if sport == "NCAAF" else None
+        game_rows, odds_rows = _process_events(
+            events, sport, "open", snapshot_at, reuse_game_id=reuse,
+        )
+        for r in odds_rows:
+            r["source"] = HISTORICAL_ODDS_SOURCE
         n_games = _upsert_games(conn, game_rows)
         n_odds  = _insert_odds(conn, odds_rows)
         conn.commit()
@@ -1543,8 +1703,11 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     spent += per_call
                     stats["calls"] += 1
                     time.sleep(REQUEST_SLEEP)
+                    reuse = (_ncaaf_resolver(conn, day.isoformat())
+                             if sport == "NCAAF" else None)
                     game_rows, odds_rows = _process_events(
-                        events, sport, "open", snapshot_at)
+                        events, sport, "open", snapshot_at,
+                        reuse_game_id=reuse)
                     for r in odds_rows:
                         r["source"] = HISTORICAL_ODDS_SOURCE
                     flipped = _mark_in_play(game_rows, odds_rows)

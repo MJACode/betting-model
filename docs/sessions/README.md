@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, NCAAF ingest reuses an existing games row (same two schools, either order, ±1 day of the ET date) instead of minting an ET/UTC twin. UTC CFBD ids kept only when ncaaf_team_game_log already has them. No data fix, no feature-engine change |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions: shared names settled by most recent game (never skipped); MLB position card becomes a per-player summary |
