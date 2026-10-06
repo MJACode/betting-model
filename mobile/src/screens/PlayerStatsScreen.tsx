@@ -19,7 +19,7 @@ import { HitModeSheet } from '@/components/HitModeSheet';
 import { HitRateChart } from '@/components/HitRateChart';
 import { PlayerBetBar } from '@/components/PlayerBetBar';
 import { PlayerNewsButton } from '@/components/PlayerNewsButton';
-import { PositionVsOpponentCard } from '@/components/PositionVsOpponentCard';
+import { PositionVsOpponentCard, PositionVsOpponentPending } from '@/components/PositionVsOpponentCard';
 import { TrendStrip } from '@/components/TrendStrip';
 import { useNow } from '@/hooks/useNow';
 import { usePlayerNews } from '@/hooks/usePlayerNews';
@@ -874,6 +874,13 @@ export function PlayerStatsScreen() {
                 betLabel={modeLineLabel(selection.line, selection.side, mode)}
                 selection={selection}
                 groupBasis={detail.positionVsOpponent.groupBasis}
+                sport={detail.positionVsOpponent.sport}
+              />
+            ) : detail.positionVsOpponentPending ? (
+              <PositionVsOpponentPending
+                opponent={detail.positionVsOpponentPending.opponent}
+                loading={detail.positionVsOpponentPending.loading}
+                error={detail.positionVsOpponentPending.error}
               />
             ) : null}
 

@@ -111,14 +111,15 @@ def test_the_client_reads_each_rpc_by_name_for_its_own_sport():
     assert m
     body = m.group(0)
     # Literal names, each behind its own sport check, so the read-surface
-    # tripwire sees both and neither sport can reach the other's function.
-    nfl = body.index("if (sport === 'NFL')")
-    mlb = body.index("if (sport === 'MLB')")
-    assert body.index(".rpc('position_vs_opponent_nfl'") > nfl
-    assert mlb > body.index(".rpc('position_vs_opponent_nfl'")
-    assert body.index(".rpc('position_vs_opponent_mlb'") > mlb
-    assert body.rstrip().endswith("return [];\n}") or "  return [];\n}" in body
-    assert body.count("fetchAllPages") == 2 and body.count(".range(from, to)") == 2
+    # tripwire sees every one and no sport can reach another's function.
+    order = ["NFL", "MLB", "NBA", "WNBA", "NCAAF"]
+    checks = [body.index(f"if (sport === '{sp}')") for sp in order] + [len(body)]
+    for i, sp in enumerate(order):
+        rpc = body.index(f".rpc('position_vs_opponent_{sp.lower()}'")
+        assert checks[i] < rpc < checks[i + 1], sp
+    assert "  return [];\n}" in body
+    assert body.count("fetchAllPages") == len(order)
+    assert body.count(".range(from, to)") == len(order)
 
 
 def test_the_card_is_about_other_players_and_is_mounted():
@@ -237,3 +238,107 @@ def test_the_pure_layer_behaves():
     )
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
     assert "ALL PASS" in proc.stdout
+
+
+# ── NBA / WNBA / NCAAF (phase 3, 2026-10-06) ─────────────────────────────────
+BN_MIG = ROOT / "data/migrations/add_position_vs_opponent_bball_ncaaf.sql"
+BN_CODE = BN_MIG.read_text(encoding="utf-8")
+BN_SQL = "\n".join(ln for ln in BN_CODE.splitlines() if not ln.lstrip().startswith("--"))
+
+
+def _bn_body(sport: str) -> str:
+    start = BN_SQL.index(f"FUNCTION public.position_vs_opponent_{sport}(")
+    nxt = BN_SQL.find("CREATE OR REPLACE FUNCTION", start + 10)
+    return BN_SQL[start:] if nxt == -1 else BN_SQL[start:nxt]
+
+
+def test_roster_sports_are_applied_after_their_table_guarded_and_granted():
+    from data.anon_readable import ANON_READABLE, RPC_ANON_CALLABLE
+    from data.view_migrations import ACTIVE_MIGRATIONS
+
+    assert ACTIVE_MIGRATIONS.index(BN_MIG.name) > ACTIVE_MIGRATIONS.index("add_player_positions.sql")
+    assert "player_positions" in ANON_READABLE
+    for s in ("nba", "wnba", "ncaaf"):
+        assert f"position_vs_opponent_{s}" in RPC_ANON_CALLABLE
+        assert (f"REVOKE ALL ON FUNCTION public.position_vs_opponent_{s}"
+                "(integer[], text, text, text) FROM PUBLIC") in BN_CODE
+    assert BN_SQL.strip().startswith("DO $mig$") and BN_SQL.strip().endswith("$mig$;")
+    assert ") >= 3 THEN" in BN_CODE and "RETURN;" in BN_CODE
+
+
+def test_roster_functions_join_positions_and_the_right_opponent():
+    for s, sport in (("nba", "NBA"), ("wnba", "WNBA")):
+        b = _bn_body(s)
+        assert f"pp.sport = '{sport}' AND pp.player_id = l.player_id AND pp.pos_group = p_pos_group" in b
+        assert f"JOIN games gm ON gm.game_id = l.game_id AND gm.sport = '{sport}'" in b
+        assert "COALESCE(g.minutes, 0) >= 15 AS has_role" in b
+    b = _bn_body("ncaaf")
+    assert "pp.sport = 'NCAAF' AND pp.player_id = l.player_id AND pp.pos_group = p_pos_group" in b
+    assert "l.opponent AS opp" in b
+
+
+def test_the_app_names_the_role_cut_each_roster_function_applies():
+    assert "G: '15+ minutes'" in TS and "F: '15+ minutes'" in TS and "C: '15+ minutes'" in TS
+    b = _bn_body("ncaaf")
+    assert "WHEN 'RB' THEN COALESCE(g.carries,0) + COALESCE(g.receptions,0) >= 6" in b
+    assert "RB: '6+ carries and catches'" in TS
+    assert "WHEN 'WR' THEN COALESCE(g.receptions,0) >= 1" in b and "WR: '1+ catch'" in TS
+    assert "WHEN 'TE' THEN COALESCE(g.receptions,0) >= 1" in b and "TE: '1+ catch'" in TS
+    assert "ELSE COALESCE(g.def_tackles,0) + COALESCE(g.def_sacks,0) >= 2" in b
+    assert "DL: '2+ tackles or sacks'" in TS
+    # QB is the same cut as the NFL's, so it reads the shared map.
+    assert "WHEN 'QB' THEN COALESCE(g.attempts,0) >= 10" in b and "QB: '10+ pass attempts'" in TS
+
+
+def test_every_roster_sport_chip_has_a_branch():
+    catalog = CATALOG.read_text(encoding="utf-8")
+    for sport, fn in (("NBA", "nba"), ("WNBA", "wnba"), ("NCAAF", "ncaaf")):
+        keys = set(re.findall(rf"\{{ key: '(\w+)', label: '[^']*', sport: '{sport}'", catalog))
+        assert keys, sport
+        body = _bn_body(fn)
+        for k in keys:
+            assert f"WHEN '{k}'" in body, f"{sport} chip {k} has no branch"
+
+
+def test_the_player_page_reads_its_own_position_by_key():
+    q = QUERIES.read_text(encoding="utf-8")
+    m = re.search(r"export async function fetchPlayerPositionGroup\(.*?\n\}\n", q, re.S)
+    assert m
+    body = m.group(0)
+    assert ".from('player_positions')" in body
+    assert ".eq('sport', sport)" in body and ".eq('player_id', playerId)" in body
+    assert ".maybeSingle()" in body
+    for s in ("nba", "wnba", "ncaaf"):
+        assert f".rpc('position_vs_opponent_{s}'" in q
+
+
+def test_ncaaf_ranks_only_opponents_with_three_games():
+    """Measured 2026-10-06: 245 opponents in the 2026 college log, 74 with one
+    game. A one-game sample keeps its average and gets no rank."""
+    b = _bn_body("ncaaf")
+    assert "count(DISTINCT ok.game_id)::int AS games" in b
+    assert "CASE WHEN d.games >= 3 THEN" in b
+    assert "PARTITION BY d.season, d.games >= 3" in b
+    for s in ("nba", "wnba"):
+        assert "d.games >= 3" not in _bn_body(s)
+
+
+def test_a_failed_position_read_is_said_not_hidden():
+    """No row = no card (the roster pull has not placed him). A failed read
+    renders the section with an error line instead (UX_REVIEW §3)."""
+    hook = HOOK.read_text(encoding="utf-8")
+    assert ("isRosterSport && opponent && stat && !posGroup && (rosterPos.loading || rosterPos.error)"
+            in hook)
+    screen = SCREEN.read_text(encoding="utf-8")
+    assert "<PositionVsOpponentPending" in screen
+    card = CARD.read_text(encoding="utf-8")
+    assert "Couldn't load this player's position. Pull down to retry." in card
+
+
+def test_the_card_opens_on_last_season_when_this_one_is_empty():
+    card = CARD.read_text(encoding="utf-8")
+    assert "if (!hasThis && hasLast) setChoice('last');" in card
+    # Once only, and never over the reader's own choice.
+    assert "if (picked.current || loading || rows.length === 0) return;" in card
+    assert "const pick = (c: SeasonChoice) => {\n    picked.current = true;" in card
+    assert "toLowerCase()" not in card

@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card for NBA/WNBA (G/F/C, 15+ min) and NCAAF; daily position refresh; basketball dry run 2: 496/609 NBA, 213/243 WNBA matched |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions: shared names settled by most recent game (never skipped); MLB position card becomes a per-player summary |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, player_positions table + ESPN/CFBD ingestor for NBA/WNBA/NCAAF; sources unreachable from sandbox, so a declared worker dry run measures shapes and match rate first |

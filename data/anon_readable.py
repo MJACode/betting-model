@@ -56,6 +56,10 @@ ANON_READABLE: tuple[str, ...] = (
     "player_game_log",
     "player_handedness",
     "player_news",
+    # NBA/WNBA/NCAAF positions: the player page reads one row by key to pick
+    # the card's group, and the position_vs_opponent_* functions join it
+    # (data/migrations/add_player_positions.sql).
+    "player_positions",
     "player_prop_odds",
     "player_savant_stats",
     # Consensus ticket/money splits per game market, for the team page's
@@ -185,9 +189,6 @@ def all_readable() -> tuple[str, ...]:
 # v_latest_prop_odds_all_books, v_latest_dk_odds and v_live_game_state_latest
 # (data/migrations/latest_line_state_tables.sql).
 VIEW_BASE_TABLES: tuple[str, ...] = (
-    # NBA/WNBA/NCAAF positions, read only through the security-invoker
-    # position_vs_opponent_* functions (data/migrations/add_player_positions.sql).
-    "player_positions",
     "latest_odds",
     "latest_prop_odds",
     "latest_live_game_state",
@@ -390,7 +391,10 @@ RPC_ANON_CALLABLE: tuple[str, ...] = (
     # Same-position-vs-opponent card on the player page
     # (data/migrations/add_position_vs_opponent_nfl.sql).
     "position_vs_opponent_mlb",
+    "position_vs_opponent_nba",
+    "position_vs_opponent_ncaaf",
     "position_vs_opponent_nfl",
+    "position_vs_opponent_wnba",
     "player_window_totals_mlb",
     "player_window_totals_nba",
     "player_window_totals_ncaaf",

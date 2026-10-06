@@ -22,12 +22,15 @@ import {
   mlbSeasonInProgress,
   nflPositionGroup,
   nflSeasonInProgress,
+  rosterGroup,
+  rosterSeasonInProgress,
   type PositionGroup,
 } from '@/lib/positionVsOpponent';
 import {
   fetchGamesByIds,
   fetchH2HStatValues,
   fetchLineupSlot,
+  fetchPlayerPositionGroup,
   fetchPositionVsOpponent,
   fetchPropLineRows,
   fetchPropOddsHistory,
@@ -262,12 +265,22 @@ export function usePlayerDetail(args: {
   // the ruler refetches. NFL and MLB (lib/positionVsOpponent).
   // MLB groups by lineup spot (tonight's posted slot first) and starting
   // pitcher, so this block sits after the lineup read it depends on.
+  // NBA / WNBA / NCAAF logs carry no position: it is read from the
+  // player_positions table the roster pull fills (one row by key).
+  const isRosterSport = sport === 'NBA' || sport === 'WNBA' || sport === 'NCAAF';
+  const rosterPos = useSection<{ position: string; pos_group: string | null } | null>(
+    null,
+    isRosterSport && playerId ? () => fetchPlayerPositionGroup(sport, playerId) : null,
+    [sport, playerId, nonce],
+  );
   const posGroup: PositionGroup | null =
     sport === 'NFL'
       ? nflPositionGroup(positionOf(games))
       : sport === 'MLB'
         ? mlbGroup({ playerType, lineupSlot: lineup.data?.batting_order, games })
-        : null;
+        : isRosterSport
+          ? rosterGroup(sport, rosterPos.data?.pos_group)
+          : null;
   // Said on the card for MLB hitters: the group can change when the lineup
   // posts, so the reader is told which slot it was built from.
   const lastStartSlot = useMemo(() => {
@@ -286,7 +299,13 @@ export function usePlayerDetail(args: {
           : null
       : null;
   const pvoSeason =
-    sport === 'NFL' ? nflSeasonInProgress(today) : sport === 'MLB' ? mlbSeasonInProgress(today) : null;
+    sport === 'NFL'
+      ? nflSeasonInProgress(today)
+      : sport === 'MLB'
+        ? mlbSeasonInProgress(today)
+        : isRosterSport
+          ? rosterSeasonInProgress(sport, today)
+          : null;
   // The rows are tagged with the stat they were read for: useSection keeps the
   // previous data while it refetches, so without the tag a chip tap would draw
   // last stat's numbers under the new stat's label for one round trip (UX
@@ -322,6 +341,12 @@ export function usePlayerDetail(args: {
     nextGame,
     h2h,
     h2hLoading: h2hRow.loading,
+    // The card's place while a roster sport's position is read, or why it
+    // failed; null once the read succeeds (row or no row) and elsewhere.
+    positionVsOpponentPending:
+      isRosterSport && opponent && stat && !posGroup && (rosterPos.loading || rosterPos.error)
+        ? { opponent, loading: rosterPos.loading, error: rosterPos.error }
+        : null,
     positionVsOpponent:
       opponent && posGroup && pvoSeason != null
         ? {
@@ -332,6 +357,7 @@ export function usePlayerDetail(args: {
             loading: pvo.loading || (pvo.error == null && !pvoFresh),
             error: pvo.error,
             groupBasis,
+            sport,
           }
         : null,
     slateLoading: slate.loading,

@@ -354,6 +354,25 @@ def step_player_news(run_date: str, max_age_min: int | None = None) -> bool:
         return False
 
 
+def step_player_positions(run_date: str) -> bool:
+    """NBA / WNBA / NCAAF positions for the player page's "same position vs
+    the next opponent" card (data/ingestors/player_positions_ingestor.py).
+
+    Once a day is enough: rosters change slowly, and the ESPN half re-fetches
+    only athletes not stored in the last 7 days, so a steady-state pass is the
+    ~45 roster-list calls plus that week's signings (ESPN has IP-blocked this
+    worker twice). CFBD /roster is one call. Verified on the worker
+    2026-10-06 by dry runs 405765 / 406072 before this was scheduled."""
+    try:
+        from data.ingestors.player_positions_ingestor import ingest_player_positions
+        result = ingest_player_positions(dry_run=False)
+        logger.success(f"✓ Player positions: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Player positions failed: {exc}")
+        return False
+
+
 def step_odds(run_date: str, snapshot_type: str = "open") -> bool:
     fn = _import_step("odds")
     try:
@@ -1782,6 +1801,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["player_news"] = step_player_news(run_date)
     time.sleep(1)
 
+    # ── Step 5b3: Player positions (NBA / WNBA / NCAAF) ───────────────────────
+    logger.info("Step 5b3/10: Refreshing player positions...")
+    results["player_positions"] = step_player_positions(run_date)
+    time.sleep(1)
+
     # ── Step 5c: Umpires ──────────────────────────────────────────────────────
     logger.info("Step 5c/10: Fetching today's HP umpire assignments...")
     results["umpires"] = step_umpires(run_date)
@@ -2060,7 +2084,7 @@ Examples:
                                  "injuries", "injuries-refresh", "weather-refresh",
                                  "odds", "prop-odds", "mlb_stats", "probables-refresh",
                                  "savant", "bullpen",
-                                 "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news",
+                                 "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news", "player-positions",
                                  "player-news-refresh",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
@@ -2126,6 +2150,7 @@ Examples:
             "weather":      lambda: step_weather(run_date),
             "lineups":      lambda: step_lineups(run_date),
             "player-news":  lambda: step_player_news(run_date),
+            "player-positions": lambda: step_player_positions(run_date),
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),

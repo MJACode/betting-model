@@ -882,5 +882,15 @@
       "season": 2026,
       "dry_run": false
     }
+  },
+  {
+    "key": "player-positions-basketball-2026-10-06",
+    "job_type": "player_positions",
+    "requested_by": "matt",
+    "note": "REAL RUN, NBA + WNBA. Dry run 2 (job 406072): NBA rosters answered under season 2027 for all 30 teams, 609 athletes read, 496 matched to our nba_api ids by name (0 tiebreaks), positions G/F/C; WNBA under 2026 for 16 teams, 243 read, 213 matched. Unmatched are mostly 2026 rookies with no log history (and a national team ESPN lists in the WNBA). Writes player_positions; the daily step keeps it fresh from the next 6am run.",
+    "args": {
+      "sports": ["NBA", "WNBA"],
+      "dry_run": false
+    }
   }
 ]
