@@ -64,6 +64,7 @@ import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 import { decisionOdds, hasPricedLine } from '@/lib/decisionPrice';
 import { BetslipBarSpacer } from '@/components/BetslipBarSpacer';
 import { OffenseDefenseCard } from '@/components/OffenseDefenseCard';
+import { pickDetailBlockOrder } from '@/lib/pickDetailOrder';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -293,76 +294,33 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
     playerType: isPitcherProp ? 'pitcher' : isBatterProp ? 'batter' : null,
   });
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.list}>
-        <View style={styles.header}>
-          <View style={styles.titleRow}>
-            <Text style={[styles.label, styles.labelFlex]}>{pick.pick_label}</Text>
-            {/* Recent news for the player this prop is on — same icon, same
-                sheet as the player detail screen. */}
-            <PlayerNewsButton
-              playerName={playerName ?? 'Player'}
-              subtitle={pick.pick_label}
-              news={playerNews}
-            />
-          </View>
-          <View style={styles.metaRow}>
-            {preview || paused ? (
-              <View style={styles.previewBadge}>
-                <Text style={styles.previewBadgeText}>{preview ? 'PREVIEW' : 'PAUSED'}</Text>
-              </View>
-            ) : (
-              <SignalBadge signal={voided ? 'NONE' : pick.signal_type} />
-            )}
-            <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
-          </View>
-          {voided ? (
-            <Text style={styles.previewNote}>
-              Withdrawn — this pick was published in error and does not count
-              toward the record.
-            </Text>
-          ) : null}
-          {pick.condition_status === 'VOID' && !voided ? (
-            <Text style={styles.previewNote}>
-              Posted to Discord · not counted in the model’s record.
-            </Text>
-          ) : null}
-          {paused ? (
-            <Text style={styles.previewNote}>
-              This model is paused. Paused models’ picks are shown for reference
-              only — they are not signals, and paused models don’t post to Discord
-              or push.
-            </Text>
-          ) : null}
-          {preview ? (
-            <Text style={styles.previewNote}>
-              {pick.sport === 'GOLF'
-                ? 'This pick re-prices until the tournament starts, then locks. It becomes a signal only if it still clears the bar then.'
-                : 'This pick re-prices until fight-day morning, then locks. It becomes a signal only if it still clears the bar then.'}
-            </Text>
-          ) : null}
-          {bestLine ? <Text style={styles.bestLine}>{bestLine}</Text> : null}
-          {quoteProvenance ? (
-            <Text style={styles.quoteProvenance}>{quoteProvenance}</Text>
-          ) : null}
-          {game ? (
-            <View style={styles.matchupRow}>
-              <Text style={styles.matchup}>
-                {game.sport === 'GOLF'
-                  ? game.home_team
-                  : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
-              </Text>
-              <GameStatusPill game={game} compact={false} live={liveState} />
-            </View>
-          ) : null}
-          {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
-        </View>
+  const timingBlock = (
+    <>
+        {paused ? null : <PickTimingCard pick={pick} />}
 
-        <ReasoningCard pick={pick} paused={paused} />
+        {paused ? null : <SharpScoreCard pick={pick} />}
 
-        {/* Where to bet, then Track, then the context cards. Fair price is
-            not on this screen — that card is on hold. */}
+        {isProbOnlyModel(pick.model_id) ? (
+          <View style={styles.infoCard}>
+            <Text style={styles.infoHeading}>Why no edge number?</Text>
+            <Text style={styles.infoBody}>
+              This market is priced on model probability alone. DraftKings doesn’t post a
+              reliable line for it (or juices it heavily), so we flag the pick when the model is
+              confident rather than comparing it to a book price.
+            </Text>
+          </View>
+        ) : null}
+
+        <LineMovementCard pick={pick} playerName={playerName} />
+    </>
+  );
+
+  const betBlock = (
+    <>
+
+        {/* Where to bet, then Track. NFL and NCAAF render this block before
+            the context cards; every other sport keeps master's order. Fair
+            price is not on this screen — that card is on hold. */}
         {/* Where to place it, then every book and line — one section, action
             first (UX review): the chips are the bettable same-line subset, the
             table below carries books at a different number and the reference
@@ -446,24 +404,11 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             />
           </View>
         ) : null}
+    </>
+  );
 
-        {paused ? null : <PickTimingCard pick={pick} />}
-
-        {paused ? null : <SharpScoreCard pick={pick} />}
-
-        {isProbOnlyModel(pick.model_id) ? (
-          <View style={styles.infoCard}>
-            <Text style={styles.infoHeading}>Why no edge number?</Text>
-            <Text style={styles.infoBody}>
-              This market is priced on model probability alone. DraftKings doesn’t post a
-              reliable line for it (or juices it heavily), so we flag the pick when the model is
-              confident rather than comparing it to a book price.
-            </Text>
-          </View>
-        ) : null}
-
-        <LineMovementCard pick={pick} playerName={playerName} />
-
+  const afterBlock = (
+    <>
         <PublicBettingCard pick={pick} />
 
         <ClvCard pick={pick} />
@@ -552,6 +497,81 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
             </Pressable>
           </>
         ) : null}
+    </>
+  );
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.list}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <Text style={[styles.label, styles.labelFlex]}>{pick.pick_label}</Text>
+            {/* Recent news for the player this prop is on — same icon, same
+                sheet as the player detail screen. */}
+            <PlayerNewsButton
+              playerName={playerName ?? 'Player'}
+              subtitle={pick.pick_label}
+              news={playerNews}
+            />
+          </View>
+          <View style={styles.metaRow}>
+            {preview || paused ? (
+              <View style={styles.previewBadge}>
+                <Text style={styles.previewBadgeText}>{preview ? 'PREVIEW' : 'PAUSED'}</Text>
+              </View>
+            ) : (
+              <SignalBadge signal={voided ? 'NONE' : pick.signal_type} />
+            )}
+            <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
+          </View>
+          {voided ? (
+            <Text style={styles.previewNote}>
+              Withdrawn — this pick was published in error and does not count
+              toward the record.
+            </Text>
+          ) : null}
+          {pick.condition_status === 'VOID' && !voided ? (
+            <Text style={styles.previewNote}>
+              Posted to Discord · not counted in the model’s record.
+            </Text>
+          ) : null}
+          {paused ? (
+            <Text style={styles.previewNote}>
+              This model is paused. Paused models’ picks are shown for reference
+              only — they are not signals, and paused models don’t post to Discord
+              or push.
+            </Text>
+          ) : null}
+          {preview ? (
+            <Text style={styles.previewNote}>
+              {pick.sport === 'GOLF'
+                ? 'This pick re-prices until the tournament starts, then locks. It becomes a signal only if it still clears the bar then.'
+                : 'This pick re-prices until fight-day morning, then locks. It becomes a signal only if it still clears the bar then.'}
+            </Text>
+          ) : null}
+          {bestLine ? <Text style={styles.bestLine}>{bestLine}</Text> : null}
+          {quoteProvenance ? (
+            <Text style={styles.quoteProvenance}>{quoteProvenance}</Text>
+          ) : null}
+          {game ? (
+            <View style={styles.matchupRow}>
+              <Text style={styles.matchup}>
+                {game.sport === 'GOLF'
+                  ? game.home_team
+                  : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
+              </Text>
+              <GameStatusPill game={game} compact={false} live={liveState} />
+            </View>
+          ) : null}
+          {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
+        </View>
+
+        <ReasoningCard pick={pick} paused={paused} />
+        {pickDetailBlockOrder(pick.sport).map((block) => (
+          <React.Fragment key={block}>
+            {block === 'timing' ? timingBlock : block === 'bet' ? betBlock : afterBlock}
+          </React.Fragment>
+        ))}
 
         {playerTrends.loading || homeTrends.loading || awayTrends.loading ? (
           <ActivityIndicator style={styles.loadingTrend} />
