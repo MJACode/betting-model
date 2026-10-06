@@ -203,3 +203,16 @@ def test_mlb_opponent_comes_from_games():
     of the row's own MLB game."""
     assert "JOIN games g ON g.game_id = pgl.game_id AND g.sport = 'MLB'" in MLB_SQL
     assert "CASE WHEN g.home_team = pgl.team THEN g.away_team ELSE g.home_team END AS opp" in MLB_SQL
+
+
+def test_mlb_shows_a_per_player_summary_and_the_nfl_keeps_its_game_list():
+    """Matt, 2026-10-06: "Sure in summary" — MLB is ~440 player-games a
+    season against one team, so it is summarised per player; the NFL list
+    (~45 a season) stays game by game."""
+    assert "export function isMlbGroup(g: PositionGroup): g is MlbGroup {" in TS
+    assert "return g === 'TOP' || g === 'MID' || g === 'BOT' || g === 'SP';" in TS
+    card = CARD.read_text(encoding="utf-8")
+    assert "isMlbGroup(group) ? playerSummaries(card.entries) : null" in card
+    # The summary counts hits with the SAME isHit the rows use, never its own.
+    m = re.search(r"export function playerSummaries\(.*?\n\}\n", TS, re.S)
+    assert m and "e.hit ? 1 : 0" in m.group(0) and "isHit(" not in m.group(0)

@@ -22,7 +22,9 @@ import {
   groupShort,
   footnoteText,
   groupSingular,
+  isMlbGroup,
   opponentNoun,
+  playerSummaries,
   rankPhrase,
   positionVsOpponent,
   roleCutText,
@@ -104,8 +106,17 @@ export function PositionVsOpponentCard({
   );
   const plural = groupPlural(group);
   const short = groupShort(group);
+  // MLB: one row per player (Matt, 2026-10-06: "Sure in summary"); the NFL
+  // keeps one row per game — ~45 a season, where each game is worth seeing.
+  const summary = useMemo(
+    () => (isMlbGroup(group) ? playerSummaries(card.entries) : null),
+    [group, card.entries],
+  );
+  const total = summary ? summary.length : card.entries.length;
   const shown = card.entries.slice(0, visible);
-  const left = card.entries.length - shown.length;
+  const shownSummary = summary ? summary.slice(0, visible) : [];
+  const left = total - Math.min(visible, total);
+  const unit = summary ? 'players' : 'games';
   const seasonText = choice === 'this' ? 'this season' : 'last season';
   const pick = (c: SeasonChoice) => {
     setChoice(c);
@@ -204,7 +215,34 @@ export function PositionVsOpponentCard({
             />
           </View>
 
-          {shown.map((e) => (
+          {summary
+            ? shownSummary.map((p) => (
+                <View
+                  key={p.playerId}
+                  style={styles.row}
+                  accessible
+                  accessibilityLabel={
+                    `${p.playerName}, ${p.team}: ${p.hits} of ${p.games} games at this line, ` +
+                    `average ${fmt(p.avg)} ${statLabel}`
+                  }
+                >
+                  <View style={styles.rowMain}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {p.playerName}
+                    </Text>
+                    <Text style={styles.meta}>
+                      {p.team} · {p.games} {p.games === 1 ? 'game' : 'games'} · avg {fmt(p.avg)}
+                    </Text>
+                  </View>
+                  <View style={styles.valueCol}>
+                    <Text style={styles.value}>
+                      {p.hits}/{p.games}
+                    </Text>
+                    <Text style={styles.valueLabel}>at this line</Text>
+                  </View>
+                </View>
+              ))
+            : shown.map((e) => (
             <View
               key={`${e.gameId}:${e.playerId}`}
               style={styles.row}
@@ -243,7 +281,7 @@ export function PositionVsOpponentCard({
                 <Pressable
                   onPress={() => setVisible((v) => v + ROWS_STEP)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Show ${Math.min(ROWS_STEP, left)} more games, ${left} left`}
+                  accessibilityLabel={`Show ${Math.min(ROWS_STEP, left)} more ${unit}, ${left} left`}
                   style={({ pressed }) => [styles.moreButton, pressed && { opacity: 0.7 }]}
                 >
                   <Text style={styles.moreText}>
@@ -255,7 +293,7 @@ export function PositionVsOpponentCard({
                 <Pressable
                   onPress={() => setVisible(ROWS_SHOWN)}
                   accessibilityRole="button"
-                  accessibilityLabel="Show fewer games"
+                  accessibilityLabel={`Show fewer ${unit}`}
                   style={({ pressed }) => [styles.moreButton, pressed && { opacity: 0.7 }]}
                 >
                   <Text style={styles.moreText}>Show fewer</Text>

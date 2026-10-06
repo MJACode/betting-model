@@ -23,8 +23,10 @@ SOURCES — chosen for what the WORKER can reach:
 PLAYER IDS (load-bearing). The basketball logs key on the nba_api PLAYER_ID, not
 ESPN's athlete id, so each ESPN athlete is mapped back by NORMALISED NAME
 against the log — the same rule wnba_results_ingestor uses (norm_player_name),
-narrowed by team when a name is shared. An athlete with no log history is
-skipped and counted: the card needs positions only for players with games.
+narrowed by team when a name is shared, and — Matt, 2026-10-06: "don't skip
+names" — a name still shared after that goes to the player with the most
+recent game, counted as a tiebreak. An athlete with no log history is skipped
+and counted: the card needs positions only for players with games.
 
 UNVERIFIED SHAPES, ON PURPOSE MEASURED FIRST. The dev sandbox's egress proxy
 403s ESPN and CFBD outright (requests and WebFetch, 2026-10-06), so the
@@ -167,38 +169,56 @@ def parse_cfbd_roster(rows) -> list[dict]:
     return out
 
 
-def match_to_log(name: str, team: str | None, index: dict) -> str | None:
+def match_to_log(name: str, team: str | None, index: dict,
+                 how: dict | None = None) -> str | None:
     """Our player_id for an ESPN athlete, by normalised name.
 
-    `index` maps norm_name -> [(player_id, latest_team)]. A unique name wins
-    outright; a shared name is settled by team; anything still ambiguous is
-    skipped rather than guessed.
+    `index` maps norm_name -> [(player_id, latest_team, latest_game_date)].
+    A unique name wins outright; a shared name is settled by team; one still
+    shared after that goes to the candidate with the most recent game (Matt,
+    2026-10-06: "don't skip names") — among the same-team candidates when there
+    are any, else among all of them. `how["method"]` records which rule
+    decided, so a run can report how often the tiebreak was needed.
     """
+    def _set(m: str) -> None:
+        if how is not None:
+            how["method"] = m
+
     cands = index.get(norm_player_name(name)) or []
-    ids = {pid for pid, _ in cands}
+    if not cands:
+        _set("none")
+        return None
+    ids = {c[0] for c in cands}
     if len(ids) == 1:
+        _set("name")
         return next(iter(ids))
+    pool = cands
     if team:
-        on_team = {pid for pid, t in cands if t and t.upper() == team.upper()}
-        if len(on_team) == 1:
-            return next(iter(on_team))
-    return None
+        on_team = [c for c in cands if c[1] and str(c[1]).upper() == team.upper()]
+        if len({c[0] for c in on_team}) == 1:
+            _set("team")
+            return on_team[0][0]
+        if on_team:
+            pool = on_team
+    _set("tiebreak_recent")
+    return max(pool, key=lambda c: str(c[2] if len(c) > 2 and c[2] else ""))[0]
 
 
 # ── DB ───────────────────────────────────────────────────────────────────────
 
 def _name_index(conn, sport: str) -> dict:
-    """norm_name -> [(player_id, latest team)] over the last two seasons' log."""
+    """norm_name -> [(player_id, latest team, latest game date)] over the
+    last two seasons' log."""
     table = LOG_TABLE[sport]
     rows = conn.execute(f"""
-        SELECT DISTINCT ON (player_id) player_id, player_name, team
+        SELECT DISTINCT ON (player_id) player_id, player_name, team, game_date
         FROM {table}
         WHERE season >= (SELECT max(season) - 1 FROM {table})
         ORDER BY player_id, game_date DESC
     """).fetchall()
     index: dict[str, list] = {}
-    for pid, name, team in rows:
-        index.setdefault(norm_player_name(name), []).append((str(pid), team))
+    for pid, name, team, gdate in rows:
+        index.setdefault(norm_player_name(name), []).append((str(pid), team, str(gdate)))
     return index
 
 
@@ -244,6 +264,7 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
     fresh = set() if dry_run else _fresh_source_ids(conn, sport)
     stats = {"teams": len(teams), "athletes_listed": 0, "athletes_fetched": 0,
              "skipped_fresh": 0, "unparsed": 0, "matched": 0, "unmatched": 0,
+             "match_method": {}, "tiebreak_sample": [],
              "no_group": 0, "positions": {}, "sample": [], "unmatched_sample": []}
     out: list[dict] = []
     for tref in teams:
@@ -274,7 +295,12 @@ def _basketball(conn, sport: str, dry_run: bool) -> dict:
                          "position": adoc.get("position")})
                 continue
             stats["positions"][a["position"]] = stats["positions"].get(a["position"], 0) + 1
-            pid = match_to_log(a["name"], team_abbrev, index)
+            how: dict = {}
+            pid = match_to_log(a["name"], team_abbrev, index, how)
+            m_ = how.get("method", "none")
+            stats["match_method"][m_] = stats["match_method"].get(m_, 0) + 1
+            if m_ == "tiebreak_recent" and len(stats["tiebreak_sample"]) < SAMPLE:
+                stats["tiebreak_sample"].append({"name": a["name"], "team": team_abbrev, "player_id": pid})
             if not pid:
                 stats["unmatched"] += 1
                 if len(stats["unmatched_sample"]) < SAMPLE:
