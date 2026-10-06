@@ -250,7 +250,7 @@ export function playCellSpeech(
 }
 
 function boxSpeech(
-  label: string,
+  spoken: string,
   offenseTeam: string,
   defenseTeam: string,
   offValue: number | null,
@@ -264,16 +264,19 @@ function boxSpeech(
   const offRankBit = offRank != null ? `, ranked ${ordinal(offRank)}` : ', unranked';
   const defRankBit = defRank != null ? `, ranked ${ordinal(defRank)}` : ', unranked';
   return {
-    offSpeech: `${label}: ${offenseTeam} offense ${off}${offRankBit}`,
-    defSpeech: `${label}: ${defenseTeam} defense allows ${def}${defRankBit}`,
+    offSpeech: `${spoken}: ${offenseTeam} offense ${off}${offRankBit}`,
+    defSpeech: `${spoken}: ${defenseTeam} defense allows ${def}${defRankBit}`,
   };
 }
 
-const BOX_SPECS: { key: string; label: string; off: keyof TeamRates; def: keyof TeamRates; format: TeamStatFormat }[] = [
-  { key: 'pts', label: 'Points / game', off: 'pointsFor', def: 'pointsAgainst', format: 'dec1' },
-  { key: 'ypp', label: 'Yards / play', off: 'yardsPerPlay', def: 'yardsPerPlayAllowed', format: 'dec2' },
-  { key: 'pass', label: 'Pass yds / game', off: 'passYds', def: 'passYdsAllowed', format: 'dec1' },
-  { key: 'rush', label: 'Rush yds / game', off: 'rushYds', def: 'rushYdsAllowed', format: 'dec1' },
+const BOX_SPECS: {
+  key: string; label: string; spoken: string;
+  off: keyof TeamRates; def: keyof TeamRates; format: TeamStatFormat;
+}[] = [
+  { key: 'pts', label: 'Points / game', spoken: 'Points per game', off: 'pointsFor', def: 'pointsAgainst', format: 'dec1' },
+  { key: 'ypp', label: 'Yards / play', spoken: 'Yards per play', off: 'yardsPerPlay', def: 'yardsPerPlayAllowed', format: 'dec2' },
+  { key: 'pass', label: 'Pass yds / game', spoken: 'Passing yards per game', off: 'passYds', def: 'passYdsAllowed', format: 'dec1' },
+  { key: 'rush', label: 'Rush yds / game', spoken: 'Rushing yards per game', off: 'rushYds', def: 'rushYdsAllowed', format: 'dec1' },
 ];
 
 function rateRow(
@@ -288,7 +291,7 @@ function rateRow(
   const defValue = defCol.get(defenseTeam) ?? null;
   const offRank = rankIn(offCol, offenseTeam, true);
   const defRank = rankIn(defCol, defenseTeam, false);
-  const speech = boxSpeech(spec.label, offenseTeam, defenseTeam, offValue, defValue, offRank, defRank, spec.format);
+  const speech = boxSpeech(spec.spoken, offenseTeam, defenseTeam, offValue, defValue, offRank, defRank, spec.format);
   return {
     key: spec.key,
     label: spec.label,
@@ -308,6 +311,7 @@ function boardRateRow(
   rows: readonly TeamStatsRow[],
   key: string,
   label: string,
+  spoken: string,
   offKey: keyof TeamStatsRow,
   defKey: keyof TeamStatsRow,
   format: TeamStatFormat,
@@ -320,7 +324,7 @@ function boardRateRow(
   const defValue = defCol.get(defenseTeam) ?? null;
   const offRank = rankIn(offCol, offenseTeam, true);
   const defRank = rankIn(defCol, defenseTeam, false);
-  const speech = boxSpeech(label, offenseTeam, defenseTeam, offValue, defValue, offRank, defRank, format);
+  const speech = boxSpeech(spoken, offenseTeam, defenseTeam, offValue, defValue, offRank, defRank, format);
   return {
     key,
     label,
@@ -381,8 +385,9 @@ function sectionRows(
     // NCAAF has no per-game box in nfl_team_game_stats. Points per game are
     // on the board; yards allowed are not, so those rows stay off rather
     // than printing a league of dashes.
+    const pts = BOX_SPECS[0];
     rows.push(boardRateRow(
-      board, 'pts', 'Points / game', 'points_for_pg', 'points_against_pg', 'dec1',
+      board, pts.key, pts.label, pts.spoken, 'points_for_pg', 'points_against_pg', pts.format,
       offenseTeam, defenseTeam,
     ));
   }

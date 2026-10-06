@@ -318,6 +318,15 @@ const PLACEHOLDER: TeamStatDef = {
   better: null,
 };
 
+/**
+ * Width of the Teams stat column. 72pt at normal type, growing with the
+ * reader's font scale and stopping at 1.6 so "PTS ADDED/PLAY" can wrap to
+ * two lines instead of truncating at the 2× cap.
+ */
+export function teamStatColumnWidth(fontScale: number): number {
+  return Math.round(72 * Math.min(Math.max(fontScale, 1), 1.6));
+}
+
 /** "1st", "2nd", "3rd", "11th". */
 export function ordinal(n: number): string {
   const mod100 = n % 100;

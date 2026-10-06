@@ -153,6 +153,13 @@ eq(
   eq('each side names its own games, not the league total', model.sections[0].offenseGames, 1);
   eq('the other side names its own games', model.sections[0].defenseGames, 1);
   eq('four counting rows', model.sections[0].rows.length, 4);
+  const pass = model.sections[0].rows.find((r) => r.key === 'pass')!;
+  check('pass VoiceOver says passing yards per game',
+    pass.offSpeech.startsWith('Passing yards per game:'), pass.offSpeech);
+  eq('the visible pass label stays short', pass.label, 'Pass yds / game');
+  const rush = model.sections[0].rows.find((r) => r.key === 'rush')!;
+  check('rush VoiceOver says rushing yards per game',
+    rush.defSpeech.startsWith('Rushing yards per game:'), rush.defSpeech);
   check('no points-added row on an empty NFL board',
     !model.sections[0].rows.some((r) => r.key === 'points-added' || r.key === 'success'));
   const pts = model.sections[0].rows[0];
@@ -184,6 +191,10 @@ eq(
   });
   const keys = model.sections[0].rows.map((r) => r.key);
   eq('NCAAF rows are points plus the two play metrics', keys.join(','), 'pts,points-added,success');
+  const ncaafPts = model.sections[0].rows.find((r) => r.key === 'pts')!;
+  check('NCAAF points VoiceOver uses the spoken name',
+    ncaafPts.offSpeech.startsWith('Points per game:'), ncaafPts.offSpeech);
+  eq('NCAAF points label stays short', ncaafPts.label, 'Points / game');
   eq('NCAAF game count comes from that team', model.sections[0].offenseGames, 4);
   const added = model.sections[0].rows.find((r) => r.key === 'points-added')!;
   eq('NCAAF points-added prints unsigned', added.displayOff, '0.21');
@@ -247,6 +258,8 @@ eq(
   const card = read('src/components/OffenseDefenseCard.tsx');
   check('the card passes the pick date into that read',
     /fetchNflSeasonBox\(season, beforeDate\)/.test(card));
+  check('the game count joins the number to the word with a non-breaking space',
+    /\$\{games\}\\u00A0\$\{games === 1 \? 'game' : 'games'\}/.test(card));
   const screen = read('src/screens/PickDetailScreen.tsx');
   check('the date is the pick’s game_date',
     /beforeDate=\{pick\.game_date\}/.test(screen));

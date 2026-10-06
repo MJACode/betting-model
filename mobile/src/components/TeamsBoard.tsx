@@ -22,6 +22,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -71,6 +72,7 @@ import {
   teamGroupsForSport,
   teamStatValue,
   teamStatAfterOffer,
+  teamStatColumnWidth,
   teamStatsForBoard,
   teamStatsForSport,
   teamStatsShown,
@@ -320,6 +322,9 @@ export function TeamsBoard({
       ? `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted lines for today’s games.`
       : null;
 
+  const { fontScale } = useWindowDimensions();
+  const valW = teamStatColumnWidth(fontScale);
+
   if (!stat) {
     return (
       <EmptyState
@@ -339,6 +344,7 @@ export function TeamsBoard({
         onChange={pickGroup}
         labelFor={(g) => teamGroupLabel(g, sport)}
         fit={sport === 'NFL' || sport === 'NCAAF'}
+        wrap={sport === 'NFL' || sport === 'NCAAF'}
       />
 
       <ScrollView
@@ -354,6 +360,7 @@ export function TeamsBoard({
             <FilterChip
               key={String(s.key)}
               label={s.label}
+              accessibilityLabel={s.spoken ?? s.label}
               active={s.key === stat.key}
               onPress={() => setStat(s)}
             />
@@ -436,10 +443,11 @@ export function TeamsBoard({
             TEAM{season ? ` · ${season}` : ''}
           </Text>
           <Text
-            style={styles.colHeaderRight}
+            style={[styles.colHeaderRight, { width: valW }]}
             numberOfLines={2}
             adjustsFontSizeToFit
             minimumFontScale={0.75}
+            accessibilityLabel={stat.spoken ?? stat.header ?? stat.label}
           >
             {(stat.header ?? stat.label).toUpperCase()}
           </Text>
@@ -475,6 +483,7 @@ export function TeamsBoard({
               // The pill asks: a tap opens the add-to-betslip sheet.
               onLinePress={quote ? () => setLineSheet(quote) : undefined}
               onOpen={onOpenTeam ? () => onOpenTeam(item, season) : undefined}
+              columnWidth={valW}
             />
           );
         }}
@@ -523,6 +532,7 @@ function TeamRow({
   showLine,
   onLinePress,
   onOpen,
+  columnWidth,
 }: {
   rank: number;
   row: TeamStatsRow;
@@ -537,6 +547,8 @@ function TeamRow({
   /** Opens the team's page. The name and record are the target; the LINE
    *  pill keeps its own tap, so the two never fight for one press. */
   onOpen?: () => void;
+  /** Matches the column header. Grows with the font scale. */
+  columnWidth: number;
 }) {
   const value = teamStatValue(row, def);
   const thin = isThinSample(row, def);
@@ -606,7 +618,7 @@ function TeamRow({
           {thin ? ` · ${sample} game${sample === 1 ? '' : 's'}` : ''}
         </Text>
       </Pressable>
-      <View style={styles.valueWrap}>
+      <View style={[styles.valueWrap, { width: columnWidth }]}>
         <Text
           style={[styles.value, color ? { color } : null]}
           accessibilityLabel={boardValueSpeech(def, value, rank) ?? undefined}

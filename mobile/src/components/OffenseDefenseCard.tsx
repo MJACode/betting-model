@@ -119,7 +119,7 @@ export function OffenseDefenseCard({
 function sideLabel(team: string, side: 'off' | 'def', games: number | null): string {
   const base = `${team} ${side}`;
   if (games == null || games <= 0) return base;
-  return `${base} · ${games} ${games === 1 ? 'game' : 'games'}`;
+  return `${base} · ${games}\u00A0${games === 1 ? 'game' : 'games'}`;
 }
 
 function Header({

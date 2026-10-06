@@ -39,8 +39,12 @@ export function SegmentTabs<T extends string>({
    *  truncating it, and cap it at 2x (UX_REVIEW §5 segmented-control
    *  exception). Added 2026-09-25 for the Stats position row, whose NFL
    *  segments (QB / RB / WR/TE / DEF / Teams) share one screen width
-   *  (Designer: "don't truncate"). */
+   *  (Designer: "don't truncate"). One line: wrapping that row mid-word
+   *  reads "Tea / ms" and "WR/ / TE". */
   fit = false,
+  /** Two lines, for a label that is a phrase ("Offense & defense"). The
+   *  position row does not set this. */
+  wrap = false,
 }: {
   items: readonly T[];
   active: T;
@@ -50,6 +54,7 @@ export function SegmentTabs<T extends string>({
   compact?: boolean;
   accessibilityLabelFor?: (item: T) => string;
   fit?: boolean;
+  wrap?: boolean;
 }) {
   if (items.length < 2) return null;
   return (
@@ -85,11 +90,11 @@ export function SegmentTabs<T extends string>({
                 second && styles.textSecond,
                 compact && styles.textCompact,
                 isActive && (second || compact ? styles.textActiveSecond : styles.textActive),
-                fit && styles.textFit,
+                wrap && styles.textFit,
               ]}
-              // `fit` labels ("Offense & defense") wrap to two lines. One line
-              // plus the shrink floor still ellipsizes them at the 2× cap.
-              numberOfLines={fit ? 2 : 1}
+              // `wrap` is the two-line phrase. `fit` stays one line and shrinks,
+              // which is the position row's behaviour on master.
+              numberOfLines={wrap ? 2 : 1}
               adjustsFontSizeToFit={fit}
               minimumFontScale={fit ? 0.75 : undefined}
               // Segmented-control labels cap at 2x, as iOS caps its native
@@ -116,8 +121,10 @@ export function GroupTabs<T extends string>({
    *  is exactly the "floating to nowhere" this component was built to end. */
   second = true,
   labelFor,
-  /** Shrink a long label ("Offense & defense") instead of truncating it. */
+  /** Shrink a long label instead of truncating it. One line. */
   fit = false,
+  /** Let that label wrap to two lines. Only the Teams board sets this. */
+  wrap = false,
 }: {
   groups: readonly T[];
   active: T;
@@ -125,6 +132,7 @@ export function GroupTabs<T extends string>({
   second?: boolean;
   labelFor?: (item: T) => string;
   fit?: boolean;
+  wrap?: boolean;
 }) {
   return (
     <SegmentTabs
@@ -134,6 +142,7 @@ export function GroupTabs<T extends string>({
       second={second}
       labelFor={labelFor}
       fit={fit}
+      wrap={wrap}
     />
   );
 }

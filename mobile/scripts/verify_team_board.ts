@@ -18,6 +18,9 @@ import {
   tierFor,
 } from '../src/lib/teamBoard';
 import { teamRanks } from '../src/lib/teamDetail';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import {
   EXPLAIN_PTS_ADDED,
   EXPLAIN_SUCCESS,
@@ -32,6 +35,7 @@ import {
   teamGroupsForSport,
   teamStatValue,
   teamStatAfterOffer,
+  teamStatColumnWidth,
   teamStatsForBoard,
   teamStatsForSport,
   teamStatsShown,
@@ -307,6 +311,22 @@ for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   check('NCAAF team page lists the same rows',
     teamRanks(liveNcaaf, 'ALA', 'NCAAF', 'Efficiency').some((r) => r.def.key === 'epa_off'));
   eq('NFL still opens on yards/play', defaultTeamStatFor('NFL')?.key, 'yards_per_play');
+  eq('stat column is 72pt at normal type', teamStatColumnWidth(1), 72);
+  eq('stat column does not shrink below 72', teamStatColumnWidth(0.85), 72);
+  eq('stat column grows with the font scale', teamStatColumnWidth(1.3), Math.round(72 * 1.3));
+  eq('stat column stops growing at 1.6', teamStatColumnWidth(2), Math.round(72 * 1.6));
+  eq('stat column stops growing past the cap', teamStatColumnWidth(3), Math.round(72 * 1.6));
+
+  const boardSrc = readFileSync(join(import.meta.dirname, '..', 'src/components/TeamsBoard.tsx'), 'utf-8');
+  check('chips read the spoken name, not the short label',
+    /accessibilityLabel=\{s\.spoken \?\? s\.label\}/.test(boardSrc));
+  check('the column header reads the spoken name and still wraps to two lines',
+    /accessibilityLabel=\{stat\.spoken \?\? stat\.header \?\? stat\.label\}/.test(boardSrc)
+    && /numberOfLines=\{2\}/.test(boardSrc)
+    && /width: valW/.test(boardSrc));
+  check('the value column uses the same width', /width: columnWidth/.test(boardSrc));
+  check('only the Teams board asks the group tab to wrap',
+    /wrap=\{sport === 'NFL' \|\| sport === 'NCAAF'\}/.test(boardSrc));
 
   const epa = TEAM_STAT_CATALOG.find((s) => s.key === 'epa_off')!;
   const emptyOffered = teamStatsForBoard('NCAAF', []);
