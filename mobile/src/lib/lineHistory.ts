@@ -134,10 +134,17 @@ export function changesFooter(
   /** The series is the open, a sample of the gap, and the latest page — not every row. */
   partial = false,
 ): string {
-  if (partial) {
-    return `Sampled from the open through the latest ${LINE_HISTORY_PAGE} snapshots`;
-  }
   const noun = (n: number) => `${n} ${n === 1 ? 'change' : 'changes'}`;
+  if (partial) {
+    // "Of N" is the full count on a complete history. On a sample that N is
+    // not the book, so a cut table says how many rows are on screen and that
+    // moves in between are missing. The snapshot length is not quoted.
+    const head =
+      r.shownChanges < r.changes
+        ? `Last ${r.shownChanges} ${r.shownChanges === 1 ? 'change' : 'changes'} shown`
+        : noun(r.changes);
+    return `${head} · some intermediate moves aren't listed`;
+  }
   const head =
     r.shownChanges < r.changes
       ? `Last ${r.shownChanges} of ${r.changes} changes`
@@ -145,6 +152,57 @@ export function changesFooter(
         ? `${noun(r.changes)} · opening not shown`
         : noun(r.changes);
   return `${head} · ${snapshots} snapshots`;
+}
+
+/** Right-hand side of the headline. After the start, that number is the close. */
+export function movementHeadline(lock: string, end: string, atClose: boolean): string {
+  return atClose ? `${lock} → ${end} at the close` : `${lock} → ${end}`;
+}
+
+export type MovementVerdictKind = 'steady' | 'against' | 'favor' | 'steamed' | 'eased';
+
+/** Verdict under the headline. Unstarted copy is unchanged. */
+export function movementVerdict(opts: {
+  kind: MovementVerdictKind;
+  atClose: boolean;
+  lock?: string;
+  end?: string;
+  side?: string;
+  pp?: number | null;
+}): string {
+  const { kind, atClose } = opts;
+  if (kind === 'steady') return atClose ? 'Line steady through the close' : 'Line steady since pick';
+  if (kind === 'against') {
+    const base = `Line moved ${opts.lock} → ${opts.end} against your ${opts.side}`;
+    return atClose ? `${base} by the close` : base;
+  }
+  if (kind === 'favor') {
+    const base = `Line moved ${opts.lock} → ${opts.end} in your favor`;
+    return atClose ? `${base} by the close` : base;
+  }
+  if (kind === 'steamed') {
+    const n = (opts.pp ?? 0).toFixed(1);
+    return atClose
+      ? `Steamed ${n}pp against you by the close`
+      : `Steamed ${n}pp against you since scoring`;
+  }
+  const abs = Math.abs(opts.pp ?? 0).toFixed(1);
+  return atClose
+    ? `Moved ${abs}pp in your favor by the close`
+    : `Moved ${abs}pp in your favor since scoring`;
+}
+
+/**
+ * Time cell. The last pregame row is the close once the game has started.
+ * A gap row the bisect did not pin is an upper bound, so it says "by 3:10 PM ET".
+ */
+export function historyTimeLabel(
+  label: string,
+  opts: { atCloseLast: boolean; bounded: boolean },
+): string {
+  if (opts.atCloseLast) return 'Close';
+  if (opts.bounded) return `by ${label}`;
+  return label;
 }
 
 /**
@@ -161,6 +219,61 @@ export interface HistoryProbe {
   gte?: string;
   /** Exclusive upper bound on snapshot_at. */
   lt?: string;
+  /**
+   * Inclusive upper bound on snapshot_at. Pregame reads set this to the
+   * game's commence_time. Live reads leave it unset.
+   */
+  lte?: string;
+}
+
+/**
+ * What one history read is allowed to see.
+ *
+ * `until` is commence_time for a pregame pick: every probe, including the
+ * latest page, is `snapshot_at <= commence_time`. `from` is the lock time
+ * for a live pick, which may read past the start.
+ */
+export interface LineHistoryWindow {
+  from?: string;
+  until?: string;
+}
+
+export interface SampledSeries<T> {
+  rows: T[];
+  /**
+   * snapshot_at of gap rows whose time only bounds the move. The card prints
+   * those as "by 3:10 PM ET".
+   */
+  moveByAt: string[];
+}
+
+/**
+ * Pregame picks never read a row after the start. The worker keeps writing
+ * odds after commence_time, mostly still tagged snapshot_type 'open', so the
+ * cap is the timestamp.
+ *
+ * A live pick — `is_live`, or created at/after the start — reads from its
+ * lock and may continue past the start.
+ */
+export function lineHistoryWindow(input: {
+  commenceTime: string | null | undefined;
+  createdAt: string | null | undefined;
+  isLive?: boolean | null;
+}): LineHistoryWindow {
+  const start = input.commenceTime ?? '';
+  const kick = Date.parse(start);
+  if (!start || Number.isNaN(kick)) {
+    // No start time on the game or the pick, so this read is not capped.
+    return {};
+  }
+  const created = input.createdAt ?? '';
+  const locked = Date.parse(created);
+  const live = input.isLive === true || (Number.isFinite(locked) && locked >= kick);
+  if (live) {
+    if (!Number.isFinite(locked)) return {};
+    return { from: created };
+  }
+  return { until: start };
 }
 
 /**
@@ -180,32 +293,124 @@ export function historyBucketInstants(startIso: string, endIso: string, buckets:
 }
 
 /**
- * Oldest-first snapshots from the open through the latest row.
+ * Halves taken per changed gap. Six steps bring a bucket-width gap (about
+ * a tenth of the pregame span) inside a quarter hour. Wider than that, or
+ * a gap the cap did not spend queries on, stays an upper bound.
+ */
+export const LINE_HISTORY_BISECT_STEPS = 6;
+
+/** Hard cap on the extra reads. Four changes get the full step budget. */
+export const LINE_HISTORY_BISECT_CAP = 24;
+
+/** A refined time within this of the previous bound is the move, not "by". */
+const MOVE_TIGHT_MS = 60_000;
+
+function applyBounds(probe: HistoryProbe, bounds?: LineHistoryWindow): HistoryProbe {
+  let gte = probe.gte;
+  if (bounds?.from && (!gte || Date.parse(bounds.from) > Date.parse(gte))) {
+    gte = bounds.from;
+  }
+  const lte = bounds?.until ?? probe.lte;
+  if (gte === probe.gte && lte === probe.lte) return probe;
+  return { ...probe, gte, lte };
+}
+
+function quoteKey(row: { snapshot_at: string }): string {
+  const { snapshot_at: _at, ...rest } = row;
+  return JSON.stringify(rest);
+}
+
+interface ChangeGap<T> {
+  leftAt: string;
+  right: T;
+  span: number;
+}
+
+function changeGaps<T extends { snapshot_at: string }>(rows: T[]): ChangeGap<T>[] {
+  const out: ChangeGap<T>[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    if (quoteKey(rows[i - 1]) === quoteKey(rows[i])) continue;
+    const span = Date.parse(rows[i].snapshot_at) - Date.parse(rows[i - 1].snapshot_at);
+    if (span > MOVE_TIGHT_MS) out.push({ leftAt: rows[i - 1].snapshot_at, right: rows[i], span });
+  }
+  return out;
+}
+
+/**
+ * Earliest snapshot in (leftAt, right] carrying right's quote. Empty halves
+ * shrink the window without moving the candidate: no row there means the
+ * move is not there. Stops at a minute, or after LINE_HISTORY_BISECT_STEPS.
+ */
+async function refineChange<T extends { snapshot_at: string }>(
+  read: (probe: HistoryProbe) => Promise<T[]>,
+  leftAt: string,
+  right: T,
+): Promise<{ row: T; tight: boolean }> {
+  const key = quoteKey(right);
+  let lo = Date.parse(leftAt);
+  let hi = Date.parse(right.snapshot_at);
+  let best = right;
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi - lo <= MOVE_TIGHT_MS) {
+    return { row: best, tight: true };
+  }
+  for (let step = 0; step < LINE_HISTORY_BISECT_STEPS; step++) {
+    if (hi - lo <= MOVE_TIGHT_MS) break;
+    const midMs = lo + (hi - lo) / 2;
+    const row = (await read({
+      ascending: true,
+      limit: 1,
+      gte: new Date(midMs).toISOString(),
+      lt: best.snapshot_at,
+    }))[0];
+    if (!row?.snapshot_at) {
+      hi = midMs;
+      continue;
+    }
+    const t = Date.parse(row.snapshot_at);
+    if (!Number.isFinite(t) || t <= lo) break;
+    if (quoteKey(row) === key) {
+      best = row;
+      hi = t;
+    } else {
+      lo = t;
+    }
+  }
+  return { row: best, tight: hi - lo <= MOVE_TIGHT_MS };
+}
+
+/**
+ * Oldest-first snapshots from the open through the latest row the window
+ * allows.
  *
  * A history that fits in one page comes back whole (latest page, reversed).
  * A full page has not reached the open, so the open is kept and the gap
  * before that page is sampled. The latest page is kept row for row — two
  * snapshots can share a timestamp — and the series always ends on it.
+ *
+ * `bounds.until` caps every probe, including that latest page. `bounds.from`
+ * starts a live pick at its lock. With neither set, the read is unbounded.
  */
 export async function sampleOpenToNow<T extends { snapshot_at: string }>(
   read: (probe: HistoryProbe) => Promise<T[]>,
-): Promise<T[]> {
+  bounds?: LineHistoryWindow,
+): Promise<SampledSeries<T>> {
+  const bounded = (probe: HistoryProbe) => read(applyBounds(probe, bounds));
   const [latestDesc, openRows] = await Promise.all([
-    read({ ascending: false, limit: LINE_HISTORY_PAGE }),
-    read({ ascending: true, limit: 1 }),
+    bounded({ ascending: false, limit: LINE_HISTORY_PAGE }),
+    bounded({ ascending: true, limit: 1 }),
   ]);
   const latest = latestDesc.slice().reverse();
-  if (latest.length < LINE_HISTORY_PAGE) return latest;
+  if (latest.length < LINE_HISTORY_PAGE) return { rows: latest, moveByAt: [] };
 
   const open = openRows[0];
   const pageStart = latest[0]?.snapshot_at;
   if (!open?.snapshot_at || !pageStart || Date.parse(open.snapshot_at) >= Date.parse(pageStart)) {
-    return latest;
+    return { rows: latest, moveByAt: [] };
   }
 
   const instants = historyBucketInstants(open.snapshot_at, pageStart, LINE_HISTORY_BUCKETS);
   const probed = await Promise.all(
-    instants.map((gte) => read({ ascending: true, limit: 1, gte, lt: pageStart })),
+    instants.map((gte) => bounded({ ascending: true, limit: 1, gte, lt: pageStart })),
   );
   const seen = new Set(latest.map((r) => r.snapshot_at));
   const head: T[] = [];
@@ -215,5 +420,49 @@ export async function sampleOpenToNow<T extends { snapshot_at: string }>(
     head.push(row);
   }
   head.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
-  return [...head, ...latest];
+
+  const gaps = changeGaps(head);
+  const prev = head[head.length - 1];
+  const first = latest[0];
+  if (prev && first && quoteKey(prev) !== quoteKey(first)) {
+    const span = Date.parse(first.snapshot_at) - Date.parse(prev.snapshot_at);
+    if (span > MOVE_TIGHT_MS) gaps.push({ leftAt: prev.snapshot_at, right: first, span });
+  }
+  gaps.sort((a, b) => b.span - a.span);
+  const slots = Math.floor(LINE_HISTORY_BISECT_CAP / LINE_HISTORY_BISECT_STEPS);
+  const chosen = gaps.slice(0, slots);
+  const skipped = gaps.slice(slots);
+
+  const refined = await Promise.all(
+    chosen.map((gap) => refineChange(bounded, gap.leftAt, gap.right)),
+  );
+  const replacements = new Map<string, T>();
+  const moveByAt: string[] = [];
+  chosen.forEach((gap, i) => {
+    const result = refined[i];
+    if (result.row.snapshot_at !== gap.right.snapshot_at) {
+      replacements.set(gap.right.snapshot_at, result.row);
+    }
+    if (!result.tight) moveByAt.push(result.row.snapshot_at);
+  });
+  for (const gap of skipped) moveByAt.push(gap.right.snapshot_at);
+
+  const headSeen = new Set(latest.map((r) => r.snapshot_at));
+  const headOut: T[] = [];
+  for (const row of head) {
+    const next = replacements.get(row.snapshot_at) ?? row;
+    if (headSeen.has(next.snapshot_at)) continue;
+    headSeen.add(next.snapshot_at);
+    headOut.push(next);
+  }
+  let tail = latest;
+  if (first) {
+    const junction = replacements.get(first.snapshot_at);
+    if (junction && junction.snapshot_at !== first.snapshot_at && !headSeen.has(junction.snapshot_at)) {
+      tail = [junction, ...latest];
+    }
+  }
+  const rows = [...headOut, ...tail];
+  rows.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+  return { rows, moveByAt };
 }

@@ -137,7 +137,7 @@ const read = async (probe) => {
   if (!probe.ascending) xs.reverse();
   return xs.slice(0, probe.limit);
 };
-const sampled = await sampleOpenToNow(read);
+const sampled = (await sampleOpenToNow(read)).rows;
 eq(sampled[0].spread_home, -2.5, 'open');
 eq(sampled[sampled.length - 1].spread_home, -7, 'latest line');
 eq(sampled[sampled.length - 1].snapshot_at, rows[rows.length - 1].snapshot_at, 'latest stamp');
@@ -181,11 +181,275 @@ const read = async (probe) => {
   if (!probe.ascending) xs.reverse();
   return xs.slice(0, probe.limit);
 };
-const sampled = await sampleOpenToNow(read);
+const sampled = (await sampleOpenToNow(read)).rows;
 eq(sampled.map((r) => r.spread_home), [-2.5, -3, -6, -7], 'whole series');
 """
     proc = _run(tmp_path, ["lineHistory.ts"], script)
     assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+def test_history_reads_cap_at_commence_and_do_not_filter_snapshot_type():
+    """Post-start rows stay tagged 'open'. The cap is snapshot_at <= commence,
+    after the equality filters, inside each exported function."""
+    region = _history_region(_read(QUERIES))
+    for fn in ("fetchOddsHistory", "fetchPropOddsHistory"):
+        body = re.search(rf"export async function {fn}\(.*?\n\}}\n", region, re.S)
+        assert body, fn
+        assert ".lte('snapshot_at', probe.lte)" in body.group(0)
+        assert "snapshot_type" not in body.group(0)
+    card = _read(SRC / "components" / "LineMovementCard.tsx")
+    assert "lineHistoryWindow" in card
+    assert "fetchOddsHistory(pick.game_id, market, historyBook, historyWindow)" in card
+    assert "fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook, historyWindow)" in card
+    screen = _read(SCREEN)
+    assert "commenceTime={game?.commence_time || pick.game_time}" in screen
+    assert "gameHasStarted(game, liveState, pick.game_time)" in screen
+    history = _read(HISTORY)
+    assert "No start time on the game or the pick, so this read is not capped." in history
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_pregame_history_stops_at_kickoff_and_a_live_pick_may_pass_it(tmp_path):
+    """ATL @ NO shape: the book keeps printing after the start, and the last
+    DraftKings spread is NO +21.5 (home +21.5) at -1100. A pregame pick must
+    not read that row. A live pick, locked after the start, may."""
+    script = PRELUDE + """
+import { sampleOpenToNow, lineHistoryWindow, LINE_HISTORY_BISECT_CAP, LINE_HISTORY_BISECT_STEPS } from './lineHistory.ts';
+
+const KICK = '2026-10-05T00:15:00.000Z';
+const LOCK = '2026-10-05T01:00:00.000Z';
+const rows = [];
+const t0 = Date.parse('2026-10-01T03:59:29.000Z');
+const kick = Date.parse(KICK);
+for (let i = 0; i < 70; i++) {
+  const at = t0 + ((kick - 60_000 - t0) * i) / 69;
+  rows.push({
+    snapshot_at: new Date(at).toISOString(),
+    spread_home: i === 0 ? -2.5 : -3,
+    home_price: -110,
+  });
+}
+// In-game. The last row is the one the card used to treat as current.
+for (let i = 0; i < 60; i++) {
+  const at = kick + 5 * 60_000 + i * 3 * 60_000;
+  const last = i === 59;
+  rows.push({
+    snapshot_at: last ? '2026-10-05T03:26:00.000Z' : new Date(at).toISOString(),
+    spread_home: last ? 21.5 : 14,
+    home_price: last ? -1100 : -180,
+  });
+}
+
+function readFactory() {
+  const probes = [];
+  const read = async (probe) => {
+    probes.push(probe);
+    let xs = rows.filter((r) => {
+      const t = Date.parse(r.snapshot_at);
+      if (probe.gte && t < Date.parse(probe.gte)) return false;
+      if (probe.lt && t >= Date.parse(probe.lt)) return false;
+      if (probe.lte && t > Date.parse(probe.lte)) return false;
+      return true;
+    });
+    xs.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+    if (!probe.ascending) xs.reverse();
+    return xs.slice(0, probe.limit);
+  };
+  return { probes, read };
+}
+
+const pregame = lineHistoryWindow({
+  commenceTime: KICK,
+  createdAt: '2026-10-04T18:00:00.000Z',
+  isLive: false,
+});
+eq(pregame, { until: KICK }, 'pregame window');
+const pre = readFactory();
+const capped = await sampleOpenToNow(pre.read, pregame);
+if (capped.rows.some((r) => Date.parse(r.snapshot_at) > Date.parse(KICK))) {
+  throw new Error('pregame read returned a post-start row');
+}
+if (capped.rows.some((r) => r.spread_home === 21.5)) {
+  throw new Error('pregame read ended on the in-game NO +21.5');
+}
+eq(capped.rows[capped.rows.length - 1].spread_home, -3, 'last pregame number');
+if (!pre.probes.length) throw new Error('no probes');
+if (!pre.probes.every((p) => p.lte === KICK)) {
+  throw new Error('a probe was not capped at commence_time: ' + JSON.stringify(pre.probes[0]));
+}
+const openProbe = pre.probes.find((p) => p.ascending && p.limit === 1 && !p.gte);
+const latestProbe = pre.probes.find((p) => !p.ascending && p.limit === 50);
+if (!openProbe || !latestProbe) throw new Error('open or latest page was not read');
+
+// Unknown start: the same book is read unbounded, which is the old behaviour.
+eq(lineHistoryWindow({ commenceTime: null, createdAt: '2026-10-04T18:00:00.000Z', isLive: false }), {}, 'unknown start');
+const openEnded = await sampleOpenToNow(readFactory().read);
+eq(openEnded.rows[openEnded.rows.length - 1].spread_home, 21.5, 'uncapped still sees the in-game line');
+
+const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: LOCK, isLive: false });
+eq(liveWindow, { from: LOCK }, 'created at or after the start');
+eq(lineHistoryWindow({ commenceTime: KICK, createdAt: '2026-10-04T18:00:00.000Z', isLive: true }), { from: '2026-10-04T18:00:00.000Z' }, 'is_live starts at the lock');
+const live = readFactory();
+const after = await sampleOpenToNow(live.read, liveWindow);
+if (after.rows.some((r) => Date.parse(r.snapshot_at) < Date.parse(LOCK))) {
+  throw new Error('live read returned a row from before the lock');
+}
+eq(after.rows[after.rows.length - 1].spread_home, 21.5, 'live read may pass the start');
+eq(after.rows[after.rows.length - 1].home_price, -1100, 'live read keeps the in-game price');
+if (!live.probes.every((p) => !p.lte)) throw new Error('live read was capped at kickoff');
+if (!live.probes.every((p) => !p.gte || Date.parse(p.gte) >= Date.parse(LOCK))) {
+  throw new Error('live read started before the lock');
+}
+
+// Bisect budget. Twelve distinct gap quotes, so most changes are not refined.
+const noisy = [];
+const spanStart = Date.parse('2026-10-01T00:00:00.000Z');
+const spanEnd = Date.parse('2026-10-06T00:00:00.000Z');
+for (let i = 0; i < 80; i++) {
+  noisy.push({
+    snapshot_at: new Date(spanStart + ((spanEnd - spanStart) * i) / 79).toISOString(),
+    spread_home: i < 30 ? i : -7,
+  });
+}
+let calls = 0;
+const noisyRead = async (probe) => {
+  calls += 1;
+  let xs = noisy.filter((r) => {
+    const t = Date.parse(r.snapshot_at);
+    if (probe.gte && t < Date.parse(probe.gte)) return false;
+    if (probe.lt && t >= Date.parse(probe.lt)) return false;
+    if (probe.lte && t > Date.parse(probe.lte)) return false;
+    return true;
+  });
+  xs.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+  if (!probe.ascending) xs.reverse();
+  return xs.slice(0, probe.limit);
+};
+await sampleOpenToNow(noisyRead);
+if (calls > 2 + 10 + LINE_HISTORY_BISECT_CAP) {
+  throw new Error(`bisect blew the cap: ${calls} reads, cap ${LINE_HISTORY_BISECT_CAP}, steps ${LINE_HISTORY_BISECT_STEPS}`);
+}
+"""
+    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_a_gap_change_is_bisected_back_toward_the_real_move(tmp_path):
+    """The probe time is the first row at the bucket, hours after the move.
+    Six steps between adjacent samples have to land on the real first row."""
+    script = PRELUDE + """
+import { sampleOpenToNow } from './lineHistory.ts';
+// A row every minute, so a bucket probe lands on the probe time and not on
+// the move. The move sits between the 1h and 2h probes.
+const t0 = Date.parse('2026-10-01T00:00:00.000Z');
+const minute = 60_000;
+const trueMove = t0 + 90 * minute;
+const pageStart = t0 + 11 * 60 * minute;
+const rows = [];
+for (let m = 0; m < 11 * 60; m++) {
+  const at = t0 + m * minute;
+  rows.push({
+    snapshot_at: new Date(at).toISOString(),
+    spread_home: at < t0 + minute ? -2.5 : at < trueMove ? -3 : -7,
+  });
+}
+for (let i = 0; i < 50; i++) {
+  rows.push({ snapshot_at: new Date(pageStart + i * 1000).toISOString(), spread_home: -7 });
+}
+const read = async (probe) => {
+  let xs = rows.filter((r) => {
+    const t = Date.parse(r.snapshot_at);
+    if (probe.gte && t < Date.parse(probe.gte)) return false;
+    if (probe.lt && t >= Date.parse(probe.lt)) return false;
+    if (probe.lte && t > Date.parse(probe.lte)) return false;
+    return true;
+  });
+  xs.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+  if (!probe.ascending) xs.reverse();
+  return xs.slice(0, probe.limit);
+};
+const sampled = await sampleOpenToNow(read);
+const firstSeven = sampled.rows.find((r) => r.spread_home === -7);
+eq(firstSeven.snapshot_at, new Date(trueMove).toISOString(), 'change time, not the probe');
+const pageKept = sampled.rows.filter((r) => Date.parse(r.snapshot_at) >= pageStart);
+eq(pageKept.length, 50, 'latest page kept row for row');
+"""
+    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_close_label_and_footer_copy(tmp_path):
+    """After the start the headline and the verdict compare the lock to the
+    close, and the last row is labelled Close. Unstarted copy stays put."""
+    script = PRELUDE + """
+import { historyTimeLabel, movementHeadline, movementVerdict, changesFooter } from './lineHistory.ts';
+eq(historyTimeLabel('3:10 PM ET', { atCloseLast: true, bounded: false }), 'Close', 'close row');
+eq(historyTimeLabel('3:10 PM ET', { atCloseLast: false, bounded: true }), 'by 3:10 PM ET', 'upper bound');
+eq(historyTimeLabel('3:10 PM ET', { atCloseLast: false, bounded: false }), '3:10 PM ET', 'real time');
+eq(movementHeadline('+6', '+3', false), '+6 → +3', 'unstarted headline');
+eq(movementHeadline('+6', '+3', true), '+6 → +3 at the close', 'close headline');
+eq(movementHeadline('-110', '-105', true), '-110 → -105 at the close', 'close price headline');
+eq(
+  movementVerdict({ kind: 'steady', atClose: false }),
+  'Line steady since pick',
+  'unstarted steady',
+);
+eq(
+  movementVerdict({ kind: 'steady', atClose: true }),
+  'Line steady through the close',
+  'close steady',
+);
+eq(
+  movementVerdict({ kind: 'against', atClose: false, lock: '+6', end: '+3', side: 'away' }),
+  'Line moved +6 → +3 against your away',
+  'unstarted against',
+);
+eq(
+  movementVerdict({ kind: 'against', atClose: true, lock: '+6', end: '+3', side: 'away' }),
+  'Line moved +6 → +3 against your away by the close',
+  'close against',
+);
+eq(
+  movementVerdict({ kind: 'favor', atClose: true, lock: '+6', end: '+7', side: 'away' }),
+  'Line moved +6 → +7 in your favor by the close',
+  'close favor',
+);
+eq(
+  movementVerdict({ kind: 'steamed', atClose: false, pp: 2.4 }),
+  'Steamed 2.4pp against you since scoring',
+  'unstarted steam',
+);
+eq(
+  movementVerdict({ kind: 'steamed', atClose: true, pp: 2.4 }),
+  'Steamed 2.4pp against you by the close',
+  'close steam',
+);
+eq(
+  movementVerdict({ kind: 'eased', atClose: true, pp: -2.4 }),
+  'Moved 2.4pp in your favor by the close',
+  'close eased',
+);
+eq(
+  movementVerdict({ kind: 'eased', atClose: false, pp: -2.4 }),
+  'Moved 2.4pp in your favor since scoring',
+  'unstarted eased',
+);
+const footer = changesFooter({ changes: 11, shownChanges: 8, hidden: 3 }, 62, true);
+eq(footer, "Last 8 changes shown · some intermediate moves aren't listed", 'footer');
+if (footer.includes('62')) throw new Error(footer);
+"""
+    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+def test_the_card_uses_the_close_copy():
+    card = _read(SRC / "components" / "LineMovementCard.tsx")
+    assert "movementHeadline(" in card
+    assert "movementVerdict(" in card
+    assert "historyTimeLabel(" in card
+    assert "gameStarted && historyWindow.until != null" in card
 
 
 # ── form strip ─────────────────────────────────────────────────────────────
@@ -229,11 +493,13 @@ def test_a_partial_history_footer_does_not_quote_the_sample_as_the_book(tmp_path
     """62 sampled rows are not 62 snapshots of the book. The complete-history
     footer is unchanged."""
     script = PRELUDE + """
-import { changesFooter, LINE_HISTORY_PAGE } from './lineHistory.ts';
+import { changesFooter } from './lineHistory.ts';
 const partial = changesFooter({ changes: 11, shownChanges: 8, hidden: 3 }, 62, true);
 if (partial.includes('62')) throw new Error('partial footer quotes the sample size: ' + partial);
-if (!partial.includes('open')) throw new Error(partial);
-if (!partial.includes(String(LINE_HISTORY_PAGE))) throw new Error(partial);
+eq(partial, "Last 8 changes shown · some intermediate moves aren't listed", 'partial cut');
+const partialAllShown = changesFooter({ changes: 8, shownChanges: 8, hidden: 1 }, 62, true);
+if (partialAllShown.includes('62')) throw new Error(partialAllShown);
+eq(partialAllShown, "8 changes · some intermediate moves aren't listed", 'partial, table not cut');
 eq(changesFooter({ changes: 19, shownChanges: 8, hidden: 12 }, 20), 'Last 8 of 19 changes · 20 snapshots', 'complete');
 """
     proc = _run(tmp_path, ["lineHistory.ts"], script)

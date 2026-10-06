@@ -158,20 +158,25 @@ export function usePlayerDetail(args: {
 
   // ── Tonight's line for the selected stat, and its movement ───────────────
   // fetchPropLineRows is bounded by (game, market, player): a few dozen rows.
-  // The history read is capped at 50 oldest-first, which is enough for the
-  // OPENING row; the latest comes from the all-books view.
+  // History is the open through the latest pregame snapshot (capped at the
+  // game's commence_time). The latest quote on the card comes from the
+  // all-books view.
   const lines = useSection<{ rows: PropOddsByBookRow[]; history: PropOddsSnapshotRow[] }>(
     { rows: [], history: [] },
     gameId && market
       ? async () => {
           const [rows, history] = await Promise.all([
             fetchPropLineRows(gameId, market, playerName),
-            fetchPropOddsHistory(gameId, market, playerName, MODEL_BOOK).catch(() => [] as PropOddsSnapshotRow[]),
+            fetchPropOddsHistory(gameId, market, playerName, MODEL_BOOK, {
+              until: nextGame?.entry.game.commence_time,
+            })
+              .then((sample) => sample.rows)
+              .catch(() => [] as PropOddsSnapshotRow[]),
           ]);
           return { rows, history };
         }
       : null,
-    [gameId, market, playerName, nonce],
+    [gameId, market, playerName, nonce, nextGame?.entry.game.commence_time],
   );
   const tonight: TonightLine | null = useMemo(
     () => (market ? tonightLine(lines.data.rows, market, books, MODEL_BOOK) : null),

@@ -40,7 +40,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { fetchPickById } from '@/lib/queries';
 import { openForAction } from '@/lib/discordPublish';
 import { slipKeyForPick } from '@/lib/parlay';
-import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, formatSigned, gameHasStarted, gameStatus } from '@/lib/format';
 import { gameStartedLine, gameStartedSpeech, pickCtaFor } from '@/lib/pickCta';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
@@ -369,7 +369,12 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           </View>
         ) : null}
 
-        <LineMovementCard pick={pick} playerName={playerName} />
+        <LineMovementCard
+          pick={pick}
+          playerName={playerName}
+          commenceTime={game?.commence_time || pick.game_time}
+          gameStarted={gameHasStarted(game, liveState, pick.game_time)}
+        />
 
         {/* Where to place it, then every book and line — one section, action
             first (UX review): the chips are the bettable same-line subset, the
