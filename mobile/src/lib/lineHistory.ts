@@ -183,8 +183,13 @@ export function changesFooter(
   return `${head} · ${snapshots} snapshots`;
 }
 
-/** Right-hand side of the headline. After the start, that number is the close. */
-export function movementHeadline(lock: string, end: string, atClose: boolean): string {
+/**
+ * Right-hand side of the headline. After the start, that number is the close.
+ * A non-live lock after the stored start shows only the pick's own number:
+ * the close is earlier, so the arrow would run backwards.
+ */
+export function movementHeadline(lock: string, end: string, atClose: boolean, lockOnly = false): string {
+  if (lockOnly) return lock;
   return atClose ? `${lock} → ${end} at the close` : `${lock} → ${end}`;
 }
 
@@ -301,10 +306,13 @@ export function movementHeadlineLabel(opts: {
   atClose: boolean;
   /** Spreads show a sign. Totals and props do not say "plus". */
   signedLine?: boolean;
+  /** The pick's own number only. No arrow, no close. */
+  lockOnly?: boolean;
 }): string {
   const signed = opts.kind === 'price' || opts.signedLine === true;
   const speak = (n: number | null) => (n == null || Number.isNaN(n) ? 'not available' : speakMagnitude(n, signed));
   const noun = opts.kind === 'line' ? 'Line ' : 'Price ';
+  if (opts.lockOnly) return `${noun}${speak(opts.lock)}`;
   const tail = opts.atClose ? ' at the close' : '';
   return `${noun}${speak(opts.lock)} to ${speak(opts.end)}${tail}`;
 }

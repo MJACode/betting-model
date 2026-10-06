@@ -466,6 +466,7 @@ def test_the_card_uses_the_close_copy():
     assert "nonLiveLockAfterStart(" in card
     assert "lockAfterStart" in card
     assert "headlineAtClose = atClose && !lockAfterStart" in card
+    assert "lockOnly: lockAfterStart" in card
     assert "movementHeadline(" in card
     assert "inPlay || lockAfterStart" in card
     screen = _read(SCREEN)
@@ -772,13 +773,16 @@ eq(historyTimeLabel(closeRow.snapshot_at, { atCloseLast: true, bounded: false })
 const lockAfter = nonLiveLockAfterStart({ commenceTime: KICK, createdAt: CREATED, isLive: false });
 eq(lockAfter, true, 'lock after the stored start');
 const headlineAtClose = late.until != null && !lockAfter;
-const title = movementHeadline('+100', '+105', headlineAtClose);
-eq(title, '+100 → +105', 'headline does not say at the close');
-if (title.includes('at the close') || title.includes('250')) {
-  throw new Error('headline used the post-start row: ' + title);
+const title = movementHeadline('+100', '+105', headlineAtClose, lockAfter);
+eq(title, '+100', 'lock after start shows only the pick');
+if (title.includes('→') || title.includes('105') || title.includes('at the close') || title.includes('250')) {
+  throw new Error('headline still has an arrow or a close: ' + title);
 }
-const spoken = movementHeadlineLabel({ kind: 'price', lock: 100, end: 105, atClose: headlineAtClose });
-if (spoken.includes('at the close')) throw new Error(spoken);
+const spoken = movementHeadlineLabel({
+  kind: 'price', lock: 100, end: 105, atClose: headlineAtClose, lockOnly: lockAfter,
+});
+eq(spoken, 'Price plus 100', 'spoken headline is the pick only');
+if (spoken.includes('to ') || spoken.includes('105') || spoken.includes('at the close')) throw new Error(spoken);
 
 const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: CREATED, isLive: true });
 eq(liveWindow, { from: CREATED }, 'true live');

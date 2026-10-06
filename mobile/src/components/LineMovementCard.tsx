@@ -203,6 +203,7 @@ export function LineMovementCard({
             end: lineOnly ? lineForSide(currentLine, pick.pick_side, market) : currentPrice,
             atClose: headlineAtClose,
             signedLine: signLine,
+            lockOnly: lockAfterStart,
           })}
         >
           {movementHeadline(
@@ -213,6 +214,7 @@ export function LineMovementCard({
               ? formatHistoryLine(lineForSide(currentLine, pick.pick_side, market), signLine)
               : formatHistoryAmerican(currentPrice),
             headlineAtClose,
+            lockAfterStart,
           )}
         </Text>
         {verdict ? (
