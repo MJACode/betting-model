@@ -216,3 +216,24 @@ def test_mlb_shows_a_per_player_summary_and_the_nfl_keeps_its_game_list():
     # The summary counts hits with the SAME isHit the rows use, never its own.
     m = re.search(r"export function playerSummaries\(.*?\n\}\n", TS, re.S)
     assert m and "e.hit ? 1 : 0" in m.group(0) and "isHit(" not in m.group(0)
+
+
+def test_the_pure_layer_behaves():
+    """Runs mobile/scripts/verify_position_vs_opponent.ts: the MLB summary's
+    grouping, averaging, latest-team, sort order and side; own-player
+    exclusion; doubleheader numbering. Needs the mobile deps (tsx resolves the
+    app's @/ aliases); skipped where they are not installed."""
+    import shutil
+    import subprocess
+
+    import pytest
+
+    tsx = ROOT / "mobile" / "node_modules" / ".bin" / "tsx"
+    if shutil.which("node") is None or not tsx.exists():
+        pytest.skip("mobile node_modules not installed")
+    proc = subprocess.run(
+        [str(tsx), "scripts/verify_position_vs_opponent.ts"],
+        cwd=ROOT / "mobile", capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
+    assert "ALL PASS" in proc.stdout

@@ -135,7 +135,8 @@ export function PositionVsOpponentCard({
             `them, so a smaller role reads as a miss. "Real role" means ${roleCutText(group)} in that game. ` +
             `The rank compares ${opponent} with the other ${opponentNoun(group)} on the average ` +
             `${statLabel} per ${short}: ` +
-            `${rankPhrase(group)}.`,
+            `${rankPhrase(group)}.` +
+            (isMlbGroup(group) ? ' Below, one row per player, most games first.' : ''),
         }}
       />
 
@@ -222,7 +223,7 @@ export function PositionVsOpponentCard({
                   style={styles.row}
                   accessible
                   accessibilityLabel={
-                    `${p.playerName}, ${p.team}: ${p.hits} of ${p.games} games at this line, ` +
+                    `${p.playerName}, ${p.team}: ${p.hits} of ${p.games} ${p.games === 1 ? 'game' : 'games'} at this line, ` +
                     `average ${fmt(p.avg)} ${statLabel}`
                   }
                 >
@@ -364,7 +365,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontVariant: ['tabular-nums'],
   },
-  valueLabel: { fontSize: font.size.nano, color: colors.textTertiary, marginTop: 1 },
+  valueLabel: { fontSize: font.size.nano, color: colors.textSecondary, marginTop: 1 },
   more: {
     flex: 1,
     textAlign: 'center',
