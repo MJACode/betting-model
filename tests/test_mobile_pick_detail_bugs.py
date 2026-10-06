@@ -713,12 +713,14 @@ if (firstSeven.snapshot_at === new Date(otherTick).toISOString()) {
 def test_a_late_pregame_pick_stops_at_the_close_and_a_live_pick_ends_on_final(tmp_path):
     """is_live false and the lock six minutes after commence_time. A DK row
     between the start and the lock must not appear, and must not be Close.
-    Close is the last row at or before commence_time. A true live pick may
-    pass the start. Final only when the game is final; otherwise Latest."""
+    A row at the lock, after the start, is not Close either. The headline
+    does not say "at the close". Close is the last row at or before
+    commence_time. A true live pick may pass the start. Final only when
+    the game is final; otherwise Latest."""
     script = PRELUDE + r"""
 import {
   sampleOpenToNow, lineHistoryWindow, historyTimeLabel, inPlayMovementLabel,
-  collapseLineHistory, historyRowAccessibilityLabel, movementHeadlineLabel,
+  collapseLineHistory, historyRowAccessibilityLabel, movementHeadline, movementHeadlineLabel,
   formatHistoryAmerican, formatHistoryLine, nonLiveLockAfterStart,
 } from './lineHistory.ts';
 
@@ -732,6 +734,7 @@ const rows = [
   { snapshot_at: '2026-10-05T23:40:00.000Z', home_price: 100, away_price: -120 },
   { snapshot_at: '2026-10-05T23:59:00.000Z', home_price: 105, away_price: -125 },
   { snapshot_at: BETWEEN, home_price: 250, away_price: -300 },
+  { snapshot_at: CREATED, home_price: 180, away_price: -200 },
   { snapshot_at: '2026-10-06T00:06:30.000Z', home_price: 400, away_price: -500 },
   { snapshot_at: '2026-10-06T01:20:00.000Z', home_price: 1400, away_price: -2500 },
 ];
@@ -753,7 +756,10 @@ if (capped.rows.some((r) => Date.parse(r.snapshot_at) > Date.parse(KICK))) {
   throw new Error('a row after commence reached the card');
 }
 if (capped.rows.some((r) => r.snapshot_at === BETWEEN || r.home_price === 250)) {
-  throw new Error('the row between kickoff and the lock was labelled into the history');
+  throw new Error('the row between kickoff and the lock was shown');
+}
+if (capped.rows.some((r) => r.snapshot_at === CREATED || r.home_price === 180)) {
+  throw new Error('the lock-time row after the start was labelled Close');
 }
 if (capped.rows.some((r) => r.home_price === 1400 || r.home_price === 400)) {
   throw new Error('in-play price reached the card');
@@ -762,7 +768,17 @@ const closeRow = capped.rows[capped.rows.length - 1];
 eq(closeRow.snapshot_at, '2026-10-05T23:59:00.000Z', 'close is the last row at or before commence');
 eq(closeRow.home_price, 105, 'close price');
 if (Date.parse(closeRow.snapshot_at) > Date.parse(KICK)) throw new Error('close is after commence');
-eq(historyTimeLabel('8:00 PM', { atCloseLast: true, bounded: false }), 'Close', 'close label');
+eq(historyTimeLabel(closeRow.snapshot_at, { atCloseLast: true, bounded: false }), 'Close', 'close label');
+const lockAfter = nonLiveLockAfterStart({ commenceTime: KICK, createdAt: CREATED, isLive: false });
+eq(lockAfter, true, 'lock after the stored start');
+const headlineAtClose = late.until != null && !lockAfter;
+const title = movementHeadline('+100', '+105', headlineAtClose);
+eq(title, '+100 → +105', 'headline does not say at the close');
+if (title.includes('at the close') || title.includes('250')) {
+  throw new Error('headline used the post-start row: ' + title);
+}
+const spoken = movementHeadlineLabel({ kind: 'price', lock: 100, end: 105, atClose: headlineAtClose });
+if (spoken.includes('at the close')) throw new Error(spoken);
 
 const liveWindow = lineHistoryWindow({ commenceTime: KICK, createdAt: CREATED, isLive: true });
 eq(liveWindow, { from: CREATED }, 'true live');
