@@ -57,7 +57,6 @@ const FOOTBALL_CHIPS: Record<'qb' | 'rb' | 'wrte' | 'def', ChipSpec[]> = {
   wrte: [
     { group: 'Receiving', key: 'receptions' },
     { group: 'Receiving', key: 'receiving_yards' },
-    { group: 'Receiving', key: 'targets' },
     { group: 'Receiving', key: 'rush_rec_tds' },
   ],
   def: [WHOLE_GROUP('Defense')],
