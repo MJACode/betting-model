@@ -550,9 +550,10 @@ export async function fetchH2HStatValues(
  * this season and last, with the defence's league rank on each row. Backs the
  * player page's "WRs vs ATL" card (Matt, 2026-10-05).
  *
- * ROW COUNT, measured on production: NFL WR receiving_yards vs ATL, seasons
- * 2025-2026, 55 rows (2026-10-05); MLB 1-3 hitters' hits vs NYY, 883 rows
- * (2026-10-06) — the largest, and the reason this read is paged. A full 17-game season of
+ * ROW COUNT, from each function's query run read-only against production
+ * data: NFL WR receiving_yards vs ATL, seasons 2025-2026, 55 rows
+ * (2026-10-05); MLB 1-3 hitters' hits vs NYY, 883 rows (2026-10-06, before
+ * position_vs_opponent_mlb was deployed) — the largest, and why it is paged. A full 17-game season of
  * a defensive group is a few hundred at most, so one page — but paged anyway,
  * because the 1,000-row cap is a property of every read
  * (.claude/rules/frontend.md), on an order the REQUEST names.
