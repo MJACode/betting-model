@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, NCAAF props use the game-line resolver (±1 day, either order) so a late kickoff on a UTC games row is not skipped. Props are not flipped. DK line window is that same ±1 day |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, comment above the NCAAF score mirror now matches retain: a UTC id stays if the games row exists, with or without team logs, until Part B. New rows date by ET. No code change |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, NCAAF UTC id is kept whenever the games row exists (the team-log gate re-dated unplayed preloads). Ambiguity warned once per run. A non-numeric spread skips that event. Historical NCAAF window loaded once per range |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, swapped-only NCAAF reuse flips side-specific odds onto the stored home team (spread sign included). One warning per run with the count. Exact-orientation reuse unchanged |

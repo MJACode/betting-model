@@ -41,9 +41,11 @@ The NFL ingestor's lesson, and it bites harder here. The Odds API writes
 spellings carry accents and punctuation this feed drops ("San José State",
 "Hawai'i"). `resolve_odds_api_school` already solves exactly this for game
 lines, so props reuse it rather than growing a second, differently-wrong copy.
-An event whose resolved id is not in `games` is SKIPPED, not written: an
-orphan prop row joins to nothing and would sit in the table forever looking
-like coverage.
+The game row is the same one the game-line ingest reuses: `_ncaaf_resolver`,
+±1 day, either home/away order. A late kickoff whose only row is the UTC id
+lands on that id. Props are player-keyed, so a swapped row is not flipped.
+An event that matches no row is SKIPPED, not written: an orphan prop row
+joins to nothing and would sit in the table forever looking like coverage.
 
 WHAT IS AND IS NOT ASSUMED ABOUT THE FEED
 ------------------------------------------
@@ -86,7 +88,10 @@ from config import (
     PROP_MARKETS_NCAAF,
 )
 from data.db import get_connection, DBConnection
-from data.ingestors.cfbd_ingestor import build_ncaaf_game_id, resolve_odds_api_school
+from data.ingestors.cfbd_ingestor import resolve_odds_api_school
+from data.ingestors.odds_ingestor import (
+    _NCAAF_GAME_DATE_SKEW_DAYS, _ncaaf_resolver,
+)
 from data.ingestors.odds_quota import persist_quota, record_quota_headers
 from data.ingestors.prop_odds_ingestor import _insert_prop_odds, _parse_prop_markets
 
@@ -146,23 +151,38 @@ def _get_events(target_date: str) -> list[dict]:
 
 
 def _dk_lined_game_ids(conn: DBConnection, game_date: str) -> set[str]:
-    """Games DraftKings has posted a line for -- "a book is pricing this"."""
+    """Games DraftKings has posted a line for -- "a book is pricing this".
+
+    The window is the game resolver's ±1 day, not the ET date alone. A late
+    kickoff's line sits on the UTC-dated row the game-line ingest reused, and
+    an exact `game_date` match would drop every prop for that game.
+    """
+    anchor = datetime.strptime(game_date[:10], "%Y-%m-%d")
+    lo = (anchor - timedelta(days=_NCAAF_GAME_DATE_SKEW_DAYS)).strftime("%Y-%m-%d")
+    hi = (anchor + timedelta(days=_NCAAF_GAME_DATE_SKEW_DAYS)).strftime("%Y-%m-%d")
     rows = conn.execute("""
         SELECT DISTINCT o.game_id
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE g.sport = 'NCAAF'
-          AND g.game_date = %s
+          AND g.game_date BETWEEN %s AND %s
           AND o.bookmaker = %s
-    """, (game_date, ODDS_API_BOOKMAKER)).fetchall()
+    """, (lo, hi, ODDS_API_BOOKMAKER)).fetchall()
     return {r[0] for r in rows}
 
 
-def _known_game_ids(conn: DBConnection, game_date: str) -> set[str]:
-    rows = conn.execute(
-        "SELECT game_id FROM games WHERE sport = 'NCAAF' AND game_date = %s",
-        (game_date,)).fetchall()
-    return {r[0] for r in rows}
+def _resolved_prop_game_id(reuse, home: str, away: str, game_date: str) -> str | None:
+    """The existing games row for this prop event, or None.
+
+    Same helper the game-line ingest uses. `swapped` is ignored: a prop row
+    is keyed by player, not by home/away, so nothing is flipped.
+    """
+    if reuse is None or not home or not away:
+        return None
+    match = reuse(home, away, game_date)
+    if match is None or not match.game_id:
+        return None
+    return match.game_id
 
 
 def scope_events(conn: DBConnection, events: list[dict], game_date: str,
@@ -180,7 +200,7 @@ def scope_events(conn: DBConnection, events: list[dict], game_date: str,
     require_dk_line = NCAAF_PROP_REQUIRE_DK_LINE if require_dk_line is None else require_dk_line
     max_events = NCAAF_PROP_MAX_EVENTS if max_events is None else max_events
 
-    known = _known_game_ids(conn, game_date)
+    reuse = _ncaaf_resolver(conn, game_date)
     lined = _dk_lined_game_ids(conn, game_date) if require_dk_line else set()
 
     kept: list[tuple[dict, str]] = []
@@ -188,12 +208,14 @@ def scope_events(conn: DBConnection, events: list[dict], game_date: str,
     for ev in events:
         home = resolve_odds_api_school(ev["home_team"], conn)
         away = resolve_odds_api_school(ev["away_team"], conn)
-        game_id = build_ncaaf_game_id(game_date, away, home)
-        if game_id not in known:
+        game_id = _resolved_prop_game_id(reuse, home, away, game_date)
+        if not game_id:
             # An orphan prop row joins to nothing and looks like coverage
-            # forever. Skipping is the same choice the game-line resolver makes.
+            # forever. Skipping is the same choice the game-line resolver makes
+            # when it finds no row. A hit a day off, or with the teams
+            # reversed, is that row — props are not flipped onto it.
             dropped["unresolved"] += 1
-            logger.debug(f"  unresolved: {ev['away_team']} @ {ev['home_team']} -> {game_id}")
+            logger.debug(f"  unresolved: {ev['away_team']} @ {ev['home_team']}")
             continue
         if require_dk_line and game_id not in lined:
             dropped["no_dk_line"] += 1
@@ -547,7 +569,7 @@ def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
         logger.info(f"  {d}: no historical events")
         return 0
 
-    known = _known_game_ids(conn, d)
+    reuse = _ncaaf_resolver(conn, d)
     date_rows = 0
     seen = 0
     for ev in evs:
@@ -562,8 +584,8 @@ def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
         game_date = kick.astimezone(_ET).strftime("%Y-%m-%d")
         home = resolve_odds_api_school(ev.get("home_team", ""), conn)
         away = resolve_odds_api_school(ev.get("away_team", ""), conn)
-        game_id = build_ncaaf_game_id(game_date, away, home)
-        if game_id not in known:
+        game_id = _resolved_prop_game_id(reuse, home, away, game_date)
+        if not game_id:
             total["skipped"] += 1        # orphan rows join to nothing
             continue
 

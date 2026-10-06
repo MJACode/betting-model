@@ -1887,7 +1887,10 @@ def run_historical_odds_range(sport: str, start: str, end: str,
         lock_down(conn, "odds_history_pulls")
         conn.commit()
         # One games window for the whole range. Loading [day-2, day+200] on
-        # every snapshot re-reads the same span once per day.
+        # every snapshot re-reads the same span once per day. A game
+        # rescheduled onto a different ET date during the range is not in
+        # this snapshot under the new date, so that day can mint a new id.
+        # That is rare. The next live pull reuses whichever row exists then.
         reuse = None
         if sport == "NCAAF":
             reuse = _ncaaf_resolver_between(
