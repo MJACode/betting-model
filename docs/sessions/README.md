@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: history bounds follow the series timestamp text (Z, +00:00, -04:00, -05:00). Post-start rows cannot be labelled Close. created_at space form normalized. Prop UTC backfill left for Matt |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail form strip: one VoiceOver label per cell, games spelled out only when the window is short, season note under the strip. Movement verdict says "against your pick" |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: pregame line history stops at commence_time (post-start rows stay tagged open). Close label after the start. Gap times bisected, cap 24. Footer says intermediate moves aren't listed |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: line movement was the oldest 50 snapshots (JAX/PHI DK spreads, 3,939 rows, page ended at home −3, latest was −7); form strip mixed PHI across MLB/NHL/NFL and labelled every sport runs. Open-to-now sample, sport-scoped games, points for football |

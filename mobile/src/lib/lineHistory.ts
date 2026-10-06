@@ -220,9 +220,15 @@ export interface HistoryProbe {
   lt?: string;
   /**
    * Inclusive upper bound on snapshot_at. Pregame reads set this to the
-   * game's commence_time. Live reads leave it unset.
+   * game's commence_time, written in the series' own text form. Live reads
+   * leave it unset.
    */
   lte?: string;
+  /**
+   * One newest row, no range. That row's suffix is how this series writes
+   * snapshot_at. A range on this read would be the wrong offset.
+   */
+  unbounded?: boolean;
 }
 
 /**
@@ -247,29 +253,128 @@ export interface SampledSeries<T> {
 }
 
 /**
+ * Postgres writes timestamps as text, and not all of it is ISO.
+ * `created_at` since 2026-09-20 looks like `2026-10-05 01:00:00.123+00`
+ * (a space, and `+00` with no minutes). Hermes parses the ECMA-262 form
+ * `YYYY-MM-DDTHH:mm:ss.sssZ` or `±HH:MM`, and a space sorts before `T`, so
+ * the raw string both fails to parse and compares before every ISO row.
+ * Null when the text is not a timestamp.
+ */
+export function normalizeTimestamp(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(
+    raw.trim(),
+  );
+  if (!match) return null;
+  const date = match[1];
+  const time = match[2];
+  const frac = match[3];
+  const tz = match[4];
+  let fraction = '';
+  if (frac) fraction = `.${(frac.slice(1) + '000').slice(0, 3)}`;
+  let zone = 'Z';
+  if (tz) {
+    if (tz.toUpperCase() === 'Z') zone = 'Z';
+    else {
+      const sign = tz[0] === '-' ? '-' : '+';
+      const rest = tz.slice(1).replace(':', '');
+      if (!/^\d{2,4}$/.test(rest)) return null;
+      const hh = rest.slice(0, 2);
+      const mm = (rest.slice(2, 4) || '00').padStart(2, '0');
+      zone = `${sign}${hh}:${mm}`;
+    }
+  }
+  const iso = `${date}T${time}${fraction}${zone}`;
+  if (Number.isNaN(Date.parse(iso))) return null;
+  return iso;
+}
+
+function instantMs(raw: string | null | undefined): number {
+  const iso = normalizeTimestamp(raw);
+  if (!iso) return Number.NaN;
+  return Date.parse(iso);
+}
+
+/**
+ * `snapshot_at` is text, so a bound has to wear the series' own suffix or
+ * the comparison is not chronological. `2026-10-04T23:20:05-04:00` sorts
+ * before `2026-10-05T00:10:00+00:00` even though it is three hours later.
+ * `sampleTs` is one row from the series: same separator, fraction length
+ * and offset spelling. Subseconds are dropped when the sample has none.
+ */
+export function formatBoundLike(sampleTs: string, instant: number | Date): string {
+  const ms = typeof instant === 'number' ? instant : instant.getTime();
+  if (!Number.isFinite(ms)) return '';
+  const match = /^(\d{4}-\d{2}-\d{2})([ T])(\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(
+    sampleTs.trim(),
+  );
+  if (!match) return new Date(ms).toISOString();
+  const sep = match[2] === ' ' ? ' ' : 'T';
+  const frac = match[4];
+  const tz = match[5] ?? 'Z';
+  let offsetMin = 0;
+  let suffix = 'Z';
+  if (tz.toUpperCase() === 'Z') {
+    suffix = 'Z';
+  } else {
+    const sign = tz[0] === '-' ? -1 : 1;
+    const rest = tz.slice(1).replace(':', '');
+    const hh = Number(rest.slice(0, 2));
+    const mm = Number(rest.slice(2, 4) || '0');
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return new Date(ms).toISOString();
+    offsetMin = sign * (hh * 60 + mm);
+    suffix = tz;
+  }
+  const shifted = new Date(ms + offsetMin * 60_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  let fraction = '';
+  if (frac) {
+    const width = frac.length - 1;
+    const digits = `${String(shifted.getUTCMilliseconds()).padStart(3, '0')}000000`;
+    fraction = `.${digits.slice(0, width)}`;
+  }
+  return (
+    `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}` +
+    `${sep}${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}` +
+    `${fraction}${suffix}`
+  );
+}
+
+/**
  * Pregame picks never read a row after the start. The worker keeps writing
  * odds after commence_time, mostly still tagged snapshot_type 'open', so the
  * cap is the timestamp.
  *
  * A live pick — `is_live`, or created at/after the start — reads from its
- * lock and may continue past the start.
+ * lock and may continue past the start. A pick scored after the start with
+ * `is_live` unset is still live: `created_at` is the lock.
+ *
+ * Both instants come back normalized. An unparseable lock is unknown, not
+ * pregame: capping it at the start would hide the in-play rows it was
+ * written on.
  */
 export function lineHistoryWindow(input: {
   commenceTime: string | null | undefined;
   createdAt: string | null | undefined;
   isLive?: boolean | null;
 }): LineHistoryWindow {
-  const start = input.commenceTime ?? '';
-  const kick = Date.parse(start);
+  const startRaw = input.commenceTime ?? '';
+  const start = startRaw ? normalizeTimestamp(startRaw) : null;
+  const kick = start ? Date.parse(start) : Number.NaN;
   if (!start || Number.isNaN(kick)) {
     // No start time on the game or the pick, so this read is not capped.
     return {};
   }
-  const created = input.createdAt ?? '';
-  const locked = Date.parse(created);
+  const createdRaw = input.createdAt ?? '';
+  const created = createdRaw ? normalizeTimestamp(createdRaw) : null;
+  if (createdRaw && !created) {
+    // The lock did not parse. Unknown, not pregame.
+    return {};
+  }
+  const locked = created ? Date.parse(created) : Number.NaN;
   const live = input.isLive === true || (Number.isFinite(locked) && locked >= kick);
   if (live) {
-    if (!Number.isFinite(locked)) return {};
+    if (!created || !Number.isFinite(locked)) return {};
     return { from: created };
   }
   return { until: start };
@@ -280,8 +385,8 @@ export function lineHistoryWindow(input: {
  * whole span, so the result length is `buckets - 2`.
  */
 export function historyBucketInstants(startIso: string, endIso: string, buckets: number): string[] {
-  const start = Date.parse(startIso);
-  const end = Date.parse(endIso);
+  const start = instantMs(startIso);
+  const end = instantMs(endIso);
   const interior = buckets - 2;
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || interior < 1) return [];
   const out: string[] = [];
@@ -306,7 +411,9 @@ const MOVE_TIGHT_MS = 60_000;
 
 function applyBounds(probe: HistoryProbe, bounds?: LineHistoryWindow): HistoryProbe {
   let gte = probe.gte;
-  if (bounds?.from && (!gte || Date.parse(bounds.from) > Date.parse(gte))) {
+  const fromMs = bounds?.from ? instantMs(bounds.from) : Number.NaN;
+  const gteMs = gte ? instantMs(gte) : Number.NaN;
+  if (bounds?.from && Number.isFinite(fromMs) && (!gte || !Number.isFinite(gteMs) || fromMs > gteMs)) {
     gte = bounds.from;
   }
   const lte = bounds?.until ?? probe.lte;
@@ -314,7 +421,8 @@ function applyBounds(probe: HistoryProbe, bounds?: LineHistoryWindow): HistoryPr
   return { ...probe, gte, lte };
 }
 
-function quoteKey(row: { snapshot_at: string }): string {
+function rowQuote<T extends { snapshot_at: string }>(row: T, quote?: (row: T) => string): string {
+  if (quote) return quote(row);
   const { snapshot_at: _at, ...rest } = row;
   return JSON.stringify(rest);
 }
@@ -325,11 +433,14 @@ interface ChangeGap<T> {
   span: number;
 }
 
-function changeGaps<T extends { snapshot_at: string }>(rows: T[]): ChangeGap<T>[] {
+function changeGaps<T extends { snapshot_at: string }>(
+  rows: T[],
+  quote?: (row: T) => string,
+): ChangeGap<T>[] {
   const out: ChangeGap<T>[] = [];
   for (let i = 1; i < rows.length; i++) {
-    if (quoteKey(rows[i - 1]) === quoteKey(rows[i])) continue;
-    const span = Date.parse(rows[i].snapshot_at) - Date.parse(rows[i - 1].snapshot_at);
+    if (rowQuote(rows[i - 1], quote) === rowQuote(rows[i], quote)) continue;
+    const span = instantMs(rows[i].snapshot_at) - instantMs(rows[i - 1].snapshot_at);
     if (span > MOVE_TIGHT_MS) out.push({ leftAt: rows[i - 1].snapshot_at, right: rows[i], span });
   }
   return out;
@@ -344,10 +455,11 @@ async function refineChange<T extends { snapshot_at: string }>(
   read: (probe: HistoryProbe) => Promise<T[]>,
   leftAt: string,
   right: T,
+  quote?: (row: T) => string,
 ): Promise<{ row: T; tight: boolean }> {
-  const key = quoteKey(right);
-  let lo = Date.parse(leftAt);
-  let hi = Date.parse(right.snapshot_at);
+  const key = rowQuote(right, quote);
+  let lo = instantMs(leftAt);
+  let hi = instantMs(right.snapshot_at);
   let best = right;
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi - lo <= MOVE_TIGHT_MS) {
     return { row: best, tight: true };
@@ -365,9 +477,9 @@ async function refineChange<T extends { snapshot_at: string }>(
       hi = midMs;
       continue;
     }
-    const t = Date.parse(row.snapshot_at);
+    const t = instantMs(row.snapshot_at);
     if (!Number.isFinite(t) || t <= lo) break;
-    if (quoteKey(row) === key) {
+    if (rowQuote(row, quote) === key) {
       best = row;
       hi = t;
     } else {
@@ -388,23 +500,48 @@ async function refineChange<T extends { snapshot_at: string }>(
  *
  * `bounds.until` caps every probe, including that latest page. `bounds.from`
  * starts a live pick at its lock. With neither set, the read is unbounded.
+ *
+ * The first read is one newest row and no range. Every bound sent after that
+ * is formatted like that row, because snapshot_at is text and a UTC cap does
+ * not exclude a `-04:00` row. `quote` keys a move on the pick's side. The
+ * default is the whole row, so the other side's price is a move.
  */
 export async function sampleOpenToNow<T extends { snapshot_at: string }>(
   read: (probe: HistoryProbe) => Promise<T[]>,
   bounds?: LineHistoryWindow,
+  quote?: (row: T) => string,
 ): Promise<SampledSeries<T>> {
-  const bounded = (probe: HistoryProbe) => read(applyBounds(probe, bounds));
+  const sample = (await read({ ascending: false, limit: 1, unbounded: true }))[0];
+  const sampleTs = sample?.snapshot_at;
+  const like = (instant: string | number | undefined): string | undefined => {
+    if (instant == null || instant === '') return undefined;
+    const ms = typeof instant === 'number' ? instant : instantMs(instant);
+    if (!Number.isFinite(ms)) return typeof instant === 'string' ? instant : undefined;
+    if (!sampleTs) return new Date(ms).toISOString();
+    return formatBoundLike(sampleTs, ms);
+  };
+  const bounded = (probe: HistoryProbe) => {
+    const applied = applyBounds(probe, bounds);
+    return read({
+      ...applied,
+      gte: applied.gte != null ? like(applied.gte) : undefined,
+      lt: applied.lt != null ? like(applied.lt) : undefined,
+      lte: applied.lte != null ? like(applied.lte) : undefined,
+    });
+  };
   const [latestDesc, openRows] = await Promise.all([
     bounded({ ascending: false, limit: LINE_HISTORY_PAGE }),
     bounded({ ascending: true, limit: 1 }),
   ]);
   const latest = latestDesc.slice().reverse();
-  if (latest.length < LINE_HISTORY_PAGE) return { rows: latest, moveByAt: [] };
+  if (latest.length < LINE_HISTORY_PAGE) {
+    return { rows: rowsWithinWindow(latest, bounds), moveByAt: [] };
+  }
 
   const open = openRows[0];
   const pageStart = latest[0]?.snapshot_at;
-  if (!open?.snapshot_at || !pageStart || Date.parse(open.snapshot_at) >= Date.parse(pageStart)) {
-    return { rows: latest, moveByAt: [] };
+  if (!open?.snapshot_at || !pageStart || instantMs(open.snapshot_at) >= instantMs(pageStart)) {
+    return { rows: rowsWithinWindow(latest, bounds), moveByAt: [] };
   }
 
   const instants = historyBucketInstants(open.snapshot_at, pageStart, LINE_HISTORY_BUCKETS);
@@ -418,13 +555,13 @@ export async function sampleOpenToNow<T extends { snapshot_at: string }>(
     seen.add(row.snapshot_at);
     head.push(row);
   }
-  head.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+  head.sort((a, b) => instantMs(a.snapshot_at) - instantMs(b.snapshot_at));
 
-  const gaps = changeGaps(head);
+  const gaps = changeGaps(head, quote);
   const prev = head[head.length - 1];
   const first = latest[0];
-  if (prev && first && quoteKey(prev) !== quoteKey(first)) {
-    const span = Date.parse(first.snapshot_at) - Date.parse(prev.snapshot_at);
+  if (prev && first && rowQuote(prev, quote) !== rowQuote(first, quote)) {
+    const span = instantMs(first.snapshot_at) - instantMs(prev.snapshot_at);
     if (span > MOVE_TIGHT_MS) gaps.push({ leftAt: prev.snapshot_at, right: first, span });
   }
   gaps.sort((a, b) => b.span - a.span);
@@ -433,7 +570,7 @@ export async function sampleOpenToNow<T extends { snapshot_at: string }>(
   const skipped = gaps.slice(slots);
 
   const refined = await Promise.all(
-    chosen.map((gap) => refineChange(bounded, gap.leftAt, gap.right)),
+    chosen.map((gap) => refineChange(bounded, gap.leftAt, gap.right, quote)),
   );
   const replacements = new Map<string, T>();
   const moveByAt: string[] = [];
@@ -461,7 +598,24 @@ export async function sampleOpenToNow<T extends { snapshot_at: string }>(
       tail = [junction, ...latest];
     }
   }
-  const rows = [...headOut, ...tail];
-  rows.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
-  return { rows, moveByAt };
+  const rows = rowsWithinWindow([...headOut, ...tail], bounds);
+  rows.sort((a, b) => instantMs(a.snapshot_at) - instantMs(b.snapshot_at));
+  const kept = new Set(rows.map((row) => row.snapshot_at));
+  return { rows, moveByAt: moveByAt.filter((at) => kept.has(at)) };
+}
+
+/**
+ * Real-time window on the assembled series. A mixed offset can still satisfy
+ * a text cap: `2026-10-04T20:00:00-05:00` is after a 00:10Z start and still
+ * sorts before `2026-10-04T20:10:00-04:00`. Those rows never reach the card.
+ */
+function rowsWithinWindow<T extends { snapshot_at: string }>(rows: T[], bounds?: LineHistoryWindow): T[] {
+  if (!bounds?.from && !bounds?.until) return rows;
+  const fromMs = bounds.from ? instantMs(bounds.from) : Number.NEGATIVE_INFINITY;
+  const untilMs = bounds.until ? instantMs(bounds.until) : Number.POSITIVE_INFINITY;
+  return rows.filter((row) => {
+    const t = instantMs(row.snapshot_at);
+    if (!Number.isFinite(t)) return false;
+    return t >= fromMs && t <= untilMs;
+  });
 }

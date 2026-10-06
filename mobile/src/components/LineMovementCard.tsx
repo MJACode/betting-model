@@ -68,9 +68,20 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
       setMoveByAt(new Set());
       return undefined;
     }
+    // The other side's price is not this pick's line. A tick there must not
+    // move the time the card prints.
+    const sideQuote = (snap: Snap) => {
+      const showLine =
+        market != null && (market.startsWith('totals') || market.startsWith('spreads') || isProp);
+      const line =
+        showLine && market != null
+          ? lineForSide(lineFromSnapshot(snap, market), pick.pick_side, market)
+          : null;
+      return `${line ?? ''}|${priceForSide(snap, pick.pick_side) ?? ''}`;
+    };
     const load = isProp
-      ? fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook, historyWindow)
-      : fetchOddsHistory(pick.game_id, market, historyBook, historyWindow);
+      ? fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook, historyWindow, sideQuote)
+      : fetchOddsHistory(pick.game_id, market, historyBook, historyWindow, sideQuote);
     load
       .then((sample) => {
         if (mounted) {
@@ -87,7 +98,7 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
     return () => {
       mounted = false;
     };
-  }, [pick.pick_id, pick.game_id, historyBook, market, isProp, playerName, historyWindow]);
+  }, [pick.pick_id, pick.game_id, pick.pick_side, historyBook, market, isProp, playerName, historyWindow]);
 
   if (!snaps || snaps.length === 0 || market == null) return null;
 

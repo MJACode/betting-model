@@ -199,8 +199,8 @@ def test_history_reads_cap_at_commence_and_do_not_filter_snapshot_type():
         assert "snapshot_type" not in body.group(0)
     card = _read(SRC / "components" / "LineMovementCard.tsx")
     assert "lineHistoryWindow" in card
-    assert "fetchOddsHistory(pick.game_id, market, historyBook, historyWindow)" in card
-    assert "fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook, historyWindow)" in card
+    assert "fetchOddsHistory(pick.game_id, market, historyBook, historyWindow, sideQuote)" in card
+    assert "fetchPropOddsHistory(pick.game_id, market, playerName!, historyBook, historyWindow, sideQuote)" in card
     screen = _read(SCREEN)
     assert "commenceTime={game?.commence_time || pick.game_time}" in screen
     assert "gameHasStarted(game, liveState, pick.game_time)" in screen
@@ -274,8 +274,8 @@ if (capped.rows.some((r) => r.spread_home === 21.5)) {
 }
 eq(capped.rows[capped.rows.length - 1].spread_home, -3, 'last pregame number');
 if (!pre.probes.length) throw new Error('no probes');
-if (!pre.probes.every((p) => p.lte === KICK)) {
-  throw new Error('a probe was not capped at commence_time: ' + JSON.stringify(pre.probes[0]));
+if (!pre.probes.every((p) => p.unbounded || p.lte === KICK)) {
+  throw new Error('a probe was not capped at commence_time: ' + JSON.stringify(pre.probes.find((p) => !p.unbounded && p.lte !== KICK)));
 }
 const openProbe = pre.probes.find((p) => p.ascending && p.limit === 1 && !p.gte);
 const latestProbe = pre.probes.find((p) => !p.ascending && p.limit === 50);
@@ -326,7 +326,8 @@ const noisyRead = async (probe) => {
   return xs.slice(0, probe.limit);
 };
 await sampleOpenToNow(noisyRead);
-if (calls > 2 + 10 + LINE_HISTORY_BISECT_CAP) {
+// The extra read is the unbounded newest row that names the series offset.
+if (calls > 1 + 2 + 10 + LINE_HISTORY_BISECT_CAP) {
   throw new Error(`bisect blew the cap: ${calls} reads, cap ${LINE_HISTORY_BISECT_CAP}, steps ${LINE_HISTORY_BISECT_STEPS}`);
 }
 """
@@ -452,10 +453,233 @@ def test_the_card_uses_the_close_copy():
     assert "movementHeadline(" in card
     assert "movementVerdict(" in card
     assert "historyTimeLabel(" in card
+    assert "historyWindow, sideQuote)" in card
     assert "gameStarted && historyWindow.until != null" in card
     history = _read(HISTORY)
     assert "against your pick" in history
     assert "against your ${" not in history
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_bounds_follow_the_series_offset_and_close_is_pregame(tmp_path):
+    """snapshot_at is text. A UTC cap lets every -04:00 / -05:00 in-game row
+    through, and the card would label that row Close. ATL @ LAD shape."""
+    script = PRELUDE + r"""
+import { sampleOpenToNow, lineHistoryWindow, formatBoundLike, normalizeTimestamp, historyTimeLabel } from './lineHistory.ts';
+
+const KICK = '2026-10-05T00:10:00+00:00';
+eq(formatBoundLike('2026-10-04T23:20:05-04:00', Date.parse(KICK)), '2026-10-04T20:10:00-04:00', '-04 cap');
+eq(formatBoundLike('2026-10-04T22:00:00-05:00', Date.parse(KICK)), '2026-10-04T19:10:00-05:00', '-05 cap');
+eq(formatBoundLike('2026-10-05T03:26:00.000Z', Date.parse('2026-10-05T00:15:00.000Z')), '2026-10-05T00:15:00.000Z', 'Z bound');
+eq(formatBoundLike(KICK, Date.parse(KICK)), KICK, '+00:00 bound');
+eq(formatBoundLike('2026-10-04T23:20:05-04:00', Date.parse('2026-10-04T23:20:05-04:00')), '2026-10-04T23:20:05-04:00', '-04 round trip');
+eq(formatBoundLike('2026-10-04T22:00:00-05:00', Date.parse('2026-10-04T22:00:00-05:00')), '2026-10-04T22:00:00-05:00', '-05 round trip');
+
+const lock = normalizeTimestamp('2026-10-05 01:00:00.123+00');
+eq(lock, '2026-10-05T01:00:00.123+00:00', 'space form');
+if (Date.parse(lock) !== Date.parse('2026-10-05T01:00:00.123Z')) throw new Error('normalized lock drifted');
+eq(lineHistoryWindow({ createdAt: '2026-10-05 01:00:00.123+00', commenceTime: KICK, isLive: false }), { from: lock }, 'post-start space lock');
+eq(lineHistoryWindow({ createdAt: 'not-a-timestamp', commenceTime: KICK, isLive: false }), {}, 'unparseable lock is unknown');
+
+function textRead(rows, probes) {
+  return async (probe) => {
+    probes.push({ ...probe });
+    let xs = rows.filter((r) => {
+      if (probe.unbounded) return true;
+      const at = r.snapshot_at;
+      if (probe.gte && at < probe.gte) return false;
+      if (probe.lt && at >= probe.lt) return false;
+      if (probe.lte && at > probe.lte) return false;
+      return true;
+    });
+    xs.sort((a, b) => (a.snapshot_at < b.snapshot_at ? -1 : a.snapshot_at > b.snapshot_at ? 1 : 0));
+    if (!probe.ascending) xs.reverse();
+    return xs.slice(0, probe.limit);
+  };
+}
+
+async function runOffset(sample, cap, lastPregame, late, mixed) {
+  if (!(late <= KICK)) throw new Error('late row no longer slips under the UTC cap: ' + late);
+  if (!(late > cap)) throw new Error('series cap does not exclude the in-game row');
+  const rows = [];
+  for (let i = 10; i >= 1; i--) {
+    rows.push({
+      snapshot_at: formatBoundLike(sample, Date.parse(lastPregame) - i * 60_000),
+      spread_home: -3,
+    });
+  }
+  rows.push({ snapshot_at: lastPregame, spread_home: 7.5 });
+  for (let i = 2; i <= 70; i++) {
+    rows.push({
+      snapshot_at: formatBoundLike(sample, Date.parse(lastPregame) + i * 60_000),
+      spread_home: 14,
+    });
+  }
+  rows.push({ snapshot_at: late, spread_home: 99 });
+  if (mixed) rows.push({ snapshot_at: mixed, spread_home: 98 });
+  const probes = [];
+  const window = lineHistoryWindow({
+    commenceTime: KICK,
+    createdAt: '2026-10-04 18:00:00+00',
+    isLive: false,
+  });
+  eq(window, { until: KICK }, 'pregame until');
+  const sampled = await sampleOpenToNow(textRead(rows, probes), window);
+  const kickMs = Date.parse(KICK);
+  for (const row of sampled.rows) {
+    if (Date.parse(row.snapshot_at) > kickMs) throw new Error('post-start reached the card: ' + row.snapshot_at);
+  }
+  eq(sampled.rows[sampled.rows.length - 1].snapshot_at, lastPregame, 'close row');
+  eq(sampled.rows[sampled.rows.length - 1].spread_home, 7.5, 'close number');
+  if (sampled.rows.some((r) => r.spread_home === 99 || r.spread_home === 98)) {
+    throw new Error('in-game number reached the card');
+  }
+  eq(historyTimeLabel('8:09 PM ET', { atCloseLast: true, bounded: false }), 'Close', 'close label');
+  const ranged = probes.filter((p) => !p.unbounded);
+  if (!ranged.length) throw new Error('no ranged read');
+  if (!ranged.every((p) => p.lte === cap)) {
+    throw new Error('bound left the series offset: ' + JSON.stringify(ranged.find((p) => p.lte !== cap)));
+  }
+}
+
+await runOffset(
+  '2026-10-04T23:20:05-04:00',
+  '2026-10-04T20:10:00-04:00',
+  '2026-10-04T20:09:00-04:00',
+  '2026-10-04T23:20:05-04:00',
+  '2026-10-04T20:00:00-05:00',
+);
+await runOffset(
+  '2026-10-04T22:00:00-05:00',
+  '2026-10-04T19:10:00-05:00',
+  '2026-10-04T19:09:00-05:00',
+  '2026-10-04T22:00:00-05:00',
+  '2026-10-04T19:00:00-06:00',
+);
+
+const liveProbes = [];
+const liveRows = [
+  { snapshot_at: '2026-10-05T00:30:00.000Z', spread_home: -3 },
+  { snapshot_at: '2026-10-05T01:30:00.000Z', spread_home: -7 },
+];
+const liveSampled = await sampleOpenToNow(textRead(liveRows, liveProbes), { from: lock });
+if (liveSampled.rows.some((r) => Date.parse(r.snapshot_at) < Date.parse(lock))) {
+  throw new Error('space-form lock leaked a row from before the lock');
+}
+eq(liveSampled.rows.map((r) => r.spread_home), [-7], 'live page starts at the lock');
+const gtes = liveProbes.map((p) => p.gte).filter(Boolean);
+if (!gtes.length) throw new Error('live read sent no lower bound');
+if (gtes.some((g) => g.includes(' '))) throw new Error('space-form bound was sent: ' + gtes.join(','));
+if (!gtes.every((g) => g.endsWith('Z'))) throw new Error('lock was not written like the series: ' + gtes.join(','));
+"""
+    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_bisect_on_a_local_offset_does_not_call_the_wrong_row_tight(tmp_path):
+    """Bucket and bisect probes used to be toISOString() UTC. Against a
+    -04:00 series that text misses the real move and can call a later row tight."""
+    script = PRELUDE + r"""
+import { sampleOpenToNow, formatBoundLike } from './lineHistory.ts';
+
+const sample = '2026-10-01T00:00:00-04:00';
+const t0 = Date.parse('2026-10-01T04:00:00Z');
+const minute = 60_000;
+const trueMove = t0 + 90 * minute;
+const pageStart = t0 + 11 * 60 * minute;
+const rows = [];
+for (let m = 0; m < 11 * 60; m++) {
+  const at = t0 + m * minute;
+  rows.push({
+    snapshot_at: formatBoundLike(sample, at),
+    spread_home: at < t0 + minute ? -2.5 : at < trueMove ? -3 : -7,
+  });
+}
+for (let i = 0; i < 50; i++) {
+  rows.push({ snapshot_at: formatBoundLike(sample, pageStart + i * 1000), spread_home: -7 });
+}
+const probes = [];
+const read = async (probe) => {
+  probes.push({ ...probe });
+  let xs = rows.filter((r) => {
+    if (probe.unbounded) return true;
+    const at = r.snapshot_at;
+    if (probe.gte && at < probe.gte) return false;
+    if (probe.lt && at >= probe.lt) return false;
+    if (probe.lte && at > probe.lte) return false;
+    return true;
+  });
+  xs.sort((a, b) => (a.snapshot_at < b.snapshot_at ? -1 : a.snapshot_at > b.snapshot_at ? 1 : 0));
+  if (!probe.ascending) xs.reverse();
+  return xs.slice(0, probe.limit);
+};
+const sampled = await sampleOpenToNow(read);
+const want = formatBoundLike(sample, trueMove);
+const firstSeven = sampled.rows.find((r) => r.spread_home === -7);
+eq(firstSeven.snapshot_at, want, 'change time');
+if (sampled.moveByAt.includes(want)) throw new Error('true move left as an upper bound');
+const bisect = probes.filter((p) => p.ascending && p.limit === 1 && p.gte && p.lt);
+if (!bisect.length) throw new Error('no bisect probe');
+if (bisect.some((p) => p.gte.endsWith('Z') || !p.gte.endsWith('-04:00'))) {
+  throw new Error('bisect gte left the series: ' + bisect[0].gte);
+}
+"""
+    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+@pytest.mark.skipif(not _node_strips_types(), reason="node >= 22.6 not available")
+def test_the_other_sides_price_does_not_place_the_move(tmp_path):
+    """A home-price tick with the away line and price unchanged is not the move."""
+    script = PRELUDE + r"""
+import { sampleOpenToNow } from './lineHistory.ts';
+
+const t0 = Date.parse('2026-10-01T00:00:00.000Z');
+const minute = 60_000;
+const trueMove = t0 + 90 * minute;
+const otherTick = t0 + 100 * minute;
+const pageStart = t0 + 11 * 60 * minute;
+const rows = [];
+for (let m = 0; m < 11 * 60; m++) {
+  const at = t0 + m * minute;
+  rows.push({
+    snapshot_at: new Date(at).toISOString(),
+    spread_home: at < t0 + minute ? -2.5 : at < trueMove ? -3 : -7,
+    home_price: at < otherTick ? -110 : -115,
+    away_price: -110,
+  });
+}
+for (let i = 0; i < 50; i++) {
+  rows.push({
+    snapshot_at: new Date(pageStart + i * 1000).toISOString(),
+    spread_home: -7,
+    home_price: -115,
+    away_price: -110,
+  });
+}
+const read = async (probe) => {
+  let xs = rows.filter((r) => {
+    const t = Date.parse(r.snapshot_at);
+    if (probe.gte && t < Date.parse(probe.gte)) return false;
+    if (probe.lt && t >= Date.parse(probe.lt)) return false;
+    if (probe.lte && t > Date.parse(probe.lte)) return false;
+    return true;
+  });
+  xs.sort((a, b) => Date.parse(a.snapshot_at) - Date.parse(b.snapshot_at));
+  if (!probe.ascending) xs.reverse();
+  return xs.slice(0, probe.limit);
+};
+const quote = (row) => `${row.spread_home}|${row.away_price}`;
+const sampled = await sampleOpenToNow(read, undefined, quote);
+const firstSeven = sampled.rows.find((r) => r.spread_home === -7);
+eq(firstSeven.snapshot_at, new Date(trueMove).toISOString(), 'side quote');
+if (firstSeven.snapshot_at === new Date(otherTick).toISOString()) {
+  throw new Error('move placed on the other side');
+}
+"""
+    proc = _run(tmp_path, ["lineHistory.ts"], script)
+    assert proc.returncode == 0, proc.stderr or proc.stdout
 
 
 # ── form strip ─────────────────────────────────────────────────────────────
