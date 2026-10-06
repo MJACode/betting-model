@@ -94,7 +94,7 @@ export const EXPLAIN_PTS_ADDED: StatExplain = {
   name: 'Points added per play',
   title: 'Points added per play',
   body:
-    'How much each play helps a team score, compared with an average play in the same down, distance and field position. Higher means more points per play. Compare teams by rank. For a defense, lower is better.',
+    'How much each play helps a team score, compared with an average play in the same down, distance and field position. For an offense higher is better; for a defense lower is better. Compare teams by rank, not against 0.',
   a11y: 'About points added per play',
 };
 
@@ -102,7 +102,7 @@ export const EXPLAIN_SUCCESS: StatExplain = {
   name: 'Successful plays',
   title: 'Successful plays',
   body:
-    'The share of plays that gain 50% of the yards to go on 1st down, 70% on 2nd, and 100% on 3rd or 4th. Higher is better for an offense. For a defense, lower is better.',
+    'The share of plays that keep a drive on track: at least 50% of the yards needed on 1st down, 70% on 2nd, and all of them on 3rd or 4th down. Higher is better for an offense, lower for a defense.',
   a11y: 'About successful plays',
 };
 

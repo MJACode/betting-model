@@ -240,23 +240,15 @@ for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   eq('points-added chip', epaOff.label, 'Pts added/play Off');
   eq('points-added header', epaOff.header, 'Pts added/play');
   eq('points-added sheet label', epaOff.explain?.a11y, 'About points added per play');
-  eq('points-added copy', epaOff.explain?.body, EXPLAIN_PTS_ADDED.body);
-  check('points-added copy does not treat 0 as average',
-    !EXPLAIN_PTS_ADDED.body.includes('Above 0') && !EXPLAIN_PTS_ADDED.body.toLowerCase().includes('better than average'));
-  check('points-added copy says higher means more and to compare by rank',
-    EXPLAIN_PTS_ADDED.body.includes('Higher means more points per play.')
-    && EXPLAIN_PTS_ADDED.body.includes('Compare teams by rank.')
-    && EXPLAIN_PTS_ADDED.body.includes('For a defense, lower is better.'));
+  const PTS_BODY = 'How much each play helps a team score, compared with an average play in the same down, distance and field position. For an offense higher is better; for a defense lower is better. Compare teams by rank, not against 0.';
+  const SUCCESS_BODY = 'The share of plays that keep a drive on track: at least 50% of the yards needed on 1st down, 70% on 2nd, and all of them on 3rd or 4th down. Higher is better for an offense, lower for a defense.';
+  eq('points-added copy', EXPLAIN_PTS_ADDED.body, PTS_BODY);
+  eq('points-added sheet uses that copy', epaOff.explain?.body, PTS_BODY);
   eq('success chip', sucOff.label, 'Successful plays Off');
   eq('success header', sucOff.header, 'Successful plays');
   eq('success sheet label', sucOff.explain?.a11y, 'About successful plays');
-  eq('success copy', sucOff.explain?.body, EXPLAIN_SUCCESS.body);
-  check('success copy uses the CFBD 50/70/100 definition',
-    EXPLAIN_SUCCESS.body.includes('50% of the yards to go on 1st down')
-    && EXPLAIN_SUCCESS.body.includes('70% on 2nd')
-    && EXPLAIN_SUCCESS.body.includes('100% on 3rd or 4th')
-    && !EXPLAIN_SUCCESS.body.includes('40%')
-    && !EXPLAIN_SUCCESS.body.includes('60%'));
+  eq('success copy', EXPLAIN_SUCCESS.body, SUCCESS_BODY);
+  eq('success sheet uses that copy', sucOff.explain?.body, SUCCESS_BODY);
   eq('success is a percent of a 0..1 rate', sucOff.format, 'pct3');
   check('both football sports share the points-added row',
     epaOff.sports.includes('NFL') && epaOff.sports.includes('NCAAF') && epaDef.sports.includes('NFL'));
