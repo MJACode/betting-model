@@ -90,7 +90,8 @@ from config import (
 from data.db import get_connection, DBConnection
 from data.ingestors.cfbd_ingestor import resolve_odds_api_school
 from data.ingestors.odds_ingestor import (
-    _NCAAF_GAME_DATE_SKEW_DAYS, _ncaaf_resolver,
+    _NCAAF_GAME_DATE_SKEW_DAYS, _NCAAF_REUSE_LOOKAHEAD_DAYS,
+    _NCAAF_REUSE_LOOKBACK_DAYS, _ncaaf_resolver, _ncaaf_resolver_between,
 )
 from data.ingestors.odds_quota import persist_quota, record_quota_headers
 from data.ingestors.prop_odds_ingestor import _insert_prop_odds, _parse_prop_markets
@@ -171,6 +172,20 @@ def _dk_lined_game_ids(conn: DBConnection, game_date: str) -> set[str]:
     return {r[0] for r in rows}
 
 
+# Sentinel: `_backfill_ncaaf_one_date` loads its own window. A passed None
+# is a range whose lookup already failed.
+_LOAD = object()
+
+
+def _warn_props_lookup_failed(when: str, count: int) -> None:
+    """The games lookup threw. Props do not mint an id; they skip the slate."""
+    if count <= 0:
+        return
+    logger.warning(
+        f"NCAAF props {when}: skipped {count} event(s) "
+        f"because the games lookup failed")
+
+
 def _resolved_prop_game_id(reuse, home: str, away: str, game_date: str) -> str | None:
     """The existing games row for this prop event, or None.
 
@@ -200,7 +215,9 @@ def scope_events(conn: DBConnection, events: list[dict], game_date: str,
     require_dk_line = NCAAF_PROP_REQUIRE_DK_LINE if require_dk_line is None else require_dk_line
     max_events = NCAAF_PROP_MAX_EVENTS if max_events is None else max_events
 
-    reuse = _ncaaf_resolver(conn, game_date)
+    reuse = _ncaaf_resolver(conn, game_date, log_failure=False)
+    if reuse is None:
+        _warn_props_lookup_failed(game_date, len(events))
     lined = _dk_lined_game_ids(conn, game_date) if require_dk_line else set()
 
     kept: list[tuple[dict, str]] = []
@@ -536,13 +553,27 @@ def backfill_ncaaf_prop_odds(dates: list[str], hours_before: int = 24,
                 logger.info(f"  {len(done)} of {len(dates)} dates already "
                             f"backfilled at {snapshot_type} -- skipping")
 
+        # One games window for every date in this call. Reloading
+        # [day-2, day+200] per date re-reads the same span all the way
+        # across a season.
+        pending = [d for d in dates if d not in done]
+        reuse = None
+        if pending:
+            first = datetime.strptime(min(pending)[:10], "%Y-%m-%d")
+            last = datetime.strptime(max(pending)[:10], "%Y-%m-%d")
+            reuse = _ncaaf_resolver_between(
+                conn,
+                (first - timedelta(days=_NCAAF_REUSE_LOOKBACK_DAYS)).strftime("%Y-%m-%d"),
+                (last + timedelta(days=_NCAAF_REUSE_LOOKAHEAD_DAYS)).strftime("%Y-%m-%d"),
+                log_failure=False,
+            )
         for d in dates:
             if d in done:
                 continue
             try:
                 got = _backfill_ncaaf_one_date(
                     conn, d, hours_before, markets, books, limit_events,
-                    snapshot_type, total)
+                    snapshot_type, total, reuse=reuse)
             except Exception as exc:                       # noqa: BLE001
                 logger.warning(f"  {d}: aborted ({type(exc).__name__}: {exc})")
                 conn.rollback()
@@ -559,8 +590,14 @@ def backfill_ncaaf_prop_odds(dates: list[str], hours_before: int = 24,
 
 
 def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
-                             limit_events, snapshot_type, total) -> int:
-    """One college date. Scoped so a failure costs that date and no other."""
+                             limit_events, snapshot_type, total,
+                             reuse=_LOAD) -> int:
+    """One college date. Scoped so a failure costs that date and no other.
+
+    `reuse` is the range's games window. `_LOAD` means this call is on its
+    own and loads the window for `d`. None means the range already tried
+    and the lookup failed — do not load it again.
+    """
     # 14:00Z is 10am ET -- before the earliest college kickoff, so the listing
     # sees the whole scheduled slate and nothing has been dropped for starting.
     evs, _served = list_historical_ncaaf_events(f"{d}T14:00:00Z")
@@ -569,9 +606,11 @@ def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
         logger.info(f"  {d}: no historical events")
         return 0
 
-    reuse = _ncaaf_resolver(conn, d)
+    if reuse is _LOAD:
+        reuse = _ncaaf_resolver(conn, d, log_failure=False)
     date_rows = 0
     seen = 0
+    lookup_skipped = 0
     for ev in evs:
         if limit_events and seen >= limit_events:
             break
@@ -587,6 +626,8 @@ def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
         game_id = _resolved_prop_game_id(reuse, home, away, game_date)
         if not game_id:
             total["skipped"] += 1        # orphan rows join to nothing
+            if reuse is None:
+                lookup_skipped += 1
             continue
 
         snap = (kick - timedelta(hours=hours_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -609,6 +650,7 @@ def _backfill_ncaaf_one_date(conn, d, hours_before, markets, books,
             date_rows += _insert_prop_odds(conn, rows)
         total["events"] += 1
 
+    _warn_props_lookup_failed(d, lookup_skipped)
     logger.info(f"  {d}: {seen} events priced, {date_rows} rows "
                 f"(running credits {total['credits']})")
     return date_rows

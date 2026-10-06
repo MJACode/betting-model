@@ -20,12 +20,15 @@ The invariants pinned here are the ones that cost money or corrupt the table:
 """
 
 import io
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 import config
 from data.ingestors import ncaaf_prop_odds_ingestor as m
+from data.ingestors import odds_ingestor as oi
 
 ROOT = Path(__file__).parent.parent
 
@@ -271,6 +274,69 @@ def test_a_fresh_late_kickoff_with_only_an_et_row_still_resolves(resolver):
         require_dk_line=True, max_events=80)
     assert [gid for _ev, gid in kept] == [MEMPHIS_ET]
     assert dropped["unresolved"] == 0
+
+
+def test_a_failed_games_lookup_skips_the_slate_and_says_so(monkeypatch, resolver):
+    """The line ingest would mint. Props drop every event, and the warning
+    says that, with the count. It does not say it is minting ids."""
+    def boom(conn, start, end):
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(oi, "_load_ncaaf_games", boom)
+    other = {"id": "2", "home_team": "USC Trojans", "away_team": "Fresno State Bulldogs"}
+    seen = []
+    sink = logger.add(lambda msg: seen.append(msg.record["message"]),
+                      level="WARNING", format="{message}")
+    try:
+        kept, dropped = m.scope_events(
+            _Conn(known=[MEMPHIS_UTC], lined=[MEMPHIS_UTC]),
+            [MEMPHIS_EVENT, other], MEMPHIS_ET_DATE,
+            require_dk_line=False, max_events=80)
+    finally:
+        logger.remove(sink)
+    assert kept == []
+    assert dropped["unresolved"] == 2
+    assert any(
+        "skipped 2 event(s) because the games lookup failed" in msg
+        and MEMPHIS_ET_DATE in msg for msg in seen)
+    assert not any("minting ids" in msg for msg in seen)
+
+
+def test_the_prop_backfill_loads_the_games_window_once(monkeypatch):
+    """Three dates used to each load [day-2, day+200]. One range loads once,
+    from two days before the first date through 200 days after the last."""
+    loads = []
+
+    class _RangeConn:
+        def execute(self, sql, params=None):
+            if "FROM games" in sql and "home_team" in sql:
+                loads.append(params)
+
+            class _Cur:
+                def fetchall(self):
+                    return []
+
+            return _Cur()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(m, "get_connection", lambda: _RangeConn())
+    monkeypatch.setattr(m, "persist_quota", lambda c: None)
+    monkeypatch.setattr(m, "ODDS_API_KEY", "test")
+    monkeypatch.setattr(m, "list_historical_ncaaf_events", lambda ts: ([], None))
+    m.backfill_ncaaf_prop_odds(
+        ["2026-09-01", "2026-09-02", "2026-09-03"],
+        markets=["player_pass_yds"], books="draftkings", skip_existing=False)
+    start = (date(2026, 9, 1) - timedelta(days=oi._NCAAF_REUSE_LOOKBACK_DAYS)).isoformat()
+    end = (date(2026, 9, 3) + timedelta(days=oi._NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat()
+    assert loads == [(start, end)]
 
 
 # ── the event call ───────────────────────────────────────────────────────────

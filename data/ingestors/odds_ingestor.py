@@ -625,11 +625,14 @@ _GAMES_WRITE_COLS = insert_columns(_UPSERT_GAMES_SQL)
 _ODDS_WRITE_COLS = insert_columns(_INSERT_ODDS_SQL)
 
 
-def _ncaaf_resolver_between(conn, start: str, end: str):
+def _ncaaf_resolver_between(conn, start: str, end: str, *,
+                            log_failure: bool = True):
     """A `reuse_game_id` over games with `game_date` in [start, end].
 
-    None means the lookup failed and the caller mints ids — it does not skip
-    the sport. An empty window is a working resolver that misses every event.
+    None means the lookup failed. The line ingest mints ids in that case —
+    it does not skip the sport. An empty window is a working resolver that
+    misses every event. `log_failure` is the 'minting ids' warning; the prop
+    ingest turns it off and logs that it skipped the slate instead.
 
     The closure is `(home_team, away_team, et_game_date) -> NcaafGameMatch | None`.
     `swapped` is the signal to flip side-specific values onto `games.home_team`.
@@ -639,9 +642,10 @@ def _ncaaf_resolver_between(conn, start: str, end: str):
     try:
         games = _load_ncaaf_games(conn, start, end)
     except Exception as exc:                                   # noqa: BLE001
-        logger.warning(
-            f"NCAAF: could not load games to reuse an existing id ({exc}); "
-            f"minting ids")
+        if log_failure:
+            logger.warning(
+                f"NCAAF: could not load games to reuse an existing id ({exc}); "
+                f"minting ids")
         return None
 
     ambiguous: list = []
@@ -659,24 +663,27 @@ def _ncaaf_resolver_between(conn, start: str, end: str):
     return reuse
 
 
-def _ncaaf_resolver(conn, around_date: str):
+def _ncaaf_resolver(conn, around_date: str, *, log_failure: bool = True):
     """A `reuse_game_id` for one pull, or None when the lookup can't run.
 
     Loads `_NCAAF_REUSE_LOOKBACK_DAYS` before `around_date` through
     `_NCAAF_REUSE_LOOKAHEAD_DAYS` after it. A historical range uses
     `_ncaaf_resolver_between` once for the whole range instead.
+    `log_failure` is the 'minting ids' warning. Props pass False.
     """
     try:
         anchor = date.fromisoformat(around_date[:10])
     except (ValueError, TypeError):
-        logger.warning(
-            f"NCAAF: could not load games to reuse an existing id "
-            f"(bad date {around_date!r}); minting ids")
+        if log_failure:
+            logger.warning(
+                f"NCAAF: could not load games to reuse an existing id "
+                f"(bad date {around_date!r}); minting ids")
         return None
     return _ncaaf_resolver_between(
         conn,
         (anchor - timedelta(days=_NCAAF_REUSE_LOOKBACK_DAYS)).isoformat(),
         (anchor + timedelta(days=_NCAAF_REUSE_LOOKAHEAD_DAYS)).isoformat(),
+        log_failure=log_failure,
     )
 
 
