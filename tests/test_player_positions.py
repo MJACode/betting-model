@@ -63,19 +63,33 @@ def test_basketball_groups_are_guard_forward_center(pos, grp):
 
 
 def test_a_unique_name_matches_its_log_id():
-    index = {norm_player_name("Paolo Banchero"): [("1631094", "ORL")]}
-    assert match_to_log("Paolo Banchero", "ORL", index) == "1631094"
+    index = {norm_player_name("Paolo Banchero"): [("1631094", "ORL", "2026-04-12")]}
+    how: dict = {}
+    assert match_to_log("Paolo Banchero", "ORL", index, how) == "1631094"
+    assert how["method"] == "name"
     # Accents, suffixes and punctuation normalise the way the WNBA results
     # ingestor already matches ESPN names to nba_api ids.
-    index = {norm_player_name("Nikola Jokic"): [("203999", "DEN")]}
+    index = {norm_player_name("Nikola Jokic"): [("203999", "DEN", "2026-04-12")]}
     assert match_to_log("Nikola Jokić", None, index) == "203999"
 
 
-def test_a_shared_name_is_settled_by_team_or_skipped():
-    index = {"jalen williams": [("1631114", "OKC"), ("1631116", "DEN")]}
-    assert match_to_log("Jalen Williams", "OKC", index) == "1631114"
-    assert match_to_log("Jalen Williams", None, index) is None
-    assert match_to_log("Jalen Williams", "BOS", index) is None
+def test_a_shared_name_is_settled_by_team_then_by_most_recent_game():
+    """Matt, 2026-10-06: "don't skip names". Team first; a name still shared
+    after that goes to whoever played most recently, and says so."""
+    index = {"jalen williams": [("1631114", "OKC", "2026-04-10"),
+                                ("1631116", "DEN", "2026-04-12")]}
+    how: dict = {}
+    assert match_to_log("Jalen Williams", "OKC", index, how) == "1631114"
+    assert how["method"] == "team"
+    assert match_to_log("Jalen Williams", None, index, how) == "1631116"
+    assert how["method"] == "tiebreak_recent"
+    # A team that matches neither: still decided, never skipped.
+    assert match_to_log("Jalen Williams", "BOS", index, how) == "1631116"
+    assert how["method"] == "tiebreak_recent"
+    # Two on the SAME team: the tiebreak runs among them only.
+    index = {"x y": [("1", "OKC", "2026-01-01"), ("2", "OKC", "2026-02-01"),
+                     ("3", "DEN", "2026-03-01")]}
+    assert match_to_log("X Y", "OKC", index, how) == "2"
 
 
 def test_no_log_history_is_no_match():
@@ -337,6 +351,50 @@ def test_a_unique_name_on_the_wrong_team_is_not_a_match():
     assert match_to_log("John Smith", None, index) == "999"
 
 
+def test_shared_name_team_rule_uses_the_espn_to_log_map():
+    """The shared-name team rule compares log codes, not ESPN's spelling.
+
+    Chris Paul on GSW played earlier than the other Chris Paul on LAL. ESPN
+    says GS. Without the map, GS matches nobody and the later LAL game wins.
+    """
+    index = {norm_player_name("Chris Paul"): [
+        ("101", "GSW", "2026-01-01"),
+        ("202", "LAL", "2026-04-12"),
+    ]}
+    how: dict = {}
+    assert match_to_log("Chris Paul", "GS", index, how, sport="NBA") == "101"
+    assert how["method"] == "team"
+    for espn, code, pid in (
+        ("NO", "NOP", "n1"),
+        ("NY", "NYK", "n2"),
+        ("SA", "SAS", "n3"),
+        ("UTAH", "UTA", "n4"),
+        ("WSH", "WAS", "n5"),
+    ):
+        idx = {norm_player_name("Pat Player"): [
+            (pid, code, "2026-01-01"),
+            ("other", "LAL", "2026-06-01"),
+        ]}
+        how = {}
+        assert match_to_log("Pat Player", espn, idx, how, sport="NBA") == pid
+        assert how["method"] == "team", espn
+    wnba = {norm_player_name("A'ja Wilson"): [
+        ("162", "LV", "2026-01-01"),
+        ("999", "NY", "2026-09-01"),
+    ]}
+    how = {}
+    assert match_to_log("A'ja Wilson", "LVA", wnba, how, sport="WNBA") == "162"
+    assert how["method"] == "team"
+    # WNBA NY is New York. The NBA map must not turn it into NYK.
+    ny = {norm_player_name("Pat Player"): [
+        ("1", "NY", "2026-01-01"),
+        ("2", "LV", "2026-06-01"),
+    ]}
+    how = {}
+    assert match_to_log("Pat Player", "NY", ny, how, sport="WNBA") == "1"
+    assert how["method"] == "team"
+
+
 def test_coverage_is_player_count_and_games_weighted():
     games = {"a": 10, "b": 5, "c": 3, "d": 2}
     cov = coverage_from_games(games, ["a", "b"])
@@ -566,3 +624,75 @@ def test_a_real_run_stores_unmatched_athletes_for_the_seven_day_skip():
     assert row[1].startswith("unmatched:")
     assert row[6] == "espn_core_unmatched"
     assert row[7] == "55"
+
+
+def test_a_tiebreak_guess_does_not_overwrite_a_claimed_id():
+    """ESPN team matches neither Bob, so the most recent Bob is a guess.
+
+    That guess is Alice's id. Whichever roster is walked first, the row
+    written for that id is Alice's name match, and the collision is
+    duplicate_ids. _upsert would otherwise keep whichever INSERT ran last.
+    """
+    from data.ingestors.player_positions_ingestor import _basketball
+
+    teams_url = ("https://sports.core.api.espn.com/v2/sports/basketball/"
+                 "leagues/nba/teams?limit=50")
+    bos = "https://sports.core.api.espn.com/teams/1"
+    lal = "https://sports.core.api.espn.com/teams/2"
+    bos_roster = "https://sports.core.api.espn.com/seasons/2026/teams/1/athletes?limit=200"
+    lal_roster = "https://sports.core.api.espn.com/seasons/2026/teams/2/athletes?limit=200"
+    log_rows = [
+        ("111", "Alice Smith", "BOS", 40, ["BOS"], "2026-04-01"),
+        ("222", "Bob Jones", "DEN", 5, ["DEN"], "2026-01-01"),
+        ("111", "Bob Jones", "MIA", 8, ["MIA"], "2026-04-20"),
+    ]
+
+    def run(order):
+        inserts = []
+
+        class Conn:
+            def execute(self, sql, params=None):
+                if sql.lstrip().upper().startswith("INSERT"):
+                    inserts.append(params)
+                if "nba_player_game_log" in sql:
+                    return _Rows(log_rows)
+                return _Rows([])
+
+            def commit(self):
+                self.committed = True
+
+            def rollback(self):
+                pass
+
+        docs = {
+            teams_url: {"items": [{"$ref": ref} for ref in order]},
+            bos: {"id": "1", "abbreviation": "BOS",
+                  "athletes": {"$ref": bos_roster}},
+            lal: {"id": "2", "abbreviation": "LAL",
+                  "athletes": {"$ref": lal_roster}},
+            bos_roster: {"items": [
+                {"id": "9001", "displayName": "Alice Smith",
+                 "position": {"abbreviation": "PG"}},
+            ]},
+            lal_roster: {"items": [
+                {"id": "9002", "displayName": "Bob Jones",
+                 "position": {"abbreviation": "SF"}},
+            ]},
+        }
+        client, _, _ = _client(docs, cap=20)
+        stats = _basketball(Conn(), "NBA", False, season=2026, client=client,
+                            cache_path=None)
+        return stats, inserts
+
+    for order in ((bos, lal), (lal, bos)):
+        stats, inserts = run(order)
+        assert stats["duplicate_ids"] == 1, order
+        assert stats["matched"] == 1, order
+        assert stats["match_method"]["name"] == 1
+        assert stats["match_method"]["tiebreak_recent"] == 1
+        owned = [p for p in inserts if p[1] == "111"]
+        assert len(owned) == 1, order
+        assert owned[0][2] == "Alice Smith"
+        assert owned[0][4] == "PG"
+        assert owned[0][7] == "9001"
+        assert all(p[7] != "9002" for p in inserts)

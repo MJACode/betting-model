@@ -203,3 +203,45 @@ def test_mlb_opponent_comes_from_games():
     of the row's own MLB game."""
     assert "JOIN games g ON g.game_id = pgl.game_id AND g.sport = 'MLB'" in MLB_SQL
     assert "CASE WHEN g.home_team = pgl.team THEN g.away_team ELSE g.home_team END AS opp" in MLB_SQL
+
+
+def test_mlb_shows_a_per_player_summary_and_the_nfl_keeps_its_game_list():
+    """Matt, 2026-10-06: "Sure in summary" — MLB is ~440 player-games a
+    season against one team, so it is summarised per player; the NFL list
+    (~45 a season) stays game by game."""
+    assert "export function isMlbGroup(g: PositionGroup): g is MlbGroup {" in TS
+    assert "return g === 'TOP' || g === 'MID' || g === 'BOT' || g === 'SP';" in TS
+    card = CARD.read_text(encoding="utf-8")
+    assert "isMlbGroup(group) ? playerSummaries(card.entries) : null" in card
+    # The summary counts hits with the SAME isHit the rows use, never its own.
+    m = re.search(r"export function playerSummaries\(.*?\n\}\n", TS, re.S)
+    assert m and "e.hit ? 1 : 0" in m.group(0) and "isHit(" not in m.group(0)
+
+
+def test_the_pure_layer_behaves():
+    """Runs mobile/scripts/verify_position_vs_opponent.ts: the MLB summary's
+    grouping, averaging, latest-team, sort order and side; own-player
+    exclusion; doubleheader numbering.
+
+    Local-only. pr-ci.yml installs Python and Node 22, not mobile/node_modules,
+    and tsx has to resolve the app's @/ aliases from that install. CI skips
+    this test. Run it locally after `npm ci` in mobile/.
+    """
+    import shutil
+    import subprocess
+
+    import pytest
+
+    tsx = ROOT / "mobile" / "node_modules" / ".bin" / "tsx"
+    if shutil.which("node") is None or not tsx.exists():
+        pytest.skip(
+            "local-only: pr-ci does not install mobile/node_modules, so "
+            "scripts/verify_position_vs_opponent.ts is not run in CI. "
+            "Install deps with npm ci in mobile/ and re-run this test locally."
+        )
+    proc = subprocess.run(
+        [str(tsx), "scripts/verify_position_vs_opponent.ts"],
+        cwd=ROOT / "mobile", capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
+    assert "ALL PASS" in proc.stdout

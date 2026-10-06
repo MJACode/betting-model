@@ -19,8 +19,10 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, merge #886 into the player-positions branch: shared-name team rule uses the ESPN-to-log map; a tiebreak guess cannot overwrite a name or team claim (counted in duplicate_ids). verify_position_vs_opponent.ts stays local-only |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, player positions review: roster $ref (405765 404'd /teams/{id}/athletes), one sport per job, cap 750, stop after 3 consecutive 403/429/404, unmatched sentinel rows, coverage. Cold NBA about 520 calls, not ~45 |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions: shared names settled by most recent game (never skipped); MLB position card becomes a per-player summary |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, player_positions table + ESPN/CFBD ingestor for NBA/WNBA/NCAAF; sources unreachable from sandbox, so a declared worker dry run measures shapes and match rate first |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card phase 2 (MLB): batters by lineup spot 1-3/4-6/7-9, starting pitchers; position_vs_opponent_mlb. 2025 log missing ARI/CWS/OAK/WSH games flagged |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, player page "WRs vs ATL" card (NFL phase 1): position_vs_opponent_nfl RPC with real-role cut and league rank, This/Last season toggle, player list. MLB and basketball/NCAAF phases next |

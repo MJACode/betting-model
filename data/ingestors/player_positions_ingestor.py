@@ -25,6 +25,19 @@ $ref (season-scoped). Items there are $refs, or, when a payload already
 carries id + name + position, the athlete doc is not fetched. A position
 that is itself a $ref is fetched once per distinct URL and reused.
 
+PLAYER IDS (load-bearing). The basketball logs key on the nba_api PLAYER_ID,
+not ESPN's athlete id. Each ESPN athlete is mapped by normalised name
+(norm_player_name), narrowed by team. The team rule compares log codes:
+ESPN GS/NO/NY/SA/UTAH/WSH are GSW/NOP/NYK/SAS/UTA/WAS, and the WNBA map is
+applied the same way. A unique name on a different team is not a match.
+A name still shared after the team rule goes to the player with the most
+recent game (Matt, 2026-10-06: "don't skip names"), counted as
+tiebreak_recent. When the ESPN team matches nobody, that guess can be
+another player's id. It is still returned, and the run will not let it
+overwrite an id already claimed by a name or team match in the same run.
+That collision, and any second claim of the same id, is duplicate_ids.
+An athlete with no log history is counted unmatched.
+
 ONE SPORT PER JOB. A cold NBA pass is on the order of 1 team list + 30 team
 docs + 30 roster lists + ~450 athlete docs + a handful of position docs
 (about 520 HTTP calls). Both leagues in one invocation was the 1,000–2,000
@@ -589,56 +602,91 @@ def parse_cfbd_roster(rows) -> list[dict]:
     return out
 
 
-def _history(cand, sport: str) -> tuple[str, set[str]]:
-    """(player_id, team codes) from an index entry.
+def _candidate(cand, sport: str) -> tuple[str, set[str], str]:
+    """(player_id, normalised team codes, latest game date) from an index entry.
 
-    Entries are (player_id, latest_team) or (player_id, latest_team, every
-    team in the window). A 2-tuple's latest team is the whole history, which
-    is what the unit tests build.
+    Shapes the callers build:
+      (player_id, latest_team)
+      (player_id, latest_team, all_teams)          all_teams is a list
+      (player_id, latest_team, latest_game_date)   the date is a string
+      (player_id, latest_team, all_teams, latest_game_date)
+    A 2-tuple's latest team is the whole history, which is what the unit
+    tests build. The date is "" when the entry has none, so it loses a
+    most-recent tiebreak.
     """
     pid = str(cand[0])
     latest = cand[1] if len(cand) > 1 else None
-    extra = cand[2] if len(cand) > 2 and cand[2] is not None else None
+    third = cand[2] if len(cand) > 2 else None
+    fourth = cand[3] if len(cand) > 3 else None
     teams: set[str] = set()
-    if extra:
-        for team in extra:
+    gdate = ""
+    if isinstance(third, (list, tuple, set)):
+        for team in third:
             code = normalize_team(sport, team)
             if code:
                 teams.add(code)
+        if fourth:
+            gdate = str(fourth)
+    elif third:
+        gdate = str(third)
     code = normalize_team(sport, latest)
     if code:
         teams.add(code)
-    return pid, teams
+    return pid, teams, gdate
 
 
 def match_to_log(name: str, team: str | None, index: dict,
-                 sport: str = "NBA") -> str | None:
+                 how: dict | None = None, *, sport: str = "NBA") -> str | None:
     """Our player_id for an ESPN athlete, by normalised name.
 
-    `index` maps norm_name -> [(player_id, latest_team)] or
-    [(player_id, latest_team, all_teams)]. A unique name matches only when
-    we have no ESPN team, the log has no team, or the ESPN team (after
-    normalisation) appears in that player's history. A unique name on a
-    different team is a conflict — a rookie must not inherit a veteran's
-    id. A shared name is settled by that same team check. Anything still
-    ambiguous is skipped.
+    `index` maps norm_name -> candidate tuples (see `_candidate`). A unique
+    name matches only when we have no ESPN team, the log has no team, or the
+    ESPN team (after normalisation) appears in that player's history. A
+    unique name on a different team is a conflict — a rookie must not inherit
+    a veteran's id. A shared name is settled by that same team check. One
+    still shared after that, or a team that matches nobody, goes to the
+    candidate with the most recent game (Matt, 2026-10-06: "don't skip
+    names"). `how["method"]` is name, team, tiebreak_recent, or none.
+
+    A tiebreak_recent result is a guess when the ESPN team matched nobody.
+    The caller must not let that guess overwrite an id already claimed by a
+    name or team match in the same run.
     """
+    def _set(m: str) -> None:
+        if isinstance(how, dict):
+            how["method"] = m
+
     cands = index.get(norm_player_name(name)) or []
-    parsed = [_history(c, sport) for c in cands]
-    by_id: dict[str, set[str]] = {}
-    for pid, teams in parsed:
-        by_id.setdefault(pid, set()).update(teams)
+    by_id: dict[str, tuple[set[str], str]] = {}
+    for pid, teams, gdate in (_candidate(c, sport) for c in cands):
+        prev = by_id.get(pid)
+        if prev is None:
+            by_id[pid] = (set(teams), gdate)
+            continue
+        prev[0].update(teams)
+        if gdate > prev[1]:
+            by_id[pid] = (prev[0], gdate)
+    if not by_id:
+        _set("none")
+        return None
     espn = normalize_team(sport, team)
     if len(by_id) == 1:
-        pid, teams = next(iter(by_id.items()))
+        pid, (teams, _) = next(iter(by_id.items()))
         if espn is None or not teams or espn in teams:
+            _set("name")
             return pid
+        _set("none")
         return None
     if espn:
-        on_team = {pid for pid, teams in by_id.items() if espn in teams}
+        on_team = {pid: info for pid, info in by_id.items() if espn in info[0]}
         if len(on_team) == 1:
+            _set("team")
             return next(iter(on_team))
-    return None
+        if len(on_team) > 1:
+            _set("tiebreak_recent")
+            return max(on_team, key=lambda pid: on_team[pid][1])
+    _set("tiebreak_recent")
+    return max(by_id, key=lambda pid: by_id[pid][1])
 
 
 def coverage_from_games(games_by_player: dict, matched_ids) -> dict:
@@ -672,14 +720,16 @@ def _rollback(conn) -> None:
 
 def _log_players(conn, sport: str) -> list:
     """One row per player over the last two seasons: id, name, latest team,
-    games, every team. The table name is the fixed LOG_TABLE value."""
+    games, every team, latest game date. The table name is the fixed
+    LOG_TABLE value. The date is what the shared-name tiebreak sorts on."""
     table = LOG_TABLE[sport]
     return conn.execute(f"""
         SELECT player_id::text,
                (ARRAY_AGG(player_name ORDER BY game_date DESC))[1],
                (ARRAY_AGG(team ORDER BY game_date DESC))[1],
                COUNT(*)::int,
-               ARRAY_AGG(DISTINCT team)
+               ARRAY_AGG(DISTINCT team),
+               MAX(game_date)
         FROM {table}
         WHERE season >= (SELECT max(season) - 1 FROM {table})
         GROUP BY player_id
@@ -687,19 +737,26 @@ def _log_players(conn, sport: str) -> list:
 
 
 def _index_from_rows(rows, sport: str) -> tuple[dict, dict, dict]:
-    """(name index, games by id, latest log team by id)."""
+    """(name index, games by id, latest log team by id).
+
+    A row is (id, name, team, games, teams, latest_date) from `_log_players`.
+    A 5-tuple (no date) is the same row from a test fixture.
+    """
     index: dict[str, list] = {}
     games: dict[str, int] = {}
     latest: dict[str, str | None] = {}
-    for pid, name, team, n_games, teams in rows:
+    for row in rows:
+        if len(row) >= 6:
+            pid, name, team, n_games, teams, gdate = row[:6]
+        else:
+            pid, name, team, n_games, teams = row[:5]
+            gdate = None
         pid = str(pid)
         games[pid] = int(n_games or 0)
         latest[pid] = normalize_team(sport, team)
-        hist = []
-        for t in teams or []:
-            if t:
-                hist.append(t)
-        index.setdefault(norm_player_name(name), []).append((pid, team, hist))
+        hist = [t for t in (teams or []) if t]
+        index.setdefault(norm_player_name(name), []).append(
+            (pid, team, hist, str(gdate) if gdate else ""))
     return index, games, latest
 
 
@@ -743,6 +800,7 @@ def _empty_basketball_stats() -> dict:
         "teams": 0, "athletes_listed": 0, "athletes_fetched": 0,
         "athletes_inline": 0, "skipped_fresh": 0, "unparsed": 0,
         "matched": 0, "unmatched": 0, "duplicate_ids": 0, "no_group": 0,
+        "match_method": {}, "tiebreak_sample": [],
         "positions": {}, "sample": [], "unmatched_sample": [],
         "teams_seen": [], "roster_via": {}, "requests": 0, "cache_hits": 0,
         "aborted_reason": None, "coverage": None, "written": 0,
@@ -763,6 +821,11 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
     out: list[dict] = []
     unmatched_rows: list[dict] = []
     seen: set[str] = set()
+    # player_id -> the method that currently owns the row in `out`.
+    # A tiebreak guess must not be the row that _upsert's ON CONFLICT keeps
+    # when a name or team match for that id also happened this run.
+    claimed: dict[str, str] = {}
+    row_at: dict[str, int] = {}
     file_unmatched: dict[str, dict] = {}
 
     teams = []
@@ -827,7 +890,14 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
                 continue
             stats["positions"][person["position"]] = (
                 stats["positions"].get(person["position"], 0) + 1)
-            pid = match_to_log(person["name"], raw_abbrev, index, sport=sport)
+            how: dict = {}
+            pid = match_to_log(person["name"], raw_abbrev, index, how, sport=sport)
+            method = how.get("method", "none")
+            stats["match_method"][method] = stats["match_method"].get(method, 0) + 1
+            if method == "tiebreak_recent" and len(stats["tiebreak_sample"]) < SAMPLE:
+                stats["tiebreak_sample"].append({
+                    "name": person["name"], "team": raw_abbrev, "player_id": pid,
+                })
             grp = basketball_group(person["position"])
             if pid is None:
                 stats["unmatched"] += 1
@@ -850,18 +920,32 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int,
                 continue
             if grp is None:
                 stats["no_group"] += 1
-            if pid in seen:
-                stats["duplicate_ids"] += 1
-                continue
-            seen.add(pid)
-            stats["matched"] += 1
-            # The log's latest code, not ESPN's spelling. Fall back to the
-            # normalised ESPN code when the log row has no team.
             stored_team = latest.get(pid) or log_team
             row = {"sport": sport, "player_id": pid, "player_name": person["name"],
                    "team": stored_team, "position": person["position"],
                    "pos_group": grp, "source": "espn_core",
                    "source_athlete_id": person["espn_id"]}
+            prior = claimed.get(pid)
+            if prior is not None:
+                # ON CONFLICT (sport, player_id) would let whichever row is
+                # inserted last win. A tiebreak guess must not be that row
+                # when a name or team match already owns the id, and a later
+                # name or team match replaces a guess so the guess does not
+                # stick. Either way the collision is counted.
+                stats["duplicate_ids"] += 1
+                if method == "tiebreak_recent" or prior != "tiebreak_recent":
+                    continue
+                claimed[pid] = method
+                out[row_at[pid]] = row
+                for i, existing in enumerate(stats["sample"]):
+                    if existing.get("player_id") == pid:
+                        stats["sample"][i] = row
+                        break
+                continue
+            claimed[pid] = method
+            seen.add(pid)
+            stats["matched"] += 1
+            row_at[pid] = len(out)
             out.append(row)
             if len(stats["sample"]) < SAMPLE:
                 stats["sample"].append(row)
