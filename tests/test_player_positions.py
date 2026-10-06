@@ -57,19 +57,33 @@ def test_basketball_groups_are_guard_forward_center(pos, grp):
 
 
 def test_a_unique_name_matches_its_log_id():
-    index = {norm_player_name("Paolo Banchero"): [("1631094", "ORL")]}
-    assert match_to_log("Paolo Banchero", "ORL", index) == "1631094"
+    index = {norm_player_name("Paolo Banchero"): [("1631094", "ORL", "2026-04-12")]}
+    how: dict = {}
+    assert match_to_log("Paolo Banchero", "ORL", index, how) == "1631094"
+    assert how["method"] == "name"
     # Accents, suffixes and punctuation normalise the way the WNBA results
     # ingestor already matches ESPN names to nba_api ids.
-    index = {norm_player_name("Nikola Jokic"): [("203999", "DEN")]}
+    index = {norm_player_name("Nikola Jokic"): [("203999", "DEN", "2026-04-12")]}
     assert match_to_log("Nikola Jokić", None, index) == "203999"
 
 
-def test_a_shared_name_is_settled_by_team_or_skipped():
-    index = {"jalen williams": [("1631114", "OKC"), ("1631116", "DEN")]}
-    assert match_to_log("Jalen Williams", "OKC", index) == "1631114"
-    assert match_to_log("Jalen Williams", None, index) is None
-    assert match_to_log("Jalen Williams", "BOS", index) is None
+def test_a_shared_name_is_settled_by_team_then_by_most_recent_game():
+    """Matt, 2026-10-06: "don't skip names". Team first; a name still shared
+    after that goes to whoever played most recently, and says so."""
+    index = {"jalen williams": [("1631114", "OKC", "2026-04-10"),
+                                ("1631116", "DEN", "2026-04-12")]}
+    how: dict = {}
+    assert match_to_log("Jalen Williams", "OKC", index, how) == "1631114"
+    assert how["method"] == "team"
+    assert match_to_log("Jalen Williams", None, index, how) == "1631116"
+    assert how["method"] == "tiebreak_recent"
+    # A team that matches neither: still decided, never skipped.
+    assert match_to_log("Jalen Williams", "BOS", index, how) == "1631116"
+    assert how["method"] == "tiebreak_recent"
+    # Two on the SAME team: the tiebreak runs among them only.
+    index = {"x y": [("1", "OKC", "2026-01-01"), ("2", "OKC", "2026-02-01"),
+                     ("3", "DEN", "2026-03-01")]}
+    assert match_to_log("X Y", "OKC", index, how) == "2"
 
 
 def test_no_log_history_is_no_match():
