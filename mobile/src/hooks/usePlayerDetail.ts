@@ -32,6 +32,7 @@ import {
   fetchLineupSlot,
   fetchPlayerPositionGroup,
   fetchPositionVsOpponent,
+  fetchSeasonStarted,
   fetchPropLineRows,
   fetchPropOddsHistory,
   fetchSavantStats,
@@ -311,26 +312,50 @@ export function usePlayerDetail(args: {
   // last stat's numbers under the new stat's label for one round trip (UX
   // review, 2026-10-05). The GROUP is in the tag too: an MLB hitter's group
   // moves when tonight's lineup lands after the log, and without it the new
-  // title drew over the old group's rows (UX review, 2026-10-06).
+  // title drew over the old group's rows (UX review, 2026-10-06). The
+  // OPPONENT is in the tag for the same reason: the card stays mounted when
+  // the next opponent changes, and the auto-open would otherwise lock onto
+  // the previous opponent's rows for the one render before the refetch's
+  // loading flag flips (UX review, 2026-10-06).
   // A mismatch is "still loading" only while the read
   // has not failed. The catch resets the payload to the untagged initial
   // (`statKey: ''`), and the card's error line sits behind
   // `loading && rows.length === 0` — counting that reset as loading leaves
   // the spinner up and the error never shows.
-  const pvo = useSection<{ statKey: string; group: string; rows: PositionVsOpponentRow[] }>(
-    { statKey: '', group: '', rows: [] },
+  const pvo = useSection<{
+    statKey: string;
+    group: string;
+    opponent: string;
+    seasonStarted: boolean | null;
+    rows: PositionVsOpponentRow[];
+  }>(
+    { statKey: '', group: '', opponent: '', seasonStarted: null, rows: [] },
     opponent && stat && posGroup && pvoSeason != null
-      ? async () => ({
-          statKey: String(stat.key),
-          group: posGroup,
-          rows: await fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
-        })
+      ? async () => {
+          const [rows, seasonStarted] = await Promise.all([
+            fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
+            fetchSeasonStarted(sport, pvoSeason).catch((err) => {
+              // The card still draws. Unknown means it does not auto-open
+              // last season; a failed probe must not hide the rows.
+              console.warn('[positionVsOpponent] season-started read failed', err);
+              return null;
+            }),
+          ]);
+          return {
+            statKey: String(stat.key),
+            group: posGroup,
+            opponent,
+            seasonStarted,
+            rows,
+          };
+        }
       : null,
     [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
   );
 
-  // The rows on screen are the rows for THIS stat and THIS group, or none.
-  const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '');
+  // The rows on screen are the rows for THIS stat, group and opponent, or none.
+  const pvoFresh = pvo.data.statKey === String(stat?.key ?? '') && pvo.data.group === (posGroup ?? '')
+    && pvo.data.opponent === opponent;
 
   return {
     reload,
@@ -356,6 +381,7 @@ export function usePlayerDetail(args: {
             rows: pvoFresh ? pvo.data.rows : [],
             loading: pvo.loading || (pvo.error == null && !pvoFresh),
             error: pvo.error,
+            seasonStarted: pvoFresh ? pvo.data.seasonStarted : null,
             groupBasis,
             sport,
           }

@@ -199,3 +199,231 @@ def test_a_real_run_before_the_table_exists_fails_so_it_is_retried(monkeypatch):
     with pytest.raises(RuntimeError, match="does not exist yet"):
         ppi.ingest_player_positions(sports=["NCAAF"], dry_run=False)
     assert conn.closed
+
+
+def test_a_shared_updated_at_does_not_expire_on_one_morning():
+    """Skipped-fresh rows are not rewritten. The window is 7 days plus a
+    0–6 day hash of the id, so a cohort stored on one morning falls due
+    across the next week instead of all on the seventh morning."""
+    from datetime import datetime, timedelta, timezone
+
+    from data.ingestors import player_positions_ingestor as ppi
+
+    updated = datetime(2026, 10, 1, 11, tzinfo=timezone.utc)
+    ids = [f"ath-{i}" for i in range(840)]
+    windows = [ppi.refresh_window_days(i) for i in ids]
+    assert min(windows) == ppi.REFRESH_DAYS
+    assert max(windows) == ppi.REFRESH_DAYS + ppi.JITTER_DAYS - 1
+    # The day before the shortest window lapses, nobody is due.
+    day_before = updated + timedelta(days=ppi.REFRESH_DAYS) - timedelta(seconds=1)
+    assert all(ppi.is_within_window(updated, i, day_before) for i in ids)
+    first_morning = updated + timedelta(days=ppi.REFRESH_DAYS)
+    due = [i for i in ids if not ppi.is_within_window(updated, i, first_morning)]
+    assert due
+    assert len(due) < len(ids) / 4
+    last_morning = updated + timedelta(days=ppi.REFRESH_DAYS + ppi.JITTER_DAYS - 1)
+    assert all(not ppi.is_within_window(updated, i, last_morning) for i in ids)
+
+
+def _espn_stub(monkeypatch, athlete_ids):
+    """One NBA club whose roster is `athlete_ids`. Returns the URL list."""
+    import re
+
+    from data.ingestors import player_positions_ingestor as ppi
+
+    calls: list[str] = []
+    team = ("https://sports.core.api.espn.com/v2/sports/basketball/leagues/"
+            "nba/teams/1?lang=en")
+
+    def fake_get(url):
+        calls.append(url)
+        if "teams?limit=50" in url:
+            return {"items": [{"$ref": team}]}
+        if "/seasons/" in url and "/athletes" in url:
+            return {"items": [{
+                "$ref": "https://sports.core.api.espn.com/v2/sports/basketball/"
+                        f"leagues/nba/athletes/{i}",
+            } for i in athlete_ids]}
+        am = re.search(r"/athletes/(\d+)", url)
+        if am:
+            aid = am.group(1)
+            return {"id": aid, "displayName": f"Rookie {aid}",
+                    "position": {"abbreviation": "PG"}}
+        if "/teams/" in url:
+            return {"abbreviation": "ORL", "id": "1"}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(ppi, "_get_json", fake_get)
+    monkeypatch.setattr(ppi, "_name_index", lambda conn, sport: {})
+    monkeypatch.setattr(ppi, "_upsert", lambda conn, rows: len(rows))
+    return calls
+
+
+def test_unmatched_ids_are_cached_and_not_refetched_within_the_ttl(monkeypatch):
+    from data.ingestors import player_positions_ingestor as ppi
+
+    calls = _espn_stub(monkeypatch, ["10", "11"])
+    remembered: list[list[str]] = []
+    monkeypatch.setattr(ppi, "_fresh_source_ids", lambda conn, sport: set())
+    monkeypatch.setattr(ppi, "_cached_unmatched_ids", lambda conn, sport: set())
+    monkeypatch.setattr(
+        ppi, "_remember_unmatched",
+        lambda conn, sport, ids: remembered.append(list(ids)) or len(ids))
+
+    first = ppi._basketball(object(), "NBA", dry_run=False)
+    assert first["athletes_fetched"] == 2
+    assert first["unmatched"] == 2
+    assert remembered == [["10", "11"]]
+    assert [u for u in calls if re.search(r"/athletes/\d+", u)]
+
+    calls.clear()
+    remembered.clear()
+    monkeypatch.setattr(ppi, "_cached_unmatched_ids", lambda conn, sport: {"10", "11"})
+    second = ppi._basketball(object(), "NBA", dry_run=False)
+    assert second["athletes_fetched"] == 0
+    assert second["cached_unmatched"] == 2
+    assert [u for u in calls if re.search(r"/athletes/\d+", u)] == []
+    assert remembered == [[]]
+
+
+def test_cached_unmatched_ids_drop_out_after_the_window(monkeypatch):
+    """A rookie who later has game rows is fetched again once the window
+    lapses. Inside it, both ids are skipped."""
+    from datetime import datetime, timedelta, timezone
+
+    from data.ingestors import player_positions_ingestor as ppi
+
+    seen = datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+    class Conn:
+        def execute(self, sql, params=None):
+            class Cur:
+                def fetchall(self_inner):
+                    return [("10", seen), ("11", seen)]
+
+                def fetchone(self_inner):
+                    return None
+            return Cur()
+
+    monkeypatch.setattr(ppi, "_relation_exists", lambda conn, name: True)
+    inside = seen + timedelta(days=3)
+    assert ppi._cached_unmatched_ids(Conn(), "NBA", inside) == {"10", "11"}
+    lapsed = seen + timedelta(days=ppi.REFRESH_DAYS + ppi.JITTER_DAYS - 1)
+    assert ppi._cached_unmatched_ids(Conn(), "NBA", lapsed) == set()
+
+
+def test_remember_unmatched_upserts_and_skips_a_missing_table(monkeypatch):
+    from data.ingestors import player_positions_ingestor as ppi
+
+    sqls: list[str] = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            sqls.append(" ".join(sql.split()))
+
+            class Cur:
+                def fetchone(self_inner):
+                    return None
+            return Cur()
+
+        def commit(self):
+            self.committed = True
+
+    conn = Conn()
+    monkeypatch.setattr(ppi, "_relation_exists", lambda c, name: False)
+    assert ppi._remember_unmatched(conn, "NBA", ["10"]) == 0
+    assert sqls == []
+
+    monkeypatch.setattr(ppi, "_relation_exists", lambda c, name: True)
+    assert ppi._remember_unmatched(conn, "NBA", ["10", "10", "11"]) == 2
+    joined = "\n".join(sqls)
+    assert "INSERT INTO player_position_unmatched" in joined
+    assert "ON CONFLICT (sport, source_athlete_id)" in joined
+    assert conn.committed
+
+
+def test_the_per_run_cap_stops_a_cold_roster(monkeypatch):
+    from data.ingestors import player_positions_ingestor as ppi
+
+    calls = _espn_stub(monkeypatch, ["1", "2", "3", "4", "5"])
+    monkeypatch.setattr(ppi, "MAX_ATHLETE_HTTP", 2)
+    monkeypatch.setattr(ppi, "_fresh_source_ids", lambda conn, sport: set())
+    monkeypatch.setattr(ppi, "_cached_unmatched_ids", lambda conn, sport: set())
+    monkeypatch.setattr(ppi, "_remember_unmatched", lambda conn, sport, ids: len(ids))
+
+    stats = ppi._basketball(object(), "NBA", dry_run=False)
+    athlete_urls = [u for u in calls if re.search(r"/athletes/\d+", u)]
+    assert stats["athletes_fetched"] == 2
+    assert stats["deferred_cap"] == 3
+    assert stats["cap_hit"] is True
+    assert len(athlete_urls) == 2
+    assert stats["athlete_http"] == 2
+    assert stats["espn_calls"] == len(calls)
+
+
+def test_fresh_athletes_are_not_fetched(monkeypatch):
+    from data.ingestors import player_positions_ingestor as ppi
+
+    calls = _espn_stub(monkeypatch, ["10", "11"])
+    monkeypatch.setattr(ppi, "_fresh_source_ids", lambda conn, sport: {"10", "11"})
+    monkeypatch.setattr(ppi, "_cached_unmatched_ids", lambda conn, sport: set())
+    monkeypatch.setattr(ppi, "_remember_unmatched", lambda conn, sport, ids: 0)
+
+    stats = ppi._basketball(object(), "NBA", dry_run=False)
+    assert stats["skipped_fresh"] == 2
+    assert stats["athletes_fetched"] == 0
+    assert [u for u in calls if re.search(r"/athletes/\d+", u)] == []
+
+
+def test_january_and_february_use_the_previous_ncaaf_fall(monkeypatch):
+    """The daily step used to pass the calendar year, so a January or
+    February run asked CFBD for a season that has no games yet. January
+    through July belong to the previous fall (2025 runs 2025-08-23 →
+    2026-01-20)."""
+    import data.db as db
+    from data.ingestors import player_positions_ingestor as ppi
+
+    assert ppi.ncaaf_roster_season("2026-01-20") == 2025
+    assert ppi.ncaaf_roster_season("2026-02-01") == 2025
+    assert ppi.ncaaf_roster_season("2026-07-31") == 2025
+    assert ppi.ncaaf_roster_season("2025-08-23") == 2025
+    assert ppi.ncaaf_roster_season("2026-08-01") == 2026
+
+    seen: dict = {}
+
+    def fake_ncaaf(conn, season, dry_run):
+        seen["season"] = season
+        return {"season": season}
+
+    class Conn:
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(ppi, "_ncaaf", fake_ncaaf)
+    monkeypatch.setattr(db, "get_connection", lambda: Conn())
+    ppi.ingest_player_positions(sports=["NCAAF"], dry_run=True, run_date="2026-02-01")
+    assert seen["season"] == 2025
+    ppi.ingest_player_positions(
+        sports=["NCAAF"], dry_run=True, run_date="2026-02-01", season=2024)
+    assert seen["season"] == 2024
+
+    src = (ROOT / "run_pipeline.py").read_text(encoding="utf-8")
+    assert "ingest_player_positions(dry_run=False, run_date=run_date)" in src
+
+
+def test_unmatched_cache_migration_is_guarded_and_closed():
+    from data.anon_readable import VIEW_BASE_TABLES
+    from data.view_migrations import ACTIVE_MIGRATIONS
+
+    mig = ROOT / "data/migrations/add_player_position_unmatched.sql"
+    code = mig.read_text(encoding="utf-8")
+    sql = "\n".join(ln for ln in code.splitlines() if not ln.lstrip().startswith("--"))
+    assert mig.name in ACTIVE_MIGRATIONS
+    assert ACTIVE_MIGRATIONS.index(mig.name) > ACTIVE_MIGRATIONS.index("add_player_positions.sql")
+    assert sql.strip().startswith("DO $mig$") and sql.strip().endswith("$mig$;")
+    assert "IF to_regclass('public.player_position_unmatched') IS NOT NULL THEN" in code
+    assert "PRIMARY KEY (sport, source_athlete_id)" in code
+    assert "REVOKE ALL ON public.player_position_unmatched FROM PUBLIC, anon, authenticated;" in code
+    assert "ENABLE ROW LEVEL SECURITY" in code
+    assert "GRANT " not in sql
+    assert "player_position_unmatched" not in VIEW_BASE_TABLES
