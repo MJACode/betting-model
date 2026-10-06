@@ -166,12 +166,11 @@ def test_the_job_defaults_to_a_dry_run_and_one_sport():
         validate({"dry_run": "no"})
 
 
-# Already worker_jobs rows from #889. Editing declared_jobs.json does not
-# change 406072 (running) or 406073 (pending 12:30Z). They stay in the file
-# so the dedupe key is not queued again, and they are outside the one-sport
-# dry-run rule that governs every declaration after them.
+# worker_jobs 406073 is already pending. The declaration matches master:
+# one sport, so the validator accepts it. It is a real run, so it is
+# outside the dry-run rule. The two-sport basketball key from #889 is
+# not declared here; the validator rejects a list of sports.
 HISTORICAL_PLAYER_POSITION_JOBS = {
-    "player-positions-basketball-dry-run-2-2026-10-06",
     "player-positions-ncaaf-2026-10-06",
 }
 
@@ -180,13 +179,25 @@ def test_every_declared_player_positions_job_is_a_dry_run():
     """WNBA is not declared (offseason). NCAAF waits on run_after so it
     does not start the moment the NBA ESPN pass ends.
 
-    The two #889 keys are kept and exempt. This branch's NBA dry run and
-    the NCAAF dry run at 18:00Z are not.
+    The NCAAF real run from #889 stays, one sport, dry_run false, run_after
+    12:30Z. The two-sport basketball dry run is not in the file. This
+    branch's NBA dry run and the NCAAF dry run at 18:00Z are unchanged.
     """
     jobs = json.loads((ROOT / "jobs/declared_jobs.json").read_text(encoding="utf-8"))
     ours = [j for j in jobs if j["job_type"] == "player_positions"]
+    keys = {j["key"] for j in ours}
+    assert "player-positions-basketball-dry-run-2-2026-10-06" not in keys
     historical = [j for j in ours if j["key"] in HISTORICAL_PLAYER_POSITION_JOBS]
     assert {j["key"] for j in historical} == HISTORICAL_PLAYER_POSITION_JOBS
+    real = historical[0]
+    assert real["args"]["sports"] == ["NCAAF"]
+    assert real["args"]["season"] == 2026
+    assert real["args"]["dry_run"] is False
+    assert real["run_after"] == "2026-10-06T12:30:00+00:00"
+    from tracking.job_queue import _validate_player_positions
+    assert _validate_player_positions(real["args"])["sports"] == ["NCAAF"]
+    with pytest.raises(ValueError, match="one sport"):
+        _validate_player_positions({"sports": ["NBA", "WNBA"], "dry_run": True})
     current = [j for j in ours if j["key"] not in HISTORICAL_PLAYER_POSITION_JOBS]
     assert len(current) >= 1
     sports = []
@@ -911,6 +922,24 @@ def test_a_real_run_before_the_table_exists_fails_so_it_is_retried(monkeypatch):
     assert conn.closed
 
 
+def test_roster_candidates_uses_the_season_argument():
+    """The year in the fallback URL is the season passed in, not today's
+    calendar year and not the neighbouring years."""
+    from data.ingestors.player_positions_ingestor import roster_candidates
+
+    nba = roster_candidates("nba", "13", 2027)
+    assert nba == [(
+        "https://sports.core.api.espn.com/v2/sports/basketball/leagues/"
+        "nba/seasons/2027/teams/13/athletes?limit=200"
+    )]
+    other = roster_candidates("nba", "13", 2026)
+    assert "/seasons/2026/teams/13/" in other[0]
+    assert "/seasons/2027/" not in other[0]
+    assert "/seasons/2025/" not in other[0]
+    wnba = roster_candidates("wnba", "3", 2026)
+    assert "/leagues/wnba/seasons/2026/teams/3/athletes?limit=200" in wnba[0]
+
+
 def test_a_same_name_rookie_inherits_the_prior_season_id():
     """A unique name whose only log game is last season is a summer move
     and a same-name rookie at once. The log has no rookie flag, so the
@@ -976,6 +1005,7 @@ def test_basketball_falls_back_to_one_season_url_and_counts_empty_teams():
     assert season_2 in calls
     assert stats["roster_via"] == {"season_path": 1}
     assert stats["teams_all_roster_urls_empty"] == 1
+    assert stats["coverage"]["teams_all_roster_urls_empty"] == 1
     assert stats["matched"] == 1
     assert stats["sample"][0]["player_id"] == "201939"
     joined = " ".join(calls)

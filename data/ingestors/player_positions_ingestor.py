@@ -307,9 +307,19 @@ def basketball_season_start(sport: str, today: str) -> str:
 
 
 def _season_roster_url(league: str, team_id: str, season: int) -> str:
-    """The one fallback roster URL. `season` is `espn_basketball_season`."""
+    """One `/seasons/{season}/teams/{id}/athletes` URL. The year is `season`."""
     return (f"{CORE}/{league}/seasons/{int(season)}/teams/{team_id}"
             f"/athletes?limit=200")
+
+
+def roster_candidates(league: str, team_id: str, season: int) -> list[str]:
+    """Season-scoped roster URLs, using `season` as the year.
+
+    The year is the argument. It is not today's calendar year and it is
+    not a list of neighbouring years. Callers pass
+    `espn_basketball_season` (NBA ending year, WNBA calendar year).
+    """
+    return [_season_roster_url(league, team_id, season)]
 
 
 def roster_url(team_doc: dict | None, league: str, team_id: str,
@@ -340,9 +350,9 @@ def _roster_urls_to_try(team_doc: dict | None, league: str, team_id: str,
     first_url, via = roster_url(team_doc, league, team_id, season)
     urls = [(first_url, via)]
     if via == "team_ref":
-        fallback = _season_roster_url(league, team_id, season)
-        if fallback != first_url:
-            urls.append((fallback, "season_path"))
+        for fallback in roster_candidates(league, team_id, season):
+            if fallback != first_url:
+                urls.append((fallback, "season_path"))
     return urls
 
 
@@ -1089,6 +1099,8 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int | None = None,
             if len(stats["sample"]) < SAMPLE:
                 stats["sample"].append(row)
     stats["coverage"] = coverage_from_games(games, seen)
+    stats["coverage"]["teams_all_roster_urls_empty"] = (
+        stats["teams_all_roster_urls_empty"])
     stats["requests"] = client.calls
     stats["cache_hits"] = client.cache_hits
     stats["aborted_reason"] = client.aborted_reason

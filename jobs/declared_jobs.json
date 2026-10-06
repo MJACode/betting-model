@@ -885,16 +885,6 @@
     }
   },
   {
-    "key": "player-positions-basketball-dry-run-2-2026-10-06",
-    "job_type": "player_positions",
-    "requested_by": "matt",
-    "note": "DRY RUN 2, basketball only. Dry run 1 (job 405765) listed 30 NBA and 17 WNBA teams but every season-less roster URL (/teams/{id}/athletes) answered 404 on the worker, so no athlete was read. The ingestor now tries season-scoped rosters (/seasons/{year}/teams/{id}/athletes) and records which year answered (roster_season_used). Writes nothing. Read worker_jobs.result for listed/parsed/matched counts, match_method (name/team/tiebreak_recent) and the positions seen.",
-    "args": {
-      "sports": ["NBA", "WNBA"],
-      "dry_run": true
-    }
-  },
-  {
     "key": "player-positions-ncaaf-2026-10-06",
     "job_type": "player_positions",
     "requested_by": "matt",
