@@ -379,9 +379,15 @@ def _job_player_positions(**kw):
     basketball, CFBD /roster for NCAAF -- 403 from the dev sandbox's egress
     proxy (requests and WebFetch, 2026-10-06), while CFBD_API_KEY is set on
     the worker only. So the response shapes are unverified until this runs:
-    `dry_run: true` writes nothing and returns counts, the name-match rate, the
-    positions seen and a sample, and is read back from worker_jobs.result
+    `dry_run: true` writes nothing to `player_positions` and returns counts,
+    the name-match rate, coverage against the two-season log (players and
+    games), duplicate_ids, requests, and aborted_reason. One sport per job:
+    a cold NBA pass is about 675 ESPN calls (worker_jobs 406072 fetched
+    609 athlete docs) and the cap is per sport. Read worker_jobs.result
     before any real run is queued.
+
+    The 2026-10-06 run (worker_jobs 405765) listed the teams and then 404'd
+    every `/teams/{id}/athletes` URL, so it stored no basketball positions.
     """
     from data.ingestors.player_positions_ingestor import ingest_player_positions
     return ingest_player_positions(
@@ -390,10 +396,22 @@ def _job_player_positions(**kw):
 
 def _validate_player_positions(args: dict) -> dict:
     from data.ingestors.player_positions_ingestor import SPORTS
-    sports = args.get("sports") or list(SPORTS)
-    if not isinstance(sports, list) or not sports:
-        raise ValueError("sports must be a non-empty list")
-    sports = [str(s).upper() for s in sports]
+    # One sport per job. A bare `sport` is the same thing as a one-element
+    # list. Omitting both runs NBA only — never every league in one invocation.
+    if args.get("sport"):
+        sports = [str(args["sport"]).upper()]
+    else:
+        raw = args.get("sports")
+        if raw is None:
+            sports = ["NBA"]
+        elif not isinstance(raw, list) or not raw:
+            raise ValueError("sports must be a non-empty list")
+        else:
+            sports = [str(s).upper() for s in raw]
+    if len(sports) != 1:
+        raise ValueError(
+            f"player_positions takes one sport per job; got {sports}. "
+            "Queue one job per sport.")
     bad = sorted(set(sports) - set(SPORTS))
     if bad:
         raise ValueError(f"unknown sport {bad}; known {list(SPORTS)}")

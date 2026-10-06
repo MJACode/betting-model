@@ -221,8 +221,12 @@ def test_mlb_shows_a_per_player_summary_and_the_nfl_keeps_its_game_list():
 def test_the_pure_layer_behaves():
     """Runs mobile/scripts/verify_position_vs_opponent.ts: the MLB summary's
     grouping, averaging, latest-team, sort order and side; own-player
-    exclusion; doubleheader numbering. Needs the mobile deps (tsx resolves the
-    app's @/ aliases); skipped where they are not installed."""
+    exclusion; doubleheader numbering.
+
+    Local-only. pr-ci.yml installs Python and Node 22, not mobile/node_modules,
+    and tsx has to resolve the app's @/ aliases from that install. CI skips
+    this test. Run it locally after `npm ci` in mobile/.
+    """
     import shutil
     import subprocess
 
@@ -230,7 +234,11 @@ def test_the_pure_layer_behaves():
 
     tsx = ROOT / "mobile" / "node_modules" / ".bin" / "tsx"
     if shutil.which("node") is None or not tsx.exists():
-        pytest.skip("mobile node_modules not installed")
+        pytest.skip(
+            "local-only: pr-ci does not install mobile/node_modules, so "
+            "scripts/verify_position_vs_opponent.ts is not run in CI. "
+            "Install deps with npm ci in mobile/ and re-run this test locally."
+        )
     proc = subprocess.run(
         [str(tsx), "scripts/verify_position_vs_opponent.ts"],
         cwd=ROOT / "mobile", capture_output=True, text=True, timeout=120,

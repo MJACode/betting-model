@@ -854,20 +854,33 @@
     "key": "player-positions-dry-run-2026-10-06",
     "job_type": "player_positions",
     "requested_by": "matt",
-    "note": "DRY RUN, writes nothing. Phase 3 of the position-vs-opponent card (Matt, 2026-10-05) needs positions for NBA, WNBA and NCAAF. ESPN core rosters and CFBD /roster both 403 from the dev sandbox, so their response shapes are unverified. This reports, per sport: teams/athletes listed, athletes parsed, the name-match rate to our nba_api ids (basketball) or the id-match rate to ncaaf_player_game_log (CFBD), the positions seen and a sample. Read worker_jobs.result, fix the parser if needed, then queue the real run (dry_run false).",
+    "note": "ALREADY RAN. worker_jobs 405765 finished 2026-10-06 10:50Z with the original three-sport args: NBA and WNBA team lists came back (30 and 17) and every /teams/{id}/athletes GET was HTTP 404, so athletes_listed was 0. NCAAF matched 11153 of 11641 season-2026 log players and wrote nothing. The key is kept so it is not queued again. sports is one element because the job now rejects a list. The replacement dry runs are the NBA key and the NCAAF key below. WNBA is not declared: it is the offseason, and a second ESPN pass must not start the moment the NBA one finishes.",
     "args": {
-      "sports": ["NBA", "WNBA", "NCAAF"],
+      "sports": ["NBA"],
       "season": 2026,
       "dry_run": true
     }
   },
   {
-    "key": "player-positions-basketball-dry-run-2-2026-10-06",
+    "key": "player-positions-dry-run-nba-2026-10-06",
     "job_type": "player_positions",
     "requested_by": "matt",
-    "note": "DRY RUN 2, basketball only. Dry run 1 (job 405765) listed 30 NBA and 17 WNBA teams but every season-less roster URL (/teams/{id}/athletes) answered 404 on the worker, so no athlete was read. The ingestor now tries season-scoped rosters (/seasons/{year}/teams/{id}/athletes) and records which year answered (roster_season_used). Writes nothing. Read worker_jobs.result for listed/parsed/matched counts, match_method (name/team/tiebreak_recent) and the positions seen.",
+    "note": "DRY RUN, one sport, writes no player_positions rows. Replacement for 405765, which 404'd /teams/{id}/athletes. Roster URL is the team document's athletes $ref. Reports coverage against the two-season log (player count and games played; the log was 687 NBA players on 2026-10-06), duplicate_ids, requests, cache_hits, and aborted_reason. Stops on the request cap or three consecutive 403/429/404. Writes the gitignored HTTP cache so a later real run does not repeat the GETs. Read worker_jobs.result before queueing dry_run false.",
     "args": {
-      "sports": ["NBA", "WNBA"],
+      "sports": ["NBA"],
+      "season": 2026,
+      "dry_run": true
+    }
+  },
+  {
+    "key": "player-positions-dry-run-ncaaf-2026-10-06",
+    "job_type": "player_positions",
+    "requested_by": "matt",
+    "note": "DRY RUN, one sport, writes no player_positions rows. CFBD /roster for the requested season and the season before it (405765 matched season 2026 only: 11153 of 11641). Reports the same coverage block as the basketball jobs. One or two CFBD calls, not an ESPN pass. run_after keeps it off the worker until a few hours after a 2026-10-06 merge, so it does not start the moment the NBA dry run ends. If this instant has already passed when the worker syncs, the job is eligible immediately and the NBA job is still claimed first (no run_after, created first).",
+    "run_after": "2026-10-06T18:00:00+00:00",
+    "args": {
+      "sports": ["NCAAF"],
+      "season": 2026,
       "dry_run": true
     }
   },
