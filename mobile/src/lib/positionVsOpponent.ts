@@ -293,6 +293,13 @@ export interface SeasonChoiceInput {
   rows: { player_id: string; season: number | string }[];
   playerId: string | null;
   seasonThis: number;
+  /**
+   * True when this sport has a final game in `seasonThis`. False when the
+   * season has not started. null while that read has not landed — do not
+   * decide yet. A scheduled-but-unplayed slate is not started: measured
+   * 2026-10-06, NBA season 2027 had 46 games and 0 finals.
+   */
+  seasonStarted: boolean | null;
 }
 
 export interface SeasonChoiceNext {
@@ -304,10 +311,14 @@ export interface SeasonChoiceNext {
 }
 
 /**
- * Open on last season when this one has no games yet and last season does,
- * once per player + opponent. A different player or opponent starts that
- * decision again. A season the reader tapped for this same player is left
- * alone, including when the opponent changes.
+ * Open on last season only when this season has no final game for the sport
+ * yet (it has not started) and last season has games against this opponent.
+ * A first meeting after the season has started stays on this season, so the
+ * card shows the empty state. Once per player + opponent. A different player
+ * or opponent starts that decision again. A season the reader tapped for
+ * this same player is left alone, including when the opponent changes.
+ * `seasonStarted === null` does not decide: deciding before that read lands
+ * is how a mid-season first meeting locked onto last season.
  */
 export function nextSeasonChoice(state: SeasonChoiceInput): SeasonChoiceNext {
   const playerId = state.playerId ?? '';
@@ -324,14 +335,48 @@ export function nextSeasonChoice(state: SeasonChoiceInput): SeasonChoiceNext {
       readerPicked = false;
     }
   }
-  if (readerPicked || decided || state.loading || state.rows.length === 0) {
+  if (readerPicked || decided || state.loading || state.rows.length === 0 || state.seasonStarted == null) {
     return { seenKey: state.subjectKey, decided, readerPicked, choice, subjectChanged };
   }
   const others = state.rows.filter((r) => !state.playerId || r.player_id !== state.playerId);
   const hasThis = others.some((r) => Number(r.season) === state.seasonThis);
   const hasLast = others.some((r) => Number(r.season) === state.seasonThis - 1);
-  if (!hasThis && hasLast) choice = 'last';
+  if (state.seasonStarted === false && !hasThis && hasLast) choice = 'last';
   return { seenKey: state.subjectKey, decided: true, readerPicked, choice, subjectChanged };
+}
+
+/** True when some other player at this position has a row in either season
+ *  the card loaded. The page's own player does not count. */
+export function hasOtherPositionGames(
+  rows: readonly { player_id: string }[],
+  playerId: string | null,
+): boolean {
+  return rows.some((r) => !playerId || r.player_id !== playerId);
+}
+
+/**
+ * The empty-state line. "this season yet" is a first meeting: last season
+ * has games against this opponent and this one does not. An opponent with
+ * no row in either season is a gap in the log, said once for both seasons
+ * — the same "in our data" hedge the last-season line already uses (the
+ * 2025 MLB log is missing every ARI, CWS, OAK and WSH game, measured
+ * 2026-10-06). The This season / Last season chips still open the
+ * year-stamped line.
+ */
+export function emptySeasonMessage(opts: {
+  short: string;
+  opponent: string;
+  choice: SeasonChoice;
+  seasonThis: number;
+  hasAnySeason: boolean;
+}): string {
+  if (opts.choice === 'last') {
+    return `No ${opts.short} games vs ${opts.opponent} in our ${opts.seasonThis - 1} data.`;
+  }
+  if (!opts.hasAnySeason) {
+    return `No ${opts.short} games vs ${opts.opponent} in our data, this season or last.`;
+  }
+  return `No ${opts.short} games vs ${opts.opponent} this season yet.`;
 }
 
 export interface PositionVsOpponentEntry {

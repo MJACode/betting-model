@@ -546,6 +546,30 @@ export async function fetchH2HStatValues(
 }
 
 /**
+ * Whether `season` has started for `sport`: at least one FINAL game.
+ *
+ * A row in `games` is not enough. Measured 2026-10-06: NBA season 2027
+ * already had 46 games on the schedule and 0 with `home_win` set (first
+ * date 2026-10-20). Counting rows would open this season before opening
+ * night. The read is `limit(1)` — 0 or 1 row, under the 1,000-row cap.
+ * `games` is already on the anon read surface.
+ */
+export async function fetchSeasonStarted(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF',
+  season: number,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('game_id')
+    .eq('sport', sport)
+    .eq('season', season)
+    .not('home_win', 'is', null)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
+/**
  * Every qualifying player-game at one NFL position group against one defence,
  * this season and last, with the defence's league rank on each row. Backs the
  * player page's "WRs vs ATL" card (Matt, 2026-10-05).

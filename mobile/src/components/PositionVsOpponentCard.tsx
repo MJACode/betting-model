@@ -21,8 +21,10 @@ import {
   groupPlural,
   groupProse,
   groupShort,
+  emptySeasonMessage,
   footnoteText,
   groupSingular,
+  hasOtherPositionGames,
   isMlbGroup,
   nextSeasonChoice,
   opponentNoun,
@@ -65,6 +67,7 @@ export function PositionVsOpponentCard({
   rows,
   loading,
   error,
+  seasonStarted,
   playerId,
   statLabel,
   betLabel,
@@ -79,6 +82,12 @@ export function PositionVsOpponentCard({
   rows: PositionVsOpponentRow[];
   loading: boolean;
   error: string | null;
+  /**
+   * True when this sport has a final game in `seasonThis`. False before the
+   * season has started. null while that read has not landed — the card does
+   * not auto-open last season until it knows.
+   */
+  seasonStarted: boolean | null;
   /**
    * MLB hitters: why this group — tonight's posted slot, or (lineup not out)
    * the slot of his last start. Said on the card, because the title changes
@@ -98,14 +107,14 @@ export function PositionVsOpponentCard({
   const [choice, setChoice] = useState<SeasonChoice>('this');
   const [visible, setVisible] = useState(ROWS_SHOWN);
   const season = choice === 'this' ? seasonThis : seasonThis - 1;
-  // Open on LAST season when this one has no games yet and last season does
-  // — the NBA in October, the NFL and NCAAF in their off-seasons — so the
-  // card is not an empty state plus a tap for every player. Once per
-  // player+opponent, and never over a season this reader already tapped
-  // for the same player (UX review, 2026-10-06). The screen keeps this
-  // card mounted when the player or the opponent changes, so the flag has
-  // to reset with that key — a sticky ref opened the previous player and
-  // then refused to open the next one.
+  // Open on LAST season only when this season has not started (no final
+  // game for the sport yet) and last season has games against this
+  // opponent — the NBA before opening night, the NFL and NCAAF in their
+  // off-seasons. A first meeting after the season has started stays here
+  // and shows the empty state. Once per player+opponent, and never over a
+  // season this reader already tapped for the same player (UX review,
+  // 2026-10-06). The screen keeps this card mounted when the player or
+  // the opponent changes, so the flag resets with that key.
   const subjectKey = seasonSubjectKey(playerId, opponent);
   const decided = useRef(false);
   const readerPicked = useRef(false);
@@ -121,13 +130,14 @@ export function PositionVsOpponentCard({
       rows,
       playerId,
       seasonThis,
+      seasonStarted,
     });
     seenKey.current = next.seenKey;
     decided.current = next.decided;
     readerPicked.current = next.readerPicked;
     if (next.subjectChanged) setVisible(ROWS_SHOWN);
     if (next.choice !== choice) setChoice(next.choice);
-  }, [subjectKey, choice, loading, rows, playerId, seasonThis]);
+  }, [subjectKey, choice, loading, rows, playerId, seasonThis, seasonStarted]);
   const card = useMemo(
     () =>
       positionVsOpponent(rows, {
@@ -142,6 +152,7 @@ export function PositionVsOpponentCard({
   );
   const plural = groupPlural(group);
   const short = groupShort(group);
+  const hasAnySeason = hasOtherPositionGames(rows, playerId);
   // MLB: one row per player (Matt, 2026-10-06: "Sure in summary"); the NFL
   // keeps one row per game — ~45 a season, where each game is worth seeing.
   const summary = useMemo(
@@ -210,14 +221,15 @@ export function PositionVsOpponentCard({
       ) : card.total === 0 ? (
         <View style={styles.card}>
           <Text style={styles.muted}>
-            {choice === 'this'
-              ? `No ${short} games vs ${opponent} this season yet.`
-              : // "in our data", not a flat "none": the 2025 MLB log is missing
-                // every ARI, CWS, OAK and WSH game (measured 2026-10-06), so an
-                // empty last season can be a gap, not a fact (UX_REVIEW §3).
-                `No ${short} games vs ${opponent} in our ${seasonThis - 1} data.`}
+            {emptySeasonMessage({
+              short,
+              opponent,
+              choice,
+              seasonThis,
+              hasAnySeason,
+            })}
           </Text>
-          {choice === 'this' ? (
+          {choice === 'this' && hasAnySeason ? (
             <Pressable
               onPress={() => pick('last')}
               accessibilityRole="button"

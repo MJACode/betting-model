@@ -32,6 +32,7 @@ import {
   fetchLineupSlot,
   fetchPlayerPositionGroup,
   fetchPositionVsOpponent,
+  fetchSeasonStarted,
   fetchPropLineRows,
   fetchPropOddsHistory,
   fetchSavantStats,
@@ -321,15 +322,33 @@ export function usePlayerDetail(args: {
   // (`statKey: ''`), and the card's error line sits behind
   // `loading && rows.length === 0` — counting that reset as loading leaves
   // the spinner up and the error never shows.
-  const pvo = useSection<{ statKey: string; group: string; opponent: string; rows: PositionVsOpponentRow[] }>(
-    { statKey: '', group: '', opponent: '', rows: [] },
+  const pvo = useSection<{
+    statKey: string;
+    group: string;
+    opponent: string;
+    seasonStarted: boolean | null;
+    rows: PositionVsOpponentRow[];
+  }>(
+    { statKey: '', group: '', opponent: '', seasonStarted: null, rows: [] },
     opponent && stat && posGroup && pvoSeason != null
-      ? async () => ({
-          statKey: String(stat.key),
-          group: posGroup,
-          opponent,
-          rows: await fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
-        })
+      ? async () => {
+          const [rows, seasonStarted] = await Promise.all([
+            fetchPositionVsOpponent(sport, [pvoSeason, pvoSeason - 1], String(stat.key), posGroup, opponent),
+            fetchSeasonStarted(sport, pvoSeason).catch((err) => {
+              // The card still draws. Unknown means it does not auto-open
+              // last season; a failed probe must not hide the rows.
+              console.warn('[positionVsOpponent] season-started read failed', err);
+              return null;
+            }),
+          ]);
+          return {
+            statKey: String(stat.key),
+            group: posGroup,
+            opponent,
+            seasonStarted,
+            rows,
+          };
+        }
       : null,
     [sport, opponent, stat?.key, posGroup, pvoSeason, nonce],
   );
@@ -362,6 +381,7 @@ export function usePlayerDetail(args: {
             rows: pvoFresh ? pvo.data.rows : [],
             loading: pvo.loading || (pvo.error == null && !pvoFresh),
             error: pvo.error,
+            seasonStarted: pvoFresh ? pvo.data.seasonStarted : null,
             groupBasis,
             sport,
           }

@@ -869,6 +869,7 @@ export function PlayerStatsScreen() {
                 rows={detail.positionVsOpponent.rows}
                 loading={detail.positionVsOpponent.loading}
                 error={detail.positionVsOpponent.error}
+                seasonStarted={detail.positionVsOpponent.seasonStarted}
                 playerId={playerId ?? null}
                 statLabel={statLabel}
                 betLabel={modeLineLabel(selection.line, selection.side, mode)}

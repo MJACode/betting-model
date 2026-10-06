@@ -11,7 +11,9 @@
  * doubleheader games are numbered.
  */
 import {
+  emptySeasonMessage,
   footnoteText,
+  hasOtherPositionGames,
   nextSeasonChoice,
   playerSummaries,
   positionVsOpponent,
@@ -122,12 +124,22 @@ function choiceInput(over: Partial<SeasonChoiceInput>): SeasonChoiceInput {
     rows: [{ player_id: 'other', season: 2025 }],
     playerId: 'p1',
     seasonThis: 2026,
+    // The fixtures below that open on last are the season-not-started case.
+    seasonStarted: false,
     ...over,
   };
 }
 const opened = nextSeasonChoice(choiceInput({}));
-check('empty this season opens on last, once', opened.choice === 'last' && opened.decided,
-  `${opened.choice} decided=${opened.decided}`);
+check('season not started, and last season has games, opens on last once',
+  opened.choice === 'last' && opened.decided, `${opened.choice} decided=${opened.decided}`);
+const firstMeeting = nextSeasonChoice(choiceInput({ seasonStarted: true }));
+check('season started with no meeting yet stays on this season',
+  firstMeeting.choice === 'this' && firstMeeting.decided,
+  `${firstMeeting.choice} decided=${firstMeeting.decided}`);
+const unknown = nextSeasonChoice(choiceInput({ seasonStarted: null }));
+check('unknown season-started does not open last and does not decide',
+  unknown.choice === 'this' && unknown.decided === false,
+  `${unknown.choice} decided=${unknown.decided}`);
 const held = nextSeasonChoice(choiceInput({
   seenKey: opened.seenKey, decided: opened.decided, choice: opened.choice,
   rows: [{ player_id: 'other', season: 2025 }],
@@ -173,6 +185,36 @@ const autoThenOpponent = nextSeasonChoice(choiceInput({
 }));
 check('an auto choice re-decides when only the opponent changes',
   autoThenOpponent.choice === 'this' && autoThenOpponent.decided && autoThenOpponent.readerPicked === false);
+
+// An opponent absent from both seasons must not be told the gap is only
+// "this season yet". Rank and hit rate stay null, so the card draws no rank tile.
+const noneEver = emptySeasonMessage({
+  short: 'WR', opponent: 'SAMFORD', choice: 'this', seasonThis: 2026, hasAnySeason: false,
+});
+check('no rows in any season names both seasons',
+  noneEver === 'No WR games vs SAMFORD in our data, this season or last.'
+  && !/this season yet/.test(noneEver), noneEver);
+const firstMeetingCopy = emptySeasonMessage({
+  short: 'WR', opponent: 'ATL', choice: 'this', seasonThis: 2026, hasAnySeason: true,
+});
+check('a first meeting still says this season yet',
+  firstMeetingCopy === 'No WR games vs ATL this season yet.', firstMeetingCopy);
+const lastCopy = emptySeasonMessage({
+  short: 'WR', opponent: 'SAMFORD', choice: 'last', seasonThis: 2026, hasAnySeason: false,
+});
+check('last season names the year in our data',
+  lastCopy === 'No WR games vs SAMFORD in our 2025 data.', lastCopy);
+check('the page player alone is not a season of games',
+  hasOtherPositionGames([{ player_id: 'me' }], 'me') === false);
+check('another player is a season of games',
+  hasOtherPositionGames([{ player_id: 'other' }], 'me') === true);
+const emptyCard = positionVsOpponent([], {
+  opponent: 'SAMFORD', group: 'WR', season: 2026, excludePlayerId: 'me', line: 0.5, side: 'over',
+});
+check('no rows: no rank, no hit rate, no total',
+  emptyCard.total === 0 && emptyCard.hitRate == null
+  && emptyCard.rankMostAllowed == null && emptyCard.avgAllowed == null && emptyCard.teamsRanked == null,
+  `total=${emptyCard.total} rank=${emptyCard.rankMostAllowed} avg=${emptyCard.avgAllowed}`);
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
 process.exit(failed ? 1 : 0);

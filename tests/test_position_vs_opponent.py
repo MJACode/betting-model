@@ -336,15 +336,28 @@ def test_a_failed_position_read_is_said_not_hidden():
     assert "Couldn't load this player's position. Pull down to retry." in card
 
 
-def test_the_card_opens_on_last_season_when_this_one_is_empty():
+def test_the_card_opens_on_last_season_only_when_the_season_has_not_started():
+    """No games against THIS opponent is not 'the season has not started'.
+    The auto-open requires seasonStarted === false (no final game for the
+    sport). A first meeting stays on this season."""
     card = CARD.read_text(encoding="utf-8")
     ts = TS
-    assert "if (!hasThis && hasLast) choice = 'last';" in ts
+    assert "if (state.seasonStarted === false && !hasThis && hasLast) choice = 'last';" in ts
+    assert "if (!hasThis && hasLast) choice = 'last';" not in ts
+    hook = HOOK.read_text(encoding="utf-8")
+    queries = QUERIES.read_text(encoding="utf-8")
+    assert "fetchSeasonStarted(" in hook
+    assert ".not('home_win', 'is', null)" in queries
+    assert ".limit(1)" in queries.split("export async function fetchSeasonStarted")[1].split("export async function")[0]
     # The screen reuses this card for the next player. The once-only flag
     # lives in nextSeasonChoice, keyed on player + opponent, and a tap sets
     # readerPicked so that choice is not overwritten for the same player.
     assert "nextSeasonChoice(" in card
     assert "seasonSubjectKey(playerId, opponent)" in card
+    assert "seasonStarted," in card
     assert "readerPicked.current = true;" in card
     assert "picked.current" not in card
     assert "toLowerCase()" not in card
+    assert "emptySeasonMessage(" in card
+    assert "choice === 'this' && hasAnySeason" in card
+    assert "No ${opts.short} games vs ${opts.opponent} in our data, this season or last." in ts
