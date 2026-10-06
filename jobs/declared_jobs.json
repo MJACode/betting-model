@@ -849,5 +849,16 @@
     "args": {
       "sports": ["MLB"]
     }
+  },
+  {
+    "key": "player-positions-dry-run-2026-10-06",
+    "job_type": "player_positions",
+    "requested_by": "matt",
+    "note": "DRY RUN, writes nothing. Phase 3 of the position-vs-opponent card (Matt, 2026-10-05) needs positions for NBA, WNBA and NCAAF. ESPN core rosters and CFBD /roster both 403 from the dev sandbox, so their response shapes are unverified. This reports, per sport: teams/athletes listed, athletes parsed, the name-match rate to our nba_api ids (basketball) or the id-match rate to ncaaf_player_game_log (CFBD), the positions seen and a sample. Read worker_jobs.result, fix the parser if needed, then queue the real run (dry_run false).",
+    "args": {
+      "sports": ["NBA", "WNBA", "NCAAF"],
+      "season": 2026,
+      "dry_run": true
+    }
   }
 ]
