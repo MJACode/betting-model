@@ -39,7 +39,9 @@ export function TrendStrip({ title, trends, mode, unit, spokenUnit, seasonGames 
   };
   const note =
     mode === 'team'
-      ? [teamShortWindowNote(counts), teamSeasonNote(seasonGames, counts)].filter((s) => s != null).join(' ')
+      ? [teamShortWindowNote(counts, seasonGames), teamSeasonNote(seasonGames, counts)]
+          .filter((s) => s != null)
+          .join(' ')
       : null;
   return (
     <View style={styles.container}>

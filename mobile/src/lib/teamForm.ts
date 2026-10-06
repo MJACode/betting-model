@@ -52,15 +52,20 @@ export const TEAM_WINDOW_SIZE: Record<string, number> = {
  * One line under the strip when the fetch is shorter than a column.
  * The count used to sit in the cell, and at large text "4 games" ran into
  * the next column. Zero is a missing fetch, not "0 games". A full L25
- * already names every column.
+ * already names every column. When the window also reaches an earlier
+ * season, "so far" would sit next to "This season: N games" and contradict
+ * it, so that case says "available".
  */
-export function teamShortWindowNote(counts: {
-  l3: number;
-  l5: number;
-  l10: number;
-  l20: number;
-  l25: number;
-}): string | null {
+export function teamShortWindowNote(
+  counts: {
+    l3: number;
+    l5: number;
+    l10: number;
+    l20: number;
+    l25: number;
+  },
+  seasonGames?: number | null,
+): string | null {
   const n = Math.max(counts.l3, counts.l5, counts.l10, counts.l20, counts.l25);
   if (n <= 0 || n >= TEAM_WINDOW_SIZE.season) return null;
   const windows = [
@@ -76,7 +81,9 @@ export function teamShortWindowNote(counts: {
   const those = n === 1 ? 'that 1' : `those ${n}`;
   const span = first.label === 'L25' ? 'L25' : `${first.label}–L25`;
   const use = first.label === 'L25' ? 'uses' : 'all use';
-  return `Only ${n} ${gamesWord} so far. ${span} ${use} ${those}.`;
+  const crossSeason = seasonGames != null && counts.l25 > seasonGames;
+  const how = crossSeason ? 'available' : 'so far';
+  return `Only ${n} ${gamesWord} ${how}. ${span} ${use} ${those}.`;
 }
 
 /** How many of the fetched games belong to the pick's season. Null if we don't know the season. */

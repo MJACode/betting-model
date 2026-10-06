@@ -9,6 +9,7 @@ import {
   inPlayMovementLabel,
   LINE_HISTORY_PAGE,
   lineHistoryWindow,
+  nonLiveLockAfterStart,
   movementHeadline,
   movementHeadlineLabel,
   movementVerdict,
@@ -29,6 +30,12 @@ interface Props {
   commenceTime?: string | null;
   /** Live or over. The last pregame row is then the close, not the current number. */
   gameStarted?: boolean;
+  /**
+   * The game is final: settled scores, or a live Final that has a score.
+   * Missing, in progress, or ended without a score is not final. A live
+   * pick's last row is Latest until this is true.
+   */
+  gameFinal?: boolean;
 }
 
 interface Snap extends PricedSnapshot {
@@ -40,7 +47,13 @@ interface Snap extends PricedSnapshot {
  * the lock is the "don't bet this anymore" signal. Fetch is the deciding
  * book (`historyBookForPick`), never a hard-coded DraftKings series.
  */
-export function LineMovementCard({ pick, playerName, commenceTime, gameStarted = false }: Props) {
+export function LineMovementCard({
+  pick,
+  playerName,
+  commenceTime,
+  gameStarted = false,
+  gameFinal = false,
+}: Props) {
   const [snaps, setSnaps] = useState<Snap[] | null>(null);
   const [moveByAt, setMoveByAt] = useState<ReadonlySet<string>>(new Set());
 
@@ -57,9 +70,16 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
     [commenceTime, pick.created_at, pick.is_live],
   );
   // Capped series: the last row is the last pregame snapshot. A true live
-  // pick (is_live only) ends on Final, not Close.
+  // pick ends on Final only when the game is final, and Latest until then.
   const inPlay = pick.is_live === true;
   const atClose = gameStarted && historyWindow.until != null && !inPlay;
+  // Lock after the stored start: the close is earlier than the lock, so a
+  // colored verdict would run backwards. The table still ends on Close.
+  const lockAfterStart = nonLiveLockAfterStart({
+    commenceTime,
+    createdAt: pick.created_at,
+    isLive: pick.is_live,
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -131,10 +151,13 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
   const verdictLine = (line: number | null) =>
     formatHistoryLine(lineForSide(line, pick.pick_side, market), signLine);
   // A green "in your favor" on an in-play price read a loss as a win.
-  // Live picks get one neutral sentence. Pregame keeps the colored verdict.
+  // Live picks get one neutral sentence. A lock after the stored start
+  // gets no verdict. Other pregame picks keep the colored verdict.
   const verdict = inPlay
     ? { label: inPlayMovementLabel(), color: colors.textSecondary }
-    : {
+    : lockAfterStart
+      ? null
+      : {
         label: movementVerdict({
           kind: verdictKind,
           atClose,
@@ -189,7 +212,9 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
             atClose,
           )}
         </Text>
-        <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
+        {verdict ? (
+          <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
+        ) : null}
       </View>
 
       <View style={styles.tableHead}>
@@ -200,7 +225,8 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
       {recent.map((r, i) => {
         const timeLabel = historyTimeLabel(r.label, {
           atCloseLast: atClose && i === recent.length - 1,
-          atFinalLast: inPlay && i === recent.length - 1,
+          atFinalLast: inPlay && gameFinal && i === recent.length - 1,
+          atLatestLast: inPlay && !gameFinal && i === recent.length - 1,
           bounded: moveByAt.has(r.at),
         });
         return (
@@ -239,12 +265,12 @@ export function LineMovementCard({ pick, playerName, commenceTime, gameStarted =
             `It doesn't change the pick or how it settles.`
           : `Your pick was decided at ${book} ${formatHistoryAmerican(lockedPrice)}` +
             `${showLineCol && movement?.scoredLine != null ? ` (${formatHistoryLine(lineForSide(movement.scoredLine, pick.pick_side, market), signLine)})` : ''}. ` +
-            (atClose
+            (atClose && !lockAfterStart
               ? `The second number is the closing line, the last price before the game started. `
               : '') +
             (partial
               ? `This samples the line at ${book} ${atClose ? 'up to the close' : inPlay ? 'since your pick' : 'since the open'}, not every tick. It doesn't `
-              : `This just shows the line at ${book} ${atClose ? 'up to the close' : inPlay ? 'since your pick' : 'since the open'}${inPlay ? '' : ', for or against you'}. It doesn't `) +
+              : `This just shows the line at ${book} ${atClose ? 'up to the close' : inPlay ? 'since your pick' : 'since the open'}${inPlay || lockAfterStart ? '' : ', for or against you'}. It doesn't `) +
             `change the pick or how it settles.`}
       </Text>
     </View>

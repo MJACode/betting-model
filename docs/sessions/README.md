@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a live history row is Final only when the game is final, otherwise Latest. A lock after the stored start has no colored verdict. A cross-season short window says "available" |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a non-live cap is the later of commence_time and the lock, so a rewritten start does not drop the pick's own row. 3218758's +100 is the pregame close |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: a pick is live only when is_live is set. Late pregame history stops at the close. Live picks say "In-play prices since your pick" and end on Final. Short form-strip counts moved into the note |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, pick detail: history bounds follow the series timestamp text (Z, +00:00, -04:00, -05:00). Post-start rows cannot be labelled Close. created_at space form normalized. Prop UTC backfill left for Matt |

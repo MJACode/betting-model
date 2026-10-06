@@ -391,7 +391,8 @@ def test_close_label_and_footer_copy(tmp_path):
     script = PRELUDE + """
 import { historyTimeLabel, movementHeadline, movementVerdict, changesFooter } from './lineHistory.ts';
 eq(historyTimeLabel('3:10 PM', { atCloseLast: true, bounded: false }), 'Close', 'close row');
-eq(historyTimeLabel('8:21 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final', 'live end');
+eq(historyTimeLabel('8:21 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final', 'game final');
+eq(historyTimeLabel('8:21 PM', { atCloseLast: false, atLatestLast: true, bounded: false }), 'Latest', 'in progress');
 eq(historyTimeLabel('3:10 PM', { atCloseLast: false, bounded: true }), 'by 3:10 PM', 'upper bound');
 eq(historyTimeLabel('3:10 PM', { atCloseLast: false, bounded: false }), '3:10 PM', 'real time');
 eq(movementHeadline('+6', '+3', false), '+6 → +3', 'unstarted headline');
@@ -461,7 +462,14 @@ def test_the_card_uses_the_close_copy():
     assert "historyWindow, sideQuote)" in card
     assert "gameStarted && historyWindow.until != null && !inPlay" in card
     assert "inPlayMovementLabel()" in card
-    assert "atFinalLast: inPlay && i === recent.length - 1" in card
+    assert "atFinalLast: inPlay && gameFinal && i === recent.length - 1" in card
+    assert "atLatestLast: inPlay && !gameFinal && i === recent.length - 1" in card
+    assert "nonLiveLockAfterStart(" in card
+    assert "lockAfterStart" in card
+    assert "atClose && !lockAfterStart" in card
+    assert "inPlay || lockAfterStart" in card
+    screen = _read(SCREEN)
+    assert "gameFinal={gameStatus(game, liveState).kind === 'final'}" in screen
     assert "Changed at (ET)" in card
     assert "the line at ${book}" in card
     assert "formatHistoryAmerican(" in card
@@ -711,7 +719,7 @@ def test_a_late_pregame_pick_stops_at_the_close_and_a_live_pick_ends_on_final(tm
 import {
   sampleOpenToNow, lineHistoryWindow, historyTimeLabel, inPlayMovementLabel,
   collapseLineHistory, historyRowAccessibilityLabel, movementHeadlineLabel,
-  formatHistoryAmerican, formatHistoryLine,
+  formatHistoryAmerican, formatHistoryLine, nonLiveLockAfterStart,
 } from './lineHistory.ts';
 
 const KICK = '2026-10-06T00:00:00.000Z';
@@ -763,7 +771,25 @@ if (live.rows.some((r) => Date.parse(r.snapshot_at) < Date.parse(CREATED))) {
   throw new Error('live read started before the lock');
 }
 eq(historyTimeLabel('9:20 PM', { atCloseLast: false, atFinalLast: true, bounded: false }), 'Final', 'final row');
+eq(historyTimeLabel('9:20 PM', { atCloseLast: false, atLatestLast: true, bounded: false }), 'Latest', 'in progress row');
+eq(
+  historyRowAccessibilityLabel({
+    marker: 'Final', at: '2026-10-05T04:00:00.000Z', line: 4, price: -113, showLine: true, signedLine: true,
+  }),
+  'Final: line plus 4, price minus 113',
+  'final spoken',
+);
+eq(
+  historyRowAccessibilityLabel({
+    marker: 'Latest', at: '2026-10-05T04:00:00.000Z', line: 4, price: -113, showLine: true, signedLine: true,
+  }),
+  'Latest: line plus 4, price minus 113',
+  'latest spoken',
+);
 eq(inPlayMovementLabel(), 'In-play prices since your pick', 'neutral verdict');
+eq(nonLiveLockAfterStart({ commenceTime: KICK, createdAt: CREATED, isLive: false }), true, 'lock after the stored start');
+eq(nonLiveLockAfterStart({ commenceTime: KICK, createdAt: CREATED, isLive: true }), false, 'a live pick keeps its verdict sentence');
+eq(nonLiveLockAfterStart({ commenceTime: KICK, createdAt: '2026-10-05T23:00:00.000Z', isLive: false }), false, 'lock before the start');
 
 const span = collapseLineHistory([
   { at: '2026-10-05T00:21:00.000Z', line: 3.5, price: -112 },
@@ -870,6 +896,8 @@ eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }), null, 'a fu
 eq(teamShortWindowNote({ l3: 3, l5: 4, l10: 4, l20: 4, l25: 4 }), 'Only 4 games so far. L5–L25 all use those 4.', 'short window');
 eq(teamShortWindowNote({ l3: 1, l5: 1, l10: 1, l20: 1, l25: 1 }), 'Only 1 game so far. L3–L25 all use that 1.', 'one game');
 eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }), 'Only 20 games so far. L25 uses those 20.', 'only L25 is short');
+eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }, 20), 'Only 20 games so far. L25 uses those 20.', 'same season stays so far');
+eq(teamShortWindowNote({ l3: 3, l5: 5, l10: 10, l20: 20, l25: 20 }, 4), 'Only 20 games available. L25 uses those 20.', 'cross season says available');
 eq(
   teamSeasonNote(4, { l3: 3, l5: 5, l10: 10, l20: 20, l25: 25 }),
   'This season: 4 games. L5–L25 include earlier seasons.',

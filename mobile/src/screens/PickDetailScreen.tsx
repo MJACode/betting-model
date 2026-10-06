@@ -374,6 +374,7 @@ function PickDetailContent({ enriched }: { enriched: EnrichedPick }) {
           playerName={playerName}
           commenceTime={game?.commence_time || pick.game_time}
           gameStarted={gameHasStarted(game, liveState, pick.game_time)}
+          gameFinal={gameStatus(game, liveState).kind === 'final'}
         />
 
         {/* Where to place it, then every book and line — one section, action

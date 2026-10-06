@@ -222,15 +222,22 @@ export function movementVerdict(opts: {
 
 /**
  * Time cell. The last pregame row is the close once the game has started.
- * A true live pick ends on Final. A gap row the bisect did not pin is an
- * upper bound, so it says "by 8:21 PM" (or "by 10/4 8:21 PM"). ET is the
- * column header, not the cell.
+ * A live pick ends on Final only once the game is final. While it is still
+ * on, that row is Latest. A gap row the bisect did not pin is an upper
+ * bound, so it says "by 8:21 PM" (or "by 10/4 8:21 PM"). ET is the column
+ * header, not the cell.
  */
 export function historyTimeLabel(
   label: string,
-  opts: { atCloseLast: boolean; atFinalLast?: boolean; bounded: boolean },
+  opts: {
+    atCloseLast: boolean;
+    atFinalLast?: boolean;
+    atLatestLast?: boolean;
+    bounded: boolean;
+  },
 ): string {
   if (opts.atFinalLast) return 'Final';
+  if (opts.atLatestLast) return 'Latest';
   if (opts.atCloseLast) return 'Close';
   if (opts.bounded) return `by ${label}`;
   return label;
@@ -243,7 +250,7 @@ export function inPlayMovementLabel(): string {
 
 function speakMagnitude(n: number, signed: boolean): string {
   const abs = Math.abs(n);
-  const body = Number.isInteger(abs) ? String(abs) : String(abs);
+  const body = String(abs);
   if (n < 0) return `minus ${body}`;
   if (n > 0 && signed) return `plus ${body}`;
   return body;
@@ -258,9 +265,9 @@ export function historySpokenWhen(at: string, seconds = false): string {
 }
 
 /**
- * One VoiceOver label for a history row. Close and Final name the row.
- * A pinned minute says when it changed. A "by" cell is an upper bound.
- * A line is "plus" or "minus" only when the cell shows a sign.
+ * One VoiceOver label for a history row. Close, Final and Latest name
+ * the row. A pinned minute says when it changed. A "by" cell is an upper
+ * bound. A line is "plus" or "minus" only when the cell shows a sign.
  */
 export function historyRowAccessibilityLabel(opts: {
   marker: string;
@@ -273,7 +280,7 @@ export function historyRowAccessibilityLabel(opts: {
   const seconds = /\d:\d{2}:\d{2}/.test(opts.marker);
   const spoken = historySpokenWhen(opts.at, seconds);
   const when =
-    opts.marker === 'Close' || opts.marker === 'Final'
+    opts.marker === 'Close' || opts.marker === 'Final' || opts.marker === 'Latest'
       ? opts.marker
       : opts.marker.startsWith('by ')
         ? `No later than ${spoken}`
@@ -319,7 +326,7 @@ export function formatHistoryLine(line: number | null | undefined, explicitSign:
   if (line == null || Number.isNaN(Number(line))) return '—';
   const n = Number(line);
   const abs = Math.abs(n);
-  const body = Number.isInteger(abs) ? String(abs) : String(abs);
+  const body = String(abs);
   if (n < 0) return `\u2212${body}`;
   if (n > 0 && explicitSign) return `+${body}`;
   return body;
@@ -508,6 +515,27 @@ export function lineHistoryWindow(input: {
   // which is still a cap, not an inverted [lock, commence] window.
   if (!created || Number.isNaN(locked) || locked <= kick) return { until: start };
   return { until: created };
+}
+
+/**
+ * Non-live, and the lock is after the stored start. The series still ends
+ * on the close, but that close is earlier than the lock, so a green or red
+ * verdict would read the move backwards. Caller suppresses the verdict.
+ */
+export function nonLiveLockAfterStart(input: {
+  commenceTime: string | null | undefined;
+  createdAt: string | null | undefined;
+  isLive?: boolean | null;
+}): boolean {
+  if (input.isLive === true) return false;
+  const startRaw = input.commenceTime ?? '';
+  const start = startRaw ? normalizeTimestamp(startRaw) : null;
+  const kick = start ? Date.parse(start) : Number.NaN;
+  if (!start || Number.isNaN(kick)) return false;
+  const createdRaw = input.createdAt ?? '';
+  const created = createdRaw ? normalizeTimestamp(createdRaw) : null;
+  const locked = created ? Date.parse(created) : Number.NaN;
+  return Number.isFinite(locked) && locked > kick;
 }
 
 /**
