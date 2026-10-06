@@ -36,6 +36,8 @@ import {
   teamStatValue,
   teamStatAfterOffer,
   teamStatColumnWidth,
+  teamStatHeaderLines,
+  teamStatHeaderText,
   teamStatsForBoard,
   teamStatsForSport,
   teamStatsShown,
@@ -179,7 +181,7 @@ eq('value on the lo cut is bottom third', tierFor(3, cuts, 'high'), 'bad');
 }
 
 // ── formatting ────────────────────────────────────────────────────────────
-eq('null formats as a dash', formatTeamStat(null, 'dec2'), '—');
+eq('null formats as a dash', formatTeamStat(null, 'fixed2'), '—');
 eq('pct3 renders a rate as a percentage', formatTeamStat(0.5432, 'pct3'), '54.3%');
 eq('int rounds', formatTeamStat(103.6, 'int'), '104');
 eq('dec3 keeps three places', formatTeamStat(0.1234, 'dec3'), '0.123');
@@ -265,16 +267,18 @@ for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   eq('MLB tab is unchanged', teamGroupLabel('Efficiency', 'MLB'), 'Efficiency');
 
   const MINUS = '\u2212';
-  eq('positive points-added has no plus', formatTeamStat(0.21, 'sdec2'), '0.21');
-  eq('negative points-added uses a true minus', formatTeamStat(-0.08, 'sdec2'), `${MINUS}0.08`);
-  eq('rounds before the sign, positive side', formatTeamStat(0.004, 'sdec2'), '0.00');
-  eq('rounds before the sign, negative side', formatTeamStat(-0.004, 'sdec2'), '0.00');
-  eq('a real hundredth still signs', formatTeamStat(-0.005, 'sdec2'), `${MINUS}0.01`);
-  eq('null is a dash, not zero', formatTeamStat(null, 'sdec2'), '—');
+  eq('positive points-added has no plus', formatTeamStat(0.21, 'dec2'), '0.21');
+  eq('negative points-added uses a true minus', formatTeamStat(-0.08, 'dec2'), `${MINUS}0.08`);
+  eq('rounds before the sign, positive side', formatTeamStat(0.004, 'dec2'), '0.00');
+  eq('rounds before the sign, negative side', formatTeamStat(-0.004, 'dec2'), '0.00');
+  eq('a real hundredth still signs', formatTeamStat(-0.005, 'dec2'), `${MINUS}0.01`);
+  eq('null is a dash, not zero', formatTeamStat(null, 'dec2'), '—');
+  eq('counting stats keep an ASCII hyphen', formatTeamStat(-1.5, 'fixed2'), '-1.50');
+  eq('counting stats can print a tiny ASCII minus zero', formatTeamStat(-0.004, 'fixed2'), '-0.00');
   eq('success rate 0.467 prints 46.7%', formatTeamStat(0.467, 'pct3'), '46.7%');
-  eq('spoken positive has no plus', spokenTeamStat(0.21, 'sdec2'), '0.21');
-  eq('spoken minus', spokenTeamStat(-0.08, 'sdec2'), 'minus 0.08');
-  eq('spoken zero has no sign word', spokenTeamStat(0.004, 'sdec2'), '0.00');
+  eq('spoken positive has no plus', spokenTeamStat(0.21, 'dec2'), '0.21');
+  eq('spoken minus', spokenTeamStat(-0.08, 'dec2'), 'minus 0.08');
+  eq('spoken zero has no sign word', spokenTeamStat(0.004, 'dec2'), '0.00');
   eq('spoken percent', spokenTeamStat(0.467, 'pct3'), '46.7 percent');
   eq('board VoiceOver, offense',
     boardValueSpeech(epaOff, 0.21, 1),
@@ -314,16 +318,30 @@ for (const s of TEAM_STAT_CATALOG.filter((x) => x.group === 'Betting')) {
   eq('stat column is 72pt at normal type', teamStatColumnWidth(1), 72);
   eq('stat column does not shrink below 72', teamStatColumnWidth(0.85), 72);
   eq('stat column grows with the font scale', teamStatColumnWidth(1.3), Math.round(72 * 1.3));
-  eq('stat column stops growing at 1.6', teamStatColumnWidth(2), Math.round(72 * 1.6));
-  eq('stat column stops growing past the cap', teamStatColumnWidth(3), Math.round(72 * 1.6));
+  eq('stat column stops growing at 1.8', teamStatColumnWidth(2), Math.round(72 * 1.8));
+  eq('stat column stops growing past the cap', teamStatColumnWidth(3), Math.round(72 * 1.8));
+  eq('large type breaks the header after the slash', teamStatHeaderText('Pts added/play', 1.3), 'PTS ADDED/\u200BPLAY');
+  eq('any other slash header breaks the same way', teamStatHeaderText('Yards/Play', 2), 'YARDS/\u200BPLAY');
+  eq('a header with no slash is unchanged at large type', teamStatHeaderText('Successful plays', 2), 'SUCCESSFUL PLAYS');
+  eq('below 1.3 the slash stays intact', teamStatHeaderText('Pts added/play', 1.29), 'PTS ADDED/PLAY');
+  eq('header allows three lines at large type', teamStatHeaderLines(1.3), 3);
+  eq('header stays on two lines below 1.3', teamStatHeaderLines(1.29), 2);
+  check('the spoken name has no zero-width space',
+    !(epaOff.spoken ?? '').includes('\u200B')
+    && !(epaOff.header ?? '').includes('\u200B')
+    && !teamStatHeaderText('Pts added/play', 1).includes('\u200B'));
 
   const boardSrc = readFileSync(join(import.meta.dirname, '..', 'src/components/TeamsBoard.tsx'), 'utf-8');
   check('chips read the spoken name, not the short label',
     /accessibilityLabel=\{s\.spoken \?\? s\.label\}/.test(boardSrc));
-  check('the column header reads the spoken name and still wraps to two lines',
+  check('the column header reads the spoken name, wraps, and still shrinks',
     /accessibilityLabel=\{stat\.spoken \?\? stat\.header \?\? stat\.label\}/.test(boardSrc)
-    && /numberOfLines=\{2\}/.test(boardSrc)
-    && /width: valW/.test(boardSrc));
+    && /numberOfLines=\{teamStatHeaderLines\(fontScale\)\}/.test(boardSrc)
+    && /teamStatHeaderText\(stat\.header \?\? stat\.label, fontScale\)/.test(boardSrc)
+    && /adjustsFontSizeToFit/.test(boardSrc)
+    && /minimumFontScale=\{0\.75\}/.test(boardSrc)
+    && /width: valW/.test(boardSrc)
+    && !/accessibilityLabel=\{teamStatHeaderText/.test(boardSrc));
   check('the value column uses the same width', /width: columnWidth/.test(boardSrc));
   check('only the Teams board asks the group tab to wrap',
     /wrap=\{sport === 'NFL' \|\| sport === 'NCAAF'\}/.test(boardSrc));

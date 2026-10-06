@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, Teams header at 2×: column cap 1.8, a zero-width space after the slash at font scale 1.3, three lines. Points-added formatter renamed to dec2 / formatDec2 (two decimals, minus only). The old toFixed path is fixed2. Sheet copy unchanged |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, designer render findings: Teams column grows with the font scale, only the Teams group tab wraps, chips and matchup rows speak the full name, game count uses a non-breaking space. Sheet copy unchanged |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, points added prints with no plus (true minus only when negative); team-page VoiceOver says "ranks 1st of 32"; NFL matchup box stops before the pick's game date. The two sheet sentences still need Matt's sign-off |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, reviewer copy on #887: points-added sheet compares by rank, successful plays use the 50/70/100 definition, a failed Teams load keeps the selected stat, NCAAF toughness prints signed two decimals. Matt still has to sign off the two sentences |

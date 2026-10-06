@@ -241,7 +241,7 @@ export function playCellSpeech(
   value: number | null,
   rank: number | null,
 ): string {
-  const format: TeamStatFormat = kind === 'points-added' ? 'sdec2' : 'pct3';
+  const format: TeamStatFormat = kind === 'points-added' ? 'dec2' : 'pct3';
   const what = kind === 'points-added'
     ? (side === 'offense' ? 'points added per play' : 'points added per play allowed')
     : (side === 'offense' ? 'successful plays' : 'successful plays allowed');
@@ -274,7 +274,7 @@ const BOX_SPECS: {
   off: keyof TeamRates; def: keyof TeamRates; format: TeamStatFormat;
 }[] = [
   { key: 'pts', label: 'Points / game', spoken: 'Points per game', off: 'pointsFor', def: 'pointsAgainst', format: 'dec1' },
-  { key: 'ypp', label: 'Yards / play', spoken: 'Yards per play', off: 'yardsPerPlay', def: 'yardsPerPlayAllowed', format: 'dec2' },
+  { key: 'ypp', label: 'Yards / play', spoken: 'Yards per play', off: 'yardsPerPlay', def: 'yardsPerPlayAllowed', format: 'fixed2' },
   { key: 'pass', label: 'Pass yds / game', spoken: 'Passing yards per game', off: 'passYds', def: 'passYdsAllowed', format: 'dec1' },
   { key: 'rush', label: 'Rush yds / game', spoken: 'Rushing yards per game', off: 'rushYds', def: 'rushYdsAllowed', format: 'dec1' },
 ];
@@ -348,7 +348,7 @@ function playRow(
 ): MatchupRow {
   const offKey = kind === 'points-added' ? 'epa_off' : 'success_off';
   const defKey = kind === 'points-added' ? 'epa_def' : 'success_def';
-  const format: TeamStatFormat = kind === 'points-added' ? 'sdec2' : 'pct3';
+  const format: TeamStatFormat = kind === 'points-added' ? 'dec2' : 'pct3';
   const explain = kind === 'points-added' ? EXPLAIN_PTS_ADDED : EXPLAIN_SUCCESS;
   const offCol = boardColumn(rows, offKey);
   const defCol = boardColumn(rows, defKey);

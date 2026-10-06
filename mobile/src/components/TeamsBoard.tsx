@@ -73,6 +73,8 @@ import {
   teamStatValue,
   teamStatAfterOffer,
   teamStatColumnWidth,
+  teamStatHeaderLines,
+  teamStatHeaderText,
   teamStatsForBoard,
   teamStatsForSport,
   teamStatsShown,
@@ -444,12 +446,12 @@ export function TeamsBoard({
           </Text>
           <Text
             style={[styles.colHeaderRight, { width: valW }]}
-            numberOfLines={2}
+            numberOfLines={teamStatHeaderLines(fontScale)}
             adjustsFontSizeToFit
             minimumFontScale={0.75}
             accessibilityLabel={stat.spoken ?? stat.header ?? stat.label}
           >
-            {(stat.header ?? stat.label).toUpperCase()}
+            {teamStatHeaderText(stat.header ?? stat.label, fontScale)}
           </Text>
           {showLines ? (
             <Text style={[styles.colHeaderRight, styles.colHeaderLine]} numberOfLines={1}>
