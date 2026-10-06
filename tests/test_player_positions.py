@@ -19,10 +19,16 @@ import pytest
 
 from data.ingestors.player_positions_ingestor import (
     FOOTBALL_GROUP,
+    EspnClient,
     basketball_group,
+    coverage_from_games,
+    ingest_player_positions,
     match_to_log,
+    ncaaf_season_or_derived,
+    normalize_team,
     parse_athlete,
     parse_cfbd_roster,
+    roster_url,
 )
 from data.ingestors.wnba_results_ingestor import norm_player_name
 
@@ -124,21 +130,439 @@ def test_the_ingestor_does_no_ddl_at_write_time():
     assert not re.search(r"\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|POLICY)", src)
 
 
-def test_the_job_defaults_to_a_dry_run_and_rejects_unknown_sports():
+def test_the_job_defaults_to_a_dry_run_and_one_sport():
     from tracking.job_queue import JOBS
 
     _, validate = JOBS["player_positions"]
     assert validate({})["dry_run"] is True
     assert validate({"dry_run": False})["dry_run"] is False
-    assert validate({})["sports"] == ["NBA", "WNBA", "NCAAF"]
+    # One sport per job. Omitting the list is NBA, not every league.
+    assert validate({})["sports"] == ["NBA"]
+    assert validate({"sport": "wnba"})["sports"] == ["WNBA"]
+    assert validate({"sports": ["NCAAF"]})["sports"] == ["NCAAF"]
+    with pytest.raises(ValueError):
+        validate({"sports": ["NBA", "WNBA"]})
     with pytest.raises(ValueError):
         validate({"sports": ["MLB"]})
     with pytest.raises(ValueError):
         validate({"dry_run": "no"})
 
 
-def test_the_first_run_declared_for_the_worker_is_a_dry_run():
+def test_every_declared_player_positions_job_is_a_dry_run():
     jobs = json.loads((ROOT / "jobs/declared_jobs.json").read_text(encoding="utf-8"))
     ours = [j for j in jobs if j["job_type"] == "player_positions"]
-    assert ours, "declare the dry run so the worker runs it"
-    assert all(j["args"].get("dry_run") is True for j in ours[:1])
+    assert len(ours) >= 1
+    for job in ours:
+        assert job["args"].get("dry_run") is True, job["key"]
+        assert job["args"].get("sports") and len(job["args"]["sports"]) == 1, job["key"]
+
+
+# ── review fixes: burst, match, coverage, isolation ──────────────────────────
+
+class _Resp:
+    def __init__(self, status, body=None, headers=None):
+        self.status_code = status
+        self._body = {} if body is None else body
+        self.headers = headers or {}
+
+    def json(self):
+        return self._body
+
+
+def _transport(docs, statuses=None):
+    """docs: url → body. statuses: url → HTTP status (default 200)."""
+    calls = []
+    sleeps = []
+    statuses = statuses or {}
+
+    def get(url, headers=None, timeout=None):
+        calls.append(url)
+        status = statuses.get(url, 200)
+        return _Resp(status, docs.get(url), headers=statuses.get(url + "#h"))
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+
+    return get, sleep, calls, sleeps
+
+
+def _client(docs, statuses=None, **kw):
+    get, sleep, calls, sleeps = _transport(docs, statuses)
+    # Retry-After lives on the response headers, keyed separately.
+    headers = kw.pop("headers", {})
+
+    def get_with_headers(url, headers=None, timeout=None):
+        calls.append(url)
+        status = (statuses or {}).get(url, 200)
+        return _Resp(status, docs.get(url), headers=headers_for(url))
+
+    def headers_for(url):
+        return headers.get(url, {})
+
+    client = EspnClient(cold=True, pause=0, get=get_with_headers, sleep=sleep,
+                        docs=kw.get("cached"), cap=kw.get("cap", 50))
+    return client, calls, sleeps
+
+
+def test_position_ref_is_fetched_once_per_distinct_url():
+    """Two athletes, one position document. The $ref is a single HTTP call."""
+    pos = "https://sports.core.api.espn.com/v2/positions/5"
+    a1 = "https://sports.core.api.espn.com/v2/athletes/1"
+    a2 = "https://sports.core.api.espn.com/v2/athletes/2"
+    docs = {
+        a1: {"id": "1", "displayName": "A", "position": {"$ref": pos}},
+        a2: {"id": "2", "displayName": "B", "position": {"$ref": pos}},
+        pos: {"abbreviation": "PG"},
+    }
+    client, calls, _ = _client(docs)
+    from data.ingestors.player_positions_ingestor import resolve_person
+    first, fetched = resolve_person({"$ref": a1}, client)
+    second, _ = resolve_person({"$ref": a2}, client)
+    assert fetched is True
+    assert first["position"] == "PG" and second["position"] == "PG"
+    assert calls.count(pos) == 1
+    assert calls.count(a1) == 1 and calls.count(a2) == 1
+
+
+def test_inline_roster_position_does_not_fetch_the_athlete():
+    """A roster item that already carries the position is not a second GET.
+    A shared position $ref is still one call, not one per athlete."""
+    pos = "https://sports.core.api.espn.com/v2/positions/7"
+    docs = {pos: {"abbreviation": "C"}}
+    client, calls, _ = _client(docs)
+    from data.ingestors.player_positions_ingestor import resolve_person
+    roster = [
+        {"id": "10", "displayName": "One", "position": {"$ref": pos}},
+        {"id": "11", "displayName": "Two", "position": {"abbreviation": "PF"}},
+    ]
+    people = [resolve_person(item, client) for item in roster]
+    assert [p[0]["position"] for p in people] == ["C", "PF"]
+    assert all(fetched is False for _, fetched in people)
+    assert calls == [pos]
+
+
+def test_roster_url_uses_the_team_doc_link_not_the_path_that_404d():
+    """worker_jobs 405765: /teams/{id}/athletes 404'd for every team."""
+    bare = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams/1/athletes?limit=200"
+    ref = "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2026/teams/1/athletes"
+    url, via = roster_url({"athletes": {"$ref": ref}}, "nba", "1", 2026)
+    assert via == "team_ref"
+    assert url.startswith("https://")
+    assert "limit=200" in url
+    assert url != bare
+    assert "/teams/1/athletes?limit=200" not in url or "/seasons/" in url
+    fallback, via2 = roster_url({}, "nba", "1", 2026)
+    assert via2 == "season_path"
+    assert "/seasons/2026/teams/1/athletes" in fallback
+    assert fallback != bare
+    bumped, _ = roster_url(
+        {"athletes": {"$ref": "https://x/athletes?limit=25"}}, "nba", "1", 2026)
+    assert "limit=200" in bumped and "limit=25" not in bumped
+
+
+def test_request_cap_stops_the_sport_with_a_warning():
+    docs = {}
+    client, calls, _ = _client(docs, cap=2)
+    # Three distinct URLs. The third must not leave the machine.
+    client.get_json("https://example.test/a")
+    client.get_json("https://example.test/b")
+    client.get_json("https://example.test/c")
+    assert calls == ["https://example.test/a", "https://example.test/b"]
+    assert client.aborted_reason is not None
+    assert "cap" in client.aborted_reason
+    assert client.calls == 2
+
+
+def test_three_consecutive_403s_stop_the_sport():
+    seen = []
+
+    def get(url, headers=None, timeout=None):
+        seen.append(url)
+        return _Resp(403, {})
+
+    client = EspnClient(cold=True, pause=0, cap=20, get=get, sleep=lambda s: None)
+    for i in range(5):
+        client.get_json(f"https://example.test/{i}")
+    assert len(seen) == 3
+    assert client.aborted_reason is not None
+    assert "403" in client.aborted_reason
+
+
+def test_429_backs_off_on_retry_after_then_continues():
+    url = "https://example.test/roster"
+    n = {"n": 0}
+
+    def get(url, headers=None, timeout=None):
+        n["n"] += 1
+        if n["n"] == 1:
+            return _Resp(429, {}, headers={"Retry-After": "5"})
+        return _Resp(200, {"items": []})
+
+    slept = []
+    client = EspnClient(cold=True, pause=0, cap=10, get=get, sleep=slept.append)
+    body = client.get_json(url)
+    assert body == {"items": []}
+    assert 5 in slept or 5.0 in slept
+    assert client.aborted_reason is None
+    assert client.consecutive_block == 0
+
+
+def test_team_codes_normalize_to_the_log():
+    assert normalize_team("NBA", "GS") == "GSW"
+    assert normalize_team("NBA", "NO") == "NOP"
+    assert normalize_team("NBA", "NY") == "NYK"
+    assert normalize_team("NBA", "SA") == "SAS"
+    assert normalize_team("NBA", "UTAH") == "UTA"
+    assert normalize_team("NBA", "WSH") == "WAS"
+    assert normalize_team("WNBA", "CONN") == "CON"
+    assert normalize_team("WNBA", "GS") == "GSV"
+    assert normalize_team("WNBA", "WSH") == "WAS"
+    assert normalize_team("WNBA", "LVA") == "LV"
+    assert normalize_team("WNBA", "NYL") == "NY"
+    assert normalize_team("WNBA", "COOP") == "COOP"
+    assert normalize_team("WNBA", "SPO") == "SPO"
+    # Tiebreak uses the normalised code, so ESPN "GS" hits the log's GSW.
+    index = {norm_player_name("Stephen Curry"): [("201939", "GSW")]}
+    assert match_to_log("Stephen Curry", "GS", index, sport="NBA") == "201939"
+    wnba = {norm_player_name("A'ja Wilson"): [("162", "LV", ["LV", "SPO"])]}
+    assert match_to_log("A'ja Wilson", "LVA", wnba, sport="WNBA") == "162"
+
+
+def test_a_unique_name_on_the_wrong_team_is_not_a_match():
+    """A rookie with no log row must not inherit the only veteran of that name."""
+    index = {norm_player_name("John Smith"): [("999", "LAL")]}
+    assert match_to_log("John Smith", "BOS", index) is None
+    assert match_to_log("John Smith", "LAL", index) == "999"
+    # No ESPN team: nothing to conflict with. The Jokic case stays a match.
+    assert match_to_log("John Smith", None, index) == "999"
+
+
+def test_coverage_is_player_count_and_games_weighted():
+    games = {"a": 10, "b": 5, "c": 3, "d": 2}
+    cov = coverage_from_games(games, ["a", "b"])
+    assert cov["log_players"] == 4
+    assert cov["log_games"] == 20
+    assert cov["players_with_position"] == 2
+    assert cov["games_with_position"] == 15
+    assert cov["player_coverage"] == 0.5
+    assert cov["games_coverage"] == 0.75
+    assert coverage_from_games({}, [])["player_coverage"] is None
+
+
+def test_ncaaf_season_is_derived_and_not_only_the_calendar_year():
+    assert ncaaf_season_or_derived(2024) == 2024
+    assert ncaaf_season_or_derived(None, "2026-10-06") == 2026
+    # January bowls belong to the prior fall, not datetime.now().year.
+    assert ncaaf_season_or_derived(None, "2027-01-15") == 2026
+
+
+class _Conn:
+    """Enough of DBConnection to prove a failed sport does not poison the next."""
+
+    def __init__(self, fail_sql):
+        self.fail_sql = fail_sql
+        self.aborted = False
+        self.rollbacks = 0
+        self.commits = 0
+        self.queries = []
+
+    def execute(self, sql, params=None):
+        if self.aborted:
+            raise RuntimeError("current transaction is aborted")
+        self.queries.append(sql)
+        if self.fail_sql in sql:
+            self.aborted = True
+            raise RuntimeError("relation blew up")
+        return _Rows([])
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.aborted = False
+        self.rollbacks += 1
+
+    def close(self):
+        pass
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+def test_one_sports_sql_error_does_not_abort_the_next(monkeypatch):
+    # "nba_player_game_log" is a substring of "wnba_player_game_log".
+    conn = _Conn(fail_sql="FROM nba_player_game_log")
+    calls = []
+
+    def factory(sport):
+        calls.append(sport)
+
+        class C:
+            aborted_reason = None
+            calls = 0
+            cache_hits = 0
+            mem = {}
+            fetched = set()
+
+            def get_json(self, url):
+                return {"items": []}
+
+        return C()
+
+    summary = ingest_player_positions(
+        sports=["NBA", "WNBA"], dry_run=True, conn=conn,
+        client_factory=factory, cache_path=None)
+    assert "error" in summary["NBA"]
+    assert "error" not in summary["WNBA"]
+    assert summary["WNBA"]["teams"] == 0
+    assert conn.rollbacks == 1
+    assert any("wnba_player_game_log" in q for q in conn.queries)
+
+
+def test_basketball_dry_run_reports_coverage_duplicates_and_cache(tmp_path):
+    """Inline roster, two athletes, one log player. Coverage and duplicate_ids
+    land on the summary, and the HTTP cache is what a later run reads."""
+    from data.ingestors.player_positions_ingestor import _basketball
+
+    pos = "https://sports.core.api.espn.com/positions/pg"
+    team_ref = "https://sports.core.api.espn.com/teams/1"
+    roster_ref = "https://sports.core.api.espn.com/seasons/2026/teams/1/athletes?limit=200"
+    teams_url = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams?limit=50"
+    docs = {
+        teams_url: {"items": [{"$ref": team_ref}]},
+        team_ref: {"id": "1", "abbreviation": "GS",
+                   "athletes": {"$ref": roster_ref}},
+        roster_ref: {"items": [
+            {"id": "10", "displayName": "Stephen Curry",
+             "position": {"$ref": pos}},
+            {"id": "11", "displayName": "Stephen Curry",
+             "position": {"abbreviation": "PG"}},
+            {"id": "12", "displayName": "Nobody Rookie",
+             "position": {"abbreviation": "C"}},
+        ]},
+        pos: {"abbreviation": "PG"},
+    }
+    client, calls, _ = _client(docs, cap=20)
+    log_rows = [("201939", "Stephen Curry", "GSW", 70, ["GSW"])]
+
+    class Conn:
+        def execute(self, sql, params=None):
+            if "nba_player_game_log" in sql:
+                return _Rows(log_rows)
+            return _Rows([])
+
+        def commit(self):
+            raise AssertionError("dry run must not commit")
+
+        def rollback(self):
+            pass
+
+    cache = tmp_path / "cache.json"
+    stats = _basketball(Conn(), "NBA", True, season=2026, client=client,
+                        cache_path=cache)
+    assert stats["matched"] == 1
+    assert stats["duplicate_ids"] == 1
+    assert stats["unmatched"] == 1
+    assert stats["athletes_fetched"] == 0
+    assert stats["coverage"]["log_players"] == 1
+    assert stats["coverage"]["log_games"] == 70
+    assert stats["coverage"]["players_with_position"] == 1
+    assert stats["coverage"]["games_coverage"] == 1.0
+    assert stats["sample"][0]["team"] == "GSW"
+    assert stats["written"] == 0
+    assert calls.count(pos) == 1
+    assert not any(u.endswith("/teams/1/athletes?limit=200") and "/seasons/" not in u
+                   for u in calls)
+    assert cache.exists()
+    saved = json.loads(cache.read_text(encoding="utf-8"))
+    assert pos in saved["docs"]
+    assert "12" in saved["unmatched"]["NBA"]
+
+
+def test_ncaaf_maps_the_requested_season_and_the_one_before(monkeypatch):
+    from data.ingestors import cfbd_ingestor
+
+    def fake_get(path, **params):
+        year = params["year"]
+        if year == 2025:
+            return [{"id": 7, "firstName": "Old", "lastName": "Hand",
+                     "team": "Alabama", "position": "wr"}]
+        if year == 2026:
+            return [{"id": 7, "firstName": "Old", "lastName": "Hand",
+                     "team": "Alabama", "position": "rb"},
+                    {"id": 8, "firstName": "New", "lastName": "Kid",
+                     "team": "Alabama", "position": "qb"}]
+        raise AssertionError(year)
+
+    monkeypatch.setattr(cfbd_ingestor, "_get", fake_get)
+
+    class Conn:
+        def execute(self, sql, params=None):
+            assert "ncaaf_player_game_log" in sql
+            assert 2025 in params[0] and 2026 in params[0]
+            return _Rows([("7", 12), ("9", 4)])
+
+        def commit(self):
+            raise AssertionError("dry run")
+
+    from data.ingestors.player_positions_ingestor import _ncaaf
+    stats = _ncaaf(Conn(), 2026, True)
+    assert stats["seasons"] == [2025, 2026]
+    assert stats["matched"] == 1
+    assert stats["coverage"]["log_players"] == 2
+    assert stats["coverage"]["log_games"] == 16
+    assert stats["coverage"]["players_with_position"] == 1
+    assert stats["coverage"]["games_with_position"] == 12
+    # 2026's position wins over 2025's for the same athlete.
+    assert stats["sample"][0]["position"] == "RB"
+
+
+def test_a_real_run_stores_unmatched_athletes_for_the_seven_day_skip():
+    """An athlete with no log row is still a row, so the next pass skips him."""
+    from data.ingestors.player_positions_ingestor import _basketball
+
+    inserts = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            if sql.lstrip().upper().startswith("INSERT"):
+                inserts.append(params)
+            if "nba_player_game_log" in sql:
+                return _Rows([("201939", "Stephen Curry", "GSW", 10, ["GSW"])])
+            if "player_positions" in sql and "SELECT" in sql.upper():
+                return _Rows([])
+            return _Rows([])
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            pass
+
+    client, _, _ = _client({
+        "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams?limit=50":
+            {"items": [{"$ref": "https://sports.core.api.espn.com/teams/1"}]},
+        "https://sports.core.api.espn.com/teams/1": {
+            "id": "1", "abbreviation": "BOS",
+            "athletes": {"$ref": "https://sports.core.api.espn.com/roster?limit=200"},
+        },
+        "https://sports.core.api.espn.com/roster?limit=200": {"items": [
+            {"id": "55", "displayName": "Rookie Nobody",
+             "position": {"abbreviation": "SG"}},
+        ]},
+    }, cap=10)
+    conn = Conn()
+    stats = _basketball(conn, "NBA", False, season=2026, client=client,
+                        cache_path=None)
+    assert stats["unmatched"] == 1
+    assert stats["written"] == 1
+    assert conn.committed
+    row = inserts[0]
+    assert row[1].startswith("unmatched:")
+    assert row[6] == "espn_core_unmatched"
+    assert row[7] == "55"
