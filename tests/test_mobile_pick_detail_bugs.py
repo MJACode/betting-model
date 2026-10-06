@@ -85,6 +85,15 @@ def test_odds_history_is_not_an_oldest_first_page():
     assert region.count("sampleOpenToNow") >= 2, "game lines and props both sample open-to-now"
     assert ".eq('bookmaker', bookmaker)" in region
     assert "'draftkings'" not in region
+    # The player-page tripwire matches only up to the function's first
+    # unindented close, so the relation literal has to sit inside it.
+    for fn, rel in (
+        ("fetchOddsHistory", "odds"),
+        ("fetchPropOddsHistory", "player_prop_odds"),
+    ):
+        body = re.search(rf"export async function {fn}\(.*?\n\}}\n", region, re.S)
+        assert body, fn
+        assert f".from('{rel}')" in body.group(0)
     assert not re.search(
         r"order\('snapshot_at', \{ ascending: true \}\)\s*\.limit\(50\)",
         region,
