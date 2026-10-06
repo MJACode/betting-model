@@ -8,7 +8,10 @@ neutral site (Army/Navy, Kansas/Arizona State, Virginia/West Virginia).
 These tests use those rows. They do not touch the database.
 """
 
+import inspect
+import re
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -114,7 +117,12 @@ def test_late_kickoff_reuses_the_utc_row_both_ingestors_share(commence, monkeypa
     )
     assert rows[0]["game_id"] == MEMPHIS_UTC
     assert games[0]["game_id"] == MEMPHIS_UTC
+    assert games[0]["home_team"] == "UNLV"
+    assert games[0]["away_team"] == "Memphis"
     assert {o["game_id"] for o in odds} == {MEMPHIS_UTC}
+    # Exact home/away. The book's home price stays on home_price.
+    assert odds[0]["home_price"] == -150
+    assert odds[0]["away_price"] == 130
     assert resolve_ncaaf_game_id(existing, "UNLV", "Memphis", "2026-08-29") == MEMPHIS_UTC
     # A game row is still emitted. NCAAF is not the NFL: this ingestor writes
     # the schedule when it has to, and the upsert does not overwrite a score.
@@ -158,7 +166,13 @@ def test_swapped_home_away_at_a_neutral_site_matches_the_existing_row(monkeypatc
         reuse_game_id=reuse,
     )
     assert games[0]["game_id"] == ARMY_NAVY_CFBD
+    # The stub agrees with the stored row (home Army), not the book's home.
+    assert games[0]["home_team"] == "Army"
+    assert games[0]["away_team"] == "Navy"
     assert {o["game_id"] for o in odds} == {ARMY_NAVY_CFBD}
+    # Book home was Navy -150. Stored home is Army, so Army's +130 is home_price.
+    assert odds[0]["home_price"] == 130
+    assert odds[0]["away_price"] == -150
     # The load window from the day Army-Navy first appeared on the board
     # (2026-09-01) has to reach the kickoff. The NFL's +10 days does not.
     assert "NCAAF" in conn.sql
@@ -261,3 +275,240 @@ def test_a_single_match_is_not_logged_as_ambiguous():
         logger.remove(sink)
     assert chosen == MEMPHIS_UTC
     assert seen == []
+
+
+# ── swapped-only reuse flips every side the writers store ────────────────────
+
+def _inserts(src: str) -> dict[str, list[str]]:
+    """Every INSERT column list in odds_ingestor, keyed by table.
+
+    Parsed from the source. A hand-kept list of columns would stay green
+    when a new home/away column was added to the INSERT and not flipped.
+    """
+    found: dict[str, list[str]] = {}
+    for match in re.finditer(
+            r"INSERT INTO\s+(\w+)\s*\((.*?)\)", src, re.S | re.IGNORECASE):
+        table = match.group(1)
+        cols = [c.strip() for c in match.group(2).split(",") if c.strip()]
+        previous = found.get(table)
+        if previous is not None and previous != cols:
+            raise AssertionError(f"{table} has two different INSERT column lists")
+        found[table] = cols
+    return found
+
+
+def _book_oriented(columns: list[str]) -> dict:
+    """One distinct value per column, in the book's home/away orientation."""
+    row = {}
+    for col in columns:
+        partner = oi._side_partner(col)
+        if partner and partner in columns:
+            row[col] = f"book:{col}"
+        elif partner:
+            row[col] = -3.5
+        else:
+            row[col] = f"neutral:{col}"
+    return row
+
+
+def _expect_flipped(book: dict, columns: list[str]) -> dict:
+    expected = dict(book)
+    colset = set(columns)
+    done = set()
+    for col in columns:
+        if col in done:
+            continue
+        partner = oi._side_partner(col)
+        if partner is None:
+            continue
+        if partner in colset:
+            expected[col] = book[partner]
+            expected[partner] = book[col]
+            done.add(col)
+            done.add(partner)
+        else:
+            expected[col] = -book[col]
+            done.add(col)
+    return expected
+
+
+def _army_navy_event():
+    """Book lists Army @ Navy. Navy -3.5, Army +3.5. Total 42.5 is the same either way."""
+    home, away = "Navy Midshipmen", "Army Black Knights"
+    when = "2026-12-12T18:00:00Z"
+    return {
+        "id": "army-navy",
+        "commence_time": "2026-12-12T20:00:00Z",
+        "home_team": home,
+        "away_team": away,
+        "bookmakers": [{
+            "key": "draftkings",
+            "markets": [
+                {"key": "h2h", "last_update": when, "outcomes": [
+                    {"name": home, "price": -180, "link": "ml-navy", "sid": "ml-navy-sid"},
+                    {"name": away, "price": 155, "link": "ml-army", "sid": "ml-army-sid"},
+                ]},
+                {"key": "spreads", "last_update": when, "outcomes": [
+                    {"name": home, "price": -115, "point": -3.5,
+                     "link": "sp-navy", "sid": "sp-navy-sid"},
+                    {"name": away, "price": -105, "point": 3.5,
+                     "link": "sp-army", "sid": "sp-army-sid"},
+                ]},
+                {"key": "totals", "last_update": when, "outcomes": [
+                    {"name": "Over", "price": -108, "point": 42.5,
+                     "link": "over", "sid": "over-sid"},
+                    {"name": "Under", "price": -112, "point": 42.5,
+                     "link": "under", "sid": "under-sid"},
+                ]},
+            ],
+        }],
+    }
+
+
+def _run(monkeypatch, stored, events):
+    _schools(monkeypatch)
+    conn = _Conn(stored)
+    reuse = oi._ncaaf_resolver(conn, "2026-12-01")
+    seen = []
+    sink = logger.add(lambda m: seen.append(m.record["message"]),
+                      level="WARNING", format="{message}")
+    try:
+        games, odds = oi._process_events(
+            events, "NCAAF", "open", "2026-12-01T12:00:00-05:00",
+            reuse_game_id=reuse,
+        )
+    finally:
+        logger.remove(sink)
+    return games, odds, [m for m in seen if "flipped side-specific" in m]
+
+
+def test_every_side_keyed_write_column_flips_on_a_swapped_reuse_and_not_on_an_exact_one(
+        monkeypatch):
+    """Army @ Navy on the book, Navy @ Army stored (the measured neutral-site
+    swap). Every home/away column the odds writers INSERT is flipped.
+    The same event against an exact-orientation row is not.
+
+    The column list is parsed from the INSERT statements. Adding a
+    side-specific column to one of them without a flip fails this test.
+    """
+    src = Path(oi.__file__).read_text(encoding="utf-8")
+    inserts = _inserts(src)
+    assert inserts, "odds_ingestor no longer has an INSERT to enumerate"
+    process_src = inspect.getsource(oi._process_events)
+    assert "flip_sides(" in process_src
+    flipped_lists = {oi._GAMES_WRITE_COLS, oi._ODDS_WRITE_COLS}
+
+    for table, cols in inserts.items():
+        side = [c for c in cols if oi._side_partner(c)]
+        if not side:
+            continue
+        assert tuple(cols) in flipped_lists, (
+            f"{table} writes side-keyed columns {side} and the reuse path "
+            f"does not flip that INSERT"
+        )
+        book = _book_oriented(cols)
+        flipped = oi.flip_sides(book, cols)
+        expected = _expect_flipped(book, cols)
+        for col in cols:
+            assert flipped[col] == expected[col], col
+            partner = oi._side_partner(col)
+            if partner is None:
+                assert flipped[col] == book[col]
+            elif partner in cols:
+                assert flipped[col] == book[partner]
+                assert flipped[col] != book[col]
+            else:
+                assert flipped[col] == -book[col]
+
+    event = _army_navy_event()
+    swapped_games, swapped_odds, swapped_warn = _run(
+        monkeypatch,
+        [(ARMY_NAVY_CFBD, "2026-12-12", "Army", "Navy")],
+        [event],
+    )
+    exact_games, exact_odds, exact_warn = _run(
+        monkeypatch,
+        [(ARMY_NAVY_ODDS, "2026-12-12", "Navy", "Army")],
+        [event],
+    )
+
+    assert swapped_games[0]["game_id"] == ARMY_NAVY_CFBD
+    assert exact_games[0]["game_id"] == ARMY_NAVY_ODDS
+    assert swapped_warn == [
+        "NCAAF: flipped side-specific lines onto 1 "
+        "reused games row(s) stored with home/away reversed from the "
+        f"book: [{ARMY_NAVY_CFBD!r}]"
+    ]
+    assert exact_warn == []
+
+    odds_side = [c for c in oi._ODDS_WRITE_COLS if oi._side_partner(c)]
+    games_side = [c for c in oi._GAMES_WRITE_COLS if oi._side_partner(c)]
+    for col in oi._GAMES_WRITE_COLS:
+        assert col in swapped_games[0] and col in exact_games[0]
+    for col in games_side:
+        partner = oi._side_partner(col)
+        assert swapped_games[0][col] == exact_games[0][partner]
+        assert swapped_games[0][col] != exact_games[0][col]
+
+    by_market = lambda rows: {r["market"]: r for r in rows}
+    swapped_by = by_market(swapped_odds)
+    exact_by = by_market(exact_odds)
+    assert set(swapped_by) == {"h2h", "spreads", "totals"}
+    for market, exact in exact_by.items():
+        got = swapped_by[market]
+        for col in oi._ODDS_WRITE_COLS:
+            assert col in got and col in exact
+        for col in odds_side:
+            partner = oi._side_partner(col)
+            if partner and partner in oi._ODDS_WRITE_COLS:
+                assert got[col] == exact[partner], (market, col)
+            else:
+                if exact[col] is None:
+                    assert got[col] is None
+                else:
+                    assert got[col] == -exact[col], (market, col)
+        for col in oi._ODDS_WRITE_COLS:
+            # game_id is the reused row, so the two cases point at different
+            # ids on purpose. Every other non-side column (the total, the
+            # draw, the snapshot) is the book's number and must match.
+            if oi._side_partner(col) is None and col != "game_id":
+                assert got[col] == exact[col], (market, col)
+
+    # The book's home is Navy -3.5 / -180. Stored home is Army, so the
+    # spread stored for that row is +3.5 and Army's moneyline is home_price.
+    assert exact_by["spreads"]["spread_home"] == -3.5
+    assert swapped_by["spreads"]["spread_home"] == 3.5
+    assert swapped_by["spreads"]["home_price"] == -105
+    assert swapped_by["spreads"]["away_price"] == -115
+    assert swapped_by["spreads"]["home_link"] == "sp-army"
+    assert swapped_by["spreads"]["away_sid"] == "sp-navy-sid"
+    assert swapped_by["h2h"]["home_price"] == 155
+    assert swapped_by["h2h"]["away_price"] == -180
+    assert swapped_by["h2h"]["home_link"] == "ml-army"
+    assert swapped_by["h2h"]["away_sid"] == "ml-navy-sid"
+    assert swapped_by["totals"]["total_line"] == 42.5
+    assert swapped_by["totals"]["over_price"] == -108
+    assert swapped_by["totals"]["under_price"] == -112
+    assert swapped_by["totals"]["over_link"] == "over"
+    assert exact_by["totals"]["total_line"] == 42.5
+    assert exact_by["h2h"]["home_price"] == -180
+    assert exact_by["spreads"]["spread_home"] == -3.5
+    assert exact_games[0]["home_team"] == "Navy"
+    assert swapped_games[0]["home_team"] == "Army"
+    assert swapped_games[0]["away_team"] == "Navy"
+
+
+def test_one_warning_counts_every_swapped_reuse_in_the_run(monkeypatch):
+    event = _army_navy_event()
+    second = dict(event)
+    second["id"] = "army-navy-2"
+    _games, _odds, warnings = _run(
+        monkeypatch,
+        [(ARMY_NAVY_CFBD, "2026-12-12", "Army", "Navy")],
+        [event, second],
+    )
+    assert warnings == [
+        "NCAAF: flipped side-specific lines onto 2 "
+        "reused games row(s) stored with home/away reversed from the "
+        f"book: [{ARMY_NAVY_CFBD!r}, {ARMY_NAVY_CFBD!r}]"
+    ]

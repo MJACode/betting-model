@@ -372,7 +372,9 @@ def _nfl_resolver(conn, around_date: str):
 # builds the id from the ET date. A 10:30pm ET kickoff is the next calendar day
 # in UTC, so the same game landed on two ids. Home/away swapped at a neutral
 # site is the same lookup (3 clusters: Army/Navy, Kansas/Arizona State,
-# Virginia/West Virginia).
+# Virginia/West Virginia). A swapped-only hit is reused, and the side-specific
+# values are flipped onto the stored home team before the write. spread_home
+# is the home number, so the book's home −3.5 becomes +3.5.
 
 # The match itself. Two days apart is a different game; one day is the UTC twin.
 _NCAAF_GAME_DATE_SKEW_DAYS = 1
@@ -403,8 +405,25 @@ def _load_ncaaf_games(conn, start: str, end: str) -> list[dict]:
     return out
 
 
-def resolve_ncaaf_game_id(games: list[dict], home: str, away: str,
-                          game_date: str) -> str | None:
+class NcaafGameMatch:
+    """An existing NCAAF games row, and whether the book has the teams reversed.
+
+    `swapped` is true only when no exact-orientation candidate was in the
+    window. The chosen row's home team is then the book's away team, and
+    every side-specific value has to be flipped before it is written —
+    `spread_home`, the prices, and settlement all read relative to
+    `games.home_team`.
+    """
+
+    __slots__ = ("game_id", "swapped")
+
+    def __init__(self, game_id: str, swapped: bool):
+        self.game_id = game_id
+        self.swapped = swapped
+
+
+def _choose_ncaaf_game(games: list[dict], home: str, away: str,
+                       game_date: str) -> NcaafGameMatch | None:
     """Existing NCAAF games row for this matchup, or None.
 
     Same two schools in either home/away order, `game_date` within
@@ -445,7 +464,7 @@ def resolve_ncaaf_game_id(games: list[dict], home: str, away: str,
     if not cands:
         return None
     cands.sort(key=lambda t: (t[0], t[1], t[2]))
-    chosen = cands[0][3]
+    rank, _delta, _gid, chosen = cands[0]
     if len(cands) > 1:
         logger.warning(
             f"NCAAF: {len(cands)} games rows match {away} @ {home} "
@@ -453,7 +472,133 @@ def resolve_ncaaf_game_id(games: list[dict], home: str, away: str,
             f"({[c[2] for c in cands]}); using {chosen['game_id']} "
             f"(exact home/away, then nearest date)"
         )
-    return chosen.get("game_id")
+    return NcaafGameMatch(chosen.get("game_id"), swapped=rank != 0)
+
+
+def resolve_ncaaf_game_id(games: list[dict], home: str, away: str,
+                          game_date: str) -> str | None:
+    """Existing NCAAF games row id for this matchup, or None.
+
+    See `_choose_ncaaf_game`. Callers that write odds need the match, not
+    just the id: a swapped-only hit has to flip side-specific values.
+    """
+    match = _choose_ncaaf_game(games, home, away, game_date)
+    return None if match is None else match.game_id
+
+
+def _side_partner(column: str) -> str | None:
+    """The other side of a home/away column name, or None when it has no side.
+
+    `home_price` ↔ `away_price`. `spread_home` ↔ `spread_away`. A totals
+    column (`total_line`, `over_price`) is not a side and returns None.
+    """
+    if column.startswith("home_"):
+        return "away_" + column[len("home_"):]
+    if column.startswith("away_"):
+        return "home_" + column[len("away_"):]
+    if column.endswith("_home"):
+        return column[: -len("_home")] + "_away"
+    if column.endswith("_away"):
+        return column[: -len("_away")] + "_home"
+    return None
+
+
+def _negate_line(value):
+    """Home −3.5 stored against the other team is +3.5. None stays None."""
+    if value is None:
+        return None
+    from decimal import Decimal
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise TypeError(f"spread point {value!r} is not a number")
+    return -value
+
+
+def flip_sides(row: dict, written_columns) -> dict:
+    """Orient one written row onto the stored home team.
+
+    A `home_`/`away_` pair that this INSERT actually writes is swapped
+    (prices, links, selection ids, team names). A `*_home` point whose
+    partner is not written — `spread_home`, the only spread column — is
+    negated, because the away number is the negative of the home number
+    and it is not stored on its own. Totals are not side-keyed and are
+    left as they are.
+
+    A side column this INSERT writes with no partner and no sign to negate
+    raises. Guessing would store the book's home number against the other
+    team.
+    """
+    colset = set(written_columns)
+    out = dict(row)
+    done: set[str] = set()
+    for col in written_columns:
+        if col in done:
+            continue
+        partner = _side_partner(col)
+        if partner is None:
+            continue
+        if partner in colset:
+            if col not in out and partner not in out:
+                done.add(col)
+                done.add(partner)
+                continue
+            out[col], out[partner] = out.get(partner), out.get(col)
+            done.add(col)
+            done.add(partner)
+        elif col.endswith("_home") or col.endswith("_away"):
+            if col in out:
+                out[col] = _negate_line(out[col])
+            done.add(col)
+        else:
+            raise ValueError(
+                f"{col} is side-specific and {partner} is not in the INSERT; "
+                f"refusing to write it unflipped"
+            )
+    return out
+
+
+def insert_columns(sql: str) -> tuple[str, ...]:
+    """Column list of an `INSERT INTO table (cols)` statement."""
+    match = re.search(r"INSERT INTO\s+\w+\s*\((.*?)\)", sql, re.S | re.IGNORECASE)
+    if not match:
+        raise ValueError("no INSERT column list")
+    cols = tuple(c.strip() for c in match.group(1).split(",") if c.strip())
+    if not cols:
+        raise ValueError("empty INSERT column list")
+    return cols
+
+
+# These two statements are the rows a reused NCAAF id is written through
+# (`_upsert_games`, `_insert_odds`). `flip_sides` reads the column lists so a
+# new home/away column is flipped with them rather than carried over from the
+# book's home team. The historical pull ledger and pipeline_log have no side.
+_UPSERT_GAMES_SQL = """
+        INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, commence_time, data_source)
+        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(commence_time)s, %(data_source)s)
+        ON CONFLICT(game_id) DO UPDATE SET
+            commence_time = COALESCE(EXCLUDED.commence_time, games.commence_time),
+            data_source   = EXCLUDED.data_source,
+            updated_at    = NOW()::TEXT
+"""
+
+_INSERT_ODDS_SQL = """
+        INSERT INTO odds (
+            game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
+            home_price, away_price, draw_price,
+            spread_home, total_line, over_price, under_price,
+            home_link, away_link, draw_link, over_link, under_link,
+            home_sid, away_sid, draw_sid, over_sid, under_sid, source
+        ) VALUES (
+            %(game_id)s, %(sport)s, %(market)s, %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
+            %(home_price)s, %(away_price)s, %(draw_price)s,
+            %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s,
+            %(home_link)s, %(away_link)s, %(draw_link)s, %(over_link)s, %(under_link)s,
+            %(home_sid)s, %(away_sid)s, %(draw_sid)s, %(over_sid)s, %(under_sid)s,
+            %(source)s
+        )
+"""
+
+_GAMES_WRITE_COLS = insert_columns(_UPSERT_GAMES_SQL)
+_ODDS_WRITE_COLS = insert_columns(_INSERT_ODDS_SQL)
 
 
 def _ncaaf_resolver(conn, around_date: str):
@@ -463,10 +608,12 @@ def _ncaaf_resolver(conn, around_date: str):
     None means the lookup failed and the caller mints ids — it does not skip
     the sport. An empty window is a working resolver that misses every event.
 
-    The closure is `(home_team, away_team, et_game_date) -> game_id | None`
+    The closure is `(home_team, away_team, et_game_date) -> NcaafGameMatch | None`
     with the names `_process_events` has already normalized and the ET date it
     has already computed. The NFL closure takes raw names and the UTC instant
     because that matcher owns both; this one does not re-derive either.
+    `swapped` on the match is the signal to flip side-specific values onto
+    `games.home_team` before the write.
     """
     try:
         anchor = date.fromisoformat(around_date[:10])
@@ -482,7 +629,7 @@ def _ncaaf_resolver(conn, around_date: str):
         return None
 
     def reuse(home_team: str, away_team: str, game_date: str):
-        return resolve_ncaaf_game_id(games, home_team, away_team, game_date)
+        return _choose_ncaaf_game(games, home_team, away_team, game_date)
 
     return reuse
 
@@ -964,15 +1111,20 @@ def _process_events(events: list[dict], sport: str,
     resolve is dropped. The NFL is the only caller today and must stay one
     (NFL_GAMES_ARE_NOT_OURS).
 
-    `reuse_game_id(home_team, away_team, et_game_date) -> game_id | None` is
-    the NCAAF twin of that hook. A hit uses the existing row's id. A miss
+    `reuse_game_id(home_team, away_team, et_game_date) -> NcaafGameMatch | None`
+    is the NCAAF twin of that hook. A hit uses the existing row's id. A miss
     mints one. Either way a game row is still emitted — for NCAAF this
     ingestor is the schedule when CFBD has not written the game yet. The two
     hooks are not combined: a sport that passes `resolve_game_id` must not
     also mint.
+
+    A swapped-only hit (`match.swapped`) flips every side-specific value
+    onto the stored home team before the rows are returned. Totals are left.
+    One warning per call names how many rows were flipped.
     """
     game_rows = []
     odds_rows = []
+    swapped_ids: list[str] = []
 
     _ET = ZoneInfo("America/New_York")
     for event in events:
@@ -1021,6 +1173,7 @@ def _process_events(events: list[dict], sport: str,
         else:
             season = year
 
+        swapped = False
         if resolve_game_id is not None:
             # Read-only against the schedule. The resolver owns the date match
             # too (a prime-time kickoff lands on the NEXT day in UTC), so the
@@ -1040,15 +1193,20 @@ def _process_events(events: list[dict], sport: str,
             # ET twin next to CFBD's UTC row.
             game_id = None
             if reuse_game_id is not None:
-                game_id = reuse_game_id(home_team, away_team, game_date)
+                match = reuse_game_id(home_team, away_team, game_date)
+                if match and match.game_id:
+                    game_id = match.game_id
+                    swapped = match.swapped
             if not game_id:
                 game_id = _build_game_id(sport, game_date, away_team, home_team)
 
             # Game row (upsert-safe — will not overwrite scores or home/away).
             # Reusing an id still emits the stub: `odds` FKs to `games`, and
             # the ON CONFLICT clause does not touch home_team, away_team,
-            # game_date or the score.
-            game_rows.append({
+            # game_date or the score. The stub's home/away is still flipped
+            # onto the stored row so a later change to that UPDATE cannot
+            # write the book's orientation over it.
+            game_row = {
                 "game_id":       game_id,
                 "sport":         sport,
                 "season":        season,
@@ -1057,7 +1215,11 @@ def _process_events(events: list[dict], sport: str,
                 "away_team":     away_team,
                 "commence_time": game_dt.isoformat() if game_dt else None,
                 "data_source":   "live",
-            })
+            }
+            if swapped:
+                game_row = flip_sides(game_row, _GAMES_WRITE_COLS)
+                swapped_ids.append(game_id)
+            game_rows.append(game_row)
 
         # Bookmaker odds. Store a row per line-shop book (DraftKings is the book
         # the models score against; the others are kept for line shopping only).
@@ -1109,18 +1271,24 @@ def _process_events(events: list[dict], sport: str,
                 if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
                     parsed = _parse_outcomes(outcomes, sport, home_name)
                     row = {**base_row, **parsed, "market": market_key}
-                    odds_rows.append(row)
-
                 elif market_key in ("spreads", "spreads_1st_5_innings"):
                     parsed = _parse_spread_outcomes(outcomes, home_name)
                     row = {**base_row, **parsed, "market": market_key}
-                    odds_rows.append(row)
-
                 elif market_key in ("totals", "totals_1st_5_innings"):
                     parsed = _parse_total_outcomes(outcomes)
                     row = {**base_row, **parsed, "market": market_key}
-                    odds_rows.append(row)
+                else:
+                    continue
+                if swapped:
+                    row = flip_sides(row, _ODDS_WRITE_COLS)
+                odds_rows.append(row)
 
+    if swapped_ids:
+        logger.warning(
+            f"NCAAF: flipped side-specific lines onto {len(swapped_ids)} "
+            f"reused games row(s) stored with home/away reversed from the "
+            f"book: {swapped_ids}"
+        )
     return game_rows, odds_rows
 
 
@@ -1128,15 +1296,7 @@ def _process_events(events: list[dict], sport: str,
 
 def _upsert_games(conn: DBConnection, game_rows: list[dict]) -> int:
     """Insert game stubs (won't overwrite existing scores)."""
-    sql = """
-        INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, commence_time, data_source)
-        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(commence_time)s, %(data_source)s)
-        ON CONFLICT(game_id) DO UPDATE SET
-            commence_time = COALESCE(EXCLUDED.commence_time, games.commence_time),
-            data_source   = EXCLUDED.data_source,
-            updated_at    = NOW()::TEXT
-    """
-    conn.executemany(sql, game_rows)
+    conn.executemany(_UPSERT_GAMES_SQL, game_rows)
     return len(game_rows)
 
 
@@ -1146,24 +1306,8 @@ def _insert_odds(conn: DBConnection, odds_rows: list[dict]) -> int:
     `source` is optional on the way in: live_price_log and pregame_line_poller
     build their own rows and predate the column. They write NULL.
     """
-    sql = """
-        INSERT INTO odds (
-            game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
-            home_price, away_price, draw_price,
-            spread_home, total_line, over_price, under_price,
-            home_link, away_link, draw_link, over_link, under_link,
-            home_sid, away_sid, draw_sid, over_sid, under_sid, source
-        ) VALUES (
-            %(game_id)s, %(sport)s, %(market)s, %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
-            %(home_price)s, %(away_price)s, %(draw_price)s,
-            %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s,
-            %(home_link)s, %(away_link)s, %(draw_link)s, %(over_link)s, %(under_link)s,
-            %(home_sid)s, %(away_sid)s, %(draw_sid)s, %(over_sid)s, %(under_sid)s,
-            %(source)s
-        )
-    """
     rows = [r if "source" in r else {**r, "source": None} for r in odds_rows]
-    conn.executemany(sql, rows)
+    conn.executemany(_INSERT_ODDS_SQL, rows)
     return len(rows)
 
 
