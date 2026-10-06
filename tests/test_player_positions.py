@@ -166,21 +166,38 @@ def test_the_job_defaults_to_a_dry_run_and_one_sport():
         validate({"dry_run": "no"})
 
 
+# Already worker_jobs rows from #889. Editing declared_jobs.json does not
+# change 406072 (running) or 406073 (pending 12:30Z). They stay in the file
+# so the dedupe key is not queued again, and they are outside the one-sport
+# dry-run rule that governs every declaration after them.
+HISTORICAL_PLAYER_POSITION_JOBS = {
+    "player-positions-basketball-dry-run-2-2026-10-06",
+    "player-positions-ncaaf-2026-10-06",
+}
+
+
 def test_every_declared_player_positions_job_is_a_dry_run():
     """WNBA is not declared (offseason). NCAAF waits on run_after so it
-    does not start the moment the NBA ESPN pass ends."""
+    does not start the moment the NBA ESPN pass ends.
+
+    The two #889 keys are kept and exempt. This branch's NBA dry run and
+    the NCAAF dry run at 18:00Z are not.
+    """
     jobs = json.loads((ROOT / "jobs/declared_jobs.json").read_text(encoding="utf-8"))
     ours = [j for j in jobs if j["job_type"] == "player_positions"]
-    assert len(ours) >= 1
+    historical = [j for j in ours if j["key"] in HISTORICAL_PLAYER_POSITION_JOBS]
+    assert {j["key"] for j in historical} == HISTORICAL_PLAYER_POSITION_JOBS
+    current = [j for j in ours if j["key"] not in HISTORICAL_PLAYER_POSITION_JOBS]
+    assert len(current) >= 1
     sports = []
-    for job in ours:
+    for job in current:
         assert job["args"].get("dry_run") is True, job["key"]
         assert job["args"].get("sports") and len(job["args"]["sports"]) == 1, job["key"]
         sports.append(job["args"]["sports"][0])
     assert "WNBA" not in sports
-    assert "player-positions-dry-run-wnba-2026-10-06" not in {j["key"] for j in ours}
-    nba = next(j for j in ours if j["key"] == "player-positions-dry-run-nba-2026-10-06")
-    ncaaf = next(j for j in ours if j["key"] == "player-positions-dry-run-ncaaf-2026-10-06")
+    assert "player-positions-dry-run-wnba-2026-10-06" not in {j["key"] for j in current}
+    nba = next(j for j in current if j["key"] == "player-positions-dry-run-nba-2026-10-06")
+    ncaaf = next(j for j in current if j["key"] == "player-positions-dry-run-ncaaf-2026-10-06")
     assert nba["args"]["sports"] == ["NBA"]
     assert "run_after" not in nba
     assert ncaaf["args"]["sports"] == ["NCAAF"]
@@ -866,3 +883,103 @@ def test_a_later_match_deletes_the_unmatched_sentinel_before_commit():
         "source": "espn_core_unmatched", "source_athlete_id": "55",
     }])
     assert [s[0] for s in statements] == ["INSERT", "COMMIT"]
+
+
+def test_a_real_run_before_the_table_exists_fails_so_it_is_retried(monkeypatch):
+    """A job that returns a per-sport error inside a 'done' result is never
+    retried; a missing table must raise instead."""
+    import data.db as db
+    from data.ingestors import player_positions_ingestor as ppi
+
+    class _Cur:
+        def fetchone(self):
+            return (None,)
+
+    class _Conn:
+        closed = False
+
+        def execute(self, *a, **k):
+            return _Cur()
+
+        def close(self):
+            self.closed = True
+
+    conn = _Conn()
+    monkeypatch.setattr(db, "get_connection", lambda: conn)
+    with pytest.raises(RuntimeError, match="does not exist yet"):
+        ppi.ingest_player_positions(sports=["NCAAF"], dry_run=False)
+    assert conn.closed
+
+
+def test_a_same_name_rookie_inherits_the_prior_season_id():
+    """A unique name whose only log game is last season is a summer move
+    and a same-name rookie at once. The log has no rookie flag, so the
+    id is returned."""
+    index = {norm_player_name("John Smith"): [("999", "LAL", "2026-04-12")]}
+    how: dict = {}
+    assert match_to_log(
+        "John Smith", "BOS", index, how, sport="NBA", as_of="2026-10-06",
+    ) == "999"
+    assert how["method"] == "prior_season_team_change"
+
+
+def test_basketball_falls_back_to_one_season_url_and_counts_empty_teams():
+    """Team-doc $ref first. An empty ref is followed by the single season
+    path from espn_basketball_season (2026-10-06 → 2027). A team whose
+    every candidate URL lists no athletes is counted. Neighbouring years
+    are not requested."""
+    from data.ingestors.player_positions_ingestor import _basketball
+
+    teams_url = ("https://sports.core.api.espn.com/v2/sports/basketball/"
+                 "leagues/nba/teams?limit=50")
+    t1 = "https://sports.core.api.espn.com/teams/1"
+    t2 = "https://sports.core.api.espn.com/teams/2"
+    empty_ref = "https://sports.core.api.espn.com/roster/empty?limit=200"
+    also_empty = "https://sports.core.api.espn.com/roster/also-empty?limit=200"
+    season_1 = ("https://sports.core.api.espn.com/v2/sports/basketball/"
+                "leagues/nba/seasons/2027/teams/1/athletes?limit=200")
+    season_2 = ("https://sports.core.api.espn.com/v2/sports/basketball/"
+                "leagues/nba/seasons/2027/teams/2/athletes?limit=200")
+    docs = {
+        teams_url: {"items": [{"$ref": t1}, {"$ref": t2}]},
+        t1: {"id": "1", "abbreviation": "GS",
+             "athletes": {"$ref": empty_ref}},
+        t2: {"id": "2", "abbreviation": "BOS",
+             "athletes": {"$ref": also_empty}},
+        empty_ref: {"items": []},
+        also_empty: {"items": []},
+        season_1: {"items": [
+            {"id": "10", "displayName": "Stephen Curry",
+             "position": {"abbreviation": "PG"}},
+        ]},
+        season_2: {"items": []},
+    }
+    log_rows = [("201939", "Stephen Curry", "GSW", 70, ["GSW"], "2026-04-10")]
+
+    class Conn:
+        def execute(self, sql, params=None):
+            if "nba_player_game_log" in sql:
+                return _Rows(log_rows)
+            return _Rows([])
+
+        def commit(self):
+            raise AssertionError("dry run")
+
+        def rollback(self):
+            pass
+
+    client, calls, _ = _client(docs, cap=20)
+    stats = _basketball(Conn(), "NBA", True, client=client, cache_path=None,
+                        as_of="2026-10-06")
+    assert stats["espn_season"] == 2027
+    assert calls.index(empty_ref) < calls.index(season_1)
+    assert season_2 in calls
+    assert stats["roster_via"] == {"season_path": 1}
+    assert stats["teams_all_roster_urls_empty"] == 1
+    assert stats["matched"] == 1
+    assert stats["sample"][0]["player_id"] == "201939"
+    joined = " ".join(calls)
+    assert "/seasons/2026/" not in joined
+    assert "/seasons/2025/" not in joined
+    assert not any(u.endswith("/teams/1/athletes?limit=200") and "/seasons/" not in u
+                   for u in calls)

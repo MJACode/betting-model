@@ -883,5 +883,27 @@
       "season": 2026,
       "dry_run": true
     }
+  },
+  {
+    "key": "player-positions-basketball-dry-run-2-2026-10-06",
+    "job_type": "player_positions",
+    "requested_by": "matt",
+    "note": "DRY RUN 2, basketball only. Dry run 1 (job 405765) listed 30 NBA and 17 WNBA teams but every season-less roster URL (/teams/{id}/athletes) answered 404 on the worker, so no athlete was read. The ingestor now tries season-scoped rosters (/seasons/{year}/teams/{id}/athletes) and records which year answered (roster_season_used). Writes nothing. Read worker_jobs.result for listed/parsed/matched counts, match_method (name/team/tiebreak_recent) and the positions seen.",
+    "args": {
+      "sports": ["NBA", "WNBA"],
+      "dry_run": true
+    }
+  },
+  {
+    "key": "player-positions-ncaaf-2026-10-06",
+    "job_type": "player_positions",
+    "requested_by": "matt",
+    "note": "REAL RUN, NCAAF only. Dry run 1 (job 405765) read 29,765 CFBD /roster rows for 2026 and matched 11,153 of the 11,641 players in ncaaf_player_game_log by id (95.8%), with the expected positions (QB 1,424, RB 2,006, WR 3,995, TE 1,842, ...). Writes player_positions. run_after 12:30Z so the table (add_player_positions.sql) exists from the 11:17Z/12:17Z refresh passes; if it still does not, the job raises and is retried.",
+    "run_after": "2026-10-06T12:30:00+00:00",
+    "args": {
+      "sports": ["NCAAF"],
+      "season": 2026,
+      "dry_run": false
+    }
   }
 ]

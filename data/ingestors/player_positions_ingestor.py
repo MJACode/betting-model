@@ -36,18 +36,31 @@ WNBA: January 1 of the calendar year). The NBA log ends 2026-04-12, so a
 summer move would otherwise be stored unmatched for 7 days. The same
 mismatch inside the current season is `team_conflict` and stays unmatched.
 A name with no log row is `none` — a rookie does not inherit a veteran's
-id. A name still shared after the team rule goes to the player with the
-most recent game (Matt, 2026-10-06: "don't skip names"), counted as
-tiebreak_recent. When the ESPN team matches nobody, that guess can be
-another player's id. It is still returned, and the run will not let it
-overwrite an id already claimed by a name, team, or prior-season match.
-That collision, and any second claim of the same id, is duplicate_ids.
+id. A rookie who shares a unique normalised name with a player whose only
+games are last season (a retiree, for example) does inherit that id: the
+log cannot tell them apart. A name still shared after the team rule goes
+to the player with the most recent game (Matt, 2026-10-06: "don't skip
+names"), counted as tiebreak_recent. When the ESPN team matches nobody,
+that guess can be another player's id. It is still returned, and the run
+will not let it overwrite an id already claimed by a name, team, or
+prior-season match. That collision, and any second claim of the same id,
+is duplicate_ids.
+
+One season year. The team document's athletes or roster $ref is tried
+first. If that payload lists no athletes, the fallback is one URL,
+`/seasons/{year}/teams/{id}/athletes`, and `year` is
+`espn_basketball_season` (NBA ending year, so 2026-10-06 is 2027; WNBA
+is the calendar year). A team whose every candidate URL is empty is
+counted and skipped. There is no second year list.
 
 ESPN SEASON YEAR on the fallback roster path. NBA seasons are the ending
 year (2026-10-06 is the 2026-27 season, ESPN 2027 — the same rule as
 nba_stats_ingestor._nba_season_for_date). WNBA seasons are the calendar
 year (wnba_stats_ingestor uses the date's year). The job's `season` argument
-is the NCAAF roster year; it is not the basketball fallback year.
+is the NCAAF roster year; it is not the basketball fallback year. The team
+document's athletes $ref is used when it returns items. Otherwise the one
+season path from `espn_basketball_season` is fetched. A real run raises
+if player_positions does not exist yet, so the queue retries it.
 
 ONE SPORT PER JOB. A cold NBA pass is on the order of 1 team list + 30 team
 docs + 30 roster lists + ~450 athlete docs + a handful of position docs
@@ -293,20 +306,44 @@ def basketball_season_start(sport: str, today: str) -> str:
     return f"{espn_basketball_season('NBA', today) - 1}-10-01"
 
 
+def _season_roster_url(league: str, team_id: str, season: int) -> str:
+    """The one fallback roster URL. `season` is `espn_basketball_season`."""
+    return (f"{CORE}/{league}/seasons/{int(season)}/teams/{team_id}"
+            f"/athletes?limit=200")
+
+
 def roster_url(team_doc: dict | None, league: str, team_id: str,
                season: int) -> tuple[str, str]:
-    """(url, via) for one team's roster.
+    """(url, via) for the first roster URL to try.
 
     `via` is `team_ref` when the team document published an athletes or
     roster link, else `season_path`. Never `/teams/{id}/athletes` without
     a season: that path 404'd for every team in worker_jobs 405765.
+    The season path is built from `season`, which callers set with
+    `espn_basketball_season`.
     """
     ref = _link(team_doc, "athletes") or _link(team_doc, "roster")
     if ref:
         return _with_limit(_https(ref)), "team_ref"
-    url = (f"{CORE}/{league}/seasons/{int(season)}/teams/{team_id}"
-           f"/athletes?limit=200")
-    return url, "season_path"
+    return _season_roster_url(league, team_id, season), "season_path"
+
+
+def _roster_urls_to_try(team_doc: dict | None, league: str, team_id: str,
+                        season: int) -> list[tuple[str, str]]:
+    """Team-doc $ref first, then one season path when that ref is absent
+    or is a different URL.
+
+    `season` is `espn_basketball_season`. One year, not a list of
+    neighbouring years. The caller stops at the first payload that lists
+    athletes and counts the team when every URL is empty.
+    """
+    first_url, via = roster_url(team_doc, league, team_id, season)
+    urls = [(first_url, via)]
+    if via == "team_ref":
+        fallback = _season_roster_url(league, team_id, season)
+        if fallback != first_url:
+            urls.append((fallback, "season_path"))
+    return urls
 
 
 def _retry_after_seconds(headers) -> float:
@@ -693,7 +730,14 @@ def match_to_log(name: str, team: str | None, index: dict,
     `as_of` is set and their latest log game is older than this season's
     start, and `team_conflict` (no id) when the mismatch is inside the
     current season or the game date is missing. No log row at all is
-    `none`: a rookie does not inherit a veteran's id.
+    `none`: a rookie whose name is absent from the log does not inherit a
+    veteran's id.
+
+    A rookie whose normalised name is unique and matches a player whose
+    latest game is before this season does inherit that id, as
+    `prior_season_team_change`. A retiree and a same-name rookie are the
+    same shape in the log: one id, one name, no game this season. There
+    is no separate rookie flag on the row, so the summer-move rule applies.
 
     A shared name is settled by the team check. One still shared after
     that, or a team that matches nobody, goes to the candidate with the
@@ -845,8 +889,13 @@ def _upsert(conn, rows: list[dict]) -> int:
               r["position"], r.get("pos_group"), r["source"],
               r.get("source_athlete_id"), now))
     # A prior run may have stored this espn id as unmatched:{id}. Drop that
-    # sentinel in the same transaction as the real row, or the 7-day skip
-    # keeps hiding a player we can now match.
+    # sentinel in the same transaction as the real row.
+    # This DELETE cannot run for REFRESH_DAYS (7). _fresh_source_ids is
+    # applied before any athlete is resolved, and it skips a
+    # source_athlete_id whose row was updated inside that window. A
+    # sentinel written on the previous pass is still fresh, so the
+    # athlete is never matched and this statement is not reached. The
+    # placeholder is removed on the first pass after that skip expires.
     seen: set[tuple[str, str]] = set()
     for r in rows:
         if r.get("source") == "espn_core_unmatched":
@@ -880,7 +929,7 @@ def _empty_basketball_stats() -> dict:
         "teams_seen": [], "roster_via": {}, "requests": 0, "cache_hits": 0,
         "aborted_reason": None, "coverage": None, "written": 0,
         "prior_season_team_change": 0, "team_conflict": 0,
-        "espn_season": None,
+        "espn_season": None, "teams_all_roster_urls_empty": 0,
     }
 
 
@@ -931,11 +980,24 @@ def _basketball(conn, sport: str, dry_run: bool, *, season: int | None = None,
             stats["teams_seen"].append({
                 "espn_id": team_id, "espn": raw_abbrev, "log": log_team,
             })
-        url, via = roster_url(tdoc, league, team_id, espn_season)
-        stats["roster_via"][via] = stats["roster_via"].get(via, 0) + 1
-        if client.aborted_reason:
+        roster = None
+        via_used = None
+        for url, via in _roster_urls_to_try(tdoc, league, team_id, espn_season):
+            if client.aborted_reason:
+                break
+            got = client.get_json(url)
+            if list(iter_roster_items(got)):
+                roster = got
+                via_used = via
+                break
+            if client.aborted_reason:
+                break
+        if client.aborted_reason and roster is None:
             break
-        roster = client.get_json(url)
+        if roster is None:
+            stats["teams_all_roster_urls_empty"] += 1
+            continue
+        stats["roster_via"][via_used] = stats["roster_via"].get(via_used, 0) + 1
         if isinstance(roster, dict):
             listed = roster.get("items") if isinstance(roster.get("items"), list) else None
             count = roster.get("count")
@@ -1136,6 +1198,14 @@ def ingest_player_positions(sports=None, season: int | None = None,
     sports = [s.upper() for s in (sports or ["NBA"])]
     ncaaf_season = ncaaf_season_or_derived(season)
     summary: dict = {"dry_run": dry_run, "ncaaf_season": ncaaf_season}
+    if not dry_run and conn.execute(
+            "SELECT to_regclass('public.player_positions')").fetchone()[0] is None:
+        # Raised, not reported: a job that "succeeds" with a per-sport error
+        # inside is never retried, and the table lands on the next refresh
+        # pass (add_player_positions.sql), so a retry is what fixes it.
+        if own_conn:
+            conn.close()
+        raise RuntimeError("player_positions does not exist yet (migration pending)")
     try:
         for sport in sports:
             try:

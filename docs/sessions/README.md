@@ -19,10 +19,12 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, merge #889 into #888: one roster year from espn_basketball_season, empty-roster team count, #889 jobs 406072 and 406073 kept as historical exemptions |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, #888 review: prior-season team change vs in-season conflict; WNBA dry run not declared; NCAAF run_after 18:00Z; NBA ESPN season is the ending year; unmatched sentinel deleted on a later match |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, merge #886 into the player-positions branch: shared-name team rule uses the ESPN-to-log map; a tiebreak guess cannot overwrite a name or team claim (counted in duplicate_ids). verify_position_vs_opponent.ts stays local-only |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, player positions review: roster $ref (405765 404'd /teams/{id}/athletes), one sport per job, cap 750, stop after 3 consecutive 403/429/404, unmatched sentinel rows, coverage. Cold NBA about 520 calls, not ~45 |
 | 2026-10-05 | [2026-10](./2026-10.md) | 2026-10-05, position-vs-opponent card: a failed read no longer stays on the spinner. Stat-key mismatch counts as loading only when the section has no error |
+| 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions dry run 1: NCAAF 95.8% id match; ESPN season-less roster URL 404s, fixed to season-scoped; NCAAF real run queued for 12:30Z |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, positions: shared names settled by most recent game (never skipped); MLB position card becomes a per-player summary |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, player_positions table + ESPN/CFBD ingestor for NBA/WNBA/NCAAF; sources unreachable from sandbox, so a declared worker dry run measures shapes and match rate first |
 | 2026-10-06 | [2026-10](./2026-10.md) | 2026-10-06, position-vs-opponent card phase 2 (MLB): batters by lineup spot 1-3/4-6/7-9, starting pitchers; position_vs_opponent_mlb. 2025 log missing ARI/CWS/OAK/WSH games flagged |
